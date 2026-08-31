@@ -118,8 +118,6 @@ const mergeTurns = (
   current: typeof RelayReviewConversationTurns.Type,
   incoming: typeof RelayReviewConversationTurns.Type
 ): typeof RelayReviewConversationTurns.Type => {
-  const turnIdentity = (turn: (typeof RelayReviewConversationTurns.Type)[number]): string =>
-    turn.id ?? JSON.stringify(turn)
   const identities = new Set(current.map(turnIdentity))
   return incoming.reduce<typeof RelayReviewConversationTurns.Type>((merged, turn) => {
     const identity = turnIdentity(turn)
@@ -129,13 +127,33 @@ const mergeTurns = (
   }, current)
 }
 
-const compatibleTurns = (
+const turnIdentity = (
+  turn: (typeof RelayReviewConversationTurns.Type)[number]
+): string => turn.id ?? JSON.stringify(turn)
+
+const compatibleReplacementTurns = (
   current: StoredRelayReviewSession,
   incoming: RelayReviewSessionWrite
 ): typeof RelayReviewConversationTurns.Type => {
   const currentTurns = reconcileReviewConversationTurns(current.review, incoming.review, current.turns)
   const incomingTurns = reconcileReviewConversationTurns(incoming.review, current.review, incoming.turns)
   return mergeTurns(currentTurns, incomingTurns)
+}
+
+const compatibleStaleIncomingTurns = (
+  current: StoredRelayReviewSession,
+  incoming: RelayReviewSessionWrite
+): typeof RelayReviewConversationTurns.Type => {
+  const compatible = reconcileReviewConversationTurns(incoming.review, current.review, incoming.turns)
+  const currentTurnIds = new Set(current.turns.map(turnIdentity))
+  const incomingTurnIds = new Set(incoming.turns.map(turnIdentity))
+  const currentTail = current.turns.at(-1)
+  const incomingTail = incoming.turns.at(-1)
+  const hasOverlap = incoming.turns.some((turn) => currentTurnIds.has(turnIdentity(turn)))
+  const incomingTailIsCurrent = incomingTail !== undefined && currentTurnIds.has(turnIdentity(incomingTail))
+  const currentTailIsIncoming = currentTail !== undefined && incomingTurnIds.has(turnIdentity(currentTail))
+  const isOlderWindow = hasOverlap && incomingTailIsCurrent && !currentTailIsIncoming
+  return isOlderWindow ? compatible.filter(({ findingId }) => findingId === "PR") : compatible
 }
 
 const compatibleIncomingDispositions = (
@@ -175,13 +193,17 @@ const mergeStoredSession = (
   current: StoredRelayReviewSession,
   incoming: RelayReviewSessionWrite
 ): RelayReviewSessionWriteOutcome => {
-  const turns = compatibleTurns(current, incoming)
   const observedCurrentVersion = incoming.expectedVersion === current.version
   if (!observedCurrentVersion) {
     const dispositions = mergeDispositions(current.dispositions, compatibleIncomingDispositions(current, incoming))
     return {
       _tag: "stale-review-preserved",
-      session: { ...current, dispositions, turns, version: current.version + 1 }
+      session: {
+        ...current,
+        dispositions,
+        turns: mergeTurns(current.turns, compatibleStaleIncomingTurns(current, incoming)),
+        version: current.version + 1
+      }
     }
   }
   const sameHead = current.identity === incoming.identity
@@ -189,16 +211,24 @@ const mergeStoredSession = (
   if (sameHead) {
     return {
       _tag: "stored",
-      session: storedSession(incoming, turns, current.version + 1)
+      session: storedSession(incoming, compatibleReplacementTurns(current, incoming), current.version + 1)
     }
   }
   if (expectedHead) {
-    return { _tag: "stored", session: storedSession(incoming, turns, current.version + 1) }
+    return {
+      _tag: "stored",
+      session: storedSession(incoming, compatibleReplacementTurns(current, incoming), current.version + 1)
+    }
   }
   const dispositions = mergeDispositions(current.dispositions, compatibleIncomingDispositions(current, incoming))
   return {
     _tag: "stale-review-preserved",
-    session: { ...current, dispositions, turns, version: current.version + 1 }
+    session: {
+      ...current,
+      dispositions,
+      turns: mergeTurns(current.turns, compatibleStaleIncomingTurns(current, incoming)),
+      version: current.version + 1
+    }
   }
 }
 

@@ -358,6 +358,15 @@ describe("Relay review session storage", () => {
       turns: [{ findingId: "PR", id: "pr-turn", role: "user", message: "PR-level context." }],
       dispositions: { F1: "pending" }
     })
+    writeSession(localStorage, key, {
+      expectedVersion: 2,
+      identity: "exact-head-2",
+      resource,
+      review: revisedReview,
+      skillIds: [],
+      turns: [{ findingId: "F1", id: "new-finding-turn", role: "user", message: "Current finding." }],
+      dispositions: { F1: "pending" }
+    })
 
     const staleWrite = writeSession(localStorage, key, {
       identity: "exact-head-1",
@@ -372,9 +381,78 @@ describe("Relay review session storage", () => {
     const restored = readRelayReviewSession(localStorage, key, resource)
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
-      expect(restored.success?.turns.map(({ id }) => id)).toEqual(["pr-turn"])
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(["pr-turn", "new-finding-turn"])
       expect(restored.success?.dispositions).toEqual({ F1: "pending" })
       expect(restored.success?.review.revisionId).toBe("revision-2")
+    }
+  })
+
+  it("keeps the winning bounded turn window when an older tab writes later", () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (index: number): RelayReviewConversationTurn => ({
+      id: `turn-${index}`,
+      findingId: "F1",
+      role: "user",
+      message: `Turn ${index}`
+    })
+    const window = (first: number, last: number): ReadonlyArray<RelayReviewConversationTurn> =>
+      Array.from({ length: last - first + 1 }, (_, offset) => turn(first + offset))
+
+    writeSession(localStorage, key, {
+      expectedVersion: 0,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(1, 40),
+      dispositions: {}
+    })
+    writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(1, 41),
+      dispositions: {}
+    })
+
+    const staleOlderWindow = writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(1, 40),
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleOlderWindow)).toBe(true)
+    const afterOlderWindow = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(afterOlderWindow)).toBe(true)
+    if (Result.isSuccess(afterOlderWindow)) {
+      expect(afterOlderWindow.success?.turns.map(({ id }) => id)).toEqual(
+        Array.from({ length: 40 }, (_, offset) => `turn-${offset + 2}`)
+      )
+    }
+
+    const staleNewerTurn = writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(2, 42),
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleNewerTurn)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(
+        Array.from({ length: 40 }, (_, offset) => `turn-${offset + 3}`)
+      )
     }
   })
 

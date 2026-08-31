@@ -1623,6 +1623,10 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(page.getByText(staleReviewMessage)).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toHaveCount(0)
+  const conversation = page.locator("section[aria-label=\"Conversation about F1\"]")
+  await conversation.getByRole("button", { name: "Open" }).click()
+  await expect(conversation.getByLabel("Message Relay")).toBeDisabled()
+  await expect(conversation.getByRole("button", { exact: true, name: "Send" })).toBeDisabled()
   expect(diffRequestCount).toBe(4)
 })
 
