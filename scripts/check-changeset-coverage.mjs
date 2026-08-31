@@ -533,6 +533,28 @@ const publicCallableChanges = (
       signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
     ].join("|")
   const pairSignatures = (previousSignatures, currentSignatures) => {
+    const previousBaseline = previousSignatures.find((signature) => conditionPathKey(signature.conditionPath) === "")
+    const currentBaseline = currentSignatures.find((signature) => conditionPathKey(signature.conditionPath) === "")
+    const previousHasConditional = previousSignatures.some(
+      (signature) => conditionPathKey(signature.conditionPath) !== ""
+    )
+    const currentHasConditional = currentSignatures.some(
+      (signature) => conditionPathKey(signature.conditionPath) !== ""
+    )
+    if (previousBaseline !== undefined && currentHasConditional) {
+      return {
+        pairs: currentSignatures.map((signature) => [previousBaseline, signature]),
+        currentOnly: [],
+        previousOnly: []
+      }
+    }
+    if (currentBaseline !== undefined && previousHasConditional) {
+      return {
+        pairs: previousSignatures.map((signature) => [signature, currentBaseline]),
+        currentOnly: [],
+        previousOnly: []
+      }
+    }
     const remainingPrevious = [...previousSignatures]
     const pairs = []
     const unmatchedCurrent = []
@@ -1649,6 +1671,46 @@ const runSelfTest = () => {
       ]),
       manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
         ...sharedConditionalPrevious.keys()
+      ])
+    ),
+    []
+  )
+  const directBaselinePrevious = new Map([
+    ["packages/public/src/shared.tsx", 'export const Public = (): string => "value"']
+  ])
+  const directBaselineManifest = { exports: { ".": "./src/shared.tsx" } }
+  assert.deepEqual(
+    publicCallableChanges(
+      directBaselinePrevious,
+      sharedConditionalCurrent,
+      manifestEntryPointDescriptors(directBaselineManifest, "packages/public", [...directBaselinePrevious.keys()]),
+      manifestEntryPointDescriptors(sharedConditionalCurrentManifest, "packages/public", [
+        ...sharedConditionalCurrent.keys()
+      ])
+    ),
+    [
+      {
+        kind: "return-type-change",
+        filePath: "packages/public/src/changed.tsx",
+        name: "Public",
+        properties: []
+      }
+    ]
+  )
+  const directBaselineConditionalCurrent = new Map([
+    ...directBaselinePrevious,
+    ["packages/public/src/changed.tsx", 'export const Public = (): string => "other"']
+  ])
+  const directBaselineConditionalManifest = {
+    exports: { ".": { import: "./src/shared.tsx", require: "./src/changed.tsx" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      directBaselinePrevious,
+      directBaselineConditionalCurrent,
+      manifestEntryPointDescriptors(directBaselineManifest, "packages/public", [...directBaselinePrevious.keys()]),
+      manifestEntryPointDescriptors(directBaselineConditionalManifest, "packages/public", [
+        ...directBaselineConditionalCurrent.keys()
       ])
     ),
     []
