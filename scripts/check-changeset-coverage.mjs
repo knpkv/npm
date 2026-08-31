@@ -175,6 +175,13 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
         return canonicalTypeText(declaration.node.type, analysis, declaration.filePath, nextSubstitutions, nextSeen)
       }
     }
+    if (typeNode.typeArguments !== undefined) {
+      const wrapper = normalizeTypeText(typeNode.typeName)
+      const argumentsText = typeNode.typeArguments
+        .map((argument) => canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+        .join(",")
+      return `${wrapper}<${argumentsText}>`
+    }
   }
   if (TypeScript.isUnionTypeNode(typeNode)) {
     return `union(${typeNode.types
@@ -1209,6 +1216,35 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(genericCallablePrevious, genericCallableRename, ["packages/public/src/index.ts"]),
     []
+  )
+  const wrappedGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: ReadonlyArray<T>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const wrappedGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <U extends string>(value: ReadonlyArray<U>) => Promise<U> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(wrappedGenericPrevious, wrappedGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const wrappedGenericChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: ReadonlyArray<string>) => Promise<T> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(wrappedGenericPrevious, wrappedGenericChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
   )
 
   const methodPrevious = new Map([
