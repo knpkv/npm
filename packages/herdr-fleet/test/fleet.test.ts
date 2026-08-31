@@ -125,6 +125,20 @@ describe("fleet local authority", () => {
         })
       )).toBe(true)
     }
+    for (const pushSubject of ["mailto:", "https://", "https:///contact"]) {
+      expect(Result.isFailure(
+        Schema.decodeUnknownResult(HostConfiguration)({
+          ...valid,
+          pushSubject
+        })
+      )).toBe(true)
+    }
+    expect(Result.isSuccess(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        pushSubject: "https://ser8.example.test/contact"
+      })
+    )).toBe(true)
     expect(Result.isFailure(
       Schema.decodeUnknownResult(HostConfiguration)({
         ...valid,

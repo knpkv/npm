@@ -62,6 +62,21 @@ const HttpsOrigin = Schema.String.check(
   )
 )
 
+const VapidSubject = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.isPattern(/^(?:mailto:\S+|https:\/\/[^/?#\s]+(?:[/?#]\S*)?)$/),
+  Schema.makeFilter(
+    (value) => {
+      if (!URL.canParse(value)) return false
+      const url = new URL(value)
+      return url.protocol === "mailto:"
+        ? url.pathname.length > 0
+        : url.protocol === "https:" && url.hostname.length > 0
+    },
+    { expected: "a complete mailto or HTTPS URI" }
+  )
+)
+
 const connectUrlFor = (host: string, agentId: string): string =>
   `/connect/?agent=${encodeURIComponent(agentId)}&host=${encodeURIComponent(host)}`
 
@@ -329,10 +344,7 @@ export const HostConfiguration = Schema.Struct({
     )
   }),
   pushAllowedOrigins: Schema.Array(HttpsOrigin),
-  pushSubject: Schema.String.check(
-    Schema.isMaxLength(2_048),
-    Schema.isPattern(/^(mailto:|https:\/\/)/)
-  )
+  pushSubject: VapidSubject
 }).check(
   Schema.makeFilter(
     (configuration) => {
