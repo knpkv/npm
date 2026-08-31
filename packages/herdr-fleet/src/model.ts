@@ -350,10 +350,17 @@ export const HostConfiguration = Schema.Struct({
         localConfigured &&
         approvalHubUrl !== null &&
         approvalHubPort === configuration.approvalPort &&
-        (!configuration.crossHost || approvalHubConfigured)
+        (
+          !configuration.crossHost ||
+          (
+            approvalHubConfigured &&
+            configuration.port !== configuration.approvalPort
+          )
+        )
     },
     {
-      expected: "valid fleet targets and an approval hub URL whose effective port matches the TLS listener"
+      expected:
+        "valid fleet targets, distinct cross-host listeners, and an approval hub URL whose effective port matches the TLS listener"
     }
   )
 )

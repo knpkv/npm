@@ -160,6 +160,20 @@ describe("fleet local authority", () => {
         machines: [{ host: "ser8", nodeId: "node-ser8" }]
       })
     )).toBe(true)
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        port: valid.approvalPort
+      })
+    )).toBe(true)
+    expect(Result.isSuccess(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        applyMachines: [],
+        crossHost: false,
+        port: valid.approvalPort
+      })
+    )).toBe(true)
     for (
       const invalid of [
         { ...valid, applyCommand: [] },
