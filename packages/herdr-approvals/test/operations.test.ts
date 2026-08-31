@@ -271,6 +271,49 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
     )
   })
 
+  it.effect("filters the typed launch-pending entry and rejects unknown variants", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-agent-list-test-"))
+    const herdrCommand = join(root, "herdr-test")
+    writeFileSync(herdrCommand, "#!/bin/sh\n", { mode: 0o700 })
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations({
+        ...config(root, ["true"]),
+        herdrCommand
+      })
+
+      writeFileSync(
+        herdrCommand,
+        `#!/bin/sh
+printf '%s\\n' '{"result":{"agents":[{"agent":"codex","agent_status":"working","cwd":"/repo","pane_id":"w1:p1","state_change_seq":1},{"launch_pending":true,"agent_status":"launch_pending","cwd":"/repo/pending","foreground_cwd":"/repo/pending","name":null,"pane_id":"w1:p2","state_change_seq":2,"tokens":{}}]}}'
+`,
+        { mode: 0o700 }
+      )
+      expect(yield* operations.listAgents()).toEqual({
+        agents: [
+          expect.objectContaining({ paneId: "w1:p1", work: "repo" })
+        ],
+        available: true,
+        error: null
+      })
+
+      writeFileSync(
+        herdrCommand,
+        `#!/bin/sh
+printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"working","cwd":"/repo","pane_id":"w1:p2","state_change_seq":2}]}}'
+`,
+        { mode: 0o700 }
+      )
+      expect(yield* operations.listAgents()).toMatchObject({
+        agents: [],
+        available: false,
+        error: expect.stringContaining("herdr.agent_list.decode:")
+      })
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("rejects an oversized actor before durable job mutation", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-job-envelope-test-"))
     const operations: HostOperations = {
