@@ -154,12 +154,17 @@ describe("Relay review session storage", () => {
   })
 
   it("migrates a credential-keyed session when repository identity is enriched", async () => {
-    const sourceKey = relayReviewSessionStorageKey(resource)
-    const targetResource: RelayReviewSessionResourceIdentity = { ...resource, accountId: "222222222222" }
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
     const targetKey = relayReviewSessionStorageKey(targetResource)
     await writeSession(localStorage, sourceKey, {
       identity: "exact-head-1",
-      resource,
+      resource: sourceResource,
       review,
       skillIds: ["builtin:pr-review"],
       turns: [{ findingId: "F1", role: "user", message: "Keep this review." }],
@@ -169,7 +174,7 @@ describe("Relay review session storage", () => {
     const migrated = await migrateRelayReviewSession(
       localStorage,
       sourceKey,
-      resource,
+      sourceResource,
       targetKey,
       targetResource,
       "exact-head-2",
@@ -185,6 +190,136 @@ describe("Relay review session storage", () => {
       expect(restored.success?.turns).toEqual([{ findingId: "F1", role: "user", message: "Keep this review." }])
       expect(restored.success?.dispositions).toEqual({ F1: "acknowledged" })
     }
+  })
+
+  it("redirects a legacy writer to the canonical resource after migration", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+    await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      "exact-head-2",
+      immediateLock
+    )
+
+    const redirected = await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: [],
+      turns: [{ id: "legacy-turn", findingId: "F1", role: "user", message: "Keep this turn." }],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(redirected)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) expect(restored.success?.turns.map(({ id }) => id)).toEqual(["legacy-turn"])
+  })
+
+  it("keeps a current canonical rerun when migration finishes after it", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+    const migrationGate = Promise.withResolvers<void>()
+    let lockCalls = 0
+    const lock: RelayReviewSessionLock = {
+      request: async (_name, effect) => {
+        lockCalls++
+        if (lockCalls === 1) await migrationGate.promise
+        return effect()
+      }
+    }
+    const migration = migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      "exact-head-2",
+      lock
+    )
+    await Promise.resolve()
+    const rerun = await writeRelayReviewSession(localStorage, targetKey, {
+      expectedIdentity: "exact-head-2",
+      expectedVersion: 0,
+      identity: "exact-head-2",
+      resource: targetResource,
+      review: { ...review, revisionId: "revision-2" },
+      skillIds: ["rerun"],
+      turns: [],
+      dispositions: {}
+    }, lock)
+    expect(Result.isSuccess(rerun)).toBe(true)
+    migrationGate.resolve()
+    await migration
+
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.review.revisionId).toBe("revision-2")
+      expect(restored.success?.skillIds).toEqual(["rerun"])
+    }
+  })
+
+  it("fails closed when a legacy session has no account provenance", async () => {
+    const sourceKey = relayReviewSessionStorageKey(resource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      resource,
+      relayReviewSessionStorageKey(targetResource),
+      targetResource,
+      "exact-head-2",
+      immediateLock
+    )
+
+    expect(Result.isFailure(migrated)).toBe(true)
+    if (Result.isFailure(migrated)) expect(migrated.failure._tag).toBe("RelayReviewSessionMigrationAmbiguous")
   })
 
   it("merges stale tab writes without losing turns or regressing publication state", async () => {
@@ -454,7 +589,7 @@ describe("Relay review session storage", () => {
       resource,
       review,
       skillIds: [],
-      turns: window(1, 40),
+      turns: window(1, 40).map((item, index) => index === 0 ? { ...item, findingId: "PR" } : item),
       dispositions: {}
     })
 

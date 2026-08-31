@@ -688,6 +688,7 @@ const ReadyReviewWorkspace = ({
     return stableAccountId === undefined
       ? null
       : {
+          accountKind: "repository",
           accountId: stableAccountId,
           pullRequestId: String(pullRequest.id),
           region: String(pullRequest.account.region),
@@ -710,6 +711,7 @@ const ReadyReviewWorkspace = ({
     )
       return null
     return {
+      accountKind: "credential",
       accountId: credentialAccountId,
       pullRequestId: String(pullRequest.id),
       region: String(pullRequest.account.region),
@@ -833,6 +835,7 @@ const ReadyReviewWorkspace = ({
       return
     }
     let hydrated = stored.success
+    let hydratedFromLegacy = false
     if (hydrated === null && legacyReviewResource !== null && legacyReviewSessionKey !== null) {
       const legacy = readRelayReviewSession(window.localStorage, legacyReviewSessionKey, legacyReviewResource)
       if (Result.isFailure(legacy)) {
@@ -846,7 +849,16 @@ const ReadyReviewWorkspace = ({
         return
       }
       hydrated = legacy.success
+      hydratedFromLegacy = hydrated !== null
       if (hydrated !== null) {
+        if (hydrated.resource.accountKind !== "credential") {
+          setReviewFailure({
+            description:
+              "Relay cannot safely migrate this legacy PR conversation because its account provenance is ambiguous.",
+            title: "PR conversation migration unavailable"
+          })
+          return
+        }
         const lock = browserRelayReviewSessionLock()
         if (lock === null) {
           setReviewFailure({
@@ -895,9 +907,10 @@ const ReadyReviewWorkspace = ({
     hydratedProfileKeyRef.current = reviewSessionKey
     skipSessionWriteRef.current = reviewSessionKey
     reviewSessionVersionRef.current = hydrated.version
+    const hydratedIdentity = hydratedFromLegacy ? reviewIdentity : hydrated.identity
     const restored = replaceRelayReviewPreservingTurns(hydrated.turns, {
-      expectedIdentity: hydrated.identity,
-      identity: hydrated.identity,
+      expectedIdentity: hydratedIdentity,
+      identity: hydratedIdentity,
       skillIds: hydrated.skillIds,
       value: hydrated.review
     })
