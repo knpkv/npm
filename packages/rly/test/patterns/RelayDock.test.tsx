@@ -27,6 +27,10 @@ interface MountedShadowApp extends MountedDock {
   readonly shadow: ShadowRoot
 }
 
+interface MountedIframeDock extends MountedDock {
+  readonly portalDocument: Document
+}
+
 const mounted: Array<MountedDock> = []
 const modelOptions = [{ label: "Codex", value: "codex" }]
 const profileOptions = [{ label: "Review", value: "review" }]
@@ -62,6 +66,20 @@ const mountWithoutPortalTarget = async (element: ReactElement): Promise<MountedD
   const entry = { host, portal: host, root }
   mounted.push(entry)
   await act(async () => root.render(<PortalProvider container={null}>{element}</PortalProvider>))
+  return entry
+}
+
+const mountWithIframePortal = async (element: ReactElement): Promise<MountedIframeDock> => {
+  const host = document.createElement("div")
+  const frame = document.createElement("iframe")
+  document.body.append(host, frame)
+  const portalDocument = frame.contentDocument
+  if (portalDocument === null) throw new Error("Iframe portal document did not mount")
+  const portal = portalDocument.body
+  const root = createRoot(host)
+  const entry = { host, portal, portalDocument, root }
+  mounted.push(entry)
+  await act(async () => root.render(<PortalProvider container={portal}>{element}</PortalProvider>))
   return entry
 }
 
@@ -296,6 +314,21 @@ describe("RelayDock", () => {
 
     const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
     expect(document.activeElement).toBe(close)
+    vi.useFakeTimers()
+    await act(async () => close?.click())
+    await act(async () => vi.runAllTimers())
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it("restores a controlled iframe-portal dock to its parent-document opener", async () => {
+    const { host, portal, portalDocument } = await mountWithIframePortal(<ControlledDock />)
+    const opener = host.querySelector<HTMLButtonElement>("button")
+    if (opener === null) throw new Error("Controlled RelayDock opener did not render")
+    opener.focus()
+    await act(async () => opener.click())
+
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    expect(portalDocument.activeElement).toBe(close)
     vi.useFakeTimers()
     await act(async () => close?.click())
     await act(async () => vi.runAllTimers())
