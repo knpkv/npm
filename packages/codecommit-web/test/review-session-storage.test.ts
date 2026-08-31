@@ -1,5 +1,3 @@
-// @vitest-environment happy-dom
-
 import { beforeEach, describe, expect, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 
@@ -41,25 +39,47 @@ const resource: RelayReviewSessionResourceIdentity = {
   repositoryName: "payments"
 }
 
+interface MemoryStorage {
+  readonly clear: () => void
+  readonly getItem: (key: string) => string | null
+  readonly setItem: (key: string, value: string) => void
+}
+
+const makeStorage = (): MemoryStorage => {
+  const entries = new Map<string, string>()
+  return {
+    clear: () => entries.clear(),
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => entries.set(key, value)
+  }
+}
+
+const localStorage = makeStorage()
+const sessionStorage = makeStorage()
+
 const writeSession = (
-  storage: Storage,
+  storage: MemoryStorage,
   key: string,
-  session: Omit<RelayReviewSessionWrite, "expectedIdentity"> & { readonly expectedIdentity?: string }
+  session: Omit<RelayReviewSessionWrite, "expectedIdentity" | "expectedVersion"> & {
+    readonly expectedIdentity?: string
+    readonly expectedVersion?: number
+  }
 ) =>
   writeRelayReviewSession(storage, key, {
     ...session,
-    expectedIdentity: session.expectedIdentity ?? session.identity
+    expectedIdentity: session.expectedIdentity ?? session.identity,
+    expectedVersion: session.expectedVersion ?? 0
   })
 
 describe("Relay review session storage", () => {
   beforeEach(() => {
-    window.localStorage.clear()
-    window.sessionStorage.clear()
+    localStorage.clear()
+    sessionStorage.clear()
   })
 
   it("restores one durable PR conversation across exact heads", () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -68,7 +88,7 @@ describe("Relay review session storage", () => {
       dispositions: { F1: "rejected" }
     })
 
-    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    const restored = readRelayReviewSession(localStorage, key, resource)
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
       expect(restored.success).toMatchObject({
@@ -81,14 +101,14 @@ describe("Relay review session storage", () => {
 
   it("rejects malformed stored state", () => {
     const key = relayReviewSessionStorageKey(resource)
-    window.sessionStorage.setItem(key, JSON.stringify({ identity: "exact-head-1", turns: "not-an-array" }))
+    sessionStorage.setItem(key, JSON.stringify({ identity: "exact-head-1", turns: "not-an-array" }))
 
-    expect(Result.isFailure(readRelayReviewSession(window.sessionStorage, key, resource))).toBe(true)
+    expect(Result.isFailure(readRelayReviewSession(sessionStorage, key, resource))).toBe(true)
   })
 
   it("rejects a schema-valid conversation stored for another repository identity", () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -97,7 +117,7 @@ describe("Relay review session storage", () => {
       dispositions: {}
     })
 
-    const restored = readRelayReviewSession(window.localStorage, key, {
+    const restored = readRelayReviewSession(localStorage, key, {
       ...resource,
       repositoryName: "identity-reassigned"
     })
@@ -113,7 +133,7 @@ describe("Relay review session storage", () => {
 
     expect(euKey).not.toBe(usKey)
 
-    writeSession(window.localStorage, euKey, {
+    writeSession(localStorage, euKey, {
       identity: "exact-head-1",
       resource,
       review,
@@ -122,8 +142,8 @@ describe("Relay review session storage", () => {
       dispositions: {}
     })
 
-    expect(Result.isSuccess(readRelayReviewSession(window.localStorage, usKey, usResource))).toBe(true)
-    const restored = readRelayReviewSession(window.localStorage, usKey, usResource)
+    expect(Result.isSuccess(readRelayReviewSession(localStorage, usKey, usResource))).toBe(true)
+    const restored = readRelayReviewSession(localStorage, usKey, usResource)
     if (Result.isSuccess(restored)) expect(restored.success).toBeNull()
   })
 
@@ -137,17 +157,17 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F1: "pending" }
     }
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       ...staleTab,
       turns: [{ findingId: "F1", role: "user", message: "First tab" }],
       dispositions: { F1: "posted" }
     })
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       ...staleTab,
       turns: [{ findingId: "F1", role: "user", message: "Second tab" }]
     })
 
-    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    const restored = readRelayReviewSession(localStorage, key, resource)
 
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
@@ -159,7 +179,7 @@ describe("Relay review session storage", () => {
 
   it("keeps the PR transcript when a new exact head replaces the review", () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -167,7 +187,7 @@ describe("Relay review session storage", () => {
       turns: [{ findingId: "F1", role: "user", message: "Check the first head." }],
       dispositions: { F1: "posted" }
     })
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       expectedIdentity: "exact-head-1",
       expectedVersion: 1,
       identity: "exact-head-2",
@@ -178,7 +198,7 @@ describe("Relay review session storage", () => {
       dispositions: { F2: "pending" }
     })
 
-    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    const restored = readRelayReviewSession(localStorage, key, resource)
 
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
@@ -191,7 +211,7 @@ describe("Relay review session storage", () => {
 
   it("recovers interrupted publications without changing settled dispositions", () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(window.sessionStorage, key, {
+    writeSession(sessionStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -200,7 +220,7 @@ describe("Relay review session storage", () => {
       dispositions: { interrupted: "posting", pending: "pending", posted: "posted" }
     })
 
-    const restored = readRelayReviewSession(window.sessionStorage, key, resource)
+    const restored = readRelayReviewSession(sessionStorage, key, resource)
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
       expect(restored.success?.dispositions).toEqual({
@@ -232,7 +252,7 @@ describe("Relay review session storage", () => {
       role: "user",
       message: "Check again."
     })
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -240,7 +260,7 @@ describe("Relay review session storage", () => {
       turns: [repeatedTurn("turn-1"), repeatedTurn("turn-2")],
       dispositions: {}
     })
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -249,7 +269,7 @@ describe("Relay review session storage", () => {
       dispositions: {}
     })
 
-    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    const restored = readRelayReviewSession(localStorage, key, resource)
 
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
@@ -259,7 +279,7 @@ describe("Relay review session storage", () => {
 
   it("keeps a newer exact-head review when an older tab writes later", () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -267,7 +287,7 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F1: "pending" }
     })
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       expectedIdentity: "exact-head-1",
       expectedVersion: 1,
       identity: "exact-head-2",
@@ -277,7 +297,7 @@ describe("Relay review session storage", () => {
       turns: [],
       dispositions: { F2: "posted" }
     })
-    const staleWrite = writeSession(window.localStorage, key, {
+    const staleWrite = writeSession(localStorage, key, {
       identity: "exact-head-1",
       resource,
       review,
@@ -288,7 +308,7 @@ describe("Relay review session storage", () => {
 
     expect(Result.isSuccess(staleWrite)).toBe(true)
     if (Result.isSuccess(staleWrite)) expect(staleWrite.success._tag).toBe("stale-review-preserved")
-    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    const restored = readRelayReviewSession(localStorage, key, resource)
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
       expect(restored.success).toMatchObject({
@@ -303,7 +323,7 @@ describe("Relay review session storage", () => {
 
   it("preserves a same-head review when a stale tab writes after a newer version", () => {
     const key = relayReviewSessionStorageKey(resource)
-    const initial = writeSession(window.localStorage, key, {
+    const initial = writeSession(localStorage, key, {
       expectedVersion: 0,
       identity: "exact-head-1",
       resource,
@@ -314,7 +334,7 @@ describe("Relay review session storage", () => {
     })
     expect(Result.isSuccess(initial)).toBe(true)
 
-    const current = writeSession(window.localStorage, key, {
+    const current = writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -325,7 +345,7 @@ describe("Relay review session storage", () => {
     })
     expect(Result.isSuccess(current)).toBe(true)
 
-    const stale = writeSession(window.localStorage, key, {
+    const stale = writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -337,7 +357,7 @@ describe("Relay review session storage", () => {
 
     expect(Result.isSuccess(stale)).toBe(true)
     if (Result.isSuccess(stale)) expect(stale.success._tag).toBe("stale-review-preserved")
-    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    const restored = readRelayReviewSession(localStorage, key, resource)
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
       expect(restored.success).toMatchObject({
@@ -353,7 +373,7 @@ describe("Relay review session storage", () => {
 
   it("accepts a same-head write only when its observed version is current", () => {
     const key = relayReviewSessionStorageKey(resource)
-    writeSession(window.localStorage, key, {
+    writeSession(localStorage, key, {
       expectedVersion: 0,
       identity: "exact-head-1",
       resource,
@@ -363,7 +383,7 @@ describe("Relay review session storage", () => {
       dispositions: {}
     })
 
-    const written = writeSession(window.localStorage, key, {
+    const written = writeSession(localStorage, key, {
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
