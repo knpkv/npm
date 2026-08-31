@@ -1859,6 +1859,17 @@ const runSelfTest = () => {
       }
     ]
   )
+  const adjacentWildcardManifest = { exports: { "./feature/*": "./dist/**.js" } }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(adjacentWildcardManifest, "packages/public", ["packages/public/src/aa.tsx"]),
+    [
+      {
+        identity: "exports:./feature/*",
+        publicSubpath: "./feature/a",
+        sourcePath: "packages/public/src/aa.tsx"
+      }
+    ]
+  )
   assert.deepEqual(
     publicCallableChanges(
       conditionalSources,
@@ -2106,12 +2117,16 @@ const sourcePaths = (paths) =>
   )
 
 const entryPathCaptures = (entryPath, candidate) => {
-  const escaped = entryPath.replace(/[.+?^${}()|[\]\\]/gu, "\\$&")
-  const match = new RegExp(`^${escaped.replaceAll("*", "(.*)")}$`, "u").exec(candidate)
-  if (match === null) return undefined
-  const captures = match.slice(1)
-  const firstCapture = captures[0]
-  return captures.some((capture) => capture !== firstCapture) ? undefined : captures.slice(0, 1)
+  const wildcardCount = entryPath.length - entryPath.replaceAll("*", "").length
+  if (wildcardCount === 0) return entryPath === candidate ? [] : undefined
+  const prefix = entryPath.split("*")[0]
+  if (!candidate.startsWith(prefix)) return undefined
+  const captureStart = prefix.length
+  for (let captureEnd = captureStart; captureEnd <= candidate.length; captureEnd += 1) {
+    const capture = candidate.slice(captureStart, captureEnd)
+    if (entryPath.replaceAll("*", capture) === candidate) return [capture]
+  }
+  return undefined
 }
 
 const publicSubpathFor = (identity, captures) => {
