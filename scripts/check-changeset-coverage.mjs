@@ -532,25 +532,38 @@ const publicCallableChanges = (
         .join(","),
       signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
     ].join("|")
+  const signatureTargetKey = (signature) => `${signature.filePath}\u0000${signature.name}`
   const pairSignatures = (previousSignatures, currentSignatures) => {
-    const previousBaseline = previousSignatures.find((signature) => conditionPathKey(signature.conditionPath) === "")
-    const currentBaseline = currentSignatures.find((signature) => conditionPathKey(signature.conditionPath) === "")
+    const previousBaselines = previousSignatures.filter((signature) => conditionPathKey(signature.conditionPath) === "")
+    const currentBaselines = currentSignatures.filter((signature) => conditionPathKey(signature.conditionPath) === "")
     const previousHasConditional = previousSignatures.some(
       (signature) => conditionPathKey(signature.conditionPath) !== ""
     )
     const currentHasConditional = currentSignatures.some(
       (signature) => conditionPathKey(signature.conditionPath) !== ""
     )
-    if (previousBaseline !== undefined && currentHasConditional) {
+    const baselineFor = (baselines, signature, index) =>
+      baselines.find((baseline) => signatureTargetKey(baseline) === signatureTargetKey(signature)) ??
+      (baselines.length === 1
+        ? baselines[0]
+        : (baselines.find((baseline) => signatureContract(baseline) === signatureContract(signature)) ??
+          baselines[index % baselines.length]))
+    if (previousBaselines.length > 0 && currentHasConditional) {
       return {
-        pairs: currentSignatures.map((signature) => [previousBaseline, signature]),
+        pairs: currentSignatures.map((signature, index) => [
+          baselineFor(previousBaselines, signature, index),
+          signature
+        ]),
         currentOnly: [],
         previousOnly: []
       }
     }
-    if (currentBaseline !== undefined && previousHasConditional) {
+    if (currentBaselines.length > 0 && previousHasConditional) {
       return {
-        pairs: previousSignatures.map((signature) => [signature, currentBaseline]),
+        pairs: previousSignatures.map((signature, index) => [
+          signature,
+          baselineFor(currentBaselines, signature, index)
+        ]),
         currentOnly: [],
         previousOnly: []
       }
@@ -1745,6 +1758,23 @@ const runSelfTest = () => {
         properties: ["value"]
       }
     ]
+  )
+  const wildcardDirectPrevious = new Map([
+    ["packages/public/src/a.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/b.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const wildcardConditionalManifest = {
+    exports: { "./*": { import: "./dist/*.js", require: "./dist/*.js" } }
+  }
+  const wildcardDirectManifest = { exports: { "./*": "./dist/*.js" } }
+  assert.deepEqual(
+    publicCallableChanges(
+      wildcardDirectPrevious,
+      wildcardDirectPrevious,
+      manifestEntryPointDescriptors(wildcardDirectManifest, "packages/public", [...wildcardDirectPrevious.keys()]),
+      manifestEntryPointDescriptors(wildcardConditionalManifest, "packages/public", [...wildcardDirectPrevious.keys()])
+    ),
+    []
   )
   assert.deepEqual(
     publicCallableChanges(
