@@ -276,21 +276,17 @@ const canonicalTypeText = (
     return `[${typeNode.elements
       .map((element) => {
         const namedMember = TypeScript.isNamedTupleMember(element)
-        const marker = namedMember
-          ? element.dotDotDotToken === undefined
-            ? element.questionToken === undefined
-              ? ""
-              : "optional:"
-            : "rest:"
-          : ""
-        return `${marker}${canonicalTypeText(
+        const elementText = canonicalTypeText(
           namedMember ? element.type : element,
           analysis,
           filePath,
           substitutions,
           seen,
           nextCanonicalTypeContext(context)
-        )}`
+        )
+        if (!namedMember) return elementText
+        if (element.dotDotDotToken !== undefined) return `...${elementText}`
+        return element.questionToken === undefined ? elementText : `${elementText}?`
       })
       .join(",")}]`
   }
@@ -515,11 +511,23 @@ const withSubstitutionDependency = (result, dependency) => ({
   substitutionDependencies: new Set([...result.substitutionDependencies, dependency])
 })
 
-const sameSubstitutionEntries = (left, right) =>
-  left.length === right.size && left.every(([name, value]) => right.get(name) === value)
-
-const sameTypeArguments = (left, right) =>
-  left.length === right.length && left.every((argument, index) => argument === right[index])
+const canonicalMemoEnvironmentKey = (analysis, filePath, substitutions, typeArguments) => {
+  const canonicalSubstitutions = [...substitutions]
+    .toSorted(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => {
+      if (Predicate.isString(value)) return [name, value]
+      if (!isTypeSubstitution(value)) {
+        throw new ChangesetCoverageError({
+          reason: `${filePath}: invalid type substitution while canonicalizing memo environment`
+        })
+      }
+      return [name, canonicalTypeText(value.typeNode, analysis, filePath, value.substitutions)]
+    })
+  const canonicalArguments = typeArguments.map((argument) =>
+    canonicalTypeText(argument, analysis, filePath, substitutions)
+  )
+  return JSON.stringify({ arguments: canonicalArguments, substitutions: canonicalSubstitutions })
+}
 
 const readTypeMembersMemo = (
   memo,
@@ -529,14 +537,16 @@ const readTypeMembersMemo = (
   substitutionPath,
   filePath,
   typeArguments = [],
-  contextNode = memoKey
+  contextNode = memoKey,
+  analysis
 ) => {
   const entries = memo.get(memoKey)
   if (entries === undefined) return undefined
+  const environmentKey = canonicalMemoEnvironmentKey(analysis, filePath, substitutions, typeArguments)
   const entry = entries.find(
     ({ substitutionEntries, referenceArguments }) =>
-      sameSubstitutionEntries(substitutionEntries, substitutions) &&
-      sameTypeArguments(referenceArguments, typeArguments)
+      canonicalMemoEnvironmentKey(analysis, filePath, new Map(substitutionEntries), referenceArguments) ===
+      environmentKey
   )
   if (entry === undefined) return undefined
   if ([...entry.result.declarationDependencies].some((dependency) => seen.has(dependency))) {
@@ -551,13 +561,8 @@ const readTypeMembersMemo = (
 const writeTypeMembersMemo = (memo, memoKey, substitutions, result, typeArguments = []) => {
   const entries = memo.get(memoKey) ?? []
   const substitutionEntries = [...substitutions]
-  const existing = entries.findIndex(
-    ({ substitutionEntries: existingEntries, referenceArguments }) =>
-      sameSubstitutionEntries(existingEntries, substitutions) && sameTypeArguments(referenceArguments, typeArguments)
-  )
   const entry = { referenceArguments: typeArguments, result, substitutionEntries }
-  if (existing === -1) entries.push(entry)
-  else entries[existing] = entry
+  entries.push(entry)
   memo.set(memoKey, entries)
   return result
 }
@@ -575,7 +580,17 @@ const typeMembers = (
     (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) ||
     (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression))
   if (!reference) {
-    const cached = readTypeMembersMemo(memo, typeNode, substitutions, seen, substitutionPath, filePath)
+    const cached = readTypeMembersMemo(
+      memo,
+      typeNode,
+      substitutions,
+      seen,
+      substitutionPath,
+      filePath,
+      [],
+      typeNode,
+      analysis
+    )
     if (cached !== undefined) return cached
   }
   if (TypeScript.isParenthesizedTypeNode(typeNode)) {
@@ -739,7 +754,8 @@ const typeMembers = (
       substitutionPath,
       filePath,
       typeArguments,
-      typeNode
+      typeNode,
+      analysis
     )
     if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
@@ -816,7 +832,8 @@ const typeMembers = (
       substitutionPath,
       filePath,
       typeArguments,
-      typeNode
+      typeNode,
+      analysis
     )
     if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
@@ -875,7 +892,8 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
   const module = analysis.modules.get(filePath)
   if (module === undefined) return new Map()
   const exports = new Map()
-  const addCallable = (name, parameters, returnType, contextualType) => {
+  const addCallable = (name, parameters, returnType, contextualType, typeParameters) => {
+    const callableGeneric = genericDescriptor(typeParameters, analysis, filePath, new Map())
     const contextualParameters = contextualType === undefined ? [] : contextualType.parameters
     const firstParameter = parameters[0]
     const contextualParameter = contextualParameters[0]
@@ -883,13 +901,16 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
     const properties =
       parameterType === undefined
         ? { members: new Map(), resolved: false }
-        : typeMembers(parameterType, analysis, filePath)
+        : typeMembers(parameterType, analysis, filePath, new Set(), callableGeneric.substitutions)
     const contextualReturnType = contextualType?.type
     const effectiveReturnType = returnType ?? contextualReturnType
     exports.set(name, {
+      genericDescriptor: callableGeneric.descriptor,
       properties,
       returnType:
-        effectiveReturnType === undefined ? undefined : canonicalTypeText(effectiveReturnType, analysis, filePath),
+        effectiveReturnType === undefined
+          ? undefined
+          : canonicalTypeText(effectiveReturnType, analysis, filePath, callableGeneric.substitutions),
       returnResolved: effectiveReturnType !== undefined
     })
   }
@@ -908,11 +929,17 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
           declaration.type !== undefined && TypeScript.isFunctionTypeNode(declaration.type)
             ? declaration.type
             : undefined
-        addCallable(declaration.name.text, initializer.parameters, initializer.type, contextualType)
+        addCallable(
+          declaration.name.text,
+          initializer.parameters,
+          initializer.type,
+          contextualType,
+          initializer.typeParameters ?? contextualType?.typeParameters
+        )
       }
     }
     if (TypeScript.isFunctionDeclaration(node) && node.name !== undefined && hasExportModifier(node)) {
-      addCallable(node.name.text, node.parameters, node.type, undefined)
+      addCallable(node.name.text, node.parameters, node.type, undefined, node.typeParameters)
     }
     TypeScript.forEachChild(node, visit)
   }
@@ -1071,6 +1098,7 @@ const publicCallableChanges = (
   const changes = []
   const signatureContract = (signature) =>
     [
+      `generic:${signature.genericDescriptor}`,
       signature.properties.resolved ? "resolved" : "unresolved",
       [...signature.properties.members.entries()]
         .toSorted(([left], [right]) => left.localeCompare(right))
@@ -1214,6 +1242,18 @@ const publicCallableChanges = (
   const compareSignatures = (previousSignature, currentSignature) => {
     const currentProperties = currentSignature?.properties.members ?? new Map()
     const previousProperties = previousSignature?.properties.members ?? new Map()
+    if (
+      previousSignature !== undefined &&
+      currentSignature !== undefined &&
+      currentSignature.genericDescriptor !== previousSignature.genericDescriptor
+    ) {
+      changes.push({
+        kind: "type-change",
+        filePath: currentSignature.filePath,
+        name: currentSignature.name,
+        properties: []
+      })
+    }
     if (
       currentSignature !== undefined &&
       currentSignature.properties.resolved &&
@@ -1805,6 +1845,17 @@ const runSelfTest = () => {
     publicCallableChanges(namedTupleOptionalPrevious, namedTupleOptionalLabelCurrent, ["packages/public/src/index.ts"]),
     []
   )
+  const unnamedTupleOptionalCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [string?] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedTupleOptionalPrevious, unnamedTupleOptionalCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
   const namedTupleRestPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -1832,6 +1883,17 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(namedTupleRestPrevious, namedTupleRestLabelCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
+  const unnamedTupleRestCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [...string[]] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedTupleRestPrevious, unnamedTupleRestCurrent, ["packages/public/src/index.ts"]),
     []
   )
 
@@ -2186,6 +2248,64 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(diamondSources, diamondSources, ["packages/public/src/index.ts"]), [])
+  const genericDiamondTypes = ["type Diamond0<T> = { value: T }"]
+  for (let index = 1; index <= 20; index++) {
+    genericDiamondTypes.push(
+      `type Diamond${index}<T> = { left: Diamond${index - 1}<T>; right: Diamond${index - 1}<T> }`
+    )
+  }
+  const genericDiamondSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      `${genericDiamondTypes.join("\n")}\ntype Props = { value: Diamond20<string> }\nexport const Public = (props: Props) => props.value`
+    ]
+  ])
+  const genericDiamondAnalysis = analyzeSources(genericDiamondSources)
+  const genericDiamondModule = genericDiamondAnalysis.modules.get("packages/public/src/view.tsx")
+  assert(genericDiamondModule !== undefined)
+  const genericDiamondProps = genericDiamondModule.declarations.get("Props")
+  assert(genericDiamondProps !== undefined)
+  assert(TypeScript.isTypeAliasDeclaration(genericDiamondProps))
+  const genericDiamondMemo = new Map()
+  const genericDiamondMembers = typeMembers(
+    genericDiamondProps.type,
+    genericDiamondAnalysis,
+    "packages/public/src/view.tsx",
+    new Set(),
+    new Map(),
+    genericDiamondMemo
+  )
+  assert.equal(genericDiamondMembers.resolved, true)
+  const genericDiamondMemoEntries = [...Array(21).keys()].reduce(
+    (count, index) =>
+      count + (genericDiamondMemo.get(`packages/public/src/view.tsx\u0000Diamond${index}`)?.length ?? 0),
+    0
+  )
+  assert.equal(genericDiamondMemoEntries, 21)
+  const distinctGenericArgumentSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Leaf<T> = { value: T }\ntype Props = { left: Leaf<string>; right: Leaf<number> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const distinctGenericArgumentAnalysis = analyzeSources(distinctGenericArgumentSources)
+  const distinctGenericArgumentModule = distinctGenericArgumentAnalysis.modules.get("packages/public/src/view.tsx")
+  assert(distinctGenericArgumentModule !== undefined)
+  const distinctGenericArgumentProps = distinctGenericArgumentModule.declarations.get("Props")
+  assert(distinctGenericArgumentProps !== undefined)
+  assert(TypeScript.isTypeAliasDeclaration(distinctGenericArgumentProps))
+  const distinctGenericArgumentMemo = new Map()
+  typeMembers(
+    distinctGenericArgumentProps.type,
+    distinctGenericArgumentAnalysis,
+    "packages/public/src/view.tsx",
+    new Set(),
+    new Map(),
+    distinctGenericArgumentMemo
+  )
+  assert.equal(distinctGenericArgumentMemo.get("packages/public/src/view.tsx\u0000Leaf")?.length, 2)
   const recursiveReadonlyArraySources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -2550,6 +2670,35 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(wrappedGenericPrevious, wrappedGenericRename, ["packages/public/src/index.ts"]),
     []
+  )
+  const forwardedGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props<T> = { value: T }\nexport function Public<T extends string>(props: Props<T>): T { return props.value }"
+    ]
+  ])
+  const forwardedGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props<U> = { value: U }\nexport function Public<U extends string>(props: Props<U>): U { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(forwardedGenericPrevious, forwardedGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const forwardedGenericConstraintChange = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props<U> = { value: U }\nexport function Public<U extends number>(props: Props<U>): U { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(forwardedGenericPrevious, forwardedGenericConstraintChange, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
   const wrappedGenericChanged = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
