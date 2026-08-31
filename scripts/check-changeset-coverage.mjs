@@ -892,6 +892,20 @@ const publicCallableChanges = (
   return [...uniqueChanges.values()]
 }
 
+const publicCallableChangesEffect = (
+  previousSources,
+  currentSources,
+  previousEntryPoints,
+  currentEntryPoints = previousEntryPoints
+) =>
+  Effect.try({
+    try: () => publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints),
+    catch: (cause) =>
+      cause instanceof ChangesetCoverageError
+        ? cause
+        : new ChangesetCoverageError({ cause, reason: "Public callable changes analysis failed" })
+  })
+
 const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
   changes.flatMap(({ filePath, kind = "addition", name, packageName, properties }) => {
     if (releaseTypes.get(packageName) !== "patch") return []
@@ -1518,6 +1532,22 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(finiteAliasSources, finiteAliasSources, ["packages/public/src/index.ts"]), [])
+  const directCycleFailure = Effect.runSync(
+    publicCallableChangesEffect(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]).pipe(
+      Effect.flip
+    )
+  )
+  assert(directCycleFailure instanceof ChangesetCoverageError)
+  assert.equal(
+    directCycleFailure.reason,
+    "packages/public/src/view.tsx: recursive type declaration while canonicalizing Loop"
+  )
+  assert.deepEqual(
+    Effect.runSync(
+      publicCallableChangesEffect(finiteAliasSources, finiteAliasSources, ["packages/public/src/index.ts"])
+    ),
+    []
+  )
   const cyclicSources = new Map([["packages/public/src/cycle.ts", "type Loop = Loop"]])
   const cyclicModule = analyzeSources(cyclicSources).modules.get("packages/public/src/cycle.ts")
   assert(cyclicModule !== undefined)
@@ -2476,12 +2506,13 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         record.directory,
         previousRelativeSourceFiles
       )
-      for (const change of publicCallableChanges(
+      const callableChanges = yield* publicCallableChangesEffect(
         previousSources,
         currentSources,
         previousEntryPoints,
         currentEntryPoints
-      )) {
+      )
+      for (const change of callableChanges) {
         changes.push({ ...change, packageName: record.name })
       }
     }
