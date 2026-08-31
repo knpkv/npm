@@ -189,7 +189,11 @@ const exactReviewIdentity = (
   `${accountId}:${repositoryName}:${region}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
 
 const canonicalReviewAccountId = (account: Domain.Account): string =>
-  String(account.repoAccountId ?? account.awsAccountId ?? account.profile)
+  account.repoAccountId !== undefined && account.repoAccountId.length > 0
+    ? account.repoAccountId
+    : account.awsAccountId !== undefined && account.awsAccountId.length > 0
+      ? account.awsAccountId
+      : account.profile
 
 export const fileIndexForFinding = (
   files: PullRequestDiffResponse["files"],
@@ -675,7 +679,12 @@ const ReadyReviewWorkspace = ({
     diff
   )
   const reviewResource = useMemo<RelayReviewSessionResourceIdentity | null>(() => {
-    const stableAccountId = pullRequest.account.repoAccountId ?? pullRequest.account.awsAccountId
+    const stableAccountId =
+      pullRequest.account.repoAccountId !== undefined && pullRequest.account.repoAccountId.length > 0
+        ? pullRequest.account.repoAccountId
+        : pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
+          ? pullRequest.account.awsAccountId
+          : undefined
     return stableAccountId === undefined
       ? null
       : {
@@ -724,7 +733,7 @@ const ReadyReviewWorkspace = ({
   const skipSessionWriteRef = useRef<string | null>(null)
   const hydratedSessionRef = useRef<HydratedSessionMarker | null>(null)
   const hydratedProfileKeyRef = useRef<string | null>(null)
-  const appendedTurnIdRef = useRef<string | undefined>(undefined)
+  const appendedTurnIdsRef = useRef<ReadonlyArray<string> | undefined>(undefined)
   const [completedReview, setCompletedReview] = useState<RelayReviewCompletion | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
@@ -774,7 +783,7 @@ const ReadyReviewWorkspace = ({
     if (profile !== undefined) {
       setSelectedProfileId(profile.id)
     }
-  }, [config, selectedProfileId])
+  }, [config, reviewSessionKey, selectedProfileId])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -808,7 +817,7 @@ const ReadyReviewWorkspace = ({
       })
       return
     }
-    hydratedProfileKeyRef.current = reviewSessionKey
+    hydratedProfileKeyRef.current = null
     const stored = readRelayReviewSession(window.localStorage, reviewSessionKey, reviewResource)
     if (Result.isFailure(stored)) {
       skipSessionWriteRef.current = null
@@ -852,6 +861,7 @@ const ReadyReviewWorkspace = ({
             legacyReviewResource,
             reviewSessionKey,
             reviewResource,
+            reviewIdentity,
             lock
           ).then((migrated) => {
             if (Result.isFailure(migrated)) {
@@ -876,11 +886,13 @@ const ReadyReviewWorkspace = ({
       reviewSessionVersionRef.current = 0
       if (completedReviewRef.current !== null) return
       setCompletedReview(null)
+      setSelectedProfileId(null)
       setTurns([])
       setDispositions({})
       setSelectedFindingId(null)
       return
     }
+    hydratedProfileKeyRef.current = reviewSessionKey
     skipSessionWriteRef.current = reviewSessionKey
     reviewSessionVersionRef.current = hydrated.version
     const restored = replaceRelayReviewPreservingTurns(hydrated.turns, {
@@ -938,7 +950,7 @@ const ReadyReviewWorkspace = ({
       return
     }
     let active = true
-    const appendedTurnId = appendedTurnIdRef.current
+    const appendedTurnIds = appendedTurnIdsRef.current
     const session = {
       expectedIdentity: completedReview.expectedIdentity,
       expectedVersion: reviewSessionVersionRef.current,
@@ -949,10 +961,10 @@ const ReadyReviewWorkspace = ({
       turns,
       dispositions
     } satisfies RelayReviewSessionWrite
-    const sessionToPersist = appendedTurnId === undefined ? session : { ...session, appendedTurnId }
+    const sessionToPersist = appendedTurnIds === undefined ? session : { ...session, appendedTurnIds }
     void writeRelayReviewSession(window.localStorage, reviewSessionKey, sessionToPersist, lock).then((written) => {
       if (!active) return
-      if (appendedTurnIdRef.current === appendedTurnId) appendedTurnIdRef.current = undefined
+      if (appendedTurnIdsRef.current === appendedTurnIds) appendedTurnIdsRef.current = undefined
       if (Result.isFailure(written)) {
         setReviewFailure({
           description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
@@ -1126,8 +1138,9 @@ const ReadyReviewWorkspace = ({
         }
         return { _tag: "failed" }
       }
+      const userTurnId = window.crypto.randomUUID()
       const userTurn: RelayReviewConversationTurn = {
-        id: window.crypto.randomUUID(),
+        id: userTurnId,
         findingId,
         role: "user",
         message: nextMessage
@@ -1155,18 +1168,21 @@ const ReadyReviewWorkspace = ({
       )
       if (!outcome.completed) return { _tag: "failed" }
       const retainedTurns = completedReviewRef.current?.turns ?? currentTurns
+      const assistantTurnId = outcome.reply === undefined ? undefined : window.crypto.randomUUID()
       const nextTurns = appendReviewTurn(retainedTurns, userTurn)
-      appendedTurnIdRef.current = userTurn.id
-      setTurns(
-        outcome.reply === undefined
-          ? nextTurns
-          : appendReviewTurn(nextTurns, {
-              id: window.crypto.randomUUID(),
-              findingId,
-              role: "assistant",
-              message: outcome.reply
-            })
-      )
+      if (assistantTurnId === undefined || outcome.reply === undefined) {
+        appendedTurnIdsRef.current = [userTurnId]
+        setTurns(nextTurns)
+      } else {
+        const assistantTurn: RelayReviewConversationTurn = {
+          id: assistantTurnId,
+          findingId,
+          role: "assistant",
+          message: outcome.reply
+        }
+        appendedTurnIdsRef.current = [userTurnId, assistantTurnId]
+        setTurns(appendReviewTurn(nextTurns, assistantTurn))
+      }
       setMessage("")
       return { _tag: "completed" }
     },

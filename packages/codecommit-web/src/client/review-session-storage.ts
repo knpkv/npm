@@ -39,8 +39,8 @@ const StoredRelayReviewSession = Schema.Struct({
 export type StoredRelayReviewSession = typeof StoredRelayReviewSession.Type
 
 export interface RelayReviewSessionWrite {
-  /** Identifies a turn appended after this tab's observed durable snapshot. */
-  readonly appendedTurnId?: string
+  /** Identifies the ordered exchange appended after this tab's observed durable snapshot. */
+  readonly appendedTurnIds?: ReadonlyArray<string>
   readonly dispositions: FindingDispositions
   readonly expectedIdentity: string
   /** Version observed when this tab read the durable session. */
@@ -170,10 +170,12 @@ const compatibleStaleIncomingTurns = (
     incoming.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS &&
     current.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS
   ) {
-    const appendedTurn = incoming.appendedTurnId === undefined
-      ? undefined
-      : incoming.turns.find((turn) => turnIdentity(turn) === incoming.appendedTurnId)
-    return appendedTurn === undefined ? [] : appendReviewTurn(current.turns, appendedTurn)
+    const appendedTurnIds = new Set(incoming.appendedTurnIds ?? [])
+    const appendedTurns = incoming.turns.filter((turn) => appendedTurnIds.has(turnIdentity(turn)))
+    return appendedTurns.reduce(
+      (turns, turn) => appendReviewTurn(turns, turn),
+      current.turns
+    )
   }
   return isOlderWindow ? compatible.filter(({ findingId }) => findingId === "PR") : compatible
 }
@@ -326,15 +328,16 @@ export const migrateRelayReviewSession = async (
   sourceResource: RelayReviewSessionResourceIdentity,
   targetKey: string,
   targetResource: RelayReviewSessionResourceIdentity,
+  targetIdentity: string,
   lock: RelayReviewSessionLock
 ): Promise<Result.Result<StoredRelayReviewSession | null, RelayReviewSessionReadFailure>> => {
   const source = readRelayReviewSession(storage, sourceKey, sourceResource)
   if (Result.isFailure(source) || source.success === null) return source
   const migrated = await writeRelayReviewSession(storage, targetKey, {
     dispositions: source.success.dispositions,
-    expectedIdentity: source.success.identity,
+    expectedIdentity: targetIdentity,
     expectedVersion: 0,
-    identity: source.success.identity,
+    identity: targetIdentity,
     resource: targetResource,
     review: source.success.review,
     skillIds: source.success.skillIds,

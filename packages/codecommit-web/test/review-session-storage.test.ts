@@ -172,6 +172,7 @@ describe("Relay review session storage", () => {
       resource,
       targetKey,
       targetResource,
+      "exact-head-2",
       immediateLock
     )
 
@@ -179,6 +180,7 @@ describe("Relay review session storage", () => {
     const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
+      expect(restored.success?.identity).toBe("exact-head-2")
       expect(restored.success?.resource).toEqual(targetResource)
       expect(restored.success?.turns).toEqual([{ findingId: "F1", role: "user", message: "Keep this review." }])
       expect(restored.success?.dispositions).toEqual({ F1: "acknowledged" })
@@ -562,7 +564,7 @@ describe("Relay review session storage", () => {
     })
 
     const staleWrite = await writeSession(localStorage, key, {
-      appendedTurnId: "turn-81",
+      appendedTurnIds: ["turn-81"],
       expectedVersion: 1,
       identity: "exact-head-1",
       resource,
@@ -580,6 +582,57 @@ describe("Relay review session storage", () => {
         ...Array.from({ length: 39 }, (_, offset) => `turn-${offset + 42}`),
         "turn-81"
       ])
+    }
+  })
+
+  it("retains the complete appended exchange from a disjoint stale window", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (id: string, role: "user" | "assistant"): RelayReviewConversationTurn => ({
+      id,
+      findingId: "F1",
+      role,
+      message: id
+    })
+    const currentTurns = Array.from({ length: 40 }, (_, index) => turn(`turn-${String(index + 41)}`, "user"))
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      appendedTurnIds: ["turn-81", "turn-82"],
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [
+        ...Array.from({ length: 38 }, (_, index) => turn(`turn-${String(index + 2)}`, "user")),
+        turn("turn-81", "user"),
+        turn("turn-82", "assistant")
+      ],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.slice(-2).map(({ id }) => id)).toEqual(["turn-81", "turn-82"])
+      expect(restored.success?.turns).toHaveLength(40)
     }
   })
 
