@@ -292,6 +292,21 @@ const canonicalTypeText = (
   return normalizeTypeText(typeNode)
 }
 
+const resolveTypeSubstitution = (typeNode, substitutions, filePath) => {
+  let current = typeNode
+  const seen = new Set()
+  while (TypeScript.isTypeReferenceNode(current) && TypeScript.isIdentifier(current.typeName)) {
+    const name = current.typeName.text
+    const substituted = substitutions.get(name)
+    if (substituted === undefined) return current
+    if (Predicate.isString(substituted)) return substituted
+    if (seen.has(name)) failCanonicalType(filePath, current, "recursive type substitution")
+    seen.add(name)
+    current = substituted
+  }
+  return current
+}
+
 const genericDescriptor = (
   typeParameters,
   analysis,
@@ -405,6 +420,14 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     }
     return { members: new Map(), resolved: false }
   }
+  if (TypeScript.isFunctionTypeNode(typeNode)) {
+    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions)
+    for (const parameter of typeNode.parameters) {
+      if (parameter.type !== undefined) typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions)
+    }
+    if (typeNode.type !== undefined) typeMembers(typeNode.type, analysis, filePath, seen, generic.substitutions)
+    return { members: new Map(), resolved: false }
+  }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     const members = new Map()
     let resolved = true
@@ -438,7 +461,12 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     return { members, resolved }
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
-    if (substitutions.has(typeNode.typeName.text)) return { members: new Map(), resolved: false }
+    const substituted = substitutions.get(typeNode.typeName.text)
+    if (substituted !== undefined) {
+      return Predicate.isString(substituted)
+        ? { members: new Map(), resolved: false }
+        : typeMembers(substituted, analysis, filePath, seen, substitutions)
+    }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration === undefined) {
       let resolved = false
@@ -456,7 +484,7 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
       if (argument !== undefined) {
-        nextSubstitutions.set(parameter.name.text, canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+        nextSubstitutions.set(parameter.name.text, resolveTypeSubstitution(argument, substitutions, filePath))
       }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
@@ -484,7 +512,7 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
       if (argument !== undefined) {
-        nextSubstitutions.set(parameter.name.text, canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+        nextSubstitutions.set(parameter.name.text, resolveTypeSubstitution(argument, substitutions, filePath))
       }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
@@ -1566,6 +1594,43 @@ const runSelfTest = () => {
     publicCallableChanges(recursiveGenericPrevious, recursiveGenericCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
+  const recursiveSubstitutedGenericSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Box<T> = { nested: T; payload: Payload }\nexport type Node = Box<Node[]>"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveSubstitutedGenericSources, recursiveSubstitutedGenericSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const finiteSubstitutedGenericSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Box<T> = { nested: T; payload: Payload }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Box, Payload } from "./types.js"\ntype Props = { value: Box<Payload[]> }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteSubstitutedGenericSources, finiteSubstitutedGenericSources, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
   const directCyclicSources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -1751,6 +1816,40 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(finiteMethodSources, finiteMethodSources, ["packages/public/src/index.ts"]),
+    []
+  )
+  const recursiveFunctionPropertySources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; child: Node }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit: (node: Node) => void }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveFunctionPropertySources, recursiveFunctionPropertySources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const finiteFunctionPropertySources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Payload = { id: string }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Payload } from "./types.js"\ntype Props = { visit: (node: Payload) => void }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteFunctionPropertySources, finiteFunctionPropertySources, [
+      "packages/public/src/index.ts"
+    ]),
     []
   )
   const finiteAliasSources = new Map([
