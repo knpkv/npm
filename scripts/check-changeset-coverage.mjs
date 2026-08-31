@@ -708,6 +708,15 @@ const runSelfTest = () => {
     }),
     []
   )
+  assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: true }, []), true)
+  assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, []), false)
+  assert.equal(
+    shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, [
+      "packages/public/src/index.ts"
+    ]),
+    true
+  )
+  assert.equal(shouldAnalyzePublicCallableChanges(records[1], ["packages/private/src/index.ts"]), false)
   assert.equal(
     manifestsDifferForRelease(
       { dependencies: { effect: "4.0.0-rc.109" } },
@@ -1587,6 +1596,9 @@ const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
   }
 )
 
+const shouldAnalyzePublicCallableChanges = (record, changedSourceFiles) =>
+  record.publishable && (changedSourceFiles.length > 0 || record.changedReleaseManifest)
+
 const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicCallableChanges")(
   function* (git, fileSystem, path, repositoryRoot, mergeBase, paths, records) {
     const changes = []
@@ -1595,7 +1607,7 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
       const changedSourceFiles = sourcePaths(paths).filter((changedPath) =>
         changedPath.startsWith(`${record.directory}/`)
       )
-      if (changedSourceFiles.length === 0) continue
+      if (!shouldAnalyzePublicCallableChanges(record, changedSourceFiles)) continue
       const sourceRoot = path.join(repositoryRoot, record.directory, "src")
       const relativeSourceFiles = yield* collectSourceFiles(fileSystem, path, sourceRoot, `${record.directory}/src`)
       const currentSources = new Map()
