@@ -15,6 +15,11 @@ class RegistrationError extends Schema.TaggedError<RegistrationError>()(
   { detail: Schema.String }
 ) {}
 
+class RemovalError extends Schema.TaggedError<RemovalError>()(
+  "RemovalError",
+  { detail: Schema.String }
+) {}
+
 describe("browser push subscription ownership", () => {
   it.effect("replaces browser subscriptions after application-server key rotation", () => {
     const key = (...bytes: ReadonlyArray<number>): ArrayBuffer => Uint8Array.from(bytes).buffer
@@ -164,6 +169,40 @@ describe("browser push subscription ownership", () => {
         }
       })
     }))
+
+  it.effect("keeps the browser subscription active until server deletion succeeds", () => {
+    const key = (...bytes: ReadonlyArray<number>): ArrayBuffer => Uint8Array.from(bytes).buffer
+    let acquired = 0
+    let unsubscribed = 0
+    return Effect.gen(function*() {
+      const result = yield* Effect.result(
+        reconcileCurrentPushSubscription(
+          {
+            endpoint: "https://push.example/old",
+            options: { applicationServerKey: key(1, 2, 3) },
+            unsubscribe: () => {
+              unsubscribed += 1
+              return Promise.resolve(true)
+            }
+          },
+          key(2, 3, 4),
+          Effect.sync(() => {
+            acquired += 1
+            return {
+              endpoint: "https://push.example/new",
+              options: { applicationServerKey: key(2, 3, 4) },
+              unsubscribe: () => Promise.resolve(true)
+            }
+          }),
+          () => Effect.die("rotated subscription must not be checked"),
+          () => Effect.die("replacement must not register"),
+          () => Effect.fail(new RemovalError({ detail: "offline" }))
+        )
+      )
+      expect(result).toMatchObject({ failure: { _tag: "RemovalError" } })
+      expect({ acquired, unsubscribed }).toEqual({ acquired: 0, unsubscribed: 0 })
+    })
+  })
 
   it.effect("re-registers an existing browser subscription with the server", () => {
     let registrations = 0

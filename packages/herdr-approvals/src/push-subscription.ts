@@ -176,6 +176,7 @@ export const reconcileCurrentPushSubscription = Effect.fn(
       register
     )
   }
+  yield* removeServerRegistration(subscription)
   const unsubscribed = yield* Effect.tryPromise({
     try: () => subscription.unsubscribe(),
     catch: (cause) => new PushSubscriptionCleanupError({ cause })
@@ -185,7 +186,6 @@ export const reconcileCurrentPushSubscription = Effect.fn(
       cause: "browser push subscription remained active after key rotation"
     })
   }
-  yield* removeServerRegistration(subscription)
   yield* registerNewPushSubscription(acquire, register)
   return true
 })
