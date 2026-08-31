@@ -472,11 +472,12 @@ const reachableCallableEntries = (sources, entryPoints) => {
     resolved.set(filePath, result)
     return result
   }
-  return normalizeEntryPoints(entryPoints).flatMap(({ conditionPath, identity, sourcePath }) =>
+  return normalizeEntryPoints(entryPoints).flatMap(({ conditionPath, identity, publicSubpath, sourcePath }) =>
     [...exportsFor(sourcePath)].map(([exportedName, target]) => ({
       conditionPath,
       entryPoint: identity,
       exportedName,
+      publicSubpath,
       target
     }))
   )
@@ -501,20 +502,24 @@ const publicCallableChanges = (
   const signatures = (sources, entryPoints) => {
     const analysis = analyzeSources(sources)
     const result = new Map()
-    for (const { conditionPath, entryPoint, exportedName, target } of reachableCallableEntries(sources, entryPoints)) {
+    for (const { conditionPath, entryPoint, exportedName, publicSubpath, target } of reachableCallableEntries(
+      sources,
+      entryPoints
+    )) {
       const signature = callableParameterTypesInSources(sources, target.filePath, analysis).get(target.name)
       if (signature === undefined) continue
       const identity = `${entryPoint}\u0000${exportedName}`
       const existing = result.get(identity) ?? []
       if (
         !existing.some(
-          ({ conditionPath: existingConditionPath, filePath, name }) =>
+          ({ conditionPath: existingConditionPath, filePath, name, publicSubpath: existingPublicSubpath }) =>
             filePath === target.filePath &&
             name === target.name &&
-            conditionPathKey(existingConditionPath) === conditionPathKey(conditionPath)
+            conditionPathKey(existingConditionPath) === conditionPathKey(conditionPath) &&
+            existingPublicSubpath === publicSubpath
         )
       ) {
-        existing.push({ conditionPath, filePath: target.filePath, name: target.name, ...signature })
+        existing.push({ conditionPath, filePath: target.filePath, name: target.name, publicSubpath, ...signature })
         result.set(identity, existing)
       }
     }
@@ -533,6 +538,9 @@ const publicCallableChanges = (
       signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
     ].join("|")
   const signatureTargetKey = (signature) => `${signature.filePath}\u0000${signature.name}`
+  const signaturePublicSubpathKey = (signature) => signature.publicSubpath ?? ""
+  const signatureOccurrenceKey = (signature) =>
+    `${signatureTargetKey(signature)}\u0000${signaturePublicSubpathKey(signature)}`
   const pairSignatures = (previousSignatures, currentSignatures) => {
     const previousBaselines = previousSignatures.filter((signature) => conditionPathKey(signature.conditionPath) === "")
     const currentBaselines = currentSignatures.filter((signature) => conditionPathKey(signature.conditionPath) === "")
@@ -543,6 +551,9 @@ const publicCallableChanges = (
       (signature) => conditionPathKey(signature.conditionPath) !== ""
     )
     const baselineFor = (baselines, signature, index) =>
+      baselines.find(
+        (baseline) => baseline.publicSubpath !== undefined && baseline.publicSubpath === signature.publicSubpath
+      ) ??
       baselines.find((baseline) => signatureTargetKey(baseline) === signatureTargetKey(signature)) ??
       (baselines.length === 1
         ? baselines[0]
@@ -574,7 +585,8 @@ const publicCallableChanges = (
     for (const currentSignature of currentSignatures) {
       const index = remainingPrevious.findIndex(
         (previousSignature) =>
-          conditionPathKey(previousSignature.conditionPath) === conditionPathKey(currentSignature.conditionPath)
+          conditionPathKey(previousSignature.conditionPath) === conditionPathKey(currentSignature.conditionPath) &&
+          signaturePublicSubpathKey(previousSignature) === signaturePublicSubpathKey(currentSignature)
       )
       if (index === -1) {
         unmatchedCurrent.push(currentSignature)
@@ -583,8 +595,22 @@ const publicCallableChanges = (
         remainingPrevious.splice(index, 1)
       }
     }
-    const unmatchedAfterTarget = []
+    const unmatchedAfterPublicSubpath = []
     for (const currentSignature of unmatchedCurrent) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) =>
+          previousSignature.publicSubpath !== undefined &&
+          previousSignature.publicSubpath === currentSignature.publicSubpath
+      )
+      if (index === -1) {
+        unmatchedAfterPublicSubpath.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const unmatchedAfterTarget = []
+    for (const currentSignature of unmatchedAfterPublicSubpath) {
       const index = remainingPrevious.findIndex(
         (previousSignature) =>
           previousSignature.filePath === currentSignature.filePath && previousSignature.name === currentSignature.name
@@ -614,8 +640,8 @@ const publicCallableChanges = (
     }
     const pairedTargetKeys = new Set(
       pairs.flatMap(([previousSignature, currentSignature]) => [
-        `${previousSignature.filePath}\u0000${previousSignature.name}`,
-        `${currentSignature.filePath}\u0000${currentSignature.name}`
+        signatureOccurrenceKey(previousSignature),
+        signatureOccurrenceKey(currentSignature)
       ])
     )
     const currentOnly = unmatchedAfterContract
@@ -625,7 +651,7 @@ const publicCallableChanges = (
           !previousSignatures.some(
             (previousSignature) =>
               conditionPathKey(previousSignature.conditionPath) === "" &&
-              pairedTargetKeys.has(`${signature.filePath}\u0000${signature.name}`)
+              pairedTargetKeys.has(signatureOccurrenceKey(signature))
           )
       )
     const previousOnly = remainingPrevious
@@ -635,7 +661,7 @@ const publicCallableChanges = (
           !currentSignatures.some(
             (currentSignature) =>
               conditionPathKey(currentSignature.conditionPath) === "" &&
-              pairedTargetKeys.has(`${signature.filePath}\u0000${signature.name}`)
+              pairedTargetKeys.has(signatureOccurrenceKey(signature))
           )
       )
     return {
@@ -707,8 +733,10 @@ const publicCallableChanges = (
     const comparedPairs = new Set()
     for (const [previousSignature, currentSignature] of pairs) {
       const pairKey = [
-        `${previousSignature.filePath}\u0000${previousSignature.name}`,
-        `${currentSignature.filePath}\u0000${currentSignature.name}`,
+        signatureOccurrenceKey(previousSignature),
+        signatureOccurrenceKey(currentSignature),
+        conditionPathKey(previousSignature.conditionPath),
+        conditionPathKey(currentSignature.conditionPath),
         signatureContract(previousSignature),
         signatureContract(currentSignature)
       ].join("\u0000")
@@ -718,14 +746,14 @@ const publicCallableChanges = (
     }
     const currentTargets = new Set()
     for (const currentSignature of currentOnly) {
-      const targetKey = `${currentSignature.filePath}\u0000${currentSignature.name}`
+      const targetKey = signatureOccurrenceKey(currentSignature)
       if (currentTargets.has(targetKey)) continue
       currentTargets.add(targetKey)
       compareSignatures(undefined, currentSignature)
     }
     const previousTargets = new Set()
     for (const previousSignature of previousOnly) {
-      const targetKey = `${previousSignature.filePath}\u0000${previousSignature.name}`
+      const targetKey = signatureOccurrenceKey(previousSignature)
       if (previousTargets.has(targetKey)) continue
       previousTargets.add(targetKey)
       changes.push({
@@ -1776,6 +1804,47 @@ const runSelfTest = () => {
     ),
     []
   )
+  const wildcardMovedPrevious = new Map([
+    ["packages/public/src/a.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/b.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const wildcardMovedCurrent = new Map([
+    ["packages/public/src/impl/a.tsx", "export const Public = (props: { value: number }) => props.value"],
+    ["packages/public/src/impl/b.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const wildcardMovedPreviousManifest = { exports: { "./*": "./dist/*.js" } }
+  const wildcardMovedCurrentManifest = {
+    exports: { "./*": { import: "./dist/impl/*.js", require: "./dist/impl/*.js" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      wildcardMovedPrevious,
+      wildcardMovedCurrent,
+      manifestEntryPointDescriptors(wildcardMovedPreviousManifest, "packages/public", [
+        ...wildcardMovedPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(wildcardMovedCurrentManifest, "packages/public", [...wildcardMovedCurrent.keys()])
+    ),
+    [
+      { kind: "type-change", filePath: "packages/public/src/impl/a.tsx", name: "Public", properties: ["value"] },
+      { kind: "type-change", filePath: "packages/public/src/impl/b.tsx", name: "Public", properties: ["value"] }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      wildcardDirectPrevious,
+      new Map([
+        ["packages/public/src/impl/a.tsx", "export const Public = (props: { value: string }) => props.value"],
+        ["packages/public/src/impl/b.tsx", "export const Public = (props: { value: number }) => props.value"]
+      ]),
+      manifestEntryPointDescriptors(wildcardDirectManifest, "packages/public", [...wildcardDirectPrevious.keys()]),
+      manifestEntryPointDescriptors({ exports: { "./*": "./dist/impl/*.js" } }, "packages/public", [
+        "packages/public/src/impl/a.tsx",
+        "packages/public/src/impl/b.tsx"
+      ])
+    ),
+    []
+  )
   assert.deepEqual(
     publicCallableChanges(
       conditionalSources,
@@ -2022,9 +2091,19 @@ const sourcePaths = (paths) =>
       !isExcludedSourcePath(changedPath)
   )
 
-const entryPathPattern = (entryPath) => {
+const entryPathCaptures = (entryPath, candidate) => {
   const escaped = entryPath.replace(/[.+?^${}()|[\]\\]/gu, "\\$&")
-  return new RegExp(`^${escaped.replaceAll("*", ".*")}$`, "u")
+  const match = new RegExp(`^${escaped.replaceAll("*", "(.*)")}$`, "u").exec(candidate)
+  return match === null ? undefined : match.slice(1)
+}
+
+const publicSubpathFor = (identity, captures) => {
+  if (!identity.startsWith("exports:")) return undefined
+  const subpath = identity.slice("exports:".length)
+  if (!subpath.includes("*") || captures.length === 0) return undefined
+  let captureIndex = 0
+  const resolved = subpath.replaceAll("*", () => captures[captureIndex++] ?? "*")
+  return resolved.includes("*") ? undefined : resolved
 }
 
 const manifestEntries = (manifest) => {
@@ -2065,15 +2144,16 @@ const manifestEntryPointDescriptors = (manifest, directory, sourceFiles) => {
     const normalized = entryPath.replace(/^\.\//u, "")
     const sourcePrefix = `${directory}/src/`
     if (normalized.startsWith("src/")) {
-      const sourcePattern = entryPathPattern(normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx|tsx?)$/u, ""))
-      return candidates.filter((candidate) =>
-        sourcePattern.test(candidate.slice(sourcePrefix.length).replace(/\.(?:tsx?|jsx)$/u, ""))
-      )
+      const sourcePattern = normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx|tsx?)$/u, "")
+      return candidates.flatMap((candidate) => {
+        const candidateStem = candidate.slice(sourcePrefix.length).replace(/\.(?:tsx?|jsx)$/u, "")
+        const captures = entryPathCaptures(sourcePattern, candidateStem)
+        return captures === undefined ? [] : [{ sourcePath: candidate, captures }]
+      })
     }
     if (!normalized.startsWith("dist/")) return []
     const outputPath = normalized.slice("dist/".length)
-    const outputPattern = entryPathPattern(outputPath)
-    return candidates.filter((candidate) => {
+    return candidates.flatMap((candidate) => {
       const sourceRelative = candidate.slice(sourcePrefix.length)
       const sourceStem = sourceRelative.replace(/\.(?:tsx?|jsx)$/u, "")
       const outputCandidates = [
@@ -2083,22 +2163,28 @@ const manifestEntryPointDescriptors = (manifest, directory, sourceFiles) => {
         `src/${sourceStem}.js`,
         `src/${sourceStem}.jsx`
       ]
-      return outputCandidates.some((outputCandidate) => outputPattern.test(outputCandidate))
+      for (const outputCandidate of outputCandidates) {
+        const captures = entryPathCaptures(outputPath, outputCandidate)
+        if (captures !== undefined) return [{ sourcePath: candidate, captures }]
+      }
+      return []
     })
   }
   const descriptors = []
   for (const { conditionPath, identity, target } of entries) {
-    for (const sourcePath of mapEntryPath(target)) {
+    for (const { captures, sourcePath } of mapEntryPath(target)) {
       if (!isExcludedSourcePath(sourcePath)) {
         const descriptor = { identity, sourcePath }
         if (conditionPath !== undefined) descriptor.conditionPath = conditionPath
+        const publicSubpath = publicSubpathFor(identity, captures)
+        if (publicSubpath !== undefined) descriptor.publicSubpath = publicSubpath
         descriptors.push(descriptor)
       }
     }
   }
   const uniqueDescriptors = new Map()
   for (const descriptor of descriptors) {
-    const key = `${descriptor.identity}\u0000${descriptor.sourcePath}\u0000${conditionPathKey(descriptor.conditionPath)}`
+    const key = `${descriptor.identity}\u0000${descriptor.sourcePath}\u0000${conditionPathKey(descriptor.conditionPath)}\u0000${descriptor.publicSubpath ?? ""}`
     const existing = uniqueDescriptors.get(key)
     if (existing === undefined) uniqueDescriptors.set(key, descriptor)
   }
