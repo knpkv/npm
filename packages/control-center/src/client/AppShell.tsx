@@ -17,6 +17,11 @@ const WorkspaceHomeLink = lazy(async () => {
   return { default: module.WorkspaceHomeLink }
 })
 
+const ControlCenterRelayDock = lazy(async () => {
+  const module = await import("./controlCenterRelayDock.js")
+  return { default: module.ControlCenterRelayDock }
+})
+
 const workspaceOverviewPath = (pathname: string): string => {
   const workspaceId = pathname.split("/")[2]
   return isWorkspaceRouteId(workspaceId) ? `/w/${workspaceId}/overview` : "/"
@@ -119,7 +124,7 @@ export const AppShell = (): ReactElement => {
     </>
   )
 
-  return (
+  const content = (
     <div className={styles.root} data-workspace-density={density}>
       <header className={styles.header}>
         {isAuthorizedShare ? (
@@ -176,5 +181,11 @@ export const AppShell = (): ReactElement => {
       </main>
       <WorkspaceScrollRestoration />
     </div>
+  )
+
+  return (
+    <Suspense fallback={content}>
+      <ControlCenterRelayDock>{content}</ControlCenterRelayDock>
+    </Suspense>
   )
 }
