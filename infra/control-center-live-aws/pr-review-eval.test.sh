@@ -317,27 +317,45 @@ test_git_credential_helper_clears_ambient_authority() {
     "${credential_helper_capture}"
 }
 
-test_git_delete_ignores_ambient_url_rewrites() {
+test_git_delete_ignores_ambient_url_rewrites() (
   local attacker_repository="${test_workspace}/attacker.git"
   local branch="fixture-branch"
+  local canary_repository="${test_workspace}/hook-canary"
   local deletion_state_root="${recovery_root}/git-delete-test"
   local git_workspace="${test_workspace}/git-workspace"
   local victim_repository="${test_workspace}/victim.git"
-  mkdir -p -- "${deletion_state_root}" "${git_workspace}"
+  mkdir -p -- "${canary_repository}" "${deletion_state_root}" "${git_workspace}"
   chmod 700 -- "${deletion_state_root}"
-  command git init --bare --quiet "${attacker_repository}"
-  command git init --bare --quiet "${victim_repository}"
-  command git -C "${git_workspace}" init --quiet
+  run_isolated_git() (
+    local environment_name
+    while IFS='=' read -r -d '' environment_name _; do
+      case "${environment_name^^}" in
+        GIT_*) unset "${environment_name}" ;;
+      esac
+    done < <(env -0)
+    command git "$@"
+  )
+  run_isolated_git init --quiet "${canary_repository}"
+  local canary_git_directory="${canary_repository}/.git"
+  local canary_index="${canary_repository}/hook-index"
+  GIT_DIR="${canary_git_directory}"
+  GIT_INDEX_FILE="${canary_index}"
+  export GIT_DIR GIT_INDEX_FILE
+  run_isolated_git init --bare --quiet "${attacker_repository}"
+  run_isolated_git init --bare --quiet "${victim_repository}"
+  run_isolated_git -C "${git_workspace}" init --quiet
   printf 'fixture\n' >"${git_workspace}/fixture.txt"
-  command git -C "${git_workspace}" add -- fixture.txt
-  command git -C "${git_workspace}" \
+  run_isolated_git -C "${git_workspace}" add -- fixture.txt
+  run_isolated_git -C "${git_workspace}" \
     -c user.name=Fixture \
     -c user.email=fixture@example.invalid \
     commit --quiet -m fixture
   local expected_head
-  expected_head="$(command git -C "${git_workspace}" rev-parse HEAD)"
-  command git -C "${git_workspace}" push --quiet "${victim_repository}" "HEAD:refs/heads/${branch}"
-  command git -C "${git_workspace}" push --quiet "${attacker_repository}" "HEAD:refs/heads/${branch}"
+  expected_head="$(run_isolated_git -C "${git_workspace}" rev-parse HEAD)"
+  run_isolated_git -C "${git_workspace}" push --quiet "${victim_repository}" "HEAD:refs/heads/${branch}"
+  run_isolated_git -C "${git_workspace}" push --quiet "${attacker_repository}" "HEAD:refs/heads/${branch}"
+  [[ ! -e "${canary_index}" ]]
+  ! run_isolated_git --git-dir="${canary_git_directory}" rev-parse --verify HEAD >/dev/null 2>&1
 
   GIT_CONFIG_COUNT=1 \
     GIT_CONFIG_KEY_0="url.file://${attacker_repository}/.pushInsteadOf" \
@@ -347,16 +365,16 @@ test_git_delete_ignores_ambient_url_rewrites() {
     _ "${test_root}/pr-review-eval.sh" "file://${victim_repository}" "${branch}" "${expected_head}" \
     "${deletion_state_root}"
 
-  if command git --git-dir="${victim_repository}" show-ref --verify --quiet "refs/heads/${branch}"; then
+  if run_isolated_git --git-dir="${victim_repository}" show-ref --verify --quiet "refs/heads/${branch}"; then
     return 1
   fi
-  command git --git-dir="${attacker_repository}" show-ref --verify --quiet "refs/heads/${branch}"
+  run_isolated_git --git-dir="${attacker_repository}" show-ref --verify --quiet "refs/heads/${branch}"
   (
     shopt -s nullglob
     local scratch_repositories=("${deletion_state_root}"/.git-delete.*)
     [[ "${#scratch_repositories[@]}" -eq 0 ]]
   )
-}
+)
 
 test_successful_lifecycle() {
   reset_fixture success

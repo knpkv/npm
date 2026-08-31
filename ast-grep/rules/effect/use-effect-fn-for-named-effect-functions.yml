@@ -115,6 +115,17 @@ rule:
     - pattern: "const $NAME: $CONTRACT = ($$$ARGS) => Effect.gen($$$BODY)"
     - pattern: "const $NAME: $CONTRACT = ($$$ARGS) => Effect.gen($$$BODY).pipe($$$OPERATORS)"
     - pattern: "const $NAME = ($$$ARGS) => $SOURCE.pipe($$$BEFORE, Stream.runCollect, $$$AFTER)"
+    - all:
+        - kind: method_definition
+        - has:
+            field: body
+            any:
+              - pattern: "{ return Effect.gen($$$BODY) }"
+              - pattern: "{ return Effect.gen($$$BODY).pipe($$$OPERATORS) }"
+              - pattern: "{ return Effect.suspend($$$BODY) }"
+              - pattern: "{ return Effect.suspend($$$BODY).pipe($$$OPERATORS) }"
+              - pattern: "{ return Effect.uninterruptibleMask($$$BODY) }"
+              - pattern: "{ return Effect.uninterruptibleMask($$$BODY).pipe($$$OPERATORS) }"
 
 files:
   - "packages/control-center/src/**/*.ts"
@@ -126,6 +137,8 @@ files:
   - "packages/codecommit/src/GitContextService.ts"
   - "packages/codecommit/src/Pr*.ts"
   - "packages/codecommit/src/tui/atoms/actions.ts"
+  - "packages/herdr-*/src/**/*.ts"
+  - "packages/herdr-*/src/**/*.tsx"
 
 ignores:
   - "**/*.test.ts"

@@ -100,6 +100,17 @@ const actionInput = (step, name) => {
   const entry = Object.entries(step.with).find(([inputName]) => inputName.toLowerCase() === name)
   return entry?.[1]
 }
+const duplicateActionInputNames = (step) => {
+  if (step?.with === null || !Predicate.isObjectOrArray(step?.with) || Array.isArray(step.with)) return []
+  const counts = new Map()
+  for (const inputName of Object.keys(step.with)) {
+    const normalized = inputName.toLowerCase()
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+}
 const referencesPullRequestRevision = (value, trigger) =>
   referencesExpression(value, "github.event.pull_request.head.sha") ||
   referencesExpression(value, "github.event.pull_request.head.ref") ||
@@ -321,6 +332,10 @@ const pinsMain = (condition) => {
     .some((term) => /^\s*\(*\s*github\.ref\s*==\s*['"]refs\/heads\/main['"]\s*\)*\s*$/u.test(term))
 }
 
+const snapshotPublishCondition =
+  "github.repository_owner == 'knpkv' && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))"
+const normalizedCondition = (condition) => (Predicate.isString(condition) ? condition.replace(/\s/gu, "") : "")
+
 const localReusableWorkflowPath = (uses) => {
   if (!Predicate.isString(uses) || !uses.startsWith("./") || uses.includes("${{")) return undefined
   const path = uses.slice(2)
@@ -336,8 +351,17 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
     for (const [jobName, rawJob] of Object.entries(currentDocument?.jobs ?? {})) {
       const job = rawJob ?? {}
       const jobLocation = `${currentLocation}: job ${jobName}`
+      const steps = Array.isArray(job.steps) ? job.steps : []
+      for (const [stepIndex, step] of steps.entries()) {
+        if (!Predicate.isString(step?.uses)) continue
+        for (const inputName of duplicateActionInputNames(step)) {
+          diagnostics.push(`${jobLocation} step ${stepIndex + 1} has duplicate action input ${inputName}`)
+        }
+      }
       const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
       const effectivePermissions = job.permissions === undefined ? currentDocument?.permissions : job.permissions
+      const jobPullRequestTriggers =
+        normalizedCondition(job.if) === normalizedCondition(snapshotPublishCondition) ? [] : pullRequestTriggers
       const implicitPullRequestTargetAuthority =
         currentDocument === document &&
         pullRequestTriggers.includes("pull_request_target") &&
@@ -349,8 +373,12 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
         referencesPullRequestCredentials(inheritedSecretContext) ||
         grantsTokenWriteAuthority(effectivePermissions)
       const oidcAuthority = authority.oidc || grantsOidcAuthority(effectivePermissions)
-      const executesPullRequestCode = pullRequestTriggers.some((trigger) => executesPullRequestRevision(job, trigger))
-      const checksOutPullRequestCode = pullRequestTriggers.some((trigger) => checksOutPullRequestRevision(job, trigger))
+      const executesPullRequestCode = jobPullRequestTriggers.some((trigger) =>
+        executesPullRequestRevision(job, trigger)
+      )
+      const checksOutPullRequestCode = jobPullRequestTriggers.some((trigger) =>
+        checksOutPullRequestRevision(job, trigger)
+      )
       if ((executesPullRequestCode && credentialAuthority) || (checksOutPullRequestCode && oidcAuthority)) {
         diagnostics.push(`${jobLocation} executes pull-request code with repository credential or OIDC authority`)
       }
@@ -394,7 +422,159 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
   return diagnostics
 }
 
+const exactPermissions = (permissions, expected) =>
+  permissions !== null &&
+  Predicate.isObjectOrArray(permissions) &&
+  !Array.isArray(permissions) &&
+  Object.keys(permissions).toSorted().join("\0") === Object.keys(expected).toSorted().join("\0") &&
+  Object.entries(expected).every(([name, access]) => permissions[name] === access)
+
+export const validateSnapshotPreviewPolicy = (document, location) => {
+  const diagnostics = []
+  const triggers = workflowTriggers(document)
+  for (const trigger of ["pull_request", "push", "workflow_dispatch"]) {
+    if (!hasTrigger(triggers, trigger)) diagnostics.push(`${location}: missing ${trigger} trigger`)
+  }
+  if (!exactPermissions(document?.permissions, {})) {
+    diagnostics.push(`${location}: workflow permissions must stay empty`)
+  }
+  const build = document?.jobs?.snapshot
+  const publish = document?.jobs?.publish
+  if (!exactPermissions(build?.permissions, { contents: "read" })) {
+    diagnostics.push(`${location}: snapshot job must have only contents: read`)
+  }
+  if (!exactPermissions(publish?.permissions, { contents: "read", "id-token": "write" })) {
+    diagnostics.push(`${location}: publish job must have only contents: read and id-token: write`)
+  }
+  if (normalizedCondition(publish?.if) !== normalizedCondition(snapshotPublishCondition)) {
+    diagnostics.push(`${location}: publish predicate must exclude pull requests and allow only main pushes or dispatch`)
+  }
+  for (const [name, job] of [
+    ["snapshot", build],
+    ["publish", publish]
+  ]) {
+    const steps = Array.isArray(job?.steps) ? job.steps : []
+    for (const [stepIndex, step] of steps.entries()) {
+      for (const inputName of duplicateActionInputNames(step)) {
+        diagnostics.push(`${location}: ${name} step ${stepIndex + 1} has duplicate action input ${inputName}`)
+      }
+    }
+    const checkouts = steps.filter((step) => usesAction(step?.uses, "actions/checkout"))
+    if (checkouts.length !== 1) {
+      diagnostics.push(`${location}: ${name} job must contain exactly one checkout`)
+      continue
+    }
+    for (const checkout of checkouts) {
+      if (actionInput(checkout, "persist-credentials") !== false) {
+        diagnostics.push(`${location}: ${name} checkout must disable persisted credentials`)
+      }
+      if (actionInput(checkout, "ref") !== "${{ github.sha }}") {
+        diagnostics.push(`${location}: ${name} checkout must pin the selected event SHA`)
+      }
+    }
+    if (name === "publish") {
+      const checkoutIndex = steps.indexOf(checkouts[0])
+      const laterTransition = steps
+        .slice(checkoutIndex + 1)
+        .some(
+          (step) =>
+            Predicate.isString(step?.run) &&
+            shellGitCommands(step.run).some(
+              ({ name, operands }) =>
+                name === "checkout" ||
+                name === "switch" ||
+                name === "worktree" ||
+                (name === "reset" && operands.includes("--hard"))
+            )
+        )
+      if (laterTransition) {
+        diagnostics.push(`${location}: publish job must not change the checked-out worktree after checkout`)
+      }
+    }
+  }
+  return diagnostics
+}
+
+const runSnapshotPreviewPolicySelfTest = () => {
+  const valid = parse(`
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+permissions: {}
+jobs:
+  snapshot:
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          ref: \${{ github.sha }}
+  publish:
+    if: ${snapshotPublishCondition}
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          persist-credentials: false
+          ref: \${{ github.sha }}
+      - run: git rev-parse HEAD
+`)
+  assert.deepEqual(validateSnapshotPreviewPolicy(valid, "valid snapshot fixture"), [])
+  const pullRequestPublish = structuredClone(valid)
+  pullRequestPublish.jobs.publish.if = "github.event_name == 'pull_request'"
+  assert.match(validateSnapshotPreviewPolicy(pullRequestPublish, "PR publish fixture").join("\n"), /publish predicate/u)
+  const hardcodedMain = structuredClone(valid)
+  hardcodedMain.jobs.publish.steps[0].with.ref = "refs/heads/main"
+  assert.match(validateSnapshotPreviewPolicy(hardcodedMain, "hardcoded main fixture").join("\n"), /selected event SHA/u)
+  const collidingInputs = structuredClone(valid)
+  collidingInputs.jobs.publish.steps[0].with.REF = "refs/heads/untrusted"
+  assert.match(
+    validateSnapshotPreviewPolicy(collidingInputs, "colliding input fixture").join("\n"),
+    /duplicate action input/u
+  )
+  const secondCheckout = structuredClone(valid)
+  secondCheckout.jobs.publish.steps.push({
+    uses: `actions/checkout@${"b".repeat(40)}`,
+    with: { "persist-credentials": false, ref: "refs/heads/main" }
+  })
+  assert.match(
+    validateSnapshotPreviewPolicy(secondCheckout, "second checkout fixture").join("\n"),
+    /exactly one checkout/u
+  )
+  const shellTransition = structuredClone(valid)
+  shellTransition.jobs.publish.steps.push({ run: "git switch refs/heads/main" })
+  assert.match(
+    validateSnapshotPreviewPolicy(shellTransition, "shell transition fixture").join("\n"),
+    /must not change the checked-out worktree/u
+  )
+  const hardReset = structuredClone(valid)
+  hardReset.jobs.publish.steps.push({ run: "git reset --hard refs/heads/main" })
+  assert.match(
+    validateSnapshotPreviewPolicy(hardReset, "hard reset fixture").join("\n"),
+    /must not change the checked-out worktree/u
+  )
+  const credentialedCheckout = structuredClone(valid)
+  credentialedCheckout.jobs.snapshot.steps[0].with["persist-credentials"] = true
+  assert.match(
+    validateSnapshotPreviewPolicy(credentialedCheckout, "credentialed checkout fixture").join("\n"),
+    /disable persisted credentials/u
+  )
+  const broadPermissions = structuredClone(valid)
+  broadPermissions.jobs.publish.permissions.actions = "write"
+  assert.match(
+    validateSnapshotPreviewPolicy(broadPermissions, "broad permissions fixture").join("\n"),
+    /publish job must have only/u
+  )
+}
+
 const runSelfTest = () => {
+  runSnapshotPreviewPolicySelfTest()
   const invalid = parse(`
 on:
   pull_request:
@@ -843,6 +1023,32 @@ jobs:
           Ref: \${{ github.event.pull_request.head.sha }}
       - run: pnpm test:integration
 `)
+  const invalidDuplicateCheckoutInputs = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.sha }}
+          REF: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
+  const safeDistinctCheckoutInputs = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: read
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          Ref: \${{ github.sha }}
+          fetch-depth: 0
+      - run: pnpm test:integration
+`)
   const safeMixedCaseTrustedCheckoutInput = parse(`
 on:
   pull_request_target:
@@ -1180,6 +1386,10 @@ jobs:
     validateWorkflowSecretBoundaries(invalidMixedCaseCheckoutInput, "mixed-case checkout input fixture").length,
     1
   )
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidDuplicateCheckoutInputs, "duplicate checkout input fixture").length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidShellCheckout, "shell checkout fixture").length, 1)
   assert.equal(
     validateWorkflowSecretBoundaries(
@@ -1294,6 +1504,7 @@ jobs:
     validateWorkflowSecretBoundaries(safeMixedCaseTrustedCheckoutInput, "mixed-case trusted checkout input fixture"),
     []
   )
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeDistinctCheckoutInputs, "distinct checkout input fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
 
@@ -1321,6 +1532,11 @@ const program = Effect.gen(function* () {
   for (const [file, { document }] of workflowDocuments) {
     for (const diagnostic of validateWorkflowSecretBoundaries(document, file, workflowDocuments)) {
       diagnostics.push(diagnostic)
+    }
+    if (file === ".github/workflows/snapshot.yml") {
+      for (const diagnostic of validateSnapshotPreviewPolicy(document, file)) {
+        diagnostics.push(diagnostic)
+      }
     }
   }
   if (diagnostics.length > 0) {

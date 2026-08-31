@@ -1,0 +1,434 @@
+@import "@knpkv/rly/styles.css";
+
+@layer connect {
+  html,
+  body.connect-body,
+  #fleet-connect-root {
+    margin: 0;
+    min-height: 100%;
+  }
+
+  body.connect-body {
+    background: var(--rly-color-surface-1);
+    overflow: hidden;
+  }
+
+  .connect-shell {
+    block-size: 100dvh;
+    overflow: hidden;
+  }
+
+  .connect-workspace,
+  .connect-directory-screen,
+  .connect-terminal-screen {
+    block-size: 100%;
+  }
+
+  .connect-directory-screen {
+    background: var(--rly-color-surface-1);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .connect-terminal-screen {
+    inset: 0;
+    pointer-events: none;
+    position: fixed;
+    visibility: hidden;
+    z-index: -1;
+  }
+
+  .connect-workspace[data-mode="terminal"] .connect-directory-screen {
+    visibility: hidden;
+  }
+
+  .connect-workspace[data-mode="terminal"] .connect-terminal-screen {
+    pointer-events: auto;
+    visibility: visible;
+    z-index: 100;
+  }
+
+  .connect-header {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    justify-content: space-between;
+    padding: var(--rly-space-12) var(--rly-space-20);
+  }
+
+  .connect-embedded-intro {
+    align-items: end;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    gap: var(--rly-space-24);
+    justify-content: space-between;
+    margin-inline: auto;
+    max-inline-size: 76rem;
+    padding: var(--rly-space-24) var(--rly-space-20) var(--rly-space-20);
+  }
+
+  .connect-embedded-intro > div {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+
+  .connect-agents {
+    inline-size: min(100%, 76rem);
+    justify-self: center;
+    min-block-size: 0;
+    overflow-y: auto;
+    padding: var(--rly-space-20) var(--rly-space-20) var(--rly-space-32);
+  }
+
+  .connect-search {
+    background: var(--rly-color-surface-1);
+    display: grid;
+    gap: var(--rly-space-6);
+    inset-block-start: 0;
+    padding-block-end: var(--rly-space-16);
+    position: sticky;
+    z-index: 1;
+  }
+
+  .connect-search span {
+    color: var(--rly-color-text-3);
+    font-size: var(--rly-type-meta-size);
+  }
+
+  .connect-search input {
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-1);
+    font: inherit;
+    inline-size: 100%;
+    min-block-size: 2.5rem;
+    padding: var(--rly-space-8) var(--rly-space-10);
+  }
+
+  .connect-search input:focus-visible {
+    border-color: var(--rly-color-agent);
+    outline: 2px solid color-mix(in srgb, var(--rly-color-agent) 35%, transparent);
+    outline-offset: 1px;
+  }
+
+  .connect-filter-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--rly-space-8);
+    justify-content: space-between;
+    margin-block-end: var(--rly-space-20);
+  }
+
+  .connect-group-filter,
+  .connect-status-filter {
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-control);
+    display: flex;
+    gap: 2px;
+    overflow-x: auto;
+    padding: 2px;
+    scrollbar-width: none;
+  }
+
+  .connect-group-filter button,
+  .connect-status-filter button {
+    background: transparent;
+    border: 0;
+    border-radius: calc(var(--rly-radius-control) - 2px);
+    color: var(--rly-color-text-3);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--rly-type-meta-size);
+    flex: 0 0 auto;
+    padding: var(--rly-space-6) var(--rly-space-8);
+    white-space: nowrap;
+  }
+
+  .connect-group-filter button[aria-pressed="true"],
+  .connect-status-filter button[aria-pressed="true"] {
+    background: var(--rly-color-surface-3);
+    box-shadow: 0 0 0 1px var(--rly-color-border-2);
+    color: var(--rly-color-text-1);
+  }
+
+  .connect-agent-tree {
+    display: grid;
+    gap: var(--rly-space-28);
+  }
+
+  .connect-day-heading {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-2);
+    display: flex;
+    justify-content: space-between;
+    margin-block-end: var(--rly-space-4);
+    padding: 0 var(--rly-space-12) var(--rly-space-8);
+  }
+
+  .connect-day-heading > div {
+    align-items: baseline;
+    display: flex;
+    gap: var(--rly-space-12);
+  }
+
+  .connect-day-heading strong {
+    color: var(--rly-color-text-1);
+    font-size: var(--rly-type-heading-size);
+  }
+
+  .connect-day-heading span,
+  .connect-day-heading small {
+    color: var(--rly-color-text-3);
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: var(--rly-type-meta-size);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .connect-agent-list {
+    display: grid;
+    position: relative;
+  }
+
+  .connect-agent-list::before {
+    background: var(--rly-color-border-1);
+    content: "";
+    inset-block: var(--rly-space-12);
+    inset-inline-start: calc(var(--rly-space-12) + 4.25rem + var(--rly-space-12) + 0.25rem);
+    inline-size: 1px;
+    pointer-events: none;
+    position: absolute;
+  }
+
+  .connect-agent {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    border-radius: 0;
+    color: inherit;
+    cursor: pointer;
+    display: grid;
+    font: inherit;
+    grid-template-columns: 4.25rem 0.5rem minmax(0, 1fr) auto;
+    gap: var(--rly-space-12);
+    min-inline-size: 0;
+    padding: var(--rly-space-12);
+    position: relative;
+    text-align: start;
+    transition:
+      background var(--rly-motion-fast-duration) var(--rly-motion-fast-easing),
+      border-color var(--rly-motion-fast-duration) var(--rly-motion-fast-easing);
+  }
+
+  .connect-agent:hover,
+  .connect-agent:focus-visible,
+  .connect-agent[data-selected="true"] {
+    background: var(--rly-color-surface-2);
+  }
+
+  .connect-agent:focus-visible {
+    outline: 1px solid var(--rly-color-agent);
+    outline-offset: -1px;
+  }
+
+  .connect-agent[data-selected="true"] {
+    background: color-mix(in srgb, var(--rly-color-agent) 12%, var(--rly-color-surface-2));
+    box-shadow: inset 3px 0 0 var(--rly-color-agent);
+  }
+
+  .connect-agent time {
+    color: var(--rly-color-text-3);
+    font-family: "Geist Mono", ui-monospace, monospace;
+    font-size: var(--rly-type-meta-size);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .connect-agent .agent-presence {
+    box-shadow: 0 0 0 4px var(--rly-color-surface-1);
+    position: relative;
+    z-index: 1;
+  }
+
+  .connect-agent:hover .agent-presence,
+  .connect-agent:focus-visible .agent-presence,
+  .connect-agent[data-selected="true"] .agent-presence {
+    box-shadow: 0 0 0 4px var(--rly-color-surface-2);
+  }
+
+  .connect-agent-copy {
+    display: grid;
+    flex: 1;
+    min-inline-size: 0;
+  }
+
+  .connect-agent-copy small,
+  .connect-agent-copy strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .connect-agent .agent-presence[data-activity="working"] {
+    background: var(--rly-color-agent);
+  }
+
+  .connect-agent .agent-presence[data-activity="finished"] {
+    background: var(--rly-color-text-3);
+  }
+
+  .connect-failures {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    color: var(--rly-color-text-3);
+    display: grid;
+    gap: var(--rly-space-4);
+    margin-block-start: var(--rly-space-20);
+    padding: var(--rly-space-12) var(--rly-space-8);
+  }
+
+  .connect-preference-error {
+    color: var(--rly-color-critical-ink);
+    margin: var(--rly-space-12) var(--rly-space-8) 0;
+  }
+
+  .connect-status-message {
+    color: var(--rly-color-text-2);
+    display: block;
+    margin-block-start: var(--rly-space-16);
+    padding: var(--rly-space-10) var(--rly-space-12);
+  }
+
+  .connect-status-message[data-tone="critical"] {
+    color: var(--rly-color-critical-ink);
+  }
+
+  .terminal-stage {
+    block-size: 100dvh;
+    background: var(--rly-color-surface-1);
+    border: 0;
+    border-radius: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-block-size: 0;
+    min-inline-size: 0;
+    overflow: hidden;
+    position: relative;
+  }
+
+  .terminal-bar {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: var(--rly-space-12);
+    min-block-size: 3.25rem;
+    padding: var(--rly-space-8) var(--rly-space-16);
+  }
+
+  .terminal-bar > div {
+    display: grid;
+    min-inline-size: 0;
+  }
+
+  .terminal-bar small {
+    color: var(--rly-color-text-3);
+  }
+
+  .terminal-bar strong,
+  .terminal-bar small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .terminal-back {
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    font: inherit;
+    min-block-size: 2.25rem;
+    padding-inline: var(--rly-space-12);
+  }
+
+  .terminal-back:hover,
+  .terminal-back:focus-visible {
+    border-color: var(--rly-color-agent);
+    outline: none;
+  }
+
+  .ghostty-terminal {
+    min-block-size: 0;
+    overflow: hidden;
+    padding: var(--rly-space-12);
+    touch-action: none;
+  }
+
+  .ghostty-terminal > div,
+  .ghostty-terminal canvas {
+    block-size: 100%;
+    inline-size: 100%;
+  }
+
+  @media (max-width: 700px) {
+    .connect-header {
+      padding: var(--rly-space-8) var(--rly-space-12);
+    }
+
+    .connect-agents {
+      padding: var(--rly-space-12) var(--rly-space-8) var(--rly-space-24);
+    }
+
+    .connect-search {
+      padding: 0;
+      position: static;
+    }
+
+    .connect-filter-row {
+      display: grid;
+      justify-content: stretch;
+    }
+
+    .connect-agent-tree {
+      gap: var(--rly-space-24);
+    }
+
+    .connect-day-heading {
+      padding-inline: var(--rly-space-8);
+    }
+
+    .connect-day-heading > div {
+      display: grid;
+      gap: 0;
+    }
+
+    .connect-agent-list::before {
+      inset-inline-start: calc(var(--rly-space-8) + 3.5rem + var(--rly-space-8) + 0.25rem);
+    }
+
+    .connect-agent {
+      gap: var(--rly-space-8);
+      grid-template-columns: 3.5rem 0.5rem minmax(0, 1fr) auto;
+      padding: var(--rly-space-12) var(--rly-space-8);
+    }
+
+    .connect-failures,
+    .connect-preference-error {
+      display: none;
+    }
+
+    .ghostty-terminal {
+      padding: var(--rly-space-8);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connect-agent {
+      transition: none;
+    }
+  }
+}

@@ -290,7 +290,10 @@ export default tseslint.config(
   {
     // Prettier formats root JavaScript utilities; ESLint still enforces their
     // semantic and safety rules.
-    files: ["scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs"],
+    files: [
+      "scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs",
+      "scripts/pack-herdr.mjs"
+    ],
     rules: {
       "@effect/dprint": "off"
     }

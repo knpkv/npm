@@ -1,6 +1,75 @@
 id: use-effect-fn-for-named-effect-functions
 snapshots:
   ? |
+    class Store {
+      put() {
+        return Effect.gen(function*() {
+          return yield* Effect.succeed("stored")
+        })
+      }
+    }
+  : labels:
+      - source: |-
+          put() {
+              return Effect.gen(function*() {
+                return yield* Effect.succeed("stored")
+              })
+            }
+        style: primary
+        start: 16
+        end: 115
+      - source: |-
+          {
+              return Effect.gen(function*() {
+                return yield* Effect.succeed("stored")
+              })
+            }
+        style: secondary
+        start: 22
+        end: 115
+  ? |
+    class Store {
+      put() {
+        return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+      }
+    }
+  : labels:
+      - source: |-
+          put() {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+            }
+        style: primary
+        start: 16
+        end: 97
+      - source: |-
+          {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+            }
+        style: secondary
+        start: 22
+        end: 97
+  ? |
+    class Store {
+      put() {
+        return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+      }
+    }
+  : labels:
+      - source: |-
+          put() {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+            }
+        style: primary
+        start: 16
+        end: 125
+      - source: |-
+          {
+              return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+            }
+        style: secondary
+        start: 22
+        end: 125
+  ? |
     const claim = <Failure, Requirements>(
       value: string
     ): Effect.Effect<string, Failure, Requirements> =>
@@ -40,6 +109,30 @@ snapshots:
         start: 14
         end: 182
   ? |
+    const collect: FilterServiceContract["collect"] = (targets) =>
+      Effect.gen(function*() {
+        return yield* fanOut(targets)
+      })
+  : labels:
+      - source: |-
+          const collect: FilterServiceContract["collect"] = (targets) =>
+            Effect.gen(function*() {
+              return yield* fanOut(targets)
+            })
+        style: primary
+        start: 0
+        end: 128
+  ? |
+    const collectMatching = (stream) =>
+      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+  : labels:
+      - source: |-
+          const collectMatching = (stream) =>
+            stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+        style: primary
+        start: 0
+        end: 113
+  ? |
     const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
       fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
   : labels:
@@ -49,6 +142,49 @@ snapshots:
         style: primary
         start: 0
         end: 141
+  ? |
+    const fetchJson = <A,>(schema: Schema.Codec<A>) =>
+      Effect.gen(function*() {
+        return yield* Schema.decodeUnknownEffect(schema)({})
+      })
+  : labels:
+      - source: |-
+          fetchJson = <A,>(schema: Schema.Codec<A>) =>
+            Effect.gen(function*() {
+              return yield* Schema.decodeUnknownEffect(schema)({})
+            })
+        style: primary
+        start: 6
+        end: 139
+      - source: <A,>
+        style: secondary
+        start: 18
+        end: 22
+      - source: |-
+          Effect.gen(function*() {
+              return yield* Schema.decodeUnknownEffect(schema)({})
+            })
+        style: secondary
+        start: 53
+        end: 139
+      - source: |-
+          <A,>(schema: Schema.Codec<A>) =>
+            Effect.gen(function*() {
+              return yield* Schema.decodeUnknownEffect(schema)({})
+            })
+        style: secondary
+        start: 18
+        end: 139
+  ? |
+    const gitOutput = (path, args) =>
+      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+  : labels:
+      - source: |-
+          const gitOutput = (path, args) =>
+            spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+        style: primary
+        start: 0
+        end: 115
   ? |
     const load = (id: Id) => Effect.gen(function*() {
       return yield* repository.load(id)
@@ -278,6 +414,16 @@ snapshots:
         start: 0
         end: 128
   ? |
+    const scan: PrOpenServiceContract["scan"] = input =>
+      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+  : labels:
+      - source: |-
+          const scan: PrOpenServiceContract["scan"] = input =>
+            source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+        style: primary
+        start: 0
+        end: 109
+  ? |
     function load(id: Id): Effect.Effect<Item> {
       return Effect.gen(function*() {
         return yield* repository.load(id)
@@ -404,47 +550,3 @@ snapshots:
         style: primary
         start: 0
         end: 82
-  ? |
-    const scan: PrOpenServiceContract["scan"] = input =>
-      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
-  : labels:
-      - source: |-
-          const scan: PrOpenServiceContract["scan"] = input =>
-            source(input).pipe(Effect.map(({ prs }) => ({ prs })))
-        style: primary
-        start: 0
-        end: 109
-  ? |
-    const gitOutput = (path, args) =>
-      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
-  : labels:
-      - source: |-
-          const gitOutput = (path, args) =>
-            spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
-        style: primary
-        start: 0
-        end: 115
-  ? |
-    const collect: FilterServiceContract["collect"] = (targets) =>
-      Effect.gen(function*() {
-        return yield* fanOut(targets)
-      })
-  : labels:
-      - source: |-
-          const collect: FilterServiceContract["collect"] = (targets) =>
-            Effect.gen(function*() {
-              return yield* fanOut(targets)
-            })
-        style: primary
-        start: 0
-        end: 128
-  ? |
-    const collectMatching = (stream) =>
-      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
-  : labels:
-      - source: |-
-          const collectMatching = (stream) =>
-            stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
-        style: primary
-        start: 0
-        end: 113
