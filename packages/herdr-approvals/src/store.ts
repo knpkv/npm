@@ -37,6 +37,7 @@ const decodeJson = <A>(
   })
 
 const StoredJsonRow = Schema.Struct({ record: Schema.String })
+const StoredCountRow = Schema.Struct({ count: Schema.Number })
 const StoredPushSubscription = Schema.Struct({
   ...PushSubscriptionRecord.fields,
   owner: Schema.optionalKey(
@@ -60,24 +61,28 @@ const recordDelivery = (
   host: string,
   jobId: string,
   endpoint: string,
-  deliveredAt: number
+  deliveredAt: number,
+  countComplete: boolean
 ): void => {
+  const encodedCountComplete = countComplete ? 1 : 0
   const updated = database
     .prepare(
       `UPDATE push_deliveries
-       SET delivered_at = max(delivered_at, ?)
+       SET delivered_at = max(delivered_at, ?),
+           count_complete = max(count_complete, ?)
        WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ?`
     )
-    .run(deliveredAt, host, jobId, endpoint)
+    .run(deliveredAt, encodedCountComplete, host, jobId, endpoint)
   if (updated.changes !== 0 && updated.changes !== 0n) return
   database
     .prepare(
-      `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
-       VALUES (?, ?, ?, ?)
+      `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at, count_complete)
+       VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
-         delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at)`
+         delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at),
+         count_complete = max(push_deliveries.count_complete, excluded.count_complete)`
     )
-    .run(host, jobId, endpoint, deliveredAt)
+    .run(host, jobId, endpoint, deliveredAt, encodedCountComplete)
 }
 
 const decodeRow = <A>(
@@ -115,9 +120,22 @@ export class ApprovalAppStore {
           job_id TEXT NOT NULL,
           endpoint TEXT NOT NULL,
           delivered_at INTEGER NOT NULL,
+          count_complete INTEGER NOT NULL DEFAULT 1,
           PRIMARY KEY (host, job_id, endpoint)
         );
       `)
+      const { count } = Schema.decodeUnknownSync(StoredCountRow)(
+        this.#database
+          .prepare(
+            "SELECT count(*) AS count FROM pragma_table_info('push_deliveries') WHERE name = 'count_complete'"
+          )
+          .get()
+      )
+      if (count === 0) {
+        this.#database.exec(
+          "ALTER TABLE push_deliveries ADD COLUMN count_complete INTEGER NOT NULL DEFAULT 1"
+        )
+      }
     } catch (error) {
       this.#database.close()
       throw error
@@ -296,7 +314,8 @@ export class ApprovalAppStore {
     jobId: string,
     subscription: PushSubscriptionRecordType,
     owner: string,
-    deliveredAt: number
+    deliveredAt: number,
+    countComplete = true
   ) {
     const database = this.#database
     const normalizedHost = host.toLowerCase()
@@ -317,7 +336,8 @@ export class ApprovalAppStore {
             normalizedHost,
             jobId,
             subscription.endpoint,
-            deliveredAt
+            deliveredAt,
+            countComplete
           )
           return true
         }),
@@ -348,7 +368,8 @@ export class ApprovalAppStore {
     host: string,
     jobId: string,
     endpoint: string,
-    deliveredAfter = Number.MIN_SAFE_INTEGER
+    deliveredAfter = Number.MIN_SAFE_INTEGER,
+    countComplete = true
   ) {
     const database = this.#database
     const normalizedHost = host.toLowerCase()
@@ -356,9 +377,20 @@ export class ApprovalAppStore {
       try: () =>
         database
           .prepare(
-            "SELECT 1 FROM push_deliveries WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ? AND delivered_at >= ?"
+            `SELECT 1 FROM push_deliveries
+             WHERE host = ? COLLATE NOCASE
+               AND job_id = ?
+               AND endpoint = ?
+               AND delivered_at >= ?
+               AND (count_complete = 1 OR ? = 0)`
           )
-          .get(normalizedHost, jobId, endpoint, deliveredAfter) !== undefined,
+          .get(
+            normalizedHost,
+            jobId,
+            endpoint,
+            deliveredAfter,
+            countComplete === true ? 1 : 0
+          ) !== undefined,
       catch: storeError("delivery.has")
     })
   })
@@ -368,12 +400,21 @@ export class ApprovalAppStore {
     host: string,
     jobId: string,
     endpoint: string,
-    deliveredAt: number
+    deliveredAt: number,
+    countComplete = true
   ) {
     const database = this.#database
     const normalizedHost = host.toLowerCase()
     yield* Effect.try({
-      try: () => recordDelivery(database, normalizedHost, jobId, endpoint, deliveredAt),
+      try: () =>
+        recordDelivery(
+          database,
+          normalizedHost,
+          jobId,
+          endpoint,
+          deliveredAt,
+          countComplete
+        ),
       catch: storeError("delivery.record")
     })
     yield* this.secureFiles()

@@ -74,7 +74,8 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
                 candidate.host,
                 candidate.jobId,
                 target.endpoint,
-                timestamp - pushDeliveryTtlMillis
+                timestamp - pushDeliveryTtlMillis,
+                pendingCount !== null
               )
               if (delivered) return
               yield* options.send(target, payload)
@@ -83,7 +84,8 @@ export const runPushPass = Effect.fn("PushWorker.runPass")(function*<
                 candidate.jobId,
                 target,
                 target.owner,
-                timestamp
+                timestamp,
+                pendingCount !== null
               )
             }).pipe(
               Effect.tapError((error) => Effect.logError("PushWorker.delivery_failed", error)),

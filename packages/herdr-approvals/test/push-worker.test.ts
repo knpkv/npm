@@ -582,6 +582,51 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("delivers the first exact count after an incomplete fleet recovers", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-recovered-count-test-"))
+    const sent: Array<ApprovalPushPayload> = []
+    const pass = (
+      store: ApprovalAppStore,
+      pendingCount: number | null,
+      now: number
+    ) =>
+      runPushPass({
+        allowedPushOrigins: ["https://push.example.test"],
+        allowedUsers: ["alice@example.com"],
+        loadCandidates: () =>
+          Effect.succeed({
+            candidates: [{ host: "SER8", jobId: "job-local" }],
+            pendingCount
+          }),
+        now: Effect.succeed(now),
+        send: (_target, payload) =>
+          Effect.sync(() => {
+            sent.push(payload)
+          }),
+        store
+      })
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          yield* pass(store, null, 1_000)
+          yield* pass(store, null, 2_000)
+          yield* pass(store, 1, 16_000)
+          yield* pass(store, 1, 17_000)
+          expect(sent).toEqual([
+            { host: "SER8", jobId: "job-local", pendingCount: null },
+            { host: "SER8", jobId: "job-local", pendingCount: 1 }
+          ])
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("retries missing and failed deliveries, then suppresses success", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-worker-test-"))
     let attempts = 0
