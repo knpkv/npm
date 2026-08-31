@@ -157,9 +157,12 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const substituted = substitutions.get(typeNode.typeName.text)
     if (substituted !== undefined) {
+      const substitutionKey = `substitution:${typeNode.typeName.text}`
+      if (seen.has(substitutionKey)) return normalizeTypeText(typeNode)
+      const nextSeen = new Set(seen).add(substitutionKey)
       return Predicate.isString(substituted)
         ? substituted
-        : canonicalTypeText(substituted, analysis, filePath, substitutions, seen)
+        : canonicalTypeText(substituted, analysis, filePath, substitutions, nextSeen)
     }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration !== undefined) {
@@ -1366,6 +1369,15 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(genericPrevious, genericCurrent, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
   ])
+
+  const nestedGeneric = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<T> }\nexport const Public = <T extends string>(props: Props<T>) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(nestedGeneric, nestedGeneric, ["packages/public/src/index.ts"]), [])
 
   const aliasPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
