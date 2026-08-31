@@ -16,6 +16,7 @@ import { PortalBoundary } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import {
   invalidateModalFocusRestore,
+  isHTMLElement,
   ModalNestingBoundary,
   restoreModalFocusAfterCleanup,
   useModalContentRegistration,
@@ -275,12 +276,25 @@ interface DockLayerProps extends Pick<RelayDockBaseProps, "context" | "footer" |
   readonly headingId: string
   readonly modal: boolean
   readonly onClose: () => void
+  readonly restoreTargetRef: RefObject<HTMLElement | null>
   readonly title: string
   readonly closeRef: RefObject<HTMLButtonElement | null>
 }
 
-const DockInitialFocus = ({ target }: { readonly target: RefObject<HTMLButtonElement | null> }): null => {
-  useLayoutEffect(() => target.current?.focus(), [target])
+const DockInitialFocus = ({
+  restoreTarget,
+  target
+}: {
+  readonly restoreTarget: RefObject<HTMLElement | null>
+  readonly target: RefObject<HTMLButtonElement | null>
+}): null => {
+  useLayoutEffect(() => {
+    const focusTarget = target.current
+    if (focusTarget === null) return
+    const active = focusTarget.ownerDocument.activeElement
+    restoreTarget.current = isHTMLElement(active) ? active : null
+    focusTarget.focus()
+  }, [restoreTarget, target])
   return null
 }
 
@@ -316,6 +330,7 @@ const DockLayer = ({
   headingId,
   modal,
   onClose,
+  restoreTargetRef,
   selection,
   state,
   title
@@ -325,6 +340,7 @@ const DockLayer = ({
   const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     const panel = event.currentTarget
     if (!event.nativeEvent.composedPath().includes(panel)) return
+    if (event.defaultPrevented) return
     if (event.key === "Escape") {
       event.stopPropagation()
       onClose()
@@ -388,7 +404,7 @@ const DockLayer = ({
                   <Icon decorative name="close" />
                 </button>
               </header>
-              <DockInitialFocus target={closeRef} />
+              <DockInitialFocus restoreTarget={restoreTargetRef} target={closeRef} />
               <DockContents context={context} footer={footer} selection={selection} state={state} />
             </section>
           </DockLayerSurface>
@@ -425,6 +441,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
   const modal = compactViewport || desktopPresentation === "overlay"
   const triggerRef = useRef<HTMLButtonElement>(null)
   const railCloseRef = useRef<HTMLButtonElement>(null)
+  const restoreTargetRef = useRef<HTMLElement>(null)
   const previousStateRef = useRef({ modal, open: false })
   const headingId = useId()
   const visibleDescription = requireText(description, "RelayDock description")
@@ -445,7 +462,8 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
     } else if (previousState.open && resolvedOpen && previousState.modal !== modal) {
       railCloseRef.current?.focus()
     } else if (previousState.open && !resolvedOpen) {
-      restoreModalFocusAfterCleanup(triggerRef.current)
+      restoreModalFocusAfterCleanup(restoreTargetRef.current ?? triggerRef.current)
+      restoreTargetRef.current = null
     }
   }, [modal, resolvedOpen])
 
@@ -481,6 +499,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
             headingId={headingId}
             modal={modal}
             onClose={() => requestOpenChange(false)}
+            restoreTargetRef={restoreTargetRef}
             selection={selection}
             state={state}
             title={visibleTitle}
