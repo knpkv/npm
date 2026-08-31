@@ -178,8 +178,47 @@ describe("ConfigService", () => {
         const loaded = yield* service.load
         expect(loaded.review.defaultProfileId).toBe("security")
         expect(loaded.review.profiles[0]?.skillIds).toEqual(["builtin:pr-review-diff"])
+        expect(loaded.review.profiles[0]).toMatchObject({
+          harness: "native-codex",
+          model: "configured-default",
+          provider: "codex"
+        })
         yield* service.save(loaded)
         expect((yield* service.load).review).toEqual(loaded.review)
+      })
+    ))
+
+  const unknownReviewConfigurationCases: ReadonlyArray<
+    readonly [field: "provider" | "harness" | "model", value: string]
+  > = [
+    ["provider", "unknown-provider"],
+    ["harness", "unknown-harness"],
+    ["model", "unknown-model"]
+  ]
+
+  it.each(unknownReviewConfigurationCases)("rejects an unknown review %s", (field, value) =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "security",
+            profiles: [{
+              id: "security",
+              name: "Security",
+              kind: "security",
+              provider: "codex",
+              harness: "native-codex",
+              model: "configured-default",
+              skillIds: [],
+              [field]: value
+            }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        expect((yield* service.validate).status).toBe("corrupted")
       })
     ))
 

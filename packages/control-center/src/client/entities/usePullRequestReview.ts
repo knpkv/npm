@@ -1,3 +1,4 @@
+import { sameReviewThread } from "@knpkv/review"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -26,6 +27,7 @@ import {
   isUnauthorizedPullRequestReviewFailure
 } from "./pullRequestReviewFailures.js"
 import type { PullRequestReviewThread } from "./pullRequestReviewThreadReplay.js"
+import { controlCenterReviewThread } from "./reviewPlatformAdapter.js"
 
 const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
 const generatedClientTransport = pullRequestReviewBrowser.then(
@@ -173,7 +175,7 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
       provider.health === "available" &&
       provider.capabilities.includes("pr-review") &&
       provider.reviewProfile !== undefined &&
-      model
+      model !== undefined
     ) {
       eligible.push({
         providerId: provider.providerId,
@@ -202,11 +204,7 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
 const sameReviewScope = (
   left: PullRequestReviewScope,
   right: PullRequestReviewScope
-): boolean =>
-  left.baseRevision === right.baseRevision &&
-  left.entityId === right.entityId &&
-  left.headRevision === right.headRevision &&
-  left.sessionKey === right.sessionKey
+): boolean => sameReviewThread(controlCenterReviewThread(left), controlCenterReviewThread(right))
 
 /** Observe the lazy history boundary so a missing browser chunk remains retryable. */
 export const observePullRequestReviewHistoryLoad = (

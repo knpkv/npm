@@ -24,6 +24,9 @@ const profileWith = (skillIds: ReadonlyArray<string>): ReviewProfileConfig => ({
   id: "thorough",
   name: "Thorough review",
   kind: "review",
+  provider: "codex",
+  harness: "native-codex",
+  model: "configured-default",
   skillIds
 })
 
@@ -153,6 +156,31 @@ describe("Relay review profile skill selection", () => {
     expect(checkbox.disabled).toBe(false)
     expect(select.disabled).toBe(false)
     expect(saveButton.disabled).toBe(false)
+    await act(async () => rendered.root.unmount())
+  })
+
+  it("roundtrips the selected model through the saved profile", async () => {
+    const saveConfig = vi.fn<SettingsRelayViewProps["saveConfig"]>(() => Promise.resolve(Exit.succeed("saved")))
+    const rendered = await renderRelaySettings(AsyncResult.success(config), { saveConfig })
+    const modelLabel = Array.from(rendered.host.querySelectorAll("label")).find((label) =>
+      label.textContent?.includes("Model")
+    )
+    const modelSelect = modelLabel?.querySelector("select")
+    const saveButton = Array.from(rendered.host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Save")
+    )
+    expect(modelSelect).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+    if (modelSelect === null || modelSelect === undefined || saveButton === undefined) return
+
+    await act(async () => {
+      modelSelect.value = "gpt-5.6-luna"
+      modelSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await act(async () => saveButton.click())
+
+    expect(saveConfig).toHaveBeenCalledOnce()
+    expect(JSON.stringify(saveConfig.mock.calls[0]?.[0])).toContain("\"model\":\"gpt-5.6-luna\"")
     await act(async () => rendered.root.unmount())
   })
 

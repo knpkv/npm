@@ -312,8 +312,11 @@ rendering.
 
 **Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
 revision after the server rechecks its revision ID and immutable base/head
-commits. Full, security, tests, and explanation focuses are available. The
-Relay settings tab selects a default review profile and prompt-only methods
+commits. Full, security, tests, and explanation focuses are available. One
+Relay profile owns the complete execution choice: focus, prompt-only methods,
+provider, harness, and model. The browser sends that exact saved profile and
+the server rejects stale, mixed, or unknown values before starting the agent.
+The Relay settings tab selects a default profile and prompt-only methods
 from the built-in catalogue or bounded `SKILL.md` metadata discovered under the
 local agent, Codex, and installed-plugin skill roots. Only server-issued skill
 IDs and safe source labels cross the authenticated browser boundary; local
@@ -325,6 +328,15 @@ repository text as untrusted evidence, rejects text pairs above its 5,000-line
 or 4,000,000-line-pair synchronous diff-complexity budgets, and gives the agent
 no host tools or repository access. Sanitized progress frames expose revision,
 file, patch, agent, and validation stages without returning hidden reasoning.
+Codex receives the focus-specific native JSON Schema before execution. Explain
+requires an empty findings array plus verdict and explanation; strict decoding
+still rejects malformed output. Completed sessions retain their exact profile
+metadata across reload. A failed rerun labels the retained deck as the previous
+result instead of presenting it as fresh output.
+
+An authenticated, opt-in Explain check is available with
+`pnpm --filter @knpkv/codecommit-web test:relay-smoke:real`; ordinary test runs
+exclude it.
 
 Findings are decoded into a bounded local deck and exact line findings appear
 beside the matching diff. **Accept · post** immediately publishes the unchanged

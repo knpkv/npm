@@ -1,5 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import { presentReviewResult, type ReviewProfileResolution, resolveReviewProfile } from "@knpkv/review"
+import { ReviewProfileControl, ReviewResultStatus } from "@knpkv/review/react"
 import { BoundedDiffCodeView, type RlyDiffCodeAnnotation, type RlyDiffCodeItem } from "@knpkv/rly/diff/bounded"
 import {
   DiffFileTree,
@@ -19,9 +21,7 @@ import {
   CircleXIcon,
   FileSearchIcon,
   LoaderCircleIcon,
-  MessageSquareMoreIcon,
-  ShieldCheckIcon,
-  TestTube2Icon
+  MessageSquareMoreIcon
 } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router"
@@ -31,7 +31,6 @@ import {
   type PullRequestRelayReviewResponse,
   RelayReviewConversationTurn,
   type RelayReviewFinding,
-  type RelayReviewKind,
   type RelayReviewStreamEvent
 } from "../../server/Api.js"
 import { configQueryAtom } from "../atoms/app.js"
@@ -47,6 +46,11 @@ import {
 } from "../review-session-state.js"
 import { runRelayReviewStream } from "../relay-review-stream.js"
 import {
+  codeCommitReviewIdentity,
+  codeCommitReviewProfile,
+  codeCommitReviewThread
+} from "../review-platform-adapter.js"
+import {
   readRelayReviewSession,
   relayReviewSessionStorageKey,
   writeRelayReviewSession
@@ -59,18 +63,6 @@ import {
   reviewCommentNavigationTarget
 } from "../review-comment-navigation.js"
 import styles from "./pr-review-workspace.module.css"
-
-const reviewFocuses: ReadonlyArray<{
-  readonly description: string
-  readonly icon: typeof BotIcon
-  readonly kind: RelayReviewKind
-  readonly label: string
-}> = [
-  { kind: "review", label: "Full review", description: "Correctness, security, and maintainability", icon: BotIcon },
-  { kind: "security", label: "Security", description: "Trust boundaries and unsafe inputs", icon: ShieldCheckIcon },
-  { kind: "tests", label: "Tests", description: "Missing behavioral guardrails", icon: TestTube2Icon },
-  { kind: "explain", label: "Explain", description: "Architecture and merge risks", icon: FileSearchIcon }
-]
 
 const MAXIMUM_RENDERABLE_DIFF_INPUT_LINES = 5_000
 const MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS = 4_000_000
@@ -135,12 +127,6 @@ interface RelayStreamTerminal {
 function failureMessage<Failure>(failure: Failure, fallback: string): string {
   return isFailureWithMessage(failure) ? failure.message : fallback
 }
-
-const exactReviewIdentity = (
-  accountId: string,
-  pullRequestId: Domain.PullRequestId,
-  diff: Pick<PullRequestDiffResponse, "baseCommit" | "headCommit" | "revisionId">
-): string => `${accountId}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
 
 export const fileIndexForFinding = (
   files: PullRequestDiffResponse["files"],
@@ -611,14 +597,13 @@ const ReadyReviewWorkspace = ({
   const navigate = useNavigate()
   const [selectedFileIndex, setSelectedFileIndex] = useState(diff.files[0]?.index ?? null)
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null)
-  const [kind, setKind] = useState<RelayReviewKind | null>(null)
   const [layout, setLayout] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(false)
   const config = useAtomValue(configQueryAtom)
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null)
   const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
   const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
-  const reviewIdentity = exactReviewIdentity(accountId, pullRequest.id, diff)
+  const reviewIdentity = codeCommitReviewIdentity(accountId, pullRequest.id, diff)
   const [contentStateCache, setContentStateCache] = useState<{
     readonly identity: string
     readonly values: ReadonlyMap<number, RlyDiffFileContent>
@@ -626,7 +611,6 @@ const ReadyReviewWorkspace = ({
   const reviewSessionKey = relayReviewSessionStorageKey(accountId, pullRequest.id)
   const [completedReview, setCompletedReview] = useState<{
     readonly identity: string
-    readonly skillIds: ReadonlyArray<string>
     readonly value: PullRequestRelayReviewResponse
   } | null>(null)
   const completedReviewRef = useRef(completedReview)
@@ -635,6 +619,7 @@ const ReadyReviewWorkspace = ({
     readonly description: string
     readonly title: string
   } | null>(null)
+  const [retainedAfterFailure, setRetainedAfterFailure] = useState(false)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [isReviewing, setIsReviewing] = useState(false)
   const [progress, setProgress] = useState<
@@ -648,14 +633,27 @@ const ReadyReviewWorkspace = ({
   dispositionsRef.current = dispositions
   const abortRef = useRef<AbortController | null>(null)
   const review = completedReview?.value ?? null
-  const reviewIsStale = completedReview !== null && completedReview.identity !== reviewIdentity
   const profiles = AsyncResult.isSuccess(config) ? config.value.review.profiles : []
+  const platformProfiles = profiles.map(codeCommitReviewProfile)
   const profilesLoading = !AsyncResult.isSuccess(config) && !AsyncResult.isFailure(config)
-  const defaultProfile = AsyncResult.isSuccess(config)
-    ? (profiles.find((profile) => profile.id === config.value.review.defaultProfileId) ?? profiles[0])
-    : undefined
-  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? defaultProfile
-  const selectedKind = kind ?? selectedProfile?.kind ?? "review"
+  const profileResolution: ReviewProfileResolution = AsyncResult.isSuccess(config)
+    ? resolveReviewProfile(platformProfiles, selectedProfileId, config.value.review.defaultProfileId)
+    : { _tag: "Missing" }
+  const selectedPlatformProfile = profileResolution._tag === "Resolved" ? profileResolution.profile : undefined
+  const selectedProfile =
+    selectedPlatformProfile === undefined ? undefined : profiles.find(({ id }) => id === selectedPlatformProfile.id)
+  const reviewPresentation = presentReviewResult(
+    codeCommitReviewThread(accountId, pullRequest.id, diff),
+    review === null
+      ? null
+      : {
+          identity: codeCommitReviewThread(accountId, pullRequest.id, review),
+          profile: codeCommitReviewProfile(review.profile),
+          result: review
+        },
+    retainedAfterFailure
+  )
+  const reviewIsStale = reviewPresentation._tag === "Stale"
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
   const contentStates =
@@ -665,11 +663,13 @@ const ReadyReviewWorkspace = ({
 
   useEffect(() => {
     if (!AsyncResult.isSuccess(config) || selectedProfileId !== null) return
-    const profile =
-      config.value.review.profiles.find(({ id }) => id === config.value.review.defaultProfileId) ??
-      config.value.review.profiles[0]
-    if (profile !== undefined) {
-      setSelectedProfileId(profile.id)
+    const resolution = resolveReviewProfile(
+      config.value.review.profiles.map(codeCommitReviewProfile),
+      null,
+      config.value.review.defaultProfileId
+    )
+    if (resolution._tag === "Resolved") {
+      setSelectedProfileId(resolution.profile.id)
     }
   }, [config, selectedProfileId])
 
@@ -703,10 +703,12 @@ const ReadyReviewWorkspace = ({
       setSelectedFindingId(null)
       return
     }
-    const restored = { identity: stored.identity, skillIds: stored.skillIds, value: stored.review }
+    const restored = { identity: stored.identity, value: stored.review }
     completedReviewRef.current = restored
     dispositionsRef.current = stored.dispositions
     setCompletedReview(restored)
+    setSelectedProfileId(stored.review.profile.id)
+    setRetainedAfterFailure(false)
     setTurns(stored.turns)
     setDispositions(stored.dispositions)
     setSelectedFindingId(stored.turns.at(-1)?.findingId ?? stored.review.result.findings[0]?.id ?? null)
@@ -717,7 +719,6 @@ const ReadyReviewWorkspace = ({
     writeRelayReviewSession(window.sessionStorage, reviewSessionKey, {
       identity: completedReview.identity,
       review: completedReview.value,
-      skillIds: completedReview.skillIds,
       turns,
       dispositions
     })
@@ -747,6 +748,7 @@ const ReadyReviewWorkspace = ({
       abortRef.current = controller
       setIsReviewing(true)
       setReviewFailure(null)
+      setRetainedAfterFailure(false)
       setProgress([])
       let terminalError: string | null = null
       const terminal: RelayStreamTerminal = {}
@@ -769,6 +771,7 @@ const ReadyReviewWorkspace = ({
           controller.signal
         )
         if (terminalError !== null) {
+          setRetainedAfterFailure(completedReviewRef.current !== null)
           setReviewFailure({ description: terminalError, title: "Relay review failed" })
           return { completed: false }
         }
@@ -781,7 +784,7 @@ const ReadyReviewWorkspace = ({
             : reconcileFindingDispositions(prior, completedEvent.review.result.findings, dispositionsRef.current)
         dispositionsRef.current = nextDispositions
         setDispositions(nextDispositions)
-        const completed = { identity: reviewIdentity, skillIds: payload.skillIds, value: completedEvent.review }
+        const completed = { identity: reviewIdentity, value: completedEvent.review }
         completedReviewRef.current = completed
         setCompletedReview(completed)
         setSelectedFindingId((current) => current ?? completedEvent.review.result.findings[0]?.id ?? null)
@@ -790,6 +793,7 @@ const ReadyReviewWorkspace = ({
           : { completed: true, reply: completedEvent.reply }
       } catch (cause) {
         if (!controller.signal.aborted) {
+          setRetainedAfterFailure(completedReviewRef.current !== null)
           setReviewFailure({
             description: failureMessage(cause, "Relay could not complete this review."),
             title: "Relay review failed"
@@ -814,24 +818,14 @@ const ReadyReviewWorkspace = ({
         revisionId: diff.revisionId,
         baseCommit: diff.baseCommit,
         headCommit: diff.headCommit,
-        kind: selectedKind,
-        skillIds: selectedProfile.skillIds
+        profile: selectedProfile
       }
     )
     if (outcome.completed) {
       setTurns([])
       setMessage("")
     }
-  }, [
-    accountId,
-    diff.baseCommit,
-    diff.headCommit,
-    diff.revisionId,
-    pullRequest.id,
-    runStream,
-    selectedKind,
-    selectedProfile
-  ])
+  }, [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, runStream, selectedProfile])
 
   const continueReview = useCallback(
     async (findingId: string, nextMessage: string): Promise<void> => {
@@ -851,8 +845,7 @@ const ReadyReviewWorkspace = ({
           revisionId: diff.revisionId,
           baseCommit: diff.baseCommit,
           headCommit: diff.headCommit,
-          kind: review.kind,
-          skillIds: completedReview?.skillIds ?? [],
+          profile: review.profile,
           currentReview: review.result,
           turns,
           findingId,
@@ -867,17 +860,7 @@ const ReadyReviewWorkspace = ({
       )
       setMessage("")
     },
-    [
-      accountId,
-      diff.baseCommit,
-      diff.headCommit,
-      diff.revisionId,
-      pullRequest.id,
-      review,
-      runStream,
-      completedReview,
-      turns
-    ]
+    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, review, runStream, turns]
   )
 
   const postFinding = useCallback(
@@ -1056,34 +1039,18 @@ const ReadyReviewWorkspace = ({
             </div>
             {isReviewing ? (
               <StateLabel label="running" size="compact" tone="progress" />
-            ) : review === null ? null : (
-              <StateLabel label={review.kind} size="compact" tone="progress" />
+            ) : (
+              <ReviewResultStatus presentation={reviewPresentation} />
             )}
           </header>
           <section aria-label="Relay controls" className={styles.relayControls}>
-            <label className={styles.profileChoice}>
-              <span>Profile</span>
-              <select
-                disabled={isReviewing || !AsyncResult.isSuccess(config)}
-                onChange={(event) => {
-                  const profile = profiles.find(({ id }) => id === event.target.value)
-                  setSelectedProfileId(event.target.value)
-                  if (profile !== undefined) setKind(profile.kind)
-                }}
-                value={selectedProfile?.id ?? ""}
-              >
-                {AsyncResult.isSuccess(config) ? null : (
-                  <option value="">
-                    {AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}
-                  </option>
-                )}
-                {profiles.map((profile) => (
-                  <option key={profile.id} value={profile.id}>
-                    {profile.name}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <ReviewProfileControl
+              {...(styles.profileChoice === undefined ? {} : { className: styles.profileChoice })}
+              disabled={isReviewing || !AsyncResult.isSuccess(config)}
+              onProfileChange={(profile) => setSelectedProfileId(profile.id)}
+              profiles={platformProfiles}
+              selectedProfileId={selectedProfileId}
+            />
             <Button
               disabled={isReviewing || diff.files.length === 0 || selectedProfile === undefined}
               loading={isReviewing}
@@ -1093,24 +1060,6 @@ const ReadyReviewWorkspace = ({
             >
               {isReviewing ? "Relay reviewing…" : review === null ? "Run Relay" : "Run again"}
             </Button>
-            <div aria-label="Relay review focus" className={styles.focusChoices} role="group">
-              {reviewFocuses.map((focus) => {
-                const Icon = focus.icon
-                return (
-                  <button
-                    aria-pressed={selectedKind === focus.kind}
-                    disabled={isReviewing}
-                    key={focus.kind}
-                    onClick={() => setKind(focus.kind)}
-                    title={focus.description}
-                    type="button"
-                  >
-                    <Icon aria-hidden="true" />
-                    {focus.label}
-                  </button>
-                )
-              })}
-            </div>
           </section>
 
           {AsyncResult.isFailure(config) ? (
@@ -1137,6 +1086,22 @@ const ReadyReviewWorkspace = ({
                 description="Loading the configured review methodology before Relay can run."
                 title="Loading Relay profiles"
                 tone="progress"
+              />
+            </div>
+          ) : profileResolution._tag === "Unknown" ? (
+            <div className={styles.reviewFailure}>
+              <StatePanel
+                description={`The saved profile ${profileResolution.profileId} no longer exists. Select an available profile before running Relay.`}
+                title="Saved Relay profile unavailable"
+                tone="caution"
+              />
+            </div>
+          ) : profileResolution._tag === "Missing" ? (
+            <div className={styles.reviewFailure}>
+              <StatePanel
+                description="Configure a default Relay profile before running a review."
+                title="Relay profile required"
+                tone="caution"
               />
             </div>
           ) : null}
@@ -1178,6 +1143,12 @@ const ReadyReviewWorkspace = ({
               >
                 Re-review latest
               </Button>
+            </div>
+          ) : null}
+
+          {retainedAfterFailure && review !== null ? (
+            <div className={styles.staleReview} role="status">
+              Previous result retained. The latest rerun failed; this output is not the attempted rerun.
             </div>
           ) : null}
 

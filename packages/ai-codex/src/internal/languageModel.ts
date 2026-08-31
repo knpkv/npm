@@ -1,67 +1,15 @@
-import { Effect, Predicate, Schema, Stream } from "effect"
+import { Effect, Predicate, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import type { CodexModelOptions } from "../model.js"
 import { makeArguments, normalizeOptions, validatePrompt } from "./configuration.js"
-import { CodexTransportError, invalidRequest, transportToAiError } from "./errors.js"
+import { invalidRequest, transportToAiError } from "./errors.js"
+import { makeOutputSchemaFile } from "./outputSchema.js"
 import { resolvePromptOnlyDisabledFeatures, runCodex } from "./process.js"
 import { renderPrompt } from "./prompt.js"
 import { type CodexTurn, decodeTranscript } from "./protocol.js"
-
-const encodeJsonString = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema.Json))
-
-const makeSchemaFile = Effect.fn("CodexLanguageModel.makeSchemaFile")(function*(
-  fileSystem: FileSystem.FileSystem,
-  schema: Schema.Top
-) {
-  const document = yield* Effect.try({
-    try: () => Schema.toJsonSchemaDocument(schema),
-    catch: (cause) =>
-      new CodexTransportError({
-        cause,
-        diagnostic: "Unable to convert the requested output schema to JSON Schema",
-        phase: "configuration"
-      })
-  })
-  const schemaFile = yield* fileSystem.makeTempFileScoped({
-    prefix: "ai-codex-output-",
-    suffix: ".json"
-  }).pipe(
-    Effect.mapError((cause) =>
-      new CodexTransportError({
-        cause,
-        diagnostic: "Unable to create a temporary output schema file",
-        phase: "configuration"
-      })
-    )
-  )
-  const jsonSchema = {
-    $defs: document.definitions,
-    $schema: "https://json-schema.org/draft/2020-12/schema",
-    ...document.schema
-  }
-  const encodedSchema = yield* encodeJsonString(jsonSchema).pipe(
-    Effect.mapError((cause) =>
-      new CodexTransportError({
-        cause,
-        diagnostic: "Unable to encode the requested output schema",
-        phase: "configuration"
-      })
-    )
-  )
-  yield* fileSystem.writeFileString(schemaFile, encodedSchema, { mode: 0o600 }).pipe(
-    Effect.mapError((cause) =>
-      new CodexTransportError({
-        cause,
-        diagnostic: "Unable to write the temporary output schema file",
-        phase: "configuration"
-      })
-    )
-  )
-  return schemaFile
-})
 
 const makeMetadataPart = (turn: CodexTurn, modelId: string | undefined): Response.ResponseMetadataPartEncoded => ({
   id: turn.threadId,
@@ -138,7 +86,7 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
       method
     )
     const schemaFile = providerOptions.responseFormat.type === "json"
-      ? yield* makeSchemaFile(dependencies.fileSystem, providerOptions.responseFormat.schema)
+      ? yield* makeOutputSchemaFile(dependencies.fileSystem, providerOptions.responseFormat.schema)
       : undefined
     const stdout = yield* runCodex({
       args: makeArguments(options, schemaFile, promptOnlyDisabledFeatures),
