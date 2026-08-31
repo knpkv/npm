@@ -55,6 +55,16 @@ const mountWithOwnedPortal = async (element: ReactElement): Promise<MountedDock>
   return entry
 }
 
+const mountWithoutPortalTarget = async (element: ReactElement): Promise<MountedDock> => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  const entry = { host, portal: host, root }
+  mounted.push(entry)
+  await act(async () => root.render(<PortalProvider container={null}>{element}</PortalProvider>))
+  return entry
+}
+
 const mountInShadowRoot = async (element: ReactElement): Promise<MountedShadowDock> => {
   const host = document.createElement("div")
   const portalHost = document.createElement("div")
@@ -333,6 +343,36 @@ describe("RelayDock", () => {
     await act(async () => dialog?.dispatchEvent(tab))
     expect(tab.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
+  })
+
+  it("includes a native summary as the final modal focus stop", async () => {
+    const footer = (
+      <details open>
+        <summary>Review evidence</summary>
+        <p>One finding</p>
+      </details>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const summary = portal.querySelector<HTMLElement>("summary")
+    const tab = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+
+    summary?.focus()
+    await act(async () => dialog?.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("keeps the trigger operable while its portal target is unavailable", async () => {
+    const { host } = await mountWithoutPortalTarget(dock())
+    const trigger = host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")
+    if (trigger === null) throw new Error("RelayDock trigger did not render")
+
+    await act(async () => trigger.click())
+    expect(trigger.hidden).toBe(false)
+    expect(trigger.getAttribute("aria-expanded")).toBe("false")
+    expect(host.querySelector("[data-rly-relay-dock-presentation]")).toBeNull()
   })
 
   it("honors Tab and Escape already prevented by inline content", async () => {

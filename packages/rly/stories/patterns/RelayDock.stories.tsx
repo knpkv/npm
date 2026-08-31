@@ -69,6 +69,11 @@ const richTextState: RlyRelayDockState = {
       <div style={{ display: "none" }}>
         <button type="button">Hidden trailing reply action</button>
       </div>
+      <div style={{ visibility: "hidden" }}>
+        <button style={{ visibility: "visible" }} type="button">
+          Visible reply action
+        </button>
+      </div>
     </>
   ),
   status: "ready"
