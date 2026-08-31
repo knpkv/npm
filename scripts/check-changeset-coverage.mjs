@@ -185,8 +185,6 @@ const canonicalTypeText = (
     return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const typeName = typeNode.typeName.text
-    const declarationKey = `${filePath}\u0000${typeName}`
-    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
     const substituted = substitutions.get(typeName)
     if (substituted !== undefined) {
       if (Predicate.isString(substituted)) return substituted
@@ -203,6 +201,8 @@ const canonicalTypeText = (
         nextCanonicalTypeContext(context, substitutionPath)
       )
     }
+    const declarationKey = `${filePath}\u0000${typeName}`
+    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
     const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
     if (declaration !== undefined) {
       const key = `${declaration.filePath}\u0000${typeName}`
@@ -1532,6 +1532,17 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(finiteAliasSources, finiteAliasSources, ["packages/public/src/index.ts"]), [])
+  const shadowedGenericSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Alias<Alias> = Alias\ntype Props = { value: Alias<string> }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(shadowedGenericSources, shadowedGenericSources, ["packages/public/src/index.ts"]),
+    []
+  )
   const directCycleFailure = Effect.runSync(
     publicCallableChangesEffect(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]).pipe(
       Effect.flip
