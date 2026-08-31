@@ -86,6 +86,7 @@
     "@knpkv/confluence-to-markdown": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
+    "@knpkv/relay-product": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0-rc.109",
     "react": "^19.2.8",
