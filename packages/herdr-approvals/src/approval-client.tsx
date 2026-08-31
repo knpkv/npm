@@ -32,7 +32,7 @@ import {
 } from "./dashboard-model.js"
 import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
 import { FleetShell } from "./shell-view.js"
-import { readApprovalDeepLink } from "./pwa.js"
+import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -567,9 +567,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       })
       return
     }
-    const target = [...document.querySelectorAll<HTMLElement>("[data-agenda-item]")].find(
-      (item) =>
-        item.dataset.approvalHost === decoded.success?.host && item.dataset.approvalJob === decoded.success?.jobId
+    const target = [...document.querySelectorAll<HTMLElement>("[data-agenda-item]")].find((item) =>
+      matchesApprovalDeepLink(item.dataset, decoded.success)
     )
     if (target === undefined) return
     target.dataset.approvalTarget = "true"

@@ -71,6 +71,16 @@ export const readApprovalDeepLink = (search: string) => {
     : Result.succeed(decoded.success)
 }
 
+export const matchesApprovalDeepLink = (
+  dataset: {
+    readonly approvalHost?: string
+    readonly approvalJob?: string
+  },
+  target: ApprovalNotificationCandidate
+): boolean =>
+  dataset.approvalHost?.toLowerCase() === target.host.toLowerCase() &&
+  dataset.approvalJob === target.jobId
+
 export const handleNotificationClick = async (
   clients: ApprovalWorkerClients,
   deepLinkUrl: string

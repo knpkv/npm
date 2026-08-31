@@ -6,6 +6,7 @@ import {
   type ApprovalWorkerClients,
   type ApprovalWorkerRegistration,
   handleNotificationClick,
+  matchesApprovalDeepLink,
   readApprovalDeepLink,
   showApprovalNotification
 } from "../src/pwa.js"
@@ -99,6 +100,28 @@ describe("approval PWA", () => {
     const decoded = readApprovalDeepLink("?approvalHost=PI")
     expect(Result.isFailure(decoded)).toBe(true)
     if (Result.isFailure(decoded)) expect(decoded.failure._tag).toBe("ApprovalDeepLinkError")
+  })
+
+  it("matches approval hosts case-insensitively without widening job identity", () => {
+    const target = { host: "PI", jobId: "job-7" }
+    expect(
+      matchesApprovalDeepLink(
+        { approvalHost: "pi", approvalJob: "job-7" },
+        target
+      )
+    ).toBe(true)
+    expect(
+      matchesApprovalDeepLink(
+        { approvalHost: "ser8", approvalJob: "job-7" },
+        target
+      )
+    ).toBe(false)
+    expect(
+      matchesApprovalDeepLink(
+        { approvalHost: "pi", approvalJob: "JOB-7" },
+        target
+      )
+    ).toBe(false)
   })
 
   it("navigates and focuses an existing canonical approval window", async () => {
