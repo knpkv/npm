@@ -383,4 +383,44 @@ describe("push delivery retries", () => {
         })
     ).pipe(provideNodeServices)
   })
+
+  it.effect("suppresses delivery when only the host casing changes", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-host-case-test-"))
+    let attempts = 0
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          yield* store.recordDelivery(
+            "SER8",
+            "job-1",
+            subscription.endpoint,
+            1_000
+          )
+          yield* runPushPass({
+            allowedPushOrigins: ["https://push.example.test"],
+            allowedUsers: ["alice@example.com"],
+            loadCandidates: () =>
+              Effect.succeed([
+                { host: "ser8", jobId: "job-1" },
+                { host: "ser8", jobId: "job-2" },
+                { host: "pi", jobId: "job-1" }
+              ]),
+            now: Effect.succeed(1_001),
+            send: () =>
+              Effect.sync(() => {
+                attempts += 1
+              }),
+            store
+          })
+          expect(attempts).toBe(2)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
 })

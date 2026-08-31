@@ -265,13 +265,14 @@ export class ApprovalAppStore {
     deliveredAfter = Number.MIN_SAFE_INTEGER
   ) {
     const database = this.#database
+    const normalizedHost = host.toLowerCase()
     return yield* Effect.try({
       try: () =>
         database
           .prepare(
-            "SELECT 1 FROM push_deliveries WHERE host = ? AND job_id = ? AND endpoint = ? AND delivered_at >= ?"
+            "SELECT 1 FROM push_deliveries WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ? AND delivered_at >= ?"
           )
-          .get(host, jobId, endpoint, deliveredAfter) !== undefined,
+          .get(normalizedHost, jobId, endpoint, deliveredAfter) !== undefined,
       catch: storeError("delivery.has")
     })
   })
@@ -284,16 +285,23 @@ export class ApprovalAppStore {
     deliveredAt: number
   ) {
     const database = this.#database
+    const normalizedHost = host.toLowerCase()
     yield* Effect.try({
       try: () => {
+        const updated = database
+          .prepare(
+            `UPDATE push_deliveries
+             SET delivered_at = ?
+             WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ?`
+          )
+          .run(deliveredAt, normalizedHost, jobId, endpoint)
+        if (updated.changes !== 0 && updated.changes !== 0n) return
         database
           .prepare(
             `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
-             VALUES (?, ?, ?, ?)
-             ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
-               delivered_at = excluded.delivered_at`
+             VALUES (?, ?, ?, ?)`
           )
-          .run(host, jobId, endpoint, deliveredAt)
+          .run(normalizedHost, jobId, endpoint, deliveredAt)
       },
       catch: storeError("delivery.record")
     })
