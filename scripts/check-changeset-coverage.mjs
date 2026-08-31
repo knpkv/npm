@@ -386,6 +386,8 @@ const memberDescriptor = (
 const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutions = new Map()) => {
   if (TypeScript.isParenthesizedTypeNode(typeNode))
     return typeMembers(typeNode.type, analysis, filePath, seen, substitutions)
+  if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword)
+    return typeMembers(typeNode.type, analysis, filePath, seen, substitutions)
   if (TypeScript.isArrayTypeNode(typeNode)) {
     typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions)
     return { members: new Map(), resolved: false }
@@ -1621,6 +1623,37 @@ const runSelfTest = () => {
     (cause) =>
       cause instanceof ChangesetCoverageError &&
       cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveReadonlyArraySources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; children: readonly Node[] }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveReadonlyArraySources, recursiveReadonlyArraySources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const finiteReadonlyArraySources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Payload = { id: string }\ntype Props = { value: readonly Payload[] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteReadonlyArraySources, finiteReadonlyArraySources, ["packages/public/src/index.ts"]),
+    []
   )
   const recursiveMethodParameterSources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
