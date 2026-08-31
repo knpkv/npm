@@ -184,7 +184,10 @@ const canonicalTypeText = (
   if (TypeScript.isParenthesizedTypeNode(typeNode))
     return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
-    const substituted = substitutions.get(typeNode.typeName.text)
+    const typeName = typeNode.typeName.text
+    const declarationKey = `${filePath}\u0000${typeName}`
+    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    const substituted = substitutions.get(typeName)
     if (substituted !== undefined) {
       if (Predicate.isString(substituted)) return substituted
       if (context.substitutionPath.has(typeNode)) {
@@ -200,9 +203,9 @@ const canonicalTypeText = (
         nextCanonicalTypeContext(context, substitutionPath)
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
     if (declaration !== undefined) {
-      const key = `${declaration.filePath}\u0000${typeNode.typeName.text}`
+      const key = `${declaration.filePath}\u0000${typeName}`
       if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
       const nextSeen = new Set(seen).add(key)
       const nextSubstitutions = new Map(substitutions)
@@ -1494,6 +1497,27 @@ const runSelfTest = () => {
     publicCallableChanges(recursiveGenericPrevious, recursiveGenericCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
+  const directCyclicSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Loop = ReadonlyArray<Loop>\ntype Props = { value: Loop }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/view.tsx: recursive type declaration while canonicalizing Loop"
+  )
+  const finiteAliasSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Item = ReadonlyArray<string>\ntype Props = { value: Item }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(finiteAliasSources, finiteAliasSources, ["packages/public/src/index.ts"]), [])
   const cyclicSources = new Map([["packages/public/src/cycle.ts", "type Loop = Loop"]])
   const cyclicModule = analyzeSources(cyclicSources).modules.get("packages/public/src/cycle.ts")
   assert(cyclicModule !== undefined)

@@ -173,6 +173,58 @@ const program = Effect.scoped(
       })
     }
 
+    const cleanWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-clean-" })
+    const cleanPackage = path.join(cleanWorkspace, "packages", "sample")
+    yield* fileSystem.makeDirectory(cleanPackage, { recursive: true })
+    yield* fileSystem.writeFileString(
+      path.join(cleanWorkspace, "package.json"),
+      "{\"packageManager\":\"pnpm@11.21.0\"}\n"
+    )
+    yield* fileSystem.writeFileString(path.join(cleanWorkspace, "LICENSE"), "license\n")
+    yield* fileSystem.writeFileString(
+      path.join(cleanPackage, "package.json"),
+      `${
+        JSON.stringify({
+          dependencies: { "@test/not-installed": "99.99.99" },
+          files: ["README.md"],
+          name: "@test/sample",
+          version: "1.0.0"
+        })
+      }\n`
+    )
+    yield* fileSystem.writeFileString(path.join(cleanPackage, "README.md"), "fixture\n")
+    const cleanArchive = path.join(first, "test-sample-1.0.0.tgz")
+    yield* run(
+      spawner,
+      "node",
+      [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), cleanPackage, first],
+      cleanWorkspace
+    )
+    const cleanListing = (yield* run(spawner, "tar", ["-tzf", cleanArchive], cleanWorkspace))
+      .split("\n")
+      .filter((entry) => entry !== "")
+      .sort()
+    const cleanExpected = yield* expectedFiles(fileSystem, path, cleanPackage, ["README.md"])
+    if (JSON.stringify(cleanListing) !== JSON.stringify(cleanExpected)) {
+      return yield* new HerdrPackContractError({
+        reason: `Clean staged manifest packed unexpected files: ${JSON.stringify({ cleanExpected, cleanListing })}`
+      })
+    }
+    const cleanManifest = yield* Schema.decodeUnknownEffect(PackageManifest)(
+      yield* run(spawner, "tar", ["-xOf", cleanArchive, "package/package.json"], cleanWorkspace)
+    ).pipe(
+      Effect.mapError((cause) =>
+        new HerdrPackContractError({ cause, reason: "Could not decode clean packed manifest" })
+      )
+    )
+    if (
+      cleanManifest.dependencies?.["@test/not-installed"] !== "99.99.99" || cleanManifest.devDependencies !== undefined
+    ) {
+      return yield* new HerdrPackContractError({
+        reason: "Clean staged manifest did not pack without installing dependencies"
+      })
+    }
+
     if (archiveNameFor("@knpkv/herdr-approvals", "0.2.0") !== "knpkv-herdr-approvals-0.2.0.tgz") {
       return yield* new HerdrPackContractError({ reason: "Archive naming does not preserve package versions" })
     }
