@@ -17,6 +17,8 @@ export interface CommentCoordinates {
   readonly accountRegion: string
 }
 
+const legacyCoordinate = ""
+
 const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new CacheError({ operation: `CommentRepo.${op}`, cause })),
@@ -34,8 +36,8 @@ const makeCommentRepo = Effect.gen(function*() {
       sql`SELECT locations_json FROM pr_comments
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
-              AND repository_name IS NULL
-              AND account_region IS NULL`
+              AND repository_name = ${legacyCoordinate}
+              AND account_region = ${legacyCoordinate}`
   })
 
   const findExact_ = SqlSchema.findOneOption({
@@ -57,8 +59,8 @@ const makeCommentRepo = Effect.gen(function*() {
   const upsert_ = (awsAccountId: string, prId: string, locationsJson: string, coordinates?: CommentCoordinates) =>
     sql`INSERT OR REPLACE INTO pr_comments
           (aws_account_id, pull_request_id, repository_name, account_region, locations_json, fetched_at)
-          VALUES (${awsAccountId}, ${prId}, ${coordinates?.repositoryName ?? null}, ${
-      coordinates?.accountRegion ?? null
+          VALUES (${awsAccountId}, ${prId}, ${coordinates?.repositoryName ?? legacyCoordinate}, ${
+      coordinates?.accountRegion ?? legacyCoordinate
     },
             ${locationsJson}, datetime('now'))
       `.pipe(Effect.asVoid)

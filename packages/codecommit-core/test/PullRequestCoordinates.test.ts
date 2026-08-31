@@ -143,6 +143,16 @@ describe("pull request coordinate migration", () => {
         VALUES ('42', '123456789012')`
       yield* migration0019.pipe(Effect.provideService(SqlClient.SqlClient, sql))
 
+      yield* sql`INSERT OR REPLACE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('42', '123456789012', '', '', 'legacy-replaced')`
+      yield* sql`INSERT OR IGNORE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('42', '123456789012', '', '', 'ignored-legacy-duplicate')`
+      yield* sql`INSERT OR IGNORE INTO pr_subscriptions
+        (pull_request_id, aws_account_id, repository_name, account_region)
+        VALUES ('42', '123456789012', '', '')`
+
       yield* sql`CREATE TABLE pull_requests (
         id TEXT NOT NULL,
         aws_account_id TEXT NOT NULL,
@@ -211,12 +221,12 @@ describe("pull request coordinate migration", () => {
         ORDER BY repository_name IS NOT NULL, repository_name`
 
       expect(comments).toEqual([
-        { repositoryName: null, locationsJson: "legacy" },
+        { repositoryName: "", locationsJson: "legacy-replaced" },
         { repositoryName: "orders", locationsJson: orderComments },
         { repositoryName: "payments", locationsJson: paymentComments }
       ])
       expect(subscriptions).toEqual([
-        { repositoryName: null, accountRegion: null },
+        { repositoryName: "", accountRegion: "" },
         { repositoryName: "payments", accountRegion: "eu-west-1" }
       ])
       const commentedBy = yield* sql<{

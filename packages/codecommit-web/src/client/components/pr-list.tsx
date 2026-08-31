@@ -43,6 +43,9 @@ export const prListHref = (pr: Pick<PullRequest, "account" | "id" | "repositoryN
     String(pr.account.region)
   )
 
+export const prListKey = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
+  `${pr.account.awsAccountId ?? pr.account.profile}:${String(pr.id)}:${String(pr.repositoryName)}:${String(pr.account.region)}`
+
 const replaceStatusFacet = (params: URLSearchParams, status: "approved" | "open" | "pending"): void => {
   const retained = params.getAll("f").filter((raw) => !raw.startsWith("status:") && raw !== "")
   params.delete("f")
@@ -230,13 +233,7 @@ export function PRList() {
       return (
         <Surface className={styles.queueSurface} padding="none" form="grouped">
           {sorted.map((pr) => (
-            <PRRow
-              currentUser={appState.currentUser}
-              key={`${pr.account.profile}:${pr.id}`}
-              pr={pr}
-              showUpdated
-              to={prListHref(pr)}
-            />
+            <PRRow currentUser={appState.currentUser} key={prListKey(pr)} pr={pr} showUpdated to={prListHref(pr)} />
           ))}
         </Surface>
       )
@@ -264,12 +261,7 @@ export function PRList() {
             </div>
             <Surface className={styles.queueSurface} padding="none" form="grouped">
               {accountPrs.map((pr) => (
-                <PRRow
-                  currentUser={appState.currentUser}
-                  key={`${pr.account.profile}:${pr.id}`}
-                  pr={pr}
-                  to={prListHref(pr)}
-                />
+                <PRRow currentUser={appState.currentUser} key={prListKey(pr)} pr={pr} to={prListHref(pr)} />
               ))}
             </Surface>
           </section>

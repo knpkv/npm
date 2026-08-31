@@ -9,9 +9,11 @@ import { EventsHub, RepoChange } from "../EventsHub.js"
 const SubscriptionRow = Schema.Struct({
   awsAccountId: Schema.String,
   pullRequestId: Schema.String,
-  repositoryName: Schema.NullOr(Schema.String),
-  accountRegion: Schema.NullOr(Schema.String)
+  repositoryName: Schema.String,
+  accountRegion: Schema.String
 })
+
+const legacyCoordinate = ""
 
 export interface SubscriptionCoordinates {
   readonly repositoryName: string
@@ -40,7 +42,7 @@ const makeSubscriptionRepo = Effect.gen(function*() {
     Request: RequestPair,
     execute: (req) =>
       sql`INSERT OR IGNORE INTO pr_subscriptions (aws_account_id, pull_request_id, repository_name, account_region)
-            VALUES (${req.awsAccountId}, ${req.prId}, NULL, NULL)`
+            VALUES (${req.awsAccountId}, ${req.prId}, ${legacyCoordinate}, ${legacyCoordinate})`
   })
 
   const subscribeExact_ = SqlSchema.void({
@@ -56,7 +58,7 @@ const makeSubscriptionRepo = Effect.gen(function*() {
     execute: (req) =>
       sql`DELETE FROM pr_subscriptions
             WHERE aws_account_id = ${req.awsAccountId} AND pull_request_id = ${req.prId}
-              AND repository_name IS NULL AND account_region IS NULL`
+              AND repository_name = ${legacyCoordinate} AND account_region = ${legacyCoordinate}`
   })
 
   const unsubscribeExact_ = SqlSchema.void({
@@ -81,7 +83,7 @@ const makeSubscriptionRepo = Effect.gen(function*() {
     execute: (req) =>
       sql`SELECT 1 AS "exists" FROM pr_subscriptions
             WHERE aws_account_id = ${req.awsAccountId} AND pull_request_id = ${req.prId}
-              AND repository_name IS NULL AND account_region IS NULL`
+              AND repository_name = ${legacyCoordinate} AND account_region = ${legacyCoordinate}`
   })
 
   const isSubscribedExact_ = SqlSchema.findOneOption({
@@ -119,7 +121,17 @@ const makeSubscriptionRepo = Effect.gen(function*() {
           accountRegion: coordinates.accountRegion
         })).pipe(Effect.tap(() => publish), cacheError("unsubscribe")),
 
-    findAll: () => findAll_(voidRequest).pipe(cacheError("findAll")),
+    findAll: () =>
+      findAll_(voidRequest).pipe(
+        Effect.map((rows) =>
+          rows.map((row) => ({
+            ...row,
+            repositoryName: row.repositoryName === legacyCoordinate ? null : row.repositoryName,
+            accountRegion: row.accountRegion === legacyCoordinate ? null : row.accountRegion
+          }))
+        ),
+        cacheError("findAll")
+      ),
 
     isSubscribed: (awsAccountId: string, prId: string, coordinates?: SubscriptionCoordinates) =>
       (coordinates === undefined

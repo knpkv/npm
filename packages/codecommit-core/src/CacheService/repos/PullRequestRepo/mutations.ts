@@ -224,7 +224,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
               AND p.aws_account_id = c.aws_account_id
               AND p.repository_name = c.repository_name
               AND p.account_region = c.account_region
-            WHERE c.repository_name IS NOT NULL AND c.account_region IS NOT NULL
+            WHERE c.repository_name <> '' AND c.account_region <> ''
           `
           for (const row of rows) {
             const parsed = yield* decodeCommentLocationJson(row.locationsJson)
