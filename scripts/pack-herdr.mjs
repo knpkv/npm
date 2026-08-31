@@ -10,6 +10,7 @@ import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 const pnpmVersion = "11.21.0"
+const pnpmInvocation = ["corepack", `pnpm@${pnpmVersion}`]
 
 class PackError extends Data.TaggedError("PackError") {
   get message() {
@@ -198,13 +199,19 @@ const program = Effect.scoped(
         reason: `Expected workspace pnpm@${pnpmVersion}, got ${workspaceManifest.packageManager}`
       })
     }
-    const actualVersion = (yield* runPnpm(spawner, stdio, ["--version"], staging, false)).trim()
+    const actualVersion = (yield* runPnpm(spawner, stdio, [...pnpmInvocation, "--version"], staging, false)).trim()
     if (actualVersion !== pnpmVersion) {
       return yield* new PackError({
         reason: `Expected pnpm ${pnpmVersion}, got ${actualVersion}`
       })
     }
-    const output = yield* runPnpm(spawner, stdio, ["pack", "--pack-destination", destination], staging, true)
+    const output = yield* runPnpm(
+      spawner,
+      stdio,
+      [...pnpmInvocation, "pack", "--pack-destination", destination],
+      staging,
+      true
+    )
     yield* Stream.make(output).pipe(Stream.run(stdio.stdout()))
   })
 )

@@ -166,6 +166,13 @@ const program = Effect.scoped(
     const second = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-second-" })
     const archives = new Map<string, string>()
 
+    const stagedPnpmVersion = (yield* run(spawner, "corepack", ["pnpm@11.21.0", "--version"], first)).trim()
+    if (stagedPnpmVersion !== "11.21.0") {
+      return yield* new HerdrPackContractError({
+        reason: `Staging did not resolve pnpm@11.21.0: ${stagedPnpmVersion}`
+      })
+    }
+
     if (archiveNameFor("@knpkv/herdr-approvals", "0.2.0") !== "knpkv-herdr-approvals-0.2.0.tgz") {
       return yield* new HerdrPackContractError({ reason: "Archive naming does not preserve package versions" })
     }
