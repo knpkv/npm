@@ -27,6 +27,13 @@ export const AgentStableId = Schema.String.check(
 )
 export type AgentStableId = typeof AgentStableId.Type
 
+export const FleetHostName = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(253),
+  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/)
+)
+export type FleetHostName = typeof FleetHostName.Type
+
 export const AgentWorkerRelationship = Schema.Struct({
   parentAgentId: AgentStableId,
   relation: Schema.Literals(["delegated", "pair", "review"])
@@ -34,11 +41,7 @@ export const AgentWorkerRelationship = Schema.Struct({
 export type AgentWorkerRelationship = typeof AgentWorkerRelationship.Type
 
 export const AgentWorkerIdentity = Schema.Struct({
-  host: Schema.String.check(
-    Schema.isNonEmpty(),
-    Schema.isMaxLength(253),
-    Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/)
-  ),
+  host: FleetHostName,
   agentId: AgentStableId,
   name: Schema.String.check(
     Schema.isNonEmpty(),
@@ -272,7 +275,7 @@ export const JobHistoryPage = Schema.Struct({
 export type JobHistoryPage = typeof JobHistoryPage.Type
 
 export const FleetMachine = Schema.Struct({
-  host: JobIdentifier,
+  host: FleetHostName,
   nodeId: JobIdentifier
 })
 export type FleetMachine = typeof FleetMachine.Type
@@ -306,7 +309,7 @@ const TcpPort = Schema.Number.check(
 )
 
 export const HostConfiguration = Schema.Struct({
-  host: Schema.String,
+  host: FleetHostName,
   repository: Schema.String,
   stateDirectory: Schema.String,
   crossHost: Schema.Boolean,
@@ -316,7 +319,7 @@ export const HostConfiguration = Schema.Struct({
   allowedUsers: Schema.Array(Schema.String),
   approvalNodes: Schema.Array(Schema.String),
   machines: FleetMachines,
-  applyMachines: Schema.Array(Schema.String),
+  applyMachines: Schema.Array(FleetHostName),
   checkCommand: Command,
   applyCommand: Schema.NullOr(Command),
   browserMcpRecoverCommand: Schema.NullOr(Command),
@@ -336,7 +339,7 @@ export const HostConfiguration = Schema.Struct({
     })
   ),
   approvalHub: Schema.Struct({
-    host: Schema.String,
+    host: FleetHostName,
     nodeId: Schema.String.check(Schema.isMinLength(1), Schema.isMaxLength(256)),
     url: Schema.String.check(
       Schema.isMaxLength(2_048),
@@ -428,7 +431,7 @@ export type HostDetails = typeof HostDetails.Type
 export const HostStatus = Schema.Struct({
   ...HostDetails.fields,
   herdr: AgentInventory,
-  host: Schema.String
+  host: FleetHostName
 })
 export type HostStatus = typeof HostStatus.Type
 

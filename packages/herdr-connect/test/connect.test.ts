@@ -806,6 +806,55 @@ describe("Connect public seams", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("projects a configured dotted hostname into live agents", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-directory-hostname-test-"))
+    const dottedHost = "ser8.example.test"
+    const source: AgentSource = {
+      agents: () =>
+        Effect.succeed({
+          agents: [{
+            activityRevision: 1,
+            agentId: "agent-dotted-host",
+            kind: "codex",
+            name: "Dotted host agent",
+            paneId: "w1:p1",
+            parentAgentId: null,
+            relation: null,
+            status: "working",
+            work: "npm"
+          }],
+          available: true,
+          error: null
+        }),
+      workers: () => Effect.succeed([])
+    }
+    const configuration: HostConfiguration = {
+      ...hostConfiguration(root),
+      applyMachines: [dottedHost],
+      host: dottedHost,
+      machines: [{ host: dottedHost, nodeId: "node-ser8" }]
+    }
+    return Effect.scoped(
+      Effect.gen(function*() {
+        const activity = yield* Effect.acquireRelease(
+          AgentActivityStore.open(join(root, "activity.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const relationships = yield* Effect.acquireRelease(
+          AgentRelationshipStore.open(join(root, "relationships.sqlite")),
+          (store) => Effect.sync(() => store.close())
+        )
+        const local = yield* localConnectAgents(configuration, source, activity, relationships, 2_000)
+        expect(local.agents.map(({ host, id }) => ({ host, id }))).toEqual([
+          { host: dottedHost, id: "agent-dotted-host" }
+        ])
+      })
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("recovers a stale stored parent from newer same-pane live inventory without exposing it", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-directory-replay-test-"))
     const hostConfig = hostConfiguration(root)

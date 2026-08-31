@@ -142,6 +142,26 @@ describe("fleet local authority", () => {
     expect(Result.isFailure(
       Schema.decodeUnknownResult(HostConfiguration)({
         ...valid,
+        applyMachines: [],
+        crossHost: false,
+        host: "SER8/foo",
+        machines: [{ host: "SER8/foo", nodeId: "node-ser8" }]
+      })
+    )).toBe(true)
+    for (const host of ["SER8", "ser8.example.test"]) {
+      expect(Result.isSuccess(
+        Schema.decodeUnknownResult(HostConfiguration)({
+          ...valid,
+          applyMachines: [],
+          crossHost: false,
+          host,
+          machines: [{ host, nodeId: "node-ser8" }]
+        })
+      )).toBe(true)
+    }
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
         approvalHub: { ...valid.approvalHub, url: "https://ser8.example.test/" }
       })
     )).toBe(true)
