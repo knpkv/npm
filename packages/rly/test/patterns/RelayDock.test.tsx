@@ -345,6 +345,31 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("excludes controls disabled by an ancestor from the modal focus boundary", async () => {
+    const footer = (
+      <>
+        <fieldset>
+          <button type="button">Last enabled control</button>
+        </fieldset>
+        <fieldset disabled>
+          <button type="button">Disabled trailing control</button>
+        </fieldset>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const lastEnabled = [...portal.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Last enabled control"
+    )
+    const tab = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+
+    lastEnabled?.focus()
+    await act(async () => dialog?.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("includes a native summary as the final modal focus stop", async () => {
     const footer = (
       <details open>

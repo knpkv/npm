@@ -140,6 +140,22 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
   }
 })
 
+test("resolves compact Relay layout from a cross-window portal target", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1_440 })
+  await page.goto(story("patterns-relaydock--cross-window-viewport"))
+
+  const frame = page.frameLocator("iframe[aria-label=\"Relay portal viewport\"]")
+  const sheet = frame.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(sheet).toBeVisible()
+  await expect(sheet).toHaveAttribute("role", "dialog")
+  expect(
+    await frame.locator("html").evaluate((element) => ({
+      client: element.clientWidth,
+      scroll: element.scrollWidth
+    }))
+  ).toMatchObject({ client: 320, scroll: 320 })
+})
+
 test("modal Relay presentations isolate and scroll-lock the page without swallowing nested modal keys", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--modal-isolation"))
@@ -190,12 +206,15 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   const thread = dock.getByRole("region", { name: "Relay thread" })
   const editor = dock.getByRole("textbox", { name: "Rich Relay reply" })
   const visibleReplyAction = dock.getByRole("button", { name: "Visible reply action" })
+  const enabledFieldsetAction = dock.getByRole("button", { name: "Enabled fieldset action" })
 
   await thread.focus()
   await page.keyboard.press("Tab")
   await expect(editor).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(visibleReplyAction).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(enabledFieldsetAction).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(dock.getByRole("button", { name: "Close Relay" })).toBeFocused()
 })
