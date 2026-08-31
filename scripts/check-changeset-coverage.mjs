@@ -470,8 +470,13 @@ const reachableCallableEntries = (sources, entryPoints) => {
     resolved.set(filePath, result)
     return result
   }
-  return normalizeEntryPoints(entryPoints).flatMap(({ identity, sourcePath }) =>
-    [...exportsFor(sourcePath)].map(([exportedName, target]) => ({ entryPoint: identity, exportedName, target }))
+  return normalizeEntryPoints(entryPoints).flatMap(({ conditionPath, identity, sourcePath }) =>
+    [...exportsFor(sourcePath)].map(([exportedName, target]) => ({
+      conditionPath,
+      entryPoint: identity,
+      exportedName,
+      target
+    }))
   )
 }
 
@@ -494,13 +499,13 @@ const publicCallableChanges = (
   const signatures = (sources, entryPoints) => {
     const analysis = analyzeSources(sources)
     const result = new Map()
-    for (const { entryPoint, exportedName, target } of reachableCallableEntries(sources, entryPoints)) {
+    for (const { conditionPath, entryPoint, exportedName, target } of reachableCallableEntries(sources, entryPoints)) {
       const signature = callableParameterTypesInSources(sources, target.filePath, analysis).get(target.name)
       if (signature === undefined) continue
       const identity = `${entryPoint}\u0000${exportedName}`
       const existing = result.get(identity) ?? []
       if (!existing.some(({ filePath, name }) => filePath === target.filePath && name === target.name)) {
-        existing.push({ filePath: target.filePath, name: target.name, ...signature })
+        existing.push({ conditionPath, filePath: target.filePath, name: target.name, ...signature })
         result.set(identity, existing)
       }
     }
@@ -518,6 +523,7 @@ const publicCallableChanges = (
         .join(","),
       signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
     ].join("|")
+  const conditionPathKey = (conditionPath) => (conditionPath ?? []).join("\u0000")
   const pairSignatures = (previousSignatures, currentSignatures) => {
     const remainingPrevious = [...previousSignatures]
     const pairs = []
@@ -525,7 +531,7 @@ const publicCallableChanges = (
     for (const currentSignature of currentSignatures) {
       const index = remainingPrevious.findIndex(
         (previousSignature) =>
-          previousSignature.filePath === currentSignature.filePath && previousSignature.name === currentSignature.name
+          conditionPathKey(previousSignature.conditionPath) === conditionPathKey(currentSignature.conditionPath)
       )
       if (index === -1) {
         unmatchedCurrent.push(currentSignature)
@@ -534,8 +540,21 @@ const publicCallableChanges = (
         remainingPrevious.splice(index, 1)
       }
     }
-    const unmatchedAfterContract = []
+    const unmatchedAfterTarget = []
     for (const currentSignature of unmatchedCurrent) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) =>
+          previousSignature.filePath === currentSignature.filePath && previousSignature.name === currentSignature.name
+      )
+      if (index === -1) {
+        unmatchedAfterTarget.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const unmatchedAfterContract = []
+    for (const currentSignature of unmatchedAfterTarget) {
       const index = remainingPrevious.findIndex(
         (previousSignature) => signatureContract(previousSignature) === signatureContract(currentSignature)
       )
@@ -1493,6 +1512,40 @@ const runSelfTest = () => {
     ),
     []
   )
+  const swappedConditionalPrevious = new Map([
+    ["packages/public/src/import-view.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/require-view.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const swappedConditionalCurrent = swappedConditionalPrevious
+  const swappedConditionalCurrentManifest = {
+    exports: { ".": { import: "./src/require-view.tsx", require: "./src/import-view.tsx" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      swappedConditionalPrevious,
+      swappedConditionalCurrent,
+      manifestEntryPointDescriptors(splitConditionalManifest, "packages/public", [
+        ...swappedConditionalPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(swappedConditionalCurrentManifest, "packages/public", [
+        ...swappedConditionalCurrent.keys()
+      ])
+    ),
+    [
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/require-view.tsx",
+        name: "Public",
+        properties: ["value"]
+      },
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/import-view.tsx",
+        name: "Public",
+        properties: ["value"]
+      }
+    ]
+  )
   assert.deepEqual(
     publicCallableChanges(
       conditionalSources,
@@ -1755,13 +1808,17 @@ const manifestEntries = (manifest) => {
     const target = effectiveManifest[field]
     if (Predicate.isString(target)) entries.push({ identity: field, target })
   }
-  const collectExports = (value, subpath) => {
+  const collectExports = (value, subpath, conditionPath = []) => {
     if (Predicate.isString(value)) {
-      entries.push({ identity: `exports:${subpath ?? "."}`, target: value })
+      const entry = { identity: `exports:${subpath ?? "."}`, target: value }
+      if (conditionPath.length > 0) entry.conditionPath = conditionPath
+      entries.push(entry)
     } else if (Predicate.isObjectOrArray(value)) {
       for (const [key, nested] of Object.entries(value)) {
-        const nextSubpath = subpath ?? (key.startsWith(".") ? key : ".")
-        collectExports(nested, nextSubpath)
+        const isSubpath = subpath === undefined && key.startsWith(".")
+        const nextSubpath = subpath ?? (isSubpath ? key : ".")
+        const nextConditionPath = isSubpath ? [] : [...conditionPath, key]
+        collectExports(nested, nextSubpath, nextConditionPath)
       }
     }
   }
@@ -1800,16 +1857,26 @@ const manifestEntryPointDescriptors = (manifest, directory, sourceFiles) => {
     })
   }
   const descriptors = []
-  for (const { identity, target } of entries) {
+  for (const { conditionPath, identity, target } of entries) {
     for (const sourcePath of mapEntryPath(target)) {
-      if (!isExcludedSourcePath(sourcePath)) descriptors.push({ identity, sourcePath })
+      if (!isExcludedSourcePath(sourcePath)) {
+        const descriptor = { identity, sourcePath }
+        if (conditionPath !== undefined) descriptor.conditionPath = conditionPath
+        descriptors.push(descriptor)
+      }
     }
   }
-  return [
-    ...new Map(
-      descriptors.map((descriptor) => [`${descriptor.identity}\u0000${descriptor.sourcePath}`, descriptor])
-    ).values()
-  ]
+  const uniqueDescriptors = new Map()
+  for (const descriptor of descriptors) {
+    const key = `${descriptor.identity}\u0000${descriptor.sourcePath}`
+    const existing = uniqueDescriptors.get(key)
+    if (existing === undefined) {
+      uniqueDescriptors.set(key, descriptor)
+    } else if (existing.conditionPath !== undefined || descriptor.conditionPath !== undefined) {
+      uniqueDescriptors.set(key, { identity: descriptor.identity, sourcePath: descriptor.sourcePath })
+    }
+  }
+  return [...uniqueDescriptors.values()]
 }
 
 const manifestEntryPoints = (manifest, directory, sourceFiles) => [
