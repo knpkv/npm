@@ -1,4 +1,4 @@
-import type { Stream } from "effect"
+import { Schema, type Stream } from "effect"
 import type * as FileSystem from "effect/FileSystem"
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { streamEvents } from "../src/index.js"
@@ -8,6 +8,11 @@ type Includes<Whole, Part> = Part extends Whole ? true : false
 
 const _ordinary = streamEvents({ cwd: "/workspace", prompt: "review" })
 const _promptOnly = streamEvents({ cwd: "/workspace", prompt: "review", promptOnly: true })
+const _structured = streamEvents({
+  cwd: "/workspace",
+  outputSchema: Schema.Struct({ ok: Schema.Boolean }),
+  prompt: "review"
+})
 declare const widenedPromptOnly: boolean
 const _widened = streamEvents({ cwd: "/workspace", prompt: "review", promptOnly: widenedPromptOnly })
 
@@ -22,6 +27,7 @@ export const promptOnlyNeedsSpawner: Includes<
   ChildProcessSpawner.ChildProcessSpawner
 > = true
 export const promptOnlyNeedsFileSystem: Includes<Requirements<typeof _promptOnly>, FileSystem.FileSystem> = true
+export const structuredNeedsFileSystem: Includes<Requirements<typeof _structured>, FileSystem.FileSystem> = true
 export const widenedNeedsSpawner: Includes<
   Requirements<typeof _widened>,
   ChildProcessSpawner.ChildProcessSpawner

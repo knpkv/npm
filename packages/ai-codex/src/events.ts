@@ -4,6 +4,7 @@ import type * as AiError from "effect/unstable/ai/AiError"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { makeArguments, normalizeOptions, validatePrompt } from "./internal/configuration.js"
 import { CodexTransportError, invalidRequest, transportToAiError } from "./internal/errors.js"
+import { makeStreamOutputSchemaFile } from "./internal/outputSchema.js"
 import { resolvePromptOnlyDisabledFeatures, streamCodexLines } from "./internal/process.js"
 import type { CodexModelOptions } from "./model.js"
 
@@ -11,9 +12,16 @@ import type { CodexModelOptions } from "./model.js"
 export interface CodexEventStreamOptions extends CodexModelOptions {
   /** Prompt sent to the ephemeral Codex turn over stdin. */
   readonly prompt: string
+  /** Native JSON Schema constraint passed to `codex exec --output-schema`. */
+  readonly outputSchema?: Schema.Top
 }
 
-type OrdinaryEventStreamOptions = Omit<CodexEventStreamOptions, "promptOnly"> & {
+type OrdinaryEventStreamOptions = Omit<CodexEventStreamOptions, "outputSchema" | "promptOnly"> & {
+  readonly promptOnly?: false
+}
+
+type StructuredEventStreamOptions = Omit<CodexEventStreamOptions, "outputSchema" | "promptOnly"> & {
+  readonly outputSchema: Schema.Top
   readonly promptOnly?: false
 }
 
@@ -41,8 +49,8 @@ const validateEvent = Effect.fn("CodexEvents.validateEvent")(function*(line: str
  *
  * Records are validated as Codex event JSON but otherwise returned unchanged,
  * so callers can observe native events such as command execution and agent messages.
- * A literal `promptOnly: true` additionally requires `FileSystem`; omitted or
- * literal `false` keeps the original spawner-only environment requirement.
+ * A native output schema or literal `promptOnly: true` additionally requires
+ * `FileSystem`; an ordinary unconstrained stream remains spawner-only.
  */
 export function streamEvents(
   options: PromptOnlyEventStreamOptions
@@ -54,6 +62,13 @@ export function streamEvents(
 export function streamEvents(
   options: OrdinaryEventStreamOptions
 ): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner>
+export function streamEvents(
+  options: StructuredEventStreamOptions
+): Stream.Stream<
+  string,
+  AiError.AiError,
+  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
+>
 export function streamEvents(
   options: CodexEventStreamOptions
 ): Stream.Stream<
@@ -76,15 +91,26 @@ export function streamEvents(
     const normalized = yield* normalizeOptions(options, "streamEvents")
     yield* validatePrompt(options.prompt, normalized.maxPromptBytes, "streamEvents")
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const fileSystem = normalized.promptOnly || options.outputSchema !== undefined
+      ? yield* FileSystem.FileSystem
+      : undefined
     const promptOnlyDisabledFeatures = normalized.promptOnly
       ? yield* Effect.gen(function*() {
-        const fileSystem = yield* FileSystem.FileSystem
+        if (fileSystem === undefined) return []
         return yield* resolvePromptOnlyDisabledFeatures(normalized, spawner, fileSystem, "streamEvents")
       })
       : []
+    const schemaFile = options.outputSchema === undefined || fileSystem === undefined
+      ? undefined
+      : yield* makeStreamOutputSchemaFile(fileSystem, options.outputSchema).pipe(
+        Effect.mapError((error) => transportToAiError("streamEvents", error))
+      )
+    const cleanupSchema = schemaFile === undefined || fileSystem === undefined
+      ? Effect.void
+      : fileSystem.remove(schemaFile).pipe(Effect.ignore)
 
     return streamCodexLines({
-      args: makeArguments(normalized, undefined, promptOnlyDisabledFeatures),
+      args: makeArguments(normalized, schemaFile, promptOnlyDisabledFeatures),
       cwd: normalized.cwd,
       environment: normalized.environment,
       executable: normalized.executable,
@@ -95,7 +121,8 @@ export function streamEvents(
       timeout: normalized.timeout
     }).pipe(
       Stream.mapEffect(validateEvent),
-      Stream.mapError((error) => transportToAiError("streamEvents", error))
+      Stream.mapError((error) => transportToAiError("streamEvents", error)),
+      Stream.ensuring(cleanupSchema)
     )
   }))
 }

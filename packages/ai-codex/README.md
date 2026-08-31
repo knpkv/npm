@@ -55,10 +55,11 @@ For native Codex progress and tool-call events, use the opt-in raw JSONL stream:
 ```ts
 import { NodeServices } from "@effect/platform-node"
 import { streamEvents } from "@knpkv/ai-codex"
-import { Stream } from "effect"
+import { Schema, Stream } from "effect"
 
 const events = streamEvents({
   cwd: ".",
+  outputSchema: Schema.Struct({ summary: Schema.String }),
   prompt: "Inspect package.json and summarize the available scripts."
 }).pipe(Stream.provide(NodeServices.layer))
 ```
@@ -67,7 +68,9 @@ Each stream element is one validated, non-empty `codex exec --json` record,
 returned unchanged as soon as the CLI writes it. This low-level interface can
 include native `command_execution` and other tool events. Its event shapes are
 owned by the installed Codex CLI and are not normalized or versioned by this
-package.
+package. `outputSchema` is materialized as an owner-only scoped file and passed
+to native `codex exec --output-schema`; callers still own fail-closed decoding
+of the final agent message.
 
 ## Real smoke test
 
