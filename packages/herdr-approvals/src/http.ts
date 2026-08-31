@@ -37,6 +37,7 @@ import {
   FleetAuthorizationError,
   FleetJobNotFoundError,
   FleetOperationError,
+  fleetResponseBodyMaxBytes,
   FleetValidationError,
   JobHash,
   JobRequest,
@@ -88,6 +89,7 @@ import {
   type PendingApprovalTarget
 } from "./dashboard-model.js"
 import { DashboardView } from "./dashboard-view.js"
+import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
 import {
@@ -121,6 +123,7 @@ type ApiError =
   | ApprovalAppStoreError
   | ChatHistoryError
   | ConnectPeerError
+  | DashboardResponseBudgetError
   | FleetApprovalError
   | FleetAuthorizationError
   | FleetJobConflictError
@@ -222,6 +225,15 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 500, body: { error: error._tag, detail: error.operation } }
     case "WorkCheckpointConflictError":
       return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+    case "DashboardResponseBudgetError":
+      return {
+        status: 413,
+        body: {
+          error: error._tag,
+          encodedBytes: error.encodedBytes,
+          maximumBytes: error.maximumBytes
+        }
+      }
   }
 }
 
@@ -436,6 +448,47 @@ const pendingApproval = (record: JobRecord): PendingApproval => ({
 })
 
 const dashboardHistoryMaxBytes = 512 * 1024
+export const dashboardSnapshotBytes = (snapshot: DashboardSnapshot): number =>
+  new TextEncoder().encode(JSON.stringify(snapshot)).byteLength + 1
+
+export const budgetDashboardSnapshot = Effect.fn(
+  "HostHttp.budgetDashboardSnapshot"
+)(function*(
+  snapshot: DashboardSnapshot
+) {
+  const originalRecords = snapshot.records
+  const records = [...originalRecords]
+  while (
+    records.length > 0 &&
+    dashboardSnapshotBytes({ ...snapshot, records }) > fleetResponseBodyMaxBytes
+  ) {
+    records.pop()
+  }
+  const last = records.at(-1)
+  const first = originalRecords[0]
+  const candidate = records.length === originalRecords.length
+    ? snapshot
+    : {
+      ...snapshot,
+      records,
+      historyNextCursor: last !== undefined
+        ? { createdAt: last.createdAt, id: last.id }
+        : first === undefined
+        ? snapshot.historyNextCursor
+        : {
+          createdAt: first.createdAt + 1,
+          id: first.id
+        }
+    }
+  const encodedBytes = dashboardSnapshotBytes(candidate)
+  if (encodedBytes > fleetResponseBodyMaxBytes) {
+    return yield* new DashboardResponseBudgetError({
+      encodedBytes,
+      maximumBytes: fleetResponseBodyMaxBytes
+    })
+  }
+  return candidate
+})
 
 const dashboardHistory = Effect.fn("HostHttp.dashboardHistory")(function*(
   service: FleetService,
@@ -1528,8 +1581,6 @@ export const startHttpServer = async (
               history: dashboardHistory(service, null),
               status: service.status()
             })
-            const chatHistory = mode === "serve" ? yield* chat.history() : null
-            const workSnapshots = mode === "serve" ? yield* work.snapshots(observedAt) : null
             let directory: ApprovalDirectory | null = null
             let pendingApprovals: DashboardSnapshot["pendingApprovals"] = {
               local: approvalSurface
@@ -1585,24 +1636,26 @@ export const startHttpServer = async (
                 }
               }
             }
-            return {
-              host: config.host,
-              observedAt,
-              approvalsEnabled: approvalSurface,
-              approvalApp: {
-                canonical: mode === "serve",
-                canonicalUrl: config.approvalHub.url,
-                chatEnabled: mode === "serve",
-                pushEnabled: mode === "serve"
-              },
-              chat: chatHistory,
-              work: workSnapshots,
-              status: state.status,
-              records: state.history.records,
-              historyNextCursor: state.history.nextCursor,
-              directory,
-              pendingApprovals
-            } satisfies DashboardSnapshot
+            return yield* budgetDashboardSnapshot(
+              {
+                host: config.host,
+                observedAt,
+                approvalsEnabled: approvalSurface,
+                approvalApp: {
+                  canonical: mode === "serve",
+                  canonicalUrl: config.approvalHub.url,
+                  chatEnabled: mode === "serve",
+                  pushEnabled: mode === "serve"
+                },
+                chat: null,
+                work: null,
+                status: state.status,
+                records: state.history.records,
+                historyNextCursor: state.history.nextCursor,
+                directory,
+                pendingApprovals
+              } satisfies DashboardSnapshot
+            )
           })
 
           if (request.method === "GET" && url.pathname === "/v1/dashboard") {

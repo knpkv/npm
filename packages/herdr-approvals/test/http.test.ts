@@ -8,6 +8,7 @@ import {
   terminalFrameMaxEncodedBytes,
   type TerminalSession
 } from "@knpkv/herdr-connect"
+import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
 import {
   FleetAuthorizationError,
   fleetResponseBodyMaxBytes,
@@ -41,7 +42,13 @@ import WebSocketClient from "ws"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
 import { DashboardSnapshot, PendingApprovalSummary, PendingApprovalTarget } from "../src/dashboard-model.js"
-import { makeRunner, recordWorkCheckpointRequest, startHttpServer } from "../src/http.js"
+import {
+  budgetDashboardSnapshot,
+  dashboardSnapshotBytes,
+  makeRunner,
+  recordWorkCheckpointRequest,
+  startHttpServer
+} from "../src/http.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 
@@ -111,23 +118,6 @@ const directTls = {
   certificatePath: join(import.meta.dirname, "fixtures/ser8.example.test.crt"),
   privateKeyPath: join(import.meta.dirname, "fixtures/ser8.example.test.key")
 }
-
-const secureRequestStatus = (
-  url: string,
-  headers: Readonly<Record<string, string>>
-): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const request = httpsRequest(
-      url,
-      { headers, rejectUnauthorized: false },
-      (response) => {
-        response.resume()
-        resolve(response.statusCode ?? 0)
-      }
-    )
-    request.once("error", reject)
-    request.end()
-  })
 
 const secureRequestBody = (
   url: string,
@@ -241,6 +231,115 @@ const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string
 })
 
 describe("host HTTP authority", () => {
+  it.effect("refuses an oversized dashboard when no history remains to page", () =>
+    Effect.gen(function*() {
+      const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)({
+        approvalApp: {
+          canonical: true,
+          canonicalUrl: "https://ser8.example.test:4779/",
+          chatEnabled: true,
+          pushEnabled: true
+        },
+        approvalsEnabled: true,
+        chat: null,
+        directory: null,
+        historyNextCursor: null,
+        host: "SER8",
+        observedAt: 1,
+        pendingApprovals: {
+          failures: [],
+          local: [],
+          remote: Array.from({ length: 16 }, (_, index) => ({
+            approval: {
+              actor: "andrey@example.com",
+              approvalExpiresAt: null,
+              createdAt: index,
+              id: `job-${index}`,
+              payload: {
+                kind: "agent.delegate",
+                mode: "work",
+                prompt: "\u0001".repeat(jobTextMaxLength),
+                repository: "/repo"
+              },
+              status: "pending_approval"
+            },
+            approvalUrl: `http://100.64.0.${index + 1}:4779/`,
+            host: `worker-${index}`
+          }))
+        },
+        records: [],
+        status: {
+          applyConfigured: false,
+          branch: "main",
+          dirty: false,
+          herdr: { agents: [], available: true, error: null },
+          host: "SER8",
+          repository: "/repo",
+          revision: "abc123"
+        },
+        work: null
+      })
+      expect(Buffer.byteLength(JSON.stringify(snapshot))).toBeGreaterThan(
+        fleetResponseBodyMaxBytes
+      )
+      expect(yield* Effect.result(budgetDashboardSnapshot(snapshot))).toMatchObject({
+        failure: {
+          _tag: "DashboardResponseBudgetError",
+          maximumBytes: fleetResponseBodyMaxBytes
+        }
+      })
+    }))
+
+  it.effect("counts the emitted newline at the exact dashboard response limit", () =>
+    Effect.gen(function*() {
+      const base = Schema.decodeUnknownSync(DashboardSnapshot)({
+        approvalApp: {
+          canonical: true,
+          canonicalUrl: "https://ser8.example.test:4779/",
+          chatEnabled: true,
+          pushEnabled: true
+        },
+        approvalsEnabled: true,
+        chat: null,
+        directory: null,
+        historyNextCursor: null,
+        host: "SER8",
+        observedAt: 1,
+        pendingApprovals: { failures: [], local: [], remote: [] },
+        records: [],
+        status: {
+          applyConfigured: false,
+          branch: "main",
+          dirty: false,
+          herdr: { agents: [], available: true, error: null },
+          host: "SER8",
+          repository: "/repo",
+          revision: ""
+        },
+        work: null
+      })
+      const rawBaseBytes = Buffer.byteLength(JSON.stringify(base))
+      const exactRawLimit = Schema.decodeUnknownSync(DashboardSnapshot)({
+        ...base,
+        status: {
+          ...base.status,
+          revision: "x".repeat(fleetResponseBodyMaxBytes - rawBaseBytes)
+        }
+      })
+      expect(Buffer.byteLength(JSON.stringify(exactRawLimit))).toBe(
+        fleetResponseBodyMaxBytes
+      )
+      expect(dashboardSnapshotBytes(exactRawLimit)).toBe(
+        fleetResponseBodyMaxBytes + 1
+      )
+      expect(yield* Effect.result(budgetDashboardSnapshot(exactRawLimit))).toMatchObject({
+        failure: {
+          _tag: "DashboardResponseBudgetError",
+          encodedBytes: fleetResponseBodyMaxBytes + 1
+        }
+      })
+    }))
+
   it.effect("records only authorized valid Work checkpoints and projects them immediately", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-work-checkpoint-"))
     return Effect.gen(function*() {
@@ -396,8 +495,14 @@ esac
           if (server.approvalUrl === null) {
             return yield* Effect.die("approval listener missing")
           }
+          const dashboardResponse = yield* Effect.promise(() => fetch(`${server.approvalUrl}/v1/dashboard`))
+          const dashboardBody = yield* Effect.promise(() => dashboardResponse.text())
+          expect(dashboardResponse.status).toBe(200)
+          expect(Buffer.byteLength(dashboardBody)).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
           const initial = Schema.decodeUnknownSync(DashboardSnapshot)(
-            yield* Effect.promise(() => fetch(`${server.approvalUrl}/v1/dashboard`).then((response) => response.json()))
+            JSON.parse(dashboardBody)
           )
           expect(initial.pendingApprovals.local).toHaveLength(
             pendingApprovalPageMaxRecords
@@ -694,15 +799,60 @@ esac
             (workStore) => Effect.sync(() => workStore.close())
           )
           expect(acceptedWorkCheckpoints).toBeLessThan(11)
+          yield* Effect.acquireUseRelease(
+            ChatStore.open(join(root, "approval-app.sqlite")),
+            (chatStore) =>
+              Effect.forEach(
+                Array.from({ length: chatHistoryMaxEntries }, (_, index) => index),
+                (index) => {
+                  const jobId = `chat-job-${index}`
+                  const turn: StoredChatTurn = {
+                    createdAt: index,
+                    id: `chat-turn-${index}`,
+                    jobId,
+                    message: "m".repeat(2_000),
+                    mode: "ask"
+                  }
+                  const record: JobRecord = {
+                    actor: "andrey@example.com",
+                    approvalNonce: null,
+                    approvedBy: null,
+                    createdAt: index,
+                    error: null,
+                    hash: index.toString(16).padStart(64, "0"),
+                    id: jobId,
+                    payload: {
+                      channel: "coordinator_chat",
+                      kind: "agent.delegate",
+                      mode: "consult",
+                      prompt: turn.message,
+                      repository: "/repo"
+                    },
+                    result: "r".repeat(20_000),
+                    status: "succeeded",
+                    updatedAt: index
+                  }
+                  return Effect.all([store.put(record), chatStore.put(turn)], {
+                    discard: true
+                  })
+                },
+                { discard: true }
+              ),
+            (chatStore) => Effect.sync(() => chatStore.close())
+          )
           expect(server.serveUrl).toMatch(/^https:\/\//)
           expect(server.approvalUrl).toBe(server.serveUrl)
           const requestHeaders = {
             host: "ser8.example.test:0",
             "tailscale-user-login": "attacker@example.com"
           }
-          expect(
-            yield* Effect.promise(() => secureRequestStatus(`${server.serveUrl}/v1/dashboard`, requestHeaders))
-          ).toBe(200)
+          const dashboardResponse = yield* Effect.promise(() =>
+            secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
+          )
+          expect(dashboardResponse.status).toBe(200)
+          expect(Buffer.byteLength(dashboardResponse.body)).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
           const workResponse = yield* Effect.promise(() =>
             secureRequestBody(`${server.serveUrl}/v1/work`, requestHeaders)
           )
@@ -713,6 +863,16 @@ esac
           expect(
             Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now.goals
           ).toHaveLength(acceptedWorkCheckpoints)
+          const chatResponse = yield* Effect.promise(() =>
+            secureRequestBody(`${server.serveUrl}/v1/chat`, requestHeaders)
+          )
+          expect(chatResponse.status).toBe(200)
+          expect(Buffer.byteLength(chatResponse.body)).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
+          expect(
+            Schema.decodeUnknownSync(ChatHistory)(JSON.parse(chatResponse.body)).entries
+          ).toHaveLength(chatHistoryMaxEntries)
           const agentIds: Array<string> = []
           let agentCursor: typeof FleetConnectAgentPage.Type["nextCursor"] = null
           do {

@@ -12,6 +12,7 @@ import { createRoot, hydrateRoot } from "react-dom/client"
 import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
 import { JobRecord } from "@knpkv/herdr-fleet/model"
+import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
 import {
@@ -148,6 +149,7 @@ const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecisi
 })
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
+const loadWork = fetchJson(WorkSnapshots, "/v1/work")
 
 const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
   return yield* fetchJson(ChatEntry, "/v1/chat", {
@@ -339,6 +341,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
   const chat = browserRuntime.atom(loadChat, {
     initialValue: initial.chat ?? { entries: [] }
   })
+  const work = browserRuntime.atom(loadWork)
   const chatPoll = browserRuntime.atom(
     initial.approvalApp.chatEnabled
       ? Atom.refresh(chat).pipe(Effect.repeat(Schedule.spaced("3 seconds")))
@@ -362,7 +365,8 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     ),
     historyPage: browserRuntime.fn(loadDashboardHistory),
     pendingTarget: browserRuntime.fn(loadPendingApprovalTarget),
-    pull: Atom.make<PullState>(initialPull)
+    pull: Atom.make<PullState>(initialPull),
+    work
   }
 }
 
@@ -371,9 +375,11 @@ type DashboardAtoms = ReturnType<typeof makeDashboardAtoms>
 const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const result = useAtomValue(atoms.dashboard)
   const chatResult = useAtomValue(atoms.chat)
+  const workResult = useAtomValue(atoms.work)
   const notificationResult = useAtomValue(atoms.notification)
   const refresh = useAtomRefresh(atoms.dashboard)
   const refreshChat = useAtomRefresh(atoms.chat)
+  const refreshWork = useAtomRefresh(atoms.work)
   const refreshNotification = useAtomRefresh(atoms.notification)
   const runDecision = useAtomSet(atoms.decision, { mode: "promiseExit" })
   const runChat = useAtomSet(atoms.chatSend, { mode: "promiseExit" })
@@ -405,6 +411,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setPull({ ...initialPull, refreshing: true })
     refresh()
     refreshChat()
+    refreshWork()
   }
   const onTouchStart = (event: TouchEvent<HTMLDivElement>): void => {
     if (window.scrollY === 0 && event.touches.length === 1) {
@@ -480,6 +487,11 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     : chatResult._tag === "Failure" && chatResult.previousSuccess._tag === "Some"
       ? chatResult.previousSuccess.value.value
       : snapshot?.chat
+  const work = AsyncResult.isSuccess(workResult)
+    ? workResult.value
+    : workResult._tag === "Failure" && workResult.previousSuccess._tag === "Some"
+      ? workResult.previousSuccess.value.value
+      : snapshot?.work
   const notificationState: NotificationState = AsyncResult.isSuccess(notificationResult)
     ? notificationResult.value
     : notificationResult._tag === "Failure"
@@ -494,7 +506,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       ? null
       : withPendingApprovalTarget(
           {
-            ...(chat === undefined ? snapshot : { ...snapshot, chat }),
+            ...(chat === undefined && work === undefined
+              ? snapshot
+              : { ...snapshot, chat: chat ?? null, work: work ?? null }),
             historyNextCursor,
             records: [...snapshot.records, ...historyRecords]
           },
