@@ -299,7 +299,9 @@ export class ApprovalAppStore {
         database
           .prepare(
             `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
-             VALUES (?, ?, ?, ?)`
+             VALUES (?, ?, ?, ?)
+             ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
+               delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at)`
           )
           .run(normalizedHost, jobId, endpoint, deliveredAt)
       },

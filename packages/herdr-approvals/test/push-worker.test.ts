@@ -127,6 +127,57 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("retains the newest concurrent delivery timestamp", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-delivery-race-test-"))
+    const path = join(root, "approval.sqlite")
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(path),
+      (store) =>
+        Effect.scoped(Effect.gen(function*() {
+          const database = yield* Effect.acquireRelease(
+            Effect.sync(() => new DatabaseSync(path)),
+            (connection) => Effect.sync(() => connection.close())
+          )
+          database.exec(`
+            CREATE TRIGGER insert_newer_delivery
+            BEFORE INSERT ON push_deliveries
+            WHEN NEW.job_id = 'job-race'
+            BEGIN
+              INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at)
+              VALUES (NEW.host, NEW.job_id, NEW.endpoint, NEW.delivered_at + 1);
+            END;
+          `)
+          yield* store.recordDelivery(
+            "SER8",
+            "job-race",
+            subscription.endpoint,
+            1_000
+          )
+          expect(
+            yield* store.hasDelivered(
+              "ser8",
+              "job-race",
+              subscription.endpoint,
+              1_001
+            )
+          ).toBe(true)
+          expect(
+            yield* store.hasDelivered(
+              "ser8",
+              "job-race",
+              subscription.endpoint,
+              1_002
+            )
+          ).toBe(false)
+        })),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("does not recreate delivery state for a removed subscription", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-expired-test-"))
     return Effect.acquireUseRelease(
