@@ -497,18 +497,70 @@ const publicCallableChanges = (
     for (const { entryPoint, exportedName, target } of reachableCallableEntries(sources, entryPoints)) {
       const signature = callableParameterTypesInSources(sources, target.filePath, analysis).get(target.name)
       if (signature === undefined) continue
-      result.set(`${entryPoint}\u0000${exportedName}`, { filePath: target.filePath, name: target.name, ...signature })
+      const identity = `${entryPoint}\u0000${exportedName}`
+      const existing = result.get(identity) ?? []
+      if (!existing.some(({ filePath, name }) => filePath === target.filePath && name === target.name)) {
+        existing.push({ filePath: target.filePath, name: target.name, ...signature })
+        result.set(identity, existing)
+      }
     }
     return result
   }
   const previous = signatures(previousSources, previousEntryPoints)
   const current = signatures(currentSources, currentEntryPoints)
   const changes = []
-  for (const [identity, currentSignature] of current) {
-    const previousSignature = previous.get(identity)
-    const currentProperties = currentSignature.properties.members
+  const signatureContract = (signature) =>
+    [
+      signature.properties.resolved ? "resolved" : "unresolved",
+      [...signature.properties.members.entries()]
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(([name, type]) => `${name}:${type}`)
+        .join(","),
+      signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
+    ].join("|")
+  const pairSignatures = (previousSignatures, currentSignatures) => {
+    const remainingPrevious = [...previousSignatures]
+    const pairs = []
+    const unmatchedCurrent = []
+    for (const currentSignature of currentSignatures) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) =>
+          previousSignature.filePath === currentSignature.filePath && previousSignature.name === currentSignature.name
+      )
+      if (index === -1) {
+        unmatchedCurrent.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const unmatchedAfterContract = []
+    for (const currentSignature of unmatchedCurrent) {
+      const index = remainingPrevious.findIndex(
+        (previousSignature) => signatureContract(previousSignature) === signatureContract(currentSignature)
+      )
+      if (index === -1) {
+        unmatchedAfterContract.push(currentSignature)
+      } else {
+        pairs.push([remainingPrevious[index], currentSignature])
+        remainingPrevious.splice(index, 1)
+      }
+    }
+    const fallbackCount = Math.min(remainingPrevious.length, unmatchedAfterContract.length)
+    for (let index = 0; index < fallbackCount; index += 1) {
+      pairs.push([remainingPrevious[index], unmatchedAfterContract[index]])
+    }
+    return {
+      pairs,
+      currentOnly: unmatchedAfterContract.slice(fallbackCount),
+      previousOnly: remainingPrevious.slice(fallbackCount)
+    }
+  }
+  const compareSignatures = (previousSignature, currentSignature) => {
+    const currentProperties = currentSignature?.properties.members ?? new Map()
     const previousProperties = previousSignature?.properties.members ?? new Map()
     if (
+      currentSignature !== undefined &&
       currentSignature.properties.resolved &&
       (previousSignature === undefined || previousSignature.properties.resolved)
     ) {
@@ -533,20 +585,23 @@ const publicCallableChanges = (
         }
       }
     }
-    for (const property of [...currentProperties.keys()].toSorted()) {
-      const previousType = previousProperties.get(property)
-      const currentType = currentProperties.get(property)
-      if (previousType !== undefined && currentType !== undefined && previousType !== currentType) {
-        changes.push({
-          kind: "type-change",
-          filePath: currentSignature.filePath,
-          name: currentSignature.name,
-          properties: [property]
-        })
+    if (currentSignature !== undefined) {
+      for (const property of [...currentProperties.keys()].toSorted()) {
+        const previousType = previousProperties.get(property)
+        const currentType = currentProperties.get(property)
+        if (previousType !== undefined && currentType !== undefined && previousType !== currentType) {
+          changes.push({
+            kind: "type-change",
+            filePath: currentSignature.filePath,
+            name: currentSignature.name,
+            properties: [property]
+          })
+        }
       }
     }
     if (
       previousSignature !== undefined &&
+      currentSignature !== undefined &&
       currentSignature.returnResolved &&
       previousSignature.returnResolved &&
       currentSignature.returnType !== previousSignature.returnType
@@ -559,14 +614,24 @@ const publicCallableChanges = (
       })
     }
   }
-  for (const [identity, previousSignature] of previous) {
-    if (current.has(identity)) continue
-    changes.push({
-      kind: "callable-removal",
-      filePath: previousSignature.filePath,
-      name: previousSignature.name,
-      properties: [...previousSignature.properties.members.keys()].toSorted()
-    })
+  const compareIdentity = (currentSignatures, previousSignatures) => {
+    const { pairs, currentOnly, previousOnly } = pairSignatures(previousSignatures, currentSignatures)
+    for (const [previousSignature, currentSignature] of pairs) compareSignatures(previousSignature, currentSignature)
+    for (const currentSignature of currentOnly) compareSignatures(undefined, currentSignature)
+    for (const previousSignature of previousOnly) {
+      changes.push({
+        kind: "callable-removal",
+        filePath: previousSignature.filePath,
+        name: previousSignature.name,
+        properties: [...previousSignature.properties.members.keys()].toSorted()
+      })
+    }
+  }
+  for (const [identity, currentSignatures] of current) {
+    compareIdentity(currentSignatures, previous.get(identity) ?? [])
+  }
+  for (const [identity, previousSignatures] of previous) {
+    if (!current.has(identity)) compareIdentity([], previousSignatures)
   }
   return changes
 }
@@ -1387,6 +1452,44 @@ const runSelfTest = () => {
       conditionalSources,
       manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
       manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    []
+  )
+  const splitConditionalPrevious = new Map([
+    ["packages/public/src/import-view.tsx", "export const Public = (props: { value: string }) => props.value"],
+    ["packages/public/src/require-view.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const splitConditionalCurrent = new Map([
+    ["packages/public/src/import-view.tsx", "export const Public = (props: { value: number }) => props.value"],
+    ["packages/public/src/require-view.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const splitConditionalManifest = {
+    exports: { ".": { import: "./src/import-view.tsx", require: "./src/require-view.tsx" } }
+  }
+  const splitConditionalDescriptors = (sources) =>
+    manifestEntryPointDescriptors(splitConditionalManifest, "packages/public", [...sources.keys()])
+  assert.deepEqual(
+    publicCallableChanges(
+      splitConditionalPrevious,
+      splitConditionalCurrent,
+      splitConditionalDescriptors(splitConditionalPrevious),
+      splitConditionalDescriptors(splitConditionalCurrent)
+    ),
+    [
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/import-view.tsx",
+        name: "Public",
+        properties: ["value"]
+      }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      splitConditionalPrevious,
+      splitConditionalPrevious,
+      splitConditionalDescriptors(splitConditionalPrevious),
+      splitConditionalDescriptors(splitConditionalPrevious)
     ),
     []
   )
