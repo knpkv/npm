@@ -39,6 +39,15 @@ export type ConnectPreferenceResolution =
   | { readonly _tag: "retry"; readonly reason: "unknown" }
   | { readonly _tag: "rejected"; readonly reason: "malformed" }
 
+export type RememberedConnectPreference =
+  | { readonly _tag: "available"; readonly key: string | null }
+  | { readonly _tag: "unavailable" }
+
+export type ConnectPreferenceDecision =
+  | { readonly _tag: "connect"; readonly target: ConnectAgent }
+  | { readonly _tag: "retry"; readonly error: "connect_target.unknown"; readonly key: string | null }
+  | { readonly _tag: "select"; readonly error: "connect_target.malformed" | null; readonly key: string | null }
+
 export const resolveConnectPreference = Effect.fn("HerdrConnect.resolvePreference")(function*(
   search: string,
   agents: ReadonlyArray<ConnectAgent>
@@ -54,4 +63,37 @@ export const resolveConnectPreference = Effect.fn("HerdrConnect.resolvePreferenc
           : { _tag: "rejected", reason: error.reason }
       ))
   )
+})
+
+const connectPreferenceDecision = (
+  resolution: ConnectPreferenceResolution,
+  rememberedKey: string | null
+): ConnectPreferenceDecision => {
+  if (resolution._tag === "retry") {
+    return {
+      _tag: "retry",
+      error: "connect_target.unknown",
+      key: rememberedKey
+    }
+  }
+  if (resolution._tag === "rejected") {
+    return {
+      _tag: "select",
+      error: "connect_target.malformed",
+      key: rememberedKey
+    }
+  }
+  return resolution.target === null
+    ? { _tag: "select", error: null, key: rememberedKey }
+    : { _tag: "connect", target: resolution.target }
+}
+
+export const resolveConnectPreferenceDecision = Effect.fn("HerdrConnect.resolvePreferenceDecision")(function*(
+  search: string,
+  agents: ReadonlyArray<ConnectAgent>,
+  remembered: RememberedConnectPreference
+) {
+  const rememberedKey = remembered._tag === "available" ? remembered.key : null
+  const resolution = yield* resolveConnectPreference(search, agents)
+  return connectPreferenceDecision(resolution, rememberedKey)
 })

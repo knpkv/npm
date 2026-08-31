@@ -38,7 +38,7 @@ import {
   PersistedConnectAgentMetadata,
   type RelationshipObservation
 } from "../src/relationship-store.js"
-import { resolveConnectPreference, resolveConnectTarget } from "../src/target.js"
+import { resolveConnectPreference, resolveConnectPreferenceDecision, resolveConnectTarget } from "../src/target.js"
 import { acquireTerminalSetup } from "../src/terminal-setup.js"
 import { boundedTerminalLines, makeHerdrTerminalConnector, terminalEventMaxLineBytes } from "../src/terminal.js"
 import { calendarConnectAgents, connectLineageRows } from "../src/view.js"
@@ -644,6 +644,24 @@ describe("Connect public seams", () => {
       expect(
         yield* resolveConnectPreference("?host=PI", [remote])
       ).toMatchObject({ _tag: "rejected", reason: "malformed" })
+    }))
+
+  it.effect("resolves URL targets when optional preference storage is unavailable", () =>
+    Effect.gen(function*() {
+      const remote = agent("agent-worker", "PI")
+      expect(
+        yield* resolveConnectPreferenceDecision(
+          "?host=PI&agent=agent-worker",
+          [remote],
+          { _tag: "unavailable" }
+        )
+      ).toEqual({ _tag: "connect", target: remote })
+      expect(
+        yield* resolveConnectPreferenceDecision("", [remote], {
+          _tag: "available",
+          key: "SER8:agent-remembered"
+        })
+      ).toEqual({ _tag: "select", error: null, key: "SER8:agent-remembered" })
     }))
 
   it("accepts only activity timestamps renderable by JavaScript Date", () => {

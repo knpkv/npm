@@ -27,7 +27,7 @@ import {
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
-import { resolveConnectPreference } from "./target.js"
+import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
@@ -481,24 +481,25 @@ export const ConnectSurface = ({
     )
   }
   useEffect(() => {
-    if (preferenceApplied.current || current === null || !AsyncResult.isSuccess(remembered)) return
+    if (preferenceApplied.current || current === null) return
+    const stored: RememberedConnectPreference = AsyncResult.isSuccess(remembered)
+      ? { _tag: "available", key: remembered.value }
+      : { _tag: "unavailable" }
     const fiber = Effect.runFork(
-      resolveConnectPreference(window.location.search, current.agents).pipe(
-        Effect.tap((resolution) =>
+      resolveConnectPreferenceDecision(window.location.search, current.agents, stored).pipe(
+        Effect.tap((decision) =>
           Effect.sync(() => {
-            if (resolution._tag === "retry") {
-              setSelectedKey(remembered.value)
-              setPreferenceError(`connect_target.${resolution.reason}`)
+            if (decision._tag === "retry") {
+              setSelectedKey(decision.key)
+              setPreferenceError(decision.error)
               return
             }
             preferenceApplied.current = true
-            if (resolution._tag === "rejected") {
-              setSelectedKey(remembered.value)
-              setPreferenceError(`connect_target.${resolution.reason}`)
-            } else if (resolution.target === null) {
-              setSelectedKey(remembered.value)
+            if (decision._tag === "select") {
+              setSelectedKey(decision.key)
+              setPreferenceError(decision.error)
             } else {
-              selectAgent(resolution.target)
+              selectAgent(decision.target)
             }
           })
         )
