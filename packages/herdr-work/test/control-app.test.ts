@@ -1,0 +1,125 @@
+import { describe, expect, it } from "@effect/vitest"
+import { Schema } from "effect"
+import { createElement } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
+import { WorkBoard, WorkGoal, type WorkSnapshot, type WorkSnapshots } from "../src/index.js"
+
+const workGoalInput = {
+  blocker: null,
+  connectTarget: {
+    agentId: "agent-work-owner",
+    host: "SER8",
+    url: "/connect/?agent=agent-work-owner&host=SER8"
+  },
+  agentHierarchy: {
+    agent: {
+      agentId: "agent-work-owner",
+      host: "SER8",
+      name: "Work owner",
+      paneId: "w1:p2",
+      relationship: {
+        parentAgentId: "agent-coordinator",
+        relation: "delegated"
+      }
+    }
+  },
+  activity: [
+    {
+      id: "activity-started",
+      kind: "status",
+      occurredAt: 2_000,
+      summary: "Agent started the implementation"
+    },
+    {
+      id: "activity-shipped",
+      kind: "shipment",
+      occurredAt: 3_000,
+      summary: "Pull request opened"
+    }
+  ],
+  blockers: [],
+  createdAt: 1_000,
+  delivery: "pull_request",
+  detail: "Keep the daily fleet handoff visible in one place",
+  id: "goal-work-control-app",
+  owner: { id: "owner-coordinator", name: "Coordinator" },
+  repository: { branch: "feat/herdr-work-control-app", repository: "npm" },
+  requests: [
+    {
+      approvalTarget: {
+        host: "SER8",
+        url: "https://ser8.example.test/?tab=approvals"
+      },
+      id: "request-review",
+      requestedAt: 3_000,
+      state: "open",
+      summary: "Approve the package shipment"
+    }
+  ],
+  review: {
+    state: "requested",
+    summary: "Waiting for the fresh package review",
+    updatedAt: 3_000,
+    url: "https://github.com/knpkv/npm/pull/400"
+  },
+  spend: null,
+  state: "working",
+  summary: "Track agent work through shipment",
+  title: "Daily fleet Work",
+  updatedAt: 3_000,
+  approvalTarget: {
+    host: "SER8",
+    url: "https://ser8.example.test/?tab=approvals"
+  }
+}
+
+const workGoal = Schema.decodeUnknownSync(WorkGoal)(workGoalInput)
+
+const snapshotFor = (window: WorkSnapshot["window"]): WorkSnapshot => ({
+  asOf: 3_000,
+  goals: [workGoal],
+  observedAt: 3_000,
+  window
+})
+
+const snapshots: WorkSnapshots = {
+  day: snapshotFor("day"),
+  month: snapshotFor("month"),
+  now: snapshotFor("now"),
+  observedAt: 3_000,
+  week: snapshotFor("week")
+}
+
+describe("Work control app", () => {
+  it("decodes the authoritative hierarchy and exact handoff links", () => {
+    expect(workGoal.agentHierarchy?.agent.host).toBe("SER8")
+    expect(workGoal.agentHierarchy?.agent.relationship?.parentAgentId).toBe("agent-coordinator")
+    expect(workGoal.connectTarget?.url).toBe("/connect/?agent=agent-work-owner&host=SER8")
+    expect(workGoal.approvalTarget?.url).toBe("https://ser8.example.test/?tab=approvals")
+  })
+
+  it("rejects a Connect target that diverges from the authoritative agent", () => {
+    const malformed = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      connectTarget: {
+        agentId: "agent-other",
+        host: "SER8",
+        url: "/connect/?agent=agent-other&host=SER8"
+      }
+    })
+    expect(malformed._tag).toBe("Failure")
+  })
+
+  it("renders activity, requests, review, shipment, and exact links beside the hierarchy", () => {
+    const markup = renderToStaticMarkup(createElement(WorkBoard, { snapshots }))
+    expect(markup).toContain("Daily fleet Work")
+    expect(markup).toContain("SER8 / Work owner")
+    expect(markup).toContain("agent-coordinator")
+    expect(markup).toContain("Activity")
+    expect(markup).toContain("Approve the package shipment")
+    expect(markup).toContain("Waiting for the fresh package review")
+    expect(markup).toContain("Shipment path")
+    expect(markup).toContain("href=\"/connect/?agent=agent-work-owner&amp;host=SER8\"")
+    expect(markup).toContain("href=\"https://ser8.example.test/?tab=approvals\"")
+  })
+})

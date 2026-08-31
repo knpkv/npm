@@ -1,4 +1,4 @@
-import { AgentConnectTarget } from "@knpkv/herdr-fleet/model"
+import { AgentConnectTarget, AgentWorkerIdentity, FleetHostName } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
@@ -6,6 +6,19 @@ const Text = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096),
 const Timestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
+)
+const LinkUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
+    (value) => {
+      if (!URL.canParse(value)) return false
+      const url = new URL(value)
+      return (url.protocol === "http:" || url.protocol === "https:") &&
+        url.username === "" &&
+        url.password === ""
+    },
+    { expected: "an HTTP(S) URL without embedded credentials" }
+  )
 )
 
 export const workHistoryMaxEvents = 16_384
@@ -41,6 +54,58 @@ export const WorkBlocker = Schema.Struct({
 })
 export interface WorkBlocker extends Schema.Schema.Type<typeof WorkBlocker> {}
 
+export const WorkAgentHierarchy = Schema.Struct({
+  agent: AgentWorkerIdentity
+})
+export interface WorkAgentHierarchy extends Schema.Schema.Type<typeof WorkAgentHierarchy> {}
+
+export const WorkActivityKind = Schema.Literals([
+  "note",
+  "status",
+  "blocker",
+  "request",
+  "review",
+  "shipment"
+])
+export type WorkActivityKind = typeof WorkActivityKind.Type
+
+export const WorkActivity = Schema.Struct({
+  id: Identifier,
+  kind: WorkActivityKind,
+  summary: Text,
+  occurredAt: Timestamp
+})
+export interface WorkActivity extends Schema.Schema.Type<typeof WorkActivity> {}
+
+export const WorkApprovalTarget = Schema.Struct({
+  host: FleetHostName,
+  url: LinkUrl
+})
+export interface WorkApprovalTarget extends Schema.Schema.Type<typeof WorkApprovalTarget> {}
+
+export const WorkRequestState = Schema.Literals(["open", "approved", "rejected", "fulfilled"])
+export type WorkRequestState = typeof WorkRequestState.Type
+
+export const WorkRequest = Schema.Struct({
+  id: Identifier,
+  summary: Text,
+  state: WorkRequestState,
+  requestedAt: Timestamp,
+  approvalTarget: Schema.NullOr(WorkApprovalTarget)
+})
+export interface WorkRequest extends Schema.Schema.Type<typeof WorkRequest> {}
+
+export const WorkReviewState = Schema.Literals(["not_requested", "requested", "changes_requested", "approved"])
+export type WorkReviewState = typeof WorkReviewState.Type
+
+export const WorkReview = Schema.Struct({
+  state: WorkReviewState,
+  summary: Schema.NullOr(Text),
+  updatedAt: Timestamp,
+  url: Schema.NullOr(LinkUrl)
+})
+export interface WorkReview extends Schema.Schema.Type<typeof WorkReview> {}
+
 export const WorkGoal = Schema.Struct({
   id: WorkGoalId,
   title: Text,
@@ -53,12 +118,30 @@ export const WorkGoal = Schema.Struct({
   delivery: DeliveryStage,
   blocker: Schema.NullOr(WorkBlocker),
   connectTarget: Schema.NullOr(AgentConnectTarget),
+  agentHierarchy: Schema.optionalKey(Schema.NullOr(WorkAgentHierarchy)),
+  activity: Schema.optionalKey(Schema.Array(WorkActivity).check(Schema.isMaxLength(128))),
+  blockers: Schema.optionalKey(Schema.Array(WorkBlocker).check(Schema.isMaxLength(32))),
+  requests: Schema.optionalKey(Schema.Array(WorkRequest).check(Schema.isMaxLength(32))),
+  review: Schema.optionalKey(Schema.NullOr(WorkReview)),
+  approvalTarget: Schema.optionalKey(Schema.NullOr(WorkApprovalTarget)),
   createdAt: Timestamp,
   updatedAt: Timestamp
 }).check(
   Schema.makeFilter(
-    (goal) => goal.updatedAt >= goal.createdAt && ((goal.state === "blocked") === (goal.blocker !== null)),
-    { expected: "ordered goal timestamps and blocker present exactly for blocked state" }
+    (goal) => {
+      const hasBlocker = goal.blocker !== null ||
+        (goal.blockers !== undefined && goal.blockers.length > 0)
+      const agent = goal.agentHierarchy?.agent
+      return goal.updatedAt >= goal.createdAt &&
+        ((goal.state === "blocked") === hasBlocker) &&
+        (goal.blockers === undefined || goal.blocker === null) &&
+        (agent === undefined || agent === null || (
+          goal.connectTarget !== null &&
+          goal.connectTarget.agentId === agent.agentId &&
+          goal.connectTarget.host.toLowerCase() === agent.host.toLowerCase()
+        ))
+    },
+    { expected: "ordered goal timestamps, blocker state, and authoritative agent target" }
   )
 )
 export interface WorkGoal extends Schema.Schema.Type<typeof WorkGoal> {}
