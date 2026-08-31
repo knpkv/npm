@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactElement, type ReactNode } from "react"
+import { act, type ReactElement, type ReactNode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
-import { afterEach, describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import {
   RelayDock,
@@ -89,9 +89,35 @@ const dock = ({
   />
 )
 
+const ControlledDock = (): ReactElement => {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button onClick={() => setOpen(true)} type="button">
+        Open controlled Relay
+      </button>
+      <RelayDock
+        context={[
+          { id: "product", label: "Product", value: "CodeCommit" },
+          { id: "pull-request", label: "PR", value: "#184" }
+        ]}
+        footer={<textarea aria-label="Message Relay" />}
+        onOpenChange={setOpen}
+        open={open}
+        selection={{
+          model: { onValueChange: () => undefined, options: modelOptions, value: "codex" },
+          profile: { onValueChange: () => undefined, options: profileOptions, value: "review" }
+        }}
+        state={{ content: <p>One review thread</p>, status: "ready" }}
+      />
+    </>
+  )
+}
+
 afterEach(async () => {
   for (const entry of mounted.splice(0)) await act(async () => entry.root.unmount())
   document.body.replaceChildren()
+  vi.useRealTimers()
 })
 
 describe("RelayDock", () => {
@@ -171,8 +197,9 @@ describe("RelayDock", () => {
     const rail = portal.querySelector<HTMLElement>('[data-rly-relay-dock-presentation="rail"]')
     expect(rail?.getAttribute("role")).not.toBe("dialog")
     expect(document.activeElement).toBe(rail?.querySelector('[aria-label="Close Relay"]'))
+    vi.useFakeTimers()
     await act(async () => rail?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
-    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    await act(async () => vi.runAllTimers())
     expect(portal.querySelector('[data-rly-relay-dock-presentation="rail"]')).toBeNull()
     expect(document.activeElement).toBe(trigger)
   })
@@ -190,12 +217,52 @@ describe("RelayDock", () => {
     expect(dialog?.contains(document.activeElement)).toBe(true)
     expect(host.inert).toBe(true)
     expect(document.documentElement.style.overflow).toBe("hidden")
+    vi.useFakeTimers()
     await act(async () => dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
-    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
+    await act(async () => vi.runAllTimers())
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
     expect(host.inert).toBe(false)
     expect(document.documentElement.style.overflow).toBe("")
     expect(document.activeElement).toBe(trigger)
+  })
+
+  it("restores controlled docks to the element focused before opening", async () => {
+    const { host, portal } = await mount(<ControlledDock />)
+    const opener = host.querySelector<HTMLButtonElement>("button")
+    if (opener === null) throw new Error("Controlled RelayDock opener did not render")
+    opener.focus()
+    await act(async () => opener.click())
+
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    expect(document.activeElement).toBe(close)
+    vi.useFakeTimers()
+    await act(async () => close?.click())
+    await act(async () => vi.runAllTimers())
+    expect(document.activeElement).toBe(opener)
+  })
+
+  it("honors Tab and Escape already prevented by inline content", async () => {
+    const editor = (
+      <textarea
+        aria-label="Owned editor"
+        onKeyDown={(event) => {
+          if (event.key === "Escape" || event.key === "Tab") event.preventDefault()
+        }}
+      />
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer: editor }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const textarea = portal.querySelector<HTMLTextAreaElement>('[aria-label="Owned editor"]')
+
+    textarea?.focus()
+    await act(async () =>
+      textarea?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" }))
+    )
+    expect(document.activeElement).toBe(textarea)
+    await act(async () =>
+      textarea?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }))
+    )
+    expect(portal.querySelector('[role="dialog"]')).toBe(dialog)
   })
 
   it("focuses an initially open dialog after the owned portal target mounts", async () => {
@@ -249,7 +316,6 @@ describe("RelayDock", () => {
     )
     expect(portal.activeElement).toBe(composer)
     await act(async () => dialog?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })))
-    await act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)))
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
     expect(host.inert).toBe(false)
   })
