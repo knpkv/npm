@@ -48,7 +48,8 @@ const workGoalInput = {
     {
       approvalTarget: {
         host: "SER8",
-        url: "https://ser8.example.test/?tab=approvals"
+        jobId: "approval-job-42",
+        url: "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
       },
       id: "request-review",
       requestedAt: 3_000,
@@ -69,7 +70,8 @@ const workGoalInput = {
   updatedAt: 3_000,
   approvalTarget: {
     host: "SER8",
-    url: "https://ser8.example.test/?tab=approvals"
+    jobId: "approval-job-42",
+    url: "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
   }
 }
 
@@ -95,7 +97,10 @@ describe("Work control app", () => {
     expect(workGoal.agentHierarchy?.agent.host).toBe("SER8")
     expect(workGoal.agentHierarchy?.agent.relationship?.parentAgentId).toBe("agent-coordinator")
     expect(workGoal.connectTarget?.url).toBe("/connect/?agent=agent-work-owner&host=SER8")
-    expect(workGoal.approvalTarget?.url).toBe("https://ser8.example.test/?tab=approvals")
+    expect(workGoal.approvalTarget?.jobId).toBe("approval-job-42")
+    expect(workGoal.approvalTarget?.url).toBe(
+      "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
+    )
   })
 
   it("rejects a Connect target that diverges from the authoritative agent", () => {
@@ -108,6 +113,28 @@ describe("Work control app", () => {
       }
     })
     expect(malformed._tag).toBe("Failure")
+  })
+
+  it("requires every approval target to identify its approval", () => {
+    const generic = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      approvalTarget: { host: "SER8", jobId: "approval-job-42", url: "https://ser8.example.test/?tab=approvals" }
+    })
+    const mismatched = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      requests: [{
+        ...workGoalInput.requests[0],
+        approvalTarget: {
+          host: "SER8",
+          jobId: "approval-job-42",
+          url: "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-other"
+        }
+      }]
+    })
+
+    expect(generic._tag).toBe("Failure")
+    expect(mismatched._tag).toBe("Failure")
+    expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
   })
 
   it("rejects future detail timestamps and accepts a detail at the goal update", () => {
@@ -134,6 +161,24 @@ describe("Work control app", () => {
     expect(detailAtUpdate._tag).toBe("Success")
   })
 
+  it("rejects future blockers and accepts a blocker at the goal update", () => {
+    const futureBlocker = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      blocker: null,
+      blockers: [{ since: 3_001, summary: "Future blocker" }],
+      state: "blocked"
+    })
+    const blockerAtUpdate = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      blocker: null,
+      blockers: [{ since: workGoalInput.updatedAt, summary: "Current blocker" }],
+      state: "blocked"
+    })
+
+    expect(futureBlocker._tag).toBe("Failure")
+    expect(blockerAtUpdate._tag).toBe("Success")
+  })
+
   it("rejects duplicate activity and request identities", () => {
     const duplicateActivity = Schema.decodeUnknownResult(WorkGoal)({
       ...workGoalInput,
@@ -158,6 +203,8 @@ describe("Work control app", () => {
     expect(markup).toContain("Waiting for the fresh package review")
     expect(markup).toContain("Shipment path")
     expect(markup).toContain("href=\"/connect/?agent=agent-work-owner&amp;host=SER8\"")
-    expect(markup).toContain("href=\"https://ser8.example.test/?tab=approvals\"")
+    expect(markup).toContain(
+      "href=\"https://ser8.example.test/?tab=approvals&amp;approvalHost=SER8&amp;approvalJob=approval-job-42\""
+    )
   })
 })

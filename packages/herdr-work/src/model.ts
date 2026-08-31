@@ -79,8 +79,24 @@ export interface WorkActivity extends Schema.Schema.Type<typeof WorkActivity> {}
 
 export const WorkApprovalTarget = Schema.Struct({
   host: FleetHostName,
+  jobId: Identifier,
   url: LinkUrl
-})
+}).check(
+  Schema.makeFilter(
+    ({ host, jobId, url }) => {
+      const parsed = new URL(url)
+      const approvalHosts = parsed.searchParams.getAll("approvalHost")
+      const approvalJobs = parsed.searchParams.getAll("approvalJob")
+      return parsed.searchParams.getAll("tab").length === 1 &&
+        parsed.searchParams.get("tab") === "approvals" &&
+        approvalHosts.length === 1 &&
+        approvalJobs.length === 1 &&
+        approvalHosts[0]?.toLowerCase() === host.toLowerCase() &&
+        approvalJobs[0] === jobId
+    },
+    { expected: "an approval URL with matching host and job identity" }
+  )
+)
 export interface WorkApprovalTarget extends Schema.Schema.Type<typeof WorkApprovalTarget> {}
 
 export const WorkRequestState = Schema.Literals(["open", "approved", "rejected", "fulfilled"])
@@ -153,6 +169,7 @@ export const WorkGoal = Schema.Struct({
       return goal.updatedAt >= goal.createdAt &&
         ((goal.state === "blocked") === hasBlocker) &&
         (goal.blockers === undefined || goal.blocker === null) &&
+        (goal.blockers === undefined || goal.blockers.every(({ since }) => since <= goal.updatedAt)) &&
         (goal.activity === undefined || goal.activity.every(({ occurredAt }) => occurredAt <= goal.updatedAt)) &&
         (goal.requests === undefined || goal.requests.every(({ requestedAt }) => requestedAt <= goal.updatedAt)) &&
         (goal.review === undefined || goal.review === null || goal.review.updatedAt <= goal.updatedAt) &&
