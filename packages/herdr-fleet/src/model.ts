@@ -3,7 +3,8 @@ import { fleetJobRecordMaxBytes } from "./limits.js"
 
 export const JobIdentifier = Schema.String.check(
   Schema.isNonEmpty(),
-  Schema.isMaxLength(256)
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
 )
 const WorkerTimestamp = Schema.Number.check(
   Schema.isInt(),

@@ -1444,7 +1444,7 @@ esac
           const fleet = yield* makeFleetService({
             approvalEnabled: true,
             host: hostConfig.host,
-            id: Effect.succeed("job/with-slash"),
+            id: Effect.succeed("job-🦊/with-slash"),
             nonce: Effect.succeed("nonce-route"),
             now: Effect.succeed(1_000),
             operations,
@@ -1489,7 +1489,7 @@ esac
           expect(decided.status).toBe(303)
           expect((yield* fleet.get(pending.id)).status).not.toBe("pending_approval")
           const localHost = new URL(server.url).host
-          expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/job/with-slash`, localHost))).toBe(
+          expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/job-🦊/with-slash`, localHost))).toBe(
             404
           )
           expect(yield* Effect.promise(() => requestStatus(`${server.url}/v1/jobs/%`, localHost))).toBe(400)

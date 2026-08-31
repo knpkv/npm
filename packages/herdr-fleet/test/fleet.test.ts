@@ -17,6 +17,7 @@ import {
   type HostOperations,
   JobHash,
   jobHash,
+  JobIdentifier,
   JobPayload,
   JobRecord,
   JobStore,
@@ -75,6 +76,15 @@ const seedJobRecords = (path: string, records: ReadonlyArray<JobRecord>): void =
 }
 
 describe("fleet local authority", () => {
+  it("accepts only Unicode scalar job identifiers", () => {
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(JobIdentifier)("\uD800")
+    )).toBe(true)
+    expect(Schema.decodeUnknownSync(JobIdentifier)("job-🦊/with-slash")).toBe(
+      "job-🦊/with-slash"
+    )
+  })
+
   it("rejects duplicate and unknown apply targets at config decoding", () => {
     const valid = {
       allowedUsers: ["andrey@example.com"],
