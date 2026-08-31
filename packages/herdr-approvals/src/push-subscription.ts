@@ -145,6 +145,9 @@ export const reconcileCurrentPushSubscription = Effect.fn(
   RegisterResult,
   RegisterError,
   RegisterRequirements,
+  RemoveResult,
+  RemoveError,
+  RemoveRequirements,
   AcquireError,
   AcquireRequirements
 >(
@@ -156,7 +159,10 @@ export const reconcileCurrentPushSubscription = Effect.fn(
   ) => Effect.Effect<boolean, CheckError, CheckRequirements>,
   register: (
     subscription: Subscription
-  ) => Effect.Effect<RegisterResult, RegisterError, RegisterRequirements>
+  ) => Effect.Effect<RegisterResult, RegisterError, RegisterRequirements>,
+  removeServerRegistration: (
+    subscription: Subscription
+  ) => Effect.Effect<RemoveResult, RemoveError, RemoveRequirements>
 ) {
   if (
     applicationServerKeysEqual(
@@ -179,6 +185,7 @@ export const reconcileCurrentPushSubscription = Effect.fn(
       cause: "browser push subscription remained active after key rotation"
     })
   }
+  yield* removeServerRegistration(subscription)
   yield* registerNewPushSubscription(acquire, register)
   return true
 })

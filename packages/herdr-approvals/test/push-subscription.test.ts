@@ -19,6 +19,7 @@ describe("browser push subscription ownership", () => {
   it.effect("replaces browser subscriptions after application-server key rotation", () => {
     const key = (...bytes: ReadonlyArray<number>): ArrayBuffer => Uint8Array.from(bytes).buffer
     let acquired = 0
+    let removed = ""
     let registered = ""
     let retainedUnsubscribed = 0
     let unsubscribed = 0
@@ -48,12 +49,17 @@ describe("browser push subscription ownership", () => {
           (subscription) =>
             Effect.sync(() => {
               registered = subscription.endpoint
+            }),
+          (subscription) =>
+            Effect.sync(() => {
+              removed = subscription.endpoint
             })
         )
       ).toBe(true)
-      expect({ acquired, registered, unsubscribed }).toEqual({
+      expect({ acquired, registered, removed, unsubscribed }).toEqual({
         acquired: 1,
         registered: replacement.endpoint,
+        removed: "https://push.example/old",
         unsubscribed: 1
       })
 
@@ -70,7 +76,8 @@ describe("browser push subscription ownership", () => {
           key(2, 3, 4),
           Effect.die("current subscription must not be replaced"),
           () => Effect.succeed(true),
-          () => Effect.die("registered current subscription must not be posted again")
+          () => Effect.die("registered current subscription must not be posted again"),
+          () => Effect.die("registered current subscription must not be removed")
         )
       ).toBe(true)
       expect(retainedUnsubscribed).toBe(0)
@@ -84,6 +91,7 @@ describe("browser push subscription ownership", () => {
         key(2, 3, 4),
         Effect.succeed(replacement),
         () => Effect.die("keyless subscription must not be checked"),
+        () => Effect.void,
         () => Effect.void
       )
     })

@@ -179,6 +179,15 @@ const isPushSubscriptionRegistered = Effect.fn("Notifications.status")(function*
   return status.subscribed
 })
 
+const removePushSubscriptionRegistration = Effect.fn("Notifications.remove")(function* (
+  subscription: PushSubscription
+) {
+  yield* fetchJson(PushSubscriptionStatus, "/v1/push/subscriptions", {
+    body: JSON.stringify({ endpoint: subscription.endpoint }),
+    method: "DELETE"
+  })
+})
+
 const loadNotificationState = Effect.gen(function* () {
   const config = yield* loadPushConfiguration
   if (!config.enabled || config.publicKey === null) return "disabled"
@@ -216,7 +225,8 @@ const loadNotificationState = Effect.gen(function* () {
         catch: (cause) => new BrowserNetworkError({ detail: String(cause) })
       }),
       isPushSubscriptionRegistered,
-      registerPushSubscription
+      registerPushSubscription,
+      removePushSubscriptionRegistration
     ).pipe(Effect.map((): NotificationState => "enabled"))
   }
   return yield* reconcilePushSubscriptionState(
@@ -285,7 +295,8 @@ const enableNotifications = Effect.fn("Notifications.enable")(function* () {
       expectedKey,
       acquire,
       isPushSubscriptionRegistered,
-      registerPushSubscription
+      registerPushSubscription,
+      removePushSubscriptionRegistration
     )
     return
   }
