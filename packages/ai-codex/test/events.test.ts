@@ -1,11 +1,14 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
+import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Schema, Sink, Stream } from "effect"
+import { ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schema, Sink, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { streamEvents } from "../src/index.js"
 import { makeStreamOutputSchemaFile } from "../src/internal/outputSchema.js"
+
+const nodeFileSystemAndPath = Layer.merge(NodeFileSystem.layer, NodePath.layer)
 
 const fakeProcessLayer = (
   calls: Array<ChildProcess.Command>,
@@ -120,6 +123,8 @@ describe("streamEvents", () => {
   it.effect("passes a scoped native output schema to streamed turns", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
       yield* streamEvents({
         cwd: "/workspace",
         outputSchema: Schema.Struct({ findings: Schema.Tuple([]), explanation: Schema.String }),
@@ -129,7 +134,6 @@ describe("streamEvents", () => {
           calls,
           Stream.make("{\"type\":\"turn.completed\"}\n").pipe(Stream.encodeText)
         )),
-        Stream.provide(NodeFileSystem.layer),
         Stream.runDrain
       )
 
@@ -138,9 +142,42 @@ describe("streamEvents", () => {
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         const schemaIndex = command.args.indexOf("--output-schema")
         expect(schemaIndex).toBeGreaterThan(-1)
-        expect(command.args[schemaIndex + 1]).toMatch(/ai-codex-output-.*\.json$/u)
+        const schemaFile = command.args[schemaIndex + 1]
+        expect(schemaFile).toMatch(/ai-codex-output-.*\.json$/u)
+        if (schemaFile !== undefined) {
+          expect(yield* fileSystem.exists(schemaFile)).toBe(false)
+          expect(yield* fileSystem.exists(path.dirname(schemaFile))).toBe(false)
+        }
       }
-    }))
+    }).pipe(
+      // This Vitest Effect is the entry point that owns the complete filesystem layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(nodeFileSystemAndPath)
+    ))
+
+  it.effect("rejects schemas whose provider representation needs a different codec", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const result = yield* makeStreamOutputSchemaFile(
+        fileSystem,
+        Schema.Struct({ maybe: Schema.optional(Schema.String) })
+      ).pipe(Effect.exit)
+
+      if (Exit.isSuccess(result)) {
+        yield* result.value.cleanup
+      }
+      expect(Exit.isFailure(result)).toBe(true)
+      if (Exit.isFailure(result)) {
+        expect(result.cause.reasons[0]?.error).toMatchObject({
+          _tag: "CodexTransportError",
+          phase: "configuration"
+        })
+      }
+    }).pipe(
+      // This Vitest Effect is the entry point that owns the complete filesystem layer lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(nodeFileSystemAndPath)
+    ))
 
   it.effect("rewrites Effect refinements to Codex-compatible schema keywords", () =>
     Effect.gen(function*() {
@@ -153,8 +190,8 @@ describe("streamEvents", () => {
             verdict: Schema.String.check(Schema.isNonEmpty())
           })
         ),
-        fileSystem.readFileString,
-        (path) => fileSystem.remove(path).pipe(Effect.ignore)
+        ({ path }) => fileSystem.readFileString(path),
+        ({ cleanup }) => cleanup
       )
 
       expect(contents).toContain("\"maxItems\":0")

@@ -13,6 +13,12 @@ const _structured = streamEvents({
   outputSchema: Schema.Struct({ ok: Schema.Boolean }),
   prompt: "review"
 })
+const structuredOptions = {
+  cwd: "/workspace",
+  outputSchema: Schema.Struct({ ok: Schema.Boolean }),
+  prompt: "review"
+}
+const _structuredVariable = streamEvents(structuredOptions)
 declare const widenedPromptOnly: boolean
 const _widened = streamEvents({ cwd: "/workspace", prompt: "review", promptOnly: widenedPromptOnly })
 
@@ -28,6 +34,10 @@ export const promptOnlyNeedsSpawner: Includes<
 > = true
 export const promptOnlyNeedsFileSystem: Includes<Requirements<typeof _promptOnly>, FileSystem.FileSystem> = true
 export const structuredNeedsFileSystem: Includes<Requirements<typeof _structured>, FileSystem.FileSystem> = true
+export const structuredVariableNeedsFileSystem: Includes<
+  Requirements<typeof _structuredVariable>,
+  FileSystem.FileSystem
+> = true
 export const widenedNeedsSpawner: Includes<
   Requirements<typeof _widened>,
   ChildProcessSpawner.ChildProcessSpawner

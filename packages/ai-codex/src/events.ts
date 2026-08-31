@@ -60,15 +60,15 @@ export function streamEvents(
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 >
 export function streamEvents(
-  options: OrdinaryEventStreamOptions
-): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner>
-export function streamEvents(
   options: StructuredEventStreamOptions
 ): Stream.Stream<
   string,
   AiError.AiError,
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem
 >
+export function streamEvents(
+  options: OrdinaryEventStreamOptions
+): Stream.Stream<string, AiError.AiError, ChildProcessSpawner.ChildProcessSpawner>
 export function streamEvents(
   options: CodexEventStreamOptions
 ): Stream.Stream<
@@ -105,12 +105,12 @@ export function streamEvents(
       : yield* makeStreamOutputSchemaFile(fileSystem, options.outputSchema).pipe(
         Effect.mapError((error) => transportToAiError("streamEvents", error))
       )
-    const cleanupSchema = schemaFile === undefined || fileSystem === undefined
+    const cleanupSchema = schemaFile === undefined
       ? Effect.void
-      : fileSystem.remove(schemaFile).pipe(Effect.ignore)
+      : schemaFile.cleanup
 
     return streamCodexLines({
-      args: makeArguments(normalized, schemaFile, promptOnlyDisabledFeatures),
+      args: makeArguments(normalized, schemaFile?.path, promptOnlyDisabledFeatures),
       cwd: normalized.cwd,
       environment: normalized.environment,
       executable: normalized.executable,

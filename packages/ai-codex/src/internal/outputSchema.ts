@@ -8,7 +8,13 @@ const encodeJsonString = Schema.encodeUnknownEffect(Schema.fromJsonString(Schema
 
 const outputSchemaDocument = (schema: Schema.Top, providerCompatible: boolean) =>
   providerCompatible
-    ? OpenAiStructuredOutput.toCodecOpenAI(schema).jsonSchema
+    ? (() => {
+      const transformed = OpenAiStructuredOutput.toCodecOpenAI(schema)
+      if (transformed.codec !== schema) {
+        throw new Error("Codex native output schemas cannot change the provider wire representation")
+      }
+      return transformed.jsonSchema
+    })()
     : (() => {
       const document = Schema.toJsonSchemaDocument(schema)
       return {
@@ -87,11 +93,17 @@ export const makeStreamOutputSchemaFile = Effect.fn("CodexOutputSchema.makeStrea
   fileSystem: FileSystem.FileSystem,
   schema: Schema.Top
 ) {
-  const schemaFile = yield* fileSystem.makeTempFile({
-    prefix: "ai-codex-output-",
-    suffix: ".json"
+  const schemaDirectory = yield* fileSystem.makeTempDirectory({
+    prefix: "ai-codex-output-"
   }).pipe(Effect.mapError(mapTemporaryFileError))
-  return yield* writeOutputSchema(fileSystem, schemaFile, schema, true).pipe(
-    Effect.onError(() => fileSystem.remove(schemaFile).pipe(Effect.ignore))
+  const cleanup = fileSystem.remove(schemaDirectory, { recursive: true }).pipe(Effect.ignore)
+  const schemaFile = yield* fileSystem.makeTempFile({
+    directory: schemaDirectory,
+    suffix: ".json"
+  }).pipe(
+    Effect.mapError(mapTemporaryFileError),
+    Effect.onError(() => cleanup)
   )
+  yield* writeOutputSchema(fileSystem, schemaFile, schema, true).pipe(Effect.onError(() => cleanup))
+  return { cleanup, path: schemaFile }
 })
