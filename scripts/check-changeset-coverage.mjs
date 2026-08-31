@@ -274,16 +274,24 @@ const canonicalTypeText = (
   }
   if (TypeScript.isTupleTypeNode(typeNode)) {
     return `[${typeNode.elements
-      .map((element) =>
-        canonicalTypeText(
-          TypeScript.isNamedTupleMember(element) ? element.type : element,
+      .map((element) => {
+        const namedMember = TypeScript.isNamedTupleMember(element)
+        const marker = namedMember
+          ? element.dotDotDotToken === undefined
+            ? element.questionToken === undefined
+              ? ""
+              : "optional:"
+            : "rest:"
+          : ""
+        return `${marker}${canonicalTypeText(
+          namedMember ? element.type : element,
           analysis,
           filePath,
           substitutions,
           seen,
           nextCanonicalTypeContext(context)
-        )
-      )
+        )}`
+      })
       .join(",")}]`
   }
   if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword) {
@@ -1765,6 +1773,67 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(optionalPrevious, optionalCurrent, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["label"] }
   ])
+
+  const namedTupleOptionalPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [value?: string] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const namedTupleOptionalMarkerCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [value: string] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedTupleOptionalPrevious, namedTupleOptionalMarkerCurrent, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const namedTupleOptionalLabelCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [renamed?: string] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedTupleOptionalPrevious, namedTupleOptionalLabelCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
+  const namedTupleRestPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [...values: string[]] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const namedTupleRestMarkerCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [values: string[]] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedTupleRestPrevious, namedTupleRestMarkerCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const namedTupleRestLabelCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [...items: string[]] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedTupleRestPrevious, namedTupleRestLabelCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
 
   const inheritedPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
