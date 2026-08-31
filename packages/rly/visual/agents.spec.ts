@@ -74,6 +74,22 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
   ).toBe("0s")
   await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("relay-dock-iphone.png") })
 
+  await page.setViewportSize({ height: 390, width: 390 })
+  const shortFinePointerSheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  const shortFinePointerScrollRegion = shortFinePointerSheet.locator("[data-rly-relay-dock-scroll]")
+  expect(
+    await shortFinePointerScrollRegion.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollable: element.scrollHeight > element.clientHeight
+    }))
+  ).toEqual({ overflowY: "auto", scrollable: true })
+  const shortFinePointerDraft = shortFinePointerSheet.getByRole("textbox", { name: "Message Relay" })
+  await shortFinePointerDraft.scrollIntoViewIfNeeded()
+  await expect(shortFinePointerDraft).toBeInViewport()
+  const shortFinePointerAction = shortFinePointerSheet.getByRole("button", { name: "Ask Relay" })
+  await shortFinePointerAction.scrollIntoViewIfNeeded()
+  await expect(shortFinePointerAction).toBeInViewport()
+
   const landscapeContext = await browser.newContext({
     hasTouch: true,
     isMobile: true,
@@ -149,6 +165,30 @@ test("resolves compact Relay layout from a cross-window portal target", async ({
   await expect(sheet).toBeVisible()
   await expect(sheet).toHaveAttribute("role", "dialog")
   expect(
+    await sheet.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      const computed = getComputedStyle(element)
+      return {
+        backgroundColor: computed.backgroundColor,
+        height: box.height,
+        position: computed.position,
+        styleSheets: element.ownerDocument.styleSheets.length,
+        width: box.width,
+        x: box.x,
+        y: box.y
+      }
+    })
+  ).toEqual({
+    backgroundColor: "rgb(23, 24, 28)",
+    height: 844,
+    position: "fixed",
+    styleSheets: expect.any(Number),
+    width: 320,
+    x: 0,
+    y: 0
+  })
+  expect(await sheet.evaluate((element) => element.ownerDocument.styleSheets.length)).toBeGreaterThan(0)
+  expect(
     await frame.locator("html").evaluate((element) => ({
       client: element.clientWidth,
       scroll: element.scrollWidth
@@ -207,6 +247,10 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   const editor = dock.getByRole("textbox", { name: "Rich Relay reply" })
   const visibleReplyAction = dock.getByRole("button", { name: "Visible reply action" })
   const enabledFieldsetAction = dock.getByRole("button", { name: "Enabled fieldset action" })
+  const expandedSummary = dock.getByText("Expanded evidence", { exact: true })
+  const expandedAction = dock.getByRole("button", { name: "Expanded evidence action" })
+  const collapsedSummary = dock.getByText("Collapsed evidence", { exact: true })
+  const collapsedAction = dock.getByRole("button", { name: "Collapsed evidence action", includeHidden: true })
 
   await thread.focus()
   await page.keyboard.press("Tab")
@@ -216,7 +260,16 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   await page.keyboard.press("Tab")
   await expect(enabledFieldsetAction).toBeFocused()
   await page.keyboard.press("Tab")
+  await expect(expandedSummary).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(expandedAction).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(collapsedSummary).toBeFocused()
+  await page.keyboard.press("Tab")
   await expect(dock.getByRole("button", { name: "Close Relay" })).toBeFocused()
+  await expect(collapsedAction).not.toBeFocused()
+  await page.keyboard.press("Shift+Tab")
+  await expect(collapsedSummary).toBeFocused()
 })
 
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {

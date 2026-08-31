@@ -268,6 +268,24 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(trigger)
   })
 
+  it("restores to the built-in trigger when click activation starts elsewhere", async () => {
+    const unrelated = document.createElement("button")
+    unrelated.textContent = "Unrelated action"
+    document.body.append(unrelated)
+    const { host, portal } = await mount(dock())
+    const trigger = host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")
+    if (trigger === null) throw new Error("RelayDock trigger did not render")
+    unrelated.focus()
+    await act(async () => trigger.click())
+
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    expect(document.activeElement).toBe(close)
+    vi.useFakeTimers()
+    await act(async () => close?.click())
+    await act(async () => vi.runAllTimers())
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it("restores controlled docks to the element focused before opening", async () => {
     const { host, portal } = await mount(<ControlledDock />)
     const opener = host.querySelector<HTMLButtonElement>("button")
@@ -387,6 +405,33 @@ describe("RelayDock", () => {
     await act(async () => dialog?.dispatchEvent(tab))
     expect(tab.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
+  })
+
+  it("excludes controls inside closed details from the modal focus boundary", async () => {
+    const footer = (
+      <details>
+        <summary>Collapsed evidence</summary>
+        <button type="button">Collapsed evidence action</button>
+      </details>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const summary = portal.querySelector<HTMLElement>("summary")
+    const collapsedAction = [...portal.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Collapsed evidence action"
+    )
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+    const reverse = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab", shiftKey: true })
+
+    summary?.focus()
+    await act(async () => dialog?.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+    await act(async () => dialog?.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(summary)
+    expect(document.activeElement).not.toBe(collapsedAction)
   })
 
   it("keeps the trigger operable while its portal target is unavailable", async () => {

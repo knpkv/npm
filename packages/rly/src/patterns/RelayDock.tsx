@@ -69,6 +69,10 @@ const isRenderedFocusable = (element: HTMLElement): boolean => {
   if (visibility === "hidden" || visibility === "collapse") return false
   let current: HTMLElement | null = element
   while (current !== null) {
+    if (current.tagName === "DETAILS" && !current.hasAttribute("open")) {
+      const firstSummary: HTMLElement | null = current.querySelector(":scope > summary:first-of-type")
+      if (firstSummary !== element) return false
+    }
     if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
       const firstLegend = current.querySelector(":scope > legend:first-of-type")
       if (firstLegend === null || !firstLegend.contains(element)) return false
@@ -522,7 +526,10 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
         className={style("trigger")}
         data-rly-relay-dock-trigger=""
         hidden={resolvedOpen}
-        onClick={() => requestOpenChange(true)}
+        onClick={(event) => {
+          event.currentTarget.focus()
+          requestOpenChange(true)
+        }}
         ref={triggerRef}
         type="button"
       >
