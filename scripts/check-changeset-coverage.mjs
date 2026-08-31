@@ -399,6 +399,12 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     }
     return { members: new Map(), resolved: false }
   }
+  if (TypeScript.isUnionTypeNode(typeNode)) {
+    for (const member of typeNode.types) {
+      typeMembers(member, analysis, filePath, seen, substitutions)
+    }
+    return { members: new Map(), resolved: false }
+  }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     const members = new Map()
     let resolved = true
@@ -1688,6 +1694,52 @@ const runSelfTest = () => {
     (cause) =>
       cause instanceof ChangesetCoverageError &&
       cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveUnionMethodParameterSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Node = { child: Node }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit(value: Node | null): void }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveUnionMethodParameterSources, recursiveUnionMethodParameterSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveUnionMethodReturnSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Node = { child: Node }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit(): Node | null }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveUnionMethodReturnSources, recursiveUnionMethodReturnSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const finiteUnionMethodSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Node = { id: string }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit(value: Node | null): Node | null }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteUnionMethodSources, finiteUnionMethodSources, ["packages/public/src/index.ts"]),
+    []
   )
   const finiteMethodSources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
