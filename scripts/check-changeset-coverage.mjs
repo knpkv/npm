@@ -729,7 +729,12 @@ const publicCallableChanges = (
   for (const [identity, previousSignatures] of previous) {
     if (!current.has(identity)) compareIdentity([], previousSignatures)
   }
-  return changes
+  const uniqueChanges = new Map()
+  for (const change of changes) {
+    const key = `${change.kind}\u0000${change.filePath}\u0000${change.name}\u0000${change.properties.join("\u0000")}`
+    if (!uniqueChanges.has(key)) uniqueChanges.set(key, change)
+  }
+  return [...uniqueChanges.values()]
 }
 
 const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
@@ -1714,6 +1719,32 @@ const runSelfTest = () => {
       ])
     ),
     []
+  )
+  const duplicateIdentityPrevious = new Map([
+    ["packages/public/src/view.tsx", "export const Public = (props: { value: string }) => props.value"]
+  ])
+  const duplicateIdentityCurrent = new Map([
+    ["packages/public/src/view.tsx", "export const Public = (props: { value: number }) => props.value"]
+  ])
+  const duplicateIdentityEntryPoints = [
+    { identity: "main", sourcePath: "packages/public/src/view.tsx" },
+    { identity: "exports:.", sourcePath: "packages/public/src/view.tsx" }
+  ]
+  assert.deepEqual(
+    publicCallableChanges(
+      duplicateIdentityPrevious,
+      duplicateIdentityCurrent,
+      duplicateIdentityEntryPoints,
+      duplicateIdentityEntryPoints
+    ),
+    [
+      {
+        kind: "type-change",
+        filePath: "packages/public/src/view.tsx",
+        name: "Public",
+        properties: ["value"]
+      }
+    ]
   )
   assert.deepEqual(
     publicCallableChanges(
