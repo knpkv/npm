@@ -87,7 +87,9 @@ export const mergeDashboardHistoryPage = (
     }
 
 export const dashboardPendingBadgeCount = (state: FleetPendingApprovals): number | null =>
-  state.nextCursors.length === 0 ? state.local.length + state.remote.length : null
+  state.nextCursors.length === 0 && state.failures.length === 0
+    ? state.local.length + state.remote.length
+    : null
 
 export const pendingApprovalTargetAfterRevalidation = (
   current: PendingApprovalTarget | null,

@@ -84,6 +84,12 @@ describe("dashboard pending continuation state", () => {
     }
 
     expect(dashboardPendingBadgeCount(partial)).toBeNull()
+    expect(
+      dashboardPendingBadgeCount({
+        ...emptyPage([]),
+        failures: [{ host: "PI", reason: "unavailable" }]
+      })
+    ).toBeNull()
     expect(dashboardPendingBadgeCount(emptyPage([]))).toBe(0)
   })
 
