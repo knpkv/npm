@@ -431,6 +431,8 @@ const normalizeEntryPoints = (entryPoints) =>
     Predicate.isString(entryPoint) ? { identity: entryPoint, sourcePath: entryPoint } : entryPoint
   )
 
+const conditionPathKey = (conditionPath) => (conditionPath ?? []).join("\u0000")
+
 const reachableCallableEntries = (sources, entryPoints) => {
   const info = analyzeSources(sources).modules
   const resolved = new Map()
@@ -504,7 +506,14 @@ const publicCallableChanges = (
       if (signature === undefined) continue
       const identity = `${entryPoint}\u0000${exportedName}`
       const existing = result.get(identity) ?? []
-      if (!existing.some(({ filePath, name }) => filePath === target.filePath && name === target.name)) {
+      if (
+        !existing.some(
+          ({ conditionPath: existingConditionPath, filePath, name }) =>
+            filePath === target.filePath &&
+            name === target.name &&
+            conditionPathKey(existingConditionPath) === conditionPathKey(conditionPath)
+        )
+      ) {
         existing.push({ conditionPath, filePath: target.filePath, name: target.name, ...signature })
         result.set(identity, existing)
       }
@@ -523,7 +532,6 @@ const publicCallableChanges = (
         .join(","),
       signature.returnResolved ? `return:${signature.returnType}` : "return:unresolved"
     ].join("|")
-  const conditionPathKey = (conditionPath) => (conditionPath ?? []).join("\u0000")
   const pairSignatures = (previousSignatures, currentSignatures) => {
     const remainingPrevious = [...previousSignatures]
     const pairs = []
@@ -569,10 +577,36 @@ const publicCallableChanges = (
     for (let index = 0; index < fallbackCount; index += 1) {
       pairs.push([remainingPrevious[index], unmatchedAfterContract[index]])
     }
+    const pairedTargetKeys = new Set(
+      pairs.flatMap(([previousSignature, currentSignature]) => [
+        `${previousSignature.filePath}\u0000${previousSignature.name}`,
+        `${currentSignature.filePath}\u0000${currentSignature.name}`
+      ])
+    )
+    const currentOnly = unmatchedAfterContract
+      .slice(fallbackCount)
+      .filter(
+        (signature) =>
+          !previousSignatures.some(
+            (previousSignature) =>
+              conditionPathKey(previousSignature.conditionPath) === "" &&
+              pairedTargetKeys.has(`${signature.filePath}\u0000${signature.name}`)
+          )
+      )
+    const previousOnly = remainingPrevious
+      .slice(fallbackCount)
+      .filter(
+        (signature) =>
+          !currentSignatures.some(
+            (currentSignature) =>
+              conditionPathKey(currentSignature.conditionPath) === "" &&
+              pairedTargetKeys.has(`${signature.filePath}\u0000${signature.name}`)
+          )
+      )
     return {
       pairs,
-      currentOnly: unmatchedAfterContract.slice(fallbackCount),
-      previousOnly: remainingPrevious.slice(fallbackCount)
+      currentOnly,
+      previousOnly
     }
   }
   const compareSignatures = (previousSignature, currentSignature) => {
@@ -635,9 +669,30 @@ const publicCallableChanges = (
   }
   const compareIdentity = (currentSignatures, previousSignatures) => {
     const { pairs, currentOnly, previousOnly } = pairSignatures(previousSignatures, currentSignatures)
-    for (const [previousSignature, currentSignature] of pairs) compareSignatures(previousSignature, currentSignature)
-    for (const currentSignature of currentOnly) compareSignatures(undefined, currentSignature)
+    const comparedPairs = new Set()
+    for (const [previousSignature, currentSignature] of pairs) {
+      const pairKey = [
+        `${previousSignature.filePath}\u0000${previousSignature.name}`,
+        `${currentSignature.filePath}\u0000${currentSignature.name}`,
+        signatureContract(previousSignature),
+        signatureContract(currentSignature)
+      ].join("\u0000")
+      if (comparedPairs.has(pairKey)) continue
+      comparedPairs.add(pairKey)
+      compareSignatures(previousSignature, currentSignature)
+    }
+    const currentTargets = new Set()
+    for (const currentSignature of currentOnly) {
+      const targetKey = `${currentSignature.filePath}\u0000${currentSignature.name}`
+      if (currentTargets.has(targetKey)) continue
+      currentTargets.add(targetKey)
+      compareSignatures(undefined, currentSignature)
+    }
+    const previousTargets = new Set()
     for (const previousSignature of previousOnly) {
+      const targetKey = `${previousSignature.filePath}\u0000${previousSignature.name}`
+      if (previousTargets.has(targetKey)) continue
+      previousTargets.add(targetKey)
       changes.push({
         kind: "callable-removal",
         filePath: previousSignature.filePath,
@@ -1456,14 +1511,20 @@ const runSelfTest = () => {
   const directManifest = { exports: { ".": "./src/index.ts" } }
   assert.deepEqual(
     manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
-    [{ identity: "exports:.", sourcePath: "packages/public/src/index.ts" }]
+    [
+      { conditionPath: ["import"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" },
+      { conditionPath: ["require"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" }
+    ]
   )
   const topLevelConditionalManifest = {
     exports: { import: "./src/index.ts", require: "./src/index.ts" }
   }
   assert.deepEqual(
     manifestEntryPointDescriptors(topLevelConditionalManifest, "packages/public", [...conditionalSources.keys()]),
-    [{ identity: "exports:.", sourcePath: "packages/public/src/index.ts" }]
+    [
+      { conditionPath: ["import"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" },
+      { conditionPath: ["require"], identity: "exports:.", sourcePath: "packages/public/src/index.ts" }
+    ]
   )
   assert.deepEqual(
     publicCallableChanges(
@@ -1545,6 +1606,52 @@ const runSelfTest = () => {
         properties: ["value"]
       }
     ]
+  )
+  const sharedConditionalPrevious = new Map([
+    ["packages/public/src/shared.tsx", 'export const Public = (): string => "value"']
+  ])
+  const sharedConditionalCurrent = new Map([
+    ["packages/public/src/shared.tsx", 'export const Public = (): string => "value"'],
+    ["packages/public/src/changed.tsx", "export const Public = (): number => 1"]
+  ])
+  const sharedConditionalPreviousManifest = {
+    exports: { ".": { import: "./src/shared.tsx", require: "./src/shared.tsx" } }
+  }
+  const sharedConditionalCurrentManifest = {
+    exports: { ".": { import: "./src/shared.tsx", require: "./src/changed.tsx" } }
+  }
+  assert.deepEqual(
+    publicCallableChanges(
+      sharedConditionalPrevious,
+      sharedConditionalCurrent,
+      manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
+        ...sharedConditionalPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(sharedConditionalCurrentManifest, "packages/public", [
+        ...sharedConditionalCurrent.keys()
+      ])
+    ),
+    [
+      {
+        kind: "return-type-change",
+        filePath: "packages/public/src/changed.tsx",
+        name: "Public",
+        properties: []
+      }
+    ]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      sharedConditionalPrevious,
+      sharedConditionalPrevious,
+      manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
+        ...sharedConditionalPrevious.keys()
+      ]),
+      manifestEntryPointDescriptors(sharedConditionalPreviousManifest, "packages/public", [
+        ...sharedConditionalPrevious.keys()
+      ])
+    ),
+    []
   )
   assert.deepEqual(
     publicCallableChanges(
@@ -1868,13 +1975,9 @@ const manifestEntryPointDescriptors = (manifest, directory, sourceFiles) => {
   }
   const uniqueDescriptors = new Map()
   for (const descriptor of descriptors) {
-    const key = `${descriptor.identity}\u0000${descriptor.sourcePath}`
+    const key = `${descriptor.identity}\u0000${descriptor.sourcePath}\u0000${conditionPathKey(descriptor.conditionPath)}`
     const existing = uniqueDescriptors.get(key)
-    if (existing === undefined) {
-      uniqueDescriptors.set(key, descriptor)
-    } else if (existing.conditionPath !== undefined || descriptor.conditionPath !== undefined) {
-      uniqueDescriptors.set(key, { identity: descriptor.identity, sourcePath: descriptor.sourcePath })
-    }
+    if (existing === undefined) uniqueDescriptors.set(key, descriptor)
   }
   return [...uniqueDescriptors.values()]
 }
