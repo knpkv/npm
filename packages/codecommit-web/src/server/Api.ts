@@ -734,6 +734,7 @@ export const SandboxResponse = Schema.Struct({
   id: Schema.String,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
+  region: Schema.NullOr(Schema.String),
   repositoryName: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),

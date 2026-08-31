@@ -179,7 +179,12 @@ const makeSandboxService = Effect.gen(function*() {
     create: (params: CreateSandboxParams) =>
       Effect.gen(function*() {
         // Singleton check — one active sandbox per PR
-        const existing = yield* repo.findByPr(params.awsAccountId, params.pullRequestId)
+        const existing = yield* repo.findByPr(
+          params.awsAccountId,
+          params.pullRequestId,
+          params.repositoryName,
+          params.region
+        )
         if (Option.isSome(existing)) {
           return existing.value
         }
@@ -200,6 +205,7 @@ const makeSandboxService = Effect.gen(function*() {
           pullRequestId: params.pullRequestId,
           awsAccountId: params.awsAccountId,
           repositoryName: params.repositoryName,
+          region: params.region,
           sourceBranch: params.sourceBranch,
           accessPassword,
           workspacePath,
@@ -340,7 +346,9 @@ const makeSandboxService = Effect.gen(function*() {
               yield* Effect.forEach(sandboxCfg.extensions, (ext) =>
                 log(`Installing extension: ${ext}`).pipe(
                   Effect.andThen(docker.exec(cid, ["code-server", "--install-extension", ext])),
-                  Effect.tap((output) => log(`Extension installed: ${ext}${output ? `\n${output.trim()}` : ""}`)),
+                  Effect.tap((output) =>
+                    log(`Extension installed: ${ext}${output.length > 0 ? `\n${output.trim()}` : ""}`)
+                  ),
                   Effect.tapError((e) => log(`Extension failed: ${ext} — ${String(e)}`)),
                   Effect.catchIf(() => true, () => Effect.void)
                 ), { discard: true })
@@ -353,9 +361,11 @@ const makeSandboxService = Effect.gen(function*() {
                 log(`[${i + 1}/${sandboxCfg.setupCommands.length}] ${cmd}`).pipe(
                   Effect.andThen(docker.exec(cid, ["sh", "-c", cmd])),
                   Effect.tap((output) =>
-                    log(`Command done: ${cmd.slice(0, 60)}${output ? `\n${output.trim()}` : ""}`)
+                    log(`Command done: ${cmd.slice(0, 60)}${output.length > 0 ? `\n${output.trim()}` : ""}`)
                   ),
-                  Effect.tapError((e) => log(`Command failed: ${cmd.slice(0, 60)} — ${String(e)}`)),
+                  Effect.tapError((e) =>
+                    log(`Command failed: ${cmd.slice(0, 60)} — ${String(e)}`)
+                  ),
                   Effect.catchIf(() => true, () => Effect.void)
                 ), { discard: true })
             }
@@ -391,7 +401,7 @@ const makeSandboxService = Effect.gen(function*() {
         const row = yield* repo.findById(id)
         yield* updateStatus(id, "stopping")
 
-        if (row.containerId) {
+        if (row.containerId !== null) {
           const ctx = makeSandboxContext(row)
           yield* plugins.executeHook("onSandboxDestroy", ctx)
           yield* docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
@@ -407,23 +417,19 @@ const makeSandboxService = Effect.gen(function*() {
       Effect.gen(function*() {
         const row = yield* repo.findById(id)
         if (row.accessPassword === null) {
-          return yield* Effect.fail(
-            new SandboxError({
-              sandboxId: id,
-              message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
-            })
-          )
+          return yield* new SandboxError({
+            sandboxId: id,
+            message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
+          })
         }
-        if (!row.containerId) {
-          return yield* Effect.fail(
-            new SandboxError({ sandboxId: id, message: "No container to restart" })
-          )
+        if (row.containerId === null) {
+          return yield* new SandboxError({ sandboxId: id, message: "No container to restart" })
         }
 
         yield* updateStatus(id, "starting")
         yield* progress(id, "Restarting container")
         yield* docker.startContainer(row.containerId)
-        yield* updateStatus(id, "starting", row.port ? { port: row.port } : {})
+        yield* updateStatus(id, "starting", row.port !== null ? { port: row.port } : {})
         yield* progress(id, "Waiting for code-server health check")
 
         yield* docker.exec(row.containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
@@ -447,7 +453,7 @@ const makeSandboxService = Effect.gen(function*() {
         const row = yield* repo.findById(id)
         const fs = yield* FileSystem.FileSystem
 
-        if (row.containerId) {
+        if (row.containerId !== null) {
           yield* docker.removeContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
         }
 
@@ -484,14 +490,14 @@ const makeSandboxService = Effect.gen(function*() {
               })
               return
             }
-            if (!row.containerId) {
+            if (row.containerId === null) {
               yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
               return
             }
             const info = yield* docker.inspectContainer(row.containerId).pipe(
               Effect.catchIf(() => true, () => Effect.succeed(null))
             )
-            if (!info || !info.State.Running) {
+            if (info === null || info.State.Running === false) {
               yield* updateStatus(SandboxId.make(row.id), "stopped")
               yield* Effect.logInfo(`Reconciled orphaned sandbox ${row.id}`)
             }
@@ -519,7 +525,7 @@ const makeSandboxService = Effect.gen(function*() {
             if (now - lastActivity > Duration.toMillis(idleTimeout)) {
               return Effect.gen(function*() {
                 yield* Effect.logInfo(`GC: stopping idle sandbox ${row.id}`)
-                if (row.containerId) {
+                if (row.containerId !== null) {
                   yield* docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
                 }
                 yield* updateStatus(SandboxId.make(row.id), "stopped")
@@ -539,7 +545,7 @@ const makeSandboxService = Effect.gen(function*() {
             if (now - lastActivity > Duration.toMillis(cleanupDelay)) {
               return Effect.gen(function*() {
                 yield* Effect.logInfo(`GC: cleaning up sandbox ${row.id}`)
-                if (row.containerId) {
+                if (row.containerId !== null) {
                   yield* docker.removeContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
                 }
                 yield* fs.remove(row.workspacePath, { recursive: true }).pipe(

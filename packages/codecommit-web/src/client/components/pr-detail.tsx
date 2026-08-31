@@ -81,6 +81,7 @@ import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
 import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
+import { encodePullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   type ReviewCommentNavigation,
   type ReviewCommentNavigationTarget,
@@ -99,6 +100,32 @@ const PullRequestReviewWorkspace = lazy(() =>
     default: module.PullRequestReviewWorkspace
   }))
 )
+
+/** Match a persisted sandbox to every coordinate of the selected pull request. */
+export const sandboxMatchesPullRequest = (
+  sandbox: {
+    readonly awsAccountId: string
+    readonly pullRequestId: string
+    readonly repositoryName: string
+    readonly region?: string | null
+  },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  sandbox.awsAccountId === (pullRequest.account.awsAccountId ?? pullRequest.account.profile) &&
+  sandbox.pullRequestId === String(pullRequest.id) &&
+  sandbox.repositoryName === String(pullRequest.repositoryName) &&
+  sandbox.region === String(pullRequest.account.region)
+
+/** Keep review API requests bound to the exact PR shown by this page. */
+export const reviewApiAccountId = (
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): string =>
+  encodePullRequestCoordinates({
+    accountId: pullRequest.account.awsAccountId ?? pullRequest.account.profile,
+    pullRequestId: pullRequest.id,
+    repositoryName: pullRequest.repositoryName,
+    region: pullRequest.account.region
+  })
 
 const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
   tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
@@ -1035,11 +1062,13 @@ export function PRDetail() {
   const createSandbox = useAtomSet(createSandboxAtom)
   const existingSandbox = useMemo(
     () =>
-      state.sandboxes?.find(
-        (s) =>
-          s.pullRequestId === prId && s.awsAccountId === accountId && s.status !== "stopped" && s.status !== "error"
-      ),
-    [state.sandboxes, prId, accountId]
+      pr === null
+        ? undefined
+        : state.sandboxes?.find(
+            (sandbox) =>
+              sandbox.status !== "stopped" && sandbox.status !== "error" && sandboxMatchesPullRequest(sandbox, pr)
+          ),
+    [pr, state.sandboxes]
   )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)
@@ -1337,7 +1366,7 @@ export function PRDetail() {
         }
       >
         <PullRequestReviewWorkspace
-          accountId={accountId ?? pr.account.profile}
+          accountId={reviewApiAccountId(pr)}
           commentsRefreshGeneration={commentsRefreshGeneration}
           commentNavigation={commentNavigation}
           onFindingPosted={refreshCommentsAfterPublication}

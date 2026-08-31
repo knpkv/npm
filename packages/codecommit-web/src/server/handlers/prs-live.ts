@@ -14,11 +14,12 @@ import { AwsClient, CacheService, ChildEnv, ConfigService, PRService, ReadClient
 import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
+import { Chunk, Effect, Option, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { decodePullRequestCoordinates, type PullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   ApiError,
   CodeCommitApi,
@@ -152,18 +153,32 @@ const relayStreamResponse = (stream: Stream.Stream<typeof RelayReviewStreamEvent
 export const selectedPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
   awsAccountId: string,
-  pullRequestId: Domain.PullRequestId
+  pullRequestId: Domain.PullRequestId,
+  coordinates?: PullRequestCoordinates
 ): Effect.Effect<Domain.PullRequest, ApiError> => {
-  const pullRequest = pullRequests.find(
+  const routeAccountId = coordinates?.accountId ?? awsAccountId
+  const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&
-      (candidate.account.awsAccountId === awsAccountId ||
-        candidate.account.repoAccountId === awsAccountId ||
-        candidate.account.profile === awsAccountId)
+      (candidate.account.awsAccountId === routeAccountId ||
+        candidate.account.repoAccountId === routeAccountId ||
+        candidate.account.profile === routeAccountId) &&
+      (coordinates === undefined ||
+        (candidate.repositoryName === coordinates.repositoryName && candidate.account.region === coordinates.region))
   )
-  return pullRequest === undefined
-    ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
-    : Effect.succeed(pullRequest)
+  if (matches.length === 1) {
+    const pullRequest = matches[0]
+    return pullRequest === undefined
+      ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
+      : Effect.succeed(pullRequest)
+  }
+  return Effect.fail(
+    new ApiError({
+      message: matches.length === 0
+        ? "The selected pull request is not available in the local workspace"
+        : "The selected pull request is ambiguous; repository and region coordinates are required"
+    })
+  )
 }
 
 interface PullRequestLookup {
@@ -176,12 +191,28 @@ export const cachedPullRequest = (
   awsAccountId: string,
   pullRequestId: Domain.PullRequestId
 ): Effect.Effect<Domain.PullRequest, ApiError> =>
-  pullRequestRepo.findAll().pipe(
-    Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-    Effect.mapError(() =>
-      new ApiError({ message: "The selected pull request is not available in the local workspace" })
-    ),
-    Effect.flatMap((pullRequests) => selectedPullRequest(pullRequests, awsAccountId, pullRequestId))
+  decodePullRequestCoordinates(awsAccountId).pipe(
+    Effect.mapError((error) => new ApiError({ message: error.message })),
+    Effect.flatMap((coordinatesOption) => {
+      const coordinates = Option.getOrUndefined(coordinatesOption)
+      if (coordinates !== undefined && coordinates.pullRequestId !== pullRequestId) {
+        return Effect.fail(new ApiError({ message: "The pull-request coordinate token does not match its route" }))
+      }
+      return pullRequestRepo.findAll().pipe(
+        Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+        Effect.mapError(() =>
+          new ApiError({ message: "The selected pull request is not available in the local workspace" })
+        ),
+        Effect.flatMap((pullRequests) =>
+          selectedPullRequest(
+            pullRequests,
+            coordinates?.accountId ?? awsAccountId,
+            pullRequestId,
+            coordinates
+          )
+        )
+      )
+    })
   )
 
 /** Keep proprietary source revisions out of browser and intermediary caches. */

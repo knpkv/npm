@@ -12,6 +12,7 @@ export const encodeSandbox = (row: SandboxRow): typeof SandboxResponse.Type => (
   id: row.id,
   pullRequestId: row.pullRequestId,
   awsAccountId: row.awsAccountId,
+  region: row.region ?? null,
   repositoryName: row.repositoryName,
   sourceBranch: row.sourceBranch,
   containerId: row.containerId,

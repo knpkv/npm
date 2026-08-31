@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, Domain, Errors, PRService } from "@knpkv/codecommit-core"
 import { Deferred, Effect, Schema } from "effect"
+import { encodePullRequestCoordinates } from "../src/pull-request-coordinates.js"
 
 import {
   cachedPullRequest,
@@ -174,5 +175,41 @@ describe("PR handler selection", () => {
 
       const mismatch = yield* cachedPullRequest(cache, "unrelated", pullRequest.id).pipe(Effect.flip)
       expect(mismatch.message).toContain("not available")
+    }))
+
+  it.effect("requires exact coordinates when duplicate account and PR identifiers exist", () =>
+    Effect.gen(function*() {
+      const regionalPullRequest = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: pullRequest.account.profile,
+          region: Domain.AwsRegion.make("us-east-1"),
+          repoAccountId: pullRequest.account.repoAccountId
+        }),
+        repositoryName: Domain.RepositoryName.make("payments-us")
+      })
+      const ambiguous = yield* selectedPullRequest(
+        [pullRequest, regionalPullRequest],
+        pullRequest.account.profile,
+        pullRequest.id
+      ).pipe(Effect.flip)
+      expect(ambiguous.message).toContain("ambiguous")
+
+      const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(regionalPullRequest)
+      const first = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
+      const cache = { findAll: () => Effect.succeed([first, cached]) }
+      const token = encodePullRequestCoordinates({
+        accountId: pullRequest.account.profile,
+        pullRequestId: regionalPullRequest.id,
+        repositoryName: regionalPullRequest.repositoryName,
+        region: regionalPullRequest.account.region
+      })
+
+      const selected = yield* cachedPullRequest(cache, token, regionalPullRequest.id)
+      expect(selected.repositoryName).toBe(regionalPullRequest.repositoryName)
+      expect(selected.account.region).toBe(regionalPullRequest.account.region)
+
+      const invalidToken = yield* cachedPullRequest(cache, "ccpr:not-json", regionalPullRequest.id).pipe(Effect.flip)
+      expect(invalidToken.message).toContain("Invalid pull-request")
     }))
 })
