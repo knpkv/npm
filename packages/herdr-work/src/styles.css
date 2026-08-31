@@ -59,7 +59,8 @@
     grid-template-columns: minmax(0, 1fr) minmax(20rem, 0.32fr);
   }
   .work-departure-board {
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
   .work-board-head,
   .work-board-row {

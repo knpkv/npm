@@ -119,9 +119,27 @@ export const WorkGoal = Schema.Struct({
   blocker: Schema.NullOr(WorkBlocker),
   connectTarget: Schema.NullOr(AgentConnectTarget),
   agentHierarchy: Schema.optionalKey(Schema.NullOr(WorkAgentHierarchy)),
-  activity: Schema.optionalKey(Schema.Array(WorkActivity).check(Schema.isMaxLength(128))),
+  activity: Schema.optionalKey(
+    Schema.Array(WorkActivity)
+      .check(Schema.isMaxLength(128))
+      .check(
+        Schema.makeFilter(
+          (activities) => new Set(activities.map(({ id }) => id)).size === activities.length,
+          { expected: "unique activity ids" }
+        )
+      )
+  ),
   blockers: Schema.optionalKey(Schema.Array(WorkBlocker).check(Schema.isMaxLength(32))),
-  requests: Schema.optionalKey(Schema.Array(WorkRequest).check(Schema.isMaxLength(32))),
+  requests: Schema.optionalKey(
+    Schema.Array(WorkRequest)
+      .check(Schema.isMaxLength(32))
+      .check(
+        Schema.makeFilter(
+          (requests) => new Set(requests.map(({ id }) => id)).size === requests.length,
+          { expected: "unique request ids" }
+        )
+      )
+  ),
   review: Schema.optionalKey(Schema.NullOr(WorkReview)),
   approvalTarget: Schema.optionalKey(Schema.NullOr(WorkApprovalTarget)),
   createdAt: Timestamp,
@@ -135,6 +153,9 @@ export const WorkGoal = Schema.Struct({
       return goal.updatedAt >= goal.createdAt &&
         ((goal.state === "blocked") === hasBlocker) &&
         (goal.blockers === undefined || goal.blocker === null) &&
+        (goal.activity === undefined || goal.activity.every(({ occurredAt }) => occurredAt <= goal.updatedAt)) &&
+        (goal.requests === undefined || goal.requests.every(({ requestedAt }) => requestedAt <= goal.updatedAt)) &&
+        (goal.review === undefined || goal.review === null || goal.review.updatedAt <= goal.updatedAt) &&
         (agent === undefined || agent === null || (
           goal.connectTarget !== null &&
           goal.connectTarget.agentId === agent.agentId &&

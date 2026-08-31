@@ -110,6 +110,44 @@ describe("Work control app", () => {
     expect(malformed._tag).toBe("Failure")
   })
 
+  it("rejects future detail timestamps and accepts a detail at the goal update", () => {
+    const futureActivity = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      activity: [{ ...workGoalInput.activity[0], occurredAt: 3_001 }]
+    })
+    const futureRequest = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      requests: [{ ...workGoalInput.requests[0], requestedAt: 3_001 }]
+    })
+    const futureReview = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      review: { ...workGoalInput.review, updatedAt: 3_001 }
+    })
+    const detailAtUpdate = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      activity: [{ ...workGoalInput.activity[0], occurredAt: workGoalInput.updatedAt }]
+    })
+
+    expect(futureActivity._tag).toBe("Failure")
+    expect(futureRequest._tag).toBe("Failure")
+    expect(futureReview._tag).toBe("Failure")
+    expect(detailAtUpdate._tag).toBe("Success")
+  })
+
+  it("rejects duplicate activity and request identities", () => {
+    const duplicateActivity = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      activity: [workGoalInput.activity[0], { ...workGoalInput.activity[0], summary: "same identity, changed summary" }]
+    })
+    const duplicateRequest = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      requests: [workGoalInput.requests[0], { ...workGoalInput.requests[0], summary: "same identity, changed summary" }]
+    })
+
+    expect(duplicateActivity._tag).toBe("Failure")
+    expect(duplicateRequest._tag).toBe("Failure")
+  })
+
   it("renders activity, requests, review, shipment, and exact links beside the hierarchy", () => {
     const markup = renderToStaticMarkup(createElement(WorkBoard, { snapshots }))
     expect(markup).toContain("Daily fleet Work")
