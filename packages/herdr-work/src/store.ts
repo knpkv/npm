@@ -1,3 +1,4 @@
+import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Effect, FileSystem, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { WorkCheckpointConflictError, WorkProjectionError, WorkStoreError } from "./errors.js"
@@ -9,12 +10,44 @@ import {
 } from "./model.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
+const StoredEventRows = Schema.Array(StoredEventRow)
 const CountRow = Schema.Struct({ count: Schema.Number })
 const storeError = (operation: string) => (cause: unknown) => new WorkStoreError({ cause, operation })
 type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
   | { readonly _tag: "rejected"; readonly error: AppendRejection }
+
+const utf8 = new TextEncoder()
+const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSON.stringify(value)).byteLength
+const maximumTimestamp = 8_640_000_000_000_000
+const workSnapshotEnvelopeMaxBytes = encodedBytes({
+  observedAt: maximumTimestamp,
+  now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
+  day: { window: "day", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
+  week: { window: "week", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
+  month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] }
+})
+
+const maximumSnapshotBytes = (
+  history: ReadonlyArray<WorkGoalCheckpointType>,
+  candidate: WorkGoalCheckpointType
+): number => {
+  const maximumGoalBytes = new Map<string, number>()
+  for (const { goal } of [...history, candidate]) {
+    const bytes = encodedBytes(goal)
+    maximumGoalBytes.set(
+      goal.id,
+      Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes)
+    )
+  }
+  const encodedGoals = [...maximumGoalBytes.values()].reduce(
+    (total, bytes) => total + bytes,
+    0
+  )
+  const separators = Math.max(0, maximumGoalBytes.size - 1)
+  return workSnapshotEnvelopeMaxBytes + 4 * (encodedGoals + separators)
+}
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
   Schema.decodeUnknownEffect(StoredEventRow)(row).pipe(
@@ -121,6 +154,18 @@ export class WorkStore implements WorkStoreService {
               new WorkProjectionError({
                 cause: decoded,
                 detail: `work history cannot exceed ${workHistoryMaxEvents} checkpoints`,
+                reason: "capacity_exceeded"
+              })
+            )
+          }
+          const history = Schema.decodeUnknownSync(StoredEventRows)(
+            this.#database.prepare("SELECT record FROM work_goal_events").all()
+          ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+          if (maximumSnapshotBytes(history, decoded) > fleetResponseBodyMaxBytes) {
+            return reject(
+              new WorkProjectionError({
+                cause: decoded,
+                detail: `work snapshots cannot exceed ${fleetResponseBodyMaxBytes} encoded bytes`,
                 reason: "capacity_exceeded"
               })
             )

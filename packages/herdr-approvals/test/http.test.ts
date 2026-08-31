@@ -25,6 +25,7 @@ import {
   makeWorkService,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkSnapshots,
   WorkStore
 } from "@knpkv/herdr-work"
 import { Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
@@ -126,6 +127,27 @@ const secureRequestStatus = (
     request.end()
   })
 
+const secureRequestBody = (
+  url: string,
+  headers: Readonly<Record<string, string>>
+): Promise<{ readonly body: string; readonly status: number }> =>
+  new Promise((resolve, reject) => {
+    const request = httpsRequest(
+      url,
+      { headers, rejectUnauthorized: false },
+      (response) => {
+        let body = ""
+        response.setEncoding("utf8")
+        response.on("data", (chunk: string) => {
+          body += chunk
+        })
+        response.once("end", () => resolve({ body, status: response.statusCode ?? 0 }))
+      }
+    )
+    request.once("error", reject)
+    request.end()
+  })
+
 const workCheckpoint: WorkGoalCheckpointType = {
   eventId: "event-work-created",
   goal: {
@@ -145,6 +167,30 @@ const workCheckpoint: WorkGoalCheckpointType = {
   },
   occurredAt: 1_000,
   version: "herdr.work.event.v1"
+}
+
+const maximumTextWorkCheckpoint = (index: number): WorkGoalCheckpointType => {
+  const text = "x".repeat(4_096)
+  const idPrefix = `goal-${index}-`
+  const eventPrefix = `event-${index}-`
+  return {
+    ...workCheckpoint,
+    eventId: `${eventPrefix}${"e".repeat(256 - eventPrefix.length)}`,
+    goal: {
+      ...workCheckpoint.goal,
+      blocker: { since: 0, summary: text },
+      createdAt: 0,
+      detail: text,
+      id: `${idPrefix}${"g".repeat(256 - idPrefix.length)}`,
+      owner: { id: "o".repeat(256), name: text },
+      repository: { branch: text, repository: text },
+      state: "blocked",
+      summary: text,
+      title: text,
+      updatedAt: 0
+    },
+    occurredAt: 0
+  }
 }
 
 type WorkCheckpointTestPayload = WorkGoalCheckpointType & {
@@ -608,16 +654,42 @@ esac
           if (server.serveUrl === null || server.approvalUrl === null) {
             return yield* Effect.die("direct TLS listener missing")
           }
+          const acceptedWorkCheckpoints = yield* Effect.acquireUseRelease(
+            WorkStore.open(join(root, "approval-app.sqlite")),
+            (workStore) =>
+              Effect.gen(function*() {
+                const work = yield* makeWorkService(workStore)
+                let accepted = 0
+                for (let index = 0; index < 11; index += 1) {
+                  const result = yield* Effect.result(
+                    work.record(maximumTextWorkCheckpoint(index))
+                  )
+                  if (Result.isSuccess(result)) accepted += 1
+                }
+                return accepted
+              }),
+            (workStore) => Effect.sync(() => workStore.close())
+          )
+          expect(acceptedWorkCheckpoints).toBeLessThan(11)
           expect(server.serveUrl).toMatch(/^https:\/\//)
           expect(server.approvalUrl).toBe(server.serveUrl)
+          const requestHeaders = {
+            host: "ser8.example.test:0",
+            "tailscale-user-login": "attacker@example.com"
+          }
           expect(
-            yield* Effect.promise(() =>
-              secureRequestStatus(`${server.serveUrl}/v1/dashboard`, {
-                host: "ser8.example.test:0",
-                "tailscale-user-login": "attacker@example.com"
-              })
-            )
+            yield* Effect.promise(() => secureRequestStatus(`${server.serveUrl}/v1/dashboard`, requestHeaders))
           ).toBe(200)
+          const workResponse = yield* Effect.promise(() =>
+            secureRequestBody(`${server.serveUrl}/v1/work`, requestHeaders)
+          )
+          expect(workResponse.status).toBe(200)
+          expect(Buffer.byteLength(workResponse.body)).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
+          expect(
+            Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now.goals
+          ).toHaveLength(acceptedWorkCheckpoints)
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(

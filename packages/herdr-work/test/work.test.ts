@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
+import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Effect, Schema } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
@@ -74,6 +75,38 @@ const checkpointForGoal = (
   occurredAt,
   version: "herdr.work.event.v1"
 })
+
+const maximumTextCheckpoint = (index: number): WorkGoalCheckpointType => {
+  const maximumText = "x".repeat(4_096)
+  const agentId = `agent-${"a".repeat(250)}`
+  const host = "h".repeat(253)
+  const idPrefix = `goal-${index}-`
+  const eventPrefix = `event-${index}-`
+  return {
+    eventId: `${eventPrefix}${"e".repeat(256 - eventPrefix.length)}`,
+    goal: {
+      blocker: { since: 0, summary: maximumText },
+      connectTarget: {
+        agentId,
+        host,
+        url: `/connect/?agent=${agentId}&host=${host}`
+      },
+      createdAt: 0,
+      delivery: "local",
+      detail: maximumText,
+      id: `${idPrefix}${"g".repeat(256 - idPrefix.length)}`,
+      owner: { id: "o".repeat(256), name: maximumText },
+      repository: { branch: maximumText, repository: maximumText },
+      spend: { currency: "USD", minorUnits: Number.MAX_SAFE_INTEGER },
+      state: "blocked",
+      summary: maximumText,
+      title: maximumText,
+      updatedAt: 0
+    },
+    occurredAt: 0,
+    version: "herdr.work.event.v1"
+  }
+}
 
 const seedWorkDatabase = (
   path: string,
@@ -284,4 +317,36 @@ describe("durable Work projection", () => {
       })
       expect(yield* store.list()).toHaveLength(workSnapshotMaxGoals)
     }).pipe(provideNodeServices), 30_000)
+
+  it.effect("rejects maximum-text goals before snapshots exceed the response budget", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-work-byte-capacity-"))
+    const path = join(root, "work.sqlite")
+    return Effect.acquireUseRelease(
+      WorkStore.open(path),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeWorkService(store)
+          for (let index = 0; index < 10; index += 1) {
+            yield* Effect.result(service.record(maximumTextCheckpoint(index)))
+          }
+          const persistedBeforeFinalAttempt = yield* store.list()
+          expect(
+            yield* Effect.result(service.record(maximumTextCheckpoint(10)))
+          ).toMatchObject({
+            failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+          })
+          expect(yield* store.list()).toEqual(persistedBeforeFinalAttempt)
+          expect(persistedBeforeFinalAttempt.length).toBeLessThan(11)
+          const snapshots = yield* service.snapshots(30 * day)
+          expect(Buffer.byteLength(JSON.stringify(snapshots))).toBeLessThanOrEqual(
+            fleetResponseBodyMaxBytes
+          )
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
 })
