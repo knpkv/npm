@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { JobRecord } from "@knpkv/herdr-fleet/model"
 import type { FleetPendingApprovals } from "../src/dashboard-model.js"
-import { dashboardPendingState, mergeDashboardPendingPage } from "../src/internal/dashboard-pending-state.js"
+import {
+  dashboardPendingState,
+  mergeDashboardPendingPage,
+  rotateFailedDashboardPendingPage
+} from "../src/internal/dashboard-pending-state.js"
 
 const record = (id: string): JobRecord => ({
   actor: "andrey@example.com",
@@ -62,5 +66,24 @@ describe("dashboard pending continuation state", () => {
         page
       )
     ).toEqual(merged)
+  })
+
+  it("keeps a failed host retryable without starving the next host", () => {
+    const offline = cursor("OFFLINE", "cursor-offline")
+    const healthy = cursor("SER8", "cursor-ser8")
+    const initial = dashboardPendingState(1, emptyPage([offline, healthy]))
+
+    const rotated = rotateFailedDashboardPendingPage(initial, {
+      continuation: offline,
+      generation: 1
+    })
+
+    expect(rotated.nextCursors).toEqual([healthy, offline])
+    expect(
+      rotateFailedDashboardPendingPage(rotated, {
+        continuation: offline,
+        generation: 0
+      })
+    ).toEqual(rotated)
   })
 })

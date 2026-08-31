@@ -32,7 +32,11 @@ import {
   type PendingApprovalTarget as PendingApprovalTargetType
 } from "./dashboard-model.js"
 import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
-import { dashboardPendingState, mergeDashboardPendingPage } from "./internal/dashboard-pending-state.js"
+import {
+  dashboardPendingState,
+  mergeDashboardPendingPage,
+  rotateFailedDashboardPendingPage
+} from "./internal/dashboard-pending-state.js"
 import { FleetShell } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 
@@ -514,6 +518,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     const exit = await runPendingPage(continuation)
     setPendingBusy(false)
     if (Exit.isFailure(exit)) {
+      setPendingState((state) => rotateFailedDashboardPendingPage(state, request))
       Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
       return
     }

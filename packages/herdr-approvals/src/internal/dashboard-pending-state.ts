@@ -17,6 +17,14 @@ const sameContinuation = (
   left.cursor.createdAt === right.cursor.createdAt &&
   left.cursor.id === right.cursor.id
 
+const requestedIndex = (
+  state: DashboardPendingState,
+  request: DashboardPendingRequest
+): number =>
+  state.generation === request.generation
+    ? state.nextCursors.findIndex((candidate) => sameContinuation(candidate, request.continuation))
+    : -1
+
 export const dashboardPendingState = (
   generation: number,
   page: FleetPendingApprovals
@@ -30,8 +38,7 @@ export const mergeDashboardPendingPage = (
   request: DashboardPendingRequest,
   page: FleetPendingApprovals
 ): DashboardPendingState => {
-  if (state.generation !== request.generation) return state
-  const index = state.nextCursors.findIndex((candidate) => sameContinuation(candidate, request.continuation))
+  const index = requestedIndex(state, request)
   if (index < 0) return state
   return {
     failures: [...state.failures, ...page.failures],
@@ -43,5 +50,23 @@ export const mergeDashboardPendingPage = (
       ...state.nextCursors.slice(index + 1)
     ],
     remote: [...state.remote, ...page.remote]
+  }
+}
+
+export const rotateFailedDashboardPendingPage = (
+  state: DashboardPendingState,
+  request: DashboardPendingRequest
+): DashboardPendingState => {
+  const index = requestedIndex(state, request)
+  if (index < 0 || state.nextCursors.length < 2) return state
+  const failed = state.nextCursors[index]
+  if (failed === undefined) return state
+  return {
+    ...state,
+    nextCursors: [
+      ...state.nextCursors.slice(0, index),
+      ...state.nextCursors.slice(index + 1),
+      failed
+    ]
   }
 }
