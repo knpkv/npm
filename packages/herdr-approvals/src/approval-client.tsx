@@ -584,7 +584,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     return () => {
       current = false
     }
-  }, [snapshot?.observedAt, runPendingTarget])
+  }, [snapshot, runPendingTarget])
   useEffect(() => {
     if (currentSnapshot === null) return
     const decoded = readApprovalDeepLink(window.location.search)

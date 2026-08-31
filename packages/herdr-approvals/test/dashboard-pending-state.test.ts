@@ -56,6 +56,27 @@ describe("dashboard pending continuation state", () => {
     ).toEqual(refreshed)
   })
 
+  it("appends a current history page and advances its exact cursor", () => {
+    const currentCursor = { createdAt: 2, id: "job-current" }
+    const initial = dashboardHistoryState(3, [record("job-new")], currentCursor)
+
+    expect(
+      mergeDashboardHistoryPage(
+        initial,
+        { cursor: currentCursor, generation: 3 },
+        {
+          nextCursor: { createdAt: 1, id: "job-next" },
+          records: [record("job-current")]
+        }
+      )
+    ).toEqual(
+      dashboardHistoryState(3, [record("job-new"), record("job-current")], {
+        createdAt: 1,
+        id: "job-next"
+      })
+    )
+  })
+
   it("does not claim an exact badge count while pending pages remain", () => {
     const partial = {
       ...emptyPage([cursor("ALPHA", "cursor-a")]),
@@ -115,6 +136,13 @@ describe("dashboard pending continuation state", () => {
         generation: 0
       })
     ).toEqual(rotated)
+    const singleHost = dashboardPendingState(1, emptyPage([offline]))
+    expect(
+      rotateFailedDashboardPendingPage(singleHost, {
+        continuation: offline,
+        generation: 1
+      })
+    ).toEqual(singleHost)
   })
 
   it("loads the healthy host after a controlled failure through the client loader", async () => {
