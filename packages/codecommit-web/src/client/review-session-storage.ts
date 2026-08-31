@@ -143,9 +143,9 @@ const mergeStoredSession = (
   incoming: RelayReviewSessionWrite
 ): RelayReviewSessionWriteOutcome => {
   const turns = mergeTurns(current.turns, incoming.turns)
-  const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
   const observedCurrentVersion = incoming.expectedVersion === current.version
   if (!observedCurrentVersion) {
+    const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
     return {
       _tag: "stale-review-preserved",
       session: { ...current, dispositions, turns, version: current.version + 1 }
@@ -156,15 +156,13 @@ const mergeStoredSession = (
   if (sameHead) {
     return {
       _tag: "stored",
-      session: {
-        ...storedSession(incoming, turns, current.version + 1),
-        dispositions
-      }
+      session: storedSession(incoming, turns, current.version + 1)
     }
   }
   if (expectedHead) {
     return { _tag: "stored", session: storedSession(incoming, turns, current.version + 1) }
   }
+  const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
   return {
     _tag: "stale-review-preserved",
     session: { ...current, dispositions, turns, version: current.version + 1 }

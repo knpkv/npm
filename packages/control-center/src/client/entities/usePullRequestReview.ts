@@ -1,4 +1,5 @@
 import { sameReviewThread } from "@knpkv/review"
+import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -166,6 +167,8 @@ export interface PullRequestReviewTransport {
     signal: AbortSignal
   ) => Promise<PullRequestReviewState>
 }
+
+export class PullRequestReviewRequestAborted extends Data.TaggedError("PullRequestReviewRequestAborted")<{}> {}
 
 const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewProviderSelection> => {
   const eligible = new Array<ReviewProviderSelection>()
@@ -534,7 +537,7 @@ export const usePullRequestReview = (
         )
       },
       (failure) => {
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) return Promise.reject(new PullRequestReviewRequestAborted())
         if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
         setState((latest) =>
           latest._tag === "ready" && sameReviewScope(latest, current)
@@ -551,6 +554,7 @@ export const usePullRequestReview = (
     providerId?: ReviewProviderSelection["providerId"]
   ): void => {
     void startAwaitable(prompt, providerId).catch(<UnparsedInput>(failure: UnparsedInput) => {
+      if (Predicate.isTagged(failure, "PullRequestReviewRequestAborted")) return
       Effect.runFork(Effect.logError("Pull-request review enqueue failed", failure))
     })
   }, [startAwaitable])

@@ -83,7 +83,9 @@ const ControlCenterPullRequestRoute = Schema.Struct({
 const CodeCommitPullRequestRoute = Schema.Struct({
   accountId: AccountId,
   href: ProductPath,
-  pullRequestId: PullRequestId
+  /** Credential/account alias used by the browser URL; accountId stays canonical. */
+  pullRequestId: PullRequestId,
+  routeAccountId: Schema.optionalKey(AccountId)
 })
 
 /** Stable product-qualified identity. Head revisions never participate in thread identity. */
@@ -115,9 +117,10 @@ export const PullRequestConversation = Schema.TaggedUnion({
       switch (conversation._tag) {
         case "codecommit":
           return (
+            conversation.route.accountId === conversation.thread.accountId &&
             conversation.route.pullRequestId === conversation.thread.pullRequestId &&
             conversation.route.href ===
-              `/accounts/${encodeURIComponent(conversation.route.accountId)}/prs/${
+              `/accounts/${encodeURIComponent(conversation.route.routeAccountId ?? conversation.route.accountId)}/prs/${
                 encodeURIComponent(conversation.route.pullRequestId)
               }`
           )

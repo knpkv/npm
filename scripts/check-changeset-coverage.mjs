@@ -157,12 +157,11 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const substituted = substitutions.get(typeNode.typeName.text)
     if (substituted !== undefined) {
-      const substitutionKey = `substitution:${typeNode.typeName.text}`
+      const substitutionKey = `substitution:${substituted.kind === "text" ? substituted.value : substituted.key}`
       if (seen.has(substitutionKey)) return normalizeTypeText(typeNode)
       const nextSeen = new Set(seen).add(substitutionKey)
-      return Predicate.isString(substituted)
-        ? substituted
-        : canonicalTypeText(substituted, analysis, filePath, substitutions, nextSeen)
+      if (substituted.kind === "text") return substituted.value
+      return canonicalTypeText(substituted.node, analysis, filePath, substituted.scope, nextSeen)
     }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration !== undefined) {
@@ -172,7 +171,14 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
         const argument = typeNode.typeArguments?.[index]
-        if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+        if (argument !== undefined) {
+          nextSubstitutions.set(parameter.name.text, {
+            kind: "node",
+            key: `${declaration.filePath}\u0000${declaration.node.pos}\u0000${String(index)}`,
+            node: argument,
+            scope: substitutions
+          })
+        }
       }
       if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
         return canonicalTypeText(declaration.node.type, analysis, declaration.filePath, nextSubstitutions, nextSeen)
@@ -221,7 +227,7 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
 const genericDescriptor = (typeParameters, analysis, filePath, substitutions) => {
   const nextSubstitutions = new Map(substitutions)
   for (const [index, parameter] of (typeParameters ?? []).entries()) {
-    nextSubstitutions.set(parameter.name.text, `generic#${index}`)
+    nextSubstitutions.set(parameter.name.text, { kind: "text", value: `generic#${index}` })
   }
   const descriptor = (typeParameters ?? [])
     .map((parameter, index) => {
@@ -305,7 +311,14 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
-      if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+      if (argument !== undefined) {
+        nextSubstitutions.set(parameter.name.text, {
+          kind: "node",
+          key: `${declaration.filePath}\u0000${declaration.node.pos}\u0000${String(index)}`,
+          node: argument,
+          scope: substitutions
+        })
+      }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
       return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
@@ -321,7 +334,14 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
-      if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+      if (argument !== undefined) {
+        nextSubstitutions.set(parameter.name.text, {
+          kind: "node",
+          key: `${declaration.filePath}\u0000${declaration.node.pos}\u0000${String(index)}`,
+          node: argument,
+          scope: substitutions
+        })
+      }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
       return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
@@ -1378,6 +1398,17 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(nestedGeneric, nestedGeneric, ["packages/public/src/index.ts"]), [])
+
+  const nestedGenericChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<T> }\nexport const Public = (props: Props<number>) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(nestedGeneric, nestedGenericChanged, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
 
   const aliasPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],

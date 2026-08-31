@@ -7,6 +7,8 @@ import { afterEach, describe, expect, it } from "vitest"
 
 import { AppShell } from "../../src/client/AppShell.js"
 import { BrowserSessionProvider } from "../../src/client/BrowserSession.js"
+import { RelayDockChromeBoundary } from "../../src/client/controlCenterRelayDockShell.js"
+import * as Data from "effect/Data"
 
 Reflect.set(window, "IS_REACT_ACT_ENVIRONMENT", true)
 
@@ -24,6 +26,12 @@ const MountProbe = (): ReactElement => {
     observedMounts += 1
   }, [])
   return <output>page</output>
+}
+
+class DockChromeFailure extends Data.TaggedError("DockChromeFailure") {}
+
+const ThrowingDockChrome = (): ReactElement => {
+  throw new DockChromeFailure()
 }
 
 describe("AppShell Relay dock", () => {
@@ -54,5 +62,24 @@ describe("AppShell Relay dock", () => {
 
     expect(host.querySelector("[data-relay-product-dock-chrome]")).not.toBeNull()
     expect(observedMounts).toBe(1)
+  })
+
+  it("contains a rejected dock chrome without unmounting routed content", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <>
+          <output data-routed-page="true">page</output>
+          <RelayDockChromeBoundary>
+            <ThrowingDockChrome />
+          </RelayDockChromeBoundary>
+        </>
+      )
+    )
+
+    expect(host.querySelector("[data-routed-page]")?.textContent).toBe("page")
   })
 })

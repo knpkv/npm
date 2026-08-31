@@ -44,6 +44,7 @@ import {
   appendReviewTurn,
   type FindingDispositions,
   initialFindingDispositions,
+  reconcileReviewConversationTurns,
   replaceRelayReviewPreservingTurns,
   reconcileFindingDispositions,
   settleFindingPublication,
@@ -143,6 +144,14 @@ function failureMessage<Failure>(failure: Failure, fallback: string): string {
 
 const relayReviewFailureDescription = (message: string, hasPriorReview: boolean): string =>
   hasPriorReview ? `Previous result retained. The latest rerun failed. ${message}` : message
+
+/** Keep an explicit profile selection fail-closed when configuration removes it. */
+export const resolveRelayReviewProfile = <Profile extends { readonly id: string }>(
+  profiles: ReadonlyArray<Profile>,
+  selectedProfileId: string | null,
+  defaultProfile: Profile | undefined
+): Profile | undefined =>
+  selectedProfileId === null ? defaultProfile : profiles.find(({ id }) => id === selectedProfileId)
 
 const exactReviewIdentity = (
   accountId: string,
@@ -687,7 +696,7 @@ const ReadyReviewWorkspace = ({
   const defaultProfile = AsyncResult.isSuccess(config)
     ? (profiles.find((profile) => profile.id === config.value.review.defaultProfileId) ?? profiles[0])
     : undefined
-  const selectedProfile = profiles.find((profile) => profile.id === selectedProfileId) ?? defaultProfile
+  const selectedProfile = resolveRelayReviewProfile(profiles, selectedProfileId, defaultProfile)
   const selectedKind = kind ?? selectedProfile?.kind ?? "review"
   const selectedFile = diff.files.find(({ index }) => index === selectedFileIndex) ?? diff.files[0]
   const selectedFileMode = selectedFile === undefined ? null : fileModeLabel(selectedFile)
@@ -882,12 +891,19 @@ const ReadyReviewWorkspace = ({
             : reconcileFindingDispositions(prior, completedEvent.review.result.findings, dispositionsRef.current)
         dispositionsRef.current = nextDispositions
         setDispositions(nextDispositions)
-        const completed = replaceRelayReviewPreservingTurns(priorTurns, {
-          expectedIdentity: completedReviewRef.current?.identity ?? reviewIdentity,
-          identity: reviewIdentity,
-          skillIds: payload.profile.skillIds,
-          value: completedEvent.review
-        })
+        const completed = replaceRelayReviewPreservingTurns(
+          reconcileReviewConversationTurns(
+            completedReviewRef.current?.value ?? null,
+            completedEvent.review,
+            priorTurns
+          ),
+          {
+            expectedIdentity: completedReviewRef.current?.identity ?? reviewIdentity,
+            identity: reviewIdentity,
+            skillIds: payload.profile.skillIds,
+            value: completedEvent.review
+          }
+        )
         completedReviewRef.current = completed
         setCompletedReview(completed)
         setSelectedFindingId((current) => current ?? completedEvent.review.result.findings[0]?.id ?? null)
@@ -957,7 +973,6 @@ const ReadyReviewWorkspace = ({
         return { _tag: "failed" }
       }
       const currentTurns = turnsRef.current
-      const nextTurns = appendReviewTurn(currentTurns, userTurn)
       const outcome = await runStream(
         `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue`,
         {
@@ -972,6 +987,8 @@ const ReadyReviewWorkspace = ({
         }
       )
       if (!outcome.completed) return { _tag: "failed" }
+      const retainedTurns = completedReviewRef.current?.turns ?? currentTurns
+      const nextTurns = appendReviewTurn(retainedTurns, userTurn)
       setTurns(
         outcome.reply === undefined
           ? nextTurns
@@ -1067,6 +1084,7 @@ const ReadyReviewWorkspace = ({
         profile={selectedProfile}
         pullRequest={pullRequest}
         review={review}
+        reviewIsStale={reviewIsStale}
         selectedFindingId={conversationFindingId}
         turns={turns}
       />
@@ -1194,7 +1212,9 @@ const ReadyReviewWorkspace = ({
                   }}
                   value={selectedProfile?.id ?? ""}
                 >
-                  {AsyncResult.isSuccess(config) ? null : (
+                  {AsyncResult.isSuccess(config) && selectedProfile === undefined && selectedProfileId !== null ? (
+                    <option value="">Selected profile unavailable</option>
+                  ) : AsyncResult.isSuccess(config) ? null : (
                     <option value="">
                       {AsyncResult.isFailure(config) ? "Profiles unavailable" : "Loading profiles…"}
                     </option>
