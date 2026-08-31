@@ -159,6 +159,29 @@ const resolveExportedType = (analysis, filePath, name, seen = new Set()) => {
 
 const canonicalTypeMaxDepth = 128
 
+const typeSubstitutionTag = Symbol("type substitution")
+
+const makeTypeSubstitution = (typeNode, substitutions) => ({
+  [typeSubstitutionTag]: true,
+  substitutions,
+  typeNode
+})
+
+const isTypeSubstitution = (value) => value?.[typeSubstitutionTag] === true
+
+const rawTypeSubstitutionBindings = new WeakMap()
+
+const typeSubstitutionBinding = (value, substitutions) => {
+  if (isTypeSubstitution(value)) return value
+  const bindings = rawTypeSubstitutionBindings.get(substitutions) ?? new Map()
+  const existing = bindings.get(value)
+  if (existing !== undefined) return existing
+  const binding = makeTypeSubstitution(value, substitutions)
+  bindings.set(value, binding)
+  rawTypeSubstitutionBindings.set(substitutions, bindings)
+  return binding
+}
+
 const nextCanonicalTypeContext = (context, substitutionPath = context.substitutionPath) => ({
   depth: context.depth + 1,
   substitutionPath
@@ -188,15 +211,16 @@ const canonicalTypeText = (
     const substituted = substitutions.get(typeName)
     if (substituted !== undefined) {
       if (Predicate.isString(substituted)) return substituted
-      if (context.substitutionPath.has(typeNode)) {
+      const binding = typeSubstitutionBinding(substituted, substitutions)
+      if (context.substitutionPath.has(binding)) {
         failCanonicalType(filePath, typeNode, "recursive type substitution")
       }
-      const substitutionPath = new Set(context.substitutionPath).add(typeNode)
+      const substitutionPath = new Set(context.substitutionPath).add(binding)
       return canonicalTypeText(
-        substituted,
+        binding.typeNode,
         analysis,
         filePath,
-        substitutions,
+        binding.substitutions,
         seen,
         nextCanonicalTypeContext(context, substitutionPath)
       )
@@ -237,6 +261,60 @@ const canonicalTypeText = (
         .join(",")
       return `${wrapper}<${argumentsText}>`
     }
+  }
+  if (TypeScript.isArrayTypeNode(typeNode)) {
+    return `${canonicalTypeText(
+      typeNode.elementType,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )}[]`
+  }
+  if (TypeScript.isTupleTypeNode(typeNode)) {
+    return `[${typeNode.elements
+      .map((element) =>
+        canonicalTypeText(
+          TypeScript.isNamedTupleMember(element) ? element.type : element,
+          analysis,
+          filePath,
+          substitutions,
+          seen,
+          nextCanonicalTypeContext(context)
+        )
+      )
+      .join(",")}]`
+  }
+  if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword) {
+    return `readonly ${canonicalTypeText(
+      typeNode.type,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )}`
+  }
+  if (TypeScript.isOptionalTypeNode(typeNode)) {
+    return `${canonicalTypeText(
+      typeNode.type,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )}?`
+  }
+  if (TypeScript.isRestTypeNode(typeNode)) {
+    return `...${canonicalTypeText(
+      typeNode.type,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )}`
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && typeNode.typeArguments !== undefined) {
     const wrapper = normalizeTypeText(typeNode.typeName)
@@ -290,21 +368,6 @@ const canonicalTypeText = (
     }`
   }
   return normalizeTypeText(typeNode)
-}
-
-const resolveTypeSubstitution = (typeNode, substitutions, filePath) => {
-  let current = typeNode
-  const seen = new Set()
-  while (TypeScript.isTypeReferenceNode(current) && TypeScript.isIdentifier(current.typeName)) {
-    const name = current.typeName.text
-    const substituted = substitutions.get(name)
-    if (substituted === undefined) return current
-    if (Predicate.isString(substituted)) return substituted
-    if (seen.has(name)) failCanonicalType(filePath, current, "recursive type substitution")
-    seen.add(name)
-    current = substituted
-  }
-  return current
 }
 
 const genericDescriptor = (
@@ -371,10 +434,17 @@ const memberDescriptor = (
   filePath,
   substitutions,
   seen = new Set(),
-  context = { depth: 0, substitutionPath: new Set() }
+  context = { depth: 0, substitutionPath: new Set() },
+  memo = new Map(),
+  substitutionPath = new Set()
 ) => {
   const optional = member.questionToken === undefined ? "required" : "optional"
   const readonly = hasReadonlyModifier(member) ? "readonly:" : ""
+  const dependencies = { declarationDependencies: new Set(), substitutionDependencies: new Set() }
+  const collectDependencies = (result) => {
+    for (const dependency of result.declarationDependencies) dependencies.declarationDependencies.add(dependency)
+    for (const dependency of result.substitutionDependencies) dependencies.substitutionDependencies.add(dependency)
+  }
   if (TypeScript.isMethodSignature(member)) {
     const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions, context)
     const parameters = member.parameters
@@ -385,68 +455,216 @@ const memberDescriptor = (
         ? "unknown"
         : canonicalTypeText(member.type, analysis, filePath, generic.substitutions, seen, context)
     for (const parameter of member.parameters) {
-      if (parameter.type !== undefined) typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions)
+      if (parameter.type !== undefined) {
+        collectDependencies(
+          typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath)
+        )
+      }
     }
-    if (member.type !== undefined) typeMembers(member.type, analysis, filePath, seen, generic.substitutions)
-    return `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
+    if (member.type !== undefined) {
+      collectDependencies(
+        typeMembers(member.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath)
+      )
+    }
+    return {
+      descriptor: `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`,
+      ...dependencies
+    }
   }
   const type =
     member.type === undefined
       ? "unknown"
       : canonicalTypeText(member.type, analysis, filePath, substitutions, seen, context)
-  if (member.type !== undefined) typeMembers(member.type, analysis, filePath, seen, substitutions)
-  return `${readonly}${optional}:${type}`
+  if (member.type !== undefined) {
+    collectDependencies(typeMembers(member.type, analysis, filePath, seen, substitutions, memo, substitutionPath))
+  }
+  return { descriptor: `${readonly}${optional}:${type}`, ...dependencies }
 }
 
-const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutions = new Map()) => {
-  if (TypeScript.isParenthesizedTypeNode(typeNode))
-    return typeMembers(typeNode.type, analysis, filePath, seen, substitutions)
-  if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword)
-    return typeMembers(typeNode.type, analysis, filePath, seen, substitutions)
+const typeMembersResult = (members = new Map(), resolved = false) => ({
+  declarationDependencies: new Set(),
+  members,
+  resolved,
+  substitutionDependencies: new Set()
+})
+
+const collectTypeMembersResult = (target, result, includeMembers = true) => {
+  if (!result.resolved) target.resolved = false
+  if (includeMembers) {
+    for (const [name, type] of result.members) target.members.set(name, type)
+  }
+  for (const dependency of result.declarationDependencies) target.declarationDependencies.add(dependency)
+  for (const dependency of result.substitutionDependencies) target.substitutionDependencies.add(dependency)
+}
+
+const withDeclarationDependency = (result, dependency) => ({
+  ...result,
+  declarationDependencies: new Set([...result.declarationDependencies, dependency])
+})
+
+const withSubstitutionDependency = (result, dependency) => ({
+  ...result,
+  substitutionDependencies: new Set([...result.substitutionDependencies, dependency])
+})
+
+const sameSubstitutionEntries = (left, right) =>
+  left.length === right.size && left.every(([name, value]) => right.get(name) === value)
+
+const sameTypeArguments = (left, right) =>
+  left.length === right.length && left.every((argument, index) => argument === right[index])
+
+const readTypeMembersMemo = (
+  memo,
+  memoKey,
+  substitutions,
+  seen,
+  substitutionPath,
+  filePath,
+  typeArguments = [],
+  contextNode = memoKey
+) => {
+  const entries = memo.get(memoKey)
+  if (entries === undefined) return undefined
+  const entry = entries.find(
+    ({ substitutionEntries, referenceArguments }) =>
+      sameSubstitutionEntries(substitutionEntries, substitutions) &&
+      sameTypeArguments(referenceArguments, typeArguments)
+  )
+  if (entry === undefined) return undefined
+  if ([...entry.result.declarationDependencies].some((dependency) => seen.has(dependency))) {
+    failCanonicalType(filePath, contextNode, "recursive type declaration")
+  }
+  if ([...entry.result.substitutionDependencies].some((dependency) => substitutionPath.has(dependency))) {
+    failCanonicalType(filePath, contextNode, "recursive type substitution")
+  }
+  return entry.result
+}
+
+const writeTypeMembersMemo = (memo, memoKey, substitutions, result, typeArguments = []) => {
+  const entries = memo.get(memoKey) ?? []
+  const substitutionEntries = [...substitutions]
+  const existing = entries.findIndex(
+    ({ substitutionEntries: existingEntries, referenceArguments }) =>
+      sameSubstitutionEntries(existingEntries, substitutions) && sameTypeArguments(referenceArguments, typeArguments)
+  )
+  const entry = { referenceArguments: typeArguments, result, substitutionEntries }
+  if (existing === -1) entries.push(entry)
+  else entries[existing] = entry
+  memo.set(memoKey, entries)
+  return result
+}
+
+const typeMembers = (
+  typeNode,
+  analysis,
+  filePath,
+  seen = new Set(),
+  substitutions = new Map(),
+  memo = new Map(),
+  substitutionPath = new Set()
+) => {
+  const reference =
+    (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) ||
+    (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression))
+  if (!reference) {
+    const cached = readTypeMembersMemo(memo, typeNode, substitutions, seen, substitutionPath, filePath)
+    if (cached !== undefined) return cached
+  }
+  if (TypeScript.isParenthesizedTypeNode(typeNode)) {
+    return writeTypeMembersMemo(
+      memo,
+      typeNode,
+      substitutions,
+      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath)
+    )
+  }
+  if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword) {
+    return writeTypeMembersMemo(
+      memo,
+      typeNode,
+      substitutions,
+      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath)
+    )
+  }
   if (TypeScript.isArrayTypeNode(typeNode)) {
-    typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions)
-    return { members: new Map(), resolved: false }
+    const result = typeMembersResult()
+    collectTypeMembersResult(
+      result,
+      typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions, memo, substitutionPath),
+      false
+    )
+    result.resolved = false
+    return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isTupleTypeNode(typeNode)) {
+    const result = typeMembersResult()
     for (const element of typeNode.elements) {
-      const elementType = TypeScript.isNamedTupleMember(element) ? element.type : element
-      typeMembers(elementType, analysis, filePath, seen, substitutions)
+      let elementType = TypeScript.isNamedTupleMember(element) ? element.type : element
+      if (TypeScript.isOptionalTypeNode(elementType) || TypeScript.isRestTypeNode(elementType)) {
+        elementType = elementType.type
+      }
+      collectTypeMembersResult(
+        result,
+        typeMembers(elementType, analysis, filePath, seen, substitutions, memo, substitutionPath),
+        false
+      )
     }
-    return { members: new Map(), resolved: false }
+    result.resolved = false
+    return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isUnionTypeNode(typeNode)) {
+    const result = typeMembersResult()
     for (const member of typeNode.types) {
-      typeMembers(member, analysis, filePath, seen, substitutions)
+      collectTypeMembersResult(
+        result,
+        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath),
+        false
+      )
     }
-    return { members: new Map(), resolved: false }
+    result.resolved = false
+    return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isFunctionTypeNode(typeNode)) {
     const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions)
+    const result = typeMembersResult()
     for (const parameter of typeNode.parameters) {
-      if (parameter.type !== undefined) typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions)
+      if (parameter.type !== undefined) {
+        collectTypeMembersResult(
+          result,
+          typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath),
+          false
+        )
+      }
     }
-    if (typeNode.type !== undefined) typeMembers(typeNode.type, analysis, filePath, seen, generic.substitutions)
-    return { members: new Map(), resolved: false }
+    if (typeNode.type !== undefined) {
+      collectTypeMembersResult(
+        result,
+        typeMembers(typeNode.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath),
+        false
+      )
+    }
+    result.resolved = false
+    return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
-    const members = new Map()
-    let resolved = true
+    const result = typeMembersResult(new Map(), true)
     for (const member of typeNode.types) {
-      const result = typeMembers(member, analysis, filePath, seen, substitutions)
-      if (!result.resolved) resolved = false
-      for (const [name, type] of result.members) members.set(name, type)
+      collectTypeMembersResult(
+        result,
+        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath)
+      )
     }
-    return { members, resolved }
+    return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isTypeLiteralNode(typeNode) || TypeScript.isInterfaceDeclaration(typeNode)) {
-    const members = new Map()
-    let resolved = true
+    const result = typeMembersResult(new Map(), true)
     if (TypeScript.isInterfaceDeclaration(typeNode)) {
       for (const clause of typeNode.heritageClauses ?? []) {
         for (const heritageType of clause.types) {
-          const result = typeMembers(heritageType, analysis, filePath, seen, substitutions)
-          if (!result.resolved) resolved = false
-          for (const [name, type] of result.members) members.set(name, type)
+          collectTypeMembersResult(
+            result,
+            typeMembers(heritageType, analysis, filePath, seen, substitutions, memo, substitutionPath)
+          )
         }
       }
     }
@@ -456,73 +674,193 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
       if (!TypeScript.isIdentifier(name) && !TypeScript.isStringLiteral(name) && !TypeScript.isNumericLiteral(name)) {
         continue
       }
-      members.set(name.text, memberDescriptor(member, analysis, filePath, substitutions, seen))
+      const descriptor = memberDescriptor(
+        member,
+        analysis,
+        filePath,
+        substitutions,
+        seen,
+        { depth: 0, substitutionPath },
+        memo,
+        substitutionPath
+      )
+      result.members.set(name.text, descriptor.descriptor)
+      for (const dependency of descriptor.declarationDependencies) result.declarationDependencies.add(dependency)
+      for (const dependency of descriptor.substitutionDependencies) result.substitutionDependencies.add(dependency)
     }
-    return { members, resolved }
+    return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const substituted = substitutions.get(typeNode.typeName.text)
     if (substituted !== undefined) {
-      return Predicate.isString(substituted)
-        ? { members: new Map(), resolved: false }
-        : typeMembers(substituted, analysis, filePath, seen, substitutions)
+      if (Predicate.isString(substituted)) return typeMembersResult()
+      const binding = typeSubstitutionBinding(substituted, substitutions)
+      if (substitutionPath.has(binding)) failCanonicalType(filePath, typeNode, "recursive type substitution")
+      const result = typeMembers(
+        binding.typeNode,
+        analysis,
+        filePath,
+        seen,
+        binding.substitutions,
+        memo,
+        new Set(substitutionPath).add(binding)
+      )
+      return writeTypeMembersMemo(memo, typeNode, substitutions, withSubstitutionDependency(result, binding))
     }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration === undefined) {
-      let resolved = false
+      const result = typeMembersResult(new Map(), false)
       for (const argument of typeNode.typeArguments ?? []) {
-        const result = typeMembers(argument, analysis, filePath, seen, substitutions)
-        if (result.resolved) resolved = true
+        collectTypeMembersResult(
+          result,
+          typeMembers(argument, analysis, filePath, seen, substitutions, memo, substitutionPath),
+          false
+        )
       }
-      return { members: new Map(), resolved }
+      return writeTypeMembersMemo(memo, typeNode, substitutions, result)
     }
     const declarationName = declaration.node.name.text
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
     if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    const typeArguments = typeNode.typeArguments ?? []
+    const cached = readTypeMembersMemo(
+      memo,
+      declarationKey,
+      substitutions,
+      seen,
+      substitutionPath,
+      filePath,
+      typeArguments,
+      typeNode
+    )
+    if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
       if (argument !== undefined) {
-        nextSubstitutions.set(parameter.name.text, resolveTypeSubstitution(argument, substitutions, filePath))
+        nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions))
       }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
-      return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
+      return writeTypeMembersMemo(
+        memo,
+        declarationKey,
+        substitutions,
+        withDeclarationDependency(
+          typeMembers(
+            declaration.node.type,
+            analysis,
+            declaration.filePath,
+            nextSeen,
+            nextSubstitutions,
+            memo,
+            substitutionPath
+          ),
+          declarationKey
+        ),
+        typeArguments
+      )
     }
     if (TypeScript.isInterfaceDeclaration(declaration.node)) {
-      return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen, nextSubstitutions)
+      return writeTypeMembersMemo(
+        memo,
+        declarationKey,
+        substitutions,
+        withDeclarationDependency(
+          typeMembers(
+            declaration.node,
+            analysis,
+            declaration.filePath,
+            nextSeen,
+            nextSubstitutions,
+            memo,
+            substitutionPath
+          ),
+          declarationKey
+        ),
+        typeArguments
+      )
     }
   }
   if (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression)) {
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
     if (declaration === undefined) {
-      let resolved = false
+      const result = typeMembersResult(new Map(), false)
       for (const argument of typeNode.typeArguments ?? []) {
-        const result = typeMembers(argument, analysis, filePath, seen, substitutions)
-        if (result.resolved) resolved = true
+        collectTypeMembersResult(
+          result,
+          typeMembers(argument, analysis, filePath, seen, substitutions, memo, substitutionPath),
+          false
+        )
       }
-      return { members: new Map(), resolved }
+      return writeTypeMembersMemo(memo, typeNode, substitutions, result)
     }
     const declarationName = declaration.node.name.text
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
     if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    const typeArguments = typeNode.typeArguments ?? []
+    const cached = readTypeMembersMemo(
+      memo,
+      declarationKey,
+      substitutions,
+      seen,
+      substitutionPath,
+      filePath,
+      typeArguments,
+      typeNode
+    )
+    if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
       if (argument !== undefined) {
-        nextSubstitutions.set(parameter.name.text, resolveTypeSubstitution(argument, substitutions, filePath))
+        nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions))
       }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
-      return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
+      return writeTypeMembersMemo(
+        memo,
+        declarationKey,
+        substitutions,
+        withDeclarationDependency(
+          typeMembers(
+            declaration.node.type,
+            analysis,
+            declaration.filePath,
+            nextSeen,
+            nextSubstitutions,
+            memo,
+            substitutionPath
+          ),
+          declarationKey
+        ),
+        typeArguments
+      )
     }
     if (TypeScript.isInterfaceDeclaration(declaration.node)) {
-      return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen, nextSubstitutions)
+      return writeTypeMembersMemo(
+        memo,
+        declarationKey,
+        substitutions,
+        withDeclarationDependency(
+          typeMembers(
+            declaration.node,
+            analysis,
+            declaration.filePath,
+            nextSeen,
+            nextSubstitutions,
+            memo,
+            substitutionPath
+          ),
+          declarationKey
+        ),
+        typeArguments
+      )
     }
   }
-  return { members: new Map(), resolved: false }
+  return writeTypeMembersMemo(memo, typeNode, substitutions, typeMembersResult())
 }
 
 const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSources(sources)) => {
@@ -1631,6 +1969,19 @@ const runSelfTest = () => {
     ]),
     []
   )
+  const finiteWrappedForwardingSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Box<T> = { value: T }\ntype Props<T> = Box<T[]>\nexport function Public<T>(props: Props<T>) { return props }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteWrappedForwardingSources, finiteWrappedForwardingSources, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
   const directCyclicSources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -1695,6 +2046,77 @@ const runSelfTest = () => {
       cause instanceof ChangesetCoverageError &&
       cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
   )
+  const recursiveOptionalTupleSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; children: [Node?] }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveOptionalTupleSources, recursiveOptionalTupleSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveRestTupleSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; children: [...Node[]] }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(recursiveRestTupleSources, recursiveRestTupleSources, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const finiteOptionalTupleSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Payload = { id: string }\ntype Props = { value: [Payload?] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteOptionalTupleSources, finiteOptionalTupleSources, ["packages/public/src/index.ts"]),
+    []
+  )
+  const finiteRestTupleSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Payload = { id: string }\ntype Props = { value: [...Payload[]] }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteRestTupleSources, finiteRestTupleSources, ["packages/public/src/index.ts"]),
+    []
+  )
+  const diamondTypes = ["type Diamond0 = { payload: string }"]
+  for (let index = 1; index <= 20; index++) {
+    diamondTypes.push(`type Diamond${index} = { left: Diamond${index - 1}; right: Diamond${index - 1} }`)
+  }
+  const diamondSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      `${diamondTypes.join("\n")}\ntype Props = Diamond20\nexport const Public = (props: Props) => props.value`
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(diamondSources, diamondSources, ["packages/public/src/index.ts"]), [])
   const recursiveReadonlyArraySources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
