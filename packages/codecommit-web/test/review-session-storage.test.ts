@@ -20,6 +20,15 @@ const review: PullRequestRelayReviewResponse = {
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
   kind: "review",
+  profile: {
+    id: "thorough",
+    name: "Thorough review",
+    kind: "review",
+    provider: "codex",
+    harness: "native-codex",
+    model: "configured-default",
+    skillIds: ["builtin:pr-review"]
+  },
   result: {
     verdict: "One finding.",
     findings: [{
