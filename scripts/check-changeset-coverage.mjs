@@ -152,10 +152,13 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set()) => {
   if (TypeScript.isParenthesizedTypeNode(typeNode)) return typeMembers(typeNode.type, analysis, filePath, seen)
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     const members = new Map()
+    let resolved = true
     for (const member of typeNode.types) {
-      for (const [name, type] of typeMembers(member, analysis, filePath, seen)) members.set(name, type)
+      const result = typeMembers(member, analysis, filePath, seen)
+      if (!result.resolved) resolved = false
+      for (const [name, type] of result.members) members.set(name, type)
     }
-    return members
+    return { members, resolved }
   }
   if (TypeScript.isTypeLiteralNode(typeNode) || TypeScript.isInterfaceDeclaration(typeNode)) {
     const members = new Map()
@@ -165,20 +168,24 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set()) => {
       if (!TypeScript.isIdentifier(name) && !TypeScript.isStringLiteral(name) && !TypeScript.isNumericLiteral(name)) {
         continue
       }
-      members.set(name.text, member.type === undefined ? "unknown" : normalizeTypeText(member.type))
+      const type = member.type === undefined ? "unknown" : normalizeTypeText(member.type)
+      members.set(name.text, `${member.questionToken === undefined ? "required" : "optional"}:${type}`)
     }
+    let resolved = true
     if (TypeScript.isInterfaceDeclaration(typeNode)) {
       for (const clause of typeNode.heritageClauses ?? []) {
         for (const heritageType of clause.types) {
-          for (const [name, type] of typeMembers(heritageType, analysis, filePath, seen)) members.set(name, type)
+          const result = typeMembers(heritageType, analysis, filePath, seen)
+          if (!result.resolved) resolved = false
+          for (const [name, type] of result.members) members.set(name, type)
         }
       }
     }
-    return members
+    return { members, resolved }
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
-    if (declaration === undefined) return new Map()
+    if (declaration === undefined) return { members: new Map(), resolved: false }
     const nextSeen = new Set(seen).add(`${declaration.filePath}\u0000${typeNode.typeName.text}`)
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
       return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen)
@@ -187,7 +194,18 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set()) => {
       return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen)
     }
   }
-  return new Map()
+  if (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression)) {
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
+    if (declaration === undefined) return { members: new Map(), resolved: false }
+    const nextSeen = new Set(seen).add(`${declaration.filePath}\u0000${typeNode.expression.text}`)
+    if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
+      return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen)
+    }
+    if (TypeScript.isInterfaceDeclaration(declaration.node)) {
+      return typeMembers(declaration.node, analysis, declaration.filePath, nextSeen)
+    }
+  }
+  return { members: new Map(), resolved: false }
 }
 
 const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSources(sources)) => {
@@ -226,8 +244,8 @@ const callableParameterTypes = (source, filePath) => {
   const detailed = callableParameterTypesInSources(new Map([[filePath, source]]), filePath)
   return new Map(
     [...detailed]
-      .filter(([, properties]) => properties.size > 0)
-      .map(([name, properties]) => [name, new Set(properties.keys())])
+      .filter(([, properties]) => properties.resolved && properties.members.size > 0)
+      .map(([name, properties]) => [name, new Set(properties.members.keys())])
   )
 }
 
@@ -339,8 +357,10 @@ const publicCallableChanges = (previousSources, currentSources, entryPoints) => 
   const changes = []
   for (const [identity, currentSignature] of current) {
     const previousSignature = previous.get(identity)
-    const previousProperties = previousSignature?.properties ?? new Map()
-    for (const property of [...currentSignature.properties.keys()].toSorted()) {
+    if (!currentSignature.properties.resolved || previousSignature?.properties.resolved === false) continue
+    const currentProperties = currentSignature.properties.members
+    const previousProperties = previousSignature?.properties.members ?? new Map()
+    for (const property of [...currentProperties.keys()].toSorted()) {
       if (!previousProperties.has(property)) {
         changes.push({
           kind: "addition",
@@ -351,7 +371,7 @@ const publicCallableChanges = (previousSources, currentSources, entryPoints) => 
       }
     }
     for (const property of [...previousProperties.keys()].toSorted()) {
-      if (!currentSignature.properties.has(property)) {
+      if (!currentProperties.has(property)) {
         changes.push({
           kind: "removal",
           filePath: currentSignature.filePath,
@@ -360,9 +380,9 @@ const publicCallableChanges = (previousSources, currentSources, entryPoints) => 
         })
       }
     }
-    for (const property of [...currentSignature.properties.keys()].toSorted()) {
+    for (const property of [...currentProperties.keys()].toSorted()) {
       const previousType = previousProperties.get(property)
-      const currentType = currentSignature.properties.get(property)
+      const currentType = currentProperties.get(property)
       if (previousType !== undefined && currentType !== undefined && previousType !== currentType) {
         changes.push({
           kind: "type-change",
@@ -373,14 +393,25 @@ const publicCallableChanges = (previousSources, currentSources, entryPoints) => 
       }
     }
   }
+  for (const [identity, previousSignature] of previous) {
+    if (current.has(identity) || !previousSignature.properties.resolved) continue
+    changes.push({
+      kind: "callable-removal",
+      filePath: previousSignature.filePath,
+      name: previousSignature.name,
+      properties: [...previousSignature.properties.members.keys()].toSorted()
+    })
+  }
   return changes
 }
 
 const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
   changes.flatMap(({ filePath, kind = "addition", name, packageName, properties }) => {
     if (releaseTypes.get(packageName) !== "patch") return []
+    const action =
+      kind === "addition" ? "add" : kind === "removal" ? "remove" : kind === "callable-removal" ? "remove" : "change"
     const diagnostic = [
-      `${packageName}: patch changeset cannot ${kind === "addition" ? "add" : kind === "removal" ? "remove" : "change"} public callable props`,
+      `${packageName}: patch changeset cannot ${action} public callable${kind === "callable-removal" ? "" : " props"}`,
       properties.join(", "),
       `(${name} in ${filePath})`
     ].join(" ")
@@ -789,6 +820,87 @@ const runSelfTest = () => {
       properties: ["terminalViewportRef"]
     }
   ])
+
+  const optionalPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { label?: string }\nexport const Public = (props: Props) => props.label"
+    ]
+  ])
+  const optionalCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { label: string }\nexport const Public = (props: Props) => props.label"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(optionalPrevious, optionalCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["label"] }
+  ])
+
+  const inheritedPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface BaseProps { value: string }\ninterface Props extends BaseProps {}\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const inheritedCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface BaseProps { value: string; terminalViewportRef?: string }\ninterface Props extends BaseProps {}\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(inheritedPrevious, inheritedCurrent, ["packages/public/src/index.ts"]), [
+    {
+      kind: "addition",
+      filePath: "packages/public/src/view.tsx",
+      name: "Public",
+      properties: ["terminalViewportRef"]
+    }
+  ])
+
+  const unionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string; label: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const unionCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type A = { value: string }\ntype B = { label: string }\ntype Props = A | B\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(unionPrevious, unionCurrent, ["packages/public/src/index.ts"]), [])
+
+  const removedCurrent = new Map([
+    ["packages/public/src/index.ts", "export {}"],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(movedPrevious, removedCurrent, ["packages/public/src/index.ts"]), [
+    {
+      kind: "callable-removal",
+      filePath: "packages/public/src/old-view.tsx",
+      name: "Public",
+      properties: ["value"]
+    }
+  ])
+
+  assert.deepEqual(
+    manifestEntryPoints({ exports: { ".": "./src/index.ts", "./view.js": "./src/view.js" } }, "packages/public", [
+      "packages/public/src/index.ts",
+      "packages/public/src/view.tsx"
+    ]),
+    ["packages/public/src/index.ts", "packages/public/src/view.tsx"]
+  )
 }
 
 const decodeJson = Effect.fn("ChangesetCoverage.decodeJson")(function* (content, location) {
@@ -978,8 +1090,10 @@ const manifestEntryPoints = (manifest, directory, sourceFiles) => {
     const normalized = entryPath.replace(/^\.\//u, "")
     const sourcePrefix = `${directory}/src/`
     if (normalized.startsWith("src/")) {
-      const sourcePattern = entryPathPattern(normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx)$/u, ".ts"))
-      return candidates.filter((candidate) => sourcePattern.test(candidate.slice(sourcePrefix.length)))
+      const sourcePattern = entryPathPattern(normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx|tsx?)$/u, ""))
+      return candidates.filter((candidate) =>
+        sourcePattern.test(candidate.slice(sourcePrefix.length).replace(/\.(?:tsx?|jsx)$/u, ""))
+      )
     }
     if (!normalized.startsWith("dist/")) return []
     const outputPath = normalized.slice("dist/".length)
