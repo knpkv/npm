@@ -986,6 +986,41 @@ describe("Connect public seams", () => {
     })
   })
 
+  it.effect("continues a fleet page after the cursor agent exits", () => {
+    const agents = Array.from({ length: connectAgentPageMaxRecords + 2 }, (_, index): ConnectAgent => ({
+      host: "SER8",
+      id: `agent-${index.toString().padStart(3, "0")}`,
+      kind: "codex",
+      lastActivityAt: index,
+      name: `Agent ${index}`,
+      state: "working",
+      work: "npm"
+    }))
+    return Effect.gen(function*() {
+      const first = yield* pageFleetConnectAgents(
+        FleetConnectAgents.make({ agents, failures: [] }),
+        null
+      )
+      expect(first.nextCursor).not.toBeNull()
+      const cursor = first.nextCursor
+      if (cursor === null) return yield* Effect.die("first page must have a cursor")
+      const continued = yield* pageFleetConnectAgents(
+        FleetConnectAgents.make({
+          agents: agents.filter(
+            ({ host, id }) => host !== cursor.host || id !== cursor.id
+          ),
+          failures: []
+        }),
+        cursor
+      )
+      expect(continued.agents.map(({ id }) => id)).toEqual([
+        `agent-${connectAgentPageMaxRecords.toString().padStart(3, "0")}`,
+        `agent-${(connectAgentPageMaxRecords + 1).toString().padStart(3, "0")}`
+      ])
+      expect(continued.nextCursor).toBeNull()
+    })
+  })
+
   it.effect("rejects peer agents that claim a different host", () => {
     const peer = {
       agentsUrl: "http://100.64.0.2/v1/connect/agents/local",

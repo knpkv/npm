@@ -48,19 +48,13 @@ export const pageFleetConnectAgents = Effect.fn("HerdrConnect.pageFleetAgents")(
   cursor: ConnectAgentCursor | null
 ) {
   const sorted = directory.agents.toSorted(compareConnectAgents)
-  const cursorIndex = cursor === null
-    ? -1
-    : sorted.findIndex(
-      ({ host, id }) => host.toLowerCase() === cursor.host.toLowerCase() && id === cursor.id
-    )
-  if (cursor !== null && cursorIndex === -1) {
-    return yield* new ConnectPeerError({
-      cause: cursor,
-      host: "fleet",
-      reason: "invalid_response"
+  const nextIndex = cursor === null
+    ? 0
+    : sorted.findIndex(({ host, id }) => {
+      const hostOrder = compareText(host.toLowerCase(), cursor.host.toLowerCase())
+      return hostOrder > 0 || (hostOrder === 0 && compareText(id, cursor.id) > 0)
     })
-  }
-  const start = cursorIndex + 1
+  const start = nextIndex === -1 ? sorted.length : nextIndex
   const agents = sorted.slice(start, start + connectAgentPageMaxRecords)
   const last = agents.at(-1)
   const nextCursor = start + agents.length < sorted.length && last !== undefined
