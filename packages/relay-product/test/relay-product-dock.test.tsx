@@ -83,10 +83,17 @@ const RegisteredThread = ({ registration }: { readonly registration: RelayPullRe
 
 describe("RelayProductDock", () => {
   it("renders on the host page collapsed, then exposes the profile and model selectors", async () => {
-    const rendered = await renderDock(<RelayProductDock host={host}>Host page</RelayProductDock>)
+    const rendered = await renderDock(
+      <RelayProductDock host={host}>
+        <div style={{ minHeight: "100dvh" }}>Host page</div>
+      </RelayProductDock>
+    )
     try {
       expect(rendered.container.textContent).toContain("Host page")
       expect(rendered.portal.querySelector('[role="dialog"]')).toBeNull()
+      expect(queryRequired<HTMLElement>(rendered.container, "[data-relay-product-dock-chrome]").style.position).toBe(
+        "fixed"
+      )
 
       await click(queryRequired(rendered.container, "[data-rly-relay-dock-trigger]"))
 

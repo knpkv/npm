@@ -37,7 +37,7 @@ import {
 } from "../../server/Api.js"
 import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
-import { CodeCommitRelayThread } from "../codecommitRelayDock.js"
+import { CodeCommitRelayThread, type CodeCommitRelayContinuationOutcome } from "../codecommitRelayDock.js"
 import { useComments } from "../hooks/useComments.js"
 import {
   applyFindingDecision,
@@ -638,6 +638,7 @@ const ReadyReviewWorkspace = ({
   }>(() => ({ identity: reviewIdentity, values: new Map() }))
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
   const [completedReview, setCompletedReview] = useState<{
+    readonly expectedIdentity: string
     readonly identity: string
     readonly skillIds: ReadonlyArray<string>
     readonly value: PullRequestRelayReviewResponse
@@ -734,6 +735,7 @@ const ReadyReviewWorkspace = ({
       return
     }
     const restored = {
+      expectedIdentity: stored.success.identity,
       identity: stored.success.identity,
       skillIds: stored.success.skillIds,
       value: stored.success.review
@@ -755,6 +757,7 @@ const ReadyReviewWorkspace = ({
     )
       return
     const written = writeRelayReviewSession(window.localStorage, reviewSessionKey, {
+      expectedIdentity: completedReview.expectedIdentity,
       identity: completedReview.identity,
       resource: reviewResource,
       review: completedReview.value,
@@ -766,6 +769,11 @@ const ReadyReviewWorkspace = ({
       setReviewFailure({
         description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
         title: "PR conversation not saved"
+      })
+    } else if (written.success._tag === "stale-review-preserved") {
+      setReviewFailure({
+        description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
+        title: "Newer PR review preserved"
       })
     }
   }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, turns])
@@ -828,7 +836,12 @@ const ReadyReviewWorkspace = ({
             : reconcileFindingDispositions(prior, completedEvent.review.result.findings, dispositionsRef.current)
         dispositionsRef.current = nextDispositions
         setDispositions(nextDispositions)
-        const completed = { identity: reviewIdentity, skillIds: payload.skillIds, value: completedEvent.review }
+        const completed = {
+          expectedIdentity: completedReviewRef.current?.identity ?? reviewIdentity,
+          identity: reviewIdentity,
+          skillIds: payload.skillIds,
+          value: completedEvent.review
+        }
         completedReviewRef.current = completed
         setCompletedReview(completed)
         setSelectedFindingId((current) => current ?? completedEvent.review.result.findings[0]?.id ?? null)
@@ -881,15 +894,20 @@ const ReadyReviewWorkspace = ({
   ])
 
   const continueReview = useCallback(
-    async (findingId: string, nextMessage: string): Promise<void> => {
-      if (review === null) return
-      const userTurn: RelayReviewConversationTurn = { findingId, role: "user", message: nextMessage }
+    async (findingId: string, nextMessage: string): Promise<CodeCommitRelayContinuationOutcome> => {
+      if (review === null) return { _tag: "failed" }
+      const userTurn: RelayReviewConversationTurn = {
+        id: window.crypto.randomUUID(),
+        findingId,
+        role: "user",
+        message: nextMessage
+      }
       if (!Schema.is(RelayReviewConversationTurn)(userTurn)) {
         setReviewFailure({
           description: "Shorten the message so it can be retained in this review conversation.",
           title: "Message is too large"
         })
-        return
+        return { _tag: "failed" }
       }
       const nextTurns = appendReviewTurn(turns, userTurn)
       const outcome = await runStream(
@@ -906,13 +924,19 @@ const ReadyReviewWorkspace = ({
           message: nextMessage
         }
       )
-      if (!outcome.completed) return
+      if (!outcome.completed) return { _tag: "failed" }
       setTurns(
         outcome.reply === undefined
           ? nextTurns
-          : appendReviewTurn(nextTurns, { findingId, role: "assistant", message: outcome.reply })
+          : appendReviewTurn(nextTurns, {
+              id: window.crypto.randomUUID(),
+              findingId,
+              role: "assistant",
+              message: outcome.reply
+            })
       )
       setMessage("")
+      return { _tag: "completed" }
     },
     [
       accountId,

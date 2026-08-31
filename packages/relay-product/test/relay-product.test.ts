@@ -15,6 +15,7 @@ import {
   pullRequestThreadIdentity,
   RelayAuthenticationRequired,
   RelayProductAdapterContractError,
+  RelayProductContinuationReceiptMismatch,
   type RelayProductPort
 } from "../src/index.js"
 
@@ -249,6 +250,56 @@ describe("Relay product adapter", () => {
           actualProduct: "control-center",
           expectedProduct: "codecommit",
           operation: "continue-pull-request-conversation"
+        })
+      )
+    }))
+
+  it.effect("rejects a continuation receipt for another PR thread", () =>
+    Effect.gen(function*() {
+      const authorization = yield* Schema.decodeUnknownEffect(ProductAuthorization)({
+        _tag: "codecommit",
+        principalId: "owner"
+      })
+      const conversation = yield* Schema.decodeUnknownEffect(PullRequestConversation)({
+        _tag: "codecommit",
+        route: {
+          accountId: "123456789012",
+          href: "/accounts/123456789012/prs/184",
+          pullRequestId: "184"
+        },
+        selection: selectionFixture,
+        thread: {
+          accountId: "123456789012",
+          pullRequestId: "184",
+          repositoryName: "payments"
+        }
+      })
+      const request = yield* Schema.decodeUnknownEffect(ContinuePullRequestConversationRequest)({
+        conversation,
+        message: "Continue this PR thread.",
+        selection: selectionFixture
+      })
+      const wrongReceipt = yield* Schema.decodeUnknownEffect(PullRequestConversationContinuation)({
+        messageId: "message-42",
+        thread: {
+          ...pullRequestThreadIdentity(conversation),
+          pullRequestId: "185"
+        }
+      })
+      const port: RelayProductPort = {
+        authorize: () => Effect.succeed(authorization),
+        continuePullRequestConversation: () => Effect.succeed(wrongReceipt),
+        locatePullRequestConversation: () => Effect.die("lookup is outside this test"),
+        product: "codecommit",
+        redirectToPullRequest: () => Effect.die("redirect is outside this test")
+      }
+
+      const failure = yield* makeRelayProductAdapter(port).continuePullRequestConversation(request).pipe(Effect.flip)
+
+      expect(failure).toEqual(
+        new RelayProductContinuationReceiptMismatch({
+          actualThread: wrongReceipt.thread,
+          expectedThread: pullRequestThreadIdentity(conversation)
         })
       )
     }))
