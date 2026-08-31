@@ -68,19 +68,38 @@ const recordDelivery = (
   const updated = database
     .prepare(
       `UPDATE push_deliveries
-       SET delivered_at = max(delivered_at, ?),
-           count_complete = max(count_complete, ?)
+       SET count_complete = CASE
+             WHEN delivered_at < ? THEN ?
+             WHEN delivered_at = ? THEN max(count_complete, ?)
+             ELSE count_complete
+           END,
+           delivered_at = max(delivered_at, ?)
        WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ?`
     )
-    .run(deliveredAt, encodedCountComplete, host, jobId, endpoint)
+    .run(
+      deliveredAt,
+      encodedCountComplete,
+      deliveredAt,
+      encodedCountComplete,
+      deliveredAt,
+      host,
+      jobId,
+      endpoint
+    )
   if (updated.changes !== 0 && updated.changes !== 0n) return
   database
     .prepare(
       `INSERT INTO push_deliveries (host, job_id, endpoint, delivered_at, count_complete)
        VALUES (?, ?, ?, ?, ?)
        ON CONFLICT(host, job_id, endpoint) DO UPDATE SET
-         delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at),
-         count_complete = max(push_deliveries.count_complete, excluded.count_complete)`
+         count_complete = CASE
+           WHEN excluded.delivered_at > push_deliveries.delivered_at
+             THEN excluded.count_complete
+           WHEN excluded.delivered_at = push_deliveries.delivered_at
+             THEN max(push_deliveries.count_complete, excluded.count_complete)
+           ELSE push_deliveries.count_complete
+         END,
+         delivered_at = max(push_deliveries.delivered_at, excluded.delivered_at)`
     )
     .run(host, jobId, endpoint, deliveredAt, encodedCountComplete)
 }

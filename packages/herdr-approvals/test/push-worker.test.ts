@@ -177,7 +177,8 @@ describe("push delivery retries", () => {
             "SeR8",
             "job-race",
             subscription.endpoint,
-            1_000
+            1_000,
+            false
           )
           expect(
             yield* store.hasDelivered(
@@ -587,6 +588,7 @@ describe("push delivery retries", () => {
     const sent: Array<ApprovalPushPayload> = []
     const pass = (
       store: ApprovalAppStore,
+      jobId: string,
       pendingCount: number | null,
       now: number
     ) =>
@@ -595,7 +597,7 @@ describe("push delivery retries", () => {
         allowedUsers: ["alice@example.com"],
         loadCandidates: () =>
           Effect.succeed({
-            candidates: [{ host: "SER8", jobId: "job-local" }],
+            candidates: [{ host: "SER8", jobId }],
             pendingCount
           }),
         now: Effect.succeed(now),
@@ -610,13 +612,19 @@ describe("push delivery retries", () => {
       (store) =>
         Effect.gen(function*() {
           yield* store.putSubscription(subscription, "alice@example.com")
-          yield* pass(store, null, 1_000)
-          yield* pass(store, null, 2_000)
-          yield* pass(store, 1, 16_000)
-          yield* pass(store, 1, 17_000)
+          yield* pass(store, "job-local", null, 1_000)
+          yield* pass(store, "job-local", null, 2_000)
+          yield* pass(store, "job-local", 1, 16_000)
+          yield* pass(store, "job-local", 1, 17_000)
+          yield* pass(store, "job-expired", 1, 1_000)
+          yield* pass(store, "job-expired", null, 61_001)
+          yield* pass(store, "job-expired", 1, 61_002)
           expect(sent).toEqual([
             { host: "SER8", jobId: "job-local", pendingCount: null },
-            { host: "SER8", jobId: "job-local", pendingCount: 1 }
+            { host: "SER8", jobId: "job-local", pendingCount: 1 },
+            { host: "SER8", jobId: "job-expired", pendingCount: 1 },
+            { host: "SER8", jobId: "job-expired", pendingCount: null },
+            { host: "SER8", jobId: "job-expired", pendingCount: 1 }
           ])
         }),
       (store) =>
