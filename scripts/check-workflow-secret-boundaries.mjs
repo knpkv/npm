@@ -100,6 +100,17 @@ const actionInput = (step, name) => {
   const entry = Object.entries(step.with).find(([inputName]) => inputName.toLowerCase() === name)
   return entry?.[1]
 }
+const duplicateActionInputNames = (step) => {
+  if (step?.with === null || !Predicate.isObjectOrArray(step?.with) || Array.isArray(step.with)) return []
+  const counts = new Map()
+  for (const inputName of Object.keys(step.with)) {
+    const normalized = inputName.toLowerCase()
+    counts.set(normalized, (counts.get(normalized) ?? 0) + 1)
+  }
+  return Array.from(counts.entries())
+    .filter(([, count]) => count > 1)
+    .map(([name]) => name)
+}
 const referencesPullRequestRevision = (value, trigger) =>
   referencesExpression(value, "github.event.pull_request.head.sha") ||
   referencesExpression(value, "github.event.pull_request.head.ref") ||
@@ -436,6 +447,11 @@ export const validateSnapshotPreviewPolicy = (document, location) => {
     ["publish", publish]
   ]) {
     const steps = Array.isArray(job?.steps) ? job.steps : []
+    for (const [stepIndex, step] of steps.entries()) {
+      for (const inputName of duplicateActionInputNames(step)) {
+        diagnostics.push(`${location}: ${name} step ${stepIndex + 1} has duplicate action input ${inputName}`)
+      }
+    }
     const checkouts = steps.filter((step) => usesAction(step?.uses, "actions/checkout"))
     if (checkouts.length !== 1) {
       diagnostics.push(`${location}: ${name} job must contain exactly one checkout`)
@@ -487,6 +503,7 @@ jobs:
     steps:
       - uses: actions/checkout@${"a".repeat(40)}
         with:
+          fetch-depth: 1
           persist-credentials: false
           ref: \${{ github.sha }}
   publish:
@@ -508,6 +525,12 @@ jobs:
   const hardcodedMain = structuredClone(valid)
   hardcodedMain.jobs.publish.steps[0].with.ref = "refs/heads/main"
   assert.match(validateSnapshotPreviewPolicy(hardcodedMain, "hardcoded main fixture").join("\n"), /selected event SHA/u)
+  const collidingInputs = structuredClone(valid)
+  collidingInputs.jobs.publish.steps[0].with.REF = "refs/heads/untrusted"
+  assert.match(
+    validateSnapshotPreviewPolicy(collidingInputs, "colliding input fixture").join("\n"),
+    /duplicate action input/u
+  )
   const secondCheckout = structuredClone(valid)
   secondCheckout.jobs.publish.steps.push({
     uses: `actions/checkout@${"b".repeat(40)}`,
