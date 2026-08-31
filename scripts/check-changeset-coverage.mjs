@@ -151,15 +151,40 @@ const resolveExportedType = (analysis, filePath, name, seen = new Set()) => {
   return localAlias === undefined ? undefined : { filePath, node: localAlias }
 }
 
-const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map(), seen = new Set()) => {
+const canonicalTypeMaxDepth = 128
+
+const nextCanonicalTypeContext = (context, substitutionPath = context.substitutionPath) => ({
+  depth: context.depth + 1,
+  substitutionPath
+})
+
+const canonicalTypeText = (
+  typeNode,
+  analysis,
+  filePath,
+  substitutions = new Map(),
+  seen = new Set(),
+  context = { depth: 0, substitutionPath: new Set() }
+) => {
+  if (context.depth > canonicalTypeMaxDepth) return `depth-limit(${normalizeTypeText(typeNode)})`
   if (TypeScript.isParenthesizedTypeNode(typeNode))
-    return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen)
+    return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const substituted = substitutions.get(typeNode.typeName.text)
     if (substituted !== undefined) {
-      return Predicate.isString(substituted)
-        ? substituted
-        : canonicalTypeText(substituted, analysis, filePath, substitutions, seen)
+      if (Predicate.isString(substituted)) return substituted
+      if (context.substitutionPath.has(typeNode)) {
+        return `cycle(${normalizeTypeText(typeNode)})`
+      }
+      const substitutionPath = new Set(context.substitutionPath).add(typeNode)
+      return canonicalTypeText(
+        substituted,
+        analysis,
+        filePath,
+        substitutions,
+        seen,
+        nextCanonicalTypeContext(context, substitutionPath)
+      )
     }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration !== undefined) {
@@ -169,16 +194,30 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
         const argument = typeNode.typeArguments?.[index]
-        if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+        if (argument !== undefined) {
+          nextSubstitutions.set(
+            parameter.name.text,
+            canonicalTypeText(argument, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+          )
+        }
       }
       if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
-        return canonicalTypeText(declaration.node.type, analysis, declaration.filePath, nextSubstitutions, nextSeen)
+        return canonicalTypeText(
+          declaration.node.type,
+          analysis,
+          declaration.filePath,
+          nextSubstitutions,
+          nextSeen,
+          nextCanonicalTypeContext(context)
+        )
       }
     }
     if (typeNode.typeArguments !== undefined) {
       const wrapper = normalizeTypeText(typeNode.typeName)
       const argumentsText = typeNode.typeArguments
-        .map((argument) => canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+        .map((argument) =>
+          canonicalTypeText(argument, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+        )
         .join(",")
       return `${wrapper}<${argumentsText}>`
     }
@@ -186,36 +225,57 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
   if (TypeScript.isTypeReferenceNode(typeNode) && typeNode.typeArguments !== undefined) {
     const wrapper = normalizeTypeText(typeNode.typeName)
     const argumentsText = typeNode.typeArguments
-      .map((argument) => canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+      .map((argument) =>
+        canonicalTypeText(argument, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+      )
       .join(",")
     return `${wrapper}<${argumentsText}>`
   }
   if (TypeScript.isUnionTypeNode(typeNode)) {
     return `union(${typeNode.types
-      .map((member) => canonicalTypeText(member, analysis, filePath, substitutions, seen))
+      .map((member) =>
+        canonicalTypeText(member, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+      )
       .toSorted()
       .join("|")})`
   }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     return `intersection(${typeNode.types
-      .map((member) => canonicalTypeText(member, analysis, filePath, substitutions, seen))
+      .map((member) =>
+        canonicalTypeText(member, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+      )
       .toSorted()
       .join("&")})`
   }
   if (TypeScript.isFunctionTypeNode(typeNode)) {
-    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions)
+    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions, context)
     return `function<${generic.descriptor}>(${typeNode.parameters
-      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions))
+      .map((parameter) =>
+        parameterDescriptor(parameter, analysis, filePath, generic.substitutions, nextCanonicalTypeContext(context))
+      )
       .join(",")}):${
       typeNode.type === undefined
         ? "unknown"
-        : canonicalTypeText(typeNode.type, analysis, filePath, generic.substitutions, seen)
+        : canonicalTypeText(
+            typeNode.type,
+            analysis,
+            filePath,
+            generic.substitutions,
+            seen,
+            nextCanonicalTypeContext(context)
+          )
     }`
   }
   return normalizeTypeText(typeNode)
 }
 
-const genericDescriptor = (typeParameters, analysis, filePath, substitutions) => {
+const genericDescriptor = (
+  typeParameters,
+  analysis,
+  filePath,
+  substitutions,
+  context = { depth: 0, substitutionPath: new Set() }
+) => {
   const nextSubstitutions = new Map(substitutions)
   for (const [index, parameter] of (typeParameters ?? []).entries()) {
     nextSubstitutions.set(parameter.name.text, `generic#${index}`)
@@ -225,38 +285,71 @@ const genericDescriptor = (typeParameters, analysis, filePath, substitutions) =>
       const constraint =
         parameter.constraint === undefined
           ? ""
-          : `extends:${canonicalTypeText(parameter.constraint, analysis, filePath, nextSubstitutions)}`
+          : `extends:${canonicalTypeText(
+              parameter.constraint,
+              analysis,
+              filePath,
+              nextSubstitutions,
+              new Set(),
+              nextCanonicalTypeContext(context)
+            )}`
       const defaultType =
         parameter.default === undefined
           ? ""
-          : `default:${canonicalTypeText(parameter.default, analysis, filePath, nextSubstitutions)}`
+          : `default:${canonicalTypeText(
+              parameter.default,
+              analysis,
+              filePath,
+              nextSubstitutions,
+              new Set(),
+              nextCanonicalTypeContext(context)
+            )}`
       return `${index}:${constraint}:${defaultType}`
     })
     .join(",")
   return { descriptor, substitutions: nextSubstitutions }
 }
 
-const parameterDescriptor = (parameter, analysis, filePath, substitutions) => {
+const parameterDescriptor = (
+  parameter,
+  analysis,
+  filePath,
+  substitutions,
+  context = { depth: 0, substitutionPath: new Set() }
+) => {
   const marker = parameter.dotDotDotToken === undefined ? "" : "..."
   const optional = parameter.questionToken === undefined ? "" : "?"
   const type =
-    parameter.type === undefined ? "unknown" : canonicalTypeText(parameter.type, analysis, filePath, substitutions)
+    parameter.type === undefined
+      ? "unknown"
+      : canonicalTypeText(parameter.type, analysis, filePath, substitutions, new Set(), context)
   return `${marker}${optional}:${type}`
 }
 
-const memberDescriptor = (member, analysis, filePath, substitutions) => {
+const memberDescriptor = (
+  member,
+  analysis,
+  filePath,
+  substitutions,
+  context = { depth: 0, substitutionPath: new Set() }
+) => {
   const optional = member.questionToken === undefined ? "required" : "optional"
   const readonly = hasReadonlyModifier(member) ? "readonly:" : ""
   if (TypeScript.isMethodSignature(member)) {
-    const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions)
+    const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions, context)
     const parameters = member.parameters
-      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions))
+      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions, context))
       .join(",")
     const returnType =
-      member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, generic.substitutions)
+      member.type === undefined
+        ? "unknown"
+        : canonicalTypeText(member.type, analysis, filePath, generic.substitutions, new Set(), context)
     return `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
   }
-  const type = member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, substitutions)
+  const type =
+    member.type === undefined
+      ? "unknown"
+      : canonicalTypeText(member.type, analysis, filePath, substitutions, new Set(), context)
   return `${readonly}${optional}:${type}`
 }
 
@@ -302,7 +395,9 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
-      if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+      if (argument !== undefined) {
+        nextSubstitutions.set(parameter.name.text, canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+      }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
       return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
@@ -318,7 +413,9 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
-      if (argument !== undefined) nextSubstitutions.set(parameter.name.text, argument)
+      if (argument !== undefined) {
+        nextSubstitutions.set(parameter.name.text, canonicalTypeText(argument, analysis, filePath, substitutions, seen))
+      }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
       return typeMembers(declaration.node.type, analysis, declaration.filePath, nextSeen, nextSubstitutions)
@@ -1364,6 +1461,48 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(genericPrevious, genericCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
+
+  const recursiveGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Leaf<T> = { value: T }\ntype Wrapped<T> = Leaf<T>\ntype Props = Wrapped<string>\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const recursiveGenericCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Leaf<T> = { value: T }\ntype Wrapped<T> = Leaf<T>\ntype Props = Wrapped<number>\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(recursiveGenericPrevious, recursiveGenericPrevious, ["packages/public/src/index.ts"]),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(recursiveGenericPrevious, recursiveGenericCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const deeplyNestedType = (leaf) =>
+    `${"Wrap<".repeat(canonicalTypeMaxDepth + 1)}${leaf}${">".repeat(canonicalTypeMaxDepth + 1)}`
+  const deeplyNestedPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      `type Props = { value: ${deeplyNestedType("string")} }\nexport const Public = (props: Props) => props.value`
+    ]
+  ])
+  const deeplyNestedCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      `type Props = { value: ${deeplyNestedType("number")} }\nexport const Public = (props: Props) => props.value`
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(deeplyNestedPrevious, deeplyNestedCurrent, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
   ])
 
