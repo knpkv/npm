@@ -21,6 +21,7 @@ import {
   restoreModalFocusAfterCleanup,
   useModalContentRegistration,
   useModalIsolation,
+  useParentModalReady,
   useModalScrollLock
 } from "../internal/modal.js"
 import { Field } from "../primitives/Field.js"
@@ -45,6 +46,36 @@ const hasActiveElement = (node: Node): node is Node & DocumentOrShadowRoot => "a
 const activeElementFor = (panel: HTMLElement): Element | null => {
   const root = panel.getRootNode()
   return hasActiveElement(root) ? root.activeElement : panel.ownerDocument.activeElement
+}
+
+const deepActiveHTMLElement = (root: DocumentOrShadowRoot): HTMLElement | null => {
+  const active = root.activeElement
+  if (!isHTMLElement(active)) return null
+  return active.shadowRoot === null ? active : (deepActiveHTMLElement(active.shadowRoot) ?? active)
+}
+
+const focusRestoreTarget = (ownerDocument: Document): HTMLElement | null => {
+  const active = deepActiveHTMLElement(ownerDocument)
+  return active === ownerDocument.body || active === ownerDocument.documentElement ? null : active
+}
+
+const isRenderedFocusable = (element: HTMLElement): boolean => {
+  const view = element.ownerDocument.defaultView
+  if (view === null) return element.hidden === false
+  let current: HTMLElement | null = element
+  while (current !== null) {
+    const computed = view.getComputedStyle(current)
+    if (
+      current.hidden !== false ||
+      computed.display === "none" ||
+      computed.visibility === "hidden" ||
+      computed.visibility === "collapse"
+    ) {
+      return false
+    }
+    current = current.parentElement
+  }
+  return true
 }
 
 /** One explicit piece of application-owned context attached to the current Relay thread. */
@@ -291,8 +322,7 @@ const DockInitialFocus = ({
   useLayoutEffect(() => {
     const focusTarget = target.current
     if (focusTarget === null) return
-    const active = focusTarget.ownerDocument.activeElement
-    restoreTarget.current = isHTMLElement(active) ? active : null
+    restoreTarget.current = focusRestoreTarget(focusTarget.ownerDocument)
     focusTarget.focus()
   }, [restoreTarget, target])
   return null
@@ -349,7 +379,7 @@ const DockLayer = ({
     if (!modal || event.key !== "Tab") return
 
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-      (element) => element.hidden === false && (element.tabIndex >= 0 || element.isContentEditable)
+      (element) => isRenderedFocusable(element) && (element.tabIndex >= 0 || element.isContentEditable)
     )
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
@@ -436,7 +466,8 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
     ...props
   } = componentProps
   const [defaultState, setDefaultState] = useState(defaultOpen)
-  const resolvedOpen = open ?? defaultState
+  const parentModalReady = useParentModalReady()
+  const resolvedOpen = (open ?? defaultState) && parentModalReady
   const compactViewport = useCompactViewport()
   const modal = compactViewport || desktopPresentation === "overlay"
   const triggerRef = useRef<HTMLButtonElement>(null)

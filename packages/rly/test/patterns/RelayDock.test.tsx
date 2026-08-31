@@ -9,6 +9,7 @@ import {
   type RlyRelayDockDesktopPresentation,
   type RlyRelayDockState
 } from "../../src/patterns/RelayDock.js"
+import { Dialog } from "../../src/primitives/Dialog.js"
 
 Object.defineProperty(window, "IS_REACT_ACT_ENVIRONMENT", { configurable: true, value: true })
 
@@ -22,9 +23,14 @@ interface MountedShadowDock extends Omit<MountedDock, "portal"> {
   readonly portal: ShadowRoot
 }
 
+interface MountedShadowApp extends MountedDock {
+  readonly shadow: ShadowRoot
+}
+
 const mounted: Array<MountedDock> = []
 const modelOptions = [{ label: "Codex", value: "codex" }]
 const profileOptions = [{ label: "Review", value: "review" }]
+const shadowPortalTargets: ReadonlyArray<"explicit" | "owned"> = ["owned", "explicit"]
 
 const mount = async (element: ReactElement): Promise<MountedDock> => {
   const host = document.createElement("div")
@@ -58,6 +64,32 @@ const mountInShadowRoot = async (element: ReactElement): Promise<MountedShadowDo
   const entry = { host, portal, root }
   mounted.push(entry)
   await act(async () => root.render(<PortalProvider container={portal}>{element}</PortalProvider>))
+  return entry
+}
+
+const mountAppInShadowRoot = async (
+  element: ReactElement,
+  portalTarget: "explicit" | "owned"
+): Promise<MountedShadowApp> => {
+  const shadowHost = document.createElement("div")
+  const shadow = shadowHost.attachShadow({ mode: "open" })
+  const host = document.createElement("div")
+  shadow.append(host)
+  document.body.append(shadowHost)
+  const root = createRoot(host)
+  await act(async () =>
+    root.render(
+      portalTarget === "explicit" ? (
+        <PortalProvider container={shadow}>{element}</PortalProvider>
+      ) : (
+        <PortalProvider>{element}</PortalProvider>
+      )
+    )
+  )
+  const portal = portalTarget === "explicit" ? shadow : host.querySelector<HTMLDivElement>("[data-rly-portal-root]")
+  if (portal === null) throw new Error("PortalProvider did not create its ShadowRoot portal")
+  const entry = { host, portal, root, shadow }
+  mounted.push(entry)
   return entry
 }
 
@@ -239,6 +271,68 @@ describe("RelayDock", () => {
     await act(async () => close?.click())
     await act(async () => vi.runAllTimers())
     expect(document.activeElement).toBe(opener)
+  })
+
+  it.each(shadowPortalTargets)(
+    "restores controlled docks to a ShadowRoot launcher with an %s portal target",
+    async (portalTarget) => {
+      const { host, portal, shadow } = await mountAppInShadowRoot(<ControlledDock />, portalTarget)
+      const opener = host.querySelector<HTMLButtonElement>("button")
+      if (opener === null) throw new Error("Controlled RelayDock opener did not render")
+      opener.focus()
+      expect(shadow.activeElement).toBe(opener)
+      await act(async () => opener.click())
+
+      const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+      expect(shadow.activeElement).toBe(close)
+      vi.useFakeTimers()
+      await act(async () => close?.click())
+      await act(async () => vi.runAllTimers())
+      expect(shadow.activeElement).toBe(opener)
+    }
+  )
+
+  it("stages an initially open overlay behind its parent dialog and restores parent focus", async () => {
+    const { portal } = await mount(
+      <Dialog.Root defaultOpen>
+        <Dialog.Content title="Outer dialog">{dock({ defaultOpen: true })}</Dialog.Content>
+      </Dialog.Root>
+    )
+    const layers = portal.querySelectorAll<HTMLElement>("[data-rly-modal-layer]")
+    const dialogs = portal.querySelectorAll<HTMLElement>('[role="dialog"]')
+    const outer = dialogs[0]
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+
+    expect(layers).toHaveLength(2)
+    expect(layers[0]?.hasAttribute("data-rly-dialog-layer")).toBe(true)
+    expect(layers[1]?.hasAttribute("data-rly-relay-dock-modal")).toBe(true)
+    expect(document.activeElement).toBe(close)
+    vi.useFakeTimers()
+    await act(async () => close?.click())
+    await act(async () => vi.runAllTimers())
+    expect(portal.querySelectorAll('[role="dialog"]')).toHaveLength(1)
+    expect(outer?.contains(document.activeElement)).toBe(true)
+  })
+
+  it("excludes controls hidden by an ancestor from the modal focus boundary", async () => {
+    const footer = (
+      <>
+        <textarea aria-label="Last visible control" />
+        <div style={{ display: "none" }}>
+          <button type="button">Hidden trailing control</button>
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const lastVisible = portal.querySelector<HTMLTextAreaElement>('[aria-label="Last visible control"]')
+    const tab = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+
+    lastVisible?.focus()
+    await act(async () => dialog?.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
   })
 
   it("honors Tab and Escape already prevented by inline content", async () => {

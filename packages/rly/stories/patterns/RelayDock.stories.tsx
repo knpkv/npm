@@ -63,7 +63,14 @@ const nestedDialogState: RlyRelayDockState = {
 }
 
 const richTextState: RlyRelayDockState = {
-  content: <div aria-label="Rich Relay reply" contentEditable role="textbox" />,
+  content: (
+    <>
+      <div aria-label="Rich Relay reply" contentEditable role="textbox" />
+      <div style={{ display: "none" }}>
+        <button type="button">Hidden trailing reply action</button>
+      </div>
+    </>
+  ),
   status: "ready"
 }
 
@@ -116,8 +123,8 @@ const Composer = (): ReactElement => (
 )
 
 const RelayDockFixture = ({
-  initiallyOpen = false,
   footer = <Composer />,
+  initiallyOpen = false,
   presentation = "overlay",
   state = readyState,
   tall = false
