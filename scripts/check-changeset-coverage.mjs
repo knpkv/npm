@@ -369,6 +369,10 @@ const memberDescriptor = (
       member.type === undefined
         ? "unknown"
         : canonicalTypeText(member.type, analysis, filePath, generic.substitutions, seen, context)
+    for (const parameter of member.parameters) {
+      if (parameter.type !== undefined) typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions)
+    }
+    if (member.type !== undefined) typeMembers(member.type, analysis, filePath, seen, generic.substitutions)
     return `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
   }
   const type =
@@ -382,6 +386,17 @@ const memberDescriptor = (
 const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutions = new Map()) => {
   if (TypeScript.isParenthesizedTypeNode(typeNode))
     return typeMembers(typeNode.type, analysis, filePath, seen, substitutions)
+  if (TypeScript.isArrayTypeNode(typeNode)) {
+    typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions)
+    return { members: new Map(), resolved: false }
+  }
+  if (TypeScript.isTupleTypeNode(typeNode)) {
+    for (const element of typeNode.elements) {
+      const elementType = TypeScript.isNamedTupleMember(element) ? element.type : element
+      typeMembers(elementType, analysis, filePath, seen, substitutions)
+    }
+    return { members: new Map(), resolved: false }
+  }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     const members = new Map()
     let resolved = true
@@ -1572,6 +1587,86 @@ const runSelfTest = () => {
     (cause) =>
       cause instanceof ChangesetCoverageError &&
       cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveArraySources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; children: Node[] }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(recursiveArraySources, recursiveArraySources, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveTupleSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type Payload = { id: string }\nexport type Node = { payload: Payload; children: [Node] }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { value: Node }\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(recursiveTupleSources, recursiveTupleSources, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveMethodParameterSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Node = { child: Node }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit(value: Node): void }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveMethodParameterSources, recursiveMethodParameterSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const recursiveMethodReturnSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Node = { child: Node }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit(): Node }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(recursiveMethodReturnSources, recursiveMethodReturnSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Node"
+  )
+  const finiteMethodSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Node = { id: string }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Node } from "./types.js"\ntype Props = { visit(value: Node): Node }\nexport const Public = (props: Props) => props.visit'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(finiteMethodSources, finiteMethodSources, ["packages/public/src/index.ts"]),
+    []
   )
   const finiteAliasSources = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
