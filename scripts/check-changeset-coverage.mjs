@@ -121,13 +121,13 @@ const analyzeSources = (sources) => {
 }
 
 const resolveTypeDeclaration = (analysis, filePath, name, seen = new Set()) => {
-  const key = `${filePath}\u0000${name}`
-  if (seen.has(key)) return undefined
-  const nextSeen = new Set(seen).add(key)
   const module = analysis.modules.get(filePath)
   if (module === undefined) return undefined
   const local = module.declarations.get(name)
   if (local !== undefined) return { filePath, node: local }
+  const key = `${filePath}\u0000${name}`
+  if (seen.has(key)) return undefined
+  const nextSeen = new Set(seen).add(key)
   const imported = module.imports.get(name)
   if (imported === undefined || imported.importedName === "*") return undefined
   const target = resolveLocalModule(filePath, imported.sourceSpecifier, analysis.sources)
@@ -135,13 +135,13 @@ const resolveTypeDeclaration = (analysis, filePath, name, seen = new Set()) => {
 }
 
 const resolveExportedType = (analysis, filePath, name, seen = new Set()) => {
-  const key = `${filePath}\u0000${name}`
-  if (seen.has(key)) return undefined
-  const nextSeen = new Set(seen).add(key)
   const module = analysis.modules.get(filePath)
   if (module === undefined) return undefined
   const local = module.declarations.get(name)
   if (local !== undefined && module.exportedTypes.has(name)) return { filePath, node: local }
+  const key = `${filePath}\u0000${name}`
+  if (seen.has(key)) return undefined
+  const nextSeen = new Set(seen).add(key)
   const alias = module.aliases.get(name)
   if (alias === undefined) return undefined
   if (alias.sourceSpecifier !== undefined) {
@@ -201,11 +201,10 @@ const canonicalTypeText = (
         nextCanonicalTypeContext(context, substitutionPath)
       )
     }
-    const declarationKey = `${filePath}\u0000${typeName}`
-    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
     const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
     if (declaration !== undefined) {
-      const key = `${declaration.filePath}\u0000${typeName}`
+      const declarationName = declaration.node.name.text
+      const key = `${declaration.filePath}\u0000${declarationName}`
       if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
       const nextSeen = new Set(seen).add(key)
       const nextSubstitutions = new Map(substitutions)
@@ -408,7 +407,10 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration === undefined) return { members: new Map(), resolved: false }
-    const nextSeen = new Set(seen).add(`${declaration.filePath}\u0000${typeNode.typeName.text}`)
+    const declarationName = declaration.node.name.text
+    const declarationKey = `${declaration.filePath}\u0000${declarationName}`
+    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    const nextSeen = new Set(seen).add(declarationKey)
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
@@ -426,7 +428,10 @@ const typeMembers = (typeNode, analysis, filePath, seen = new Set(), substitutio
   if (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression)) {
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
     if (declaration === undefined) return { members: new Map(), resolved: false }
-    const nextSeen = new Set(seen).add(`${declaration.filePath}\u0000${typeNode.expression.text}`)
+    const declarationName = declaration.node.name.text
+    const declarationKey = `${declaration.filePath}\u0000${declarationName}`
+    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    const nextSeen = new Set(seen).add(declarationKey)
     const nextSubstitutions = new Map(substitutions)
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
@@ -1543,6 +1548,37 @@ const runSelfTest = () => {
     publicCallableChanges(shadowedGenericSources, shadowedGenericSources, ["packages/public/src/index.ts"]),
     []
   )
+  const renamedFiniteCollisionSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Alias<T> = { value: T }\nexport type Orig<T> = Alias<T>"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Orig as Alias } from "./types.js"\ntype Props = Alias<string>\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(renamedFiniteCollisionSources, renamedFiniteCollisionSources, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  const renamedRecursiveAliasSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Alias<T> = Orig<T>\nexport type Orig<T> = Alias<T>"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Orig as Alias } from "./types.js"\ntype Props = Alias<string>\nexport const Public = (props: Props) => props.value'
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(renamedRecursiveAliasSources, renamedRecursiveAliasSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/types.ts: recursive type declaration while canonicalizing Orig<T>"
+  )
   const directCycleFailure = Effect.runSync(
     publicCallableChangesEffect(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]).pipe(
       Effect.flip
@@ -1607,6 +1643,16 @@ const runSelfTest = () => {
       cause instanceof ChangesetCoverageError &&
       cause.reason ===
         `packages/public/src/view.tsx: type depth exceeded ${canonicalTypeMaxDepth} while canonicalizing number`
+  )
+  const deepOverflowFailure = Effect.runSync(
+    publicCallableChangesEffect(deeplyNestedPrevious, deeplyNestedOverflow, ["packages/public/src/index.ts"]).pipe(
+      Effect.flip
+    )
+  )
+  assert(deepOverflowFailure instanceof ChangesetCoverageError)
+  assert.equal(
+    deepOverflowFailure.reason,
+    `packages/public/src/view.tsx: type depth exceeded ${canonicalTypeMaxDepth} while canonicalizing number`
   )
 
   const aliasPrevious = new Map([
