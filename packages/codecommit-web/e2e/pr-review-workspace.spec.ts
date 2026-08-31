@@ -1481,6 +1481,7 @@ test("clears a failed publication error after a successful retry", async ({ page
   const post = page.getByRole("button", { name: "Accept · post" }).first()
   await post.click()
   await expect(page.getByText("Finding post failed")).toBeVisible()
+  await expect(page.getByText("Newer PR review preserved")).toHaveCount(0)
   await expect(post).toBeEnabled()
 
   await post.click()

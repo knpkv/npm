@@ -826,6 +826,59 @@ const ReadyReviewWorkspace = ({
     [reviewResource, reviewSessionKey]
   )
 
+  const persistReviewSnapshot = useCallback(async (): Promise<boolean> => {
+    const currentReview = completedReviewRef.current
+    if (currentReview === null || reviewResource === null || reviewSessionKey === null) return true
+    const lock = browserRelayReviewSessionLock()
+    if (lock === null) {
+      setReviewFailure({
+        description:
+          "This browser cannot coordinate Relay writes across tabs. Relay did not save this PR conversation.",
+        title: "PR conversation not saved"
+      })
+      return false
+    }
+    const written = await writeRelayReviewSession(
+      window.localStorage,
+      reviewSessionKey,
+      {
+        dispositions: dispositionsRef.current,
+        expectedIdentity: currentReview.expectedIdentity,
+        expectedVersion: reviewSessionVersionRef.current,
+        identity: currentReview.identity,
+        resource: reviewResource,
+        review: currentReview.value,
+        skillIds: currentReview.skillIds,
+        turns: turnsRef.current
+      },
+      lock
+    )
+    if (Result.isFailure(written)) {
+      setReviewFailure({
+        description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
+        title: "PR conversation not saved"
+      })
+      return false
+    }
+    reviewSessionVersionRef.current = written.success.session.version
+    hydratedSessionRef.current = {
+      fingerprint: sessionFingerprint(currentReview, turnsRef.current, dispositionsRef.current),
+      key: reviewSessionKey,
+      pendingInitialPass: false
+    }
+    if (
+      written.success._tag === "stale-review-preserved" &&
+      written.success.session.identity !== currentReview.identity
+    ) {
+      setReviewFailure({
+        description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
+        title: "Newer PR review preserved"
+      })
+      return false
+    }
+    return true
+  }, [reviewResource, reviewSessionKey])
+
   useEffect(() => {
     if (reviewSessionKey !== null && hydratedProfileKeyRef.current === reviewSessionKey) {
       hydratedProfileKeyRef.current = null
@@ -1113,6 +1166,7 @@ const ReadyReviewWorkspace = ({
       }
       reviewSessionVersionRef.current = written.success.session.version
       if (written.success._tag === "stale-review-preserved") {
+        const newerIdentity = written.success.session.identity !== currentCompletedReview.identity
         skipSessionWriteRef.current = reviewSessionKey
         const preserved = replaceRelayReviewPreservingTurns(written.success.session.turns, {
           expectedIdentity: written.success.session.identity,
@@ -1125,10 +1179,12 @@ const ReadyReviewWorkspace = ({
         dispositionsRef.current = written.success.session.dispositions
         setTurns(written.success.session.turns)
         setDispositions(written.success.session.dispositions)
-        setReviewFailure({
-          description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
-          title: "Newer PR review preserved"
-        })
+        if (newerIdentity) {
+          setReviewFailure({
+            description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
+            title: "Newer PR review preserved"
+          })
+        }
       }
     })
     return () => {
@@ -1253,7 +1309,7 @@ const ReadyReviewWorkspace = ({
       }
     )
     if (outcome.completed) {
-      setMessage("")
+      if (await persistReviewSnapshot()) setMessage("")
     }
   }, [
     accountId,
@@ -1261,8 +1317,8 @@ const ReadyReviewWorkspace = ({
     diff.headCommit,
     diff.revisionId,
     pullRequest.id,
+    persistReviewSnapshot,
     runStream,
-    selectedKind,
     selectedProfile
   ])
 
