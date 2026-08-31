@@ -34,7 +34,10 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
         const released = yield* Fiber.await(releaseFiber).pipe(
           Effect.timeoutOption(terminalKillOptions.forceKillAfter)
         )
-        if (Option.isNone(released)) yield* kill.pipe(Effect.ignore)
+        if (Option.isNone(released)) {
+          yield* Fiber.interrupt(releaseFiber)
+          yield* kill.pipe(Effect.ignore)
+        }
       }),
     (releaseScope, exit) => Scope.close(releaseScope, exit)
   )

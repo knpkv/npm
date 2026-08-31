@@ -1378,9 +1378,10 @@ describe("Connect public seams", () => {
     )
   })
 
-  it.effect("kills before interrupting a timed-out release wait", () => {
+  it.effect("reaps a timed-out release wait before killing", () => {
     let kills = 0
     let releaseInterruptions = 0
+    let killObservedReleaseInterruption = false
     return Effect.gen(function*() {
       expect(terminalKillOptions).toEqual({ forceKillAfter: "1 second" })
       const fiber = yield* releaseTerminalControl(
@@ -1394,6 +1395,7 @@ describe("Connect public seams", () => {
         Effect.never,
         Effect.sync(() => {
           kills += 1
+          killObservedReleaseInterruption = releaseInterruptions > 0
         })
       ).pipe(
         Effect.forkChild({ startImmediately: true, uninterruptible: false })
@@ -1401,6 +1403,7 @@ describe("Connect public seams", () => {
       yield* TestClock.adjust("1 second")
       expect(kills).toBe(1)
       expect(releaseInterruptions).toBe(1)
+      expect(killObservedReleaseInterruption).toBe(true)
       expect(fiber.pollUnsafe()).toBeDefined()
     }).pipe(provideTestClock)
   })
