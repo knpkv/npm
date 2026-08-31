@@ -71,6 +71,7 @@ const ControlCenterThreadIdentity = Schema.Struct({
 const CodeCommitThreadIdentity = Schema.Struct({
   accountId: AccountId,
   pullRequestId: PullRequestId,
+  region: Region,
   repositoryName: RepositoryName
 })
 
@@ -345,6 +346,7 @@ const samePullRequestThread = (
         right._tag === "codecommit" &&
         left.accountId === right.accountId &&
         left.pullRequestId === right.pullRequestId &&
+        left.region === right.region &&
         left.repositoryName === right.repositoryName
       )
     case "control-center":

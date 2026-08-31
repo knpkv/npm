@@ -117,6 +117,7 @@ describe("Relay product adapter", () => {
         thread: {
           accountId: "123456789012",
           pullRequestId: "184",
+          region: "eu-west-1",
           repositoryName: "payments"
         }
       })
@@ -131,6 +132,7 @@ describe("Relay product adapter", () => {
         thread: {
           accountId: "123456789012",
           pullRequestId: "185",
+          region: "eu-west-1",
           repositoryName: "payments"
         }
       })
@@ -139,6 +141,7 @@ describe("Relay product adapter", () => {
         _tag: "codecommit",
         accountId: "123456789012",
         pullRequestId: "184",
+        region: "eu-west-1",
         repositoryName: "payments"
       })
       expect(pullRequestThreadIdentity(second)).not.toEqual(pullRequestThreadIdentity(first))
@@ -162,6 +165,7 @@ describe("Relay product adapter", () => {
         thread: {
           accountId: "123456789012",
           pullRequestId: "184",
+          region: "eu-west-1",
           repositoryName: "payments"
         }
       })
@@ -271,6 +275,7 @@ describe("Relay product adapter", () => {
         thread: {
           accountId: "123456789012",
           pullRequestId: "184",
+          region: "eu-west-1",
           repositoryName: "payments"
         }
       })
@@ -303,4 +308,27 @@ describe("Relay product adapter", () => {
         })
       )
     }))
+
+  it("keeps CodeCommit conversations in separate regional threads", () => {
+    const regionalConversation = (region: string) =>
+      Schema.decodeUnknownSync(PullRequestConversation)({
+        _tag: "codecommit",
+        route: {
+          accountId: "123456789012",
+          href: "/accounts/123456789012/prs/184",
+          pullRequestId: "184"
+        },
+        selection: selectionFixture,
+        thread: {
+          accountId: "123456789012",
+          pullRequestId: "184",
+          region,
+          repositoryName: "payments"
+        }
+      })
+
+    expect(pullRequestThreadIdentity(regionalConversation("eu-west-1"))).not.toEqual(
+      pullRequestThreadIdentity(regionalConversation("us-east-1"))
+    )
+  })
 })

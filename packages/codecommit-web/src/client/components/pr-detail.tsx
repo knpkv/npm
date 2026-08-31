@@ -61,7 +61,7 @@ import {
 } from "lucide-react"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import { toast } from "sonner"
@@ -80,6 +80,7 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
+import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
 import {
   type ReviewCommentNavigation,
   type ReviewCommentNavigationTarget,
@@ -784,6 +785,7 @@ const pullRequestStatusTone = (status: Domain.PullRequest["status"]): RlyStateTo
 
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
+  const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
   const refreshSingle = useAtomSet(refreshSinglePrAtom)
   const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
@@ -793,11 +795,17 @@ export function PRDetail() {
   const pr = useMemo(
     () =>
       prId !== undefined && prId.length > 0
-        ? (state.pullRequests.find(
-            (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
-          ) ?? null)
+        ? (() => {
+            let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
+            if (accountId !== undefined) route = { ...route, accountId }
+            if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
+            if (searchParams.has("repository")) {
+              route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
+            }
+            return state.pullRequests.find((p) => matchesCodeCommitPullRequestRoute(p, route)) ?? null
+          })()
         : null,
-    [accountId, prId, state.pullRequests]
+    [accountId, prId, searchParams, state.pullRequests]
   )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)

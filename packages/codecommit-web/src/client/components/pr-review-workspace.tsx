@@ -44,8 +44,10 @@ import {
   appendReviewTurn,
   type FindingDispositions,
   initialFindingDispositions,
+  replaceRelayReviewPreservingTurns,
   reconcileFindingDispositions,
-  settleFindingPublication
+  settleFindingPublication,
+  type RelayReviewCompletion
 } from "../review-session-state.js"
 import { runRelayReviewStream } from "../relay-review-stream.js"
 import {
@@ -629,20 +631,23 @@ const ReadyReviewWorkspace = ({
       : {
           accountId: stableAccountId,
           pullRequestId: String(pullRequest.id),
+          region: String(pullRequest.account.region),
           repositoryName: String(pullRequest.repositoryName)
         }
-  }, [pullRequest.account.awsAccountId, pullRequest.account.repoAccountId, pullRequest.id, pullRequest.repositoryName])
+  }, [
+    pullRequest.account.awsAccountId,
+    pullRequest.account.region,
+    pullRequest.account.repoAccountId,
+    pullRequest.id,
+    pullRequest.repositoryName
+  ])
   const [contentStateCache, setContentStateCache] = useState<{
     readonly identity: string
     readonly values: ReadonlyMap<number, RlyDiffFileContent>
   }>(() => ({ identity: reviewIdentity, values: new Map() }))
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
-  const [completedReview, setCompletedReview] = useState<{
-    readonly expectedIdentity: string
-    readonly identity: string
-    readonly skillIds: ReadonlyArray<string>
-    readonly value: PullRequestRelayReviewResponse
-  } | null>(null)
+  const reviewSessionVersionRef = useRef(0)
+  const [completedReview, setCompletedReview] = useState<RelayReviewCompletion | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
   const [reviewFailure, setReviewFailure] = useState<{
@@ -709,6 +714,7 @@ const ReadyReviewWorkspace = ({
 
   useEffect(() => {
     if (reviewResource === null || reviewSessionKey === null) {
+      reviewSessionVersionRef.current = 0
       setReviewFailure({
         description: "CodeCommit has not resolved a stable AWS account identity for this pull request.",
         title: "PR conversation unavailable"
@@ -717,6 +723,7 @@ const ReadyReviewWorkspace = ({
     }
     const stored = readRelayReviewSession(window.localStorage, reviewSessionKey, reviewResource)
     if (Result.isFailure(stored)) {
+      reviewSessionVersionRef.current = 0
       setReviewFailure({
         description:
           stored.failure._tag === "RelayReviewSessionInvalid"
@@ -727,6 +734,7 @@ const ReadyReviewWorkspace = ({
       return
     }
     if (stored.success === null) {
+      reviewSessionVersionRef.current = 0
       if (completedReviewRef.current !== null) return
       setCompletedReview(null)
       setTurns([])
@@ -734,12 +742,13 @@ const ReadyReviewWorkspace = ({
       setSelectedFindingId(null)
       return
     }
-    const restored = {
+    reviewSessionVersionRef.current = stored.success.version
+    const restored = replaceRelayReviewPreservingTurns(stored.success.turns, {
       expectedIdentity: stored.success.identity,
       identity: stored.success.identity,
       skillIds: stored.success.skillIds,
       value: stored.success.review
-    }
+    })
     completedReviewRef.current = restored
     dispositionsRef.current = stored.success.dispositions
     setCompletedReview(restored)
@@ -758,6 +767,7 @@ const ReadyReviewWorkspace = ({
       return
     const written = writeRelayReviewSession(window.localStorage, reviewSessionKey, {
       expectedIdentity: completedReview.expectedIdentity,
+      expectedVersion: reviewSessionVersionRef.current,
       identity: completedReview.identity,
       resource: reviewResource,
       review: completedReview.value,
@@ -770,11 +780,14 @@ const ReadyReviewWorkspace = ({
         description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
         title: "PR conversation not saved"
       })
-    } else if (written.success._tag === "stale-review-preserved") {
-      setReviewFailure({
-        description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
-        title: "Newer PR review preserved"
-      })
+    } else {
+      reviewSessionVersionRef.current = written.success.session.version
+      if (written.success._tag === "stale-review-preserved") {
+        setReviewFailure({
+          description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
+          title: "Newer PR review preserved"
+        })
+      }
     }
   }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, turns])
 
@@ -836,12 +849,12 @@ const ReadyReviewWorkspace = ({
             : reconcileFindingDispositions(prior, completedEvent.review.result.findings, dispositionsRef.current)
         dispositionsRef.current = nextDispositions
         setDispositions(nextDispositions)
-        const completed = {
+        const completed = replaceRelayReviewPreservingTurns(turns, {
           expectedIdentity: completedReviewRef.current?.identity ?? reviewIdentity,
           identity: reviewIdentity,
           skillIds: payload.skillIds,
           value: completedEvent.review
-        }
+        })
         completedReviewRef.current = completed
         setCompletedReview(completed)
         setSelectedFindingId((current) => current ?? completedEvent.review.result.findings[0]?.id ?? null)
@@ -863,7 +876,7 @@ const ReadyReviewWorkspace = ({
         }
       }
     },
-    [reviewIdentity]
+    [reviewIdentity, turns]
   )
 
   const executeReview = useCallback(async (): Promise<void> => {
@@ -879,7 +892,6 @@ const ReadyReviewWorkspace = ({
       }
     )
     if (outcome.completed) {
-      setTurns([])
       setMessage("")
     }
   }, [

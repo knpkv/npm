@@ -9,6 +9,7 @@ import {
   type RelayPullRequestDockRegistration,
   RelaySelectorState
 } from "@knpkv/relay-product"
+import { codeCommitPullRequestHref, matchesCodeCommitPullRequestRoute } from "../src/client/codecommit-route.js"
 import {
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
@@ -27,7 +28,7 @@ const conversation = Schema.decodeUnknownSync(PullRequestConversation)({
   _tag: "codecommit",
   route: { accountId: "credential-account", href: "/accounts/credential-account/prs/42", pullRequestId: "42" },
   selection,
-  thread: { accountId: "repository-account", pullRequestId: "42", repositoryName: "payments" }
+  thread: { accountId: "repository-account", pullRequestId: "42", region: "eu-central-1", repositoryName: "payments" }
 })
 
 const explainReview: PullRequestRelayReviewResponse = {
@@ -60,6 +61,35 @@ describe("CodeCommit Relay dock adapter", () => {
 
     expect(codeCommitRepositoryAccountIdentity(account)).toBe("repository-account")
     expect(codeCommitRouteAccountIdentity(account)).toBe("credential-account")
+  })
+
+  it("keeps the located repository and region in the redirect route", () => {
+    const account = new Domain.Account({
+      awsAccountId: "credential-account",
+      profile: "dev-administratoraccess",
+      region: "eu-central-1",
+      repoAccountId: "repository-account"
+    })
+    const candidate = {
+      account,
+      id: Domain.PullRequestId.make("42"),
+      repositoryName: Domain.RepositoryName.make("payments")
+    }
+
+    expect(codeCommitPullRequestHref("credential-account", "42", "payments", "eu-central-1"))
+      .toBe("/accounts/credential-account/prs/42?repository=payments&region=eu-central-1")
+    expect(matchesCodeCommitPullRequestRoute(candidate, {
+      accountId: "credential-account",
+      pullRequestId: "42",
+      region: "eu-central-1",
+      repositoryName: "payments"
+    })).toBe(true)
+    expect(matchesCodeCommitPullRequestRoute({ ...candidate, repositoryName: Domain.RepositoryName.make("other") }, {
+      accountId: "credential-account",
+      pullRequestId: "42",
+      region: "eu-central-1",
+      repositoryName: "payments"
+    })).toBe(false)
   })
 
   it.effect("keeps a zero-finding PR review ready and continues at PR scope", () =>

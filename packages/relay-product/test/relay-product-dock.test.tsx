@@ -118,6 +118,7 @@ describe("RelayProductDock", () => {
         thread: {
           accountId: "123456789012",
           pullRequestId: "184",
+          region: "eu-west-1",
           repositoryName: "payments"
         }
       })
@@ -188,6 +189,7 @@ describe("RelayProductDock", () => {
         thread: {
           accountId: "123456789012",
           pullRequestId: "184",
+          region: "eu-west-1",
           repositoryName: "payments"
         }
       })

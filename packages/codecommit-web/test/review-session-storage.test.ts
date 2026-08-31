@@ -37,6 +37,7 @@ const review: PullRequestRelayReviewResponse = {
 const resource: RelayReviewSessionResourceIdentity = {
   accountId: "111111111111",
   pullRequestId: "42",
+  region: "eu-central-1",
   repositoryName: "payments"
 }
 
@@ -105,6 +106,27 @@ describe("Relay review session storage", () => {
     if (Result.isFailure(restored)) expect(restored.failure._tag).toBe("RelayReviewSessionResourceMismatch")
   })
 
+  it("keeps regional PR sessions under distinct durable identities", () => {
+    const euKey = relayReviewSessionStorageKey(resource)
+    const usResource: RelayReviewSessionResourceIdentity = { ...resource, region: "us-east-1" }
+    const usKey = relayReviewSessionStorageKey(usResource)
+
+    expect(euKey).not.toBe(usKey)
+
+    writeSession(window.localStorage, euKey, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(readRelayReviewSession(window.localStorage, usKey, usResource))).toBe(true)
+    const restored = readRelayReviewSession(window.localStorage, usKey, usResource)
+    if (Result.isSuccess(restored)) expect(restored.success).toBeNull()
+  })
+
   it("merges stale tab writes without losing turns or regressing publication state", () => {
     const key = relayReviewSessionStorageKey(resource)
     const staleTab = {
@@ -147,6 +169,7 @@ describe("Relay review session storage", () => {
     })
     writeSession(window.localStorage, key, {
       expectedIdentity: "exact-head-1",
+      expectedVersion: 1,
       identity: "exact-head-2",
       resource,
       review: { ...review, revisionId: "revision-2" },
@@ -246,6 +269,7 @@ describe("Relay review session storage", () => {
     })
     writeSession(window.localStorage, key, {
       expectedIdentity: "exact-head-1",
+      expectedVersion: 1,
       identity: "exact-head-2",
       resource,
       review: { ...review, headCommit: "c".repeat(40), revisionId: "revision-2" },
@@ -274,6 +298,86 @@ describe("Relay review session storage", () => {
         dispositions: { F2: "posted" }
       })
       expect(restored.success?.turns.map(({ id }) => id)).toContain("stale-turn")
+    }
+  })
+
+  it("preserves a same-head review when a stale tab writes after a newer version", () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const initial = writeSession(window.localStorage, key, {
+      expectedVersion: 0,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: ["old-skill"],
+      turns: [],
+      dispositions: { F1: "pending" }
+    })
+    expect(Result.isSuccess(initial)).toBe(true)
+
+    const current = writeSession(window.localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review: { ...review, revisionId: "revision-2" },
+      skillIds: ["new-skill"],
+      turns: [],
+      dispositions: { F1: "posted" }
+    })
+    expect(Result.isSuccess(current)).toBe(true)
+
+    const stale = writeSession(window.localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: ["old-skill"],
+      turns: [{ id: "stale-turn", findingId: "F1", role: "user", message: "Keep this turn." }],
+      dispositions: { F1: "pending" }
+    })
+
+    expect(Result.isSuccess(stale)).toBe(true)
+    if (Result.isSuccess(stale)) expect(stale.success._tag).toBe("stale-review-preserved")
+    const restored = readRelayReviewSession(window.localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success).toMatchObject({
+        identity: "exact-head-1",
+        review: { revisionId: "revision-2" },
+        skillIds: ["new-skill"],
+        dispositions: { F1: "posted" },
+        version: 3
+      })
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(["stale-turn"])
+    }
+  })
+
+  it("accepts a same-head write only when its observed version is current", () => {
+    const key = relayReviewSessionStorageKey(resource)
+    writeSession(window.localStorage, key, {
+      expectedVersion: 0,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: ["old-skill"],
+      turns: [],
+      dispositions: {}
+    })
+
+    const written = writeSession(window.localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review: { ...review, revisionId: "revision-2" },
+      skillIds: ["new-skill"],
+      turns: [],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(written)).toBe(true)
+    if (Result.isSuccess(written)) {
+      expect(written.success._tag).toBe("stored")
+      expect(written.success.session.review.revisionId).toBe("revision-2")
+      expect(written.success.session.version).toBe(2)
     }
   })
 })

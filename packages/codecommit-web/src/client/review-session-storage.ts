@@ -7,6 +7,7 @@ import { appendReviewTurn, FindingDisposition, type FindingDispositions } from "
 export const RelayReviewSessionResourceIdentity = Schema.Struct({
   accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   pullRequestId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  region: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
   repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
 })
 export interface RelayReviewSessionResourceIdentity
@@ -28,6 +29,8 @@ export type StoredRelayReviewSession = typeof StoredRelayReviewSession.Type
 export interface RelayReviewSessionWrite {
   readonly dispositions: FindingDispositions
   readonly expectedIdentity: string
+  /** Version observed when this tab read the durable session; omitted callers are treated as stale writers. */
+  readonly expectedVersion?: number
   readonly identity: string
   readonly resource: RelayReviewSessionResourceIdentity
   readonly review: PullRequestRelayReviewResponse
@@ -79,6 +82,7 @@ const sameResource = (
 ): boolean =>
   left.accountId === right.accountId &&
   left.pullRequestId === right.pullRequestId &&
+  left.region === right.region &&
   left.repositoryName === right.repositoryName
 
 const dispositionRank = (disposition: FindingDisposition): number => {
@@ -143,12 +147,19 @@ const mergeStoredSession = (
   incoming: RelayReviewSessionWrite
 ): RelayReviewSessionWriteOutcome => {
   const turns = mergeTurns(current.turns, incoming.turns)
+  const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
+  if (incoming.expectedVersion !== current.version) {
+    return {
+      _tag: "stale-review-preserved",
+      session: { ...current, dispositions, turns, version: current.version + 1 }
+    }
+  }
   if (current.identity === incoming.identity) {
     return {
       _tag: "stored",
       session: {
         ...storedSession(incoming, turns, current.version + 1),
-        dispositions: mergeDispositions(current.dispositions, incoming.dispositions)
+        dispositions
       }
     }
   }
@@ -157,7 +168,7 @@ const mergeStoredSession = (
   }
   return {
     _tag: "stale-review-preserved",
-    session: { ...current, turns, version: current.version + 1 }
+    session: { ...current, dispositions, turns, version: current.version + 1 }
   }
 }
 
@@ -167,7 +178,7 @@ export const relayReviewSessionStorageKey = (identity: RelayReviewSessionResourc
     encodeURIComponent(
       identity.repositoryName
     )
-  }:${encodeURIComponent(identity.pullRequestId)}`
+  }:${encodeURIComponent(identity.region)}:${encodeURIComponent(identity.pullRequestId)}`
 
 export const readRelayReviewSession = (
   storage: RelayReviewSessionReadableStorage,

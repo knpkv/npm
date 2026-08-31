@@ -5,9 +5,15 @@ import {
   applyFindingDecision,
   initialFindingDispositions,
   reconcileFindingDispositions,
+  replaceRelayReviewPreservingTurns,
   settleFindingPublication
 } from "../src/client/review-session-state.js"
-import { MAXIMUM_RELAY_REVIEW_TURNS, RelayReviewConversationTurn, type RelayReviewFinding } from "../src/server/Api.js"
+import {
+  MAXIMUM_RELAY_REVIEW_TURNS,
+  type PullRequestRelayReviewResponse,
+  RelayReviewConversationTurn,
+  type RelayReviewFinding
+} from "../src/server/Api.js"
 import { MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 
 const finding = (summary: string): RelayReviewFinding => ({
@@ -130,6 +136,30 @@ describe("Relay finding dispositions", () => {
     expect(next.at(-1)?.message).toBe("newest")
     expect(appendReviewTurn([], { findingId: "F1", role: "user", message: "first" }))
       .toEqual([{ findingId: "F1", role: "user", message: "first" }])
+  })
+
+  it("preserves the in-memory transcript when a rerun replaces the review", () => {
+    const turns: ReadonlyArray<RelayReviewConversationTurn> = [
+      { findingId: "F1", role: "user", message: "Explain this finding again." }
+    ]
+    const nextReview = {
+      pullRequestId: "42",
+      revisionId: "revision-2",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: "review",
+      result: { findings: [], verdict: "No findings." }
+    } satisfies PullRequestRelayReviewResponse
+
+    const replaced = replaceRelayReviewPreservingTurns(turns, {
+      expectedIdentity: "exact-head-1",
+      identity: "exact-head-2",
+      skillIds: ["builtin:pr-review"],
+      value: nextReview
+    })
+
+    expect(replaced.value).toBe(nextReview)
+    expect(replaced.turns).toEqual(turns)
   })
 
   it("trims completed conversation exchanges as atomic user and assistant pairs", () => {
