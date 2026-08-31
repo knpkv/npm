@@ -71,7 +71,7 @@ const isRenderedFocusable = (element: HTMLElement): boolean => {
   while (current !== null) {
     if (current.tagName === "DETAILS" && !current.hasAttribute("open")) {
       const firstSummary: HTMLElement | null = current.querySelector(":scope > summary:first-of-type")
-      if (firstSummary !== element) return false
+      if (firstSummary === null || !firstSummary.contains(element)) return false
     }
     if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
       const firstLegend = current.querySelector(":scope > legend:first-of-type")
@@ -82,6 +82,18 @@ const isRenderedFocusable = (element: HTMLElement): boolean => {
     current = current.parentElement
   }
   return true
+}
+
+const isSequentiallyFocusableRadio = (element: HTMLElement, panel: HTMLElement): boolean => {
+  const radio = [...panel.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(
+    (candidate) => candidate === element
+  )
+  if (radio === undefined || radio.name.length === 0) return true
+  const group = [...panel.querySelectorAll<HTMLInputElement>('input[type="radio"]')].filter(
+    (candidate) => candidate.name === radio.name && candidate.form === radio.form && isRenderedFocusable(candidate)
+  )
+  const checked = group.find((candidate) => candidate.checked)
+  return checked === undefined ? group[0] === radio : checked === radio
 }
 
 /** One explicit piece of application-owned context attached to the current Relay thread. */
@@ -329,10 +341,14 @@ const DockInitialFocus = ({
   readonly restoreTarget: RefObject<HTMLElement | null>
   readonly target: RefObject<HTMLButtonElement | null>
 }): null => {
+  const hasCapturedRestoreTarget = useRef(false)
   useLayoutEffect(() => {
     const focusTarget = target.current
     if (focusTarget === null) return
-    restoreTarget.current = focusRestoreTarget(focusTarget.ownerDocument)
+    if (!hasCapturedRestoreTarget.current) {
+      restoreTarget.current = focusRestoreTarget(focusTarget.ownerDocument)
+      hasCapturedRestoreTarget.current = true
+    }
     focusTarget.focus()
   }, [restoreTarget, target])
   return null
@@ -381,6 +397,7 @@ const DockLayer = ({
     const panel = event.currentTarget
     if (!event.nativeEvent.composedPath().includes(panel)) return
     if (event.defaultPrevented) return
+    if (event.nativeEvent.isComposing) return
     if (event.key === "Escape") {
       event.stopPropagation()
       onClose()
@@ -391,6 +408,7 @@ const DockLayer = ({
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
       (element) =>
         isRenderedFocusable(element) &&
+        isSequentiallyFocusableRadio(element, panel) &&
         (element.tabIndex >= 0 || element.isContentEditable || element.matches("details > summary:first-of-type"))
     )
     const first = focusable[0] ?? panel

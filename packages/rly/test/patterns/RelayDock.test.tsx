@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { act, type ReactElement, type ReactNode, useState } from "react"
+import { act, type ReactElement, type ReactNode, StrictMode, useState } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { PortalProvider } from "../../src/foundations/PortalProvider.js"
@@ -301,6 +301,21 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(opener)
   })
 
+  it("preserves the opener across StrictMode effect probes", async () => {
+    const { host, portal } = await mount(<StrictMode>{dock()}</StrictMode>)
+    const trigger = host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")
+    if (trigger === null) throw new Error("RelayDock trigger did not render")
+    trigger.focus()
+    await act(async () => trigger.click())
+
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    expect(document.activeElement).toBe(close)
+    vi.useFakeTimers()
+    await act(async () => close?.click())
+    await act(async () => vi.runAllTimers())
+    expect(document.activeElement).toBe(trigger)
+  })
+
   it.each(shadowPortalTargets)(
     "restores controlled docks to a ShadowRoot launcher with an %s portal target",
     async (portalTarget) => {
@@ -434,6 +449,54 @@ describe("RelayDock", () => {
     expect(document.activeElement).not.toBe(collapsedAction)
   })
 
+  it("keeps focusable descendants of a closed details summary in the modal boundary", async () => {
+    const footer = (
+      <details>
+        <summary>
+          Collapsed evidence
+          <button type="button">Visible summary action</button>
+        </summary>
+        <button type="button">Collapsed evidence action</button>
+      </details>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const summaryAction = [...portal.querySelectorAll<HTMLButtonElement>("button")].find(
+      (button) => button.textContent === "Visible summary action"
+    )
+    const tab = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+
+    summaryAction?.focus()
+    await act(async () => dialog?.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("excludes unchecked members after the checked radio from the modal boundary", async () => {
+    const footer = (
+      <fieldset>
+        <legend>Review route</legend>
+        <label>
+          <input defaultChecked name="review-route" type="radio" /> Checked route
+        </label>
+        <label>
+          <input name="review-route" type="radio" /> Unchecked trailing route
+        </label>
+      </fieldset>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const checked = portal.querySelector<HTMLInputElement>('input[type="radio"]:checked')
+    const tab = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Tab" })
+
+    checked?.focus()
+    await act(async () => dialog?.dispatchEvent(tab))
+    expect(tab.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("keeps the trigger operable while its portal target is unavailable", async () => {
     const { host } = await mountWithoutPortalTarget(dock())
     const trigger = host.querySelector<HTMLButtonElement>("[data-rly-relay-dock-trigger]")
@@ -467,6 +530,38 @@ describe("RelayDock", () => {
       textarea?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Escape" }))
     )
     expect(portal.querySelector('[role="dialog"]')).toBe(dialog)
+  })
+
+  it("keeps a composing Escape inside caller-owned content", async () => {
+    const { portal } = await mount(dock({ defaultOpen: true, footer: <textarea defaultValue="Draft reply" /> }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const composer = portal.querySelector<HTMLTextAreaElement>("textarea")
+
+    composer?.focus()
+    await act(async () =>
+      composer?.dispatchEvent(
+        new KeyboardEvent("keydown", { bubbles: true, cancelable: true, isComposing: true, key: "Escape" })
+      )
+    )
+    expect(portal.querySelector('[role="dialog"]')).toBe(dialog)
+    expect(composer?.value).toBe("Draft reply")
+  })
+
+  it("isolates background siblings mounted after the modal opens", async () => {
+    const { portal } = await mount(dock({ defaultOpen: true }))
+    const lateBackgroundAction = document.createElement("button")
+    lateBackgroundAction.textContent = "Late background action"
+
+    await act(async () => document.body.append(lateBackgroundAction))
+    expect(lateBackgroundAction.inert).toBe(true)
+
+    const insideAction = document.createElement("button")
+    insideAction.textContent = "Late dock action"
+    await act(async () => portal.querySelector('[role="dialog"]')?.append(insideAction))
+    expect(insideAction.inert).toBe(false)
+
+    await act(async () => portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')?.click())
+    expect(lateBackgroundAction.inert).toBe(false)
   })
 
   it("focuses an initially open dialog after the owned portal target mounts", async () => {

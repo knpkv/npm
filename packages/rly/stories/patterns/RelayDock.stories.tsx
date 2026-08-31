@@ -84,6 +84,17 @@ const richTextState: RlyRelayDockState = {
         <summary>Expanded evidence</summary>
         <button type="button">Expanded evidence action</button>
       </details>
+      <fieldset>
+        <legend>Review route</legend>
+        <label>
+          <input aria-label="Checked review route" defaultChecked name="review-route" type="radio" />
+          Checked route
+        </label>
+        <label>
+          <input aria-label="Unchecked review route" name="review-route" type="radio" />
+          Unchecked trailing route
+        </label>
+      </fieldset>
       <details>
         <summary>Collapsed evidence</summary>
         <button type="button">Collapsed evidence action</button>

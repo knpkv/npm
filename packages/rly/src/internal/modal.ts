@@ -102,37 +102,50 @@ export const useModalIsolation = (layerRef: RefObject<HTMLDivElement | null>, is
     if (!isOpen) return
     const layer = layerRef.current
     if (layer === null) return
-    let current: Element = layer
-    const retained: Array<HTMLElement> = []
+    const retained = new Set<HTMLElement>()
+    const observedParents = new Set<Node>()
+    const MutationObserverConstructor = layer.ownerDocument.defaultView?.MutationObserver
+    let observer: MutationObserver | null = null
 
-    while (true) {
-      if (current === current.ownerDocument.body) break
-      const parent = current.parentNode
-      if (parent === null) break
-      let hasReachedCurrent = false
-      for (const sibling of parent.children) {
-        if (sibling === current) {
-          hasReachedCurrent = true
+    const synchronizeIsolation = (): void => {
+      let current: Element = layer
+      while (true) {
+        if (current === current.ownerDocument.body) break
+        const parent = current.parentNode
+        if (parent === null) break
+        if (!observedParents.has(parent)) {
+          observer?.observe(parent, { childList: true })
+          observedParents.add(parent)
+        }
+        let hasReachedCurrent = false
+        for (const sibling of parent.children) {
+          if (sibling === current) {
+            hasReachedCurrent = true
+            continue
+          }
+          const isLaterModalLayer = hasReachedCurrent && sibling.hasAttribute("data-rly-modal-layer")
+          if (!isLaterModalLayer && isHTMLElement(sibling) && !retained.has(sibling)) {
+            retainInert(sibling)
+            retained.add(sibling)
+          }
+        }
+        const parentElement = current.parentElement
+        if (parentElement !== null) {
+          current = parentElement
           continue
         }
-        const isLaterModalLayer = hasReachedCurrent && sibling.hasAttribute("data-rly-modal-layer")
-        if (!isLaterModalLayer && isHTMLElement(sibling)) {
-          retainInert(sibling)
-          retained.push(sibling)
-        }
+        if (!("host" in parent)) break
+        const host = parent.host
+        if (!Predicate.isObjectOrArray(host) || !hasHTMLElementInertContract(host)) break
+        current = host
       }
-      const parentElement = current.parentElement
-      if (parentElement !== null) {
-        current = parentElement
-        continue
-      }
-      if (!("host" in parent)) break
-      const host = parent.host
-      if (!Predicate.isObjectOrArray(host) || !hasHTMLElementInertContract(host)) break
-      current = host
     }
 
+    if (MutationObserverConstructor !== undefined) observer = new MutationObserverConstructor(synchronizeIsolation)
+    synchronizeIsolation()
+
     return () => {
+      observer?.disconnect()
       for (const element of retained) releaseInert(element)
     }
   }, [isOpen, layerRef])
