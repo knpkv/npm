@@ -4,6 +4,7 @@ import {
   type ReactElement,
   type ReactNode,
   type RefObject,
+  useCallback,
   useId,
   useLayoutEffect,
   useRef,
@@ -61,12 +62,17 @@ const focusRestoreTarget = (ownerDocument: Document): HTMLElement | null => {
 }
 
 const isRenderedFocusable = (element: HTMLElement): boolean => {
+  if (element.matches(":disabled")) return false
   const view = element.ownerDocument.defaultView
   if (view === null) return element.hidden === false
   const visibility = view.getComputedStyle(element).visibility
   if (visibility === "hidden" || visibility === "collapse") return false
   let current: HTMLElement | null = element
   while (current !== null) {
+    if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
+      const firstLegend = current.querySelector(":scope > legend:first-of-type")
+      if (firstLegend === null || !firstLegend.contains(element)) return false
+    }
     const computed = view.getComputedStyle(current)
     if (current.hidden !== false || computed.display === "none") return false
     current = current.parentElement
@@ -154,19 +160,23 @@ type DefaultRelayDockProps = RelayDockBaseProps & {
 /** Controlled-first dock state with a collapsed uncontrolled default. */
 export type RelayDockProps = ControlledRelayDockProps | DefaultRelayDockProps
 
-const subscribeToCompactViewport = (onStoreChange: () => void): (() => void) => {
-  if (!("matchMedia" in window)) return () => undefined
-  const query = window.matchMedia(compactViewportQuery)
+const subscribeToCompactViewport = (view: Window | null, onStoreChange: () => void): (() => void) => {
+  if (view === null || !("matchMedia" in view)) return () => undefined
+  const query = view.matchMedia(compactViewportQuery)
   query.addEventListener("change", onStoreChange)
   return () => query.removeEventListener("change", onStoreChange)
 }
 
-const compactViewportSnapshot = (): boolean => "matchMedia" in window && window.matchMedia(compactViewportQuery).matches
+const compactViewportSnapshot = (view: Window | null): boolean =>
+  view !== null && "matchMedia" in view && view.matchMedia(compactViewportQuery).matches
 
 const serverCompactViewportSnapshot = (): boolean => false
 
-const useCompactViewport = (): boolean =>
-  useSyncExternalStore(subscribeToCompactViewport, compactViewportSnapshot, serverCompactViewportSnapshot)
+const useCompactViewport = (view: Window | null): boolean => {
+  const subscribe = useCallback((onStoreChange: () => void) => subscribeToCompactViewport(view, onStoreChange), [view])
+  const snapshot = useCallback(() => compactViewportSnapshot(view), [view])
+  return useSyncExternalStore(subscribe, snapshot, serverCompactViewportSnapshot)
+}
 
 const RelayMark = (): ReactElement => (
   <span aria-hidden="true" className={style("mark")}>
@@ -467,7 +477,8 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
   const parentModalReady = useParentModalReady()
   const portalTarget = usePortalTarget()
   const resolvedOpen = (open ?? defaultState) && parentModalReady && portalTarget.available
-  const compactViewport = useCompactViewport()
+  const portalView = portalTarget.available ? portalTarget.container.ownerDocument.defaultView : null
+  const compactViewport = useCompactViewport(portalView)
   const modal = compactViewport || desktopPresentation === "overlay"
   const triggerRef = useRef<HTMLButtonElement>(null)
   const railCloseRef = useRef<HTMLButtonElement>(null)

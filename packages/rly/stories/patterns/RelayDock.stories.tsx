@@ -74,6 +74,12 @@ const richTextState: RlyRelayDockState = {
           Visible reply action
         </button>
       </div>
+      <fieldset>
+        <button type="button">Enabled fieldset action</button>
+      </fieldset>
+      <fieldset disabled>
+        <button type="button">Disabled fieldset action</button>
+      </fieldset>
     </>
   ),
   status: "ready"
@@ -175,6 +181,30 @@ const RelayDockFixture = ({
   )
 }
 
+const IframeRelayDockFixture = (): ReactElement => {
+  const [container, setContainer] = useState<HTMLElement | null>(null)
+  return (
+    <>
+      <iframe
+        aria-label="Relay portal viewport"
+        onLoad={(event) => {
+          const frameDocument = event.currentTarget.contentDocument
+          if (frameDocument === null) return
+          const target = frameDocument.createElement("div")
+          frameDocument.body.replaceChildren(target)
+          setContainer(target)
+        }}
+        srcDoc="<!doctype html><html><body></body></html>"
+        style={{ border: 0, height: 844, width: 320 }}
+        title="Relay portal viewport"
+      />
+      <PortalProvider container={container}>
+        <RelayDock {...storyArgs} defaultOpen desktopPresentation="rail" />
+      </PortalProvider>
+    </>
+  )
+}
+
 const meta = {
   args: storyArgs,
   component: RelayDock,
@@ -207,6 +237,10 @@ export const DesktopRail: Story = {
     await expect(canvas.getAllByRole("combobox")).toHaveLength(2)
   },
   render: () => <RelayDockFixture initiallyOpen presentation="rail" />
+}
+
+export const CrossWindowViewport: Story = {
+  render: () => <IframeRelayDockFixture />
 }
 
 export const ModalIsolation: Story = {
