@@ -9,16 +9,78 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
+import * as Predicate from "effect/Predicate"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import * as TypeScript from "typescript"
 import { parse } from "yaml"
-import * as Predicate from "effect/Predicate"
 
 const releaseTypes = new Set(["major", "minor", "patch"])
 const publicManifestFields = ["bin", "browser", "exports", "files", "main", "module", "types", "typesVersions"]
 const runtimeDependencyFields = ["dependencies", "optionalDependencies", "peerDependencies"]
 const releaseManifestFields = [...publicManifestFields, ...runtimeDependencyFields]
+
+const exportedCallableParameterProperties = (source, filePath) => {
+  const sourceFile = TypeScript.createSourceFile(
+    filePath,
+    source,
+    TypeScript.ScriptTarget.Latest,
+    true,
+    filePath.endsWith(".tsx") ? TypeScript.ScriptKind.TSX : TypeScript.ScriptKind.TS
+  )
+  const exports = new Map()
+  const visit = (node) => {
+    if (
+      TypeScript.isVariableStatement(node) &&
+      node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ExportKeyword)
+    ) {
+      for (const declaration of node.declarationList.declarations) {
+        const initializer = declaration.initializer
+        if (
+          !TypeScript.isIdentifier(declaration.name) ||
+          initializer === undefined ||
+          !TypeScript.isArrowFunction(initializer)
+        ) {
+          continue
+        }
+        const firstParameter = initializer.parameters[0]
+        if (firstParameter === undefined || !TypeScript.isObjectBindingPattern(firstParameter.name)) continue
+        const properties = new Set()
+        for (const element of firstParameter.name.elements) {
+          if (!TypeScript.isBindingElement(element)) continue
+          const propertyName = element.propertyName ?? element.name
+          if (TypeScript.isIdentifier(propertyName)) properties.add(propertyName.text)
+        }
+        exports.set(declaration.name.text, properties)
+      }
+    }
+    TypeScript.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return exports
+}
+
+const publicCallableAdditions = (previousSource, currentSource, filePath) => {
+  const previous = exportedCallableParameterProperties(previousSource ?? "", filePath)
+  const current = exportedCallableParameterProperties(currentSource, filePath)
+  return [...current].flatMap(([name, properties]) => {
+    const previousProperties = previous.get(name) ?? new Set()
+    const added = [...properties].filter((property) => !previousProperties.has(property)).toSorted()
+    return added.length === 0 ? [] : [{ filePath, name, properties: added }]
+  })
+}
+
+const validatePublicCallableReleaseTypes = ({ additions, releaseTypes }) =>
+  additions.flatMap(({ filePath, name, packageName, properties }) => {
+    if (releaseTypes.get(packageName) !== "patch") return []
+    const diagnostic = [
+      `${packageName}: patch changeset cannot add public callable props`,
+      properties.join(", "),
+      `(${name} in ${filePath})`
+    ].join(" ")
+    return [diagnostic]
+  })
 
 class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") {
   get message() {
@@ -49,6 +111,27 @@ const parseChangesetFrontmatter = (content, changesetPath) => {
     packages.add(name)
   }
   return packages
+}
+
+const parseChangesetReleaseTypes = (content, changesetPath) => {
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)
+  if (match === null) throw new ChangesetCoverageError({ reason: `${changesetPath}: changeset frontmatter is missing` })
+  const frontmatter = parse(match[1])
+  if (frontmatter === null || !Predicate.isObjectOrArray(frontmatter) || Array.isArray(frontmatter)) {
+    throw new ChangesetCoverageError({
+      reason: `${changesetPath}: changeset frontmatter must be a package-to-release map`
+    })
+  }
+  const releases = new Map()
+  for (const [name, releaseType] of Object.entries(frontmatter)) {
+    if (!releaseTypes.has(releaseType)) {
+      throw new ChangesetCoverageError({
+        reason: `${changesetPath}: ${name} has invalid release type ${JSON.stringify(releaseType)}`
+      })
+    }
+    releases.set(name, releaseType)
+  }
+  return releases
 }
 
 const selectedReleaseManifestFields = (manifest) =>
@@ -156,6 +239,33 @@ const runSelfTest = () => {
   assert.throws(
     () => parseChangesetFrontmatter('---\n"@fixture/public": invalid\n---\n', ".changeset/invalid.md"),
     /invalid release type/u
+  )
+  const previousSource = "export const Public = ({ value }) => value\nconst Local = ({ value }) => value"
+  const currentSource =
+    "export const Public = ({ value, terminalViewportRef }) => value\nconst Local = ({ value, terminalViewportRef }) => value"
+  const additions = publicCallableAdditions(previousSource, currentSource, "packages/public/src/index.ts").map(
+    (addition) => ({
+      ...addition,
+      packageName: "@fixture/public"
+    })
+  )
+  assert.deepEqual(additions, [
+    {
+      filePath: "packages/public/src/index.ts",
+      name: "Public",
+      packageName: "@fixture/public",
+      properties: ["terminalViewportRef"]
+    }
+  ])
+  assert.deepEqual(
+    validatePublicCallableReleaseTypes({ additions, releaseTypes: new Map([["@fixture/public", "patch"]]) }),
+    [
+      "@fixture/public: patch changeset cannot add public callable props terminalViewportRef (Public in packages/public/src/index.ts)"
+    ]
+  )
+  assert.deepEqual(
+    validatePublicCallableReleaseTypes({ additions, releaseTypes: new Map([["@fixture/public", "minor"]]) }),
+    []
   )
 }
 
@@ -289,6 +399,51 @@ const changedChangesetPackages = Effect.fn("ChangesetCoverage.changedChangesetPa
   }
 )
 
+const changedChangesetReleaseTypes = Effect.fn("ChangesetCoverage.changedChangesetReleaseTypes")(
+  function* (fileSystem, path, repositoryRoot, paths) {
+    const releases = new Map()
+    const changesets = [...paths].filter(
+      (changedPath) =>
+        changedPath.startsWith(".changeset/") && changedPath.endsWith(".md") && changedPath !== ".changeset/README.md"
+    )
+    for (const changesetPath of changesets) {
+      const absolute = path.join(repositoryRoot, changesetPath)
+      if (!(yield* fileSystem.exists(absolute))) continue
+      const content = yield* fileSystem.readFileString(absolute)
+      const parsed = yield* Effect.try({
+        try: () => parseChangesetReleaseTypes(content, changesetPath),
+        catch: (cause) => new ChangesetCoverageError({ cause, reason: `Could not parse ${changesetPath}` })
+      })
+      for (const [name, releaseType] of parsed) releases.set(name, releaseType)
+    }
+    return releases
+  }
+)
+
+const sourcePaths = (paths) =>
+  [...paths].filter(
+    (changedPath) =>
+      changedPath.startsWith("packages/") && changedPath.includes("/src/") && /\.(?:ts|tsx)$/u.test(changedPath)
+  )
+
+const changedPublicCallableAdditions = Effect.fn("ChangesetCoverage.changedPublicCallableAdditions")(
+  function* (git, fileSystem, path, repositoryRoot, mergeBase, paths, records) {
+    const additions = []
+    for (const filePath of sourcePaths(paths)) {
+      const record = records.find(({ directory }) => filePath.startsWith(`${directory}/`))
+      if (record === undefined || !record.publishable) continue
+      const absolute = path.join(repositoryRoot, filePath)
+      if (!(yield* fileSystem.exists(absolute))) continue
+      const currentSource = yield* fileSystem.readFileString(absolute)
+      const previousSource = yield* gitOption(git, ["show", `${mergeBase}:${filePath}`])
+      for (const addition of publicCallableAdditions(previousSource, currentSource, filePath)) {
+        additions.push({ ...addition, packageName: record.name })
+      }
+    }
+    return additions
+  }
+)
+
 const valueAtRevision = Effect.fn("ChangesetCoverage.valueAtRevision")(function* (git, revision, filePath) {
   const content = yield* gitOption(git, ["show", `${revision}:${filePath}`])
   return content === undefined ? undefined : yield* decodeJson(content, `${revision}:${filePath}`)
@@ -344,11 +499,28 @@ const program = Effect.gen(function* () {
   const paths = yield* changedPaths(git, mergeBase)
   const records = yield* loadPackageRecords(git, fileSystem, path, repositoryRoot, packagesRoot, mergeBase, paths)
   const changedChangesetNames = yield* changedChangesetPackages(fileSystem, path, repositoryRoot, paths)
+  const changedReleaseTypes = yield* changedChangesetReleaseTypes(fileSystem, path, repositoryRoot, paths)
   const missing = validateCoverage({ changedChangesetNames, paths, records })
   if (missing.length > 0) {
     return yield* fail(
       `Changeset coverage failed for publishable package changes since ${mergeBase}:\n- ${missing.join("\n- ")}`
     )
+  }
+  const callableAdditions = yield* changedPublicCallableAdditions(
+    git,
+    fileSystem,
+    path,
+    repositoryRoot,
+    mergeBase,
+    paths,
+    records
+  )
+  const releaseDiagnostics = validatePublicCallableReleaseTypes({
+    additions: callableAdditions,
+    releaseTypes: changedReleaseTypes
+  })
+  if (releaseDiagnostics.length > 0) {
+    return yield* fail(`Changeset release type coverage failed:\n- ${releaseDiagnostics.join("\n- ")}`)
   }
   yield* Console.log(
     `Changeset coverage checked ${releaseBearingPackages(paths, records).length} publishable packages against changed changesets`
