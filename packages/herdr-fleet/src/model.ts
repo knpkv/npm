@@ -53,6 +53,15 @@ export const AgentWorkerIdentity = Schema.Struct({
 })
 export type AgentWorkerIdentity = typeof AgentWorkerIdentity.Type
 
+const HttpsOrigin = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.isPattern(/^https:\/\/[^/?#@]+$/),
+  Schema.makeFilter(
+    (value) => URL.canParse(value) && new URL(value).protocol === "https:",
+    { expected: "a parseable HTTPS origin" }
+  )
+)
+
 const connectUrlFor = (host: string, agentId: string): string =>
   `/connect/?agent=${encodeURIComponent(agentId)}&host=${encodeURIComponent(host)}`
 
@@ -319,12 +328,7 @@ export const HostConfiguration = Schema.Struct({
       Schema.isPattern(/^https:\/\/[^/]+\/$/)
     )
   }),
-  pushAllowedOrigins: Schema.Array(
-    Schema.String.check(
-      Schema.isMaxLength(2_048),
-      Schema.isPattern(/^https:\/\/[^/?#@]+$/)
-    )
-  ),
+  pushAllowedOrigins: Schema.Array(HttpsOrigin),
   pushSubject: Schema.String.check(
     Schema.isMaxLength(2_048),
     Schema.isPattern(/^(mailto:|https:\/\/)/)

@@ -111,6 +111,23 @@ describe("fleet local authority", () => {
     expect(Result.isFailure(
       Schema.decodeUnknownResult(HostConfiguration)({
         ...valid,
+        pushAllowedOrigins: [
+          "https://push.example.test",
+          "https://push.example.test:99999"
+        ]
+      })
+    )).toBe(true)
+    for (const origin of ["https://Push.Example.Test:443", "https://push.example.test:8443"]) {
+      expect(Result.isSuccess(
+        Schema.decodeUnknownResult(HostConfiguration)({
+          ...valid,
+          pushAllowedOrigins: [origin]
+        })
+      )).toBe(true)
+    }
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
         approvalHub: { ...valid.approvalHub, url: "https://ser8.example.test/" }
       })
     )).toBe(true)
