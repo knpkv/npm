@@ -2,7 +2,7 @@ import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration, HostOperations } from "@knpkv/herdr-fleet"
 import { fleetResponseBodyMaxBytes, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import { Deferred, Effect, Fiber, Option, Result, Schedule, Schema, Stream } from "effect"
+import { Effect, Fiber, Option, Result, Schedule, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
@@ -1378,27 +1378,29 @@ describe("Connect public seams", () => {
     )
   })
 
-  it.effect("kills terminal control when the release write does not complete", () => {
+  it.effect("kills before interrupting a timed-out release wait", () => {
     let kills = 0
+    let releaseInterruptions = 0
     return Effect.gen(function*() {
       expect(terminalKillOptions).toEqual({ forceKillAfter: "1 second" })
-      const stopped = yield* Deferred.make<void>()
-      const fiber = yield* Effect.forkChild(
-        Effect.scoped(
-          Effect.addFinalizer(() =>
-            releaseTerminalControl(
-              Deferred.await(stopped),
-              Deferred.await(stopped),
-              Effect.sync(() => {
-                kills += 1
-              }).pipe(Effect.andThen(Deferred.succeed(stopped, undefined)))
-            )
+      const fiber = yield* releaseTerminalControl(
+        Effect.never.pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              releaseInterruptions += 1
+            })
           )
         ),
-        { startImmediately: true, uninterruptible: false }
+        Effect.never,
+        Effect.sync(() => {
+          kills += 1
+        })
+      ).pipe(
+        Effect.forkChild({ startImmediately: true, uninterruptible: false })
       )
       yield* TestClock.adjust("1 second")
       expect(kills).toBe(1)
+      expect(releaseInterruptions).toBe(1)
       expect(fiber.pollUnsafe()).toBeDefined()
     }).pipe(provideTestClock)
   })

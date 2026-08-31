@@ -1,4 +1,4 @@
-import { Effect, Fiber } from "effect"
+import { Effect, Fiber, Option, Scope } from "effect"
 import type { KillOptions } from "effect/unstable/process/ChildProcess"
 
 export const terminalKillOptions = {
@@ -17,17 +17,23 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
   exitCode: Effect.Effect<unknown, ExitError, ExitRequirements>,
   kill: Effect.Effect<unknown, KillError, KillRequirements>
 ) {
-  const watchdog = yield* Effect.forkChild(
-    Effect.sleep("1 second").pipe(
-      Effect.andThen(kill),
-      Effect.ignore
-    ),
-    { startImmediately: true, uninterruptible: false }
-  )
-  yield* release.pipe(
-    Effect.ignore,
-    Effect.andThen(exitCode),
-    Effect.ignore,
-    Effect.ensuring(Fiber.interrupt(watchdog))
+  yield* Effect.acquireUseRelease(
+    Scope.make(),
+    (releaseScope) =>
+      Effect.gen(function*() {
+        const releaseFiber = yield* Effect.forkIn(
+          release.pipe(
+            Effect.ignore,
+            Effect.andThen(exitCode),
+            Effect.ignore
+          ),
+          releaseScope
+        )
+        const released = yield* Fiber.await(releaseFiber).pipe(
+          Effect.timeoutOption(terminalKillOptions.forceKillAfter)
+        )
+        if (Option.isNone(released)) yield* kill.pipe(Effect.ignore)
+      }),
+    (releaseScope, exit) => Scope.close(releaseScope, exit)
   )
 })
