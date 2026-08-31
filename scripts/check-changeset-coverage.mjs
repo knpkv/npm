@@ -156,7 +156,11 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
     return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen)
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const substituted = substitutions.get(typeNode.typeName.text)
-    if (substituted !== undefined) return canonicalTypeText(substituted, analysis, filePath, substitutions, seen)
+    if (substituted !== undefined) {
+      return Predicate.isString(substituted)
+        ? substituted
+        : canonicalTypeText(substituted, analysis, filePath, substitutions, seen)
+    }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration !== undefined) {
       const key = `${declaration.filePath}\u0000${typeNode.typeName.text}`
@@ -185,13 +189,37 @@ const canonicalTypeText = (typeNode, analysis, filePath, substitutions = new Map
       .join("&")})`
   }
   if (TypeScript.isFunctionTypeNode(typeNode)) {
-    return `function(${typeNode.parameters.map((parameter) => parameterDescriptor(parameter, analysis, filePath, substitutions)).join(",")}):${
+    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions)
+    return `function<${generic.descriptor}>(${typeNode.parameters
+      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions))
+      .join(",")}):${
       typeNode.type === undefined
         ? "unknown"
-        : canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen)
+        : canonicalTypeText(typeNode.type, analysis, filePath, generic.substitutions, seen)
     }`
   }
   return normalizeTypeText(typeNode)
+}
+
+const genericDescriptor = (typeParameters, analysis, filePath, substitutions) => {
+  const nextSubstitutions = new Map(substitutions)
+  for (const [index, parameter] of (typeParameters ?? []).entries()) {
+    nextSubstitutions.set(parameter.name.text, `generic#${index}`)
+  }
+  const descriptor = (typeParameters ?? [])
+    .map((parameter, index) => {
+      const constraint =
+        parameter.constraint === undefined
+          ? ""
+          : `extends:${canonicalTypeText(parameter.constraint, analysis, filePath, nextSubstitutions)}`
+      const defaultType =
+        parameter.default === undefined
+          ? ""
+          : `default:${canonicalTypeText(parameter.default, analysis, filePath, nextSubstitutions)}`
+      return `${index}:${constraint}:${defaultType}`
+    })
+    .join(",")
+  return { descriptor, substitutions: nextSubstitutions }
 }
 
 const parameterDescriptor = (parameter, analysis, filePath, substitutions) => {
@@ -206,13 +234,13 @@ const memberDescriptor = (member, analysis, filePath, substitutions) => {
   const optional = member.questionToken === undefined ? "required" : "optional"
   const readonly = hasReadonlyModifier(member) ? "readonly:" : ""
   if (TypeScript.isMethodSignature(member)) {
-    const typeParameters = (member.typeParameters ?? []).map((parameter) => parameter.name.text).join(",")
+    const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions)
     const parameters = member.parameters
-      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, substitutions))
+      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions))
       .join(",")
     const returnType =
-      member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, substitutions)
-    return `${readonly}${optional}:method<${typeParameters}>(${parameters}):${returnType}`
+      member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, generic.substitutions)
+    return `${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
   }
   const type = member.type === undefined ? "unknown" : canonicalTypeText(member.type, analysis, filePath, substitutions)
   return `${readonly}${optional}:${type}`
@@ -294,11 +322,13 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
   const exports = new Map()
   const addCallable = (name, parameters, returnType, contextualType) => {
     const contextualParameters = contextualType === undefined ? [] : contextualType.parameters
-    const firstParameter = parameters[0] ?? contextualParameters[0]
+    const firstParameter = parameters[0]
+    const contextualParameter = contextualParameters[0]
+    const parameterType = firstParameter?.type ?? contextualParameter?.type
     const properties =
-      firstParameter?.type === undefined
+      parameterType === undefined
         ? { members: new Map(), resolved: false }
-        : typeMembers(firstParameter.type, analysis, filePath)
+        : typeMembers(parameterType, analysis, filePath)
     const contextualReturnType = contextualType?.type
     const effectiveReturnType = returnType ?? contextualReturnType
     exports.set(name, {
@@ -1131,6 +1161,46 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(contextualSource, contextualSource, ["packages/public/src/index.ts"]), [])
+  const contextualChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: number }\nexport const Public: (props: Props) => string = (props) => String(props.value)"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(contextualSource, contextualChanged, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
+  ])
+
+  const genericCallablePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends string>(value: T) => void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const genericCallableCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <T extends number>(value: T) => void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(genericCallablePrevious, genericCallableCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
+  )
+  const genericCallableRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { cb: <U extends string>(value: U) => void }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(genericCallablePrevious, genericCallableRename, ["packages/public/src/index.ts"]),
+    []
+  )
 
   const methodPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
