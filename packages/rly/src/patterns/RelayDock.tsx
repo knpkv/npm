@@ -331,15 +331,18 @@ interface DockLayerProps extends Pick<RelayDockBaseProps, "context" | "footer" |
   readonly modal: boolean
   readonly parentModalPresent: boolean
   readonly onClose: () => void
+  readonly restoreDocument: Document | null
   readonly restoreTargetRef: RefObject<HTMLElement | null>
   readonly title: string
   readonly closeRef: RefObject<HTMLButtonElement | null>
 }
 
 const DockInitialFocus = ({
+  restoreDocument,
   restoreTarget,
   target
 }: {
+  readonly restoreDocument: Document | null
   readonly restoreTarget: RefObject<HTMLElement | null>
   readonly target: RefObject<HTMLButtonElement | null>
 }): null => {
@@ -348,11 +351,11 @@ const DockInitialFocus = ({
     const focusTarget = target.current
     if (focusTarget === null) return
     if (!hasCapturedRestoreTarget.current) {
-      restoreTarget.current = focusRestoreTarget(focusTarget.ownerDocument)
+      restoreTarget.current = focusRestoreTarget(restoreDocument ?? focusTarget.ownerDocument)
       hasCapturedRestoreTarget.current = true
     }
     focusTarget.focus()
-  }, [restoreTarget, target])
+  }, [restoreDocument, restoreTarget, target])
   return null
 }
 
@@ -391,6 +394,7 @@ const DockLayer = ({
   modal,
   onClose,
   parentModalPresent,
+  restoreDocument,
   restoreTargetRef,
   selection,
   state,
@@ -471,7 +475,7 @@ const DockLayer = ({
                   <Icon decorative name="close" />
                 </button>
               </header>
-              <DockInitialFocus restoreTarget={restoreTargetRef} target={closeRef} />
+              <DockInitialFocus restoreDocument={restoreDocument} restoreTarget={restoreTargetRef} target={closeRef} />
               <DockContents context={context} footer={footer} selection={selection} state={state} />
             </section>
           </DockLayerSurface>
@@ -574,6 +578,7 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
             modal={modal}
             onClose={() => requestOpenChange(false)}
             parentModalPresent={parentModalPresent}
+            restoreDocument={triggerRef.current?.ownerDocument ?? null}
             restoreTargetRef={restoreTargetRef}
             selection={selection}
             state={state}
