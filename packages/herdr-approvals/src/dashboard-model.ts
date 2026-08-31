@@ -97,6 +97,7 @@ export const DashboardSnapshot = Schema.Struct({
 })
 
 export type ApprovalDirectory = typeof ApprovalDirectory.Type
+export type FleetPendingApprovals = typeof FleetPendingApprovals.Type
 export type DashboardSnapshot = typeof DashboardSnapshot.Type
 export type DashboardHistoryPage = typeof DashboardHistoryPage.Type
 export type PendingApproval = typeof PendingApproval.Type

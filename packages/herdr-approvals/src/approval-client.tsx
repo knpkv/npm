@@ -32,6 +32,7 @@ import {
   type PendingApprovalTarget as PendingApprovalTargetType
 } from "./dashboard-model.js"
 import { AgentActivity, DashboardView, type ApprovalDecision } from "./dashboard-view.js"
+import { dashboardPendingState, mergeDashboardPendingPage } from "./internal/dashboard-pending-state.js"
 import { FleetShell } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 
@@ -428,9 +429,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [historyRecords, setHistoryRecords] = useState<DashboardSnapshotType["records"]>([])
   const [historyNextCursor, setHistoryNextCursor] = useState(initial.historyNextCursor)
   const [pendingBusy, setPendingBusy] = useState(false)
-  const [pendingLocal, setPendingLocal] = useState<DashboardSnapshotType["pendingApprovals"]["local"]>([])
-  const [pendingRemote, setPendingRemote] = useState<DashboardSnapshotType["pendingApprovals"]["remote"]>([])
-  const [pendingNextCursors, setPendingNextCursors] = useState(initial.pendingApprovals.nextCursors)
+  const [pendingState, setPendingState] = useState(dashboardPendingState(0, initial.pendingApprovals))
   const start = useRef<number | null>(null)
   useAtomMount(atoms.chatPoll)
 
@@ -508,8 +507,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setHistoryNextCursor(exit.value.nextCursor)
   }
   const onLoadPending = async (): Promise<void> => {
-    const continuation = pendingNextCursors.at(0)
+    const continuation = pendingState.nextCursors.at(0)
     if (continuation === undefined || pendingBusy) return
+    const request = { continuation, generation: pendingState.generation }
     setPendingBusy(true)
     const exit = await runPendingPage(continuation)
     setPendingBusy(false)
@@ -517,9 +517,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
       return
     }
-    setPendingLocal((records) => [...records, ...exit.value.local])
-    setPendingRemote((records) => [...records, ...exit.value.remote])
-    setPendingNextCursors((cursors) => [...cursors.slice(1), ...exit.value.nextCursors])
+    setPendingState((state) => mergeDashboardPendingPage(state, request, exit.value))
   }
 
   const snapshot = AsyncResult.isSuccess(result)
@@ -555,12 +553,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
               ? snapshot
               : { ...snapshot, chat: chat ?? null, work: work ?? null }),
             historyNextCursor,
-            pendingApprovals: {
-              ...snapshot.pendingApprovals,
-              local: [...snapshot.pendingApprovals.local, ...pendingLocal],
-              remote: [...snapshot.pendingApprovals.remote, ...pendingRemote],
-              nextCursors: pendingNextCursors
-            },
+            pendingApprovals: pendingState,
             records: [...snapshot.records, ...historyRecords]
           },
           deepLinkTarget
@@ -582,10 +575,8 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     if (snapshot === null) return
     setHistoryRecords([])
     setHistoryNextCursor(snapshot.historyNextCursor)
-    setPendingLocal([])
-    setPendingRemote([])
-    setPendingNextCursors(snapshot.pendingApprovals.nextCursors)
-  }, [snapshot?.observedAt])
+    setPendingState((state) => dashboardPendingState(state.generation + 1, snapshot.pendingApprovals))
+  }, [snapshot])
   useEffect(() => {
     if (currentSnapshot === null) return
     const decoded = readApprovalDeepLink(window.location.search)
