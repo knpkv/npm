@@ -169,6 +169,34 @@ describe("push delivery retries", () => {
               1_002
             )
           ).toBe(false)
+          yield* store.recordDelivery(
+            "SeR8",
+            "job-race",
+            subscription.endpoint,
+            1_000
+          )
+          expect(
+            yield* store.hasDelivered(
+              "ser8",
+              "job-race",
+              subscription.endpoint,
+              1_001
+            )
+          ).toBe(true)
+          yield* store.recordDelivery(
+            "ser8",
+            "job-race",
+            subscription.endpoint,
+            1_002
+          )
+          expect(
+            yield* store.hasDelivered(
+              "SER8",
+              "job-race",
+              subscription.endpoint,
+              1_002
+            )
+          ).toBe(true)
         })),
       (store) =>
         Effect.sync(() => {

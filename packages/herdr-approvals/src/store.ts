@@ -291,7 +291,7 @@ export class ApprovalAppStore {
         const updated = database
           .prepare(
             `UPDATE push_deliveries
-             SET delivered_at = ?
+             SET delivered_at = max(delivered_at, ?)
              WHERE host = ? COLLATE NOCASE AND job_id = ? AND endpoint = ?`
           )
           .run(deliveredAt, normalizedHost, jobId, endpoint)
