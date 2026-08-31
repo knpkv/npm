@@ -39,8 +39,8 @@ const HerdrLaunchPendingAgent = Schema.Struct({
 })
 
 const HerdrAgentEntry = Schema.Union([
-  HerdrAgent,
-  HerdrLaunchPendingAgent
+  HerdrLaunchPendingAgent,
+  HerdrAgent
 ])
 
 const isHerdrLaunchPendingAgent = Schema.is(HerdrLaunchPendingAgent)

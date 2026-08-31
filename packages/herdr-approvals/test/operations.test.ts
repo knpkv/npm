@@ -284,7 +284,7 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
       writeFileSync(
         herdrCommand,
         `#!/bin/sh
-printf '%s\\n' '{"result":{"agents":[{"agent":"codex","agent_status":"working","cwd":"/repo","pane_id":"w1:p1","state_change_seq":1},{"launch_pending":true,"agent_status":"launch_pending","cwd":"/repo/pending","foreground_cwd":"/repo/pending","name":null,"pane_id":"w1:p2","state_change_seq":2,"tokens":{}}]}}'
+printf '%s\\n' '{"result":{"agents":[{"agent":"codex","agent_status":"working","cwd":"/repo","pane_id":"w1:p1","state_change_seq":1},{"launch_pending":true,"agent":"codex","agent_status":"launch_pending","cwd":"/repo/pending","foreground_cwd":"/repo/pending","name":null,"pane_id":"w1:p2","state_change_seq":2,"tokens":{}}]}}'
 `,
         { mode: 0o700 }
       )
