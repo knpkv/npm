@@ -351,6 +351,13 @@ export const validateWorkflowSecretBoundaries = (document, location, workflowDoc
     for (const [jobName, rawJob] of Object.entries(currentDocument?.jobs ?? {})) {
       const job = rawJob ?? {}
       const jobLocation = `${currentLocation}: job ${jobName}`
+      const steps = Array.isArray(job.steps) ? job.steps : []
+      for (const [stepIndex, step] of steps.entries()) {
+        if (!Predicate.isString(step?.uses)) continue
+        for (const inputName of duplicateActionInputNames(step)) {
+          diagnostics.push(`${jobLocation} step ${stepIndex + 1} has duplicate action input ${inputName}`)
+        }
+      }
       const inheritedSecretContext = { workflowEnv: currentDocument?.env, job }
       const effectivePermissions = job.permissions === undefined ? currentDocument?.permissions : job.permissions
       const jobPullRequestTriggers =
@@ -1016,6 +1023,32 @@ jobs:
           Ref: \${{ github.event.pull_request.head.sha }}
       - run: pnpm test:integration
 `)
+  const invalidDuplicateCheckoutInputs = parse(`
+on:
+  pull_request_target:
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          ref: \${{ github.sha }}
+          REF: \${{ github.event.pull_request.head.sha }}
+      - run: pnpm test:integration
+`)
+  const safeDistinctCheckoutInputs = parse(`
+on:
+  pull_request_target:
+permissions:
+  contents: read
+jobs:
+  integration:
+    steps:
+      - uses: actions/checkout@${"a".repeat(40)}
+        with:
+          Ref: \${{ github.sha }}
+          fetch-depth: 0
+      - run: pnpm test:integration
+`)
   const safeMixedCaseTrustedCheckoutInput = parse(`
 on:
   pull_request_target:
@@ -1353,6 +1386,10 @@ jobs:
     validateWorkflowSecretBoundaries(invalidMixedCaseCheckoutInput, "mixed-case checkout input fixture").length,
     1
   )
+  assert.equal(
+    validateWorkflowSecretBoundaries(invalidDuplicateCheckoutInputs, "duplicate checkout input fixture").length,
+    1
+  )
   assert.equal(validateWorkflowSecretBoundaries(invalidShellCheckout, "shell checkout fixture").length, 1)
   assert.equal(
     validateWorkflowSecretBoundaries(
@@ -1467,6 +1504,7 @@ jobs:
     validateWorkflowSecretBoundaries(safeMixedCaseTrustedCheckoutInput, "mixed-case trusted checkout input fixture"),
     []
   )
+  assert.deepEqual(validateWorkflowSecretBoundaries(safeDistinctCheckoutInputs, "distinct checkout input fixture"), [])
   assert.deepEqual(validateWorkflowSecretBoundaries(protectedMain, "protected main fixture"), [])
 }
 
