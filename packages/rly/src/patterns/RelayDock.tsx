@@ -12,7 +12,7 @@ import {
 } from "react"
 import { Portal as RadixPortal } from "radix-ui"
 import { Icon } from "../foundations/Icon.js"
-import { PortalBoundary } from "../foundations/PortalProvider.js"
+import { PortalBoundary, usePortalTarget } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
 import {
   invalidateModalFocusRestore,
@@ -36,6 +36,7 @@ const focusableSelector = [
   "button:not([disabled])",
   "input:not([disabled])",
   "select:not([disabled])",
+  "details > summary:first-of-type",
   "textarea:not([disabled])",
   '[contenteditable]:not([contenteditable="false"])',
   '[tabindex]:not([tabindex="-1"])'
@@ -62,17 +63,12 @@ const focusRestoreTarget = (ownerDocument: Document): HTMLElement | null => {
 const isRenderedFocusable = (element: HTMLElement): boolean => {
   const view = element.ownerDocument.defaultView
   if (view === null) return element.hidden === false
+  const visibility = view.getComputedStyle(element).visibility
+  if (visibility === "hidden" || visibility === "collapse") return false
   let current: HTMLElement | null = element
   while (current !== null) {
     const computed = view.getComputedStyle(current)
-    if (
-      current.hidden !== false ||
-      computed.display === "none" ||
-      computed.visibility === "hidden" ||
-      computed.visibility === "collapse"
-    ) {
-      return false
-    }
+    if (current.hidden !== false || computed.display === "none") return false
     current = current.parentElement
   }
   return true
@@ -379,7 +375,9 @@ const DockLayer = ({
     if (!modal || event.key !== "Tab") return
 
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-      (element) => isRenderedFocusable(element) && (element.tabIndex >= 0 || element.isContentEditable)
+      (element) =>
+        isRenderedFocusable(element) &&
+        (element.tabIndex >= 0 || element.isContentEditable || element.matches("details > summary:first-of-type"))
     )
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
@@ -467,7 +465,8 @@ export const RelayDock = (componentProps: RelayDockProps): ReactElement => {
   } = componentProps
   const [defaultState, setDefaultState] = useState(defaultOpen)
   const parentModalReady = useParentModalReady()
-  const resolvedOpen = (open ?? defaultState) && parentModalReady
+  const portalTarget = usePortalTarget()
+  const resolvedOpen = (open ?? defaultState) && parentModalReady && portalTarget.available
   const compactViewport = useCompactViewport()
   const modal = compactViewport || desktopPresentation === "overlay"
   const triggerRef = useRef<HTMLButtonElement>(null)

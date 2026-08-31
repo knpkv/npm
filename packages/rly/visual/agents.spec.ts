@@ -189,10 +189,13 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   const dock = page.getByRole("dialog", { name: "Relay" })
   const thread = dock.getByRole("region", { name: "Relay thread" })
   const editor = dock.getByRole("textbox", { name: "Rich Relay reply" })
+  const visibleReplyAction = dock.getByRole("button", { name: "Visible reply action" })
 
   await thread.focus()
   await page.keyboard.press("Tab")
   await expect(editor).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(visibleReplyAction).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(dock.getByRole("button", { name: "Close Relay" })).toBeFocused()
 })
