@@ -928,6 +928,7 @@ const ReadyReviewWorkspace = ({
         } else {
           sessionMigrationStatusRef.current = "pending"
           setSessionMigration({ key: reviewSessionKey, status: "pending" })
+          const migrationIdentity = relayReviewSessionIdentity(reviewResource, hydrated.review)
           void migrateRelayReviewSession(
             window.localStorage,
             legacyReviewSessionKey,
@@ -947,6 +948,28 @@ const ReadyReviewWorkspace = ({
               }
             } else if (migrated.success !== null) {
               if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                if (migrated.success.identity !== migrationIdentity) {
+                  const adopted = replaceRelayReviewPreservingTurns(migrated.success.turns, {
+                    expectedIdentity: migrated.success.identity,
+                    identity: migrated.success.identity,
+                    skillIds: migrated.success.skillIds,
+                    value: migrated.success.review
+                  })
+                  completedReviewRef.current = adopted
+                  setCompletedReview(adopted)
+                  dispositionsRef.current = migrated.success.dispositions
+                  setDispositions(migrated.success.dispositions)
+                  setSelectedProfileId(migrated.success.review.profile.id)
+                  setTurns(migrated.success.turns)
+                  setSelectedFindingId(
+                    migrated.success.turns.at(-1)?.findingId ?? migrated.success.review.result.findings[0]?.id ?? null
+                  )
+                  hydratedSessionRef.current = {
+                    fingerprint: sessionFingerprint(adopted, migrated.success.turns, migrated.success.dispositions),
+                    key: reviewSessionKey,
+                    pendingInitialPass: false
+                  }
+                }
                 sessionMigrationStatusRef.current = "idle"
                 reviewSessionVersionRef.current = migrated.success.version
                 setSessionMigration((current) => (current?.key === reviewSessionKey ? null : current))

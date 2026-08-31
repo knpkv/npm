@@ -148,6 +148,16 @@ describe("CodeCommit Relay dock adapter", () => {
         selection
       ).thread.accountId
     ).toBe("credential-account")
+    expect(
+      codeCommitRouteAccountIdentity(
+        new Domain.Account({
+          awsAccountId: "",
+          profile: "dev-administratoraccess",
+          region: "eu-central-1",
+          repoAccountId: ""
+        })
+      )
+    ).toBe("dev-administratoraccess")
   })
 
   it("keeps the located repository and region in the redirect route", () => {

@@ -51,7 +51,7 @@ export const codeCommitRelayAccountKind = (account: Domain.Account): "credential
   nonEmptyAccountId(account.repoAccountId) === undefined ? "credential" : "repository"
 
 export const codeCommitRouteAccountIdentity = (account: Domain.Account): string =>
-  account.awsAccountId ?? account.profile
+  nonEmptyAccountId(account.awsAccountId) ?? account.profile
 
 /** Construct the canonical Relay conversation while retaining the credential URL alias. */
 export const makeCodeCommitRelayConversation = (

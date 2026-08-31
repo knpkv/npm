@@ -320,6 +320,50 @@ describe("Relay review session storage", () => {
     }
   })
 
+  it("returns the canonical winner when a target appears before migration commits", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "credential-head",
+      resource: sourceResource,
+      review,
+      skillIds: ["legacy"],
+      turns: [],
+      dispositions: {}
+    })
+    const canonicalReview = { ...review, revisionId: "revision-canonical" }
+    await writeSession(localStorage, targetKey, {
+      identity: "canonical-head",
+      resource: targetResource,
+      review: canonicalReview,
+      skillIds: ["canonical"],
+      turns: [],
+      dispositions: {}
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      immediateLock
+    )
+
+    expect(Result.isSuccess(migrated)).toBe(true)
+    if (Result.isSuccess(migrated)) {
+      expect(migrated.success?.identity).toBe("canonical-head")
+      expect(migrated.success?.review.revisionId).toBe("revision-canonical")
+      expect(migrated.success?.skillIds).toEqual(["canonical"])
+    }
+  })
+
   it("keeps a current canonical rerun when migration finishes after it", async () => {
     const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
     const sourceKey = relayReviewSessionStorageKey(sourceResource)
