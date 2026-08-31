@@ -467,21 +467,25 @@ export const budgetDashboardSnapshot = Effect.fn(
   ) {
     records.pop()
   }
+  const first = originalRecords.at(0)
+  if (first !== undefined && records.length === 0) {
+    return yield* new DashboardResponseBudgetError({
+      encodedBytes: dashboardSnapshotBytes({
+        ...snapshot,
+        records: [first]
+      }),
+      maximumBytes: fleetResponseBodyMaxBytes
+    })
+  }
   const last = records.at(-1)
-  const first = originalRecords[0]
   const candidate = records.length === originalRecords.length
     ? snapshot
     : {
       ...snapshot,
       records,
-      historyNextCursor: last !== undefined
-        ? { createdAt: last.createdAt, id: last.id }
-        : first === undefined
+      historyNextCursor: last === undefined
         ? snapshot.historyNextCursor
-        : {
-          createdAt: first.createdAt + 1,
-          id: first.id
-        }
+        : { createdAt: last.createdAt, id: last.id }
     }
   const encodedBytes = dashboardSnapshotBytes(candidate)
   if (encodedBytes > fleetResponseBodyMaxBytes) {

@@ -291,6 +291,77 @@ describe("host HTTP authority", () => {
       })
     }))
 
+  it.effect("refuses a dashboard when no history record fits the remaining envelope", () =>
+    Effect.gen(function*() {
+      const record = {
+        actor: "andrey@example.com",
+        approvalNonce: null,
+        approvedBy: null,
+        createdAt: 1,
+        error: null,
+        hash: "1".repeat(64),
+        id: "job-too-large-for-dashboard",
+        payload: {
+          kind: "agent.delegate",
+          mode: "work",
+          prompt: "x".repeat(2_000),
+          repository: "/repo"
+        },
+        result: null,
+        status: "queued",
+        updatedAt: 1
+      } satisfies JobRecord
+      const base = Schema.decodeUnknownSync(DashboardSnapshot)({
+        approvalApp: {
+          canonical: true,
+          canonicalUrl: "https://ser8.example.test:4779/",
+          chatEnabled: true,
+          pushEnabled: true
+        },
+        approvalsEnabled: true,
+        chat: null,
+        directory: null,
+        historyNextCursor: null,
+        host: "SER8",
+        observedAt: 1,
+        pendingApprovals: { failures: [], local: [], remote: [] },
+        records: [],
+        status: {
+          applyConfigured: false,
+          branch: "main",
+          dirty: false,
+          herdr: { agents: [], available: true, error: null },
+          host: "SER8",
+          repository: "/repo",
+          revision: ""
+        },
+        work: null
+      })
+      const rawBaseBytes = Buffer.byteLength(JSON.stringify(base))
+      const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)({
+        ...base,
+        records: [record],
+        status: {
+          ...base.status,
+          revision: "x".repeat(
+            fleetResponseBodyMaxBytes - rawBaseBytes - 1_000
+          )
+        }
+      })
+      expect(dashboardSnapshotBytes({ ...snapshot, records: [] })).toBeLessThan(
+        fleetResponseBodyMaxBytes
+      )
+      expect(dashboardSnapshotBytes(snapshot)).toBeGreaterThan(
+        fleetResponseBodyMaxBytes
+      )
+      expect(yield* Effect.result(budgetDashboardSnapshot(snapshot))).toMatchObject({
+        failure: {
+          _tag: "DashboardResponseBudgetError",
+          maximumBytes: fleetResponseBodyMaxBytes
+        }
+      })
+    }))
+
   it.effect("counts the emitted newline at the exact dashboard response limit", () =>
     Effect.gen(function*() {
       const base = Schema.decodeUnknownSync(DashboardSnapshot)({
