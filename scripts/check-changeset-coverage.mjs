@@ -17,19 +17,70 @@ import * as TypeScript from "typescript"
 import { parse } from "yaml"
 
 const releaseTypes = new Set(["major", "minor", "patch"])
+const releasePrecedence = new Map([
+  ["patch", 0],
+  ["minor", 1],
+  ["major", 2]
+])
 const publicManifestFields = ["bin", "browser", "exports", "files", "main", "module", "types", "typesVersions"]
 const runtimeDependencyFields = ["dependencies", "optionalDependencies", "peerDependencies"]
 const releaseManifestFields = [...publicManifestFields, ...runtimeDependencyFields]
 
-const exportedCallableParameterProperties = (source, filePath) => {
-  const sourceFile = TypeScript.createSourceFile(
+const mergeReleaseType = (current, incoming) =>
+  current === undefined || releasePrecedence.get(incoming) > releasePrecedence.get(current) ? incoming : current
+
+const sourceFileFor = (source, filePath) =>
+  TypeScript.createSourceFile(
     filePath,
     source,
     TypeScript.ScriptTarget.Latest,
     true,
     filePath.endsWith(".tsx") ? TypeScript.ScriptKind.TSX : TypeScript.ScriptKind.TS
   )
+
+const typeMembers = (typeNode, declarations, seen = new Set()) => {
+  if (TypeScript.isParenthesizedTypeNode(typeNode)) return typeMembers(typeNode.type, declarations, seen)
+  if (TypeScript.isIntersectionTypeNode(typeNode)) {
+    return new Set(typeNode.types.flatMap((member) => [...typeMembers(member, declarations, seen)]))
+  }
+  if (TypeScript.isTypeLiteralNode(typeNode) || TypeScript.isInterfaceDeclaration(typeNode)) {
+    return new Set(
+      typeNode.members.flatMap((member) => {
+        if (!TypeScript.isPropertySignature(member) && !TypeScript.isMethodSignature(member)) return []
+        const name = member.name
+        return TypeScript.isIdentifier(name) || TypeScript.isStringLiteral(name) || TypeScript.isNumericLiteral(name)
+          ? [name.text]
+          : []
+      })
+    )
+  }
+  if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
+    const declaration = declarations.get(typeNode.typeName.text)
+    if (declaration === undefined || seen.has(declaration)) return new Set()
+    const nextSeen = new Set(seen).add(declaration)
+    if (TypeScript.isTypeAliasDeclaration(declaration)) return typeMembers(declaration.type, declarations, nextSeen)
+    if (TypeScript.isInterfaceDeclaration(declaration)) return typeMembers(declaration, declarations, nextSeen)
+  }
+  return new Set()
+}
+
+const callableParameterTypes = (source, filePath) => {
+  const sourceFile = sourceFileFor(source, filePath)
+  const declarations = new Map()
+  const collectDeclarations = (node) => {
+    if (TypeScript.isTypeAliasDeclaration(node) || TypeScript.isInterfaceDeclaration(node)) {
+      declarations.set(node.name.text, node)
+    }
+    TypeScript.forEachChild(node, collectDeclarations)
+  }
+  collectDeclarations(sourceFile)
   const exports = new Map()
+  const addCallable = (name, parameters) => {
+    const firstParameter = parameters[0]
+    if (firstParameter === undefined || firstParameter.type === undefined) return
+    const properties = typeMembers(firstParameter.type, declarations)
+    if (properties.size > 0) exports.set(name, properties)
+  }
   const visit = (node) => {
     if (
       TypeScript.isVariableStatement(node) &&
@@ -40,20 +91,19 @@ const exportedCallableParameterProperties = (source, filePath) => {
         if (
           !TypeScript.isIdentifier(declaration.name) ||
           initializer === undefined ||
-          !TypeScript.isArrowFunction(initializer)
+          (!TypeScript.isArrowFunction(initializer) && !TypeScript.isFunctionExpression(initializer))
         ) {
           continue
         }
-        const firstParameter = initializer.parameters[0]
-        if (firstParameter === undefined || !TypeScript.isObjectBindingPattern(firstParameter.name)) continue
-        const properties = new Set()
-        for (const element of firstParameter.name.elements) {
-          if (!TypeScript.isBindingElement(element)) continue
-          const propertyName = element.propertyName ?? element.name
-          if (TypeScript.isIdentifier(propertyName)) properties.add(propertyName.text)
-        }
-        exports.set(declaration.name.text, properties)
+        addCallable(declaration.name.text, initializer.parameters)
       }
+    }
+    if (
+      TypeScript.isFunctionDeclaration(node) &&
+      node.name !== undefined &&
+      node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ExportKeyword)
+    ) {
+      addCallable(node.name.text, node.parameters)
     }
     TypeScript.forEachChild(node, visit)
   }
@@ -61,14 +111,124 @@ const exportedCallableParameterProperties = (source, filePath) => {
   return exports
 }
 
-const publicCallableAdditions = (previousSource, currentSource, filePath) => {
-  const previous = exportedCallableParameterProperties(previousSource ?? "", filePath)
-  const current = exportedCallableParameterProperties(currentSource, filePath)
+const publicCallableAdditions = (previousSource, currentSource, filePath, reachableNames) => {
+  const previous = callableParameterTypes(previousSource ?? "", filePath)
+  const current = callableParameterTypes(currentSource, filePath)
   return [...current].flatMap(([name, properties]) => {
+    if (reachableNames !== undefined && !reachableNames.has(name)) return []
     const previousProperties = previous.get(name) ?? new Set()
     const added = [...properties].filter((property) => !previousProperties.has(property)).toSorted()
     return added.length === 0 ? [] : [{ filePath, name, properties: added }]
   })
+}
+
+const isExcludedSourcePath = (filePath) =>
+  filePath.split("/").some((segment) => segment === "generated" || segment === "vendor" || segment === "node_modules")
+
+const resolveLocalModule = (fromPath, specifier, sourceFiles) => {
+  if (!specifier.startsWith(".")) return undefined
+  const fromSegments = fromPath.split("/")
+  fromSegments.pop()
+  const targetSegments = []
+  for (const segment of [...fromSegments, ...specifier.split("/")]) {
+    if (segment === ".") continue
+    if (segment === "..") {
+      targetSegments.pop()
+    } else {
+      targetSegments.push(segment)
+    }
+  }
+  const target = targetSegments.join("/")
+  const withoutExtension = target.replace(/\.(?:[cm]?js|jsx|tsx?|d\.ts)$/u, "")
+  const candidates = [
+    `${withoutExtension}.ts`,
+    `${withoutExtension}.tsx`,
+    `${withoutExtension}/index.ts`,
+    `${withoutExtension}/index.tsx`
+  ]
+  return candidates.find((candidate) => sourceFiles.has(candidate))
+}
+
+const moduleExportInfo = (source, filePath) => {
+  const sourceFile = sourceFileFor(source, filePath)
+  const local = new Set()
+  const aliases = new Map()
+  const stars = []
+  const visit = (node) => {
+    if (
+      (TypeScript.isVariableStatement(node) || TypeScript.isFunctionDeclaration(node)) &&
+      node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ExportKeyword)
+    ) {
+      if (TypeScript.isVariableStatement(node)) {
+        for (const declaration of node.declarationList.declarations) {
+          if (TypeScript.isIdentifier(declaration.name)) local.add(declaration.name.text)
+        }
+      } else if (node.name !== undefined) {
+        local.add(node.name.text)
+      }
+    }
+    if (TypeScript.isExportDeclaration(node)) {
+      const moduleSpecifier = node.moduleSpecifier
+      const sourceSpecifier =
+        moduleSpecifier !== undefined && TypeScript.isStringLiteral(moduleSpecifier) ? moduleSpecifier.text : undefined
+      const clause = node.exportClause
+      if (clause === undefined) {
+        if (sourceSpecifier !== undefined) stars.push(sourceSpecifier)
+      } else if (TypeScript.isNamedExports(clause)) {
+        for (const element of clause.elements) {
+          const exportedName = element.name.text
+          const importedName = element.propertyName?.text ?? exportedName
+          aliases.set(exportedName, { importedName, sourceSpecifier })
+        }
+      }
+    }
+    TypeScript.forEachChild(node, visit)
+  }
+  visit(sourceFile)
+  return { aliases, local, stars }
+}
+
+const reachableCallableNames = (sources, entryPoints) => {
+  const info = new Map([...sources].map(([filePath, source]) => [filePath, moduleExportInfo(source, filePath)]))
+  const resolved = new Map()
+  const resolving = new Set()
+  const exportsFor = (filePath) => {
+    const cached = resolved.get(filePath)
+    if (cached !== undefined) return cached
+    if (resolving.has(filePath)) return new Map()
+    const current = info.get(filePath)
+    if (current === undefined) return new Map()
+    resolving.add(filePath)
+    const result = new Map([...current.local].map((name) => [name, { filePath, name }]))
+    for (const [exportedName, alias] of current.aliases) {
+      if (alias.sourceSpecifier === undefined) {
+        result.set(exportedName, { filePath, name: alias.importedName })
+        continue
+      }
+      const target = resolveLocalModule(filePath, alias.sourceSpecifier, sources)
+      const targetExport = target === undefined ? undefined : exportsFor(target).get(alias.importedName)
+      if (targetExport !== undefined) result.set(exportedName, targetExport)
+    }
+    for (const sourceSpecifier of current.stars) {
+      const target = resolveLocalModule(filePath, sourceSpecifier, sources)
+      if (target === undefined) continue
+      for (const [name, targetExport] of exportsFor(target)) {
+        if (name !== "default" && !result.has(name)) result.set(name, targetExport)
+      }
+    }
+    resolving.delete(filePath)
+    resolved.set(filePath, result)
+    return result
+  }
+  const reachable = new Map()
+  for (const entryPoint of entryPoints) {
+    for (const target of exportsFor(entryPoint).values()) {
+      const names = reachable.get(target.filePath) ?? new Set()
+      names.add(target.name)
+      reachable.set(target.filePath, names)
+    }
+  }
+  return reachable
 }
 
 const validatePublicCallableReleaseTypes = ({ additions, releaseTypes }) =>
@@ -240,18 +400,35 @@ const runSelfTest = () => {
     () => parseChangesetFrontmatter('---\n"@fixture/public": invalid\n---\n', ".changeset/invalid.md"),
     /invalid release type/u
   )
-  const previousSource = "export const Public = ({ value }) => value\nconst Local = ({ value }) => value"
-  const currentSource =
-    "export const Public = ({ value, terminalViewportRef }) => value\nconst Local = ({ value, terminalViewportRef }) => value"
-  const additions = publicCallableAdditions(previousSource, currentSource, "packages/public/src/index.ts").map(
-    (addition) => ({
-      ...addition,
-      packageName: "@fixture/public"
-    })
+  const sourceFiles = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string }\nexport const Public = ({ value }: Props) => value\nexport const Internal = ({ value }: Props) => value"
+    ]
+  ])
+  assert.deepEqual(
+    reachableCallableNames(sourceFiles, ["packages/public/src/index.ts"]).get("packages/public/src/view.tsx"),
+    new Set(["Public"])
   )
+  const refactoredPrevious = "type Props = { value: string }\nexport const Public = (props: Props) => props.value"
+  const refactoredCurrent = "type Props = { value: string }\nexport const Public = ({ value }: Props) => value"
+  assert.deepEqual(
+    publicCallableAdditions(refactoredPrevious, refactoredCurrent, "packages/public/src/view.tsx", new Set(["Public"])),
+    []
+  )
+  const previousSource = "type Props = { value: string }\nexport const Public = ({ value }: Props) => value"
+  const currentSource =
+    "type Props = { value: string; terminalViewportRef?: string }\nexport const Public = ({ value, terminalViewportRef }: Props) => value"
+  const additions = publicCallableAdditions(
+    previousSource,
+    currentSource,
+    "packages/public/src/view.tsx",
+    new Set(["Public"])
+  ).map((addition) => ({ ...addition, packageName: "@fixture/public" }))
   assert.deepEqual(additions, [
     {
-      filePath: "packages/public/src/index.ts",
+      filePath: "packages/public/src/view.tsx",
       name: "Public",
       packageName: "@fixture/public",
       properties: ["terminalViewportRef"]
@@ -260,13 +437,41 @@ const runSelfTest = () => {
   assert.deepEqual(
     validatePublicCallableReleaseTypes({ additions, releaseTypes: new Map([["@fixture/public", "patch"]]) }),
     [
-      "@fixture/public: patch changeset cannot add public callable props terminalViewportRef (Public in packages/public/src/index.ts)"
+      "@fixture/public: patch changeset cannot add public callable props terminalViewportRef (Public in packages/public/src/view.tsx)"
     ]
   )
   assert.deepEqual(
     validatePublicCallableReleaseTypes({ additions, releaseTypes: new Map([["@fixture/public", "minor"]]) }),
     []
   )
+  const releaseOrders = [
+    ["major", "minor", "patch"],
+    ["major", "patch", "minor"],
+    ["minor", "major", "patch"],
+    ["minor", "patch", "major"],
+    ["patch", "major", "minor"],
+    ["patch", "minor", "major"]
+  ]
+  for (const order of releaseOrders) {
+    assert.equal(
+      order.reduce((current, incoming) => mergeReleaseType(current, incoming), undefined),
+      "major"
+    )
+  }
+  assert.equal(mergeReleaseType("patch", "patch"), "patch")
+  assert.deepEqual(
+    sourcePaths(
+      new Set([
+        "packages/public/src/index.ts",
+        "packages/public/src/generated/public.ts",
+        "packages/public/src/vendor/public.ts",
+        "packages/private/src/internal.ts"
+      ])
+    ),
+    ["packages/public/src/index.ts", "packages/private/src/internal.ts"]
+  )
+  assert.equal(isExcludedSourcePath("packages/public/src/generated/public.ts"), true)
+  assert.equal(isExcludedSourcePath("packages/public/src/vendor/public.ts"), true)
 }
 
 const decodeJson = Effect.fn("ChangesetCoverage.decodeJson")(function* (content, location) {
@@ -414,7 +619,9 @@ const changedChangesetReleaseTypes = Effect.fn("ChangesetCoverage.changedChanges
         try: () => parseChangesetReleaseTypes(content, changesetPath),
         catch: (cause) => new ChangesetCoverageError({ cause, reason: `Could not parse ${changesetPath}` })
       })
-      for (const [name, releaseType] of parsed) releases.set(name, releaseType)
+      for (const [name, releaseType] of parsed) {
+        releases.set(name, mergeReleaseType(releases.get(name), releaseType))
+      }
     }
     return releases
   }
@@ -423,21 +630,76 @@ const changedChangesetReleaseTypes = Effect.fn("ChangesetCoverage.changedChanges
 const sourcePaths = (paths) =>
   [...paths].filter(
     (changedPath) =>
-      changedPath.startsWith("packages/") && changedPath.includes("/src/") && /\.(?:ts|tsx)$/u.test(changedPath)
+      changedPath.startsWith("packages/") &&
+      changedPath.includes("/src/") &&
+      /\.(?:ts|tsx)$/u.test(changedPath) &&
+      !isExcludedSourcePath(changedPath)
   )
+
+const manifestEntryPoints = (manifest, directory) => {
+  const paths = []
+  const collect = (value) => {
+    if (typeof value === "string") paths.push(value)
+    else if (value !== null && typeof value === "object") {
+      for (const nested of Object.values(value)) collect(nested)
+    }
+  }
+  for (const field of ["main", "module", "types", "exports"]) collect(manifest[field])
+  return [
+    ...new Set(
+      paths.flatMap((entryPath) => {
+        const normalized = entryPath.replace(/^\.\//u, "")
+        if (!normalized.startsWith("dist/")) return []
+        const stem = normalized.slice("dist/".length).replace(/\.(?:d\.ts|[cm]?js|jsx)$/u, "")
+        return [`${directory}/src/${stem}.ts`, `${directory}/src/${stem}.tsx`]
+      })
+    )
+  ].filter((entryPath) => !isExcludedSourcePath(entryPath))
+}
+
+const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
+  function* (fileSystem, path, directory, relativeDirectory) {
+    const files = []
+    for (const entry of (yield* fileSystem.readDirectory(directory)).toSorted()) {
+      const absolute = path.join(directory, entry)
+      const relative = `${relativeDirectory}/${entry}`
+      const stats = yield* fileSystem.stat(absolute)
+      if (stats.type === "Directory") {
+        files.push(...(yield* collectSourceFiles(fileSystem, path, absolute, relative)))
+      } else if (/\.(?:ts|tsx)$/u.test(entry) && !isExcludedSourcePath(relative)) {
+        files.push(relative)
+      }
+    }
+    return files
+  }
+)
 
 const changedPublicCallableAdditions = Effect.fn("ChangesetCoverage.changedPublicCallableAdditions")(
   function* (git, fileSystem, path, repositoryRoot, mergeBase, paths, records) {
     const additions = []
-    for (const filePath of sourcePaths(paths)) {
-      const record = records.find(({ directory }) => filePath.startsWith(`${directory}/`))
-      if (record === undefined || !record.publishable) continue
-      const absolute = path.join(repositoryRoot, filePath)
-      if (!(yield* fileSystem.exists(absolute))) continue
-      const currentSource = yield* fileSystem.readFileString(absolute)
-      const previousSource = yield* gitOption(git, ["show", `${mergeBase}:${filePath}`])
-      for (const addition of publicCallableAdditions(previousSource, currentSource, filePath)) {
-        additions.push({ ...addition, packageName: record.name })
+    for (const record of records) {
+      if (!record.publishable) continue
+      const sourceRoot = path.join(repositoryRoot, record.directory, "src")
+      const relativeSourceFiles = yield* collectSourceFiles(fileSystem, path, sourceRoot, `${record.directory}/src`)
+      const sources = new Map()
+      for (const relativePath of relativeSourceFiles) {
+        sources.set(relativePath, yield* fileSystem.readFileString(path.join(repositoryRoot, relativePath)))
+      }
+      const reachable = reachableCallableNames(sources, manifestEntryPoints(record.manifest, record.directory))
+      for (const filePath of sourcePaths(paths).filter((changedPath) =>
+        changedPath.startsWith(`${record.directory}/`)
+      )) {
+        const currentSource = sources.get(filePath)
+        if (currentSource === undefined) continue
+        const previousSource = yield* gitOption(git, ["show", `${mergeBase}:${filePath}`])
+        for (const addition of publicCallableAdditions(
+          previousSource,
+          currentSource,
+          filePath,
+          reachable.get(filePath)
+        )) {
+          additions.push({ ...addition, packageName: record.name })
+        }
       }
     }
     return additions
@@ -468,6 +730,7 @@ const loadPackageRecords = Effect.fn("ChangesetCoverage.loadPackageRecords")(
       records.push({
         changedReleaseManifest: paths.has(manifestRelativePath) && manifestsDifferForRelease(current, previous),
         directory: `packages/${entry}`,
+        manifest: current,
         name: current.name ?? `packages/${entry}`,
         publishable: current.private !== true
       })
