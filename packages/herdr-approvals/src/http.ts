@@ -91,6 +91,7 @@ import {
 import { DashboardView } from "./dashboard-view.js"
 import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
+import { dashboardDocumentTitle } from "./internal/html.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
 import {
   ApprovalNotificationCandidate,
@@ -861,7 +862,7 @@ const dashboardPage = (snapshot: DashboardSnapshot): string => {
 <meta name="theme-color" content="#111418">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Approvals">
-<title>Host activity · ${snapshot.host}</title>
+<title>${dashboardDocumentTitle(snapshot.host)}</title>
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" href="/assets/approval-icon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="/assets/index.css">

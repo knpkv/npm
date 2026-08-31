@@ -50,6 +50,7 @@ import {
   recordWorkCheckpointRequest,
   startHttpServer
 } from "../src/http.js"
+import { dashboardDocumentTitle } from "../src/internal/html.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept, terminalBufferLimitBytes } from "../src/internal/websocket.js"
 import { commandOutputMaxBytes } from "../src/operations.js"
 
@@ -232,6 +233,16 @@ const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string
 })
 
 describe("host HTTP authority", () => {
+  it("escapes configured hosts in the dashboard document title", () => {
+    const host = "SER8</title><script data-xss=\"true\">alert(1)</script>"
+    const title = dashboardDocumentTitle(host)
+    expect(title).not.toContain("<script")
+    expect(title).not.toContain(host)
+    expect(title).toBe(
+      "Host activity · SER8&lt;/title&gt;&lt;script data-xss=&quot;true&quot;&gt;alert(1)&lt;/script&gt;"
+    )
+  })
+
   it.effect("refuses an oversized dashboard when no history remains to page", () =>
     Effect.gen(function*() {
       const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)({
