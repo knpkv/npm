@@ -2,6 +2,7 @@ import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import {
   PullRequestConversation,
   PullRequestConversationAmbiguous,
+  type PullRequestConversationLocator,
   PullRequestConversationLookupFailed,
   PullRequestConversationNotFound,
   PullRequestConversationRedirectFailed,
@@ -73,62 +74,70 @@ export const ControlCenterRelayDock = ({ children }: { readonly children: ReactN
   const host = useMemo<RelayProductDockHost>(
     () => ({
       context: [{ id: "product", label: "Product", value: "Control Center" }],
-      locatePullRequestConversation: Effect.fn("ControlCenterRelayDock.locatePullRequestConversation")(
-        function* (locator) {
-          if (browserSession.state._tag !== "authenticated") {
-            return yield* new RelayAuthenticationRequired({
-              operation: "locate-pull-request-conversation",
-              product: "control-center"
-            })
-          }
-          const session = browserSession.state.session
-          if (session.permission !== "workspace-owner" && session.permission !== "workspace-approver") {
-            return yield* new RelayAuthorizationDenied({
-              operation: "locate-pull-request-conversation",
-              product: "control-center"
-            })
-          }
-          const providerLocator = yield* Schema.decodeUnknownEffect(CodeCommitDomain.CodeCommitPullRequestLocator)({
-            pullRequestId: locator.pullRequestId,
-            region: locator.region,
-            repositoryName: locator.repositoryName
-          }).pipe(Effect.mapError(() => new PullRequestConversationLookupFailed({ product: "control-center" })))
-          const openPullRequest = yield* Effect.tryPromise({
-            try: () => import("./openPullRequest/openPullRequest.js"),
-            catch: () => new PullRequestConversationLookupFailed({ product: "control-center" })
+      locatePullRequestConversation: Effect.fn("ControlCenterRelayDock.locatePullRequestConversation")(function* (
+        locator: PullRequestConversationLocator
+      ) {
+        if (browserSession.state._tag !== "authenticated") {
+          return yield* new RelayAuthenticationRequired({
+            operation: "locate-pull-request-conversation",
+            product: "control-center"
           })
-          const resolution = yield* Effect.tryPromise({
-            try: (signal) => openPullRequest.browserOpenPullRequestTransport.resolve(providerLocator, signal),
-            catch: () => new PullRequestConversationLookupFailed({ product: "control-center" })
+        }
+        const session = browserSession.state.session
+        if (session.permission !== "workspace-owner" && session.permission !== "workspace-approver") {
+          return yield* new RelayAuthorizationDenied({
+            operation: "locate-pull-request-conversation",
+            product: "control-center"
           })
-          const candidate = selectControlCenterRelayCandidate(resolution, locator.accountId)
-          if (candidate !== undefined) {
-            const href = workspaceEntityPath(session.workspaceId, candidate.entityId)
-            return yield* Effect.tryPromise({
-              try: async () => {
-                await navigate(href)
-              },
-              catch: () => new PullRequestConversationRedirectFailed({ href, product: "control-center" })
-            })
-          }
-          if (resolution._tag === "ambiguous") {
-            return yield* new PullRequestConversationAmbiguous({
-              matches: resolution.candidates.length,
-              product: "control-center",
-              pullRequestId: locator.pullRequestId,
-              repositoryName: locator.repositoryName
-            })
-          }
-          if (resolution._tag === "account-identity-unavailable") {
-            return yield* new PullRequestConversationLookupFailed({ product: "control-center" })
-          }
-          return yield* new PullRequestConversationNotFound({
+        }
+        const providerLocator = yield* Schema.decodeUnknownEffect(CodeCommitDomain.CodeCommitPullRequestLocator)({
+          pullRequestId: locator.pullRequestId,
+          region: locator.region,
+          repositoryName: locator.repositoryName
+        }).pipe(
+          Effect.mapError(
+            (): PullRequestConversationLookupFailed =>
+              new PullRequestConversationLookupFailed({ product: "control-center" })
+          )
+        )
+        const openPullRequest = yield* Effect.tryPromise({
+          try: () => import("./openPullRequest/openPullRequest.js"),
+          catch: (): PullRequestConversationLookupFailed =>
+            new PullRequestConversationLookupFailed({ product: "control-center" })
+        })
+        const resolution = yield* Effect.tryPromise({
+          try: (signal) => openPullRequest.browserOpenPullRequestTransport.resolve(providerLocator, signal),
+          catch: (): PullRequestConversationLookupFailed =>
+            new PullRequestConversationLookupFailed({ product: "control-center" })
+        })
+        const candidate = selectControlCenterRelayCandidate(resolution, locator.accountId)
+        if (candidate !== undefined) {
+          const href = workspaceEntityPath(session.workspaceId, candidate.entityId)
+          return yield* Effect.tryPromise({
+            try: async () => {
+              await navigate(href)
+            },
+            catch: (): PullRequestConversationRedirectFailed =>
+              new PullRequestConversationRedirectFailed({ href, product: "control-center" })
+          })
+        }
+        if (resolution._tag === "ambiguous") {
+          return yield* new PullRequestConversationAmbiguous({
+            matches: resolution.candidates.length,
             product: "control-center",
             pullRequestId: locator.pullRequestId,
             repositoryName: locator.repositoryName
           })
         }
-      ),
+        if (resolution._tag === "account-identity-unavailable") {
+          return yield* new PullRequestConversationLookupFailed({ product: "control-center" })
+        }
+        return yield* new PullRequestConversationNotFound({
+          product: "control-center",
+          pullRequestId: locator.pullRequestId,
+          repositoryName: locator.repositoryName
+        })
+      }),
       product: "control-center",
       selection: controlCenterRelayHostSelection
     }),
