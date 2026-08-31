@@ -7,6 +7,10 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { inspectPackageContract } from "../../scripts/package-contract.js"
 
+// This test effect is the application boundary for its Node services.
+// @effect-diagnostics-next-line strictEffectProvide:off
+const provideNodeServices = Effect.provide(NodeServices.layer)
+
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
@@ -27,6 +31,7 @@ const validManifest = {
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/review": "workspace:^",
+    "@knpkv/relay-product": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "@distilled.cloud/aws": "1.0.0-rc.4",
     effect: "4.0.0-rc.109",
@@ -78,11 +83,7 @@ describe("package contract", () => {
       const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(Schema.Unknown))(source)
       if (Result.isFailure(decoded)) return yield* Effect.die("package.json version could not be decoded")
       expect(inspectPackageContract(decoded.success)).toEqual([])
-    }).pipe(
-      // Each test effect is an application boundary for its scoped Node services.
-      // @effect-diagnostics-next-line strictEffectProvide:off
-      Effect.provide(NodeServices.layer)
-    ))
+    }).pipe(provideNodeServices))
 
   it("accepts the changeset-produced 0.1.0 version", () => {
     expect(inspectPackageContract({ ...validManifest, version: "0.1.0" })).toEqual([])
