@@ -215,9 +215,27 @@ describe("Work control app", () => {
       ...workGoalInput,
       requests: [workGoalInput.requests[0], { ...workGoalInput.requests[0], summary: "same identity, changed summary" }]
     })
+    const duplicateBlocker = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      blockers: [
+        { since: 2_000, summary: "same blocker" },
+        { since: 2_000, summary: "same blocker" }
+      ],
+      state: "blocked"
+    })
+    const distinctBlockers = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      blockers: [
+        { since: 2_000, summary: "first blocker" },
+        { since: 2_500, summary: "second blocker" }
+      ],
+      state: "blocked"
+    })
 
     expect(duplicateActivity._tag).toBe("Failure")
     expect(duplicateRequest._tag).toBe("Failure")
+    expect(duplicateBlocker._tag).toBe("Failure")
+    expect(distinctBlockers._tag).toBe("Success")
   })
 
   it("renders activity, requests, review, shipment, and exact links beside the hierarchy", () => {

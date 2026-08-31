@@ -146,7 +146,17 @@ export const WorkGoal = Schema.Struct({
         )
       )
   ),
-  blockers: Schema.optionalKey(Schema.Array(WorkBlocker).check(Schema.isMaxLength(32))),
+  blockers: Schema.optionalKey(
+    Schema.Array(WorkBlocker)
+      .check(Schema.isMaxLength(32))
+      .check(
+        Schema.makeFilter(
+          (blockers) =>
+            new Set(blockers.map(({ since, summary }) => `${since}\u0000${summary}`)).size === blockers.length,
+          { expected: "unique blocker records" }
+        )
+      )
+  ),
   requests: Schema.optionalKey(
     Schema.Array(WorkRequest)
       .check(Schema.isMaxLength(32))
