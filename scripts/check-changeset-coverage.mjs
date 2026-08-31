@@ -897,6 +897,11 @@ const publicCallableChanges = (
   return [...uniqueChanges.values()]
 }
 
+const toPublicCallableChangesError = (cause) =>
+  cause instanceof ChangesetCoverageError
+    ? cause
+    : new ChangesetCoverageError({ cause, reason: "Public callable changes analysis failed" })
+
 const publicCallableChangesEffect = (
   previousSources,
   currentSources,
@@ -905,10 +910,7 @@ const publicCallableChangesEffect = (
 ) =>
   Effect.try({
     try: () => publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints),
-    catch: (cause) =>
-      cause instanceof ChangesetCoverageError
-        ? cause
-        : new ChangesetCoverageError({ cause, reason: "Public callable changes analysis failed" })
+    catch: toPublicCallableChangesError
   })
 
 const validatePublicCallableReleaseTypes = ({ changes, releaseTypes }) =>
@@ -2563,12 +2565,10 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         record.directory,
         previousRelativeSourceFiles
       )
-      const callableChanges = yield* publicCallableChangesEffect(
-        previousSources,
-        currentSources,
-        previousEntryPoints,
-        currentEntryPoints
-      )
+      const callableChanges = yield* Effect.try({
+        try: () => publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints),
+        catch: toPublicCallableChangesError
+      })
       for (const change of callableChanges) {
         changes.push({ ...change, packageName: record.name })
       }
