@@ -20,6 +20,7 @@ import {
 } from "../src/directory.js"
 import { buildConnectForest } from "../src/forest.js"
 import { connectAgentId } from "../src/id.js"
+import { releaseTerminalControl } from "../src/internal/terminal-release.js"
 import { nextConnectAgentIndex } from "../src/keyboard.js"
 import {
   ConnectAgent,
@@ -39,12 +40,7 @@ import {
 } from "../src/relationship-store.js"
 import { resolveConnectPreference, resolveConnectTarget } from "../src/target.js"
 import { acquireTerminalSetup } from "../src/terminal-setup.js"
-import {
-  boundedTerminalLines,
-  makeHerdrTerminalConnector,
-  releaseTerminalControl,
-  terminalEventMaxLineBytes
-} from "../src/terminal.js"
+import { boundedTerminalLines, makeHerdrTerminalConnector, terminalEventMaxLineBytes } from "../src/terminal.js"
 import { calendarConnectAgents, connectLineageRows } from "../src/view.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its test layer.

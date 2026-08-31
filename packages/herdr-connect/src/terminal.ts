@@ -4,6 +4,7 @@ import { Crypto, Effect, Predicate, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { TerminalAgentNotFoundError, TerminalProtocolError, TerminalTransportError } from "./errors.js"
 import { connectAgentId } from "./id.js"
+import { releaseTerminalControl } from "./internal/terminal-release.js"
 import { HerdrTerminalEvent, type TerminalClientCommand, type TerminalSelection } from "./model.js"
 
 export type TerminalError =
@@ -108,35 +109,6 @@ export const boundedTerminalLines = <E, R>(
 
 const transportError = (operation: string) => (cause: unknown) =>
   new TerminalTransportError({ cause, detail: String(cause), operation })
-
-/** @internal Owns the bounded terminal-control shutdown sequence. */
-export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(function*<
-  ReleaseError,
-  ExitError,
-  KillError,
-  ReleaseRequirements,
-  ExitRequirements,
-  KillRequirements
->(
-  release: Effect.Effect<void, ReleaseError, ReleaseRequirements>,
-  exitCode: Effect.Effect<unknown, ExitError, ExitRequirements>,
-  kill: Effect.Effect<unknown, KillError, KillRequirements>
-) {
-  yield* release.pipe(
-    Effect.timeoutOrElse({
-      duration: "1 second",
-      orElse: () => kill
-    }),
-    Effect.ignore
-  )
-  yield* exitCode.pipe(
-    Effect.timeoutOrElse({
-      duration: "1 second",
-      orElse: () => kill
-    }),
-    Effect.ignore
-  )
-})
 
 export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(function*(
   config: HostConfiguration,
