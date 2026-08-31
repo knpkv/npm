@@ -500,6 +500,56 @@ describe("Relay review session storage", () => {
     }
   })
 
+  it("retains an identified new turn from a disjoint stale window", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (index: number): RelayReviewConversationTurn => ({
+      id: `turn-${index}`,
+      findingId: "F1",
+      role: "user",
+      message: `Turn ${index}`
+    })
+    const window = (first: number, last: number): ReadonlyArray<RelayReviewConversationTurn> =>
+      Array.from({ length: last - first + 1 }, (_, offset) => turn(first + offset))
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 80),
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 80),
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      appendedTurnId: "turn-81",
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [...window(2, 40), turn(81)],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual([
+        ...Array.from({ length: 39 }, (_, offset) => `turn-${offset + 42}`),
+        "turn-81"
+      ])
+    }
+  })
+
   it("serializes cross-tab writes through the session lock", async () => {
     const key = relayReviewSessionStorageKey(resource)
     let tail = Promise.resolve()

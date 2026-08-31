@@ -39,6 +39,8 @@ const StoredRelayReviewSession = Schema.Struct({
 export type StoredRelayReviewSession = typeof StoredRelayReviewSession.Type
 
 export interface RelayReviewSessionWrite {
+  /** Identifies a turn appended after this tab's observed durable snapshot. */
+  readonly appendedTurnId?: string
   readonly dispositions: FindingDispositions
   readonly expectedIdentity: string
   /** Version observed when this tab read the durable session. */
@@ -167,7 +169,12 @@ const compatibleStaleIncomingTurns = (
     !hasOverlap &&
     incoming.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS &&
     current.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS
-  ) return []
+  ) {
+    const appendedTurn = incoming.appendedTurnId === undefined
+      ? undefined
+      : incoming.turns.find((turn) => turnIdentity(turn) === incoming.appendedTurnId)
+    return appendedTurn === undefined ? [] : appendReviewTurn(current.turns, appendedTurn)
+  }
   return isOlderWindow ? compatible.filter(({ findingId }) => findingId === "PR") : compatible
 }
 

@@ -17,6 +17,7 @@ import {
   matchesCodeCommitPullRequestRoute
 } from "../src/client/codecommit-route.js"
 import {
+  codeCommitRelayExecutionProfile,
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
   makeCodeCommitRelayConversation,
@@ -104,6 +105,12 @@ describe("CodeCommit Relay dock adapter", () => {
 
     expect(selected.modelId).toBe("gpt-5.6-luna")
     expect(selected.models).toEqual([{ id: "gpt-5.6-luna", label: "gpt-5.6-luna" }])
+  })
+
+  it("keeps dock continuation on the completed profile after the main selector changes", () => {
+    const selected = { id: "security", model: "configured-default", name: "Security review" }
+
+    expect(codeCommitRelayExecutionProfile(explainReview, selected)).toEqual(explainReview.profile)
   })
 
   it("uses repository account identity without changing the credential route alias", () => {

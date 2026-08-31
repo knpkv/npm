@@ -37,7 +37,11 @@ import {
 } from "../../server/Api.js"
 import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
-import { CodeCommitRelayThread, type CodeCommitRelayContinuationOutcome } from "../codecommitRelayDock.js"
+import {
+  codeCommitRelayExecutionProfile,
+  CodeCommitRelayThread,
+  type CodeCommitRelayContinuationOutcome
+} from "../codecommitRelayDock.js"
 import { useComments } from "../hooks/useComments.js"
 import {
   applyFindingDecision,
@@ -55,6 +59,7 @@ import {
   readRelayReviewSession,
   type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
+  type RelayReviewSessionWrite,
   relayReviewSessionStorageKey,
   writeRelayReviewSession
 } from "../review-session-storage.js"
@@ -693,6 +698,8 @@ const ReadyReviewWorkspace = ({
   const reviewSessionVersionRef = useRef(0)
   const skipSessionWriteRef = useRef<string | null>(null)
   const hydratedSessionRef = useRef<HydratedSessionMarker | null>(null)
+  const hydratedProfileKeyRef = useRef<string | null>(null)
+  const appendedTurnIdRef = useRef<string | undefined>(undefined)
   const [completedReview, setCompletedReview] = useState<RelayReviewCompletion | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
@@ -731,6 +738,10 @@ const ReadyReviewWorkspace = ({
   const inventory: RlyDiffInventory = { files, state: "ready" }
 
   useEffect(() => {
+    if (reviewSessionKey !== null && hydratedProfileKeyRef.current === reviewSessionKey) {
+      hydratedProfileKeyRef.current = null
+      return
+    }
     if (!AsyncResult.isSuccess(config) || selectedProfileId !== null) return
     const profile =
       config.value.review.profiles.find(({ id }) => id === config.value.review.defaultProfileId) ??
@@ -762,6 +773,7 @@ const ReadyReviewWorkspace = ({
 
   useEffect(() => {
     if (reviewResource === null || reviewSessionKey === null) {
+      hydratedProfileKeyRef.current = null
       skipSessionWriteRef.current = null
       hydratedSessionRef.current = null
       reviewSessionVersionRef.current = 0
@@ -771,6 +783,7 @@ const ReadyReviewWorkspace = ({
       })
       return
     }
+    hydratedProfileKeyRef.current = reviewSessionKey
     const stored = readRelayReviewSession(window.localStorage, reviewSessionKey, reviewResource)
     if (Result.isFailure(stored)) {
       skipSessionWriteRef.current = null
@@ -857,22 +870,21 @@ const ReadyReviewWorkspace = ({
       return
     }
     let active = true
-    void writeRelayReviewSession(
-      window.localStorage,
-      reviewSessionKey,
-      {
-        expectedIdentity: completedReview.expectedIdentity,
-        expectedVersion: reviewSessionVersionRef.current,
-        identity: completedReview.identity,
-        resource: reviewResource,
-        review: completedReview.value,
-        skillIds: completedReview.skillIds,
-        turns,
-        dispositions
-      },
-      lock
-    ).then((written) => {
+    const appendedTurnId = appendedTurnIdRef.current
+    const session = {
+      expectedIdentity: completedReview.expectedIdentity,
+      expectedVersion: reviewSessionVersionRef.current,
+      identity: completedReview.identity,
+      resource: reviewResource,
+      review: completedReview.value,
+      skillIds: completedReview.skillIds,
+      turns,
+      dispositions
+    } satisfies RelayReviewSessionWrite
+    const sessionToPersist = appendedTurnId === undefined ? session : { ...session, appendedTurnId }
+    void writeRelayReviewSession(window.localStorage, reviewSessionKey, sessionToPersist, lock).then((written) => {
       if (!active) return
+      if (appendedTurnIdRef.current === appendedTurnId) appendedTurnIdRef.current = undefined
       if (Result.isFailure(written)) {
         setReviewFailure({
           description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
@@ -1076,6 +1088,7 @@ const ReadyReviewWorkspace = ({
       if (!outcome.completed) return { _tag: "failed" }
       const retainedTurns = completedReviewRef.current?.turns ?? currentTurns
       const nextTurns = appendReviewTurn(retainedTurns, userTurn)
+      appendedTurnIdRef.current = userTurn.id
       setTurns(
         outcome.reply === undefined
           ? nextTurns
@@ -1168,7 +1181,7 @@ const ReadyReviewWorkspace = ({
         continueReview={continueReview}
         diff={diff}
         isReviewing={isReviewing}
-        profile={selectedProfile}
+        profile={codeCommitRelayExecutionProfile(review, selectedProfile)}
         pullRequest={pullRequest}
         review={review}
         reviewIsStale={reviewIsStale}

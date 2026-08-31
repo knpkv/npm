@@ -157,6 +157,11 @@ export const makeCodeCommitRelaySelection = (profile: ReviewProfileSelection | u
     profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
   })
 
+export const codeCommitRelayExecutionProfile = (
+  review: PullRequestRelayReviewResponse | null,
+  selectedProfile: ReviewProfileSelection | undefined
+): ReviewProfileSelection | undefined => review?.profile ?? selectedProfile
+
 interface CodeCommitRelayThreadProps {
   readonly accountId: string
   readonly continueReview: (findingId: string, message: string) => Promise<CodeCommitRelayContinuationOutcome>
