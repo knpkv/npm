@@ -27,7 +27,9 @@ const resolveStaleStatus = (
   prRepo: PullRequestRepoContract,
   detail: PullRequestDetail,
   awsAccountId: string,
-  id: string
+  id: string,
+  repositoryName: string,
+  accountRegion: string
 ) =>
   detail.status === "OPEN"
     ? Effect.void
@@ -37,7 +39,8 @@ const resolveStaleStatus = (
       detail.status,
       detail.lastActivityDate.toISOString(),
       detail.mergedBy,
-      detail.approvedBy
+      detail.approvedBy,
+      { repositoryName, accountRegion }
     )
 
 const accountRegionKey = (profile: string, region: string): string => `${profile}\0${region}`
@@ -68,7 +71,7 @@ export const fetchAndUpsertPRs = (params: {
     const successfullyFetchedScopes = yield* Ref.make(
       new Set(
         enabledAccounts.flatMap((account) =>
-          accountIdMap.get(account.profile)
+          accountIdMap.has(account.profile)
             ? (account.regions ?? []).map((region) => accountRegionKey(account.profile, region))
             : []
         )
@@ -133,9 +136,13 @@ export const fetchAndUpsertPRs = (params: {
         Effect.gen(function*() {
           // Diff subscribed PRs against cache
           const subscribed = yield* Ref.get(subscribedRef)
-          if (awsAccountId && subscribed.has(`${awsAccountId}:${pr.id}`)) {
-            const cached = yield* prRepo.findByAccountAndId(awsAccountId, pr.id).pipe(
-              Effect.map((row) => Option.some(row)),
+          if (awsAccountId !== "" && subscribed.has(`${awsAccountId}:${pr.id}`)) {
+            const cached = yield* prRepo.findByCoordinates(
+              awsAccountId,
+              pr.id,
+              pr.repositoryName,
+              pr.account.region
+            ).pipe(
               Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
             )
             if (Option.isSome(cached)) {
@@ -158,13 +165,14 @@ export const fetchAndUpsertPRs = (params: {
           }
 
           // Upsert to cache + auto-subscribe current user's PRs
-          if (awsAccountId) {
+          if (awsAccountId !== "") {
             yield* prRepo.upsert(prToUpsertInput(pr, awsAccountId)).pipe(
               Effect.tapError((e) => Effect.logWarning("cache upsert error", e)),
               Effect.catch(() => withholdScopeSuccess(pr.account.profile, pr.account.region))
             )
-            const isAuthor = currentUser && pr.author === currentUser
-            const isApprover = currentUser && pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
+            const isAuthor = currentUser !== undefined && currentUser !== "" && pr.author === currentUser
+            const isApprover = currentUser !== undefined && currentUser !== "" &&
+              pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
             if (isAuthor || isApprover) {
               yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
               yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
@@ -198,11 +206,23 @@ export const fetchAndUpsertPRs = (params: {
                 pullRequestId: pr.id
               })
               .pipe(
-                Effect.flatMap((detail) => resolveStaleStatus(prRepo, detail, pr.awsAccountId, pr.id)),
+                Effect.flatMap((detail) =>
+                  resolveStaleStatus(
+                    prRepo,
+                    detail,
+                    pr.awsAccountId,
+                    pr.id,
+                    pr.repositoryName,
+                    pr.accountRegion
+                  )
+                ),
                 Effect.catch(() =>
                   withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(
                     Effect.andThen(
-                      prRepo.deleteOne(pr.awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
+                      prRepo.deleteOne(pr.awsAccountId, pr.id, {
+                        repositoryName: pr.repositoryName,
+                        accountRegion: pr.accountRegion
+                      }).pipe(Effect.catch(() => Effect.void))
                     )
                   )
                 )
@@ -220,7 +240,8 @@ export const fetchAndUpsertPRs = (params: {
     return enabledAccounts.flatMap((account) =>
       (account.regions ?? []).flatMap((region) => {
         const awsAccountId = accountIdMap.get(account.profile)
-        return awsAccountId && reconciledScopes.has(accountRegionKey(account.profile, region))
+        return awsAccountId !== undefined && awsAccountId !== "" &&
+            reconciledScopes.has(accountRegionKey(account.profile, region))
           ? [{ profile: account.profile, region, awsAccountId }]
           : []
       })

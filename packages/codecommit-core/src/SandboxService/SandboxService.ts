@@ -186,6 +186,10 @@ const makeSandboxService = Effect.gen(function*() {
           params.region
         )
         if (Option.isSome(existing)) {
+          if (existing.value.region === undefined || existing.value.region === null) {
+            yield* repo.updateRegion(SandboxId.make(existing.value.id), params.region)
+            return { ...existing.value, region: params.region }
+          }
           return existing.value
         }
 

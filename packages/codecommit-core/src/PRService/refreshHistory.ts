@@ -36,7 +36,7 @@ export const syncWeek = Effect.fn("syncWeek")(
   function*(state: PRState, week: string) {
     yield* Effect.gen(function*() {
       const range = Option.getOrUndefined(parseISOWeek(week))
-      if (!range) {
+      if (range === undefined) {
         yield* Effect.logWarning(`syncWeek: invalid week format "${week}"`)
         return
       }
@@ -45,10 +45,8 @@ export const syncWeek = Effect.fn("syncWeek")(
       const prRepo = yield* PullRequestRepo
       const configService = yield* ConfigService
 
-      const config = yield* configService.load.pipe(
-        Effect.catchIf(() => true, () => Effect.succeed(undefined))
-      )
-      if (!config) {
+      const config = yield* configService.load.pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
+      if (config === undefined) {
         yield* Effect.logWarning("syncWeek: no config found")
         return
       }
@@ -141,7 +139,8 @@ export const syncWeek = Effect.fn("syncWeek")(
                       detail.status,
                       detail.lastActivityDate.toISOString(),
                       detail.mergedBy,
-                      detail.approvedBy
+                      detail.approvedBy,
+                      { repositoryName: pr.repositoryName, accountRegion: pr.accountRegion }
                     )
                     .pipe(
                       Effect.tap(() =>

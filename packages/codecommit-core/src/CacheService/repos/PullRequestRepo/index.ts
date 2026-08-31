@@ -27,6 +27,7 @@ const makePullRequestRepo = Effect.gen(function*() {
     findAll: Q.findAll(sql),
     findMissingDiffStats: Q.findMissingDiffStats(sql),
     findByAccountAndId: Q.findByAccountAndId(sql),
+    findByCoordinates: Q.findByCoordinates(sql),
     search: Q.search(sql),
     findStaleOpen: Q.findStaleOpen(sql),
     findOpenInRange: Q.findOpenInRange(sql),

@@ -48,7 +48,9 @@ describe("PR detail coordinates", () => {
 
   it("gives review APIs a validated account-coordinate token", () => {
     const token = reviewApiAccountId(pullRequest)
-    expect(token.startsWith("ccpr:")).toBe(true)
+    expect(token.startsWith("cc1_")).toBe(true)
+    expect(token).toMatch(/^[A-Za-z0-9_-]+$/)
+    expect(token.length).toBeLessThan(100)
     expect(token).not.toBe("111122223333")
   })
 })

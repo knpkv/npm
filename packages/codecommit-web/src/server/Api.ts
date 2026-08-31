@@ -378,6 +378,10 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: Schema.Struct({
+        repositoryName: Schema.optional(Schema.String),
+        region: Schema.optional(AwsRegion)
+      }),
       success: PullRequestRefreshResponse,
       error: ApiError
     })

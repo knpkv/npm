@@ -16,6 +16,7 @@ import { CachedPullRequest as CachedPullRequestSchema, cacheError, type SearchRe
 const StaleOpenRow = Schema.Struct({
   id: Schema.String,
   awsAccountId: Schema.String,
+  repositoryName: Schema.String,
   accountProfile: AwsProfileName,
   accountRegion: AwsRegion
 })
@@ -49,6 +50,26 @@ export const findByAccountAndId = (sql: SqlClient.SqlClient) => {
           WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.id}`
   })
   return (awsAccountId: string, id: string) => run({ awsAccountId, id }).pipe(cacheError("findByAccountAndId"))
+}
+
+export const findByCoordinates = (sql: SqlClient.SqlClient) => {
+  const run = SqlSchema.findOneOption({
+    Result: CachedPullRequestSchema,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      id: Schema.String,
+      repositoryName: Schema.String,
+      accountRegion: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT * FROM pull_requests
+          WHERE aws_account_id = ${req.awsAccountId}
+            AND id = ${req.id}
+            AND repository_name = ${req.repositoryName}
+            AND account_region = ${req.accountRegion}`
+  })
+  return (awsAccountId: string, id: string, repositoryName: string, accountRegion: string) =>
+    run({ awsAccountId, id, repositoryName, accountRegion }).pipe(cacheError("findByCoordinates"))
 }
 
 export const search = (sql: SqlClient.SqlClient) => {
@@ -103,7 +124,7 @@ export const findStaleOpen = (sql: SqlClient.SqlClient) => {
     Result: StaleOpenRow,
     Request: Schema.Struct({ olderThan: Schema.String }),
     execute: (req) =>
-      sql`SELECT id, aws_account_id, account_profile, account_region
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region
           FROM pull_requests
           WHERE status = 'OPEN' AND fetched_at < ${req.olderThan}`
   })
@@ -115,7 +136,7 @@ export const findOpenInRange = (sql: SqlClient.SqlClient) => {
     Result: StaleOpenRow,
     Request: Schema.Struct({ weekStart: Schema.String, weekEnd: Schema.String }),
     execute: (req) =>
-      sql`SELECT id, aws_account_id, account_profile, account_region
+      sql`SELECT id, aws_account_id, repository_name, account_profile, account_region
           FROM pull_requests
           WHERE status = 'OPEN'
             AND (

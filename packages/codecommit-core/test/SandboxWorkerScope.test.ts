@@ -1,3 +1,5 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
+
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
@@ -50,6 +52,7 @@ const legacyRow: SandboxRow = {
 interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
+  readonly existingByPr?: SandboxRow
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
   readonly untrackedContainers?: ReadonlyArray<{
@@ -67,11 +70,15 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const insertCalls = yield* Ref.make(0)
   const containerDiscoveryCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
+  const regionUpdates = yield* Ref.make<Array<{ readonly id: string; readonly region: string }>>([])
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
-    findByPr: () => Effect.succeed(Option.none<SandboxRow>()),
+    findByPr: () =>
+      Effect.succeed(
+        options?.existingByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.existingByPr)
+      ),
     findActive: () =>
       Ref.get(rowRef).pipe(
         Effect.map((row) =>
@@ -120,7 +127,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     updateDetail: (_id, detail) =>
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }),
     appendLog: (_id, line) =>
-      Ref.update(rowRef, (row) => row === undefined ? row : { ...row, logs: `${row.logs ?? ""}${line}\n` })
+      Ref.update(rowRef, (row) => row === undefined ? row : { ...row, logs: `${row.logs ?? ""}${line}\n` }),
+    updateRegion: (id, region) => Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }])
   })
 
   const dependencies = Layer.mergeAll(
@@ -177,6 +185,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
+    regionUpdates,
     stopContainerCalls,
     workerCause
   }
@@ -222,6 +231,26 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("binds a legacy regionless sandbox to the requested region instead of duplicating it", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never, { existingByPr: legacyRow })
+
+      const reused = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(reused.id).toBe(legacyRow.id)
+      expect(reused.region).toBe(createParams.region)
+      expect(yield* Ref.get(fixture.regionUpdates)).toEqual([{
+        id: legacyRow.id,
+        region: createParams.region
+      }])
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
   it.effect("records a production sandbox worker defect as an error", () =>
     Effect.gen(function*() {
       const defect = new Error("sandbox worker defect")
@@ -258,7 +287,7 @@ describe("SandboxWorkerScope", () => {
           const cause = yield* Deferred.await(fixture.workerCause)
           const [reason] = cause.reasons
           expect(reason && Cause.isDieReason(reason)).toBe(true)
-          if (reason && Cause.isDieReason(reason)) {
+          if (reason !== undefined && Cause.isDieReason(reason)) {
             expect(reason.defect).toBe(defect)
           }
         }).pipe(Effect.provide(fixture.layer))
@@ -284,7 +313,7 @@ describe("SandboxWorkerScope", () => {
           const cause = yield* Deferred.await(fixture.workerCause)
           const [reason] = cause.reasons
           expect(reason && Cause.isDieReason(reason)).toBe(true)
-          if (reason && Cause.isDieReason(reason)) {
+          if (reason !== undefined && Cause.isDieReason(reason)) {
             expect(reason.defect).toBe(defect)
           }
         }).pipe(Effect.provide(fixture.layer))

@@ -6,6 +6,7 @@ import { encodePullRequestCoordinates } from "../src/pull-request-coordinates.js
 import {
   cachedPullRequest,
   completeSinglePullRequestRefresh,
+  refreshRouteCoordinates,
   resolveRelayReviewExecution,
   resolveRelayReviewProfile,
   selectedPullRequest
@@ -211,5 +212,29 @@ describe("PR handler selection", () => {
 
       const invalidToken = yield* cachedPullRequest(cache, "ccpr:not-json", regionalPullRequest.id).pipe(Effect.flip)
       expect(invalidToken.message).toContain("Invalid pull-request")
+    }))
+
+  it.effect("carries exact coordinates through a refresh route", () =>
+    Effect.gen(function*() {
+      const token = encodePullRequestCoordinates({
+        accountId: "111122223333",
+        pullRequestId: pullRequest.id,
+        repositoryName: pullRequest.repositoryName,
+        region: pullRequest.account.region
+      })
+      const fromToken = yield* refreshRouteCoordinates(token, pullRequest.id, {})
+      expect(fromToken).toEqual({
+        accountId: "111122223333",
+        coordinates: {
+          repositoryName: "payments",
+          region: "eu-west-1"
+        }
+      })
+
+      const fromQuery = yield* refreshRouteCoordinates("111122223333", pullRequest.id, {
+        repositoryName: "payments",
+        region: pullRequest.account.region
+      })
+      expect(fromQuery.coordinates).toEqual({ repositoryName: "payments", region: "eu-west-1" })
     }))
 })

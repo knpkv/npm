@@ -32,9 +32,9 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       },
       pullRequestId: prId,
       repositoryName: row.repositoryName
-    }).pipe(Effect.catch(() => Effect.succeed<Array<PRCommentLocation> | undefined>(undefined)))
+    }).pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
 
-    if (locs && awsAccountId) {
+    if (locs !== undefined && awsAccountId !== "") {
       // Diff comments for subscribed PRs
       if (subscribedSnapshot.has(`${awsAccountId}:${prId}`)) {
         const cachedComments = yield* commentRepo.find(awsAccountId, prId).pipe(
@@ -54,8 +54,8 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     }
 
     // Fallback: use cached comment count from DB
-    let commentCount = locs ? countAllComments(locs) : 0
-    if (!locs && awsAccountId) {
+    let commentCount = locs !== undefined ? countAllComments(locs) : 0
+    if (locs === undefined && awsAccountId !== "") {
       const cached = yield* commentRepo.find(awsAccountId, prId).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
@@ -64,7 +64,15 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       }
     }
 
-    return awsAccountId ? Option.some({ awsAccountId, commentCount, id: prId }) : Option.none()
+    return awsAccountId !== ""
+      ? Option.some({
+        awsAccountId,
+        commentCount,
+        id: prId,
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      })
+      : Option.none()
   })
 
 export const enrichComments = (params: {
@@ -105,8 +113,8 @@ export const enrichComments = (params: {
       (r) =>
         Option.match(r, {
           onNone: () => Effect.void,
-          onSome: ({ awsAccountId, commentCount, id }) =>
-            prRepo.updateCommentCount(awsAccountId, id, commentCount).pipe(
+          onSome: ({ accountRegion, awsAccountId, commentCount, id, repositoryName }) =>
+            prRepo.updateCommentCount(awsAccountId, id, commentCount, { repositoryName, accountRegion }).pipe(
               Effect.catch(() => Effect.void)
             )
         }),

@@ -26,7 +26,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
-import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
+import { AwsRegion, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -834,6 +834,9 @@ export function PRDetail() {
         : null,
     [accountId, prId, searchParams, state.pullRequests]
   )
+  const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
+  const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
+  const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
   // Build CodeCommitApprovers:REPO_ACCT:username directly — no ARN needed
@@ -861,13 +864,25 @@ export function PRDetail() {
 
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
-    if (pr !== null || accountId === undefined || accountId.length === 0 || prId === undefined || prId.length === 0)
+    if (
+      pr !== null ||
+      refreshAccountId === undefined ||
+      refreshAccountId.length === 0 ||
+      prId === undefined ||
+      prId.length === 0
+    )
       return
-    const key = `${accountId}:${prId}`
+    const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({ params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
-  }, [pr, accountId, prId, refreshSingle])
+    refreshSingle({
+      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
+      query:
+        refreshRepositoryName !== undefined && refreshRegion !== undefined
+          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+          : {}
+    })
+  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -1013,17 +1028,36 @@ export function PRDetail() {
     [commentNavigationIdentity, pr?.commentCount]
   )
   const refreshAfterApprovalMutation = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
+      return
+    void refreshSingleWithResult({
+      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
+      query:
+        refreshRepositoryName !== undefined && refreshRegion !== undefined
+          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+          : {}
+    }).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
-  }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
+  }, [invalidateReview, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0 || isRefreshing)
+    if (
+      refreshAccountId === undefined ||
+      refreshAccountId.length === 0 ||
+      prId === undefined ||
+      prId.length === 0 ||
+      isRefreshing
+    )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    void refreshSingleWithResult({
+      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
+      query:
+        refreshRepositoryName !== undefined && refreshRegion !== undefined
+          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+          : {}
+    }).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1035,7 +1069,15 @@ export function PRDetail() {
         })
       }
     )
-  }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
+  }, [
+    invalidateReview,
+    isRefreshing,
+    prId,
+    refreshAccountId,
+    refreshRegion,
+    refreshRepositoryName,
+    refreshSingleWithResult
+  ])
 
   // Copy console URL
   const consoleUrl =

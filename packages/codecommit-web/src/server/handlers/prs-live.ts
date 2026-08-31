@@ -12,8 +12,9 @@
  */
 import { AwsClient, CacheService, ChildEnv, ConfigService, PRService, ReadClient } from "@knpkv/codecommit-core"
 import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
+import type { RefreshSinglePRCoordinates } from "@knpkv/codecommit-core/PRService/index.js"
 import { Chunk, Effect, Option, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
@@ -229,6 +230,46 @@ export const completeSinglePullRequestRefresh = <E, R>(
     Effect.map(({ revisionId, sourceCommit }) => ({ revisionId, headCommit: sourceCommit }))
   )
 
+export const refreshRouteCoordinates = (
+  accountId: string,
+  pullRequestId: Domain.PullRequestId,
+  query: {
+    readonly repositoryName?: string | undefined
+    readonly region?: Domain.AwsRegion | undefined
+  }
+): Effect.Effect<
+  { readonly accountId: string; readonly coordinates?: RefreshSinglePRCoordinates },
+  ApiError
+> =>
+  Effect.gen(function*() {
+    const token = yield* decodePullRequestCoordinates(accountId).pipe(
+      Effect.mapError((error) => new ApiError({ message: error.message }))
+    )
+    if (Option.isSome(token)) {
+      if (token.value.pullRequestId !== pullRequestId) {
+        return yield* new ApiError({ message: "The pull-request coordinate token does not match its route" })
+      }
+      return {
+        accountId: token.value.accountId,
+        coordinates: { repositoryName: token.value.repositoryName, region: token.value.region }
+      }
+    }
+    if (query.repositoryName === undefined && query.region === undefined) return { accountId }
+    if (query.repositoryName === undefined || query.region === undefined) {
+      return yield* new ApiError({ message: "Pull-request refresh coordinates require repository and region together" })
+    }
+    const repositoryName = yield* Schema.decodeUnknownEffect(Domain.RepositoryName)(query.repositoryName).pipe(
+      Effect.mapError(() => new ApiError({ message: "Invalid pull-request repository coordinate" }))
+    )
+    return {
+      accountId,
+      coordinates: {
+        repositoryName,
+        region: query.region
+      }
+    }
+  })
+
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
     const prService = yield* PRService.PRService
@@ -270,10 +311,15 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
-      .handle("refreshSingle", ({ params }) =>
-        completeSinglePullRequestRefresh(prService.refreshSinglePR(params.awsAccountId, params.prId)).pipe(
+      .handle("refreshSingle", ({ params, query }) =>
+        Effect.gen(function*() {
+          const route = yield* refreshRouteCoordinates(params.awsAccountId, params.prId, query)
+          return yield* completeSinglePullRequestRefresh(
+            prService.refreshSinglePR(route.accountId, params.prId, route.coordinates)
+          )
+        }).pipe(
           Effect.mapError((error) =>
-            new ApiError({ message: extractAwsMessage(error) })
+            Predicate.isTagged(error, "ApiError") ? error : new ApiError({ message: extractAwsMessage(error) })
           )
         ))
       .handle("create", ({ payload }) =>
@@ -353,9 +399,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Stream.provideService(FileSystem.FileSystem, fileSystem),
             Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
           ))
-        }).pipe(Effect.mapError((error) =>
-          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
-        )))
+        }).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+          )
+        ))
       .handleRaw("relayReviewContinueStream", ({ params }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
@@ -383,9 +431,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Stream.provideService(FileSystem.FileSystem, fileSystem),
             Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
           ))
-        }).pipe(Effect.mapError((error) =>
-          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
-        )))
+        }).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+          )
+        ))
       .handle("postRelayFinding", ({ params, payload }) =>
         Effect.gen(function*() {
           if (payload.finding.id !== params.findingId) {

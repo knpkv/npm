@@ -21,13 +21,28 @@ import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
 import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
 
+export interface PullRequestCoordinates {
+  readonly repositoryName: string
+  readonly accountRegion: string
+}
+
 export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>) => {
+  const pullRequestWhere = (
+    awsAccountId: string,
+    id: string,
+    coordinates?: PullRequestCoordinates
+  ) =>
+    coordinates === undefined
+      ? sql`aws_account_id = ${awsAccountId} AND id = ${id}`
+      : sql`aws_account_id = ${awsAccountId} AND id = ${id}
+        AND repository_name = ${coordinates.repositoryName}
+        AND account_region = ${coordinates.accountRegion}`
   const upsert_ = SqlSchema.void({
     Request: UpsertInput,
     execute: (req) => {
       const approvedByStr = joinApprovedBy(req.approvedBy)
       const approvedByArnsStr = joinApprovedBy(req.approvedByArns)
-      const approvalRulesJson = req.approvalRules && req.approvalRules.length > 0
+      const approvalRulesJson = req.approvalRules !== undefined && req.approvalRules.length > 0
         ? JSON.stringify(req.approvalRules)
         : "[]"
       return sql`INSERT INTO pull_requests
@@ -40,7 +55,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           ${req.creationDate}, ${req.lastModifiedDate}, ${req.status},
           ${req.sourceBranch}, ${req.destinationBranch}, ${req.isMergeable}, ${req.isApproved},
           ${req.commentCount}, ${req.link}, ${approvedByStr}, ${approvedByArnsStr}, ${approvalRulesJson}, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
-        ON CONFLICT (aws_account_id, id) DO UPDATE SET
+        ON CONFLICT (aws_account_id, id, repository_name, account_region) DO UPDATE SET
           account_profile = excluded.account_profile,
           account_region = excluded.account_region,
           title = excluded.title,
@@ -55,7 +70,7 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           is_mergeable = excluded.is_mergeable,
           is_approved = excluded.is_approved,
           comment_count = COALESCE(excluded.comment_count, pull_requests.comment_count),
-          health_score = COALESCE(excluded.health_score, pull_requests.health_score),
+          health_score = pull_requests.health_score,
           link = excluded.link,
           approved_by = COALESCE(excluded.approved_by, pull_requests.approved_by),
           approved_by_arns = COALESCE(excluded.approved_by_arns, pull_requests.approved_by_arns),
@@ -91,8 +106,8 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
     deleteStaleOpen: (olderThan: string) =>
       deleteStaleOpen_({ olderThan }).pipe(Effect.tap(() => publish), cacheError("deleteStaleOpen")),
 
-    deleteOne: (awsAccountId: string, id: string) =>
-      sql`DELETE FROM pull_requests WHERE aws_account_id = ${awsAccountId} AND id = ${id}`.pipe(
+    deleteOne: (awsAccountId: string, id: string, coordinates?: PullRequestCoordinates) =>
+      sql`DELETE FROM pull_requests WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("deleteOne")
@@ -103,10 +118,11 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       id: string,
       filesAdded: number,
       filesModified: number,
-      filesDeleted: number
+      filesDeleted: number,
+      coordinates?: PullRequestCoordinates
     ) =>
       sql`UPDATE pull_requests SET files_added = ${filesAdded}, files_modified = ${filesModified}, files_deleted = ${filesDeleted}
-          WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateDiffStats")
@@ -118,30 +134,36 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       status: string,
       closedAt: string,
       mergedBy?: string,
-      approvedBy?: ReadonlyArray<string>
+      approvedBy?: ReadonlyArray<string>,
+      coordinates?: PullRequestCoordinates
     ) => {
-      const approvedByStr = approvedBy ? joinApprovedBy([...approvedBy]) : null
+      const approvedByStr = approvedBy !== undefined ? joinApprovedBy([...approvedBy]) : null
       return sql`UPDATE pull_requests SET status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
           approved_by = COALESCE(${approvedByStr}, approved_by),
           last_modified_date = ${closedAt}
-          WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateStatusAndClosedAt")
       )
     },
 
-    updateCommentCount: (awsAccountId: string, id: string, count: number | null) =>
+    updateCommentCount: (
+      awsAccountId: string,
+      id: string,
+      count: number | null,
+      coordinates?: PullRequestCoordinates
+    ) =>
       sql`UPDATE pull_requests SET comment_count = ${count}
-          WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateCommentCount")
       ),
 
-    updateHealthScore: (awsAccountId: string, id: string, score: number) =>
+    updateHealthScore: (awsAccountId: string, id: string, score: number, coordinates?: PullRequestCoordinates) =>
       sql`UPDATE pull_requests SET health_score = ${score}
-          WHERE id = ${id} AND aws_account_id = ${awsAccountId}`.pipe(
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateHealthScore")

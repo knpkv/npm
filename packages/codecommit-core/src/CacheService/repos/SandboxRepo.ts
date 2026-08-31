@@ -75,8 +75,10 @@ const makeSandboxRepo = Effect.gen(function*() {
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
               AND repository_name = ${req.repositoryName}
-              AND region = ${req.region}
-              AND status NOT IN ('stopped', 'error')`
+              AND (region = ${req.region} OR region IS NULL)
+              AND status NOT IN ('stopped', 'error')
+            ORDER BY CASE WHEN region = ${req.region} THEN 0 ELSE 1 END
+            LIMIT 1`
   })
 
   const findActive_ = SqlSchema.findAll({
@@ -140,6 +142,13 @@ const makeSandboxRepo = Effect.gen(function*() {
 
     findByPr: (awsAccountId: string, pullRequestId: string, repositoryName: string, region: string) =>
       findByPr_({ awsAccountId, pullRequestId, repositoryName, region }).pipe(cacheError("findByPr")),
+
+    /** Bind a pre-0017 sandbox row to the region supplied by its authenticated caller. */
+    updateRegion: (id: SandboxId, region: string) =>
+      sql`UPDATE sandboxes SET region = ${region} WHERE id = ${id}`.pipe(
+        Effect.tap(() => publish),
+        cacheError("updateRegion")
+      ),
 
     findActive: () => findActive_(voidRequest).pipe(cacheError("findActive")),
 

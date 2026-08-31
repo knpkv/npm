@@ -81,6 +81,7 @@ const SandboxWire = Schema.Struct({
   id: Schema.String,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
+  region: Schema.NullOr(Schema.String),
   repositoryName: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),
@@ -158,6 +159,9 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
   }
 }
 
+/** Decode one server-sent snapshot, retaining nullable sandbox coordinates. */
+export const decodeSseState = (json: string): AppState => toAppState(decode(json))
+
 export type ConnectionState = "connected" | "reconnecting" | "disconnected"
 
 export function useSSE(
@@ -204,7 +208,7 @@ export function useSSE(
                   id: `notif-${n.id}`,
                   description: n.message,
                   duration: 8000,
-                  action: n.awsAccountId && n.pullRequestId
+                  action: n.awsAccountId !== "" && n.pullRequestId !== ""
                     ? {
                       label: "View",
                       onClick: () => toastClickRef.current?.(`/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`)
@@ -259,7 +263,7 @@ export function useSSE(
     return () => {
       disposed = true
       es?.close()
-      if (retryTimeout) clearTimeout(retryTimeout)
+      if (retryTimeout !== undefined && retryTimeout !== null) clearTimeout(retryTimeout)
     }
   }, [])
 
