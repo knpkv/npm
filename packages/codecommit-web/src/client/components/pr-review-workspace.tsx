@@ -162,6 +162,9 @@ const exactReviewIdentity = (
 ): string =>
   `${accountId}:${repositoryName}:${region}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
 
+const canonicalReviewAccountId = (account: Domain.Account): string =>
+  String(account.repoAccountId ?? account.awsAccountId ?? account.profile)
+
 export const fileIndexForFinding = (
   files: PullRequestDiffResponse["files"],
   finding: RelayReviewFinding
@@ -639,7 +642,7 @@ const ReadyReviewWorkspace = ({
   const postFindingMutation = useMemo(() => ApiClient.mutation("prs", "postRelayFinding"), [])
   const postFindingRequest = useAtomSet(postFindingMutation, { mode: "promise" })
   const reviewIdentity = exactReviewIdentity(
-    accountId,
+    canonicalReviewAccountId(pullRequest.account),
     pullRequest.id,
     String(pullRequest.repositoryName),
     String(pullRequest.account.region),
@@ -668,6 +671,7 @@ const ReadyReviewWorkspace = ({
   }>(() => ({ identity: reviewIdentity, values: new Map() }))
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
   const reviewSessionVersionRef = useRef(0)
+  const skipSessionWriteRef = useRef<string | null>(null)
   const [completedReview, setCompletedReview] = useState<RelayReviewCompletion | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
@@ -737,6 +741,7 @@ const ReadyReviewWorkspace = ({
 
   useEffect(() => {
     if (reviewResource === null || reviewSessionKey === null) {
+      skipSessionWriteRef.current = null
       reviewSessionVersionRef.current = 0
       setReviewFailure({
         description: "CodeCommit has not resolved a stable AWS account identity for this pull request.",
@@ -746,6 +751,7 @@ const ReadyReviewWorkspace = ({
     }
     const stored = readRelayReviewSession(window.localStorage, reviewSessionKey, reviewResource)
     if (Result.isFailure(stored)) {
+      skipSessionWriteRef.current = null
       reviewSessionVersionRef.current = 0
       setReviewFailure({
         description:
@@ -757,6 +763,7 @@ const ReadyReviewWorkspace = ({
       return
     }
     if (stored.success === null) {
+      skipSessionWriteRef.current = reviewSessionKey
       reviewSessionVersionRef.current = 0
       if (completedReviewRef.current !== null) return
       setCompletedReview(null)
@@ -765,6 +772,7 @@ const ReadyReviewWorkspace = ({
       setSelectedFindingId(null)
       return
     }
+    skipSessionWriteRef.current = reviewSessionKey
     reviewSessionVersionRef.current = stored.success.version
     const restored = replaceRelayReviewPreservingTurns(stored.success.turns, {
       expectedIdentity: stored.success.identity,
@@ -782,6 +790,10 @@ const ReadyReviewWorkspace = ({
   }, [reviewIdentity, reviewResource, reviewSessionKey])
 
   useEffect(() => {
+    if (reviewSessionKey !== null && skipSessionWriteRef.current === reviewSessionKey) {
+      skipSessionWriteRef.current = null
+      return
+    }
     if (
       completedReview === null ||
       completedReview.identity !== reviewIdentity ||
@@ -807,6 +819,7 @@ const ReadyReviewWorkspace = ({
     } else {
       reviewSessionVersionRef.current = written.success.session.version
       if (written.success._tag === "stale-review-preserved") {
+        skipSessionWriteRef.current = reviewSessionKey
         const preserved = replaceRelayReviewPreservingTurns(written.success.session.turns, {
           expectedIdentity: written.success.session.identity,
           identity: written.success.session.identity,
@@ -958,7 +971,15 @@ const ReadyReviewWorkspace = ({
 
   const continueReview = useCallback(
     async (findingId: string, nextMessage: string): Promise<CodeCommitRelayContinuationOutcome> => {
-      if (review === null) return { _tag: "failed" }
+      if (review === null || reviewIsStale) {
+        if (reviewIsStale) {
+          setReviewFailure({
+            description: "Re-run Relay against the current exact revision before continuing this conversation.",
+            title: "Stale PR review"
+          })
+        }
+        return { _tag: "failed" }
+      }
       const userTurn: RelayReviewConversationTurn = {
         id: window.crypto.randomUUID(),
         findingId,
@@ -1002,7 +1023,7 @@ const ReadyReviewWorkspace = ({
       setMessage("")
       return { _tag: "completed" }
     },
-    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, review, runStream]
+    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, review, reviewIsStale, runStream]
   )
 
   const postFinding = useCallback(
@@ -1307,15 +1328,8 @@ const ReadyReviewWorkspace = ({
                   {diff.headCommit.slice(0, 12)}.
                 </span>
                 <Button
-                  disabled={isReviewing || review === null}
-                  onClick={() =>
-                    review === null
-                      ? undefined
-                      : void continueReview(
-                          selectedFinding?.id ?? review.result.findings[0]?.id ?? "F1",
-                          "Re-review the complete finding deck against the latest exact revision. Reconcile resolved, changed, and new findings."
-                        )
-                  }
+                  disabled={isReviewing || selectedProfile === undefined}
+                  onClick={() => void executeReview()}
                   size="compact"
                   variant="secondary"
                 >
@@ -1421,12 +1435,14 @@ const ReadyReviewWorkspace = ({
                       onSubmit={(event) => {
                         event.preventDefault()
                         const submitted = message.trim()
-                        if (submitted.length > 0 && !isReviewing) void continueReview(conversationFindingId, submitted)
+                        if (submitted.length > 0 && !isReviewing && !reviewIsStale) {
+                          void continueReview(conversationFindingId, submitted)
+                        }
                       }}
                     >
                       <textarea
                         aria-label="Message Relay"
-                        disabled={isReviewing}
+                        disabled={isReviewing || reviewIsStale}
                         maxLength={8_000}
                         onChange={(event) => setMessage(event.target.value)}
                         placeholder="Ask Relay about this finding…"
@@ -1434,7 +1450,7 @@ const ReadyReviewWorkspace = ({
                         value={message}
                       />
                       <Button
-                        disabled={isReviewing || message.trim().length === 0}
+                        disabled={isReviewing || reviewIsStale || message.trim().length === 0}
                         size="compact"
                         type="submit"
                         variant="secondary"
@@ -1500,7 +1516,9 @@ export const PullRequestReviewWorkspace = ({
     [accountId, pullRequest.id, pullRequest.lastModifiedDate, refreshGeneration]
   )
   const diff = useAtomValue(diffAtom)
-  const pullRequestIdentity = `${accountId}:${pullRequest.id}`
+  const pullRequestIdentity = `${canonicalReviewAccountId(pullRequest.account)}:${String(pullRequest.repositoryName)}:${String(
+    pullRequest.account.region
+  )}:${String(pullRequest.id)}`
   const retainedDiffRef = useRef<{ readonly identity: string; readonly value: PullRequestDiffResponse } | null>(null)
   if (AsyncResult.isSuccess(diff)) retainedDiffRef.current = { identity: pullRequestIdentity, value: diff.value }
   const retainedDiff = retainedDiffRef.current?.identity === pullRequestIdentity ? retainedDiffRef.current.value : null
@@ -1536,7 +1554,7 @@ export const PullRequestReviewWorkspace = ({
       comments={commentTargets.filter((target) => isCommentOnExactRevision(target, visibleDiff))}
       diff={visibleDiff}
       diffFailure={diffFailure}
-      key={`${accountId}:${pullRequest.id}`}
+      key={pullRequestIdentity}
       onFindingPosted={onFindingPosted}
       onNavigateToComment={onNavigateToComment}
       pullRequest={pullRequest}
