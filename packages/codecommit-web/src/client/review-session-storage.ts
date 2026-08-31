@@ -2,7 +2,12 @@
 import { Data, Result, Schema } from "effect"
 
 import { PullRequestRelayReviewResponse, RelayReviewConversationTurns, RelayReviewSkillIds } from "../server/Api.js"
-import { appendReviewTurn, FindingDisposition, type FindingDispositions } from "./review-session-state.js"
+import {
+  appendReviewTurn,
+  FindingDisposition,
+  type FindingDispositions,
+  reconcileReviewConversationTurns
+} from "./review-session-state.js"
 
 export const RelayReviewSessionResourceIdentity = Schema.Struct({
   accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
@@ -124,6 +129,34 @@ const mergeTurns = (
   }, current)
 }
 
+const compatibleTurns = (
+  current: StoredRelayReviewSession,
+  incoming: RelayReviewSessionWrite
+): typeof RelayReviewConversationTurns.Type => {
+  const currentTurns = reconcileReviewConversationTurns(current.review, incoming.review, current.turns)
+  const incomingTurns = reconcileReviewConversationTurns(incoming.review, current.review, incoming.turns)
+  return mergeTurns(currentTurns, incomingTurns)
+}
+
+const compatibleIncomingDispositions = (
+  current: StoredRelayReviewSession,
+  incoming: RelayReviewSessionWrite
+): FindingDispositions => {
+  const currentFindings = new Map(
+    current.review.result.findings.map((finding): [string, string] => [finding.id, JSON.stringify(finding)])
+  )
+  const incomingFindings = new Map(
+    incoming.review.result.findings.map((finding): [string, string] => [finding.id, JSON.stringify(finding)])
+  )
+  return Object.entries(incoming.dispositions).reduce<FindingDispositions>((compatible, [findingId, disposition]) => {
+    const currentSnapshot = currentFindings.get(findingId)
+    const incomingSnapshot = incomingFindings.get(findingId)
+    return currentSnapshot !== undefined && currentSnapshot === incomingSnapshot
+      ? { ...compatible, [findingId]: disposition }
+      : compatible
+  }, {})
+}
+
 const storedSession = (
   incoming: RelayReviewSessionWrite,
   turns: typeof RelayReviewConversationTurns.Type,
@@ -142,10 +175,10 @@ const mergeStoredSession = (
   current: StoredRelayReviewSession,
   incoming: RelayReviewSessionWrite
 ): RelayReviewSessionWriteOutcome => {
-  const turns = mergeTurns(current.turns, incoming.turns)
+  const turns = compatibleTurns(current, incoming)
   const observedCurrentVersion = incoming.expectedVersion === current.version
   if (!observedCurrentVersion) {
-    const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
+    const dispositions = mergeDispositions(current.dispositions, compatibleIncomingDispositions(current, incoming))
     return {
       _tag: "stale-review-preserved",
       session: { ...current, dispositions, turns, version: current.version + 1 }
@@ -162,7 +195,7 @@ const mergeStoredSession = (
   if (expectedHead) {
     return { _tag: "stored", session: storedSession(incoming, turns, current.version + 1) }
   }
-  const dispositions = mergeDispositions(current.dispositions, incoming.dispositions)
+  const dispositions = mergeDispositions(current.dispositions, compatibleIncomingDispositions(current, incoming))
   return {
     _tag: "stale-review-preserved",
     session: { ...current, dispositions, turns, version: current.version + 1 }

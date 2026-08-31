@@ -321,6 +321,54 @@ describe("Relay review session storage", () => {
     }
   })
 
+  it("does not bind stale finding state to a reused finding id", () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const revisedReview: PullRequestRelayReviewResponse = {
+      ...review,
+      revisionId: "revision-2",
+      result: {
+        ...review.result,
+        findings: review.result.findings.map((finding) => ({ ...finding, summary: "A different finding." }))
+      }
+    }
+    writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [{ findingId: "F1", id: "old-finding-turn", role: "user", message: "Old finding." }],
+      dispositions: { F1: "posted" }
+    })
+    writeSession(localStorage, key, {
+      expectedIdentity: "exact-head-1",
+      expectedVersion: 1,
+      identity: "exact-head-2",
+      resource,
+      review: revisedReview,
+      skillIds: [],
+      turns: [{ findingId: "PR", id: "pr-turn", role: "user", message: "PR-level context." }],
+      dispositions: { F1: "pending" }
+    })
+
+    const staleWrite = writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [{ findingId: "F1", id: "stale-finding-turn", role: "user", message: "Stale finding." }],
+      dispositions: { F1: "posted" }
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(["pr-turn"])
+      expect(restored.success?.dispositions).toEqual({ F1: "pending" })
+      expect(restored.success?.review.revisionId).toBe("revision-2")
+    }
+  })
+
   it("preserves a same-head review when a stale tab writes after a newer version", () => {
     const key = relayReviewSessionStorageKey(resource)
     const initial = writeSession(localStorage, key, {
@@ -424,6 +472,9 @@ describe("Relay review session storage", () => {
     expect(Result.isSuccess(replaced)).toBe(true)
     const restored = readRelayReviewSession(localStorage, key, resource)
     expect(Result.isSuccess(restored)).toBe(true)
-    if (Result.isSuccess(restored)) expect(restored.success?.dispositions).toEqual({ F1: "posted-stale" })
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.review.revisionId).toBe("revision-2")
+      expect(restored.success?.dispositions).toEqual({ F1: "posted-stale" })
+    }
   })
 })

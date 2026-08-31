@@ -519,7 +519,7 @@ export const usePullRequestReview = (
     setState({ ...current, action: "starting" })
     return transport.enqueue(entityId, provider, prompt, abort.signal).then(
       (review) => {
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) return Promise.reject(new PullRequestReviewRequestAborted())
         setState((latest) =>
           latest._tag === "ready" &&
             sameReviewScope(latest, current) &&

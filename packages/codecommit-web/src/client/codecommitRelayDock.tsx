@@ -30,7 +30,7 @@ import { useAtomValue } from "@effect/atom-react"
 import { appStateAtom } from "./atoms/app.js"
 import {
   codeCommitPullRequestHref,
-  matchesCodeCommitPullRequestRoute,
+  matchesCodeCommitPullRequestLocator,
   type CodeCommitPullRequestRouteCoordinates
 } from "./codecommit-route.js"
 
@@ -95,7 +95,7 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
         }
         if (locator.accountId !== undefined) route = { ...route, accountId: locator.accountId }
         const matches = state.pullRequests.filter((pullRequest) =>
-          matchesCodeCommitPullRequestRoute(pullRequest, route)
+          matchesCodeCommitPullRequestLocator(pullRequest, route)
         )
         if (matches.length === 0) {
           return yield* new PullRequestConversationNotFound({

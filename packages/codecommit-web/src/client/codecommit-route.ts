@@ -18,15 +18,28 @@ export const codeCommitPullRequestHref = (
     encodeURIComponent(repositoryName)
   }&region=${encodeURIComponent(region)}`
 
-/** Match a cached CodeCommit PR without collapsing repository or region identity. */
+const matchesRouteAccount = (pullRequest: Pick<Domain.PullRequest, "account">, accountId: string): boolean =>
+  pullRequest.account.awsAccountId === accountId || pullRequest.account.profile === accountId
+
+const matchesLocatorAccount = (pullRequest: Pick<Domain.PullRequest, "account">, accountId: string): boolean =>
+  matchesRouteAccount(pullRequest, accountId) || pullRequest.account.repoAccountId === accountId
+
+/** Match a browser route using its credential-account or profile alias. */
 export const matchesCodeCommitPullRequestRoute = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">,
   route: CodeCommitPullRequestRouteCoordinates
 ): boolean =>
   String(pullRequest.id) === route.pullRequestId &&
-  (route.accountId === undefined ||
-    pullRequest.account.repoAccountId === route.accountId ||
-    pullRequest.account.awsAccountId === route.accountId ||
-    pullRequest.account.profile === route.accountId) &&
+  (route.accountId === undefined || matchesRouteAccount(pullRequest, route.accountId)) &&
+  (route.repositoryName === undefined || String(pullRequest.repositoryName) === route.repositoryName) &&
+  (route.region === undefined || String(pullRequest.account.region) === route.region)
+
+/** Match a host locator, which may name the repository's owning account. */
+export const matchesCodeCommitPullRequestLocator = (
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">,
+  route: CodeCommitPullRequestRouteCoordinates
+): boolean =>
+  String(pullRequest.id) === route.pullRequestId &&
+  (route.accountId === undefined || matchesLocatorAccount(pullRequest, route.accountId)) &&
   (route.repositoryName === undefined || String(pullRequest.repositoryName) === route.repositoryName) &&
   (route.region === undefined || String(pullRequest.account.region) === route.region)

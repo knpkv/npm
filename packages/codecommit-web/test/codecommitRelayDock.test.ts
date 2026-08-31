@@ -10,7 +10,11 @@ import {
   type RelayPullRequestDockRegistration,
   RelaySelectorState
 } from "@knpkv/relay-product"
-import { codeCommitPullRequestHref, matchesCodeCommitPullRequestRoute } from "../src/client/codecommit-route.js"
+import {
+  codeCommitPullRequestHref,
+  matchesCodeCommitPullRequestLocator,
+  matchesCodeCommitPullRequestRoute
+} from "../src/client/codecommit-route.js"
 import {
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
@@ -101,6 +105,12 @@ describe("CodeCommit Relay dock adapter", () => {
       repositoryName: "payments"
     })).toBe(true)
     expect(matchesCodeCommitPullRequestRoute(candidate, {
+      accountId: "repository-account",
+      pullRequestId: "42",
+      region: "eu-central-1",
+      repositoryName: "payments"
+    })).toBe(false)
+    expect(matchesCodeCommitPullRequestLocator(candidate, {
       accountId: "repository-account",
       pullRequestId: "42",
       region: "eu-central-1",
