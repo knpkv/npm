@@ -1438,6 +1438,7 @@ describe("Connect public seams", () => {
       expect(releaseInterruptions).toBe(1)
       expect(killObservedPendingCleanup).toBe(true)
       expect(cleanupCompleted).toBe(false)
+      expect(fiber.pollUnsafe()).toBeDefined()
 
       yield* Effect.yieldNow
       yield* TestClock.adjust("5 seconds")
