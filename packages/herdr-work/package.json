@@ -53,16 +53,19 @@
   "dependencies": {
     "@knpkv/herdr-fleet": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    "effect": "4.0.0-rc.109",
-    "react": "^19.2.8"
+    "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.109",
     "@effect/vitest": "4.0.0-rc.109",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
+    "react": "^19.2.8",
     "rimraf": "^6.1.3",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "react": "^19.2.8"
   }
 }

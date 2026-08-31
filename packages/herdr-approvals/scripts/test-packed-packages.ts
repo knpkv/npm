@@ -40,6 +40,12 @@ const herdrPackages = [
   "herdr-approvals"
 ]
 
+const reactSurfacePeers = new Map<string, ReadonlyArray<string>>([
+  ["@knpkv/herdr-connect", ["react", "react-dom"]],
+  ["@knpkv/herdr-work", ["react"]],
+  ["@knpkv/herdr-approvals", ["react", "react-dom"]]
+])
+
 const commandError = (command: string, args: ReadonlyArray<string>, cause?: unknown) =>
   new HerdrPackContractError({ cause, reason: `${command} ${args.join(" ")} failed` })
 
@@ -127,6 +133,27 @@ const assertManifestDependencies = (name: string, manifest: typeof PackageManife
     : Effect.fail(new HerdrPackContractError({ reason: `${name} packed devDependencies` }))
 }
 
+const assertReactSurfaceManifest = (
+  name: string,
+  manifest: typeof PackageManifest.Type,
+  requireDevelopmentRuntime: boolean
+) => {
+  const peers = reactSurfacePeers.get(name)
+  if (peers === undefined) return Effect.void
+  for (const peer of peers) {
+    if (manifest.dependencies?.[peer] !== undefined) {
+      return Effect.fail(new HerdrPackContractError({ reason: `${name} owns runtime dependency ${peer}` }))
+    }
+    if (manifest.peerDependencies?.[peer] === undefined) {
+      return Effect.fail(new HerdrPackContractError({ reason: `${name} does not require React peer ${peer}` }))
+    }
+    if (requireDevelopmentRuntime && manifest.devDependencies?.[peer] === undefined) {
+      return Effect.fail(new HerdrPackContractError({ reason: `${name} cannot build against React peer ${peer}` }))
+    }
+  }
+  return Effect.void
+}
+
 const program = Effect.scoped(
   Effect.gen(function*() {
     const fileSystem = yield* FileSystem.FileSystem
@@ -185,6 +212,7 @@ const program = Effect.scoped(
         Effect.flatMap(Schema.decodeUnknownEffect(PackageManifest)),
         Effect.mapError((cause) => new HerdrPackContractError({ cause, reason: `Could not decode ${directory}` }))
       )
+      yield* assertReactSurfaceManifest(sourceManifest.name, sourceManifest, true)
       yield* run(
         spawner,
         "pnpm",
@@ -235,6 +263,7 @@ const program = Effect.scoped(
         )
       )
       yield* assertManifestDependencies(sourceManifest.name, packedManifest)
+      yield* assertReactSurfaceManifest(sourceManifest.name, packedManifest, false)
       if (
         sourceManifest.name === "@knpkv/herdr-approvals" &&
         (!Schema.is(PackageSideEffects)(packedManifest.sideEffects) ||
