@@ -732,6 +732,49 @@ describe("Connect public seams", () => {
             paneId: "w1:p1"
           }
         ])
+        const afterChildExit = yield* localConnectAgents(
+          hostConfig,
+          {
+            ...source,
+            agents: () =>
+              Effect.succeed({
+                agents: [{
+                  activityRevision: 2,
+                  agentId: "agent-coordinator-current",
+                  kind: "codex",
+                  name: "Current coordinator",
+                  paneId: "w1:p1",
+                  parentAgentId: null,
+                  relation: null,
+                  status: "working",
+                  work: "npm"
+                }],
+                available: true,
+                error: null
+              })
+          },
+          activity,
+          relationships,
+          3_000
+        )
+        expect(afterChildExit.agents).toEqual([{
+          host: "SER8",
+          id: "agent-coordinator-current",
+          kind: "codex",
+          lastActivityAt: 3_000,
+          name: "Current coordinator",
+          state: "working",
+          work: "npm"
+        }])
+        expect(
+          (yield* relationships.list()).find(({ agentId }) => agentId === "agent-child")
+        ).toMatchObject({
+          observedAt: 2_000,
+          relationship: {
+            parentAgentId: "agent-coordinator-current",
+            relation: "delegated"
+          }
+        })
       })
     ).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
