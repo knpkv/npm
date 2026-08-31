@@ -27,7 +27,7 @@ import {
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
-import { resolveConnectTarget } from "./target.js"
+import { resolveConnectPreference } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
@@ -467,6 +467,7 @@ export const ConnectSurface = ({
       ? connectionRequest.agent
       : null)
   const selectAgent = (agent: ConnectAgent): void => {
+    preferenceApplied.current = true
     const key = connectAgentKey(agent)
     setSelectedKey(key)
     setConnection({ _tag: "connecting", agent })
@@ -481,19 +482,24 @@ export const ConnectSurface = ({
   }
   useEffect(() => {
     if (preferenceApplied.current || current === null || !AsyncResult.isSuccess(remembered)) return
-    preferenceApplied.current = true
     const fiber = Effect.runFork(
-      resolveConnectTarget(window.location.search, current.agents).pipe(
-        Effect.tap((target) =>
+      resolveConnectPreference(window.location.search, current.agents).pipe(
+        Effect.tap((resolution) =>
           Effect.sync(() => {
-            if (target === null) setSelectedKey(remembered.value)
-            else selectAgent(target)
-          })
-        ),
-        Effect.catch((error) =>
-          Effect.sync(() => {
-            setSelectedKey(remembered.value)
-            setPreferenceError(`connect_target.${error.reason}`)
+            if (resolution._tag === "retry") {
+              setSelectedKey(remembered.value)
+              setPreferenceError(`connect_target.${resolution.reason}`)
+              return
+            }
+            preferenceApplied.current = true
+            if (resolution._tag === "rejected") {
+              setSelectedKey(remembered.value)
+              setPreferenceError(`connect_target.${resolution.reason}`)
+            } else if (resolution.target === null) {
+              setSelectedKey(remembered.value)
+            } else {
+              selectAgent(resolution.target)
+            }
           })
         )
       )

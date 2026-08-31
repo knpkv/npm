@@ -33,3 +33,25 @@ export const resolveConnectTarget = Effect.fn("HerdrConnect.resolveTarget")(func
     ? new ConnectTargetError({ reason: "unknown" })
     : Effect.succeed(selected)
 })
+
+export type ConnectPreferenceResolution =
+  | { readonly _tag: "resolved"; readonly target: ConnectAgent | null }
+  | { readonly _tag: "retry"; readonly reason: "unknown" }
+  | { readonly _tag: "rejected"; readonly reason: "malformed" }
+
+export const resolveConnectPreference = Effect.fn("HerdrConnect.resolvePreference")(function*(
+  search: string,
+  agents: ReadonlyArray<ConnectAgent>
+) {
+  return yield* resolveConnectTarget(search, agents).pipe(
+    Effect.map(
+      (target): ConnectPreferenceResolution => ({ _tag: "resolved", target })
+    ),
+    Effect.catchTag("ConnectTargetError", (error) =>
+      Effect.succeed<ConnectPreferenceResolution>(
+        error.reason === "unknown"
+          ? { _tag: "retry", reason: error.reason }
+          : { _tag: "rejected", reason: error.reason }
+      ))
+  )
+})

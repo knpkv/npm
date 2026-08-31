@@ -37,7 +37,7 @@ import {
   PersistedConnectAgentMetadata,
   type RelationshipObservation
 } from "../src/relationship-store.js"
-import { resolveConnectTarget } from "../src/target.js"
+import { resolveConnectPreference, resolveConnectTarget } from "../src/target.js"
 import { acquireTerminalSetup } from "../src/terminal-setup.js"
 import {
   boundedTerminalLines,
@@ -595,6 +595,20 @@ describe("Connect public seams", () => {
       expect(
         yield* Effect.result(resolveConnectTarget("?host=SER8&agent=agent-missing", [remembered, remote]))
       ).toMatchObject({ failure: { reason: "unknown" } })
+    }))
+
+  it.effect("retries a valid deep link when its agent appears in a later directory", () =>
+    Effect.gen(function*() {
+      const remote = agent("agent-worker", "PI")
+      expect(
+        yield* resolveConnectPreference("?host=PI&agent=agent-worker", [])
+      ).toMatchObject({ _tag: "retry" })
+      expect(
+        yield* resolveConnectPreference("?host=PI&agent=agent-worker", [remote])
+      ).toEqual({ _tag: "resolved", target: remote })
+      expect(
+        yield* resolveConnectPreference("?host=PI", [remote])
+      ).toMatchObject({ _tag: "rejected", reason: "malformed" })
     }))
 
   it("accepts only activity timestamps renderable by JavaScript Date", () => {
