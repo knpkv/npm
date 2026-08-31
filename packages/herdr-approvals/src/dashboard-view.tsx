@@ -35,11 +35,13 @@ type DashboardViewProps = {
   readonly chatBusy: boolean
   readonly notificationState: NotificationState
   readonly historyLoading?: boolean
+  readonly pendingLoading?: boolean
   readonly onChatSubmit: ((mode: ChatMode, message: string) => Promise<boolean>) | undefined
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly onDisableNotifications: (() => void) | undefined
   readonly onEnableNotifications: (() => void) | undefined
   readonly onLoadHistory?: (() => void) | undefined
+  readonly onLoadPending?: (() => void) | undefined
   readonly onRefresh: (() => void) | undefined
   readonly pull: {
     readonly distance: number
@@ -535,7 +537,9 @@ export const DashboardView = ({
   onDisableNotifications,
   onEnableNotifications,
   onLoadHistory,
+  onLoadPending,
   onRefresh,
+  pendingLoading = false,
   pull,
   showHeader = true,
   snapshot
@@ -706,6 +710,13 @@ export const DashboardView = ({
                 Could not check {snapshot.pendingApprovals.failures.map(pendingFailureLabel).join(", ")}. Local
                 approvals still work.
               </Text>
+            )}
+            {snapshot.pendingApprovals.nextCursors.length === 0 ? null : (
+              <div className="activity-load-more">
+                <Button loading={pendingLoading} onClick={onLoadPending} type="button" variant="quiet">
+                  Load more approvals
+                </Button>
+              </div>
             )}
             {agendaCount === 0 && !pendingUnknown ? (
               <div className="empty">

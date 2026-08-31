@@ -56,10 +56,20 @@ export const PendingApprovalFailure = Schema.Struct({
   ])
 })
 
+export const PendingApprovalContinuation = Schema.Struct({
+  host: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(253),
+    Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/)
+  ),
+  cursor: PendingApprovalCursor
+})
+
 export const FleetPendingApprovals = Schema.Struct({
   local: Schema.Array(JobRecord),
   remote: Schema.Array(RemotePendingApproval),
-  failures: Schema.Array(PendingApprovalFailure)
+  failures: Schema.Array(PendingApprovalFailure),
+  nextCursors: Schema.Array(PendingApprovalContinuation)
 })
 
 export const DashboardHistoryPage = Schema.Struct({
@@ -91,5 +101,6 @@ export type DashboardSnapshot = typeof DashboardSnapshot.Type
 export type DashboardHistoryPage = typeof DashboardHistoryPage.Type
 export type PendingApproval = typeof PendingApproval.Type
 export type PendingApprovalFailure = typeof PendingApprovalFailure.Type
+export type PendingApprovalContinuation = typeof PendingApprovalContinuation.Type
 export type PendingApprovalSummary = typeof PendingApprovalSummary.Type
 export type PendingApprovalTarget = typeof PendingApprovalTarget.Type

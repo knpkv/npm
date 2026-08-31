@@ -84,6 +84,7 @@ import {
   type DashboardHistoryPage,
   type DashboardSnapshot,
   type PendingApproval,
+  PendingApprovalContinuation,
   type PendingApprovalFailure,
   PendingApprovalSummary,
   type PendingApprovalTarget
@@ -557,6 +558,26 @@ const decodePendingApprovalCursor = Effect.fn(
   )
 })
 
+const decodePendingApprovalContinuation = Effect.fn(
+  "HostHttp.decodePendingApprovalContinuation"
+)(function*(url: URL) {
+  const host = url.searchParams.get("cursorHost")
+  const cursor = yield* decodePendingApprovalCursor(url)
+  if (host === null || cursor === null) {
+    return yield* new FleetValidationError({
+      detail: "dashboard pending continuation requires cursorHost, cursorCreatedAt and cursorId"
+    })
+  }
+  return yield* Schema.decodeUnknownEffect(PendingApprovalContinuation)({
+    host,
+    cursor
+  }).pipe(
+    Effect.mapError(
+      () => new FleetValidationError({ detail: "invalid dashboard pending continuation" })
+    )
+  )
+})
+
 const decodeConnectAgentCursor = Effect.fn(
   "HostHttp.decodeConnectAgentCursor"
 )(function*(url: URL) {
@@ -716,6 +737,9 @@ const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
       readonly approval: PendingApproval
     }> = []
     const failures: Array<PendingApprovalFailure> = []
+    const nextCursors: Array<
+      DashboardSnapshot["pendingApprovals"]["nextCursors"][number]
+    > = []
     for (const { peer, result } of results) {
       if (Result.isFailure(result)) {
         failures.push({
@@ -735,8 +759,63 @@ const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
           approval
         })
       }
+      if (result.success.nextCursor !== null) {
+        nextCursors.push({ host: peer.host, cursor: result.success.nextCursor })
+      }
     }
-    return { remote, failures }
+    return { remote, failures, nextCursors }
+  }
+)
+
+const dashboardPendingPage = Effect.fn("HostHttp.dashboardPendingPage")(
+  function*(
+    config: HostConfiguration,
+    service: FleetService,
+    continuation: DashboardSnapshot["pendingApprovals"]["nextCursors"][number]
+  ) {
+    if (continuation.host.toLowerCase() === config.host.toLowerCase()) {
+      const page = yield* service.pendingApprovalPage(continuation.cursor)
+      return {
+        local: page.records,
+        remote: [],
+        failures: [],
+        nextCursors: page.nextCursor === null
+          ? []
+          : [{ host: config.host, cursor: page.nextCursor }]
+      } satisfies DashboardSnapshot["pendingApprovals"]
+    }
+    const peers = yield* fleetPeers(config)
+    const peer = peers.find(
+      ({ host }) => host.toLowerCase() === continuation.host.toLowerCase()
+    )
+    if (peer === undefined || peer.approvalUrl === null) {
+      return yield* new FleetValidationError({
+        detail: `unknown pending approval host ${continuation.host}`
+      })
+    }
+    const approvalUrl = peer.approvalUrl
+    const page = yield* fetchPeerPending(peer, continuation.cursor).pipe(
+      Effect.mapError(
+        (cause) =>
+          new FleetOperationError({
+            cause,
+            detail: `could not continue pending approvals on ${peer.host}`,
+            operation: "fleet.pending_approvals"
+          })
+      )
+    )
+    return {
+      local: [],
+      remote: page.approvals.map((approval) => ({
+        approval,
+        approvalUrl,
+        host: peer.host
+      })),
+      failures: [],
+      nextCursors: page.nextCursor === null
+        ? []
+        : [{ host: peer.host, cursor: page.nextCursor }]
+    } satisfies DashboardSnapshot["pendingApprovals"]
   }
 )
 
@@ -1582,9 +1661,9 @@ export const startHttpServer = async (
           const approvalSurface = mode === "approval" || mode === "serve"
           const dashboard = Effect.gen(function*() {
             const observedAt = now()
-            const resolvedLocalApprovals = approvalSurface
-              ? (yield* service.pendingApprovalPage(null)).records
-              : []
+            const resolvedLocalPage = approvalSurface
+              ? yield* service.pendingApprovalPage(null)
+              : { records: [], nextCursor: null }
             const state = yield* Effect.all({
               history: dashboardHistory(service, null),
               status: service.status()
@@ -1592,12 +1671,15 @@ export const startHttpServer = async (
             let directory: ApprovalDirectory | null = null
             let pendingApprovals: DashboardSnapshot["pendingApprovals"] = {
               local: approvalSurface
-                ? resolvedLocalApprovals
+                ? resolvedLocalPage.records
                 : state.history.records.filter(
                   (record) => record.status === "pending_approval"
                 ),
               remote: [],
-              failures: []
+              failures: [],
+              nextCursors: approvalSurface && resolvedLocalPage.nextCursor !== null
+                ? [{ host: config.host, cursor: resolvedLocalPage.nextCursor }]
+                : []
             }
             if (approvalSurface) {
               const currentUrl = mode === "serve"
@@ -1624,13 +1706,22 @@ export const startHttpServer = async (
                   peersResult.success
                 )
                 pendingApprovals = {
-                  local: resolvedLocalApprovals,
-                  ...aggregated
+                  local: resolvedLocalPage.records,
+                  ...aggregated,
+                  nextCursors: resolvedLocalPage.nextCursor === null
+                    ? aggregated.nextCursors
+                    : [
+                      { host: config.host, cursor: resolvedLocalPage.nextCursor },
+                      ...aggregated.nextCursors
+                    ]
                 }
               } else {
                 pendingApprovals = {
-                  local: resolvedLocalApprovals,
+                  local: resolvedLocalPage.records,
                   remote: [],
+                  nextCursors: resolvedLocalPage.nextCursor === null
+                    ? []
+                    : [{ host: config.host, cursor: resolvedLocalPage.nextCursor }],
                   failures: config.machines
                     .filter(
                       ({ host }) => host.toLowerCase() !== config.host.toLowerCase()
@@ -1848,6 +1939,20 @@ export const startHttpServer = async (
               return submitted.entry
             })
             await respond(response, effect, 202)
+            return
+          }
+
+          if (
+            approvalSurface &&
+            request.method === "GET" &&
+            url.pathname === "/v1/dashboard-pending"
+          ) {
+            const effect = Effect.gen(function*() {
+              yield* authorized
+              const continuation = yield* decodePendingApprovalContinuation(url)
+              return yield* dashboardPendingPage(config, service, continuation)
+            })
+            await respond(response, effect)
             return
           }
 

@@ -27,6 +27,7 @@ import {
   DashboardSnapshot,
   type DashboardSnapshot as DashboardSnapshotType,
   DashboardHistoryPage,
+  FleetPendingApprovals,
   PendingApprovalTarget,
   type PendingApprovalTarget as PendingApprovalTargetType
 } from "./dashboard-model.js"
@@ -92,6 +93,17 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 const loadDashboard = fetchJson(DashboardSnapshot, "/v1/dashboard")
+
+const loadDashboardPending = Effect.fn("Dashboard.loadPending")((
+  continuation: DashboardSnapshotType["pendingApprovals"]["nextCursors"][number]
+) => {
+  const parameters = new URLSearchParams({
+    cursorCreatedAt: String(continuation.cursor.createdAt),
+    cursorHost: continuation.host,
+    cursorId: continuation.cursor.id
+  })
+  return fetchJson(FleetPendingApprovals, `/v1/dashboard-pending?${parameters.toString()}`)
+})
 
 const loadDashboardHistory = Effect.fn("Dashboard.loadHistory")((
   cursor: NonNullable<DashboardSnapshotType["historyNextCursor"]>
@@ -375,6 +387,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
       enable ? enableNotifications() : disableNotifications()
     ),
     historyPage: browserRuntime.fn(loadDashboardHistory),
+    pendingPage: browserRuntime.fn(loadDashboardPending),
     pendingTarget: browserRuntime.fn(loadPendingApprovalTarget),
     pull: Atom.make<PullState>(initialPull),
     work
@@ -404,6 +417,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const runHistoryPage = useAtomSet(atoms.historyPage, {
     mode: "promiseExit"
   })
+  const runPendingPage = useAtomSet(atoms.pendingPage, {
+    mode: "promiseExit"
+  })
   const [busyJobId, setBusyJobId] = useAtom(atoms.busyJob)
   const [busyChat, setBusyChat] = useAtom(atoms.busyChat)
   const [pull, setPull] = useAtom(atoms.pull)
@@ -411,6 +427,10 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [historyBusy, setHistoryBusy] = useState(false)
   const [historyRecords, setHistoryRecords] = useState<DashboardSnapshotType["records"]>([])
   const [historyNextCursor, setHistoryNextCursor] = useState(initial.historyNextCursor)
+  const [pendingBusy, setPendingBusy] = useState(false)
+  const [pendingLocal, setPendingLocal] = useState<DashboardSnapshotType["pendingApprovals"]["local"]>([])
+  const [pendingRemote, setPendingRemote] = useState<DashboardSnapshotType["pendingApprovals"]["remote"]>([])
+  const [pendingNextCursors, setPendingNextCursors] = useState(initial.pendingApprovals.nextCursors)
   const start = useRef<number | null>(null)
   useAtomMount(atoms.chatPoll)
 
@@ -487,6 +507,20 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     setHistoryRecords((records) => [...records, ...exit.value.records])
     setHistoryNextCursor(exit.value.nextCursor)
   }
+  const onLoadPending = async (): Promise<void> => {
+    const continuation = pendingNextCursors.at(0)
+    if (continuation === undefined || pendingBusy) return
+    setPendingBusy(true)
+    const exit = await runPendingPage(continuation)
+    setPendingBusy(false)
+    if (Exit.isFailure(exit)) {
+      Effect.runFork(Effect.logWarning(Cause.pretty(exit.cause)))
+      return
+    }
+    setPendingLocal((records) => [...records, ...exit.value.local])
+    setPendingRemote((records) => [...records, ...exit.value.remote])
+    setPendingNextCursors((cursors) => [...cursors.slice(1), ...exit.value.nextCursors])
+  }
 
   const snapshot = AsyncResult.isSuccess(result)
     ? result.value
@@ -521,6 +555,12 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
               ? snapshot
               : { ...snapshot, chat: chat ?? null, work: work ?? null }),
             historyNextCursor,
+            pendingApprovals: {
+              ...snapshot.pendingApprovals,
+              local: [...snapshot.pendingApprovals.local, ...pendingLocal],
+              remote: [...snapshot.pendingApprovals.remote, ...pendingRemote],
+              nextCursors: pendingNextCursors
+            },
             records: [...snapshot.records, ...historyRecords]
           },
           deepLinkTarget
@@ -542,6 +582,9 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     if (snapshot === null) return
     setHistoryRecords([])
     setHistoryNextCursor(snapshot.historyNextCursor)
+    setPendingLocal([])
+    setPendingRemote([])
+    setPendingNextCursors(snapshot.pendingApprovals.nextCursors)
   }, [snapshot?.observedAt])
   useEffect(() => {
     if (currentSnapshot === null) return
@@ -593,12 +636,14 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       busyJobId={busyJobId}
       chatBusy={busyChat}
       historyLoading={historyBusy}
+      pendingLoading={pendingBusy}
       notificationState={notificationState}
       onChatSubmit={onChatSubmit}
       onDecision={(decision) => void onDecision(decision)}
       onDisableNotifications={() => void onNotificationAction(false)}
       onEnableNotifications={() => void onNotificationAction(true)}
       onLoadHistory={() => void onLoadHistory()}
+      onLoadPending={() => void onLoadPending()}
       onRefresh={refreshDashboard}
       pull={pull}
       showHeader={!canonical}

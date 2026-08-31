@@ -41,7 +41,12 @@ import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
-import { DashboardSnapshot, PendingApprovalSummary, PendingApprovalTarget } from "../src/dashboard-model.js"
+import {
+  DashboardSnapshot,
+  FleetPendingApprovals,
+  PendingApprovalSummary,
+  PendingApprovalTarget
+} from "../src/dashboard-model.js"
 import {
   budgetDashboardSnapshot,
   dashboardSnapshotBytes,
@@ -107,6 +112,20 @@ const operations: HostOperations = {
 const unusedTerminal: TerminalConnector = {
   open: () => Effect.die("terminal test connector must not be opened")
 }
+
+const pendingRecord = (host: string, index: number): JobRecord => ({
+  actor: "andrey@example.com",
+  approvalNonce: `${host}-nonce-${index}`,
+  approvedBy: null,
+  createdAt: index + 1,
+  error: null,
+  hash: `${host.charCodeAt(0).toString(16)}${index.toString(16)}`.padStart(64, "0"),
+  id: `${host.toLowerCase()}-job-${String(index).padStart(2, "0")}`,
+  payload: { kind: "nix.check" },
+  result: null,
+  status: "pending_approval",
+  updatedAt: index + 1
+})
 
 const assets = {
   connectScript: "",
@@ -261,6 +280,7 @@ describe("host HTTP authority", () => {
         pendingApprovals: {
           failures: [],
           local: [],
+          nextCursors: [],
           remote: Array.from({ length: 16 }, (_, index) => ({
             approval: {
               actor: "andrey@example.com",
@@ -335,7 +355,7 @@ describe("host HTTP authority", () => {
         historyNextCursor: null,
         host: "SER8",
         observedAt: 1,
-        pendingApprovals: { failures: [], local: [], remote: [] },
+        pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
         records: [],
         status: {
           applyConfigured: false,
@@ -388,7 +408,7 @@ describe("host HTTP authority", () => {
         historyNextCursor: null,
         host: "SER8",
         observedAt: 1,
-        pendingApprovals: { failures: [], local: [], remote: [] },
+        pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
         records: [],
         status: {
           applyConfigured: false,
@@ -589,12 +609,38 @@ esac
           expect(Buffer.byteLength(dashboardBody)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )
-          const initial = Schema.decodeUnknownSync(DashboardSnapshot)(
-            JSON.parse(dashboardBody)
-          )
+          const dashboardJson = JSON.parse(dashboardBody)
+          expect(dashboardJson.pendingApprovals.nextCursors).toHaveLength(1)
+          const initial = Schema.decodeUnknownSync(DashboardSnapshot)(dashboardJson)
           expect(initial.pendingApprovals.local).toHaveLength(
             pendingApprovalPageMaxRecords
           )
+          const dashboardIds = initial.pendingApprovals.local.map(({ id }) => id)
+          let continuation = initial.pendingApprovals.nextCursors.at(0)
+          while (continuation !== undefined) {
+            const continuationUrl = new URL(
+              "/v1/dashboard-pending",
+              server.approvalUrl
+            )
+            continuationUrl.searchParams.set("cursorHost", continuation.host)
+            continuationUrl.searchParams.set(
+              "cursorCreatedAt",
+              String(continuation.cursor.createdAt)
+            )
+            continuationUrl.searchParams.set("cursorId", continuation.cursor.id)
+            const continuationResponse = yield* Effect.promise(() => fetch(continuationUrl))
+            expect(continuationResponse.status).toBe(200)
+            const continuationBody = yield* Effect.promise(() => continuationResponse.text())
+            expect(Buffer.byteLength(continuationBody)).toBeLessThanOrEqual(
+              fleetResponseBodyMaxBytes
+            )
+            const page = Schema.decodeUnknownSync(FleetPendingApprovals)(
+              JSON.parse(continuationBody)
+            )
+            for (const { id } of page.local) dashboardIds.push(id)
+            continuation = page.nextCursors.at(0)
+          }
+          expect(dashboardIds).toEqual(ids)
           const hiddenJobId = ids.at(-1)
           if (hiddenJobId === undefined) {
             return yield* Effect.die("hidden approval fixture missing")
@@ -616,6 +662,165 @@ esac
             record: { id: hiddenJobId, status: "pending_approval" }
           })
         }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("continues every local and remote dashboard approval page", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-dashboard-pending-test-"))
+    const mainTailscale = join(root, "tailscale-main")
+    const peerTailscale = join(root, "tailscale-peer")
+    writeFileSync(
+      mainTailscale,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{"ser8":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    writeFileSync(
+      peerTailscale,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.2' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "peer-jobs.sqlite")),
+      (peerStore) =>
+        Effect.acquireUseRelease(
+          JobStore.open(join(root, "main-jobs.sqlite")),
+          (mainStore) =>
+            Effect.gen(function*() {
+              yield* Effect.forEach(
+                Array.from({ length: pendingApprovalPageMaxRecords + 1 }, (_, index) => pendingRecord("SER8", index)),
+                (record) => peerStore.put(record),
+                { discard: true }
+              )
+              yield* Effect.forEach(
+                Array.from({ length: pendingApprovalPageMaxRecords + 1 }, (_, index) => pendingRecord("ALPHA", index)),
+                (record) => mainStore.put(record),
+                { discard: true }
+              )
+              const peerConfig: HostConfiguration = {
+                ...config(root),
+                approvalHub: {
+                  host: "ALPHA",
+                  nodeId: "node-alpha",
+                  url: "https://alpha.example.test/"
+                },
+                approvalNodes: ["node-alpha"],
+                approvalPort: 0,
+                crossHost: true,
+                host: "SER8",
+                port: 0,
+                tailscaleCommand: peerTailscale
+              }
+              const peerFleet = yield* makeFleetService({
+                approvalEnabled: true,
+                host: peerConfig.host,
+                operations,
+                store: peerStore
+              })
+              const peerServer = yield* Effect.acquireRelease(
+                Effect.promise(() =>
+                  startHttpServer(peerConfig, peerFleet, assets, {
+                    terminalConnector: unusedTerminal
+                  })
+                ),
+                (running) => Effect.promise(running.close)
+              )
+              if (peerServer.tailnetUrl === null || peerServer.approvalUrl === null) {
+                return yield* Effect.die("peer listeners missing")
+              }
+              const peerPort = Number(new URL(peerServer.tailnetUrl).port)
+              const approvalPort = Number(new URL(peerServer.approvalUrl).port)
+              const mainConfig: HostConfiguration = {
+                ...config(root),
+                approvalHub: {
+                  host: "ALPHA",
+                  nodeId: "node-alpha",
+                  url: `https://alpha.example.test:${approvalPort}/`
+                },
+                approvalNodes: ["node-alpha"],
+                approvalPort,
+                approvalTls: directTls,
+                crossHost: true,
+                port: peerPort,
+                tailscaleCommand: mainTailscale
+              }
+              const mainFleet = yield* makeFleetService({
+                approvalEnabled: true,
+                host: mainConfig.host,
+                operations,
+                store: mainStore
+              })
+              const mainServer = yield* Effect.acquireRelease(
+                Effect.promise(() =>
+                  startHttpServer(mainConfig, mainFleet, assets, {
+                    terminalConnector: unusedTerminal
+                  })
+                ),
+                (running) => Effect.promise(running.close)
+              )
+              if (mainServer.serveUrl === null) {
+                return yield* Effect.die("canonical listener missing")
+              }
+              const requestHeaders = {
+                host: `alpha.example.test:${approvalPort}`,
+                "tailscale-user-login": "andrey@example.com"
+              }
+              const dashboardResponse = yield* Effect.promise(() =>
+                secureRequestBody(`${mainServer.serveUrl}/v1/dashboard`, requestHeaders)
+              )
+              expect(dashboardResponse.status).toBe(200)
+              const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
+                JSON.parse(dashboardResponse.body)
+              )
+              const localIds = dashboard.pendingApprovals.local.map(({ id }) => id)
+              const remoteIds = dashboard.pendingApprovals.remote.map(({ approval }) => approval.id)
+              const continuations = [...dashboard.pendingApprovals.nextCursors]
+              expect(continuations.map(({ host }) => host).sort()).toEqual(["ALPHA", "SER8"])
+              while (continuations.length > 0) {
+                const continuation = continuations.shift()
+                if (continuation === undefined) continue
+                const parameters = new URLSearchParams({
+                  cursorCreatedAt: String(continuation.cursor.createdAt),
+                  cursorHost: continuation.host,
+                  cursorId: continuation.cursor.id
+                })
+                const pageResponse = yield* Effect.promise(() =>
+                  secureRequestBody(
+                    `${mainServer.serveUrl}/v1/dashboard-pending?${parameters.toString()}`,
+                    requestHeaders
+                  )
+                )
+                expect(pageResponse.status).toBe(200)
+                expect(Buffer.byteLength(pageResponse.body)).toBeLessThanOrEqual(
+                  fleetResponseBodyMaxBytes
+                )
+                const page = Schema.decodeUnknownSync(FleetPendingApprovals)(
+                  JSON.parse(pageResponse.body)
+                )
+                for (const { id } of page.local) localIds.push(id)
+                for (const { approval } of page.remote) remoteIds.push(approval.id)
+                for (const next of page.nextCursors) continuations.push(next)
+              }
+              expect(localIds).toHaveLength(pendingApprovalPageMaxRecords + 1)
+              expect(remoteIds).toHaveLength(pendingApprovalPageMaxRecords + 1)
+            }).pipe(Effect.scoped),
+          (store) => Effect.sync(() => store.close())
+        ),
       (store) => Effect.sync(() => store.close())
     ).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),

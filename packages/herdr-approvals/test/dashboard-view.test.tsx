@@ -36,7 +36,7 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
     host: "ALPHA",
     historyNextCursor: null,
     observedAt: 1_000,
-    pendingApprovals: { failures: [], local: [pending], remote: [] },
+    pendingApprovals: { failures: [], local: [pending], nextCursors: [], remote: [] },
     records: [pending],
     status: {
       applyConfigured: true,
@@ -204,7 +204,7 @@ describe("dashboard approval capability", () => {
         pull={{ distance: 0, ready: false, refreshing: false }}
         snapshot={{
           ...base,
-          pendingApprovals: { failures: [], local: [], remote: [] },
+          pendingApprovals: { failures: [], local: [], nextCursors: [], remote: [] },
           records: [active]
         }}
       />
@@ -233,6 +233,33 @@ describe("dashboard approval capability", () => {
       />
     )
     expect(html).toContain("Load earlier activity")
+  })
+
+  it("offers a continuation when more approvals remain", () => {
+    const continued = {
+      ...snapshot(true),
+      pendingApprovals: {
+        ...snapshot(true).pendingApprovals,
+        nextCursors: [{ host: "ALPHA", cursor: { createdAt: 1_000, id: "job-1" } }]
+      }
+    }
+    const html = renderToStaticMarkup(
+      <DashboardView
+        approvalOnly
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onLoadPending={() => undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={continued}
+      />
+    )
+    expect(html).toContain("Load more approvals")
   })
 
   it("keeps agent activity and general job history out of the approval-only surface", () => {
