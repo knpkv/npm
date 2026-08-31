@@ -25,6 +25,7 @@ export const matchesCodeCommitPullRequestRoute = (
 ): boolean =>
   String(pullRequest.id) === route.pullRequestId &&
   (route.accountId === undefined ||
+    pullRequest.account.repoAccountId === route.accountId ||
     pullRequest.account.awsAccountId === route.accountId ||
     pullRequest.account.profile === route.accountId) &&
   (route.repositoryName === undefined || String(pullRequest.repositoryName) === route.repositoryName) &&
