@@ -115,7 +115,7 @@ const publicCallableAdditions = (previousSource, currentSource, filePath, reacha
   const previous = callableParameterTypes(previousSource ?? "", filePath)
   const current = callableParameterTypes(currentSource, filePath)
   return [...current].flatMap(([name, properties]) => {
-    if (reachableNames !== undefined && !reachableNames.has(name)) return []
+    if (reachableNames === undefined || !reachableNames.has(name)) return []
     const previousProperties = previous.get(name) ?? new Set()
     const added = [...properties].filter((property) => !previousProperties.has(property)).toSorted()
     return added.length === 0 ? [] : [{ filePath, name, properties: added }]
@@ -417,6 +417,7 @@ const runSelfTest = () => {
     publicCallableAdditions(refactoredPrevious, refactoredCurrent, "packages/public/src/view.tsx", new Set(["Public"])),
     []
   )
+  assert.deepEqual(publicCallableAdditions(refactoredPrevious, refactoredCurrent, "packages/public/src/view.tsx"), [])
   const previousSource = "type Props = { value: string }\nexport const Public = ({ value }: Props) => value"
   const currentSource =
     "type Props = { value: string; terminalViewportRef?: string }\nexport const Public = ({ value, terminalViewportRef }: Props) => value"
@@ -472,6 +473,32 @@ const runSelfTest = () => {
   )
   assert.equal(isExcludedSourcePath("packages/public/src/generated/public.ts"), true)
   assert.equal(isExcludedSourcePath("packages/public/src/vendor/public.ts"), true)
+  const manifestSources = [
+    "packages/public/src/index.ts",
+    "packages/public/src/feature/view.ts",
+    "packages/public/src/internal.ts",
+    "packages/public/src/generated/generated.ts",
+    "packages/public/src/vendor/vendor.ts"
+  ]
+  assert.deepEqual(manifestEntryPoints({ main: "src/index.ts" }, "packages/public", manifestSources), [
+    "packages/public/src/index.ts"
+  ])
+  assert.deepEqual(
+    manifestEntryPoints(
+      { main: "src/internal.ts", publishConfig: { main: "dist/index.js", types: "dist/dts/index.d.ts" } },
+      "packages/public",
+      manifestSources
+    ),
+    ["packages/public/src/index.ts"]
+  )
+  assert.deepEqual(
+    manifestEntryPoints(
+      { publishConfig: { exports: { ".": "./dist/index.js", "./*.js": "./dist/*.js" } } },
+      "packages/public",
+      manifestSources
+    ),
+    ["packages/public/src/index.ts", "packages/public/src/feature/view.ts", "packages/public/src/internal.ts"]
+  )
 }
 
 const decodeJson = Effect.fn("ChangesetCoverage.decodeJson")(function* (content, location) {
@@ -636,7 +663,12 @@ const sourcePaths = (paths) =>
       !isExcludedSourcePath(changedPath)
   )
 
-const manifestEntryPoints = (manifest, directory) => {
+const entryPathPattern = (entryPath) => {
+  const escaped = entryPath.replace(/[.+?^${}()|[\]\\]/gu, "\\$&")
+  return new RegExp(`^${escaped.replaceAll("*", ".*")}$`, "u")
+}
+
+const manifestEntryPoints = (manifest, directory, sourceFiles) => {
   const paths = []
   const collect = (value) => {
     if (Predicate.isString(value)) paths.push(value)
@@ -644,17 +676,38 @@ const manifestEntryPoints = (manifest, directory) => {
       for (const nested of Object.values(value)) collect(nested)
     }
   }
-  for (const field of ["main", "module", "types", "exports"]) collect(manifest[field])
-  return [
-    ...new Set(
-      paths.flatMap((entryPath) => {
-        const normalized = entryPath.replace(/^\.\//u, "")
-        if (!normalized.startsWith("dist/")) return []
-        const stem = normalized.slice("dist/".length).replace(/\.(?:d\.ts|[cm]?js|jsx)$/u, "")
-        return [`${directory}/src/${stem}.ts`, `${directory}/src/${stem}.tsx`]
-      })
-    )
-  ].filter((entryPath) => !isExcludedSourcePath(entryPath))
+  const publishConfig =
+    Predicate.isObjectOrArray(manifest.publishConfig) && !Array.isArray(manifest.publishConfig)
+      ? manifest.publishConfig
+      : undefined
+  const effectiveManifest = publishConfig === undefined ? manifest : { ...manifest, ...publishConfig }
+  for (const field of ["main", "module", "types", "exports"]) collect(effectiveManifest[field])
+
+  const candidates = sourceFiles === undefined ? [] : [...sourceFiles]
+  const mapEntryPath = (entryPath) => {
+    const normalized = entryPath.replace(/^\.\//u, "")
+    const sourcePrefix = `${directory}/src/`
+    if (normalized.startsWith("src/")) {
+      const sourcePattern = entryPathPattern(normalized.slice("src/".length).replace(/\.(?:[cm]?js|jsx)$/u, ".ts"))
+      return candidates.filter((candidate) => sourcePattern.test(candidate.slice(sourcePrefix.length)))
+    }
+    if (!normalized.startsWith("dist/")) return []
+    const outputPath = normalized.slice("dist/".length)
+    const outputPattern = entryPathPattern(outputPath)
+    return candidates.filter((candidate) => {
+      const sourceRelative = candidate.slice(sourcePrefix.length)
+      const sourceStem = sourceRelative.replace(/\.(?:tsx?|jsx)$/u, "")
+      const outputCandidates = [
+        `${sourceStem}.js`,
+        `${sourceStem}.jsx`,
+        `dts/${sourceStem}.d.ts`,
+        `src/${sourceStem}.js`,
+        `src/${sourceStem}.jsx`
+      ]
+      return outputCandidates.some((outputCandidate) => outputPattern.test(outputCandidate))
+    })
+  }
+  return [...new Set(paths.flatMap(mapEntryPath))].filter((entryPath) => !isExcludedSourcePath(entryPath))
 }
 
 const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
@@ -685,7 +738,10 @@ const changedPublicCallableAdditions = Effect.fn("ChangesetCoverage.changedPubli
       for (const relativePath of relativeSourceFiles) {
         sources.set(relativePath, yield* fileSystem.readFileString(path.join(repositoryRoot, relativePath)))
       }
-      const reachable = reachableCallableNames(sources, manifestEntryPoints(record.manifest, record.directory))
+      const reachable = reachableCallableNames(
+        sources,
+        manifestEntryPoints(record.manifest, record.directory, relativeSourceFiles)
+      )
       for (const filePath of sourcePaths(paths).filter((changedPath) =>
         changedPath.startsWith(`${record.directory}/`)
       )) {
