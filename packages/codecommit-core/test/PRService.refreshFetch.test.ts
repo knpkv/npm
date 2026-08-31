@@ -1,3 +1,5 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
+
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Exit, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
@@ -417,6 +419,48 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([
         { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
       ])
+    }))
+
+  it.effect("does not transition a stale row when the provider returns another repository", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set<string>())
+      const statusUpdates = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, {
+          getPullRequests: () => Stream.empty,
+          getPullRequest: () =>
+            Effect.succeed(
+              new PullRequestDetail({
+                ...providerClosedDetail,
+                repositoryName: "other-repository"
+              })
+            )
+        }),
+        Layer.mock(PullRequestRepo, {
+          findStaleOpen: () => Effect.succeed([staleOpenPR]),
+          updateStatusAndClosedAt: () => Ref.update(statusUpdates, (count) => count + 1),
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {}),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(yield* Ref.get(statusUpdates)).toBe(0)
     }))
 
   it.effect("withholds scope success when a listed PR cannot be upserted", () =>

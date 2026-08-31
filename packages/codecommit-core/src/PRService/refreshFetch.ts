@@ -158,7 +158,9 @@ export const fetchAndUpsertPRs = (params: {
                 pr.id,
                 awsAccountId,
                 pr.title,
-                pr.account.profile
+                pr.account.profile,
+                pr.repositoryName,
+                pr.account.region
               )
               yield* Effect.forEach([...notifications, ...poolNotifications], (n) => notificationRepo.add(n), {
                 discard: true
@@ -217,14 +219,16 @@ export const fetchAndUpsertPRs = (params: {
               })
               .pipe(
                 Effect.flatMap((detail) =>
-                  resolveStaleStatus(
-                    prRepo,
-                    detail,
-                    pr.awsAccountId,
-                    pr.id,
-                    pr.repositoryName,
-                    pr.accountRegion
-                  )
+                  detail.repositoryName === pr.repositoryName
+                    ? resolveStaleStatus(
+                      prRepo,
+                      detail,
+                      pr.awsAccountId,
+                      pr.id,
+                      pr.repositoryName,
+                      pr.accountRegion
+                    )
+                    : Effect.void
                 ),
                 Effect.catch(() =>
                   withholdScopeSuccess(pr.accountProfile, pr.accountRegion).pipe(

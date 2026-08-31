@@ -4,31 +4,72 @@ import { Data, Effect, Encoding, Option, Schema } from "effect"
 
 const coordinateTokenPrefix = "cc1_"
 const legacyCoordinateTokenPrefix = "ccpr:"
-const coordinateAccountId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
-export const coordinateRouterMaxParamLength = 256
+const coordinatePart = Schema.Trim.check(Schema.isNonEmpty(), Schema.isMaxLength(180))
+const coordinateAccountId = coordinatePart
+export const coordinateRouterMaxParamLength = 1024
 
 export const PullRequestCoordinates = Schema.Struct({
   accountId: coordinateAccountId,
   pullRequestId: PullRequestId,
   repositoryName: RepositoryName,
   region: AwsRegion
-})
+}).check(
+  Schema.makeFilter((coordinates) => {
+    const encoded = Encoding.encodeBase64Url(JSON.stringify([
+      coordinates.accountId,
+      coordinates.pullRequestId,
+      coordinates.repositoryName,
+      coordinates.region
+    ]))
+    return encoded.length + coordinateTokenPrefix.length <= coordinateRouterMaxParamLength
+      ? undefined
+      : "Pull-request coordinate token exceeds the router parameter limit"
+  })
+)
 export type PullRequestCoordinates = typeof PullRequestCoordinates.Type
+
+const coordinateTuple = Schema.Tuple([
+  coordinatePart,
+  coordinatePart,
+  coordinatePart,
+  coordinatePart
+])
+
+const coordinateObject = Schema.Struct({
+  accountId: coordinatePart,
+  pullRequestId: coordinatePart,
+  repositoryName: coordinatePart,
+  region: coordinatePart
+})
+
+const toCoordinates = ({ accountId, pullRequestId, region, repositoryName }: {
+  readonly accountId: string
+  readonly pullRequestId: string
+  readonly repositoryName: string
+  readonly region: string
+}): PullRequestCoordinates => ({
+  accountId,
+  pullRequestId: PullRequestId.make(pullRequestId),
+  repositoryName: RepositoryName.make(repositoryName),
+  region: AwsRegion.make(region)
+})
 
 export class PullRequestCoordinateDecodeError extends Data.TaggedError(
   "PullRequestCoordinateDecodeError"
 )<{ readonly message: string }> {}
 
 /** Encode coordinates into a compact URL-safe token for the existing review API path. */
-export const encodePullRequestCoordinates = (coordinates: PullRequestCoordinates): string =>
-  `${coordinateTokenPrefix}${
+export const encodePullRequestCoordinates = (coordinates: PullRequestCoordinates): string => {
+  const validated = Schema.decodeUnknownSync(PullRequestCoordinates)(coordinates)
+  return `${coordinateTokenPrefix}${
     Encoding.encodeBase64Url(JSON.stringify([
-      coordinates.accountId,
-      coordinates.pullRequestId,
-      coordinates.repositoryName,
-      coordinates.region
+      validated.accountId,
+      validated.pullRequestId,
+      validated.repositoryName,
+      validated.region
     ]))
   }`
+}
 
 /** Decode an exact-coordinate token; ordinary account paths remain legacy routes. */
 export const decodePullRequestCoordinates = (
@@ -41,8 +82,8 @@ export const decodePullRequestCoordinates = (
       catch: () => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinate token" })
     }).pipe(
       Effect.flatMap((json) =>
-        Schema.decodeUnknownEffect(Schema.fromJsonString(PullRequestCoordinates))(json).pipe(
-          Effect.map(Option.some),
+        Schema.decodeUnknownEffect(Schema.fromJsonString(coordinateObject))(json).pipe(
+          Effect.map((coordinates) => Option.some(toCoordinates(coordinates))),
           Effect.mapError(() => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinates" }))
         )
       )
@@ -53,19 +94,10 @@ export const decodePullRequestCoordinates = (
   return Effect.fromResult(Encoding.decodeBase64UrlString(encoded)).pipe(
     Effect.mapError(() => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinate token" })),
     Effect.flatMap((json) =>
-      Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Tuple([
-        coordinateAccountId,
-        PullRequestId,
-        RepositoryName,
-        AwsRegion
-      ])))(json).pipe(
-        Effect.map(([accountId, pullRequestId, repositoryName, region]) => ({
-          accountId,
-          pullRequestId,
-          repositoryName,
-          region
-        })),
-        Effect.map(Option.some),
+      Schema.decodeUnknownEffect(Schema.fromJsonString(coordinateTuple))(json).pipe(
+        Effect.map(([accountId, pullRequestId, repositoryName, region]) =>
+          Option.some(toCoordinates({ accountId, pullRequestId, repositoryName, region }))
+        ),
         Effect.mapError(() => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinates" }))
       )
     )

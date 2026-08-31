@@ -80,6 +80,8 @@ export interface FilterOptionsRow {
 export interface CommentRow {
   readonly pullRequestId: string
   readonly awsAccountId: string
+  readonly repositoryName: string
+  readonly accountRegion: string
   readonly locationsJson: string
 }
 
@@ -89,6 +91,7 @@ export interface PRForReviewRow {
   readonly approvedBy: string | null
   readonly author: string
   readonly awsAccountId: string
+  readonly accountRegion: string
   readonly creationDate: string
   readonly closedAt: string | null
   readonly lastModifiedDate: string
@@ -145,7 +148,7 @@ export const extractComments = (
 }
 
 export const parseFilter = (v?: string): ReadonlyArray<string> | undefined =>
-  v ? v.split(",").map((s) => s.trim()).filter(Boolean) : undefined
+  v === undefined || v === "" ? undefined : v.split(",").map((s) => s.trim()).filter((s) => s !== "")
 
 // ---------------------------------------------------------------------------
 // Filters
@@ -163,10 +166,10 @@ export const whereFilters = (sql: SqlClient.SqlClient, filters: Filters, table?:
   const authors = parseFilter(filters.author)
   const accounts = parseFilter(filters.account)
   // Column references use sql.literal for the table prefix — no user input, only hardcoded table names
-  const col = (name: string) => table ? sql.literal(`${table}.${name}`) : sql.literal(name)
+  const col = (name: string) => table === undefined ? sql.literal(name) : sql.literal(`${table}.${name}`)
   return {
-    repo: repos ? sql`AND ${col("repository_name")} IN ${sql.in(repos)}` : sql``,
-    author: authors ? sql`AND ${col("author")} IN ${sql.in(authors)}` : sql``,
-    account: accounts ? sql`AND ${col("aws_account_id")} IN ${sql.in(accounts)}` : sql``
+    repo: repos === undefined ? sql`` : sql`AND ${col("repository_name")} IN ${sql.in(repos)}`,
+    author: authors === undefined ? sql`` : sql`AND ${col("author")} IN ${sql.in(authors)}`,
+    account: accounts === undefined ? sql`` : sql`AND ${col("aws_account_id")} IN ${sql.in(accounts)}`
   }
 }

@@ -36,12 +36,7 @@ import { SearchBar } from "./search-bar.js"
 type PullRequest = Domain.PullRequest
 
 export const prListHref = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
-  codeCommitPullRequestHref(
-    pr.account.awsAccountId ?? pr.account.profile,
-    String(pr.id),
-    String(pr.repositoryName),
-    String(pr.account.region)
-  )
+  codeCommitPullRequestHref(pr.account.profile, String(pr.id), String(pr.repositoryName), String(pr.account.region))
 
 export const prListKey = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
   `${pr.account.awsAccountId ?? pr.account.profile}:${String(pr.id)}:${String(pr.repositoryName)}:${String(pr.account.region)}`

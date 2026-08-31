@@ -46,7 +46,14 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
           Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
         )
         if (Option.isSome(cachedComments)) {
-          const notifications = diffComments(cachedComments.value, locs, prId, awsAccountId)
+          const notifications = diffComments(
+            cachedComments.value,
+            locs,
+            prId,
+            awsAccountId,
+            row.repositoryName,
+            row.accountRegion
+          )
           yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
             Effect.catch(() => Effect.void)
           )

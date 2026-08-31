@@ -23,6 +23,7 @@ import {
   notificationsSsoLogoutAtom
 } from "../atoms/app.js"
 import { useInfiniteNotifications } from "../hooks/use-infinite-notifications.js"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { useIntersectionObserver } from "../hooks/useIntersectionObserver.js"
 import { useOptimisticSet } from "../hooks/useOptimistic.js"
 import { Badge } from "./ui/badge.js"
@@ -74,8 +75,8 @@ const formatMessage = (message: string): string => {
   const { cause, error, message: msg, operation } = opt.value
   const reason = cause ?? error ?? msg
   const parts: Array<string> = []
-  if (operation) parts.push(operation)
-  if (reason) parts.push(reason)
+  if (operation !== undefined) parts.push(operation)
+  if (reason !== undefined) parts.push(reason)
   return parts.length > 0 ? parts.join(" — ") : message
 }
 
@@ -128,7 +129,11 @@ export function NotificationsPage() {
       markRead({ payload: { id: item.id } })
     }
     if (!isSystem(item)) {
-      navigate(`/accounts/${encodeURIComponent(item.awsAccountId)}/prs/${item.pullRequestId}`)
+      navigate(
+        item.repositoryName !== "" && item.accountRegion !== ""
+          ? codeCommitPullRequestHref(item.awsAccountId, item.pullRequestId, item.repositoryName, item.accountRegion)
+          : `/accounts/${encodeURIComponent(item.awsAccountId)}/prs/${item.pullRequestId}`
+      )
     } else {
       toggleExpand(item.id)
     }

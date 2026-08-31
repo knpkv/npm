@@ -268,6 +268,8 @@ describe("buildListItems", () => {
       title: "Test",
       message: "msg",
       profile: "",
+      repositoryName: "",
+      accountRegion: "",
       createdAt: new Date().toISOString(),
       read: 0
     }

@@ -221,7 +221,9 @@ export const makeRefreshSinglePR = (
         prId,
         durableAccountId,
         detail.title,
-        account.profile
+        account.profile,
+        identity.repositoryName,
+        identity.accountRegion
       )
       yield* Effect.forEach([...prNotifications, ...poolNotifications], (n) => notificationRepo.add(n), {
         discard: true
@@ -234,7 +236,14 @@ export const makeRefreshSinglePR = (
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cachedComments)) {
-        const commentNotifications = diffComments(cachedComments.value, locs, prId, durableAccountId)
+        const commentNotifications = diffComments(
+          cachedComments.value,
+          locs,
+          prId,
+          durableAccountId,
+          identity.repositoryName,
+          identity.accountRegion
+        )
         yield* Effect.forEach(commentNotifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
           Effect.catch(() => Effect.void)
         )

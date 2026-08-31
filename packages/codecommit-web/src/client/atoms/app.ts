@@ -24,6 +24,8 @@ export interface NotificationItem {
   readonly type: string
   readonly title: string
   readonly profile: string
+  readonly repositoryName: string
+  readonly accountRegion: string
   readonly message: string
   readonly createdAt: string
   readonly read: number

@@ -20,6 +20,8 @@ import type { ApprovalRule, CommentThread, PRCommentLocation } from "../Domain.j
 export interface NewNotification {
   readonly pullRequestId: string
   readonly awsAccountId: string
+  readonly repositoryName?: string
+  readonly accountRegion?: string
   readonly type: string
   readonly message: string
   readonly title?: string
@@ -32,6 +34,7 @@ export interface DiffablePR {
   readonly description?: string | null | undefined
   readonly repositoryName: string
   readonly accountProfile: string
+  readonly accountRegion?: string
   readonly status: string
   readonly isApproved: boolean | number
   readonly isMergeable: boolean | number
@@ -43,7 +46,13 @@ export const diffPR = (
   fresh: DiffablePR,
   awsAccountId: string
 ): Array<NewNotification> => {
-  const base = { pullRequestId: fresh.id, awsAccountId, profile: fresh.accountProfile }
+  const base = {
+    pullRequestId: fresh.id,
+    awsAccountId,
+    profile: fresh.accountProfile,
+    ...((fresh.accountRegion !== undefined) && { accountRegion: fresh.accountRegion }),
+    repositoryName: fresh.repositoryName
+  }
   const label = `#${fresh.id} ${fresh.title} (${fresh.repositoryName})`
   const notifications: Array<NewNotification> = []
 
@@ -55,21 +64,21 @@ export const diffPR = (
     }
   }
 
-  if (Boolean(fresh.isApproved) !== Boolean(cached.isApproved)) {
+  if ((fresh.isApproved === true) !== (cached.isApproved === true)) {
     notifications.push({
       ...base,
       type: "approval_changed",
       title: fresh.title,
-      message: `Approval ${fresh.isApproved ? "granted" : "revoked"} on ${label}`
+      message: `Approval ${fresh.isApproved === true ? "granted" : "revoked"} on ${label}`
     })
   }
 
-  if (Boolean(fresh.isMergeable) !== Boolean(cached.isMergeable)) {
+  if ((fresh.isMergeable === true) !== (cached.isMergeable === true)) {
     notifications.push({
       ...base,
       type: "merge_changed",
       title: fresh.title,
-      message: `${label} is ${fresh.isMergeable ? "now mergeable" : "no longer mergeable"}`
+      message: `${label} is ${fresh.isMergeable === true ? "now mergeable" : "no longer mergeable"}`
     })
   }
 
@@ -88,7 +97,7 @@ export const diffPR = (
 
   if (fresh.status !== cached.status) {
     // CodeCommit sets isMergeable=false after merge, so CLOSED+!isMergeable = merged
-    if (fresh.status === "CLOSED" && !fresh.isMergeable) {
+    if (fresh.status === "CLOSED" && fresh.isMergeable !== true) {
       notifications.push({ ...base, type: "pr_merged", title: fresh.title, message: `${label} was merged` })
     } else if (fresh.status === "CLOSED") {
       notifications.push({ ...base, type: "pr_closed", title: fresh.title, message: `${label} was closed` })
@@ -110,16 +119,20 @@ export const diffApprovalPools = (
   prId: string,
   awsAccountId: string,
   prTitle?: string,
-  profile?: string
+  profile?: string,
+  repositoryName?: string,
+  accountRegion?: string
 ): Array<NewNotification> => {
-  if (!currentUser) return []
+  if (currentUser === undefined || currentUser === "") return []
   const wasInPool = cachedRules.some((r) => r.poolMembers.includes(currentUser))
   const nowInPool = freshRules.some((r) => r.poolMembers.includes(currentUser))
 
   const notifications: Array<NewNotification> = []
   const optional = {
     ...((prTitle != null) && { title: prTitle }),
-    ...((profile != null) && { profile })
+    ...((profile != null) && { profile }),
+    ...((repositoryName != null) && { repositoryName }),
+    ...((accountRegion != null) && { accountRegion })
   }
 
   if (!wasInPool && nowInPool) {
@@ -172,9 +185,16 @@ export const diffComments = (
   cached: ReadonlyArray<PRCommentLocation>,
   fresh: ReadonlyArray<PRCommentLocation>,
   pullRequestId: string,
-  awsAccountId: string
+  awsAccountId: string,
+  repositoryName?: string,
+  accountRegion?: string
 ): Array<NewNotification> => {
-  const base = { pullRequestId, awsAccountId }
+  const base = {
+    pullRequestId,
+    awsAccountId,
+    ...((repositoryName !== undefined) && { repositoryName }),
+    ...((accountRegion !== undefined) && { accountRegion })
+  }
   const cachedFlat = flattenLocations(cached)
   const freshFlat = flattenLocations(fresh)
   const cachedMap = new Map(cachedFlat.map((c) => [c.id, c]))
@@ -191,11 +211,11 @@ export const diffComments = (
       hasNew = true
     }
     const old = cachedMap.get(f.id)
-    if (old && old.content !== f.content && !f.deleted && !hasEdited) {
+    if (old !== undefined && old.content !== f.content && f.deleted !== true && hasEdited === false) {
       notifications.push({ ...base, type: "comment_edited", message: `Comment edited on #${pullRequestId}` })
       hasEdited = true
     }
-    if (old && !old.deleted && f.deleted && !hasDeleted) {
+    if (old !== undefined && old.deleted === false && f.deleted === true && hasDeleted === false) {
       notifications.push({ ...base, type: "comment_deleted", message: `Comment deleted on #${pullRequestId}` })
       hasDeleted = true
     }

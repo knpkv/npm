@@ -216,15 +216,30 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             }
           >`
             SELECT c.aws_account_id AS awsAccountId, c.pull_request_id AS pullRequestId,
-              c.repository_name AS repositoryName, c.account_region AS accountRegion,
+              p.repository_name AS repositoryName, p.account_region AS accountRegion,
               p.author AS author, c.locations_json AS locationsJson
             FROM pr_comments c
             INNER JOIN pull_requests p
               ON p.id = c.pull_request_id
               AND p.aws_account_id = c.aws_account_id
-              AND p.repository_name = c.repository_name
-              AND p.account_region = c.account_region
-            WHERE c.repository_name <> '' AND c.account_region <> ''
+              AND (
+                (p.repository_name = c.repository_name AND p.account_region = c.account_region)
+                OR (
+                  c.repository_name = ''
+                  AND c.account_region = ''
+                  AND (
+                    SELECT count(*) FROM pull_requests p2
+                    WHERE p2.aws_account_id = c.aws_account_id AND p2.id = c.pull_request_id
+                  ) = 1
+                  AND NOT EXISTS (
+                    SELECT 1 FROM pr_comments c2
+                    WHERE c2.aws_account_id = c.aws_account_id
+                      AND c2.pull_request_id = c.pull_request_id
+                      AND c2.repository_name = p.repository_name
+                      AND c2.account_region = p.account_region
+                  )
+                )
+              )
           `
           for (const row of rows) {
             const parsed = yield* decodeCommentLocationJson(row.locationsJson)
@@ -251,7 +266,10 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
           SET repo_account_id = (
             SELECT p2.repo_account_id FROM pull_requests p2
             WHERE p2.repo_account_id IS NOT NULL
+              AND p2.aws_account_id = pull_requests.aws_account_id
+              AND p2.id = pull_requests.id
               AND p2.repository_name = pull_requests.repository_name
+              AND p2.account_region = pull_requests.account_region
             LIMIT 1
           )
           WHERE repo_account_id IS NULL`.pipe(

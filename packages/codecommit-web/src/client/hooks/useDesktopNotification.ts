@@ -11,6 +11,7 @@
  * @module
  */
 import { useCallback, useRef } from "react"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { readNotificationApi } from "../host-globals.js"
 import { StorageKeys } from "../storage-keys.js"
 
@@ -28,6 +29,8 @@ export function useDesktopNotification(onNavigate?: (path: string) => void) {
       readonly message: string
       readonly awsAccountId?: string
       readonly pullRequestId?: string
+      readonly repositoryName?: string
+      readonly accountRegion?: string
     }) => {
       // Dedup: don't fire the same notification twice
       if (n.id != null) {
@@ -55,8 +58,15 @@ export function useDesktopNotification(onNavigate?: (path: string) => void) {
       notification.addEventListener("click", () => {
         window.focus()
         notification.close()
-        const path = n.awsAccountId && n.pullRequestId
-          ? `/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`
+        const path = n.awsAccountId !== undefined &&
+            n.awsAccountId !== "" &&
+            n.pullRequestId !== undefined &&
+            n.pullRequestId !== "" &&
+            n.repositoryName !== undefined &&
+            n.repositoryName !== "" &&
+            n.accountRegion !== undefined &&
+            n.accountRegion !== ""
+          ? codeCommitPullRequestHref(n.awsAccountId, n.pullRequestId, n.repositoryName, n.accountRegion)
           : "/notifications"
         navigateRef.current?.(path)
       })

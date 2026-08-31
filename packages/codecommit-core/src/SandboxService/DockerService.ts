@@ -95,6 +95,17 @@ const makeDockerService = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const docker = (...args: Array<string>) =>
     spawner.string(ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`]))
+  const dockerWithResult = (...args: Array<string>) =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`])
+        )
+        const output = yield* Stream.mkString(Stream.decodeText(handle.stdout))
+        const exitCode = yield* handle.exitCode
+        return { output, exitCode }
+      })
+    )
   const dockerWithInput = (input: string, ...args: Array<string>) =>
     spawner.string(
       ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`], {
@@ -171,24 +182,25 @@ const makeDockerService = Effect.gen(function*() {
       docker("rm", "-f", containerId).pipe(Effect.asVoid, dockerError("removeContainer")),
 
     inspectContainer: (containerId: string) =>
-      docker("inspect", containerId).pipe(
-        dockerError("inspectContainer"),
-        Effect.flatMap((output) =>
-          Effect.try({
-            try: () => {
-              const arr = decodeContainerInfoArray(JSON.parse(output))
-              if (arr.length === 0) return undefined
-              return arr[0]
-            },
-            catch: (cause) => new DockerError({ operation: "inspectContainer", cause })
-          })
-        ),
-        Effect.flatMap((containerInfo) =>
-          containerInfo === undefined
-            ? Effect.fail(new DockerError({ operation: "inspectContainer", cause: "Empty inspect result" }))
-            : Effect.succeed(containerInfo)
+      Effect.gen(function*() {
+        const result = yield* dockerWithResult("inspect", containerId).pipe(
+          Effect.mapError((cause) => new DockerError({ operation: "inspectContainer", cause }))
         )
-      ),
+        if (Number(result.exitCode) !== 0) {
+          return yield* new DockerError({
+            operation: "inspectContainer",
+            cause: result.output.trim() || `docker inspect exited with code ${String(result.exitCode)}`
+          })
+        }
+        const arr = yield* Effect.try({
+          try: () => decodeContainerInfoArray(JSON.parse(result.output)),
+          catch: (cause) => new DockerError({ operation: "inspectContainer", cause })
+        })
+        const containerInfo = arr[0]
+        return containerInfo === undefined
+          ? yield* new DockerError({ operation: "inspectContainer", cause: "Empty inspect result" })
+          : containerInfo
+      }),
 
     exec: (containerId: string, cmd: ReadonlyArray<string>) =>
       docker("exec", containerId, ...cmd).pipe(dockerError("exec")),

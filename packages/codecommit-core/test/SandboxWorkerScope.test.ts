@@ -53,6 +53,7 @@ interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
+  readonly regionlessByPr?: SandboxRow
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
@@ -79,6 +80,10 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     findByPr: () =>
       Effect.succeed(
         options?.existingByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.existingByPr)
+      ),
+    findRegionlessByPr: () =>
+      Effect.succeed(
+        options?.regionlessByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.regionlessByPr)
       ),
     findActive: () =>
       Ref.get(rowRef).pipe(
@@ -237,18 +242,45 @@ describe("SandboxWorkerScope", () => {
 
   it.effect("does not reuse or relabel a regionless legacy sandbox", () =>
     Effect.gen(function*() {
-      const fixture = yield* makeFixture(() => Effect.never, { existingByPr: legacyRow })
+      const fixture = yield* makeFixture(() => Effect.never, { regionlessByPr: legacyRow })
 
-      const reused = yield* Effect.scoped(
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("Regionless legacy sandbox")
+      }
+      expect(yield* Ref.get(fixture.regionUpdates)).toEqual([])
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("retires an authenticated running regionless sandbox before exact creation", () =>
+    Effect.gen(function*() {
+      const regionless = { ...legacyRow, accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPr: regionless,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
         SandboxService.pipe(
           Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
           Effect.provide(fixture.layer)
         )
       )
 
-      expect(reused.id).not.toBe(legacyRow.id)
-      expect(reused.region).toBe(createParams.region)
-      expect(yield* Ref.get(fixture.regionUpdates)).toEqual([])
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 

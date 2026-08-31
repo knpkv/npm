@@ -52,8 +52,22 @@ const makeCommentRepo = Effect.gen(function*() {
       sql`SELECT locations_json FROM pr_comments
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
-              AND repository_name = ${req.repositoryName}
-              AND account_region = ${req.accountRegion}`
+              AND (
+                (repository_name = ${req.repositoryName} AND account_region = ${req.accountRegion})
+                OR (
+                  repository_name = ${legacyCoordinate}
+                  AND account_region = ${legacyCoordinate}
+                  AND (
+                    SELECT count(*) FROM pull_requests
+                    WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.pullRequestId}
+                  ) = 1
+                )
+              )
+            ORDER BY CASE
+              WHEN repository_name = ${req.repositoryName} AND account_region = ${req.accountRegion} THEN 0
+              ELSE 1
+            END
+            LIMIT 1`
   })
 
   const upsert_ = (awsAccountId: string, prId: string, locationsJson: string, coordinates?: CommentCoordinates) =>

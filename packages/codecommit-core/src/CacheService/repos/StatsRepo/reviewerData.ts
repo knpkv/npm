@@ -25,7 +25,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
   const fJoin = whereFilters(sql, filters, "p")
   return Effect.all({
     prs: sql<PRForReviewRow>`
-        SELECT id, title, author, aws_account_id, repository_name, creation_date, closed_at,
+        SELECT id, title, author, aws_account_id, repository_name, account_region, creation_date, closed_at,
           COALESCE(closed_at, last_modified_date) as last_modified_date, is_approved, status, merged_by, approved_by
         FROM pull_requests
         WHERE COALESCE(closed_at, last_modified_date) >= ${weekStart} AND COALESCE(closed_at, last_modified_date) < ${weekEnd}
@@ -33,9 +33,21 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
           ${f.repo} ${f.author} ${f.account}
       `,
     comments: sql<CommentRow>`
-        SELECT c.pull_request_id, c.aws_account_id, c.locations_json
+        SELECT c.pull_request_id, c.aws_account_id, p.repository_name, p.account_region, c.locations_json
         FROM pr_comments c
-        INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
+        INNER JOIN pull_requests p ON p.id = c.pull_request_id
+          AND p.aws_account_id = c.aws_account_id
+          AND (
+            (p.repository_name = c.repository_name AND p.account_region = c.account_region)
+            OR (
+              c.repository_name = ''
+              AND c.account_region = ''
+              AND (
+                SELECT count(*) FROM pull_requests p2
+                WHERE p2.aws_account_id = c.aws_account_id AND p2.id = c.pull_request_id
+              ) = 1
+            )
+          )
         WHERE COALESCE(p.closed_at, p.last_modified_date) >= ${weekStart} AND COALESCE(p.closed_at, p.last_modified_date) < ${weekEnd}
           AND p.status != 'CLOSED'
           ${fJoin.repo} ${fJoin.author} ${fJoin.account}
@@ -45,22 +57,23 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
       Effect.gen(function*() {
         const prAuthors = new Map(
           prs.map((p) => [
-            `${p.awsAccountId}:${p.id}`,
+            `${p.awsAccountId}:${p.id}:${p.repositoryName}:${p.accountRegion}`,
             {
               id: p.id,
               title: p.title,
               author: p.author,
               repositoryName: p.repositoryName,
               awsAccountId: p.awsAccountId,
+              accountRegion: p.accountRegion,
               creationDate: new Date(p.creationDate),
-              closedAt: p.closedAt ? new Date(p.closedAt) : null,
+              closedAt: p.closedAt === null ? null : new Date(p.closedAt),
               lastModifiedDate: new Date(p.lastModifiedDate),
               isApproved: p.isApproved === 1,
               isMerged: p.status === "MERGED",
               mergedBy: p.mergedBy,
-              approvedBy: p.approvedBy
-                ? p.approvedBy.split(",").map((s) => s.trim()).filter((s) => s && s !== p.author)
-                : []
+              approvedBy: p.approvedBy === null
+                ? []
+                : p.approvedBy.split(",").map((s) => s.trim()).filter((s) => s !== "" && s !== p.author)
             }
           ])
         )
@@ -68,10 +81,10 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
         // Top approvers — from approved_by column (comma-separated names)
         const approverCounts = new Map<string, number>()
         for (const p of prs) {
-          if (p.approvedBy) {
+          if (p.approvedBy !== null) {
             for (const name of p.approvedBy.split(",")) {
               const trimmed = name.trim()
-              if (trimmed && trimmed !== p.author) {
+              if (trimmed !== "" && trimmed !== p.author) {
                 approverCounts.set(trimmed, (approverCounts.get(trimmed) ?? 0) + 1)
               }
             }
@@ -101,9 +114,9 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
         const fmtTs = (d: Date) => d.toISOString().slice(0, 16).replace("T", " ")
 
         for (const row of comments) {
-          const key = `${row.awsAccountId}:${row.pullRequestId}`
+          const key = `${row.awsAccountId}:${row.pullRequestId}:${row.repositoryName}:${row.accountRegion}`
           const prInfo = prAuthors.get(key)
-          if (!prInfo) continue
+          if (prInfo === undefined) continue
 
           const parsed = yield* decodeCommentLocationJson(row.locationsJson)
           const allComments = extractComments(parsed)
@@ -123,7 +136,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
 
           // Time to first review (comment action)
           const firstReview = sorted.find((c) => c.author !== prInfo.author)
-          if (firstReview) {
+          if (firstReview !== undefined) {
             prsWithCommentReview.add(key)
             const durationMs = firstReview.creationDate.getTime() - prInfo.creationDate.getTime()
             firstReviewDeltas.push(durationMs)
@@ -146,11 +159,11 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
           for (let i = 0; i < sorted.length; i++) {
             if (sorted[i]!.author !== prInfo.author) {
               const nextAuthorReply = sorted.slice(i + 1).find((c) => c.author === prInfo.author)
-              if (nextAuthorReply) {
+              if (nextAuthorReply !== undefined) {
                 const dMs = nextAuthorReply.creationDate.getTime() - sorted[i]!.creationDate.getTime()
                 feedbackDeltas.push(dMs)
                 prFeedbackDeltas.push(dMs)
-                if (!firstFeedbackFrom) firstFeedbackFrom = sorted[i]!.creationDate
+                if (firstFeedbackFrom === undefined) firstFeedbackFrom = sorted[i]!.creationDate
                 lastFeedbackTo = nextAuthorReply.creationDate
               }
             }

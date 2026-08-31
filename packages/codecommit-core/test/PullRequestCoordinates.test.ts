@@ -165,7 +165,8 @@ describe("pull request coordinate migration", () => {
       yield* sql`INSERT INTO pull_requests
         (id, aws_account_id, repository_name, account_region, author)
         VALUES ('42', '123456789012', 'payments', 'eu-west-1', 'author'),
-               ('42', '123456789012', 'orders', 'us-east-1', 'author')`
+               ('42', '123456789012', 'orders', 'us-east-1', 'author'),
+               ('43', '123456789012', 'single', 'eu-west-1', 'author')`
       const paymentComments = JSON.stringify([{
         comments: [{
           root: {
@@ -206,6 +207,9 @@ describe("pull request coordinate migration", () => {
       yield* sql`INSERT OR REPLACE INTO pr_comments
         (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
         VALUES ('42', '123456789012', 'orders', 'us-east-1', ${orderComments})`
+      yield* sql`INSERT OR REPLACE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('43', '123456789012', '', '', ${orderComments})`
       yield* mutations(sql, Effect.void).refreshCommentedBy()
 
       const comments = yield* sql<{ readonly repositoryName: string | null; readonly locationsJson: string }>`
@@ -236,7 +240,8 @@ describe("pull request coordinate migration", () => {
         FROM pull_requests ORDER BY repository_name`
       expect(commentedBy).toEqual([
         { repositoryName: "orders", commentedBy: "order-reviewer" },
-        { repositoryName: "payments", commentedBy: "payment-reviewer" }
+        { repositoryName: "payments", commentedBy: "payment-reviewer" },
+        { repositoryName: "single", commentedBy: "order-reviewer" }
       ])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

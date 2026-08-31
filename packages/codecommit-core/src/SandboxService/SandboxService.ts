@@ -190,6 +190,28 @@ const makeSandboxService = Effect.gen(function*() {
           // Regionless legacy rows have no trustworthy checkout coordinate and
           // must not be relabeled or reused for a new request.
         }
+        const regionless = yield* repo.findRegionlessByPr(
+          params.awsAccountId,
+          params.pullRequestId,
+          params.repositoryName
+        )
+        if (Option.isSome(regionless)) {
+          const legacy = regionless.value
+          if (legacy.accessPassword === null || legacy.containerId === null) {
+            return yield* new SandboxError({
+              sandboxId: SandboxId.make(legacy.id),
+              message: "Regionless legacy sandbox requires explicit cleanup before recreation"
+            })
+          }
+          const inspected = yield* docker.inspectContainer(legacy.containerId).pipe(
+            Effect.map(Option.some),
+            Effect.catchIf(isMissingContainerError, () => Effect.succeed(Option.none()))
+          )
+          if (Option.isSome(inspected) && inspected.value.State.Running === true) {
+            yield* docker.stopContainer(legacy.containerId)
+          }
+          yield* updateStatus(SandboxId.make(legacy.id), "stopped")
+        }
 
         const sandboxCfg = yield* loadSandboxConfig
         yield* validateSandboxConfig(sandboxCfg, homePath)
@@ -386,7 +408,11 @@ const makeSandboxService = Effect.gen(function*() {
 
         return yield* repo.findById(id)
       }).pipe(
-        Effect.mapError((cause) => new SandboxError({ message: "Failed to create sandbox", cause }))
+        Effect.mapError((cause) =>
+          Predicate.isTagged(cause, "SandboxError")
+            ? cause
+            : new SandboxError({ message: "Failed to create sandbox", cause })
+        )
       ),
 
     get: (id: SandboxId) =>

@@ -158,12 +158,16 @@ export const selectedPullRequest = (
   coordinates?: PullRequestCoordinates
 ): Effect.Effect<Domain.PullRequest, ApiError> => {
   const routeAccountId = coordinates?.accountId ?? awsAccountId
+  const accountMatches = (candidate: Domain.PullRequest): boolean =>
+    coordinates === undefined
+      ? candidate.account.awsAccountId === routeAccountId
+        || candidate.account.repoAccountId === routeAccountId
+        || candidate.account.profile === routeAccountId
+      : candidate.account.awsAccountId === routeAccountId || candidate.account.profile === routeAccountId
   const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&
-      (candidate.account.awsAccountId === routeAccountId ||
-        candidate.account.repoAccountId === routeAccountId ||
-        candidate.account.profile === routeAccountId) &&
+      accountMatches(candidate) &&
       (coordinates === undefined ||
         (candidate.repositoryName === coordinates.repositoryName && candidate.account.region === coordinates.region))
   )

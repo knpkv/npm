@@ -131,6 +131,7 @@ export const syncWeek = Effect.fn("syncWeek")(
             })
             .pipe(
               Effect.flatMap((detail) => {
+                if (detail.repositoryName !== pr.repositoryName) return Effect.void
                 if (detail.status !== "OPEN") {
                   return prRepo
                     .updateStatusAndClosedAt(

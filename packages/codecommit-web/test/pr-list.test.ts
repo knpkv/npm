@@ -17,7 +17,7 @@ describe("PR list links", () => {
     const href = prListHref(pullRequest)
 
     expect(href).toBe(
-      "/accounts/111122223333/prs/42?repository=payments&region=eu-west-1"
+      "/accounts/production/prs/42?repository=payments&region=eu-west-1"
     )
 
     expect(prListKey(pullRequest)).toBe("111122223333:42:payments:eu-west-1")
