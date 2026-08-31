@@ -512,7 +512,7 @@ describe("host HTTP authority", () => {
 
       const malformed = yield* Effect.result(
         recordWorkCheckpointRequest(
-          Effect.succeed("andrey@example.com"),
+          Effect.succeed("local"),
           decodeWorkCheckpoint({ ...workCheckpoint, command: ["sh", "-c", "id"] }),
           work
         )
@@ -521,22 +521,67 @@ describe("host HTTP authority", () => {
 
       expect(
         yield* recordWorkCheckpointRequest(
-          Effect.succeed("andrey@example.com"),
+          Effect.succeed("local"),
           decodeWorkCheckpoint(workCheckpoint),
           work
         )
       ).toEqual(workCheckpoint)
-      const duplicate = yield* Effect.result(
+      const replay = yield* Effect.result(
         recordWorkCheckpointRequest(
-          Effect.succeed("andrey@example.com"),
+          Effect.succeed("local"),
           decodeWorkCheckpoint(workCheckpoint),
           work
         )
       )
-      expect(duplicate).toMatchObject({
-        failure: { _tag: "WorkCheckpointConflictError", eventId: "event-work-created" }
-      })
+      expect(replay).toMatchObject({ _tag: "Success", success: workCheckpoint })
       expect((yield* work.snapshots(1_000)).now.goals).toEqual([workCheckpoint.goal])
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("records and reads Work only through the loopback listener", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-work-loopback-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const hostConfig = config(root)
+      const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
+      const fleet = yield* makeFleetService({
+        approvalEnabled: false,
+        host: hostConfig.host,
+        operations,
+        store: jobStore
+      })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+
+      const recorded = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/work/checkpoints`, {
+          body: JSON.stringify(workCheckpoint),
+          headers: { "content-type": "application/json" },
+          method: "POST"
+        })
+      )
+      expect(recorded.status).toBe(201)
+      expect(Schema.decodeUnknownSync(WorkGoalCheckpoint)(yield* Effect.promise(() => recorded.json()))).toEqual(
+        workCheckpoint
+      )
+
+      const snapshot = yield* Effect.promise(() => fetch(`${server.url}/v1/work`))
+      expect(snapshot.status).toBe(200)
+      expect(Schema.decodeUnknownSync(WorkSnapshots)(yield* Effect.promise(() => snapshot.json())).now.goals).toEqual([
+        workCheckpoint.goal
+      ])
+
+      const browserWrite = yield* Effect.promise(() =>
+        fetch(`${server.url}/v1/work/checkpoints`, {
+          body: JSON.stringify(workCheckpoint),
+          headers: { "content-type": "application/json", origin: server.url },
+          method: "POST"
+        })
+      )
+      expect(browserWrite.status).toBe(403)
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
