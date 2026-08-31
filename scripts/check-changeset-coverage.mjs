@@ -1374,11 +1374,27 @@ const runSelfTest = () => {
     manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
     [{ identity: "exports:.", sourcePath: "packages/public/src/index.ts" }]
   )
+  const topLevelConditionalManifest = {
+    exports: { import: "./src/index.ts", require: "./src/index.ts" }
+  }
+  assert.deepEqual(
+    manifestEntryPointDescriptors(topLevelConditionalManifest, "packages/public", [...conditionalSources.keys()]),
+    [{ identity: "exports:.", sourcePath: "packages/public/src/index.ts" }]
+  )
   assert.deepEqual(
     publicCallableChanges(
       conditionalSources,
       conditionalSources,
       manifestEntryPointDescriptors(conditionalManifest, "packages/public", [...conditionalSources.keys()]),
+      manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
+    ),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      conditionalSources,
+      conditionalSources,
+      manifestEntryPointDescriptors(topLevelConditionalManifest, "packages/public", [...conditionalSources.keys()]),
       manifestEntryPointDescriptors(directManifest, "packages/public", [...conditionalSources.keys()])
     ),
     []
@@ -1641,7 +1657,8 @@ const manifestEntries = (manifest) => {
       entries.push({ identity: `exports:${subpath ?? "."}`, target: value })
     } else if (Predicate.isObjectOrArray(value)) {
       for (const [key, nested] of Object.entries(value)) {
-        collectExports(nested, subpath ?? key)
+        const nextSubpath = subpath ?? (key.startsWith(".") ? key : ".")
+        collectExports(nested, nextSubpath)
       }
     }
   }
