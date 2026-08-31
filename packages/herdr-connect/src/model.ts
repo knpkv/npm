@@ -61,6 +61,22 @@ export const FleetConnectAgents = Schema.Struct({
 })
 export type FleetConnectAgents = typeof FleetConnectAgents.Type
 
+export const connectAgentPageMaxRecords = 64
+export const ConnectAgentCursor = Schema.Struct({
+  host: ConnectAgent.fields.host,
+  id: ConnectAgent.fields.id
+})
+export type ConnectAgentCursor = typeof ConnectAgentCursor.Type
+
+export const FleetConnectAgentPage = Schema.Struct({
+  agents: Schema.Array(ConnectAgent).check(
+    Schema.isMaxLength(connectAgentPageMaxRecords)
+  ),
+  failures: FleetConnectAgents.fields.failures,
+  nextCursor: Schema.NullOr(ConnectAgentCursor)
+})
+export type FleetConnectAgentPage = typeof FleetConnectAgentPage.Type
+
 const TerminalColumns = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 20, maximum: 400 })

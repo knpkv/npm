@@ -12,7 +12,16 @@ import type { AgentActivityStore } from "./activity-store.js"
 import { ConnectPeerError } from "./errors.js"
 import { buildConnectForest } from "./forest.js"
 import { connectAgentId } from "./id.js"
-import { type ConnectAgent, type ConnectPeerFailure, FleetConnectAgents, LocalConnectAgents } from "./model.js"
+import {
+  type ConnectAgent,
+  type ConnectAgentCursor,
+  connectAgentPageMaxRecords,
+  type ConnectPeerFailure,
+  FleetConnectAgentPage,
+  FleetConnectAgents,
+  type FleetConnectAgents as FleetConnectAgentsType,
+  LocalConnectAgents
+} from "./model.js"
 import type { AgentRelationshipStore, RelationshipObservation } from "./relationship-store.js"
 
 export interface AgentSource {
@@ -26,6 +35,47 @@ export interface ConnectPeerTarget {
   readonly online: boolean
   readonly terminalUrl: string | null
 }
+
+const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+
+const compareConnectAgents = (left: ConnectAgent, right: ConnectAgent): number => {
+  const host = compareText(left.host.toLowerCase(), right.host.toLowerCase())
+  return host === 0 ? compareText(left.id, right.id) : host
+}
+
+export const pageFleetConnectAgents = Effect.fn("HerdrConnect.pageFleetAgents")(function*(
+  directory: FleetConnectAgentsType,
+  cursor: ConnectAgentCursor | null
+) {
+  const sorted = directory.agents.toSorted(compareConnectAgents)
+  const cursorIndex = cursor === null
+    ? -1
+    : sorted.findIndex(
+      ({ host, id }) => host.toLowerCase() === cursor.host.toLowerCase() && id === cursor.id
+    )
+  if (cursor !== null && cursorIndex === -1) {
+    return yield* new ConnectPeerError({
+      cause: cursor,
+      host: "fleet",
+      reason: "invalid_response"
+    })
+  }
+  const start = cursorIndex + 1
+  const agents = sorted.slice(start, start + connectAgentPageMaxRecords)
+  const last = agents.at(-1)
+  const nextCursor = start + agents.length < sorted.length && last !== undefined
+    ? { host: last.host, id: last.id }
+    : null
+  return yield* Schema.decodeUnknownEffect(FleetConnectAgentPage)({
+    agents,
+    failures: cursor === null ? directory.failures : [],
+    nextCursor
+  }).pipe(
+    Effect.mapError(
+      (cause) => new ConnectPeerError({ cause, host: "fleet", reason: "invalid_response" })
+    )
+  )
+})
 
 export const localConnectAgents = Effect.fn("HerdrConnect.localAgents")(function*(
   config: HostConfiguration,

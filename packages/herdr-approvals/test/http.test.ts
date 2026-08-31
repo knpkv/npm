@@ -1,6 +1,8 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import {
+  connectAgentPageMaxRecords,
+  FleetConnectAgentPage,
   terminalCommandMaxPayloadBytes,
   type TerminalConnector,
   terminalFrameMaxEncodedBytes,
@@ -628,10 +630,31 @@ esac
       },
       approvalPort: 0,
       approvalTls: directTls,
+      applyMachines: ["SER8"],
       crossHost: true,
       host: "SER8",
+      machines: [{ host: "SER8", nodeId: "node-ser8" }],
       port: 0,
       tailscaleCommand
+    }
+    const directTlsOperations: HostOperations = {
+      ...operations,
+      listAgents: () =>
+        Effect.succeed({
+          agents: Array.from({ length: 130 }, (_, index) => ({
+            activityRevision: 1,
+            agentId: `agent-${index}`,
+            kind: "k".repeat(256),
+            name: "n".repeat(256),
+            paneId: `w1:p${index}`,
+            parentAgentId: null,
+            relation: null,
+            status: "s".repeat(256),
+            work: "w".repeat(256)
+          })),
+          available: true,
+          error: null
+        })
     }
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
@@ -640,7 +663,7 @@ esac
           const fleet = yield* makeFleetService({
             approvalEnabled: true,
             host: hostConfig.host,
-            operations,
+            operations: directTlsOperations,
             store
           })
           const server = yield* Effect.acquireRelease(
@@ -690,6 +713,29 @@ esac
           expect(
             Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now.goals
           ).toHaveLength(acceptedWorkCheckpoints)
+          const agentIds: Array<string> = []
+          let agentCursor: typeof FleetConnectAgentPage.Type["nextCursor"] = null
+          do {
+            const path = agentCursor === null
+              ? "/v1/connect/agents"
+              : `/v1/connect/agents?cursorHost=${encodeURIComponent(agentCursor.host)}&cursorId=${
+                encodeURIComponent(agentCursor.id)
+              }`
+            const pageResponse = yield* Effect.promise(() =>
+              secureRequestBody(`${server.serveUrl}${path}`, requestHeaders)
+            )
+            expect(pageResponse.status).toBe(200)
+            expect(Buffer.byteLength(pageResponse.body)).toBeLessThanOrEqual(
+              fleetResponseBodyMaxBytes
+            )
+            const page = Schema.decodeUnknownSync(FleetConnectAgentPage)(
+              JSON.parse(pageResponse.body)
+            )
+            expect(page.agents.length).toBeLessThanOrEqual(connectAgentPageMaxRecords)
+            for (const { id } of page.agents) agentIds.push(id)
+            agentCursor = page.nextCursor
+          } while (agentCursor !== null)
+          expect(new Set(agentIds).size).toBe(130)
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(

@@ -10,9 +10,11 @@ import type {
 import {
   AgentActivityStore,
   AgentRelationshipStore,
+  ConnectAgentCursor,
   fleetConnectAgents,
   localConnectAgents,
   makeHerdrTerminalConnector,
+  pageFleetConnectAgents,
   TerminalClientCommand,
   terminalCommandMaxPayloadBytes,
   terminalFrameMaxEncodedBytes,
@@ -490,6 +492,24 @@ const decodePendingApprovalCursor = Effect.fn(
   }).pipe(
     Effect.mapError(
       () => new FleetValidationError({ detail: "invalid pending approval cursor" })
+    )
+  )
+})
+
+const decodeConnectAgentCursor = Effect.fn(
+  "HostHttp.decodeConnectAgentCursor"
+)(function*(url: URL) {
+  const host = url.searchParams.get("cursorHost")
+  const id = url.searchParams.get("cursorId")
+  if (host === null && id === null) return null
+  if (host === null || id === null) {
+    return yield* new FleetValidationError({
+      detail: "Connect agent cursor requires cursorHost and cursorId"
+    })
+  }
+  return yield* Schema.decodeUnknownEffect(ConnectAgentCursor)({ host, id }).pipe(
+    Effect.mapError(
+      () => new FleetValidationError({ detail: "invalid Connect agent cursor" })
     )
   )
 })
@@ -1820,8 +1840,9 @@ export const startHttpServer = async (
               Effect.andThen(
                 authorized,
                 Effect.gen(function*() {
+                  const cursor = yield* decodeConnectAgentCursor(url)
                   const peers = yield* fleetPeers(config)
-                  return yield* fleetConnectAgents(
+                  const directory = yield* fleetConnectAgents(
                     localConnectAgents(
                       config,
                       service,
@@ -1838,6 +1859,7 @@ export const startHttpServer = async (
                       terminalUrl: peer.terminalUrl
                     }))
                   )
+                  return yield* pageFleetConnectAgents(directory, cursor)
                 })
               )
             )

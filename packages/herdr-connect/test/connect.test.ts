@@ -10,12 +10,21 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync }
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { AgentActivityStore } from "../src/activity-store.js"
-import { type AgentSource, fetchPeerConnectAgents, fleetConnectAgents, localConnectAgents } from "../src/directory.js"
+import {
+  type AgentSource,
+  fetchPeerConnectAgents,
+  fleetConnectAgents,
+  localConnectAgents,
+  pageFleetConnectAgents
+} from "../src/directory.js"
 import { buildConnectForest } from "../src/forest.js"
 import { connectAgentId } from "../src/id.js"
 import { nextConnectAgentIndex } from "../src/keyboard.js"
 import {
   ConnectAgent,
+  connectAgentPageMaxRecords,
+  type ConnectPeerFailure,
+  type FleetConnectAgentPage,
   FleetConnectAgents,
   LocalConnectAgents,
   TerminalClientCommand,
@@ -877,6 +886,60 @@ describe("Connect public seams", () => {
           reason: "invalid_response"
         })
       }
+    })
+  })
+
+  it.effect("pages a 700-agent three-host forest within the response budget", () => {
+    const hosts = ["a".repeat(253), `b${"a".repeat(252)}`, `c${"a".repeat(252)}`]
+    const text = "界".repeat(256)
+    const agents = Array.from({ length: 700 }, (_, index) => {
+      const host = hosts[index % hosts.length] ?? hosts[0]
+      const hostRootIndex = index % hosts.length
+      const idPrefix = `agent-${index.toString().padStart(4, "0")}-`
+      const id = `${idPrefix}${"a".repeat(256 - idPrefix.length)}`
+      const rootPrefix = `agent-${hostRootIndex.toString().padStart(4, "0")}-`
+      const rootId = `${rootPrefix}${"a".repeat(256 - rootPrefix.length)}`
+      const agent = {
+        host,
+        id,
+        kind: text,
+        lastActivityAt: index,
+        name: text,
+        state: text,
+        work: text
+      }
+      return id === rootId
+        ? agent
+        : {
+          ...agent,
+          relationship: { parentAgentId: rootId, relation: "delegated" as const }
+        }
+    })
+    const directory = FleetConnectAgents.make({
+      agents,
+      failures: Array.from({ length: 256 }, (): ConnectPeerFailure => ({
+        host: text,
+        reason: "unavailable"
+      }))
+    })
+    return Effect.gen(function*() {
+      const collected: Array<ConnectAgent> = []
+      let cursor: typeof FleetConnectAgentPage.Type["nextCursor"] = null
+      let pageIndex = 0
+      do {
+        const page = yield* pageFleetConnectAgents(directory, cursor)
+        expect(page.agents.length).toBeLessThanOrEqual(connectAgentPageMaxRecords)
+        expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThanOrEqual(
+          fleetResponseBodyMaxBytes
+        )
+        expect(page.failures).toHaveLength(pageIndex === 0 ? 256 : 0)
+        for (const agent of page.agents) collected.push(agent)
+        cursor = page.nextCursor
+        pageIndex += 1
+      } while (cursor !== null)
+      expect(collected).toHaveLength(700)
+      expect(new Set(collected.map(({ id }) => id)).size).toBe(700)
+      expect((yield* buildConnectForest(collected)).roots).toHaveLength(3)
     })
   })
 

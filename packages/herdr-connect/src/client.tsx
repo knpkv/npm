@@ -6,9 +6,18 @@ import { Cause, Effect, Fiber, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
 import * as HttpClient from "effect/unstable/http/HttpClient"
+import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
-import { FleetConnectAgents, type TerminalClientCommand, TerminalServerSignal, type ConnectAgent } from "./model.js"
+import { buildConnectForest } from "./forest.js"
+import {
+  type ConnectAgent,
+  type ConnectAgentCursor,
+  FleetConnectAgentPage,
+  FleetConnectAgents,
+  type TerminalClientCommand,
+  TerminalServerSignal
+} from "./model.js"
 import {
   makePendingTerminalInput,
   makeTouchScrollGesture,
@@ -108,13 +117,36 @@ const storeRememberedAgent = (key: string) =>
 
 const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
-  const response = yield* client
-    .get("/v1/connect/agents")
-    .pipe(Effect.mapError((cause) => new ConnectNetworkError({ detail: String(cause) })))
-  if (response.status < 200 || response.status >= 300) {
-    return yield* new ConnectStatusError({ status: response.status })
-  }
-  return yield* decodeBoundedResponseJson(response, FleetConnectAgents).pipe(
+  const agents: Array<ConnectAgent> = []
+  const failures: Array<typeof FleetConnectAgents.Type["failures"][number]> = []
+  let cursor: ConnectAgentCursor | null = null
+  do {
+    const path: string = cursor === null
+      ? "/v1/connect/agents"
+      : `/v1/connect/agents?cursorHost=${encodeURIComponent(cursor.host)}&cursorId=${encodeURIComponent(cursor.id)}`
+    const response: HttpClientResponse.HttpClientResponse = yield* client
+      .get(path)
+      .pipe(Effect.mapError((cause) => new ConnectNetworkError({ detail: String(cause) })))
+    if (response.status < 200 || response.status >= 300) {
+      return yield* new ConnectStatusError({ status: response.status })
+    }
+    const page: typeof FleetConnectAgentPage.Type = yield* decodeBoundedResponseJson(
+      response,
+      FleetConnectAgentPage
+    ).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ConnectProtocolError({
+            detail: "invalid fleet agent directory page",
+            cause
+          })
+      )
+    )
+    for (const agent of page.agents) agents.push(agent)
+    for (const failure of page.failures) failures.push(failure)
+    cursor = page.nextCursor
+  } while (cursor !== null)
+  const directory = yield* Schema.decodeUnknownEffect(FleetConnectAgents)({ agents, failures }).pipe(
     Effect.mapError(
       (cause) =>
         new ConnectProtocolError({
@@ -123,6 +155,16 @@ const loadAgents = Effect.gen(function* () {
         })
     )
   )
+  yield* buildConnectForest(directory.agents).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConnectProtocolError({
+          detail: "invalid fleet agent relationship forest",
+          cause
+        })
+    )
+  )
+  return directory
 })
 
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
