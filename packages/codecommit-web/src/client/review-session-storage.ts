@@ -1,7 +1,12 @@
 /** Schema-validated durable storage for per-PR Relay conversations. @module */
 import { Data, Result, Schema } from "effect"
 
-import { PullRequestRelayReviewResponse, RelayReviewConversationTurns, RelayReviewSkillIds } from "../server/Api.js"
+import {
+  MAXIMUM_RELAY_REVIEW_TURNS,
+  PullRequestRelayReviewResponse,
+  RelayReviewConversationTurns,
+  RelayReviewSkillIds
+} from "../server/Api.js"
 import {
   appendReviewTurn,
   FindingDisposition,
@@ -70,6 +75,11 @@ interface RelayReviewSessionReadableStorage {
 
 interface RelayReviewSessionWritableStorage {
   readonly setItem: (key: string, value: string) => void
+}
+
+/** Serialize the read/merge/write transaction across browser tabs. */
+export interface RelayReviewSessionLock {
+  readonly request: <A>(name: string, effect: () => Promise<A>) => Promise<A>
 }
 
 const recoverInterruptedPublications = (
@@ -153,6 +163,11 @@ const compatibleStaleIncomingTurns = (
   const incomingTailIsCurrent = incomingTail !== undefined && currentTurnIds.has(turnIdentity(incomingTail))
   const currentTailIsIncoming = currentTail !== undefined && incomingTurnIds.has(turnIdentity(currentTail))
   const isOlderWindow = hasOverlap && incomingTailIsCurrent && !currentTailIsIncoming
+  if (
+    !hasOverlap &&
+    incoming.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS &&
+    current.turns.length >= MAXIMUM_RELAY_REVIEW_TURNS
+  ) return []
   return isOlderWindow ? compatible.filter(({ findingId }) => findingId === "PR") : compatible
 }
 
@@ -262,21 +277,37 @@ export const readRelayReviewSession = (
   })
 }
 
-export const writeRelayReviewSession = (
+export const writeRelayReviewSession = async (
   storage: RelayReviewSessionReadableStorage & RelayReviewSessionWritableStorage,
   key: string,
-  session: RelayReviewSessionWrite
-): Result.Result<RelayReviewSessionWriteOutcome, RelayReviewSessionReadFailure> => {
-  const existing = readRelayReviewSession(storage, key, session.resource)
-  if (Result.isFailure(existing)) return Result.fail(existing.failure)
-  const outcome: RelayReviewSessionWriteOutcome = existing.success === null
-    ? { _tag: "stored", session: storedSession(session, session.turns, 1) }
-    : mergeStoredSession(existing.success, session)
-  return Result.try({
-    try: () => {
-      storage.setItem(key, JSON.stringify(outcome.session))
-      return outcome
-    },
-    catch: () => new RelayReviewSessionStorageUnavailable({ operation: "write" })
-  })
+  session: RelayReviewSessionWrite,
+  lock: RelayReviewSessionLock
+): Promise<Result.Result<RelayReviewSessionWriteOutcome, RelayReviewSessionReadFailure>> => {
+  try {
+    return await lock.request(`codecommit:relay-review-session:${key}`, async () => {
+      const existing = readRelayReviewSession(storage, key, session.resource)
+      if (Result.isFailure(existing)) return Result.fail(existing.failure)
+      const outcome: RelayReviewSessionWriteOutcome = existing.success === null
+        ? { _tag: "stored", session: storedSession(session, session.turns, 1) }
+        : mergeStoredSession(existing.success, session)
+      const encoded = JSON.stringify(outcome.session)
+      const written = Result.try({
+        try: () => {
+          storage.setItem(key, encoded)
+        },
+        catch: () => new RelayReviewSessionStorageUnavailable({ operation: "write" })
+      })
+      if (Result.isFailure(written)) return Result.fail(written.failure)
+      const persisted = Result.try({
+        try: () => storage.getItem(key),
+        catch: () => new RelayReviewSessionStorageUnavailable({ operation: "write" })
+      })
+      if (Result.isFailure(persisted)) return Result.fail(persisted.failure)
+      return persisted.success === encoded
+        ? Result.succeed(outcome)
+        : Result.fail(new RelayReviewSessionStorageUnavailable({ operation: "write" }))
+    })
+  } catch {
+    return Result.fail(new RelayReviewSessionStorageUnavailable({ operation: "write" }))
+  }
 }

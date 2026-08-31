@@ -42,12 +42,14 @@ export {
 export {
   RelayProductDock,
   RelayProductDockChrome,
+  RelayProductDockChromeBoundary,
   type RelayProductDockHost,
   RelayProductDockInvariantViolation,
   type RelayProductDockMessage,
   RelayProductDockProvider,
   RelayProductDockProviderMissing,
   type RelayPullRequestDockRegistration,
+  relaySelectionMatchesRegistration,
   useRelayProductDockRegistration,
   useRelayPullRequestDock
 } from "./dock.js"
