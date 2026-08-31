@@ -31,6 +31,22 @@ export interface OwnedPushSubscription {
   readonly unsubscribe: () => Promise<boolean>
 }
 
+export interface CurrentPushSubscription extends OwnedPushSubscription {
+  readonly options: {
+    readonly applicationServerKey: ArrayBuffer | null
+  }
+}
+
+const applicationServerKeysEqual = (
+  current: ArrayBuffer | null,
+  expected: ArrayBuffer
+): boolean => {
+  if (current === null || current.byteLength !== expected.byteLength) return false
+  const currentBytes = new Uint8Array(current)
+  const expectedBytes = new Uint8Array(expected)
+  return currentBytes.every((byte, index) => byte === expectedBytes[index])
+}
+
 export const reconcileExistingPushSubscription = <
   Subscription,
   CheckError,
@@ -89,11 +105,15 @@ export const reconcilePushSubscriptionState = <
 export const registerNewPushSubscription = Effect.fn("PushSubscription.registerNew")(function*<
   Subscription extends OwnedPushSubscription,
   A,
-  E,
-  R
+  AcquireError,
+  AcquireRequirements,
+  RegisterError,
+  RegisterRequirements
 >(
-  acquire: Effect.Effect<Subscription, E, R>,
-  register: (subscription: Subscription) => Effect.Effect<A, E, R>
+  acquire: Effect.Effect<Subscription, AcquireError, AcquireRequirements>,
+  register: (
+    subscription: Subscription
+  ) => Effect.Effect<A, RegisterError, RegisterRequirements>
 ) {
   const retained = yield* Ref.make(false)
   return yield* Effect.acquireUseRelease(
@@ -114,6 +134,53 @@ export const registerNewPushSubscription = Effect.fn("PushSubscription.registerN
         )
       )
   )
+})
+
+export const reconcileCurrentPushSubscription = Effect.fn(
+  "PushSubscription.reconcileCurrent"
+)(function*<
+  Subscription extends CurrentPushSubscription,
+  CheckError,
+  CheckRequirements,
+  RegisterResult,
+  RegisterError,
+  RegisterRequirements,
+  AcquireError,
+  AcquireRequirements
+>(
+  subscription: Subscription,
+  expectedApplicationServerKey: ArrayBuffer,
+  acquire: Effect.Effect<Subscription, AcquireError, AcquireRequirements>,
+  isRegistered: (
+    subscription: Subscription
+  ) => Effect.Effect<boolean, CheckError, CheckRequirements>,
+  register: (
+    subscription: Subscription
+  ) => Effect.Effect<RegisterResult, RegisterError, RegisterRequirements>
+) {
+  if (
+    applicationServerKeysEqual(
+      subscription.options.applicationServerKey,
+      expectedApplicationServerKey
+    )
+  ) {
+    return yield* reconcileExistingPushSubscription(
+      subscription,
+      isRegistered,
+      register
+    )
+  }
+  const unsubscribed = yield* Effect.tryPromise({
+    try: () => subscription.unsubscribe(),
+    catch: (cause) => new PushSubscriptionCleanupError({ cause })
+  })
+  if (!unsubscribed) {
+    return yield* new PushSubscriptionCleanupError({
+      cause: "browser push subscription remained active after key rotation"
+    })
+  }
+  yield* registerNewPushSubscription(acquire, register)
+  return true
 })
 
 export const unregisterPushSubscription = Effect.fn("PushSubscription.unregister")(function*<

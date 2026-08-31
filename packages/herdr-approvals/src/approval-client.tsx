@@ -15,7 +15,7 @@ import { JobRecord } from "@knpkv/herdr-fleet/model"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
 import {
-  reconcileExistingPushSubscription,
+  reconcileCurrentPushSubscription,
   reconcilePushSubscriptionState,
   registerNewPushSubscription,
   unregisterPushSubscription
@@ -200,6 +200,23 @@ const loadNotificationState = Effect.gen(function* () {
           try: () => registration.pushManager.getSubscription(),
           catch: (cause) => new BrowserNetworkError({ detail: String(cause) })
         })
+  if (subscription !== null && registration !== undefined) {
+    const expectedKey = applicationServerKey(config.publicKey)
+    return yield* reconcileCurrentPushSubscription(
+      subscription,
+      expectedKey,
+      Effect.tryPromise({
+        try: () =>
+          registration.pushManager.subscribe({
+            applicationServerKey: expectedKey,
+            userVisibleOnly: true
+          }),
+        catch: (cause) => new BrowserNetworkError({ detail: String(cause) })
+      }),
+      isPushSubscriptionRegistered,
+      registerPushSubscription
+    ).pipe(Effect.map((): NotificationState => "enabled"))
+  }
   return yield* reconcilePushSubscriptionState(
     Notification.permission,
     subscription,
@@ -251,21 +268,26 @@ const enableNotifications = Effect.fn("Notifications.enable")(function* () {
     try: () => registration.pushManager.getSubscription(),
     catch: (cause) => new BrowserNetworkError({ detail: String(cause) })
   })
+  const expectedKey = applicationServerKey(publicKey)
+  const acquire = Effect.tryPromise({
+    try: () =>
+      registration.pushManager.subscribe({
+        applicationServerKey: expectedKey,
+        userVisibleOnly: true
+      }),
+    catch: (cause) => new BrowserNetworkError({ detail: String(cause) })
+  })
   if (existing !== null) {
-    yield* reconcileExistingPushSubscription(existing, isPushSubscriptionRegistered, registerPushSubscription)
+    yield* reconcileCurrentPushSubscription(
+      existing,
+      expectedKey,
+      acquire,
+      isPushSubscriptionRegistered,
+      registerPushSubscription
+    )
     return
   }
-  return yield* registerNewPushSubscription(
-    Effect.tryPromise({
-      try: () =>
-        registration.pushManager.subscribe({
-          applicationServerKey: applicationServerKey(publicKey),
-          userVisibleOnly: true
-        }),
-      catch: (cause) => new BrowserNetworkError({ detail: String(cause) })
-    }),
-    registerPushSubscription
-  )
+  return yield* registerNewPushSubscription(acquire, registerPushSubscription)
 })
 
 const disableNotifications = Effect.fn("Notifications.disable")(function* () {

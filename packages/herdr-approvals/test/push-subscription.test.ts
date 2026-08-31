@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Result, Schema } from "effect"
 import { PushSubscriptionRecord } from "../src/model.js"
 import {
+  reconcileCurrentPushSubscription,
   reconcileExistingPushSubscription,
   reconcilePushSubscriptionState,
   registerNewPushSubscription,
@@ -15,6 +16,79 @@ class RegistrationError extends Schema.TaggedError<RegistrationError>()(
 ) {}
 
 describe("browser push subscription ownership", () => {
+  it.effect("replaces browser subscriptions after application-server key rotation", () => {
+    const key = (...bytes: ReadonlyArray<number>): ArrayBuffer => Uint8Array.from(bytes).buffer
+    let acquired = 0
+    let registered = ""
+    let retainedUnsubscribed = 0
+    let unsubscribed = 0
+    const replacement = {
+      endpoint: "https://push.example/new",
+      options: { applicationServerKey: key(2, 3, 4) },
+      unsubscribe: () => Promise.resolve(true)
+    }
+    const acquire = Effect.sync(() => {
+      acquired += 1
+      return replacement
+    })
+    return Effect.gen(function*() {
+      expect(
+        yield* reconcileCurrentPushSubscription(
+          {
+            endpoint: "https://push.example/old",
+            options: { applicationServerKey: key(1, 2, 3) },
+            unsubscribe: () => {
+              unsubscribed += 1
+              return Promise.resolve(true)
+            }
+          },
+          key(2, 3, 4),
+          acquire,
+          () => Effect.die("rotated subscription must not be checked"),
+          (subscription) =>
+            Effect.sync(() => {
+              registered = subscription.endpoint
+            })
+        )
+      ).toBe(true)
+      expect({ acquired, registered, unsubscribed }).toEqual({
+        acquired: 1,
+        registered: replacement.endpoint,
+        unsubscribed: 1
+      })
+
+      expect(
+        yield* reconcileCurrentPushSubscription(
+          {
+            endpoint: "https://push.example/current",
+            options: { applicationServerKey: key(2, 3, 4) },
+            unsubscribe: () => {
+              retainedUnsubscribed += 1
+              return Promise.resolve(true)
+            }
+          },
+          key(2, 3, 4),
+          Effect.die("current subscription must not be replaced"),
+          () => Effect.succeed(true),
+          () => Effect.die("registered current subscription must not be posted again")
+        )
+      ).toBe(true)
+      expect(retainedUnsubscribed).toBe(0)
+
+      yield* reconcileCurrentPushSubscription(
+        {
+          endpoint: "https://push.example/keyless",
+          options: { applicationServerKey: null },
+          unsubscribe: () => Promise.resolve(true)
+        },
+        key(2, 3, 4),
+        Effect.succeed(replacement),
+        () => Effect.die("keyless subscription must not be checked"),
+        () => Effect.void
+      )
+    })
+  })
+
   it.effect("accepts only configured public push-service origins", () =>
     Effect.gen(function*() {
       for (
