@@ -34,6 +34,7 @@ export {
   RelayProduct,
   type RelayProductAdapter,
   RelayProductAdapterContractError,
+  RelayProductContinuationReceiptMismatch,
   RelayProductOperation,
   type RelayProductPort
 } from "./conversation.js"

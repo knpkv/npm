@@ -36,10 +36,11 @@ export const selectControlCenterRelayCandidate = (
       return accountId === undefined || candidateMatchesAccount(resolution.candidate, accountId)
         ? resolution.candidate
         : undefined
-    case "ambiguous":
-      return accountId === undefined
-        ? undefined
-        : resolution.candidates.find((candidate) => candidateMatchesAccount(candidate, accountId))
+    case "ambiguous": {
+      if (accountId === undefined) return undefined
+      const matches = resolution.candidates.filter((candidate) => candidateMatchesAccount(candidate, accountId))
+      return matches.length === 1 ? matches[0] : undefined
+    }
     case "account-identity-unavailable":
     case "not-found":
       return undefined

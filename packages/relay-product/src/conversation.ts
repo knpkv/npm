@@ -114,11 +114,10 @@ export const PullRequestConversation = Schema.TaggedUnion({
       switch (conversation._tag) {
         case "codecommit":
           return (
-            conversation.route.accountId === conversation.thread.accountId &&
             conversation.route.pullRequestId === conversation.thread.pullRequestId &&
             conversation.route.href ===
-              `/accounts/${encodeURIComponent(conversation.thread.accountId)}/prs/${
-                encodeURIComponent(conversation.thread.pullRequestId)
+              `/accounts/${encodeURIComponent(conversation.route.accountId)}/prs/${
+                encodeURIComponent(conversation.route.pullRequestId)
               }`
           )
         case "control-center":
@@ -258,6 +257,16 @@ export class RelayProductAdapterContractError extends Schema.TaggedError<RelayPr
   }
 ) {}
 
+export class RelayProductContinuationReceiptMismatch
+  extends Schema.TaggedError<RelayProductContinuationReceiptMismatch>()(
+    "RelayProductContinuationReceiptMismatch",
+    {
+      actualThread: PullRequestThreadIdentity,
+      expectedThread: PullRequestThreadIdentity
+    }
+  )
+{}
+
 export type RelayAuthenticationFailure =
   | RelayAuthenticationRequired
   | RelayAuthorizationDenied
@@ -296,7 +305,10 @@ export interface RelayProductAdapter {
     request: ContinuePullRequestConversationRequest
   ) => Effect.Effect<
     PullRequestConversationContinuation,
-    RelayAuthenticationFailure | PullRequestConversationContinuationFailure | RelayProductAdapterContractError
+    | RelayAuthenticationFailure
+    | PullRequestConversationContinuationFailure
+    | RelayProductAdapterContractError
+    | RelayProductContinuationReceiptMismatch
   >
   readonly openPullRequestConversation: (
     locator: PullRequestConversationLocator
@@ -322,6 +334,30 @@ const requireProduct = (
     ? Effect.void
     : new RelayProductAdapterContractError({ actualProduct, expectedProduct, operation })
 
+const samePullRequestThread = (
+  left: PullRequestThreadIdentity,
+  right: PullRequestThreadIdentity
+): boolean => {
+  if (left._tag !== right._tag) return false
+  switch (left._tag) {
+    case "codecommit":
+      return (
+        right._tag === "codecommit" &&
+        left.accountId === right.accountId &&
+        left.pullRequestId === right.pullRequestId &&
+        left.repositoryName === right.repositoryName
+      )
+    case "control-center":
+      return (
+        right._tag === "control-center" &&
+        left.pluginConnectionId === right.pluginConnectionId &&
+        left.pullRequestId === right.pullRequestId &&
+        left.repositoryName === right.repositoryName &&
+        left.workspaceId === right.workspaceId
+      )
+  }
+}
+
 /** One orchestration path shared by Control Center and CodeCommit product ports. */
 export const makeRelayProductAdapter = (port: RelayProductPort): RelayProductAdapter => {
   const openPullRequestConversation = Effect.fn("RelayProduct.openPullRequestConversation")(function*(
@@ -343,7 +379,15 @@ export const makeRelayProductAdapter = (port: RelayProductPort): RelayProductAda
     const authorization = yield* port.authorize(operation)
     yield* requireProduct(port.product, authorization._tag, operation)
     yield* requireProduct(port.product, request.conversation._tag, operation)
-    return yield* port.continuePullRequestConversation(authorization, request)
+    const receipt = yield* port.continuePullRequestConversation(authorization, request)
+    const expectedThread = pullRequestThreadIdentity(request.conversation)
+    if (!samePullRequestThread(expectedThread, receipt.thread)) {
+      return yield* new RelayProductContinuationReceiptMismatch({
+        actualThread: receipt.thread,
+        expectedThread
+      })
+    }
+    return receipt
   })
 
   return RelayProduct.of({ continuePullRequestConversation, openPullRequestConversation })

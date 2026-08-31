@@ -23,4 +23,13 @@ describe("Control Center Relay locator", () => {
       }, "222222222222")?.accountLabel
     ).toBe("Development · AWS 222222222222")
   })
+
+  it("preserves ambiguity when one account still has multiple candidates", () => {
+    expect(
+      selectControlCenterRelayCandidate({
+        _tag: "ambiguous",
+        candidates: [candidate, { ...candidate, entityId: EntityId.make("019c3df0-2222-7000-8000-000000000003") }]
+      }, "111111111111")
+    ).toBeUndefined()
+  })
 })

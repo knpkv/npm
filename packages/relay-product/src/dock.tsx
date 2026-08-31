@@ -29,7 +29,8 @@ import {
   type PullRequestConversationRedirectFailed,
   PullRequestConversationLocator,
   type RelayAuthenticationFailure,
-  type RelayProductAdapterContractError
+  type RelayProductAdapterContractError,
+  type RelayProductContinuationReceiptMismatch
 } from "./conversation.js"
 import type { RelaySelectorState } from "./model.js"
 
@@ -45,7 +46,10 @@ export interface RelayProductDockMessage {
 }
 
 type RelayProductDockContinuationFailure =
-  RelayAuthenticationFailure | PullRequestConversationContinuationFailure | RelayProductAdapterContractError
+  | RelayAuthenticationFailure
+  | PullRequestConversationContinuationFailure
+  | RelayProductAdapterContractError
+  | RelayProductContinuationReceiptMismatch
 
 type RelayProductDockLocateFailure =
   | RelayAuthenticationFailure
@@ -138,6 +142,8 @@ const actionFailureDescription = (
       return "Relay could not continue this pull-request conversation."
     case "RelayProductAdapterContractError":
       return "The active product does not own this pull-request conversation."
+    case "RelayProductContinuationReceiptMismatch":
+      return "Relay returned a continuation receipt for another pull-request conversation."
   }
 }
 
@@ -408,30 +414,40 @@ export const RelayProductDock = ({ children, host }: RelayProductDockProps): Rea
   return (
     <RelayPullRequestDockContext value={registry}>
       {children}
-      <Suspense fallback={null}>
-        <LazyRelayDock
-          context={registration?.context ?? host.context}
-          defaultOpen={false}
-          footer={
-            readyRegistration === null ? undefined : (
-              <PullRequestContinuation registration={readyRegistration} selection={selection} />
-            )
-          }
-          selection={{
-            model: {
-              onValueChange: setModel,
-              options: selection.models.map(({ id, label }) => ({ label, value: id })),
-              value: selection.modelId
-            },
-            profile: {
-              onValueChange: setProfile,
-              options: selection.profiles.map(({ id, label }) => ({ label, value: id })),
-              value: selection.profileId
+      <div
+        data-relay-product-dock-chrome=""
+        style={{
+          insetBlockEnd: "max(var(--rly-space-16), env(safe-area-inset-bottom, 0px))",
+          insetInlineEnd: "max(var(--rly-space-16), env(safe-area-inset-right, 0px))",
+          position: "fixed",
+          zIndex: 80
+        }}
+      >
+        <Suspense fallback={null}>
+          <LazyRelayDock
+            context={registration?.context ?? host.context}
+            defaultOpen={false}
+            footer={
+              readyRegistration === null ? undefined : (
+                <PullRequestContinuation registration={readyRegistration} selection={selection} />
+              )
             }
-          }}
-          state={relayDockState(host, registration)}
-        />
-      </Suspense>
+            selection={{
+              model: {
+                onValueChange: setModel,
+                options: selection.models.map(({ id, label }) => ({ label, value: id })),
+                value: selection.modelId
+              },
+              profile: {
+                onValueChange: setProfile,
+                options: selection.profiles.map(({ id, label }) => ({ label, value: id })),
+                value: selection.profileId
+              }
+            }}
+            state={relayDockState(host, registration)}
+          />
+        </Suspense>
+      </div>
     </RelayPullRequestDockContext>
   )
 }

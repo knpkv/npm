@@ -128,6 +128,12 @@ export const RelayReviewKind = ReviewKind
 export type RelayReviewKind = typeof RelayReviewKind.Type
 
 const RelayReviewFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u))
+const RelayReviewConversationTarget = Schema.Union([RelayReviewFindingId, Schema.Literal("PR")])
+const RelayReviewConversationTurnId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200)
+)
 export const RelayReviewSkillId = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
@@ -256,7 +262,8 @@ export const RelayReviewMessage = Schema.String.check(
 )
 
 export const RelayReviewConversationTurn = Schema.Struct({
-  findingId: RelayReviewFindingId,
+  id: Schema.optional(RelayReviewConversationTurnId),
+  findingId: RelayReviewConversationTarget,
   role: Schema.Literals(["user", "assistant"]),
   message: RelayReviewMessage
 })
@@ -320,7 +327,7 @@ export const RelayReviewContinueStreamRequest = Schema.Struct({
   ...RelayReviewStreamRequest.fields,
   currentReview: RelayReviewResult,
   turns: RelayReviewConversationTurns,
-  findingId: RelayReviewFindingId,
+  findingId: RelayReviewConversationTarget,
   message: RelayReviewMessage
 }).check(
   Schema.makeFilter(
