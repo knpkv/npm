@@ -249,8 +249,18 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   const enabledFieldsetAction = dock.getByRole("button", { name: "Enabled fieldset action" })
   const expandedSummary = dock.getByText("Expanded evidence", { exact: true })
   const expandedAction = dock.getByRole("button", { name: "Expanded evidence action" })
-  const collapsedSummary = dock.getByText("Collapsed evidence", { exact: true })
+  const collapsedSummary = dock.locator("summary").filter({ hasText: "Collapsed evidence" })
+  const visibleSummaryAction = dock.getByRole("button", { name: "Visible summary action" })
   const collapsedAction = dock.getByRole("button", { name: "Collapsed evidence action", includeHidden: true })
+  const checkedRadio = dock.getByRole("radio", { exact: true, name: "Checked review route" })
+  const uncheckedRadio = dock.getByRole("radio", { exact: true, name: "Unchecked review route" })
+
+  await collapsedSummary.evaluate((summary) => {
+    const action = summary.ownerDocument.createElement("button")
+    action.textContent = "Visible summary action"
+    action.type = "button"
+    summary.append(action)
+  })
 
   await thread.focus()
   await page.keyboard.press("Tab")
@@ -264,12 +274,17 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   await page.keyboard.press("Tab")
   await expect(expandedAction).toBeFocused()
   await page.keyboard.press("Tab")
+  await expect(checkedRadio).toBeFocused()
+  await page.keyboard.press("Tab")
   await expect(collapsedSummary).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(visibleSummaryAction).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(dock.getByRole("button", { name: "Close Relay" })).toBeFocused()
   await expect(collapsedAction).not.toBeFocused()
+  await expect(uncheckedRadio).not.toBeFocused()
   await page.keyboard.press("Shift+Tab")
-  await expect(collapsedSummary).toBeFocused()
+  await expect(visibleSummaryAction).toBeFocused()
 })
 
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
