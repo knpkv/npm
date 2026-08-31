@@ -335,10 +335,11 @@ describe("ChildEnv.profileScopedEnv", () => {
 describe("ChildEnv.gitChildEnv", () => {
   it.effect("drops inherited config selectors while preserving explicit overrides", () =>
     Effect.gen(function*() {
+      const host = yield* ChildEnv.HostEnvironment
       vi.stubEnv("Git_Config_System", "/ambient/system-config")
       const childEnv = ChildEnv.gitChildEnv(
         {
-          ...process.env,
+          ...host.variables,
           GIT_CONFIG_GLOBAL: "/ambient/global-config"
         },
         { GIT_CONFIG_GLOBAL: "/trusted/global-config" }
@@ -354,7 +355,7 @@ describe("ChildEnv.gitChildEnv", () => {
       assert.isTrue(hasSearchPath(env))
     }).pipe(
       Effect.ensuring(Effect.sync(() => vi.unstubAllEnvs())),
-      Effect.provide(NodeServices.layer)
+      Effect.provide(testRuntimeLayer)
     ))
 
   it.effect("drops hook-owned repository controls while preserving the explicit Git command", () =>
