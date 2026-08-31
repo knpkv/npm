@@ -270,7 +270,7 @@
     }
   }
 
-  @media (max-height: 40rem) and (pointer: coarse) {
+  @media (max-width: 40rem) and (max-height: 40rem), (max-height: 40rem) and (pointer: coarse) {
     .sheet .contents {
       display: flex;
       flex: 1 1 auto;

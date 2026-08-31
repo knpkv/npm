@@ -80,6 +80,14 @@ const richTextState: RlyRelayDockState = {
       <fieldset disabled>
         <button type="button">Disabled fieldset action</button>
       </fieldset>
+      <details open>
+        <summary>Expanded evidence</summary>
+        <button type="button">Expanded evidence action</button>
+      </details>
+      <details>
+        <summary>Collapsed evidence</summary>
+        <button type="button">Collapsed evidence action</button>
+      </details>
     </>
   ),
   status: "ready"
@@ -188,8 +196,22 @@ const IframeRelayDockFixture = (): ReactElement => {
       <iframe
         aria-label="Relay portal viewport"
         onLoad={(event) => {
-          const frameDocument = event.currentTarget.contentDocument
+          const frame = event.currentTarget
+          const frameDocument = frame.contentDocument
           if (frameDocument === null) return
+          const catalog = frame.closest<HTMLElement>("[data-rly-catalog]")
+          if (catalog === null) return
+          const styleElement = frameDocument.createElement("style")
+          styleElement.dataset.rlyFrameStyles = ""
+          styleElement.textContent = [...frame.ownerDocument.styleSheets]
+            .flatMap((styleSheet) => [...styleSheet.cssRules].map((rule) => rule.cssText))
+            .join("\n")
+          frameDocument.head.append(styleElement)
+          for (const attribute of catalog.getAttributeNames()) {
+            if (attribute !== "lang" && !attribute.startsWith("data-")) continue
+            const value = catalog.getAttribute(attribute)
+            if (value !== null) frameDocument.documentElement.setAttribute(attribute, value)
+          }
           const target = frameDocument.createElement("div")
           frameDocument.body.replaceChildren(target)
           setContainer(target)
