@@ -208,10 +208,7 @@ const AgendaItem = ({
       </div>
       <JobTimeline record={record} />
       {record.connectTarget === undefined || record.worker === undefined ? null : (
-        <a
-          className="worker-connect-link"
-          href={new URL(record.connectTarget.url, connectBaseUrl).href}
-        >
+        <a className="worker-connect-link" href={new URL(record.connectTarget.url, connectBaseUrl).href}>
           Open {record.worker.name} in Connect
         </a>
       )}
@@ -726,12 +723,7 @@ export const DashboardView = ({
             <ApprovalDecisionHistory records={snapshot.records} />
             {snapshot.historyNextCursor === null ? null : (
               <div className="activity-load-more">
-                <Button
-                  loading={historyLoading}
-                  onClick={onLoadHistory}
-                  type="button"
-                  variant="quiet"
-                >
+                <Button loading={historyLoading} onClick={onLoadHistory} type="button" variant="quiet">
                   Load earlier decisions
                 </Button>
               </div>
@@ -741,9 +733,7 @@ export const DashboardView = ({
           <ActivityHistory
             hasMore={snapshot.historyNextCursor !== null}
             loading={historyLoading}
-            {...(onLoadHistory === undefined
-              ? {}
-              : { onLoadMore: onLoadHistory })}
+            {...(onLoadHistory === undefined ? {} : { onLoadMore: onLoadHistory })}
             records={history}
           />
         )}

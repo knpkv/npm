@@ -118,12 +118,13 @@ const storeRememberedAgent = (key: string) =>
 const loadAgents = Effect.gen(function* () {
   const client = yield* HttpClient.HttpClient
   const agents: Array<ConnectAgent> = []
-  const failures: Array<typeof FleetConnectAgents.Type["failures"][number]> = []
+  const failures: Array<(typeof FleetConnectAgents.Type)["failures"][number]> = []
   let cursor: ConnectAgentCursor | null = null
   do {
-    const path: string = cursor === null
-      ? "/v1/connect/agents"
-      : `/v1/connect/agents?cursorHost=${encodeURIComponent(cursor.host)}&cursorId=${encodeURIComponent(cursor.id)}`
+    const path: string =
+      cursor === null
+        ? "/v1/connect/agents"
+        : `/v1/connect/agents?cursorHost=${encodeURIComponent(cursor.host)}&cursorId=${encodeURIComponent(cursor.id)}`
     const response: HttpClientResponse.HttpClientResponse = yield* client
       .get(path)
       .pipe(Effect.mapError((cause) => new ConnectNetworkError({ detail: String(cause) })))

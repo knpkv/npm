@@ -37,12 +37,10 @@ export const RemotePendingApproval = Schema.Struct({
 })
 
 export const PendingApprovalTarget = Schema.Union([
-  Schema.Struct({
-    _tag: Schema.Literal("local"),
+  Schema.TaggedStruct("local", {
     record: JobRecord
   }),
-  Schema.Struct({
-    _tag: Schema.Literal("remote"),
+  Schema.TaggedStruct("remote", {
     remote: RemotePendingApproval
   })
 ])

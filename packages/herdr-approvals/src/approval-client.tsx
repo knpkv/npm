@@ -99,20 +99,15 @@ const loadDashboardHistory = Effect.fn("Dashboard.loadHistory")((
     cursorCreatedAt: String(cursor.createdAt),
     cursorId: cursor.id
   })
-  return fetchJson(
-    DashboardHistoryPage,
-    `/v1/dashboard-history?${parameters.toString()}`
-  )
+  return fetchJson(DashboardHistoryPage, `/v1/dashboard-history?${parameters.toString()}`)
 })
 
-const loadPendingApprovalTarget = Effect.fn(
-  "Dashboard.loadPendingApprovalTarget"
-)((target: { readonly host: string; readonly jobId: string }) => {
+const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget")((target: {
+  readonly host: string
+  readonly jobId: string
+}) => {
   const parameters = new URLSearchParams(target)
-  return fetchJson(
-    PendingApprovalTarget,
-    `/v1/pending-approval?${parameters.toString()}`
-  )
+  return fetchJson(PendingApprovalTarget, `/v1/pending-approval?${parameters.toString()}`)
 })
 
 const withPendingApprovalTarget = (
@@ -124,26 +119,25 @@ const withPendingApprovalTarget = (
     return snapshot.pendingApprovals.local.some(({ id }) => id === target.record.id)
       ? snapshot
       : {
+          ...snapshot,
+          pendingApprovals: {
+            ...snapshot.pendingApprovals,
+            local: [...snapshot.pendingApprovals.local, target.record]
+          }
+        }
+  }
+  return snapshot.pendingApprovals.remote.some(
+    ({ approval, host }) =>
+      approval.id === target.remote.approval.id && host.toLowerCase() === target.remote.host.toLowerCase()
+  )
+    ? snapshot
+    : {
         ...snapshot,
         pendingApprovals: {
           ...snapshot.pendingApprovals,
-          local: [...snapshot.pendingApprovals.local, target.record]
+          remote: [...snapshot.pendingApprovals.remote, target.remote]
         }
       }
-  }
-  return snapshot.pendingApprovals.remote.some(
-      ({ approval, host }) =>
-        approval.id === target.remote.approval.id &&
-        host.toLowerCase() === target.remote.host.toLowerCase()
-    )
-    ? snapshot
-    : {
-      ...snapshot,
-      pendingApprovals: {
-        ...snapshot.pendingApprovals,
-        remote: [...snapshot.pendingApprovals.remote, target.remote]
-      }
-    }
 }
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
@@ -473,16 +467,17 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const pendingBadgeCount =
     (snapshot?.pendingApprovals.local.length ?? 0) + (snapshot?.pendingApprovals.remote.length ?? 0)
   const canonical = snapshot?.approvalApp.canonical === true
-  const currentSnapshot = snapshot === null
-    ? null
-    : withPendingApprovalTarget(
-      {
-        ...(chat === undefined ? snapshot : { ...snapshot, chat }),
-        historyNextCursor,
-        records: [...snapshot.records, ...historyRecords]
-      },
-      deepLinkTarget
-    )
+  const currentSnapshot =
+    snapshot === null
+      ? null
+      : withPendingApprovalTarget(
+          {
+            ...(chat === undefined ? snapshot : { ...snapshot, chat }),
+            historyNextCursor,
+            records: [...snapshot.records, ...historyRecords]
+          },
+          deepLinkTarget
+        )
   useEffect(() => {
     if (!waiting && pull.refreshing) {
       setPull(initialPull)
@@ -509,14 +504,14 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
       return
     }
     if (decoded.success === null) return
-    const loaded = currentSnapshot.pendingApprovals.local.some(
+    const loaded =
+      currentSnapshot.pendingApprovals.local.some(
         ({ id }) =>
-          id === decoded.success?.jobId &&
-          currentSnapshot.host.toLowerCase() === decoded.success?.host.toLowerCase()
-      ) || currentSnapshot.pendingApprovals.remote.some(
+          id === decoded.success?.jobId && currentSnapshot.host.toLowerCase() === decoded.success?.host.toLowerCase()
+      ) ||
+      currentSnapshot.pendingApprovals.remote.some(
         ({ approval, host }) =>
-          approval.id === decoded.success?.jobId &&
-          host.toLowerCase() === decoded.success?.host.toLowerCase()
+          approval.id === decoded.success?.jobId && host.toLowerCase() === decoded.success?.host.toLowerCase()
       )
     if (!loaded && deepLinkTarget === null) {
       void runPendingTarget(decoded.success).then((exit) => {

@@ -1519,7 +1519,7 @@ describe("approval URL resolution", () => {
         "http://100.64.0.1:4779/"
       )
       expect(yield* resolveApprovalPage(hostConfig, tailscale, "SER8")).toBe(
-        "https://ser8.example.test/"
+        "https://ser8.example.test:4779/"
       )
     })
   })

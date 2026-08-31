@@ -57,7 +57,7 @@ describe("fleetctl work record", () => {
     Effect.gen(function*() {
       expect(yield* workCheckpointFromJson(JSON.stringify(checkpoint))).toEqual(checkpoint)
       expect(yield* workCheckpointHubUrl(config, "ser8")).toBe(
-        "https://ser8.example.test/v1/work/checkpoints"
+        "https://ser8.example.test:4779/v1/work/checkpoints"
       )
       const nonHub = yield* Effect.result(workCheckpointHubUrl(config, "ALPHA"))
       expect(nonHub).toMatchObject({ failure: { _tag: "FleetValidationError" } })

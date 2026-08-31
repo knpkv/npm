@@ -209,9 +209,7 @@ describe("dashboard approval capability", () => {
         }}
       />
     )
-    expect(markup).toContain(
-      'href="https://ser8.example.test/connect/?agent=agent-worker&amp;host=PI"'
-    )
+    expect(markup).toContain('href="https://ser8.example.test/connect/?agent=agent-worker&amp;host=PI"')
   })
 
   it("offers a continuation when older activity remains", () => {

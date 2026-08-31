@@ -892,7 +892,7 @@ describe("Connect public seams", () => {
   it.effect("pages a 700-agent three-host forest within the response budget", () => {
     const hosts = ["a".repeat(253), `b${"a".repeat(252)}`, `c${"a".repeat(252)}`]
     const text = "界".repeat(256)
-    const agents = Array.from({ length: 700 }, (_, index) => {
+    const agents = Array.from({ length: 700 }, (_, index): ConnectAgent => {
       const host = hosts[index % hosts.length] ?? hosts[0]
       const hostRootIndex = index % hosts.length
       const idPrefix = `agent-${index.toString().padStart(4, "0")}-`
@@ -912,7 +912,7 @@ describe("Connect public seams", () => {
         ? agent
         : {
           ...agent,
-          relationship: { parentAgentId: rootId, relation: "delegated" as const }
+          relationship: { parentAgentId: rootId, relation: "delegated" }
         }
     })
     const directory = FleetConnectAgents.make({
