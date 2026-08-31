@@ -1,0 +1,178 @@
+import { expect, type Page, test } from "@playwright/test"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { fileURLToPath } from "node:url"
+
+const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
+const workspaceRoot = resolve(packageRoot, "../..")
+const readCss = (path: string): string => readFileSync(path, "utf8")
+const connectorCss = readCss(resolve(packageRoot, "src/styles.css")).replace(
+  "@import \"@knpkv/rly/styles.css\";",
+  ""
+)
+const fixtureCss = [
+  readCss(resolve(workspaceRoot, "packages/rly/src/styles/generated-tokens.css")),
+  readCss(resolve(workspaceRoot, "packages/rly/src/styles/base.css")),
+  readCss(resolve(workspaceRoot, "packages/rly/src/primitives/Text.module.css")),
+  connectorCss,
+  `
+    html, body { margin: 0; }
+    *, *::before, *::after { box-sizing: border-box; }
+    .fixture-offset { block-size: 10rem; }
+    .fixture-standalone-header { inset-block-start: 0; inset-inline: 0; position: absolute; }
+    @layer rly.components {
+      .fixture-page-title {
+        font: var(--rly-type-page-title-weight) var(--rly-type-page-title-size) / var(--rly-type-page-title-line-height)
+          var(--rly-type-page-title-font);
+        letter-spacing: var(--rly-type-page-title-tracking);
+        margin: 0;
+      }
+    }
+    .fixture-meta { font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-type-meta-font); }
+    .fixture-state {
+      border: 1px solid currentcolor;
+      border-radius: var(--rly-radius-tag);
+      color: var(--rly-color-success-ink);
+      display: inline-flex;
+      font: var(--rly-type-meta-weight) var(--rly-type-meta-size) / var(--rly-type-meta-line-height) var(--rly-type-meta-font);
+      padding: var(--rly-space-4) var(--rly-space-8);
+    }
+    .agent-presence { block-size: var(--rly-space-6); inline-size: var(--rly-space-6); border-radius: var(--rly-radius-round); }
+  `
+].join("\n")
+
+const agentRows = Array.from({ length: 18 }, (_, index) => {
+  const agent = String(index + 1).padStart(2, "0")
+  return `
+    <button class="connect-agent" type="button">
+      <time>12:${agent}</time>
+      <span class="agent-presence"></span>
+      <span class="connect-agent-copy"><strong>agent-${agent}</strong><small>SER8 · Root agent · Working in npm</small></span>
+      <span class="fixture-state">working</span>
+    </button>`
+}).join("")
+
+const directory = `
+  <section class="connect-agents" aria-label="Herdr agents">
+    <label class="connect-search"><span>Find agent</span><input placeholder="Name, host, state…" type="search"></label>
+    <div class="connect-filter-row">
+      <div class="connect-group-filter"><button aria-pressed="true">All hosts</button><button>SER8</button></div>
+      <div class="connect-status-filter"><button aria-pressed="true">All</button><button>Working</button><button>Attention</button><button>Ready</button><button>Finished</button></div>
+    </div>
+    <div class="connect-agent-tree">
+      <div>
+        <header class="connect-day-heading"><div><strong>Today</strong><span>Monday, 31 August</span></div><small data-agent-count>18 agents</small></header>
+        <div class="connect-agent-list">${agentRows}</div>
+      </div>
+    </div>
+  </section>`
+
+const setEmbeddedDirectory = (page: Page): Promise<void> =>
+  page.setContent(`
+    <!doctype html>
+    <html data-rly-root data-rly-theme="dark">
+      <head><style>${fixtureCss}</style></head>
+      <body>
+        <header class="connect-header fixture-standalone-header">
+          <div><span class="fixture-meta">Herdr fleet</span><h1 class="fixture-page-title">Connect</h1></div>
+          <nav class="fleet-app-nav" aria-label="Fleet applications"><a href="/">Approvals</a><a aria-current="page" href="/connect/">Connect</a></nav>
+        </header>
+        <div class="fixture-offset"></div>
+        <div class="connect-shell connect-shell-embedded">
+          <div class="connect-workspace" data-mode="directory">
+            <div class="connect-directory-screen">
+              <header class="connect-embedded-intro">
+                <div><span class="fixture-meta">Live fleet directory</span><h1 class="fixture-page-title">Connect to an agent</h1><p>Choose a worker, reviewer, or coordinator to open its exact terminal.</p></div>
+                <span class="fixture-state">18 agents</span>
+              </header>
+              ${directory}
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>`)
+
+const setStandaloneDirectory = (page: Page): Promise<void> =>
+  page.setContent(`
+    <!doctype html>
+    <html data-rly-root data-rly-theme="dark">
+      <head><style>${fixtureCss}</style></head>
+      <body class="connect-body">
+        <div class="connect-shell">
+          <div class="connect-workspace" data-mode="directory">
+            <div class="connect-directory-screen">
+              <header class="connect-header">
+                <div><span class="fixture-meta">Herdr fleet</span><h1 class="fixture-page-title">Connect</h1></div>
+                <nav class="fleet-app-nav" aria-label="Fleet applications"><a href="/">Approvals</a><a aria-current="page" href="/connect/">Connect</a></nav>
+              </header>
+              ${directory}
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>`)
+
+test("390x844 keeps directory chrome dense and the full list reachable without an inner clipped scroller", async ({ page }) => {
+  await setEmbeddedDirectory(page)
+
+  const intro = page.locator(".connect-embedded-intro")
+  const filters = page.locator(".connect-filter-row")
+  const agents = page.locator(".connect-agents")
+  const header = page.locator(".fixture-standalone-header")
+  const navigation = header.locator(".fleet-app-nav")
+  const shell = page.locator(".connect-shell-embedded")
+  const rows = page.locator(".connect-agent")
+
+  await expect(page.locator("[data-agent-count]")).toBeVisible()
+  expect((await header.boundingBox())?.height).toBeLessThanOrEqual(48)
+  expect((await navigation.boundingBox())?.height).toBeLessThanOrEqual(32)
+  expect((await intro.boundingBox())?.height).toBeLessThanOrEqual(64)
+  expect((await filters.boundingBox())?.height).toBeLessThanOrEqual(38)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
+  await expect
+    .poll(() => agents.evaluate((element) => element.scrollHeight - element.clientHeight))
+    .toBe(0)
+  await expect
+    .poll(() =>
+      Promise.all([rows.last().boundingBox(), shell.boundingBox()]).then(([last, container]) =>
+        last === null || container === null
+          ? Number.POSITIVE_INFINITY
+          : last.y + last.height - (container.y + container.height)
+      )
+    )
+    .toBeLessThanOrEqual(0)
+
+  await rows.last().scrollIntoViewIfNeeded()
+  await expect(rows.last()).toBeInViewport()
+})
+
+test("mobile standalone keeps the directory as its bounded scroll owner", async ({ page }) => {
+  await setStandaloneDirectory(page)
+
+  const agents = page.locator(".connect-agents")
+  const last = page.locator(".connect-agent").last()
+  expect(await agents.evaluate((element) => getComputedStyle(element).overflowY)).toBe("auto")
+  await expect.poll(() => agents.evaluate((element) => element.scrollHeight - element.clientHeight)).toBeGreaterThan(0)
+  expect(await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight)).toBe(0)
+
+  await last.scrollIntoViewIfNeeded()
+  expect(await agents.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await expect(last).toBeInViewport()
+})
+
+test("desktop keeps its spacious hierarchy and scroll ownership", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await setEmbeddedDirectory(page)
+
+  await expect(page.locator(".connect-embedded-intro p")).toBeVisible()
+  await expect(page.locator(".connect-search > span")).toBeVisible()
+  expect(
+    await page.locator(".connect-embedded-intro h1").evaluate((element) => getComputedStyle(element).fontSize)
+  ).toBe("57.6px")
+  expect(await page.locator(".connect-agent").first().evaluate((element) => getComputedStyle(element).paddingTop)).toBe(
+    "12px"
+  )
+  expect(await page.locator(".connect-agents").evaluate((element) => getComputedStyle(element).overflowY)).toBe(
+    "auto"
+  )
+})

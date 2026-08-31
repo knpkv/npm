@@ -1,6 +1,6 @@
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
-import type { ReactNode } from "react"
+import type { ReactNode, Ref } from "react"
 import type { ConnectAgent } from "./model.js"
 
 type AgentActivity = "working" | "ready" | "attention" | "finished"
@@ -357,14 +357,20 @@ type ConnectWorkspaceProps = {
   readonly directory: ReactNode
   readonly mode: "directory" | "terminal"
   readonly terminal: ReactNode
+  readonly terminalViewportRef?: Ref<HTMLDivElement>
 }
 
-export const ConnectWorkspace = ({ directory, mode, terminal }: ConnectWorkspaceProps) => (
+export const ConnectWorkspace = ({ directory, mode, terminal, terminalViewportRef }: ConnectWorkspaceProps) => (
   <div className="connect-workspace" data-mode={mode}>
     <div aria-hidden={mode === "terminal"} className="connect-directory-screen" inert={mode === "terminal"}>
       {directory}
     </div>
-    <div aria-hidden={mode === "directory"} className="connect-terminal-screen" inert={mode === "directory"}>
+    <div
+      aria-hidden={mode === "directory"}
+      className="connect-terminal-screen"
+      inert={mode === "directory"}
+      ref={terminalViewportRef}
+    >
       {terminal}
     </div>
   </div>
