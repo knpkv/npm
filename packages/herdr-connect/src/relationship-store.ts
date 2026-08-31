@@ -37,6 +37,9 @@ const RelationshipRow = Schema.Struct({
 })
 
 const storeError = (operation: string) => (cause: unknown) => new ConnectRelationshipStoreError({ cause, operation })
+const isRelationshipPersistenceFailure = Schema.is(
+  Schema.Union([ConnectRelationshipError, ConnectRelationshipStoreError])
+)
 
 const decodeRowSync = (
   row: Readonly<Record<string, SQLOutputValue>> | undefined
@@ -305,8 +308,7 @@ export class AgentRelationshipStore {
           }
         },
         catch: (cause) =>
-          cause instanceof ConnectRelationshipError ||
-            cause instanceof ConnectRelationshipStoreError
+          isRelationshipPersistenceFailure(cause)
             ? cause
             : storeError("persist.transaction")(cause)
       })
