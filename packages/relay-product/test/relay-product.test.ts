@@ -148,6 +148,27 @@ describe("Relay product adapter", () => {
       expect("headRevision" in pullRequestThreadIdentity(first)).toBe(false)
     }))
 
+  it("rejects a CodeCommit route whose canonical account differs from the thread", () => {
+    expect(
+      Schema.is(PullRequestConversation)({
+        _tag: "codecommit",
+        route: {
+          accountId: "credential-account",
+          href: "/accounts/credential-account/prs/184",
+          pullRequestId: "184",
+          routeAccountId: "credential-account"
+        },
+        selection: selectionFixture,
+        thread: {
+          accountId: "repository-account",
+          pullRequestId: "184",
+          region: "eu-west-1",
+          repositoryName: "payments"
+        }
+      })
+    ).toBe(false)
+  })
+
   it.effect("continues the exact CodeCommit thread with the visible selector", () =>
     Effect.gen(function*() {
       const authorization = yield* Schema.decodeUnknownEffect(ProductAuthorization)({

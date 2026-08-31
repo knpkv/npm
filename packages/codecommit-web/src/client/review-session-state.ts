@@ -35,6 +35,26 @@ export const replaceRelayReviewPreservingTurns = (
   next: Omit<RelayReviewCompletion, "turns">
 ): RelayReviewCompletion => ({ ...next, turns })
 
+/** Keep PR turns across reruns, but bind finding turns to an unchanged snapshot. */
+export const reconcileReviewConversationTurns = (
+  previous: PullRequestRelayReviewResponse | null,
+  next: PullRequestRelayReviewResponse,
+  turns: ReadonlyArray<RelayReviewConversationTurn>
+): ReadonlyArray<RelayReviewConversationTurn> => {
+  if (previous === null) return turns
+  const nextFindings = new Map(
+    next.result.findings.map((finding): [string, string] => [finding.id, findingIdentity(finding)])
+  )
+  const previousFindings = new Map(
+    previous.result.findings.map((finding): [string, string] => [finding.id, findingIdentity(finding)])
+  )
+  return turns.filter(({ findingId }) => {
+    if (findingId === "PR") return true
+    const previousIdentity = previousFindings.get(findingId)
+    return previousIdentity !== undefined && previousIdentity === nextFindings.get(findingId)
+  })
+}
+
 /** Record a local decision without discarding an existing provider publication receipt. */
 export const applyFindingDecision = (
   dispositions: FindingDispositions,

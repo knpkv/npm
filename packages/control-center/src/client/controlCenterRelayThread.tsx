@@ -95,12 +95,11 @@ export const continueControlCenterRelayConversation = ({
       })
     )
   }
-  return Effect.tryPromise(() => startReview(prompt.success, providerId)).pipe(
-    Effect.mapError(
-      (): PullRequestConversationContinuationFailed =>
-        new PullRequestConversationContinuationFailed({ product: "control-center", thread })
-    )
-  )
+  return Effect.tryPromise({
+    try: () => startReview(prompt.success, providerId),
+    catch: (): PullRequestConversationContinuationFailed =>
+      new PullRequestConversationContinuationFailed({ product: "control-center", thread })
+  })
 }
 
 const selectorFor = (state: PullRequestReviewControllerState) => {

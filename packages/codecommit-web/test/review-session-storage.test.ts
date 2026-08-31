@@ -400,4 +400,30 @@ describe("Relay review session storage", () => {
       expect(written.success.session.version).toBe(2)
     }
   })
+
+  it("persists current-head reconciliations without rank-merging them away", () => {
+    const key = relayReviewSessionStorageKey(resource)
+    writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: { F1: "posted" }
+    })
+    const replaced = writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      expectedVersion: 1,
+      resource,
+      review: { ...review, revisionId: "revision-2" },
+      skillIds: [],
+      turns: [],
+      dispositions: { F1: "posted-stale" }
+    })
+
+    expect(Result.isSuccess(replaced)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) expect(restored.success?.dispositions).toEqual({ F1: "posted-stale" })
+  })
 })

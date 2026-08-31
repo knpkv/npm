@@ -47,6 +47,31 @@ export const codeCommitRepositoryAccountIdentity = (account: Domain.Account): st
 export const codeCommitRouteAccountIdentity = (account: Domain.Account): string =>
   account.awsAccountId ?? account.profile
 
+/** Construct the canonical Relay conversation while retaining the credential URL alias. */
+export const makeCodeCommitRelayConversation = (
+  accountId: string,
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">,
+  selection: RelaySelectorState
+): PullRequestConversation => {
+  const repositoryAccountId = codeCommitRepositoryAccountIdentity(pullRequest.account)
+  return Schema.decodeUnknownSync(PullRequestConversation)({
+    _tag: "codecommit",
+    route: {
+      accountId: repositoryAccountId,
+      href: `/accounts/${encodeURIComponent(accountId)}/prs/${encodeURIComponent(pullRequest.id)}`,
+      pullRequestId: pullRequest.id,
+      routeAccountId: accountId
+    },
+    selection,
+    thread: {
+      accountId: repositoryAccountId,
+      pullRequestId: pullRequest.id,
+      region: pullRequest.account.region,
+      repositoryName: pullRequest.repositoryName
+    }
+  })
+}
+
 /** Install CodeCommit's authenticated PR locator behind the shared Relay dock. */
 export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const state = useAtomValue(appStateAtom)
@@ -102,14 +127,13 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
           String(match.repositoryName),
           String(match.account.region)
         )
-        yield* Effect.tryPromise(async () => {
-          await navigate(href)
-        }).pipe(
-          Effect.mapError(
-            (): PullRequestConversationRedirectFailed =>
-              new PullRequestConversationRedirectFailed({ href, product: "codecommit" })
-          )
-        )
+        yield* Effect.tryPromise({
+          try: async () => {
+            await navigate(href)
+          },
+          catch: (): PullRequestConversationRedirectFailed =>
+            new PullRequestConversationRedirectFailed({ href, product: "codecommit" })
+        })
       }),
       product: "codecommit",
       selection: hostSelection
@@ -132,6 +156,7 @@ interface CodeCommitRelayThreadProps {
   readonly profile: ReviewProfileSelection | undefined
   readonly pullRequest: Domain.PullRequest
   readonly review: PullRequestRelayReviewResponse | null
+  readonly reviewIsStale: boolean
   readonly selectedFindingId: string | null
   readonly turns: ReadonlyArray<RelayReviewConversationTurn>
 }
@@ -166,6 +191,7 @@ interface CodeCommitRelayThreadRegistrationInput {
   readonly conversation: PullRequestConversation
   readonly isReviewing: boolean
   readonly review: PullRequestRelayReviewResponse | null
+  readonly reviewIsStale?: boolean
   readonly selectedFindingId: string | null
   readonly selection: RelaySelectorState
   readonly turns: ReadonlyArray<RelayReviewConversationTurn>
@@ -179,6 +205,7 @@ export const makeCodeCommitRelayThreadRegistration = ({
   conversation,
   isReviewing,
   review,
+  reviewIsStale = false,
   selectedFindingId,
   selection,
   turns
@@ -195,6 +222,13 @@ export const makeCodeCommitRelayThreadRegistration = ({
     return {
       ...base,
       description: "Run Relay in the exact-revision review workspace to start this PR thread.",
+      status: "unavailable"
+    }
+  }
+  if (reviewIsStale) {
+    return {
+      ...base,
+      description: "Re-run Relay against the current exact revision before continuing this PR thread.",
       status: "unavailable"
     }
   }
@@ -217,11 +251,11 @@ export const makeCodeCommitRelayThreadRegistration = ({
           thread
         })
       }
-      return Effect.tryPromise(() => continueReview(continuationTarget, request.message)).pipe(
-        Effect.mapError(
-          (): PullRequestConversationContinuationFailed =>
-            new PullRequestConversationContinuationFailed({ product: "codecommit", thread })
-        ),
+      return Effect.tryPromise({
+        try: () => continueReview(continuationTarget, request.message),
+        catch: (): PullRequestConversationContinuationFailed =>
+          new PullRequestConversationContinuationFailed({ product: "codecommit", thread })
+      }).pipe(
         Effect.flatMap((outcome) =>
           outcome._tag === "completed"
             ? Effect.void
@@ -243,6 +277,7 @@ export const CodeCommitRelayThread = ({
   profile,
   pullRequest,
   review,
+  reviewIsStale,
   selectedFindingId,
   turns
 }: CodeCommitRelayThreadProps): null => {
@@ -258,23 +293,8 @@ export const CodeCommitRelayThread = ({
   )
   const repositoryAccountId = codeCommitRepositoryAccountIdentity(pullRequest.account)
   const conversation = useMemo(
-    () =>
-      Schema.decodeUnknownSync(PullRequestConversation)({
-        _tag: "codecommit",
-        route: {
-          accountId,
-          href: `/accounts/${encodeURIComponent(accountId)}/prs/${encodeURIComponent(pullRequest.id)}`,
-          pullRequestId: pullRequest.id
-        },
-        selection,
-        thread: {
-          accountId: repositoryAccountId,
-          pullRequestId: pullRequest.id,
-          region: pullRequest.account.region,
-          repositoryName: pullRequest.repositoryName
-        }
-      }),
-    [accountId, pullRequest.id, pullRequest.repositoryName, repositoryAccountId, selection]
+    () => makeCodeCommitRelayConversation(accountId, pullRequest, selection),
+    [accountId, pullRequest.account.region, pullRequest.id, pullRequest.repositoryName, repositoryAccountId, selection]
   )
   const registration = useMemo<RelayPullRequestDockRegistration>(() => {
     return makeCodeCommitRelayThreadRegistration({
@@ -288,6 +308,7 @@ export const CodeCommitRelayThread = ({
       conversation,
       isReviewing,
       review,
+      reviewIsStale,
       selectedFindingId,
       selection,
       turns
@@ -301,6 +322,7 @@ export const CodeCommitRelayThread = ({
     pullRequest.id,
     pullRequest.repositoryName,
     review,
+    reviewIsStale,
     selectedFindingId,
     selection,
     turns

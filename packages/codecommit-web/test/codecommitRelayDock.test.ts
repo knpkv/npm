@@ -14,6 +14,7 @@ import { codeCommitPullRequestHref, matchesCodeCommitPullRequestRoute } from "..
 import {
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
+  makeCodeCommitRelayConversation,
   makeCodeCommitRelayThreadRegistration
 } from "../src/client/codecommitRelayDock.js"
 import type { PullRequestRelayReviewResponse } from "../src/server/Api.js"
@@ -27,7 +28,12 @@ const selection = Schema.decodeUnknownSync(RelaySelectorState)({
 
 const conversation = Schema.decodeUnknownSync(PullRequestConversation)({
   _tag: "codecommit",
-  route: { accountId: "credential-account", href: "/accounts/credential-account/prs/42", pullRequestId: "42" },
+  route: {
+    accountId: "repository-account",
+    href: "/accounts/credential-account/prs/42",
+    pullRequestId: "42",
+    routeAccountId: "credential-account"
+  },
   selection,
   thread: { accountId: "repository-account", pullRequestId: "42", region: "eu-central-1", repositoryName: "payments" }
 })
@@ -38,6 +44,15 @@ const explainReview: PullRequestRelayReviewResponse = {
   baseCommit: "a".repeat(40),
   headCommit: "b".repeat(40),
   kind: "explain",
+  profile: {
+    id: "explain",
+    name: "Explain change",
+    kind: "explain",
+    provider: "codex",
+    harness: "native-codex",
+    model: "configured-default",
+    skillIds: []
+  },
   result: { explanation: "The change keeps provider access on the host.", findings: [], verdict: "Explained." }
 }
 
@@ -112,6 +127,36 @@ describe("CodeCommit Relay dock adapter", () => {
     expect(pullRequestThreadIdentity(east)).not.toEqual(pullRequestThreadIdentity(west))
   })
 
+  it("recomputes the canonical thread identity when only the region changes", () => {
+    const account = new Domain.Account({
+      awsAccountId: "credential-account",
+      profile: "dev-administratoraccess",
+      region: "us-east-1",
+      repoAccountId: "repository-account"
+    })
+    const pullRequest = {
+      account,
+      id: Domain.PullRequestId.make("42"),
+      repositoryName: Domain.RepositoryName.make("payments")
+    }
+    const east = makeCodeCommitRelayConversation("credential-account", pullRequest, selection)
+    const west = makeCodeCommitRelayConversation(
+      "credential-account",
+      {
+        ...pullRequest,
+        account: new Domain.Account({
+          awsAccountId: "credential-account",
+          profile: "dev-administratoraccess",
+          region: "us-west-2",
+          repoAccountId: "repository-account"
+        })
+      },
+      selection
+    )
+
+    expect(pullRequestThreadIdentity(east)).not.toEqual(pullRequestThreadIdentity(west))
+  })
+
   it.effect("keeps a zero-finding PR review ready and continues at PR scope", () =>
     Effect.gen(function*() {
       const targets: Array<string> = []
@@ -160,4 +205,24 @@ describe("CodeCommit Relay dock adapter", () => {
 
       expect(failure._tag).toBe("PullRequestConversationContinuationFailed")
     }))
+
+  it("blocks continuation while the stored review is stale for the visible head", () => {
+    const registration = makeCodeCommitRelayThreadRegistration({
+      available: true,
+      context: [],
+      continueReview: () => Promise.resolve({ _tag: "completed" }),
+      conversation,
+      isReviewing: false,
+      review: explainReview,
+      reviewIsStale: true,
+      selectedFindingId: null,
+      selection,
+      turns: []
+    })
+
+    expect(registration.status).toBe("unavailable")
+    if (registration.status === "unavailable") {
+      expect(registration.description).toContain("current exact revision")
+    }
+  })
 })

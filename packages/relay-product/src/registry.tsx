@@ -1,5 +1,14 @@
 import type * as Effect from "effect/Effect"
-import { createContext, type ReactElement, type ReactNode, useContext, useEffect, useMemo, useState } from "react"
+import {
+  createContext,
+  type ReactElement,
+  type ReactNode,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useState
+} from "react"
 
 import type {
   AgenticProduct,
@@ -84,18 +93,13 @@ const RelayPullRequestDockContext = createContext<RelayPullRequestDockRegistry |
 /** Provide one route-lifetime registration slot without loading the dock chrome. */
 export const RelayProductDockProvider = ({ children }: { readonly children: ReactNode }): ReactElement => {
   const [registration, setRegistration] = useState<RelayPullRequestDockRegistration | null>(null)
-  const registry = useMemo<RelayPullRequestDockRegistry>(
-    () => ({
-      register: (next) => {
-        setRegistration(next)
-        return () => {
-          setRegistration((current) => (current === next ? null : current))
-        }
-      },
-      registration
-    }),
-    [registration]
-  )
+  const register = useCallback((next: RelayPullRequestDockRegistration) => {
+    setRegistration(next)
+    return () => {
+      setRegistration((current) => (current === next ? null : current))
+    }
+  }, [])
+  const registry = useMemo<RelayPullRequestDockRegistry>(() => ({ register, registration }), [register, registration])
   return <RelayPullRequestDockContext value={registry}>{children}</RelayPullRequestDockContext>
 }
 
@@ -103,7 +107,7 @@ export const RelayProductDockProvider = ({ children }: { readonly children: Reac
 export const useRelayPullRequestDock = (registration: RelayPullRequestDockRegistration): void => {
   const registry = useContext(RelayPullRequestDockContext)
   if (registry === undefined) throw new RelayProductDockProviderMissing()
-  useEffect(() => registry.register(registration), [registration, registry])
+  useEffect(() => registry.register(registration), [registration, registry.register])
 }
 
 /** Read the current route registration from the lightweight provider. */
