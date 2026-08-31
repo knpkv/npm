@@ -34,7 +34,7 @@ import {
 } from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
-import { type ContainerConfig, DockerService } from "./DockerService.js"
+import { type ContainerConfig, DockerService, isMissingContainerError } from "./DockerService.js"
 import { PluginService, type SandboxContext } from "./PluginService.js"
 import { SandboxWorkerScope } from "./SandboxWorkerScope.js"
 
@@ -186,11 +186,9 @@ const makeSandboxService = Effect.gen(function*() {
           params.region
         )
         if (Option.isSome(existing)) {
-          if (existing.value.region === undefined || existing.value.region === null) {
-            yield* repo.updateRegion(SandboxId.make(existing.value.id), params.region)
-            return { ...existing.value, region: params.region }
-          }
-          return existing.value
+          if (existing.value.region === params.region) return existing.value
+          // Regionless legacy rows have no trustworthy checkout coordinate and
+          // must not be relabeled or reused for a new request.
         }
 
         const sandboxCfg = yield* loadSandboxConfig
@@ -495,13 +493,15 @@ const makeSandboxService = Effect.gen(function*() {
               return
             }
             if (row.containerId === null) {
+              if (row.status === "creating" || row.status === "cloning" || row.status === "starting") return
               yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
               return
             }
             const info = yield* docker.inspectContainer(row.containerId).pipe(
-              Effect.catchIf(() => true, () => Effect.succeed(null))
+              Effect.map(Option.some),
+              Effect.catchIf(isMissingContainerError, () => Effect.succeed(Option.none()))
             )
-            if (info === null || info.State.Running === false) {
+            if (Option.isNone(info) || info.value.State.Running === false) {
               yield* updateStatus(SandboxId.make(row.id), "stopped")
               yield* Effect.logInfo(`Reconciled orphaned sandbox ${row.id}`)
             }

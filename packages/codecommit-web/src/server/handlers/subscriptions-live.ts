@@ -12,12 +12,24 @@ export const SubscriptionsLive = HttpApiBuilder.group(
 
       return handlers
         .handle("subscribe", ({ payload }) =>
-          prService.subscribe(payload.awsAccountId, payload.pullRequestId).pipe(
+          prService.subscribe(
+            payload.awsAccountId,
+            payload.pullRequestId,
+            payload.repositoryName !== undefined && payload.region !== undefined
+              ? { repositoryName: payload.repositoryName, accountRegion: payload.region }
+              : undefined
+          ).pipe(
             Effect.map(() => "ok"),
             Effect.mapError((e) => new ApiError({ message: `Subscription failed: ${String(e)}` }))
           ))
         .handle("unsubscribe", ({ payload }) =>
-          prService.unsubscribe(payload.awsAccountId, payload.pullRequestId).pipe(
+          prService.unsubscribe(
+            payload.awsAccountId,
+            payload.pullRequestId,
+            payload.repositoryName !== undefined && payload.region !== undefined
+              ? { repositoryName: payload.repositoryName, accountRegion: payload.region }
+              : undefined
+          ).pipe(
             Effect.map(() => "ok"),
             Effect.mapError((e) => new ApiError({ message: `Subscription failed: ${String(e)}` }))
           ))

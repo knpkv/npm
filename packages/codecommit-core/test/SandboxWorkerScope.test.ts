@@ -9,7 +9,7 @@ import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxR
 import * as ChildEnv from "../src/ChildEnv.js"
 import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
 import { DockerError } from "../src/Errors.js"
-import { DockerService } from "../src/SandboxService/DockerService.js"
+import { type ContainerInfo, DockerService } from "../src/SandboxService/DockerService.js"
 import { PluginService } from "../src/SandboxService/PluginService.js"
 import { SandboxService } from "../src/SandboxService/SandboxService.js"
 import { SandboxWorkerScope } from "../src/SandboxService/SandboxWorkerScope.js"
@@ -55,6 +55,7 @@ interface FixtureOptions {
   readonly existingByPr?: SandboxRow
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
+  readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
   readonly untrackedContainers?: ReadonlyArray<{
     readonly Id: string
     readonly State: string
@@ -142,6 +143,9 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             options?.stopContainerByAttempt?.(attempt) ?? options?.stopContainer ?? Effect.void
           )
         ),
+      inspectContainer: (containerId) =>
+        options?.inspectContainer?.(containerId) ??
+          Effect.fail(new DockerError({ operation: "inspectContainer", cause: "not configured" })),
       listContainersByLabel: () =>
         Ref.update(containerDiscoveryCalls, (count) => count + 1).pipe(
           Effect.as([...(options?.untrackedContainers ?? [])])
@@ -231,7 +235,7 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
-  it.effect("binds a legacy regionless sandbox to the requested region instead of duplicating it", () =>
+  it.effect("does not reuse or relabel a regionless legacy sandbox", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never, { existingByPr: legacyRow })
 
@@ -242,13 +246,66 @@ describe("SandboxWorkerScope", () => {
         )
       )
 
-      expect(reused.id).toBe(legacyRow.id)
+      expect(reused.id).not.toBe(legacyRow.id)
       expect(reused.region).toBe(createParams.region)
-      expect(yield* Ref.get(fixture.regionUpdates)).toEqual([{
-        id: legacyRow.id,
-        region: createParams.region
-      }])
-      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.regionUpdates)).toEqual([])
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("preserves in-progress rows that have not received a container id", () =>
+    Effect.gen(function*() {
+      const statuses: ReadonlyArray<"creating" | "cloning" | "starting"> = ["creating", "cloning", "starting"]
+      for (const status of statuses) {
+        const fixture = yield* makeFixture(() => Effect.void, {
+          initialRow: { ...legacyRow, accessPassword: "protected", containerId: null, status }
+        })
+        yield* Effect.scoped(
+          SandboxService.pipe(
+            Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+            Effect.provide(fixture.layer)
+          )
+        )
+        expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status, containerId: null })
+      }
+    }))
+
+  it.effect("marks an authenticated row stopped only for a confirmed missing container", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: { ...legacyRow, accessPassword: "protected" },
+        inspectContainer: () =>
+          Effect.fail(
+            new DockerError({
+              operation: "inspectContainer",
+              cause: "Error: No such object: missing-container"
+            })
+          )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("retains authenticated rows when container inspection fails for infrastructure", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: { ...legacyRow, accessPassword: "protected" },
+        inspectContainer: () =>
+          Effect.fail(new DockerError({ operation: "inspectContainer", cause: "Docker daemon unavailable" }))
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(false)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running", error: null })
     }))
 
   it.effect("records a production sandbox worker defect as an error", () =>

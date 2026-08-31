@@ -12,6 +12,11 @@ const CommentRow = Schema.Struct({
   locationsJson: Schema.String
 })
 
+export interface CommentCoordinates {
+  readonly repositoryName: string
+  readonly accountRegion: string
+}
+
 const cacheError = (op: string) => <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(
     Effect.mapError((cause) => new CacheError({ operation: `CommentRepo.${op}`, cause })),
@@ -22,39 +27,67 @@ const makeCommentRepo = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   const hub = yield* EventsHub
 
-  const find_ = SqlSchema.findOneOption({
+  const findLegacy_ = SqlSchema.findOneOption({
     Result: CommentRow,
     Request: Schema.Struct({ awsAccountId: Schema.String, pullRequestId: Schema.String }),
     execute: (req) =>
       sql`SELECT locations_json FROM pr_comments
             WHERE aws_account_id = ${req.awsAccountId}
-              AND pull_request_id = ${req.pullRequestId}`
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name IS NULL
+              AND account_region IS NULL`
   })
 
-  const upsert_ = (awsAccountId: string, prId: string, locationsJson: string) =>
+  const findExact_ = SqlSchema.findOneOption({
+    Result: CommentRow,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String,
+      accountRegion: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT locations_json FROM pr_comments
+            WHERE aws_account_id = ${req.awsAccountId}
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name = ${req.repositoryName}
+              AND account_region = ${req.accountRegion}`
+  })
+
+  const upsert_ = (awsAccountId: string, prId: string, locationsJson: string, coordinates?: CommentCoordinates) =>
     sql`INSERT OR REPLACE INTO pr_comments
-          (aws_account_id, pull_request_id, locations_json, fetched_at)
-          VALUES (${awsAccountId}, ${prId}, ${locationsJson}, datetime('now'))
+          (aws_account_id, pull_request_id, repository_name, account_region, locations_json, fetched_at)
+          VALUES (${awsAccountId}, ${prId}, ${coordinates?.repositoryName ?? null}, ${
+      coordinates?.accountRegion ?? null
+    },
+            ${locationsJson}, datetime('now'))
       `.pipe(Effect.asVoid)
 
   const publish = hub.publish(RepoChange.Comments())
 
   const repo = {
-    find: (awsAccountId: string, prId: string) =>
-      find_({ awsAccountId, pullRequestId: prId }).pipe(
-        Effect.flatMap(
-          Option.match({
-            onNone: () => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()),
-            onSome: (r) =>
-              decodeCommentLocations(r.locationsJson).pipe(
-                Effect.map((decoded) => Option.some(decoded))
-              )
-          })
+    find: (awsAccountId: string, prId: string, coordinates?: CommentCoordinates) =>
+      (coordinates === undefined
+        ? findLegacy_({ awsAccountId, pullRequestId: prId })
+        : findExact_({
+          awsAccountId,
+          pullRequestId: prId,
+          repositoryName: coordinates.repositoryName,
+          accountRegion: coordinates.accountRegion
+        })).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()),
+              onSome: (r) =>
+                decodeCommentLocations(r.locationsJson).pipe(
+                  Effect.map((decoded) => Option.some(decoded))
+                )
+            })
+          ),
+          cacheError("find")
         ),
-        cacheError("find")
-      ),
-    upsert: (awsAccountId: string, prId: string, locationsJson: string) =>
-      upsert_(awsAccountId, prId, locationsJson).pipe(Effect.tap(() => publish), cacheError("upsert"))
+    upsert: (awsAccountId: string, prId: string, locationsJson: string, coordinates?: CommentCoordinates) =>
+      upsert_(awsAccountId, prId, locationsJson, coordinates).pipe(Effect.tap(() => publish), cacheError("upsert"))
   }
 
   return repo

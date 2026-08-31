@@ -898,17 +898,30 @@ export function PRDetail() {
   const subscribe = useAtomSet(subscribeAtom)
   const unsubscribe = useAtomSet(unsubscribeAtom)
   const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
+  const subscriptionCoordinates =
+    pr === null ? undefined : { repositoryName: String(pr.repositoryName), region: pr.account.region }
   const serverSubscribed = useMemo(
     () =>
       AsyncResult.isSuccess(subscriptionsResult) && accountKey !== undefined && accountKey.length > 0
-        ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
+        ? subscriptionsResult.value.some(
+            (s) =>
+              s.awsAccountId === accountKey &&
+              s.pullRequestId === prId &&
+              s.repositoryName === subscriptionCoordinates?.repositoryName &&
+              s.accountRegion === subscriptionCoordinates?.region
+          )
         : false,
-    [subscriptionsResult, accountKey, prId]
+    [subscriptionsResult, accountKey, prId, subscriptionCoordinates]
   )
   const [isSubscribed, setOptimistic] = useOptimistic(serverSubscribed)
   const handleSubscriptionToggle = useCallback(() => {
     if (accountKey === undefined || accountKey.length === 0 || pr === null) return
-    const payload = { awsAccountId: accountKey, pullRequestId: pr.id }
+    const payload = {
+      awsAccountId: accountKey,
+      pullRequestId: pr.id,
+      repositoryName: String(pr.repositoryName),
+      region: pr.account.region
+    }
     setOptimistic(!isSubscribed)
     if (isSubscribed) {
       unsubscribe({ payload })

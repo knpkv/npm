@@ -653,12 +653,16 @@ export class AccountsGroup extends HttpApiGroup.make("accounts")
 // Subscription endpoints
 const SubscriptionPayload = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: PullRequestId
+  pullRequestId: PullRequestId,
+  repositoryName: Schema.optional(Schema.String),
+  region: Schema.optional(AwsRegion)
 })
 
 const SubscriptionResponse = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: Schema.String
+  pullRequestId: Schema.String,
+  repositoryName: Schema.NullOr(Schema.String),
+  accountRegion: Schema.NullOr(Schema.String)
 })
 
 export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")

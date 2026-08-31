@@ -20,6 +20,7 @@ import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
 import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
+import { PullRequestAmbiguityError } from "./queries.js"
 
 export interface PullRequestCoordinates {
   readonly repositoryName: string
@@ -27,6 +28,25 @@ export interface PullRequestCoordinates {
 }
 
 export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>) => {
+  const countByLegacyIdentity_ = SqlSchema.findOne({
+    Result: Schema.Struct({ count: Schema.Number }),
+    Request: Schema.Struct({ awsAccountId: Schema.String, id: Schema.String }),
+    execute: (req) =>
+      sql`SELECT count(*) AS count FROM pull_requests
+          WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.id}`
+  })
+
+  const ensureUnambiguous = (awsAccountId: string, id: string, coordinates?: PullRequestCoordinates) =>
+    coordinates !== undefined
+      ? Effect.void
+      : countByLegacyIdentity_({ awsAccountId, id }).pipe(
+        Effect.flatMap(({ count }) =>
+          count > 1
+            ? Effect.fail(new PullRequestAmbiguityError({ awsAccountId, pullRequestId: id, matches: count }))
+            : Effect.void
+        )
+      )
+
   const pullRequestWhere = (
     awsAccountId: string,
     id: string,
@@ -107,7 +127,8 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       deleteStaleOpen_({ olderThan }).pipe(Effect.tap(() => publish), cacheError("deleteStaleOpen")),
 
     deleteOne: (awsAccountId: string, id: string, coordinates?: PullRequestCoordinates) =>
-      sql`DELETE FROM pull_requests WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(sql`DELETE FROM pull_requests WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`),
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("deleteOne")
@@ -121,8 +142,11 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       filesDeleted: number,
       coordinates?: PullRequestCoordinates
     ) =>
-      sql`UPDATE pull_requests SET files_added = ${filesAdded}, files_modified = ${filesModified}, files_deleted = ${filesDeleted}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          sql`UPDATE pull_requests SET files_added = ${filesAdded}, files_modified = ${filesModified}, files_deleted = ${filesDeleted}
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+        ),
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateDiffStats")
@@ -138,10 +162,13 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       coordinates?: PullRequestCoordinates
     ) => {
       const approvedByStr = approvedBy !== undefined ? joinApprovedBy([...approvedBy]) : null
-      return sql`UPDATE pull_requests SET status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
+      return ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          sql`UPDATE pull_requests SET status = ${status}, closed_at = ${closedAt}, merged_by = ${mergedBy ?? null},
           approved_by = COALESCE(${approvedByStr}, approved_by),
           last_modified_date = ${closedAt}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+        ),
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateStatusAndClosedAt")
@@ -154,16 +181,22 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       count: number | null,
       coordinates?: PullRequestCoordinates
     ) =>
-      sql`UPDATE pull_requests SET comment_count = ${count}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          sql`UPDATE pull_requests SET comment_count = ${count}
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+        ),
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateCommentCount")
       ),
 
     updateHealthScore: (awsAccountId: string, id: string, score: number, coordinates?: PullRequestCoordinates) =>
-      sql`UPDATE pull_requests SET health_score = ${score}
-          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`.pipe(
+      ensureUnambiguous(awsAccountId, id, coordinates).pipe(
+        Effect.andThen(
+          sql`UPDATE pull_requests SET health_score = ${score}
+          WHERE ${pullRequestWhere(awsAccountId, id, coordinates)}`
+        ),
         Effect.asVoid,
         Effect.tap(() => publish),
         cacheError("updateHealthScore")
@@ -173,11 +206,25 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
       sql.withTransaction(
         Effect.gen(function*() {
           const rows = yield* sql<
-            { awsAccountId: string; pullRequestId: string; author: string; locationsJson: string }
+            {
+              awsAccountId: string
+              pullRequestId: string
+              repositoryName: string
+              accountRegion: string
+              author: string
+              locationsJson: string
+            }
           >`
-            SELECT c.aws_account_id, c.pull_request_id, p.author, c.locations_json
+            SELECT c.aws_account_id AS awsAccountId, c.pull_request_id AS pullRequestId,
+              c.repository_name AS repositoryName, c.account_region AS accountRegion,
+              p.author AS author, c.locations_json AS locationsJson
             FROM pr_comments c
-            INNER JOIN pull_requests p ON p.id = c.pull_request_id AND p.aws_account_id = c.aws_account_id
+            INNER JOIN pull_requests p
+              ON p.id = c.pull_request_id
+              AND p.aws_account_id = c.aws_account_id
+              AND p.repository_name = c.repository_name
+              AND p.account_region = c.account_region
+            WHERE c.repository_name IS NOT NULL AND c.account_region IS NOT NULL
           `
           for (const row of rows) {
             const parsed = yield* decodeCommentLocationJson(row.locationsJson)
@@ -191,7 +238,10 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             for (const loc of parsed) walk(loc.comments)
             const commentedBy = commenters.size > 0 ? [...commenters].join(",") : null
             yield* sql`UPDATE pull_requests SET commented_by = ${commentedBy}
-                        WHERE id = ${row.pullRequestId} AND aws_account_id = ${row.awsAccountId}`
+                        WHERE id = ${row.pullRequestId}
+                          AND aws_account_id = ${row.awsAccountId}
+                          AND repository_name = ${row.repositoryName}
+                          AND account_region = ${row.accountRegion}`
           }
         })
       ).pipe(Effect.asVoid, cacheError("refreshCommentedBy")),

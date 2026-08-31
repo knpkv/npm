@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, Domain, Errors, PRService } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Schema } from "effect"
-import { encodePullRequestCoordinates } from "../src/pull-request-coordinates.js"
+import { Deferred, Effect, Encoding, Schema } from "effect"
+import { coordinateRouterMaxParamLength, encodePullRequestCoordinates } from "../src/pull-request-coordinates.js"
 
 import {
   cachedPullRequest,
@@ -212,6 +212,21 @@ describe("PR handler selection", () => {
 
       const invalidToken = yield* cachedPullRequest(cache, "ccpr:not-json", regionalPullRequest.id).pipe(Effect.flip)
       expect(invalidToken.message).toContain("Invalid pull-request")
+
+      const whitespaceAccountToken = `cc1_${
+        Encoding.encodeBase64Url(JSON.stringify([
+          "   ",
+          String(regionalPullRequest.id),
+          String(regionalPullRequest.repositoryName),
+          String(regionalPullRequest.account.region)
+        ]))
+      }`
+      const whitespaceFailure = yield* cachedPullRequest(
+        cache,
+        whitespaceAccountToken,
+        regionalPullRequest.id
+      ).pipe(Effect.flip)
+      expect(whitespaceFailure.message).toContain("Invalid pull-request")
     }))
 
   it.effect("carries exact coordinates through a refresh route", () =>
@@ -237,4 +252,14 @@ describe("PR handler selection", () => {
       })
       expect(fromQuery.coordinates).toEqual({ repositoryName: "payments", region: "eu-west-1" })
     }))
+
+  it("keeps provider-valid maximum repository tokens inside the router bound", () => {
+    const token = encodePullRequestCoordinates({
+      accountId: "111122223333",
+      pullRequestId: pullRequest.id,
+      repositoryName: Domain.RepositoryName.make("r".repeat(100)),
+      region: pullRequest.account.region
+    })
+    expect(token.length).toBeLessThanOrEqual(coordinateRouterMaxParamLength)
+  })
 })

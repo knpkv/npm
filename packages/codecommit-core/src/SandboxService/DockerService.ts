@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Predicate, Schema, Stream } from "effect"
 import type { Success } from "effect/Effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { DockerError } from "../Errors.js"
@@ -34,6 +34,18 @@ export interface ContainerInfo {
   readonly NetworkSettings: {
     readonly Ports: Record<string, ReadonlyArray<{ HostPort: string }> | null>
   }
+}
+
+/** Docker's inspect command reports a missing container with this exact stderr shape. */
+export const isMissingContainerError = (error: DockerError): boolean => {
+  if (!Predicate.isString(error.operation) || error.operation !== "inspectContainer") return false
+  const cause = error.cause
+  const message = Predicate.isString(cause)
+    ? cause
+    : Predicate.isError(cause)
+    ? cause.message
+    : undefined
+  return message !== undefined && /^Error:\s+No such (?:object|container):\s+\S+/u.test(message.trim())
 }
 
 const ContainerInfoSchema = Schema.Struct({
@@ -118,7 +130,7 @@ const makeDockerService = Effect.gen(function*() {
       }
 
       // Network mode
-      if (config.HostConfig.NetworkMode) {
+      if (config.HostConfig.NetworkMode !== undefined) {
         args.push("--network", config.HostConfig.NetworkMode)
       }
 
@@ -126,7 +138,7 @@ const makeDockerService = Effect.gen(function*() {
         args.push("--cap-drop", capability)
       }
 
-      if (config.User) {
+      if (config.User !== undefined) {
         args.push("--user", config.User)
       }
 
@@ -187,7 +199,7 @@ const makeDockerService = Effect.gen(function*() {
         Effect.flatMap((output) =>
           Effect.try({
             try: () => {
-              if (!output) return emptyDockerPsContainers()
+              if (output.length === 0) return emptyDockerPsContainers()
               return output.split("\n").map((line) => {
                 const obj = decodeDockerPsRow(JSON.parse(line))
                 return {

@@ -30,6 +30,7 @@ import {
   HttpServerResponse
 } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { coordinateRouterMaxParamLength } from "../pull-request-coordinates.js"
 import { CodeCommitApi } from "./Api.js"
 import {
   AccountsLive,
@@ -358,7 +359,11 @@ export const makeServer = (options: CodeCommitServerOptions) => {
   return Layer.unwrap(
     requireLoopbackHostname(hostname).pipe(
       Effect.map(() => {
-        const server = HttpRouter.serve(AllRoutes).pipe(
+        const server = HttpRouter.serve(AllRoutes, {
+          // Coordinate tokens include provider-valid repository names up to 100
+          // characters; keep one bounded segment for the review route.
+          routerConfig: { maxParamLength: coordinateRouterMaxParamLength }
+        }).pipe(
           // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
           Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
           Layer.provide(Etag.layer),

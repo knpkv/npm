@@ -3,9 +3,10 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { describe, expect, it } from "@effect/vitest"
-import { Context, Effect, FileSystem, Layer, Schema } from "effect"
+import { Context, Effect, FileSystem, Layer, Predicate, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import migration0018 from "../src/CacheService/migrations/0018_pull_request_coordinates.js"
+import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coordinates.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -107,6 +108,125 @@ describe("pull request coordinate migration", () => {
       expect(rows).toEqual([
         { repositoryName: "orders", accountRegion: "us-east-1", title: "Orders updated" },
         { repositoryName: "payments", accountRegion: "eu-west-1", title: "Payments updated" }
+      ])
+
+      const ambiguous = yield* repo.updateHealthScore("123456789012", "42", 0.5).pipe(Effect.flip)
+      expect(Predicate.isTagged(ambiguous, "CacheError")).toBe(true)
+      if (Predicate.isTagged(ambiguous, "CacheError")) {
+        expect(Predicate.isTagged(ambiguous.cause, "PullRequestAmbiguityError")).toBe(true)
+      }
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("keeps comment and subscription caches independently addressable by coordinates", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-dependent-coordinates-" })
+      const context = yield* Layer.build(LibsqlClient.layer({ url: `file:${root}/cache.db` }))
+      const sql = Context.get(context, SqlClient.SqlClient)
+
+      yield* sql`CREATE TABLE pr_comments (
+        pull_request_id TEXT NOT NULL,
+        aws_account_id TEXT NOT NULL,
+        locations_json TEXT NOT NULL,
+        fetched_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (aws_account_id, pull_request_id)
+      )`
+      yield* sql`CREATE TABLE pr_subscriptions (
+        pull_request_id TEXT NOT NULL,
+        aws_account_id TEXT NOT NULL,
+        subscribed_at TEXT NOT NULL DEFAULT (datetime('now')),
+        PRIMARY KEY (aws_account_id, pull_request_id)
+      )`
+      yield* sql`INSERT INTO pr_comments (pull_request_id, aws_account_id, locations_json)
+        VALUES ('42', '123456789012', 'legacy')`
+      yield* sql`INSERT INTO pr_subscriptions (pull_request_id, aws_account_id)
+        VALUES ('42', '123456789012')`
+      yield* migration0019.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+
+      yield* sql`CREATE TABLE pull_requests (
+        id TEXT NOT NULL,
+        aws_account_id TEXT NOT NULL,
+        repository_name TEXT NOT NULL,
+        account_region TEXT NOT NULL,
+        author TEXT NOT NULL,
+        commented_by TEXT,
+        PRIMARY KEY (aws_account_id, id, repository_name, account_region)
+      )`
+      yield* sql`INSERT INTO pull_requests
+        (id, aws_account_id, repository_name, account_region, author)
+        VALUES ('42', '123456789012', 'payments', 'eu-west-1', 'author'),
+               ('42', '123456789012', 'orders', 'us-east-1', 'author')`
+      const paymentComments = JSON.stringify([{
+        comments: [{
+          root: {
+            id: "payment-comment",
+            content: "Payment review",
+            author: "payment-reviewer",
+            creationDate: "2026-08-03T00:00:00.000Z",
+            deleted: false
+          },
+          replies: []
+        }]
+      }])
+      const orderComments = JSON.stringify([{
+        comments: [{
+          root: {
+            id: "order-comment",
+            content: "Order review",
+            author: "order-reviewer",
+            creationDate: "2026-08-03T00:00:00.000Z",
+            deleted: false
+          },
+          replies: []
+        }]
+      }])
+
+      yield* sql`INSERT OR REPLACE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('42', '123456789012', 'payments', 'eu-west-1', 'payments-comments')`
+      yield* sql`INSERT OR REPLACE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('42', '123456789012', 'orders', 'us-east-1', 'orders-comments')`
+      yield* sql`INSERT OR REPLACE INTO pr_subscriptions
+        (pull_request_id, aws_account_id, repository_name, account_region)
+        VALUES ('42', '123456789012', 'payments', 'eu-west-1')`
+      yield* sql`INSERT OR REPLACE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('42', '123456789012', 'payments', 'eu-west-1', ${paymentComments})`
+      yield* sql`INSERT OR REPLACE INTO pr_comments
+        (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
+        VALUES ('42', '123456789012', 'orders', 'us-east-1', ${orderComments})`
+      yield* mutations(sql, Effect.void).refreshCommentedBy()
+
+      const comments = yield* sql<{ readonly repositoryName: string | null; readonly locationsJson: string }>`
+        SELECT repository_name AS repositoryName, locations_json AS locationsJson
+        FROM pr_comments WHERE aws_account_id = '123456789012' AND pull_request_id = '42'
+        ORDER BY repository_name IS NOT NULL, repository_name`
+      const subscriptions = yield* sql<{
+        readonly repositoryName: string | null
+        readonly accountRegion: string | null
+      }>`
+        SELECT repository_name AS repositoryName, account_region AS accountRegion
+        FROM pr_subscriptions WHERE aws_account_id = '123456789012' AND pull_request_id = '42'
+        ORDER BY repository_name IS NOT NULL, repository_name`
+
+      expect(comments).toEqual([
+        { repositoryName: null, locationsJson: "legacy" },
+        { repositoryName: "orders", locationsJson: orderComments },
+        { repositoryName: "payments", locationsJson: paymentComments }
+      ])
+      expect(subscriptions).toEqual([
+        { repositoryName: null, accountRegion: null },
+        { repositoryName: "payments", accountRegion: "eu-west-1" }
+      ])
+      const commentedBy = yield* sql<{
+        readonly repositoryName: string
+        readonly commentedBy: string | null
+      }>`SELECT repository_name AS repositoryName, commented_by AS commentedBy
+        FROM pull_requests ORDER BY repository_name`
+      expect(commentedBy).toEqual([
+        { repositoryName: "orders", commentedBy: "order-reviewer" },
+        { repositoryName: "payments", commentedBy: "payment-reviewer" }
       ])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

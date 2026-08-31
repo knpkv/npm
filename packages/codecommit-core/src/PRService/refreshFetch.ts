@@ -21,6 +21,7 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import type { PullRequestRefreshScope } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
+import { subscriptionKey } from "./refreshResolve.js"
 
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
@@ -136,7 +137,10 @@ export const fetchAndUpsertPRs = (params: {
         Effect.gen(function*() {
           // Diff subscribed PRs against cache
           const subscribed = yield* Ref.get(subscribedRef)
-          if (awsAccountId !== "" && subscribed.has(`${awsAccountId}:${pr.id}`)) {
+          if (
+            awsAccountId !== "" &&
+            subscribed.has(subscriptionKey(awsAccountId, pr.id, pr.repositoryName, pr.account.region))
+          ) {
             const cached = yield* prRepo.findByCoordinates(
               awsAccountId,
               pr.id,
@@ -174,8 +178,14 @@ export const fetchAndUpsertPRs = (params: {
             const isApprover = currentUser !== undefined && currentUser !== "" &&
               pr.approvalRules.some((r) => r.poolMembers.includes(currentUser))
             if (isAuthor || isApprover) {
-              yield* subscriptionRepo.subscribe(awsAccountId, pr.id).pipe(Effect.catch(() => Effect.void))
-              yield* Ref.update(subscribedRef, (s) => new Set(s).add(`${awsAccountId}:${pr.id}`))
+              yield* subscriptionRepo.subscribe(awsAccountId, pr.id, {
+                repositoryName: pr.repositoryName,
+                accountRegion: pr.account.region
+              }).pipe(Effect.catch(() => Effect.void))
+              yield* Ref.update(
+                subscribedRef,
+                (s) => new Set(s).add(subscriptionKey(awsAccountId, pr.id, pr.repositoryName, pr.account.region))
+              )
             }
           } else {
             yield* withholdScopeSuccess(pr.account.profile, pr.account.region)

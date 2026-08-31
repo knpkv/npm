@@ -4,9 +4,11 @@ import { Data, Effect, Encoding, Option, Schema } from "effect"
 
 const coordinateTokenPrefix = "cc1_"
 const legacyCoordinateTokenPrefix = "ccpr:"
+const coordinateAccountId = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty())
+export const coordinateRouterMaxParamLength = 256
 
 export const PullRequestCoordinates = Schema.Struct({
-  accountId: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()),
+  accountId: coordinateAccountId,
   pullRequestId: PullRequestId,
   repositoryName: RepositoryName,
   region: AwsRegion
@@ -52,7 +54,7 @@ export const decodePullRequestCoordinates = (
     Effect.mapError(() => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinate token" })),
     Effect.flatMap((json) =>
       Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Tuple([
-        Schema.String,
+        coordinateAccountId,
         PullRequestId,
         RepositoryName,
         AwsRegion

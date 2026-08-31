@@ -12,6 +12,7 @@ import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/in
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { AwsProfileName, AwsRegion, type PRCommentLocation } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
+import { subscriptionKey } from "./refreshResolve.js"
 
 const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
 const decodeAwsRegion = Schema.decodeSync(AwsRegion)
@@ -36,8 +37,12 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
 
     if (locs !== undefined && awsAccountId !== "") {
       // Diff comments for subscribed PRs
-      if (subscribedSnapshot.has(`${awsAccountId}:${prId}`)) {
-        const cachedComments = yield* commentRepo.find(awsAccountId, prId).pipe(
+      const coordinates = {
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      }
+      if (subscribedSnapshot.has(subscriptionKey(awsAccountId, prId, row.repositoryName, row.accountRegion))) {
+        const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
           Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
         )
         if (Option.isSome(cachedComments)) {
@@ -48,7 +53,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
         }
       }
       // Cache comments
-      yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs)).pipe(
+      yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
         Effect.catch(() => Effect.void)
       )
     }
@@ -56,7 +61,10 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     // Fallback: use cached comment count from DB
     let commentCount = locs !== undefined ? countAllComments(locs) : 0
     if (locs === undefined && awsAccountId !== "") {
-      const cached = yield* commentRepo.find(awsAccountId, prId).pipe(
+      const cached = yield* commentRepo.find(awsAccountId, prId, {
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      }).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cached)) {

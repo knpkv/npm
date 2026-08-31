@@ -6,12 +6,19 @@
  *
  * @category CacheService
  */
-import { Effect, Schema } from "effect"
+import { Data, Effect, Option, Predicate, Schema } from "effect"
 import type * as SqlClient from "effect/unstable/sql/SqlClient"
 import * as SqlSchema from "effect/unstable/sql/SqlSchema"
 import { AwsProfileName, AwsRegion } from "../../../Domain.js"
-import type { CacheError } from "../../CacheError.js"
+import { CacheError } from "../../CacheError.js"
 import { CachedPullRequest as CachedPullRequestSchema, cacheError, type SearchResult } from "./internal.js"
+
+/** Coordinate-free lookup is unsafe once one account can contain duplicate PR IDs. */
+export class PullRequestAmbiguityError extends Data.TaggedError("PullRequestAmbiguityError")<{
+  readonly awsAccountId: string
+  readonly pullRequestId: string
+  readonly matches: number
+}> {}
 
 const StaleOpenRow = Schema.Struct({
   id: Schema.String,
@@ -42,14 +49,39 @@ export const findMissingDiffStats = (sql: SqlClient.SqlClient) => {
 }
 
 export const findByAccountAndId = (sql: SqlClient.SqlClient) => {
-  const run = SqlSchema.findOne({
+  const run = SqlSchema.findAll({
     Result: CachedPullRequestSchema,
     Request: Schema.Struct({ awsAccountId: Schema.String, id: Schema.String }),
     execute: (req) =>
       sql`SELECT * FROM pull_requests
           WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.id}`
   })
-  return (awsAccountId: string, id: string) => run({ awsAccountId, id }).pipe(cacheError("findByAccountAndId"))
+  return (awsAccountId: string, id: string) =>
+    run({ awsAccountId, id }).pipe(
+      Effect.flatMap((rows) => {
+        const [first, ...duplicates] = rows
+        return duplicates.length > 0
+          ? Effect.fail(
+            new PullRequestAmbiguityError({
+              awsAccountId,
+              pullRequestId: id,
+              matches: rows.length
+            })
+          )
+          : Effect.succeed(first === undefined ? undefined : first)
+      }),
+      Effect.map((row) =>
+        row === undefined
+          ? Option.none<typeof CachedPullRequestSchema.Type>()
+          : Option.some(row)
+      ),
+      Effect.mapError((cause) =>
+        Predicate.isTagged(cause, "PullRequestAmbiguityError")
+          ? cause
+          : new CacheError({ operation: "PullRequestRepo.findByAccountAndId", cause })
+      ),
+      Effect.withSpan("PullRequestRepo.findByAccountAndId")
+    )
 }
 
 export const findByCoordinates = (sql: SqlClient.SqlClient) => {

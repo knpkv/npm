@@ -9,7 +9,7 @@
  * @internal
  */
 
-import { Effect, Option, Schema, SubscriptionRef } from "effect"
+import { Clock, Effect, Option, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { diffApprovalPools, diffComments, diffPR } from "../CacheService/diff.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
@@ -19,7 +19,7 @@ import type {
   PullRequestRepoContract,
   UpsertInput
 } from "../CacheService/repos/PullRequestRepo/index.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestAmbiguityError, PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import {
@@ -114,19 +114,33 @@ export const makeRefreshSinglePR = (
 
     // Find PR in state to get account info
     const currentState = yield* SubscriptionRef.get(state)
-    const pr = currentState.pullRequests.find(
+    const stateMatches = currentState.pullRequests.filter(
       (p) =>
         p.id === prId &&
         p.account.awsAccountId === awsAccountId &&
         (coordinates === undefined ||
           (p.repositoryName === coordinates.repositoryName && p.account.region === coordinates.region))
     )
+    if (coordinates === undefined && stateMatches.length > 1) {
+      return yield* new RefreshError({
+        failedAccounts: [awsAccountId],
+        cause: new PullRequestAmbiguityError({
+          awsAccountId,
+          pullRequestId: prId,
+          matches: stateMatches.length
+        })
+      })
+    }
+    const pr = stateMatches[0]
 
     // Also check cache
     const cachedPR: Option.Option<CachedPullRequest> = coordinates === undefined
       ? yield* prRepo.findByAccountAndId(awsAccountId, prId).pipe(
-        Effect.map(Option.some),
-        Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
+        Effect.catchTag(
+          "PullRequestAmbiguityError",
+          (cause) => Effect.fail(new RefreshError({ failedAccounts: [awsAccountId], cause }))
+        ),
+        Effect.catchTag("CacheError", () => Effect.succeed(Option.none<CachedPullRequest>()))
       )
       : yield* prRepo.findByCoordinates(awsAccountId, prId, coordinates.repositoryName, coordinates.region).pipe(
         Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
@@ -161,6 +175,9 @@ export const makeRefreshSinglePR = (
     // Build fresh upsert — PullRequestDetail lacks some fields, fall back to cache
     const cached = Option.isSome(cachedPR) ? cachedPR.value : undefined
     const durableAccountId = cached?.awsAccountId ?? pr?.account.awsAccountId ?? awsAccountId
+    const lastModifiedDate = cached !== undefined
+      ? cached.lastModifiedDate.toISOString()
+      : yield* Clock.currentTimeMillis.pipe(Effect.map((nowMs) => new Date(nowMs).toISOString()))
     const freshUpsert: UpsertInput = {
       id: prId,
       awsAccountId: durableAccountId,
@@ -172,7 +189,7 @@ export const makeRefreshSinglePR = (
       author: detail.author,
       repositoryName: coordinates?.repositoryName ?? detail.repositoryName,
       creationDate: detail.creationDate.toISOString(),
-      lastModifiedDate: cached?.lastModifiedDate.toISOString() ?? new Date().toISOString(),
+      lastModifiedDate,
       status: decodePullRequestStatus(detail.status),
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
@@ -187,7 +204,11 @@ export const makeRefreshSinglePR = (
     }
 
     // Diff for subscribed PRs
-    const isSubscribed = yield* subscriptionRepo.isSubscribed(durableAccountId, prId).pipe(
+    const identity = {
+      repositoryName: coordinates?.repositoryName ?? detail.repositoryName,
+      accountRegion: account.region
+    }
+    const isSubscribed = yield* subscriptionRepo.isSubscribed(durableAccountId, prId, identity).pipe(
       Effect.catch(() => Effect.succeed(false))
     )
 
@@ -209,7 +230,7 @@ export const makeRefreshSinglePR = (
       )
 
       // Diff comments
-      const cachedComments = yield* commentRepo.find(durableAccountId, prId).pipe(
+      const cachedComments = yield* commentRepo.find(durableAccountId, prId, identity).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cachedComments)) {
@@ -221,7 +242,7 @@ export const makeRefreshSinglePR = (
     }
 
     // Cache comments
-    yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs)).pipe(
+    yield* commentRepo.upsert(durableAccountId, prId, JSON.stringify(locs), identity).pipe(
       Effect.catch(() => Effect.void)
     )
 
