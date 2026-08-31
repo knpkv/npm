@@ -185,9 +185,21 @@ export class ApprovalAppStore {
     yield* Effect.try({
       try: () => {
         immediateTransaction(database, () => {
-          database
-            .prepare("DELETE FROM push_deliveries WHERE endpoint = ?")
-            .run(subscription.endpoint)
+          const current = database
+            .prepare("SELECT record FROM push_subscriptions WHERE endpoint = ?")
+            .get(subscription.endpoint)
+          const unchanged = current !== undefined && subscriptionMatches(
+            Schema.decodeUnknownSync(StoredPushSubscription)(
+              JSON.parse(Schema.decodeUnknownSync(StoredJsonRow)(current).record)
+            ),
+            subscription,
+            owner
+          )
+          if (!unchanged) {
+            database
+              .prepare("DELETE FROM push_deliveries WHERE endpoint = ?")
+              .run(subscription.endpoint)
+          }
           database
             .prepare(
               "INSERT INTO push_subscriptions (endpoint, record) VALUES (?, ?) ON CONFLICT(endpoint) DO UPDATE SET record = excluded.record"

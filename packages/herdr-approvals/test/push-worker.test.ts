@@ -327,6 +327,48 @@ describe("push delivery retries", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("preserves delivery suppression for an identical subscription write", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-push-idempotent-subscription-test-"))
+    const replacement: PushSubscriptionRecord = {
+      ...subscription,
+      keys: { auth: "replacement_auth", p256dh: "replacement_p256dh" }
+    }
+    return Effect.acquireUseRelease(
+      ApprovalAppStore.open(join(root, "approval.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.putSubscription(subscription, "alice@example.com")
+          yield* store.recordDelivery(
+            "SER8",
+            "job-idempotent",
+            subscription.endpoint,
+            1_000
+          )
+          yield* store.putSubscription(subscription, "alice@example.com")
+          expect(
+            yield* store.hasDelivered(
+              "SER8",
+              "job-idempotent",
+              subscription.endpoint
+            )
+          ).toBe(true)
+          yield* store.putSubscription(replacement, "alice@example.com")
+          expect(
+            yield* store.hasDelivered(
+              "SER8",
+              "job-idempotent",
+              subscription.endpoint
+            )
+          ).toBe(false)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("retries an accepted delivery after its push TTL", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-ttl-test-"))
     let sends = 0
