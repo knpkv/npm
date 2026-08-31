@@ -79,7 +79,7 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
-import { authorize } from "./auth.js"
+import { authorize, authorizeLoopback, type LoopbackActor } from "./auth.js"
 import {
   type ApprovalDirectory,
   type DashboardHistoryPage,
@@ -105,7 +105,7 @@ import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
 import { ApprovalAppStore } from "./store.js"
-import { workCheckpointPath } from "./work-checkpoint.js"
+import { workCheckpointPath, workSnapshotPath } from "./work-checkpoint.js"
 
 const Approval = Schema.Struct({ hash: JobHash, nonce: Schema.String })
 type Approval = typeof Approval.Type
@@ -395,7 +395,7 @@ const authorizeOriginlessMutation = (request: IncomingMessage) => {
 
 export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkCheckpointRequest")(
   function*<AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
-    authorization: Effect.Effect<string, AuthorizationError, AuthorizationRequirements>,
+    authorization: Effect.Effect<LoopbackActor, AuthorizationError, AuthorizationRequirements>,
     decode: Effect.Effect<WorkGoalCheckpointType, DecodeError, DecodeRequirements>,
     work: WorkService
   ) {
@@ -1678,6 +1678,10 @@ export const startHttpServer = async (
             : mode === "tailnet" || mode === "serve"
             ? tailnetActor(request, config, null)
             : actor(request, config, true)
+          const loopbackAuthorized = authorizeLoopback({
+            login: header(request, "tailscale-user-login"),
+            remoteAddress: request.socket.remoteAddress
+          })
 
           const approvalSurface = mode === "approval" || mode === "serve"
           const dashboard = Effect.gen(function*() {
@@ -1827,18 +1831,23 @@ export const startHttpServer = async (
             return
           }
 
-          if (mode === "serve" && request.method === "GET" && url.pathname === "/v1/work") {
-            await respond(response, Effect.andThen(authorized, work.snapshots(now())))
+          if (
+            (mode === "local" || mode === "serve") &&
+            request.method === "GET" &&
+            url.pathname === workSnapshotPath
+          ) {
+            const workAuthorization = mode === "local" ? loopbackAuthorized : authorized
+            await respond(response, Effect.andThen(workAuthorization, work.snapshots(now())))
             return
           }
 
           if (
-            mode === "serve" &&
+            mode === "local" &&
             request.method === "POST" &&
             url.pathname === workCheckpointPath
           ) {
             const effect = recordWorkCheckpointRequest(
-              authorized,
+              loopbackAuthorized,
               authorizeOriginlessMutation(request).pipe(
                 Effect.andThen(readJson(request, WorkGoalCheckpoint))
               ),

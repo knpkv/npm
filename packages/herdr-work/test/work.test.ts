@@ -214,16 +214,42 @@ describe("durable Work projection", () => {
       expect(yield* reopened.list()).toEqual(history)
     }).pipe(provideNodeServices))
 
-  it.effect("fails a duplicate checkpoint without replacing the durable event", () =>
+  it.effect("replays an exact checkpoint without replacing the durable event", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-conflict-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const store = yield* WorkStore.open(join(directory, "work.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
       yield* store.append(history[0])
-      const duplicate = yield* Effect.result(store.append(history[0]))
-      expect(duplicate).toMatchObject({
+      const replay = yield* Effect.result(store.append({
+        occurredAt: history[0].occurredAt,
+        eventId: history[0].eventId,
+        goal: history[0].goal,
+        version: history[0].version
+      }))
+      expect(replay).toMatchObject({ _tag: "Success", success: history[0] })
+      expect(yield* store.list()).toEqual([history[0]])
+    }).pipe(provideNodeServices))
+
+  it.effect("reports an identity collision when a replay changes its content", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-conflict-content-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      yield* store.append(history[0])
+
+      const changedEvent = yield* Effect.result(
+        store.append({ ...history[0], goal: { ...history[0].goal, title: "Changed" } })
+      )
+      const changedCheckpoint = yield* Effect.result(
+        store.append({ ...history[0], eventId: "event-other" })
+      )
+      expect(changedEvent).toMatchObject({
         failure: { _tag: "WorkCheckpointConflictError", eventId: "event-created" }
+      })
+      expect(changedCheckpoint).toMatchObject({
+        failure: { _tag: "WorkCheckpointConflictError", eventId: "event-other" }
       })
       expect(yield* store.list()).toEqual([history[0]])
     }).pipe(provideNodeServices))

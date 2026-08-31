@@ -5,7 +5,7 @@ Host runtime, fleet CLI, approval PWA, push worker, and shared Rly shell for the
 It publishes two binaries:
 
 - `hostd`: local fleet authority plus optional Tailscale listeners, approvals, Connect, chat, and push
-- `fleetctl`: status, history, job submission/following, and fleet-wide apply submission with per-host outcomes
+- `fleetctl`: status, history, job submission/following, Work checkpoint recording/snapshots, and fleet-wide apply submission with per-host outcomes
 
 `hostd` reads `FLEET_CONFIG_PATH`, defaulting to `~/.config/fleet/config.json`. The file is decoded by `@knpkv/herdr-fleet`; invalid or missing fields fail startup. With `crossHost: false`, only the loopback listener and immediately queued safe jobs are available, with no Tailscale dependency. Cross-host listeners authenticate the actual socket peer with Tailscale WhoIs. Forwarded identity headers are never trusted.
 
@@ -19,4 +19,4 @@ Approval mutations require the exact active listener origin, including HTML form
 
 The approval hub renders one masthead and three tabs. Approvals contains only local decisions and remote approval handoffs. Connect embeds the package terminal and authoritative relationship tree, with coordinator chat below it. Work renders the durable `@knpkv/herdr-work` projection. The built PWA assets keep offline installation, push subscription management, notification click routing, and the same authenticated browser routes.
 
-`fleetctl work record HOST CHECKPOINT_JSON` decodes one `WorkGoalCheckpoint` locally, then posts it to the configured canonical hub at `POST /v1/work/checkpoints`. The canonical TLS listener authenticates the socket peer with Tailscale WhoIs and checks `allowedUsers`; browser-origin writes and non-hub targets are rejected. The route accepts no job, command, file, or partial-goal shape.
+`fleetctl work record HOST CHECKPOINT_JSON` decodes one `WorkGoalCheckpoint` locally, then posts it to the target host's loopback listener at `POST /v1/work/checkpoints`. `fleetctl work snapshot [HOST]` reads the four typed projections from the local `GET /v1/work` listener. The canonical hub also serves that read-only snapshot to the authenticated Work UI. Checkpoint writes reject browser-origin requests and accept no job, command, file, or partial-goal shape. Replaying the exact checkpoint is idempotent; changed content with the same event ID or goal timestamp returns `WorkCheckpointConflictError`.

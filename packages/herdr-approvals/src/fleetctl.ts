@@ -14,7 +14,11 @@ import {
   loadConfiguration
 } from "@knpkv/herdr-fleet"
 import { make as makeTailscale, nodeIpv4, resolveFleetNode, type TailscaleClient } from "@knpkv/herdr-tailscale"
-import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
+import {
+  WorkGoalCheckpoint,
+  type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkSnapshots
+} from "@knpkv/herdr-work/model"
 import { Console, Effect, Layer, Schema, Stdio } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -23,7 +27,7 @@ import { submitToHost } from "./fleetctl-submission.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
-import { workCheckpointFromJson, workCheckpointHubUrl } from "./work-checkpoint.js"
+import { workCheckpointFromJson, workCheckpointUrl, workSnapshotUrl } from "./work-checkpoint.js"
 
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
@@ -155,8 +159,14 @@ const recordWorkCheckpoint = (
   checkpoint: WorkGoalCheckpointType
 ) =>
   Effect.flatMap(
-    workCheckpointHubUrl(config, host),
+    workCheckpointUrl(config, host),
     (url) => requestAt(url, WorkGoalCheckpoint, checkpoint)
+  )
+
+const snapshotWork = (config: HostConfiguration, host: string) =>
+  Effect.flatMap(
+    workSnapshotUrl(config, host),
+    (url) => requestAt(url, WorkSnapshots)
   )
 
 export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: ReadonlyArray<string>) {
@@ -234,6 +244,7 @@ const usage = `fleetctl commands:
   submit HOST agent.delegate MODE REPOSITORY PROMPT...
   submit HOST agent.message SESSION MESSAGE...
   work record HOST CHECKPOINT_JSON
+  work snapshot [HOST]
   apply-everywhere REF`
 
 const main = Effect.gen(function*() {
@@ -311,15 +322,23 @@ const main = Effect.gen(function*() {
     }
     case "work": {
       const operation = rest[0]
-      const host = rest[1]
-      const json = rest[2]
-      if (operation !== "record" || host === undefined || json === undefined || rest.length !== 3) {
-        return yield* new FleetValidationError({ detail: usage })
+      if (operation === "record") {
+        const host = rest[1]
+        const json = rest[2]
+        if (host === undefined || json === undefined || rest.length !== 3) {
+          return yield* new FleetValidationError({ detail: usage })
+        }
+        const checkpoint = yield* workCheckpointFromJson(json)
+        const recorded = yield* recordWorkCheckpoint(config, host, checkpoint)
+        yield* Console.log(JSON.stringify(recorded, null, 2))
+        return
       }
-      const checkpoint = yield* workCheckpointFromJson(json)
-      const recorded = yield* recordWorkCheckpoint(config, host, checkpoint)
-      yield* Console.log(JSON.stringify(recorded, null, 2))
-      return
+      if (operation === "snapshot" && (rest.length === 1 || rest.length === 2)) {
+        const snapshot = yield* snapshotWork(config, rest[1] ?? config.host)
+        yield* Console.log(JSON.stringify(snapshot, null, 2))
+        return
+      }
+      return yield* new FleetValidationError({ detail: usage })
     }
     case "apply-everywhere": {
       const ref = rest[0]

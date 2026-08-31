@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
 import type { WorkGoalCheckpoint } from "@knpkv/herdr-work/model"
 import { Effect, Result } from "effect"
-import { workCheckpointFromJson, workCheckpointHubUrl } from "../src/work-checkpoint.js"
+import { workCheckpointFromJson, workCheckpointUrl, workSnapshotUrl } from "../src/work-checkpoint.js"
 
 const checkpoint: WorkGoalCheckpoint = {
   eventId: "event-work-created",
@@ -52,15 +52,23 @@ const config: HostConfiguration = {
   tailscaleCommand: "tailscale"
 }
 
-describe("fleetctl work record", () => {
-  it.effect("decodes one checkpoint and targets only the canonical hub", () =>
+describe("fleetctl work commands", () => {
+  it.effect("decodes checkpoints and targets only the local loopback listener", () =>
     Effect.gen(function*() {
       expect(yield* workCheckpointFromJson(JSON.stringify(checkpoint))).toEqual(checkpoint)
-      expect(yield* workCheckpointHubUrl(config, "ser8")).toBe(
-        "https://ser8.example.test:4779/v1/work/checkpoints"
+      expect(yield* workCheckpointUrl(config, "alpha")).toBe(
+        "http://127.0.0.1:4777/v1/work/checkpoints"
       )
-      const nonHub = yield* Effect.result(workCheckpointHubUrl(config, "ALPHA"))
-      expect(nonHub).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+      expect(yield* workSnapshotUrl(config, "ALPHA")).toBe(
+        "http://127.0.0.1:4777/v1/work"
+      )
+      const remote = yield* Effect.result(workCheckpointUrl(config, "SER8"))
+      expect(remote).toMatchObject({
+        failure: {
+          _tag: "FleetValidationError",
+          detail: "work commands can only target the local host"
+        }
+      })
     }))
 
   it.effect("rejects malformed or widened checkpoint JSON before HTTP", () =>

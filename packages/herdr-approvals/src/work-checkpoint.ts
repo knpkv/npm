@@ -2,6 +2,7 @@ import { FleetValidationError, type HostConfiguration } from "@knpkv/herdr-fleet
 import { WorkGoalCheckpoint } from "@knpkv/herdr-work/model"
 import { Effect, Schema } from "effect"
 
+export const workSnapshotPath = "/v1/work"
 export const workCheckpointPath = "/v1/work/checkpoints"
 
 export const workCheckpointFromJson = Effect.fn("Fleetctl.workCheckpointFromJson")(function*(text: string) {
@@ -24,7 +25,7 @@ export const workCheckpointFromJson = Effect.fn("Fleetctl.workCheckpointFromJson
   )
 })
 
-export const workCheckpointHubUrl = Effect.fn("Fleetctl.workCheckpointHubUrl")(function*(
+const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(
   config: HostConfiguration,
   target: string
 ) {
@@ -32,13 +33,24 @@ export const workCheckpointHubUrl = Effect.fn("Fleetctl.workCheckpointHubUrl")(f
   if (known === undefined) {
     return yield* new FleetValidationError({ detail: `unknown host: ${target}` })
   }
-  if (
-    !config.crossHost ||
-    known.host.toLowerCase() !== config.approvalHub.host.toLowerCase()
-  ) {
+  if (known.host.toLowerCase() !== config.host.toLowerCase()) {
     return yield* new FleetValidationError({
-      detail: "work checkpoints can only be recorded on the canonical approval hub"
+      detail: "work commands can only target the local host"
     })
   }
-  return new URL(workCheckpointPath, config.approvalHub.url).href
+  return `http://127.0.0.1:${config.localPort}`
+})
+
+export const workCheckpointUrl = Effect.fn("Fleetctl.workCheckpointUrl")(function*(
+  config: HostConfiguration,
+  target: string
+) {
+  return `${yield* workLocalBaseUrl(config, target)}${workCheckpointPath}`
+})
+
+export const workSnapshotUrl = Effect.fn("Fleetctl.workSnapshotUrl")(function*(
+  config: HostConfiguration,
+  target: string
+) {
+  return `${yield* workLocalBaseUrl(config, target)}${workSnapshotPath}`
 })
