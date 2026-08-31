@@ -37,55 +37,62 @@ const relationshipError = (
 const keyOf = (agent: Pick<ConnectRelationshipNode, "host" | "id">): string =>
   `${agent.host.toLowerCase()}\u0000${agent.id}`
 
+export const connectRelationshipViolation = (
+  agents: ReadonlyArray<ConnectRelationshipNode>
+): ConnectRelationshipError | undefined => {
+  const byKey = new Map<string, ConnectRelationshipNode>()
+  for (const agent of agents) {
+    const key = keyOf(agent)
+    if (byKey.has(key)) {
+      return relationshipError(
+        "ambiguous_ownership",
+        `agent ${agent.id} has more than one owner on ${agent.host}`
+      )
+    }
+    byKey.set(key, agent)
+  }
+  for (const agent of agents) {
+    if (agent.relationship === undefined) continue
+    const parent = byKey.get(
+      `${agent.host.toLowerCase()}\u0000${agent.relationship.parentAgentId}`
+    )
+    if (parent === undefined) {
+      const foreignParent = agents.find(
+        (candidate) => candidate.id === agent.relationship?.parentAgentId
+      )
+      if (foreignParent !== undefined) {
+        return relationshipError(
+          "cross_host",
+          `agent ${agent.id} and its parent belong to different hosts`
+        )
+      }
+    }
+  }
+  for (const agent of agents) {
+    const path = new Set<string>()
+    let current: ConnectRelationshipNode | undefined = agent
+    while (current !== undefined) {
+      const key = keyOf(current)
+      if (path.has(key)) {
+        return relationshipError(
+          "cyclic",
+          `agent ${current.id} closes a relationship cycle`
+        )
+      }
+      path.add(key)
+      current = current.relationship === undefined
+        ? undefined
+        : byKey.get(
+          `${current.host.toLowerCase()}\u0000${current.relationship.parentAgentId}`
+        )
+    }
+  }
+}
+
 export const validateConnectRelationships = Effect.fn("HerdrConnect.validateRelationships")(
   function*(agents: ReadonlyArray<ConnectRelationshipNode>) {
-    const byKey = new Map<string, ConnectRelationshipNode>()
-    for (const agent of agents) {
-      const key = keyOf(agent)
-      if (byKey.has(key)) {
-        return yield* relationshipError(
-          "ambiguous_ownership",
-          `agent ${agent.id} has more than one owner on ${agent.host}`
-        )
-      }
-      byKey.set(key, agent)
-    }
-    for (const agent of agents) {
-      if (agent.relationship === undefined) continue
-      const parent = byKey.get(
-        `${agent.host.toLowerCase()}\u0000${agent.relationship.parentAgentId}`
-      )
-      if (parent === undefined) {
-        const foreignParent = agents.find(
-          (candidate) => candidate.id === agent.relationship?.parentAgentId
-        )
-        if (foreignParent !== undefined) {
-          return yield* relationshipError(
-            "cross_host",
-            `agent ${agent.id} and its parent belong to different hosts`
-          )
-        }
-      }
-    }
-    for (const agent of agents) {
-      const path = new Set<string>()
-      let current: ConnectRelationshipNode | undefined = agent
-      while (current !== undefined) {
-        const key = keyOf(current)
-        if (path.has(key)) {
-          return yield* relationshipError(
-            "cyclic",
-            `agent ${current.id} closes a relationship cycle`
-          )
-        }
-        path.add(key)
-        current = current.relationship === undefined
-          ? undefined
-          : byKey.get(
-            `${current.host.toLowerCase()}\u0000${current.relationship.parentAgentId}`
-          )
-      }
-    }
+    const violation = connectRelationshipViolation(agents)
+    if (violation !== undefined) return yield* violation
   }
 )
 

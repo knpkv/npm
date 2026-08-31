@@ -272,6 +272,45 @@ describe("Connect public seams", () => {
     )
   })
 
+  it.effect("does not yield while holding the shared SQLite writer", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-relationship-writer-test-"))
+    const path = join(root, "approval-app.sqlite")
+    const observations: ReadonlyArray<RelationshipObservation> = Array.from(
+      { length: 1_024 },
+      (_, index) => ({
+        metadata: Schema.decodeUnknownSync(PersistedConnectAgentMetadata)({
+          agentId: `agent-${index}`,
+          host: "SER8",
+          observedAt: index,
+          paneId: `w1:p${index.toString(36).toUpperCase()}`
+        }),
+        source: "durable_worker"
+      })
+    )
+    return Effect.scoped(Effect.gen(function*() {
+      const store = yield* Effect.acquireRelease(
+        AgentRelationshipStore.open(path),
+        (opened) => Effect.sync(() => opened.close())
+      )
+      const sibling = yield* Effect.acquireRelease(
+        Effect.sync(() => new DatabaseSync(path)),
+        (database) => Effect.sync(() => database.close())
+      )
+      sibling.exec("CREATE TABLE sibling_writes (id INTEGER PRIMARY KEY)")
+      const persistence = yield* Effect.forkChild(
+        store.persistAll(observations),
+        { startImmediately: true, uninterruptible: false }
+      )
+      yield* Effect.yieldNow
+      expect(() => sibling.exec("INSERT INTO sibling_writes (id) VALUES (1)")).not.toThrow()
+      expect(yield* Fiber.join(persistence)).toHaveLength(observations.length)
+      expect(sibling.prepare("SELECT count(*) AS count FROM sibling_writes").get()).toEqual({ count: 1 })
+    })).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("persists a strictly newer same-pane reparent from trusted live inventory", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-relationship-reparent-test-"))
     const path = join(root, "relationships.sqlite")
