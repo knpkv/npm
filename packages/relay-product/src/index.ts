@@ -41,10 +41,13 @@ export {
 
 export {
   RelayProductDock,
+  RelayProductDockChrome,
   type RelayProductDockHost,
   RelayProductDockInvariantViolation,
   type RelayProductDockMessage,
+  RelayProductDockProvider,
   RelayProductDockProviderMissing,
   type RelayPullRequestDockRegistration,
+  useRelayProductDockRegistration,
   useRelayPullRequestDock
 } from "./dock.js"

@@ -6,24 +6,19 @@ import * as Exit from "effect/Exit"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import {
-  createContext,
   type FormEvent,
   lazy,
   type ReactElement,
   type ReactNode,
   Suspense,
   useCallback,
-  useContext,
   useEffect,
-  useMemo,
   useRef,
   useState
 } from "react"
 
 import {
-  type AgenticProduct,
   ContinuePullRequestConversationRequest,
-  type PullRequestConversation,
   type PullRequestConversationContinuationFailure,
   type PullRequestConversationLookupFailure,
   type PullRequestConversationRedirectFailed,
@@ -32,18 +27,23 @@ import {
   type RelayProductAdapterContractError,
   type RelayProductContinuationReceiptMismatch
 } from "./conversation.js"
+import {
+  type RelayProductDockMessage,
+  type RelayProductDockHost,
+  type RelayPullRequestDockRegistration,
+  RelayProductDockProvider,
+  useRelayProductDockRegistration
+} from "./registry.js"
 import type { RelaySelectorState } from "./model.js"
+
+export class RelayProductDockInvariantViolation extends Data.TaggedError("RelayProductDockInvariantViolation")<{
+  readonly boundary: "conversation" | "selector"
+}> {}
 
 const LazyRelayDock = lazy(async () => {
   const patterns = await import("@knpkv/rly/patterns")
   return { default: patterns.RelayDock }
 })
-
-export interface RelayProductDockMessage {
-  readonly id: string
-  readonly role: "operator" | "relay" | "system"
-  readonly text: string
-}
 
 type RelayProductDockContinuationFailure =
   | RelayAuthenticationFailure
@@ -57,61 +57,9 @@ type RelayProductDockLocateFailure =
   | PullRequestConversationRedirectFailed
   | RelayProductAdapterContractError
 
-interface RelayPullRequestDockRegistrationBase {
-  readonly context: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
-  readonly conversation: PullRequestConversation
-  readonly selection: RelaySelectorState
-}
-
-export type RelayPullRequestDockRegistration = RelayPullRequestDockRegistrationBase &
-  (
-    | {
-        readonly status: "loading"
-      }
-    | {
-        readonly continuePullRequestConversation: (
-          request: ContinuePullRequestConversationRequest
-        ) => Effect.Effect<void, RelayProductDockContinuationFailure>
-        readonly messages: ReadonlyArray<RelayProductDockMessage>
-        readonly status: "ready"
-      }
-    | {
-        readonly description: string
-        readonly status: "error" | "unavailable"
-      }
-  )
-
-export interface RelayProductDockHost {
-  readonly context: ReadonlyArray<{ readonly id: string; readonly label: string; readonly value: string }>
-  readonly locatePullRequestConversation: (
-    locator: PullRequestConversationLocator
-  ) => Effect.Effect<void, RelayProductDockLocateFailure>
-  readonly product: AgenticProduct
-  readonly selection: RelaySelectorState
-}
-
 interface RelayProductDockProps {
   readonly children: ReactNode
   readonly host: RelayProductDockHost
-}
-
-interface RelayPullRequestDockRegistry {
-  readonly register: (registration: RelayPullRequestDockRegistration) => () => void
-}
-
-export class RelayProductDockProviderMissing extends Data.TaggedError("RelayProductDockProviderMissing") {}
-
-export class RelayProductDockInvariantViolation extends Data.TaggedError("RelayProductDockInvariantViolation")<{
-  readonly boundary: "conversation" | "selector"
-}> {}
-
-const RelayPullRequestDockContext = createContext<RelayPullRequestDockRegistry | undefined>(undefined)
-
-/** Attach one exact PR controller to the application-level Relay dock for this route lifetime. */
-export const useRelayPullRequestDock = (registration: RelayPullRequestDockRegistration): void => {
-  const registry = useContext(RelayPullRequestDockContext)
-  if (registry === undefined) throw new RelayProductDockProviderMissing()
-  useEffect(() => registry.register(registration), [registration, registry])
 }
 
 const actionFailureDescription = (
@@ -371,24 +319,23 @@ const selectorRevision = (selection: RelaySelectorState): string =>
 
 /** Own one collapsed Relay dock while application pages register exact PR threads underneath it. */
 export const RelayProductDock = ({ children, host }: RelayProductDockProps): ReactElement => {
-  const [registration, setRegistration] = useState<RelayPullRequestDockRegistration | null>(null)
+  return (
+    <RelayProductDockProvider>
+      {children}
+      <RelayProductDockChrome host={host} />
+    </RelayProductDockProvider>
+  )
+}
+
+/** Render the chrome for a registration provider; keep this component lazy at product route boundaries. */
+export const RelayProductDockChrome = ({ host }: { readonly host: RelayProductDockHost }): ReactElement => {
+  const registration = useRelayProductDockRegistration()
   const activeSelection = registration?.selection ?? host.selection
   const identity = selectionIdentity(registration)
   const activeSelectorRevision = selectorRevision(activeSelection)
   const [selection, setSelection] = useState(activeSelection)
   useEffect(() => setSelection(activeSelection), [activeSelectorRevision, identity])
 
-  const registry = useMemo<RelayPullRequestDockRegistry>(
-    () => ({
-      register: (next) => {
-        setRegistration(next)
-        return () => {
-          setRegistration((current) => (current === next ? null : current))
-        }
-      }
-    }),
-    []
-  )
   const setModel = (value: string): void => {
     const option = selection.models.find(({ id }) => id === value)
     if (option === undefined) return
@@ -412,42 +359,47 @@ export const RelayProductDock = ({ children, host }: RelayProductDockProps): Rea
   const readyRegistration = registration?.status === "ready" ? registration : null
 
   return (
-    <RelayPullRequestDockContext value={registry}>
-      {children}
-      <div
-        data-relay-product-dock-chrome=""
-        style={{
-          insetBlockEnd: "max(var(--rly-space-16), env(safe-area-inset-bottom, 0px))",
-          insetInlineEnd: "max(var(--rly-space-16), env(safe-area-inset-right, 0px))",
-          position: "fixed",
-          zIndex: 80
-        }}
-      >
-        <Suspense fallback={null}>
-          <LazyRelayDock
-            context={registration?.context ?? host.context}
-            defaultOpen={false}
-            footer={
-              readyRegistration === null ? undefined : (
-                <PullRequestContinuation registration={readyRegistration} selection={selection} />
-              )
+    <div
+      data-relay-product-dock-chrome=""
+      style={{
+        insetBlockEnd: "max(var(--rly-space-16), env(safe-area-inset-bottom, 0px))",
+        insetInlineEnd: "max(var(--rly-space-16), env(safe-area-inset-right, 0px))",
+        position: "fixed",
+        zIndex: 80
+      }}
+    >
+      <Suspense fallback={null}>
+        <LazyRelayDock
+          context={registration?.context ?? host.context}
+          defaultOpen={false}
+          footer={
+            readyRegistration === null ? undefined : (
+              <PullRequestContinuation registration={readyRegistration} selection={selection} />
+            )
+          }
+          selection={{
+            model: {
+              onValueChange: setModel,
+              options: selection.models.map(({ id, label }) => ({ label, value: id })),
+              value: selection.modelId
+            },
+            profile: {
+              onValueChange: setProfile,
+              options: selection.profiles.map(({ id, label }) => ({ label, value: id })),
+              value: selection.profileId
             }
-            selection={{
-              model: {
-                onValueChange: setModel,
-                options: selection.models.map(({ id, label }) => ({ label, value: id })),
-                value: selection.modelId
-              },
-              profile: {
-                onValueChange: setProfile,
-                options: selection.profiles.map(({ id, label }) => ({ label, value: id })),
-                value: selection.profileId
-              }
-            }}
-            state={relayDockState(host, registration)}
-          />
-        </Suspense>
-      </div>
-    </RelayPullRequestDockContext>
+          }}
+          state={relayDockState(host, registration)}
+        />
+      </Suspense>
+    </div>
   )
 }
+
+export {
+  RelayProductDockProvider,
+  RelayProductDockProviderMissing,
+  useRelayProductDockRegistration,
+  useRelayPullRequestDock
+} from "./registry.js"
+export type { RelayProductDockHost, RelayProductDockMessage, RelayPullRequestDockRegistration } from "./registry.js"

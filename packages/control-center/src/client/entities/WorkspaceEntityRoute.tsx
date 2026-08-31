@@ -732,7 +732,7 @@ const ConnectedWorkspaceEntity = ({
           entityId={entityId}
           inspection={controller.state.inspection}
           reviewState={reviewController.state}
-          startReview={reviewController.start}
+          startReview={reviewController.startAwaitable}
           workspaceId={workspaceId}
         />
       ) : null}

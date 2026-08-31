@@ -28,6 +28,11 @@ import type {
 } from "../server/Api.js"
 import { useAtomValue } from "@effect/atom-react"
 import { appStateAtom } from "./atoms/app.js"
+import {
+  codeCommitPullRequestHref,
+  matchesCodeCommitPullRequestRoute,
+  type CodeCommitPullRequestRouteCoordinates
+} from "./codecommit-route.js"
 
 const hostSelection = Schema.decodeUnknownSync(RelaySelectorState)({
   modelId: "configured-default",
@@ -58,13 +63,14 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
             product: "codecommit"
           })
         }
-        const matches = state.pullRequests.filter(
-          (pullRequest) =>
-            String(pullRequest.id) === String(locator.pullRequestId) &&
-            String(pullRequest.repositoryName) === String(locator.repositoryName) &&
-            String(pullRequest.account.region) === String(locator.region) &&
-            (locator.accountId === undefined ||
-              codeCommitRepositoryAccountIdentity(pullRequest.account) === locator.accountId)
+        let route: CodeCommitPullRequestRouteCoordinates = {
+          pullRequestId: String(locator.pullRequestId),
+          region: String(locator.region),
+          repositoryName: String(locator.repositoryName)
+        }
+        if (locator.accountId !== undefined) route = { ...route, accountId: locator.accountId }
+        const matches = state.pullRequests.filter((pullRequest) =>
+          matchesCodeCommitPullRequestRoute(pullRequest, route)
         )
         if (matches.length === 0) {
           return yield* new PullRequestConversationNotFound({
@@ -90,7 +96,12 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
           })
         }
         const routeAccountId = codeCommitRouteAccountIdentity(match.account)
-        const href = `/accounts/${encodeURIComponent(routeAccountId)}/prs/${encodeURIComponent(match.id)}`
+        const href = codeCommitPullRequestHref(
+          routeAccountId,
+          String(match.id),
+          String(match.repositoryName),
+          String(match.account.region)
+        )
         yield* Effect.tryPromise({
           try: async () => {
             await navigate(href)
@@ -258,6 +269,7 @@ export const CodeCommitRelayThread = ({
         thread: {
           accountId: repositoryAccountId,
           pullRequestId: pullRequest.id,
+          region: pullRequest.account.region,
           repositoryName: pullRequest.repositoryName
         }
       }),

@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
 import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
+import { ControlCenterRelayDock } from "./controlCenterRelayDockShell.js"
 import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
@@ -15,11 +16,6 @@ const CommandSearch = lazy(async () => {
 const WorkspaceHomeLink = lazy(async () => {
   const module = await import("./settings/WorkspaceHomeLink.js")
   return { default: module.WorkspaceHomeLink }
-})
-
-const ControlCenterRelayDock = lazy(async () => {
-  const module = await import("./controlCenterRelayDock.js")
-  return { default: module.ControlCenterRelayDock }
 })
 
 const workspaceOverviewPath = (pathname: string): string => {
@@ -183,9 +179,5 @@ export const AppShell = (): ReactElement => {
     </div>
   )
 
-  return (
-    <Suspense fallback={content}>
-      <ControlCenterRelayDock>{content}</ControlCenterRelayDock>
-    </Suspense>
-  )
+  return <ControlCenterRelayDock>{content}</ControlCenterRelayDock>
 }

@@ -173,7 +173,7 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
       provider.health === "available" &&
       provider.capabilities.includes("pr-review") &&
       provider.reviewProfile !== undefined &&
-      model
+      model !== undefined
     ) {
       eligible.push({
         providerId: provider.providerId,
@@ -502,21 +502,21 @@ export const usePullRequestReview = (
     )
   }, [onSessionExpired, state, transport])
 
-  const start = useCallback((
+  const startAwaitable = useCallback((
     prompt?: DurableAgentPrompt,
     providerId?: ReviewProviderSelection["providerId"]
-  ) => {
-    if (state._tag !== "ready" || state.review._tag === "unavailable") return
+  ): Promise<void> => {
+    if (state._tag !== "ready" || state.review._tag === "unavailable") return Promise.resolve()
     const provider = providerId === undefined
       ? state.provider
       : state.providerPresets?.find((candidate) => candidate.providerId === providerId) ?? null
-    if (provider === null) return
+    if (provider === null) return Promise.resolve()
     const current = state
     mutationAbort.current?.abort()
     const abort = new AbortController()
     mutationAbort.current = abort
     setState({ ...current, action: "starting" })
-    transport.enqueue(entityId, provider, prompt, abort.signal).then(
+    return transport.enqueue(entityId, provider, prompt, abort.signal).then(
       (review) => {
         if (abort.signal.aborted) return
         setState((latest) =>
@@ -543,9 +543,19 @@ export const usePullRequestReview = (
             ? { ...latest, action: "failed" }
             : latest
         )
+        return Promise.reject(failure)
       }
     )
   }, [entityId, onSessionExpired, state, transport])
+
+  const start = useCallback((
+    prompt?: DurableAgentPrompt,
+    providerId?: ReviewProviderSelection["providerId"]
+  ): void => {
+    void startAwaitable(prompt, providerId).catch(<UnparsedInput>(failure: UnparsedInput) => {
+      Effect.runFork(Effect.logError("Pull-request review enqueue failed", failure))
+    })
+  }, [startAwaitable])
 
   const mutatePendingReview = useCallback((
     operation: (jobId: JobId, signal: AbortSignal) => Promise<PullRequestReviewState>
@@ -748,6 +758,7 @@ export const usePullRequestReview = (
       setRequestRevision((revision) => revision + 1)
     }, []),
     start,
+    startAwaitable,
     state: currentState
   }
 }

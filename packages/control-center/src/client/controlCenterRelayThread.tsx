@@ -1,5 +1,8 @@
 import {
+  PullRequestConversationContinuationFailed,
   PullRequestConversationContinuationRejected,
+  type ContinuePullRequestConversationRequest,
+  type PullRequestConversation,
   pullRequestThreadIdentity,
   type RelayProductDockMessage,
   type RelayPullRequestDockRegistration,
@@ -10,7 +13,7 @@ import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import { useMemo } from "react"
 
-import { DurableAgentPrompt, type PullRequestReviewThreadEvent } from "../api/agent.js"
+import { DurableAgentPrompt, type DurableAgentProviderId, type PullRequestReviewThreadEvent } from "../api/agent.js"
 import type { WorkspaceEntityInspection } from "../api/deliveryGraph.js"
 import type { EntityId, WorkspaceId } from "../domain/identifiers.js"
 import {
@@ -65,6 +68,40 @@ type ReviewProviderSelection = NonNullable<
 const providerPresets = (state: PullRequestReviewControllerState): ReadonlyArray<ReviewProviderSelection> =>
   state._tag === "ready" ? (state.providerPresets ?? (state.provider === null ? [] : [state.provider])) : []
 
+interface ControlCenterRelayContinuationInput {
+  readonly conversation: PullRequestConversation
+  readonly providerId: typeof DurableAgentProviderId.Type
+  readonly request: ContinuePullRequestConversationRequest
+  readonly startReview: (
+    prompt?: typeof DurableAgentPrompt.Type,
+    providerId?: typeof DurableAgentProviderId.Type
+  ) => Promise<void>
+}
+
+/** Await the durable enqueue so the shared dock can retain input on transport failure. */
+export const continueControlCenterRelayConversation = ({
+  conversation,
+  providerId,
+  request,
+  startReview
+}: ControlCenterRelayContinuationInput): Effect.Effect<void, PullRequestConversationContinuationFailed> => {
+  const thread = pullRequestThreadIdentity(conversation)
+  const prompt = Schema.decodeUnknownResult(DurableAgentPrompt)(request.message)
+  if (Result.isFailure(prompt)) {
+    return Effect.fail(
+      new PullRequestConversationContinuationFailed({
+        product: "control-center",
+        thread
+      })
+    )
+  }
+  return Effect.tryPromise({
+    try: () => startReview(prompt.success, providerId),
+    catch: (): PullRequestConversationContinuationFailed =>
+      new PullRequestConversationContinuationFailed({ product: "control-center", thread })
+  })
+}
+
 const selectorFor = (state: PullRequestReviewControllerState) => {
   const presets = providerPresets(state)
   const selected = state._tag === "ready" ? state.provider : null
@@ -89,7 +126,7 @@ interface ControlCenterRelayThreadProps {
   readonly startReview: (
     prompt?: typeof DurableAgentPrompt.Type,
     providerId?: ReviewProviderSelection["providerId"]
-  ) => void
+  ) => Promise<void>
   readonly workspaceId: WorkspaceId
 }
 
@@ -174,15 +211,19 @@ export const ControlCenterRelayThread = ({
             String(providerId) === String(request.selection.modelId) &&
             String(providerId) === String(request.selection.profileId)
         )
-        const prompt = Schema.decodeUnknownResult(DurableAgentPrompt)(request.message)
-        if (selected === undefined || Result.isFailure(prompt)) {
+        if (selected === undefined) {
           return new PullRequestConversationContinuationRejected({
             product: "control-center",
             reason: "selection-unavailable",
             thread
           })
         }
-        return Effect.sync(() => startReview(prompt.success, selected.providerId))
+        return continueControlCenterRelayConversation({
+          conversation,
+          providerId: selected.providerId,
+          request,
+          startReview
+        })
       },
       messages: relayMessages(reviewState),
       status: "ready"

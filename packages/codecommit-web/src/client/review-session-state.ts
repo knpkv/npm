@@ -1,6 +1,11 @@
 /** Pure state transitions for human finding dispositions. @module */
 import * as Schema from "effect/Schema"
-import { MAXIMUM_RELAY_REVIEW_TURNS, type RelayReviewConversationTurn, type RelayReviewFinding } from "../server/Api.js"
+import {
+  MAXIMUM_RELAY_REVIEW_TURNS,
+  type PullRequestRelayReviewResponse,
+  type RelayReviewConversationTurn,
+  type RelayReviewFinding
+} from "../server/Api.js"
 import { MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "../server/review/ReviewPromptBudget.js"
 
 export const FindingDisposition = Schema.Literals([
@@ -15,6 +20,20 @@ export const FindingDisposition = Schema.Literals([
 export type FindingDisposition = typeof FindingDisposition.Type
 
 export type FindingDispositions = Readonly<Record<string, FindingDisposition>>
+
+export interface RelayReviewCompletion {
+  readonly expectedIdentity: string
+  readonly identity: string
+  readonly skillIds: ReadonlyArray<string>
+  readonly turns: ReadonlyArray<RelayReviewConversationTurn>
+  readonly value: PullRequestRelayReviewResponse
+}
+
+/** Replace a review result without dropping the conversation already shown for this PR. */
+export const replaceRelayReviewPreservingTurns = (
+  turns: ReadonlyArray<RelayReviewConversationTurn>,
+  next: Omit<RelayReviewCompletion, "turns">
+): RelayReviewCompletion => ({ ...next, turns })
 
 /** Record a local decision without discarding an existing provider publication receipt. */
 export const applyFindingDecision = (
