@@ -699,6 +699,7 @@ const resolveNamespaceQualifiedTypeDeclaration = (analysis, filePath, typeName, 
   if (!TypeScript.isIdentifier(typeName.left) || !TypeScript.isIdentifier(typeName.right)) {
     failCanonicalType(filePath, typeNode, "unsupported nested namespace-qualified type")
   }
+  if (!imported.sourceSpecifier.startsWith(".")) return undefined
   const target = resolveLocalModule(filePath, imported.sourceSpecifier, analysis.sources)
   if (target === undefined) failCanonicalType(filePath, typeNode, "unresolved namespace-qualified type")
   const declaration = resolveExportedType(analysis, target, typeName.right.text, seen)
@@ -4256,7 +4257,6 @@ const publicCallableChanges = (
   } = {}
 ) => {
   const signatures = (sources, entryPoints, revisionCompilerOptions, revisionCompilerOptionsByEntryPoint) => {
-    const analyses = new Set()
     const result = new Map()
     const normalizedEntryPoints = normalizeEntryPoints(entryPoints ?? [])
     for (const entryPointDescriptor of normalizedEntryPoints) {
@@ -4270,7 +4270,6 @@ const publicCallableChanges = (
         compilerOptions: effectiveCompilerOptions,
         programFactory
       })
-      analyses.add(analysis)
       for (const { conditionPath, entryPoint, exportedName, publicSubpath, target } of reachableCallableEntries(
         sources,
         [entryPointDescriptor],
@@ -4298,9 +4297,7 @@ const publicCallableChanges = (
           result.set(identity, existing)
         }
       }
-    }
-    if (programFactory === TypeScript.createProgram) {
-      for (const analysis of analyses) analysis.releaseChecker()
+      if (programFactory === TypeScript.createProgram) analysis.releaseChecker()
     }
     return result
   }
@@ -5294,6 +5291,18 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(unresolvedBasePrevious, unresolvedBaseCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
+  const externalNamespaceSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'import * as Effect from "effect/Effect"\ntype Props = { run: Effect.Effect<string> }\nexport const Public = (props: Props) => props.run'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(externalNamespaceSources, externalNamespaceSources, ["packages/public/src/index.ts"]),
+    []
   )
 
   const genericPrevious = new Map([
