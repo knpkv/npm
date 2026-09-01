@@ -85,6 +85,10 @@ const isCompletedLegacyRetirement = (
   row: Pick<SandboxRow, "accessPassword" | "legacyRetiredAt" | "status">
 ): boolean => row.accessPassword !== null && row.status === "stopped" && row.legacyRetiredAt !== null
 
+const isPendingLegacyRetirement = (
+  row: Pick<SandboxRow, "accessPassword" | "legacyRetiredAt" | "status">
+): boolean => row.accessPassword !== null && row.status !== "stopped" && row.legacyRetiredAt !== null
+
 const isDiscoveredAwsAccountId = (value: string): boolean => /^\d{12}$/u.test(value)
 
 const homeDir = Config.string("HOME").pipe(
@@ -291,9 +295,17 @@ const makeSandboxService = Effect.gen(function*() {
           params.repositoryName,
           params.region
         )
-        const exactExisting = Option.isSome(existing) && existing.value.region === params.region
+        const exactCandidate = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
           : undefined
+        const exactExisting = exactCandidate !== undefined &&
+            !isCompletedLegacyRetirement(exactCandidate) &&
+            !isPendingLegacyRetirement(exactCandidate)
+          ? exactCandidate
+          : undefined
+        const pendingExact = exactCandidate !== undefined && isPendingLegacyRetirement(exactCandidate)
+          ? [exactCandidate]
+          : []
         const emptyAccountRows = params.awsAccountId.length === 0
           ? []
           : (yield* repo.findAll()).filter((row) =>
@@ -313,7 +325,8 @@ const makeSandboxService = Effect.gen(function*() {
           )
           : []
         const effectiveExisting = yield* Effect.forEach(
-          [...emptyAccountRows, ...profileRows].filter((row) => !isCompletedLegacyRetirement(row)),
+          [...emptyAccountRows, ...profileRows, ...pendingExact]
+            .filter((row) => !isCompletedLegacyRetirement(row)),
           retireLegacySandbox,
           { discard: true }
         ).pipe(

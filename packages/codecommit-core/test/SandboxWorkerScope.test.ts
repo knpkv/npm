@@ -501,6 +501,40 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
     }))
 
+  it.effect("retries a pending profile retirement during account fallback", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        awsAccountId: createParams.profile,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const params = { ...createParams, awsAccountId: createParams.profile }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        profileByPr: pending,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(params)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).not.toBe(pending.id)
+      expect(result.awsAccountId).toBe(params.awsAccountId)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
   it.effect("converges concurrent creates on one account-keyed row", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never)
