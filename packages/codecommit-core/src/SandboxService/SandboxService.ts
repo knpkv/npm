@@ -89,6 +89,10 @@ const isPendingLegacyRetirement = (
   row: Pick<SandboxRow, "accessPassword" | "legacyRetiredAt" | "status">
 ): boolean => row.accessPassword !== null && row.status !== "stopped" && row.legacyRetiredAt !== null
 
+const isOrdinaryStoppingSandbox = (
+  row: Pick<SandboxRow, "legacyRetiredAt" | "status">
+): boolean => row.status === "stopping" && row.legacyRetiredAt === null
+
 const isDiscoveredAwsAccountId = (value: string): boolean => /^\d{12}$/u.test(value)
 
 const homeDir = Config.string("HOME").pipe(
@@ -396,6 +400,12 @@ const makeSandboxService = Effect.gen(function*() {
           return yield* new SandboxError({
             sandboxId: SandboxId.make(unauthenticated.value.id),
             message: "Regionless legacy sandbox requires explicit cleanup before recreation"
+          })
+        }
+        if (exactCandidate !== undefined && isOrdinaryStoppingSandbox(exactCandidate)) {
+          return yield* new SandboxError({
+            sandboxId: SandboxId.make(exactCandidate.id),
+            message: "Sandbox is still stopping; retry after it has stopped"
           })
         }
         if (effectiveExisting !== undefined) {

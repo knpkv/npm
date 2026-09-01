@@ -44,7 +44,7 @@ import {
   Text,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
-import { Option } from "effect"
+import { Exit, Option } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
@@ -1163,7 +1163,7 @@ export function PRDetail() {
   }, [consoleUrl])
 
   // Sandbox
-  const createSandbox = useAtomSet(createSandboxAtom)
+  const createSandbox = useAtomSet(createSandboxAtom, { mode: "promiseExit" })
   const existingSandbox = useMemo(
     () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isReusableSandbox(sandbox, pr))),
     [pr, state.sandboxes]
@@ -1185,7 +1185,7 @@ export function PRDetail() {
   const proceedSandbox = useCallback(() => {
     if (pr === null) return
     const sandboxAccountKey = sandboxAccountIdForPullRequest(pr)
-    createSandbox({
+    const request = createSandbox({
       payload: {
         pullRequestId: pr.id,
         awsAccountId: sandboxAccountKey,
@@ -1196,6 +1196,17 @@ export function PRDetail() {
       }
     })
     setSandboxCreating(true)
+    void request.then((exit) => {
+      if (Exit.isFailure(exit)) {
+        setSandboxCreating(false)
+        const description = Option.match(Exit.findErrorOption(exit), {
+          onNone: () => "Try again once the current sandbox has stopped.",
+          onSome: (error) =>
+            Predicate.isError(error) ? error.message : "Try again once the current sandbox has stopped."
+        })
+        toast.error("Unable to create sandbox", { description })
+      }
+    })
   }, [pr, createSandbox])
 
   const handleSandbox = useCallback(() => {

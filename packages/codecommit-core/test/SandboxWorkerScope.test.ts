@@ -432,6 +432,36 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
     }))
 
+  it.effect("reports an ordinary stopping sandbox instead of returning it for creation", () =>
+    Effect.gen(function*() {
+      const stopping: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: null
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: stopping,
+        existingByPr: stopping
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("still stopping")
+      }
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
   it.effect("skips completed legacy retirement when reusing an exact row", () =>
     Effect.gen(function*() {
       const exact: SandboxRow = { ...legacyRow, region: createParams.region, status: "running" }
