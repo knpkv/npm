@@ -67,6 +67,8 @@ export type RefreshSinglePRError = AwsClientError | RefreshError
 export interface RefreshSinglePRCoordinates {
   readonly repositoryName: RepositoryName
   readonly region: AwsRegion
+  /** Coordinate tokens carry a durable account identity, not a profile alias. */
+  readonly accountIdSource?: "coordinate-token"
 }
 
 const matchesAccount = (
@@ -76,10 +78,12 @@ const matchesAccount = (
     readonly profile?: string | null | undefined
   }>,
   awsAccountId: string
-): boolean =>
-  account.awsAccountId === awsAccountId ||
-  account.repoAccountId === awsAccountId ||
-  account.profile === awsAccountId
+): boolean => {
+  if (account.awsAccountId !== undefined && account.awsAccountId !== null && account.awsAccountId !== "") {
+    return account.awsAccountId === awsAccountId || account.profile === awsAccountId
+  }
+  return account.repoAccountId === awsAccountId || account.profile === awsAccountId
+}
 
 const matchesRequestedAccount = (
   account: Readonly<{
@@ -91,6 +95,9 @@ const matchesRequestedAccount = (
   coordinates: RefreshSinglePRCoordinates | undefined
 ): boolean => {
   if (coordinates === undefined) return matchesAccount(account, awsAccountId)
+  if (coordinates.accountIdSource === "coordinate-token") {
+    return account.awsAccountId === awsAccountId
+  }
   if (account.awsAccountId !== undefined && account.awsAccountId !== null && account.awsAccountId !== "") {
     return account.awsAccountId === awsAccountId || account.profile === awsAccountId
   }

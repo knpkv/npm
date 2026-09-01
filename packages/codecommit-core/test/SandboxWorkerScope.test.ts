@@ -415,6 +415,31 @@ describe("SandboxWorkerScope", () => {
       }
     }))
 
+  it.effect("marks a regionless pre-container row orphaned after worker loss", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          accessPassword: "protected",
+          containerId: null,
+          status: "cloning"
+        }
+      })
+
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Orphaned (no container)"
+      })
+    }))
+
   it.effect("requires Docker admission for a terminal regionless row", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.void, {

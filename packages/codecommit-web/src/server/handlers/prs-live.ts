@@ -288,7 +288,11 @@ export const refreshRouteCoordinates = (
       }
       return {
         accountId: token.value.accountId,
-        coordinates: { repositoryName: token.value.repositoryName, region: token.value.region }
+        coordinates: {
+          repositoryName: token.value.repositoryName,
+          region: token.value.region,
+          accountIdSource: "coordinate-token"
+        }
       }
     }
     if (query.repositoryName === undefined && query.region === undefined) return { accountId }

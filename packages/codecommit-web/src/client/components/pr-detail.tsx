@@ -119,13 +119,17 @@ export const sandboxMatchesPullRequest = (
 /** Keep review API requests bound to the exact PR shown by this page. */
 export const reviewApiAccountId = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
-): string =>
-  encodePullRequestCoordinates({
-    accountId: pullRequest.account.awsAccountId ?? pullRequest.account.profile,
+): string => {
+  if (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) {
+    return pullRequest.account.profile
+  }
+  return encodePullRequestCoordinates({
+    accountId: pullRequest.account.awsAccountId,
     pullRequestId: pullRequest.id,
     repositoryName: pullRequest.repositoryName,
     region: pullRequest.account.region
   })
+}
 
 /** Keep optimistic comment state isolated to one exact pull-request coordinate. */
 export const commentNavigationIdentityForCoordinates = (

@@ -422,7 +422,8 @@ describe("PR handler selection", () => {
         accountId: "111122223333",
         coordinates: {
           repositoryName: "payments",
-          region: "eu-west-1"
+          region: "eu-west-1",
+          accountIdSource: "coordinate-token"
         }
       })
 

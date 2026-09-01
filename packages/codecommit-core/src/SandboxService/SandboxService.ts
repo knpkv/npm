@@ -17,6 +17,7 @@ import {
   Option,
   Predicate,
   Random,
+  Ref,
   Result,
   Schedule,
   Stream
@@ -130,6 +131,7 @@ const makeSandboxService = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const homePath = yield* homeDir.pipe(Effect.orDie)
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
+  const activeWorkerIds = yield* Ref.make<ReadonlySet<string>>(new Set())
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
@@ -271,6 +273,7 @@ const makeSandboxService = Effect.gen(function*() {
         })
 
         // Fork daemon for async lifecycle
+        yield* Ref.update(activeWorkerIds, (ids) => new Set(ids).add(String(id)))
         yield* ownerScope.fork(
           Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
@@ -434,7 +437,14 @@ const makeSandboxService = Effect.gen(function*() {
             ),
             // Observe and persist unexpected defects without recovering them.
             // `tapDefect` leaves the original Cause / Exit unchanged.
-            Effect.tapDefect((defect) => recordCreationFailure(id, defect))
+            Effect.tapDefect((defect) => recordCreationFailure(id, defect)),
+            Effect.ensuring(
+              Ref.update(activeWorkerIds, (ids) => {
+                const next = new Set(ids)
+                next.delete(String(id))
+                return next
+              })
+            )
           )
         )
 
@@ -544,7 +554,14 @@ const makeSandboxService = Effect.gen(function*() {
                 row.accessPassword !== null &&
                 containerIds.size === 0 &&
                 isPreContainerSandboxStatus(row.status)
-              ) return
+              ) {
+                const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
+                  Effect.map((ids) => ids.has(row.id))
+                )
+                if (activeWorker) return
+                yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
+                return
+              }
               if (row.accessPassword === null) {
                 yield* Effect.forEach(
                   containerIds,
