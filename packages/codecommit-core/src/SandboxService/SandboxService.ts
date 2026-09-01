@@ -651,7 +651,10 @@ const makeSandboxService = Effect.gen(function*() {
         if (row.containerId !== null) {
           const ctx = makeSandboxContext(row)
           yield* plugins.executeHook("onSandboxDestroy", ctx)
-          yield* docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
+          const stop = row.legacyRetiredAt === null
+            ? docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
+            : docker.stopContainer(row.containerId)
+          yield* stop
         }
 
         yield* updateStatus(id, "stopped")
