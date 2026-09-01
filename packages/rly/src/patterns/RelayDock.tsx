@@ -1,6 +1,6 @@
 import {
   type ComponentPropsWithRef,
-  type KeyboardEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactElement,
   type ReactNode,
   type RefObject,
@@ -142,10 +142,8 @@ const isRenderedFocusable = (element: Element, composedParents?: ReadonlyMap<Nod
       current.hasAttribute("disabled") &&
       element.matches(fieldsetDisabledSelector)
     ) {
-      if (current.getRootNode() === element.getRootNode()) {
-        const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
-        if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
-      }
+      const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
+      if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
     }
     const computed = view.getComputedStyle(current)
     if (
@@ -238,7 +236,7 @@ const hasExplicitNegativeTabIndex = (element: Element): boolean => {
 
 const ownsNegativeFocusScope = (element: Element): boolean =>
   hasExplicitNegativeTabIndex(element) &&
-  (isShadowSlotElement(element) || (isHTMLElement(element) && element.shadowRoot?.delegatesFocus === true))
+  (isSlotElement(element) || (isHTMLElement(element) && element.shadowRoot?.delegatesFocus === true))
 
 const isSequentiallyFocusableRadio = (
   element: RadioInput,
@@ -265,7 +263,6 @@ const isSequentiallyFocusableRadio = (
 
 interface ScopeTraversal {
   readonly entries: ReadonlyArray<ComposedElement>
-  readonly deferredNested: ReadonlySet<Element>
   readonly nested: ReadonlyMap<Element, ScopeTraversal>
 }
 
@@ -276,13 +273,12 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
     composedParent: Node | null
   ): ScopeTraversal => {
     const entries: Array<ComposedElement> = []
-    const deferredNested = new Set<Element>()
     const nested = new Map<Element, ScopeTraversal>()
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isShadowSlotElement(element)) {
         const assignedNodes = element.assignedNodes({ flatten: false })
-        const assignedElements = assignedNodes.filter(isElementNode)
+        const assignedElements = element.assignedElements({ flatten: false })
         const fallbackElements = [...element.children]
         nested.set(
           element,
@@ -291,10 +287,7 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
         return
       }
       if (isSlotElement(element)) {
-        if (!hasExplicitNegativeTabIndex(element)) {
-          nested.set(element, visitScopeElements([...element.children], element, element))
-          if (!isHTMLElement(element) || element.tabIndex <= 0) deferredNested.add(element)
-        }
+        nested.set(element, visitScopeElements([...element.children], element, element))
         return
       }
       if (
@@ -307,26 +300,168 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
       }
     }
     for (const element of elements) visitElement(element, composedParent)
-    return { deferredNested, entries, nested }
+    return { entries, nested }
   }
   const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): ScopeTraversal =>
     visitScopeElements([...scope.children], focusScope, composedParent)
   const flattenScope = (scope: ScopeTraversal): Array<ComposedElement> => {
     const ordered = [...scope.entries].sort((left, right) => compareSequentialTabOrder(left.element, right.element))
     const flattened: Array<ComposedElement> = []
-    const deferred: Array<ScopeTraversal> = []
     for (const entry of ordered) {
       flattened.push(entry)
       const nested = scope.nested.get(entry.element)
       if (nested !== undefined) {
-        if (scope.deferredNested.has(entry.element)) deferred.push(nested)
-        else for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
+        for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
       }
     }
-    for (const nested of deferred) for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
     return flattened
   }
   return flattenScope(visitScope(root, root, root))
+}
+
+const focusableElementsInScope = (
+  panel: HTMLElement,
+  composed: ReadonlyArray<ComposedElement>,
+  composedParents: ReadonlyMap<Node, Node | null>
+): Array<TabIndexedElement> =>
+  composed
+    .filter((entry): entry is ComposedElement & { readonly element: TabIndexedElement } => {
+      const { element, nativeRoot } = entry
+      if (element.tagName === "SLOT") return false
+      const tabIndex = tabIndexFor(element)
+      if (tabIndex === null) return false
+      let current: Node = element
+      const seen = new Set<Node>()
+      while (!seen.has(current)) {
+        seen.add(current)
+        const parent = composedParentFor(current, composedParents)
+        if (parent === null) break
+        if (parent === panel) break
+        if (ownsNegativeFocusScope(parent)) return false
+        current = parent
+      }
+      if (!element.matches(focusableSelector)) return false
+      if (element.shadowRoot?.delegatesFocus === true) return false
+      if (!isRenderedFocusable(element, composedParents)) return false
+      if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
+        return false
+      }
+      return (
+        tabIndex >= 0 ||
+        (isHTMLElement(element) &&
+          element.isContentEditable &&
+          !element.hasAttribute("tabindex") &&
+          !hasContentEditableAncestor(element, composedParents)) ||
+        (element.matches("details > summary:first-of-type") && !hasExplicitNegativeTabIndex(element))
+      )
+    })
+    .map(({ element }) => element)
+
+interface IFrameElementLike extends TabIndexedElement {
+  readonly contentDocument: Document | null
+}
+
+const isIframeElement = (value: EventTarget | null): value is IFrameElementLike =>
+  Predicate.isObjectOrArray(value) && "tagName" in value && value.tagName === "IFRAME" && "contentDocument" in value
+
+const isElementTarget = (value: EventTarget | null): value is Element =>
+  Predicate.isObjectOrArray(value) && "nodeType" in value && value.nodeType === 1
+
+const focusableElementsInFrame = (frameDocument: Document): Array<TabIndexedElement> =>
+  [...frameDocument.querySelectorAll<Element>(focusableSelector)].filter((element): element is TabIndexedElement => {
+    const tabIndex = tabIndexFor(element)
+    return (
+      (tabIndex !== null && tabIndex >= 0) ||
+      (isHTMLElement(element) &&
+        element.isContentEditable &&
+        !element.hasAttribute("tabindex") &&
+        !hasContentEditableAncestor(element, new Map<Node, Node | null>()))
+    )
+  })
+
+const installIframeFocusContainment = (panel: HTMLElement): (() => void) => {
+  const ownerDocument = panel.ownerDocument
+  const bindings = new Map<
+    IFrameElementLike,
+    {
+      readonly onLoad: () => void
+      readonly onKeyDown: (event: KeyboardEvent) => void
+      readonly frameDocument: Document | null
+    }
+  >()
+
+  const focusOuterBoundary = (frame: IFrameElementLike, backwards: boolean): void => {
+    const composed = composedElementsInScope(panel)
+    const composedParents = new Map<Node, Node | null>(
+      composed.map(({ composedParent, element }) => [element, composedParent])
+    )
+    const focusable = focusableElementsInScope(panel, composed, composedParents)
+    const frameIndex = focusable.findIndex((element) => element === frame)
+    const fallback = backwards ? focusable[focusable.length - 1] : focusable[0]
+    const adjacent = frameIndex < 0 ? undefined : focusable[frameIndex + (backwards ? -1 : 1)]
+    ;(adjacent ?? fallback)?.focus()
+  }
+
+  const attachDocumentListener = (frame: IFrameElementLike): void => {
+    const existing = bindings.get(frame)
+    const frameDocument = frame.contentDocument
+    if (existing?.frameDocument !== null && existing?.frameDocument !== undefined) {
+      existing.frameDocument.removeEventListener("keydown", existing.onKeyDown, true)
+    }
+    if (existing === undefined) return
+    if (frameDocument === null) {
+      bindings.set(frame, { ...existing, frameDocument: null })
+      return
+    }
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.defaultPrevented || event.key !== "Tab") return
+      const frameFocusables = focusableElementsInFrame(frameDocument)
+      const active = isElementTarget(event.target) ? event.target : frameDocument.activeElement
+      const first = frameFocusables[0]
+      const last = frameFocusables[frameFocusables.length - 1]
+      const atBoundary = event.shiftKey ? active === first : active === last
+      if (!atBoundary) return
+      event.preventDefault()
+      focusOuterBoundary(frame, event.shiftKey)
+    }
+    frameDocument.addEventListener("keydown", onKeyDown, true)
+    bindings.set(frame, { ...existing, frameDocument, onKeyDown })
+  }
+
+  const bindFrame = (frame: IFrameElementLike): void => {
+    if (bindings.has(frame)) {
+      attachDocumentListener(frame)
+      return
+    }
+    const onLoad = (): void => attachDocumentListener(frame)
+    bindings.set(frame, { frameDocument: null, onKeyDown: () => undefined, onLoad })
+    frame.addEventListener("load", onLoad)
+    attachDocumentListener(frame)
+  }
+
+  const syncFrames = (): void => {
+    for (const { element } of composedElementsInScope(panel)) {
+      if (element.tagName === "IFRAME" && isIframeElement(element)) bindFrame(element)
+    }
+  }
+
+  const onFocusIn = (event: FocusEvent): void => {
+    if (isIframeElement(event.target)) bindFrame(event.target)
+  }
+  ownerDocument.addEventListener("focusin", onFocusIn, true)
+  syncFrames()
+  const mutationObserver = ownerDocument.defaultView?.MutationObserver
+  const observer = mutationObserver === undefined ? null : new mutationObserver(syncFrames)
+  observer?.observe(panel, { childList: true, subtree: true })
+
+  return () => {
+    ownerDocument.removeEventListener("focusin", onFocusIn, true)
+    observer?.disconnect()
+    for (const [frame, binding] of bindings) {
+      frame.removeEventListener("load", binding.onLoad)
+      if (binding.frameDocument !== null) binding.frameDocument.removeEventListener("keydown", binding.onKeyDown, true)
+    }
+  }
 }
 
 /** One explicit piece of application-owned context attached to the current Relay thread. */
@@ -633,8 +768,15 @@ const DockLayer = ({
   title
 }: DockLayerProps): ReactElement => {
   const descriptionId = `${headingId}-description`
+  const panelRef = useRef<HTMLElement>(null)
 
-  const handleKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+  useLayoutEffect(() => {
+    const panel = panelRef.current
+    if (!modal || panel === null) return
+    return installIframeFocusContainment(panel)
+  }, [modal])
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>): void => {
     const panel = event.currentTarget
     if (!event.nativeEvent.composedPath().includes(panel)) return
     if (event.defaultPrevented) return
@@ -662,40 +804,7 @@ const DockLayer = ({
       }
       return null
     }
-    const focusable = composed
-      .filter((entry): entry is ComposedElement & { readonly element: TabIndexedElement } => {
-        const { element, nativeRoot } = entry
-        if (element.tagName === "SLOT") return false
-        const tabIndex = tabIndexFor(element)
-        if (tabIndex === null) return false
-        let current: Node = element
-        const seen = new Set<Node>()
-        while (!seen.has(current)) {
-          seen.add(current)
-          const parent = composedParentFor(current, composedParents)
-          if (parent === null) break
-          if (parent === panel) break
-          if (ownsNegativeFocusScope(parent)) {
-            return false
-          }
-          current = parent
-        }
-        if (!element.matches(focusableSelector)) return false
-        if (element.shadowRoot?.delegatesFocus === true) return false
-        if (!isRenderedFocusable(element, composedParents)) return false
-        if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
-          return false
-        }
-        return (
-          tabIndex >= 0 ||
-          (isHTMLElement(element) &&
-            element.isContentEditable &&
-            !element.hasAttribute("tabindex") &&
-            !hasContentEditableAncestor(element, composedParents)) ||
-          (element.matches("details > summary:first-of-type") && !hasExplicitNegativeTabIndex(element))
-        )
-      })
-      .map(({ element }) => element)
+    const focusable = focusableElementsInScope(panel, composed, composedParents)
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
     const active = activeElementFor(panel)
@@ -766,6 +875,7 @@ const DockLayer = ({
               className={classNames(style("panel"), modal ? style("sheet") : style("rail"))}
               data-rly-relay-dock-presentation={compactViewport ? "mobile-sheet" : modal ? "overlay" : "rail"}
               onKeyDown={handleKeyDown}
+              ref={panelRef}
               role={modal ? "dialog" : "complementary"}
               tabIndex={-1}
             >

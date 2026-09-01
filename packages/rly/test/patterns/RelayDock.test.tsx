@@ -1450,6 +1450,12 @@ describe("RelayDock", () => {
     const action = shadow.appendChild(document.createElement("button"))
     action.textContent = "Disabled fieldset shadow action"
 
+    preceding.focus()
+    const entering = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(entering))
+    expect(entering.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+
     action.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
     await act(async () => dialog.dispatchEvent(forward))
@@ -2097,6 +2103,33 @@ describe("RelayDock", () => {
     const slot = shadow.appendChild(document.createElement("slot"))
     slot.name = "negative"
     slot.tabIndex = -1
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("keeps radio-group metadata for controls behind a negative light-DOM slot", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-light-radio-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <input name="negative-light-slot-route" type="radio" />
+        <slot data-rly-negative-light-radio-slot="" tabIndex={-1}>
+          <input defaultChecked name="negative-light-slot-route" type="radio" />
+        </slot>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-light-radio-preceding]")
+    if (dialog === null || close === null || preceding === null) {
+      throw new Error("RelayDock negative light radio fixture did not render")
+    }
 
     preceding.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
