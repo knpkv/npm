@@ -61,6 +61,23 @@ describe("PR detail coordinates", () => {
     ).toBe(true)
   })
 
+  it("uses the profile for sandbox identity when the account id is empty", () => {
+    const profilePullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({
+        ...pullRequest.account,
+        awsAccountId: ""
+      })
+    })
+
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "production", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        profilePullRequest
+      )
+    ).toBe(true)
+  })
+
   it("gives review APIs a validated account-coordinate token", () => {
     const token = reviewApiAccountId(pullRequest)
     expect(token.startsWith("cc1_")).toBe(true)

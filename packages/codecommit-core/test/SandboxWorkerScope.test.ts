@@ -2,7 +2,7 @@
 
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
+import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
@@ -54,6 +54,10 @@ interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
+  readonly insertGate?: {
+    readonly inserted: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly regionlessByPr?: SandboxRow
   readonly regionlessByPrAll?: ReadonlyArray<SandboxRow>
   readonly stopContainer?: Effect.Effect<void, DockerError>
@@ -110,6 +114,13 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             logs: null,
             error: null
           })
+        ),
+        Effect.andThen(
+          options?.insertGate === undefined
+            ? Effect.void
+            : Deferred.succeed(options.insertGate.inserted, undefined).pipe(
+              Effect.andThen(Deferred.await(options.insertGate.release))
+            )
         )
       ),
     findById: () =>
@@ -393,7 +404,7 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
-  it.effect("marks exact-region pre-container rows orphaned after worker loss", () =>
+  it.effect("creates a replacement after exact-region worker loss", () =>
     Effect.gen(function*() {
       const statuses: ReadonlyArray<"creating" | "cloning" | "starting"> = ["creating", "cloning", "starting"]
       for (const status of statuses) {
@@ -488,6 +499,31 @@ describe("SandboxWorkerScope", () => {
         status: "error",
         error: "Orphaned (no container)"
       })
+    }))
+
+  it.effect("reserves a new worker before reconciliation can inspect its inserted row", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.never, {
+        insertGate: { inserted, release }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const createFiber = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.await(inserted)
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "creating",
+            containerId: null,
+            error: null
+          })
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(createFiber)
+        }).pipe(Effect.provide(fixture.layer))
+      )
     }))
 
   it.effect("marks a regionless pre-container row orphaned after worker loss", () =>
