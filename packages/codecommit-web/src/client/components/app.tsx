@@ -3,6 +3,7 @@ import { useCallback } from "react"
 import { Outlet, ScrollRestoration, useNavigate } from "react-router"
 import { Toaster } from "sonner"
 import { appStateAtom } from "../atoms/app.js"
+import { CodeCommitRelayDock } from "../codecommitRelayDock.js"
 import { useDesktopNotification } from "../hooks/useDesktopNotification.js"
 import { useReviewReminder } from "../hooks/useReviewReminder.js"
 import { useSSE } from "../hooks/useSSE.js"
@@ -25,15 +26,17 @@ export function AppLayout() {
   const { theme } = useTheme()
 
   return (
-    <div className={`${styles.root} ${isFullWidth ? styles.fullWidthRoot : ""}`}>
-      <Header />
-      <main className={isFullWidth ? styles.fullWidthMain : styles.main}>
-        <Outlet />
-      </main>
-      <ScrollRestoration storageKey="codecommit-web-scroll-positions" />
-      <CommandPalette />
-      <Toaster theme={theme} />
-      {state.permissionPrompt && <PermissionModal prompt={state.permissionPrompt} />}
-    </div>
+    <CodeCommitRelayDock>
+      <div className={`${styles.root} ${isFullWidth ? styles.fullWidthRoot : ""}`}>
+        <Header />
+        <main className={isFullWidth ? styles.fullWidthMain : styles.main}>
+          <Outlet />
+        </main>
+        <ScrollRestoration storageKey="codecommit-web-scroll-positions" />
+        <CommandPalette />
+        <Toaster theme={theme} />
+        {state.permissionPrompt && <PermissionModal prompt={state.permissionPrompt} />}
+      </div>
+    </CodeCommitRelayDock>
   )
 }

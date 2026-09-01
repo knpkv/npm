@@ -47,6 +47,7 @@ describe("SandboxesPage", () => {
           port: 8080,
           pullRequestId: "42",
           repositoryName: "payments-api",
+          region: "eu-west-1",
           sourceBranch: "feature/safe-retries",
           status: "running",
           statusDetail: null
@@ -62,6 +63,7 @@ describe("SandboxesPage", () => {
           port: null,
           pullRequestId: "7",
           repositoryName: "identity-service",
+          region: "eu-west-1",
           sourceBranch: "fix/session-rotation",
           status: "stopped",
           statusDetail: null

@@ -5,6 +5,7 @@ export type RlyPortalContainer = Element | DocumentFragment
 
 export interface PortalProviderProps {
   readonly children: ReactNode
+  /** A cross-document target must load Rly styles before it becomes available. */
   readonly container?: RlyPortalContainer | null
 }
 

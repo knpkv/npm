@@ -41,6 +41,7 @@ describe("public entries", () => {
       "RLY_RELATIONSHIP_DIRECTION_PRESENTATION",
       "RLY_RELATIONSHIP_LIFECYCLE_PRESENTATION",
       "RelationshipTable",
+      "RelayDock",
       "ReleasePreview",
       "ReleaseRelay",
       "RLY_RELEASE_RELAY_DEFAULT_VARIANTS",

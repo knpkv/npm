@@ -114,6 +114,23 @@ export const PullRequestRefreshResponse = Schema.Struct({
 })
 export type PullRequestRefreshResponse = typeof PullRequestRefreshResponse.Type
 
+/** Provider coordinates required to keep same-id pull requests distinct. */
+const PullRequestCoordinates = Schema.Struct({
+  repositoryName: Schema.String,
+  region: AwsRegion
+})
+
+/** Legacy refresh links may omit coordinates, but a partial coordinate is never valid. */
+const PullRequestRefreshCoordinates = Schema.Struct({
+  repositoryName: Schema.optional(Schema.String),
+  region: Schema.optional(AwsRegion)
+}).check(
+  Schema.makeFilter(
+    ({ region, repositoryName }) => (repositoryName === undefined) === (region === undefined),
+    { expected: "repositoryName and region must be provided together" }
+  )
+)
+
 /** Bounded text for one inventory entry; exceptional content remains explicit. */
 export const PullRequestDiffContentResponse = Schema.Struct({
   fileIndex: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -128,6 +145,12 @@ export const RelayReviewKind = ReviewKind
 export type RelayReviewKind = typeof RelayReviewKind.Type
 
 const RelayReviewFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u))
+const RelayReviewConversationTarget = Schema.Union([RelayReviewFindingId, Schema.Literal("PR")])
+const RelayReviewConversationTurnId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200)
+)
 export const RelayReviewSkillId = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
@@ -217,7 +240,7 @@ export const RelayExplainResult = Schema.Struct({
   )
 )
 
-/** One ephemeral Relay result bound to the exact diff that was reviewed. */
+/** One Relay result bound to the exact diff that was reviewed within a durable pull-request thread. */
 export const PullRequestRelayReviewResponse = Schema.Struct({
   pullRequestId: PullRequestId,
   revisionId: Schema.String,
@@ -256,7 +279,8 @@ export const RelayReviewMessage = Schema.String.check(
 )
 
 export const RelayReviewConversationTurn = Schema.Struct({
-  findingId: RelayReviewFindingId,
+  id: Schema.optional(RelayReviewConversationTurnId),
+  findingId: RelayReviewConversationTarget,
   role: Schema.Literals(["user", "assistant"]),
   message: RelayReviewMessage
 })
@@ -320,7 +344,7 @@ export const RelayReviewContinueStreamRequest = Schema.Struct({
   ...RelayReviewStreamRequest.fields,
   currentReview: RelayReviewResult,
   turns: RelayReviewConversationTurns,
-  findingId: RelayReviewFindingId,
+  findingId: RelayReviewConversationTarget,
   message: RelayReviewMessage
 }).check(
   Schema.makeFilter(
@@ -371,6 +395,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestRefreshCoordinates,
       success: PullRequestRefreshResponse,
       error: ApiError
     })
@@ -416,6 +441,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.get("diff", "/:awsAccountId/:prId/diff", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       success: PullRequestDiffResponse,
       error: ApiError
     })
@@ -430,6 +456,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
         )
       }),
       query: Schema.Struct({
+        ...PullRequestCoordinates.fields,
         revisionId: Schema.String,
         baseCommit: Schema.String,
         headCommit: Schema.String
@@ -441,6 +468,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("relayReview", "/:awsAccountId/:prId/relay-review", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       payload: Schema.Struct({
         revisionId: Schema.String,
         baseCommit: Schema.String,
@@ -454,6 +482,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("relayReviewStream", "/:awsAccountId/:prId/relay-review/stream", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       payload: RelayReviewStreamRequest,
       success: Schema.String,
       error: ApiError
@@ -462,6 +491,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("relayReviewContinueStream", "/:awsAccountId/:prId/relay-review/continue", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       payload: RelayReviewContinueStreamRequest,
       success: Schema.String,
       error: ApiError
@@ -470,6 +500,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("postRelayFinding", "/:awsAccountId/:prId/relay-review/findings/:findingId/post", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId, findingId: RelayReviewFindingId }),
+      query: PullRequestCoordinates,
       payload: Schema.Struct({
         revisionId: Schema.String,
         baseCommit: Schema.String,
@@ -728,6 +759,7 @@ export const SandboxResponse = Schema.Struct({
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
+  region: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),

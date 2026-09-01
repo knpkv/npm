@@ -52,7 +52,7 @@ class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") 
 const hasReadonlyModifier = (node) =>
   node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ReadonlyKeyword) === true
 
-const analyzeSources = (sources) => {
+const analyzeSources = (sources, recursiveDeclarations = new Set()) => {
   const modules = new Map()
   for (const [filePath, source] of sources) {
     const sourceFile = sourceFileFor(source, filePath)
@@ -117,7 +117,7 @@ const analyzeSources = (sources) => {
     visit(sourceFile)
     modules.set(filePath, { aliases, declarations, exportedTypes, imports, local, sourceFile, stars })
   }
-  return { modules, sources }
+  return { modules, recursiveDeclarations, sources }
 }
 
 const resolveTypeDeclaration = (analysis, filePath, name, seen = new Set()) => {
@@ -225,6 +225,23 @@ const nextCanonicalTypeContext = (context, substitutionPath = context.substituti
   substitutionPath
 })
 
+const unchangedDeclarationKeys = (previousSources, currentSources) => {
+  const previous = analyzeSources(previousSources)
+  const current = analyzeSources(currentSources)
+  const unchanged = new Set()
+  for (const [filePath, currentModule] of current.modules) {
+    const previousModule = previous.modules.get(filePath)
+    if (previousModule === undefined) continue
+    for (const [name, currentDeclaration] of currentModule.declarations) {
+      const previousDeclaration = previousModule.declarations.get(name)
+      if (previousDeclaration !== undefined && previousDeclaration.getText() === currentDeclaration.getText()) {
+        unchanged.add(`${filePath}\u0000${name}`)
+      }
+    }
+  }
+  return unchanged
+}
+
 const failCanonicalType = (filePath, typeNode, reason) => {
   throw new ChangesetCoverageError({
     reason: `${filePath}: ${reason} while canonicalizing ${normalizeTypeText(typeNode)}`
@@ -237,7 +254,7 @@ const canonicalTypeText = (
   filePath,
   substitutions = new Map(),
   seen = new Set(),
-  context = { depth: 0, substitutionPath: new Set() }
+  context = { depth: 0, substitutionPath: new Set(), recursiveDeclarations: new Set() }
 ) => {
   if (context.depth > canonicalTypeMaxDepth) {
     failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
@@ -267,7 +284,10 @@ const canonicalTypeText = (
     if (declaration !== undefined) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
-      if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+      if (seen.has(key)) {
+        if (context.recursiveDeclarations.has(key)) return normalizeTypeText(typeNode)
+        failCanonicalType(filePath, typeNode, "recursive type declaration")
+      }
       const nextSeen = new Set(seen).add(key)
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
@@ -834,7 +854,7 @@ const genericDescriptor = (
   analysis,
   filePath,
   substitutions,
-  context = { depth: 0, substitutionPath: new Set() }
+  context = { depth: 0, substitutionPath: new Set(), recursiveDeclarations: new Set() }
 ) => {
   const genericScope = context.genericScope ?? ""
   const childGenericScope = genericScope === "" ? "0" : `${genericScope}.0`
@@ -884,7 +904,7 @@ const parameterDescriptor = (
   filePath,
   substitutions,
   seen = new Set(),
-  context = { depth: 0, substitutionPath: new Set() }
+  context = { depth: 0, substitutionPath: new Set(), recursiveDeclarations: new Set() }
 ) => {
   const marker = parameter.dotDotDotToken === undefined ? "" : "..."
   const optional = parameter.questionToken === undefined ? "" : "?"
@@ -901,7 +921,7 @@ const memberDescriptor = (
   filePath,
   substitutions,
   seen = new Set(),
-  context = { depth: 0, substitutionPath: new Set() },
+  context = { depth: 0, substitutionPath: new Set(), recursiveDeclarations: new Set() },
   memo = new Map(),
   substitutionPath = new Set()
 ) => {
@@ -949,7 +969,8 @@ const memberDescriptor = (
             generic.substitutions,
             memo,
             substitutionPath,
-            generic.childGenericScope
+            generic.childGenericScope,
+            context.recursiveDeclarations
           )
         )
       }
@@ -964,7 +985,8 @@ const memberDescriptor = (
           generic.substitutions,
           memo,
           substitutionPath,
-          generic.childGenericScope
+          generic.childGenericScope,
+          context.recursiveDeclarations
         )
       )
     }
@@ -987,7 +1009,8 @@ const memberDescriptor = (
         substitutions,
         memo,
         substitutionPath,
-        context.genericScope ?? ""
+        context.genericScope ?? "",
+        context.recursiveDeclarations
       )
     )
   }
@@ -1020,7 +1043,14 @@ const withSubstitutionDependency = (result, dependency) => ({
   substitutionDependencies: new Set([...result.substitutionDependencies, dependency])
 })
 
-const canonicalMemoEnvironmentKey = (analysis, filePath, substitutions, typeArguments, includeSubstitutions = true) => {
+const canonicalMemoEnvironmentKey = (
+  analysis,
+  filePath,
+  substitutions,
+  typeArguments,
+  includeSubstitutions = true,
+  recursiveDeclarations = new Set()
+) => {
   const canonicalSubstitutions = includeSubstitutions
     ? [...substitutions]
         .toSorted(([left], [right]) => left.localeCompare(right))
@@ -1031,15 +1061,29 @@ const canonicalMemoEnvironmentKey = (analysis, filePath, substitutions, typeArgu
               reason: `${filePath}: invalid type substitution while canonicalizing memo environment`
             })
           }
-          return [name, canonicalTypeText(value.typeNode, analysis, value.filePath, value.substitutions)]
+          return [
+            name,
+            canonicalTypeText(value.typeNode, analysis, value.filePath, value.substitutions, new Set(), {
+              depth: 0,
+              substitutionPath: new Set(),
+              recursiveDeclarations
+            })
+          ]
         })
     : []
-  const canonicalArguments = typeArguments.map((argument) => {
-    if (isTypeSubstitution(argument)) {
-      return canonicalTypeText(argument.typeNode, analysis, argument.filePath, argument.substitutions)
-    }
-    return canonicalTypeText(argument, analysis, filePath, substitutions)
-  })
+  const canonicalArguments = typeArguments.map((argument) =>
+    isTypeSubstitution(argument)
+      ? canonicalTypeText(argument.typeNode, analysis, argument.filePath, argument.substitutions, new Set(), {
+          depth: 0,
+          substitutionPath: new Set(),
+          recursiveDeclarations
+        })
+      : canonicalTypeText(argument, analysis, filePath, substitutions, new Set(), {
+          depth: 0,
+          substitutionPath: new Set(),
+          recursiveDeclarations
+        })
+  )
   return JSON.stringify({ arguments: canonicalArguments, substitutions: canonicalSubstitutions })
 }
 
@@ -1056,7 +1100,8 @@ const readTypeMembersMemo = (
   typeArguments = [],
   contextNode = memoKey,
   analysis,
-  declarationEnvironment = false
+  declarationEnvironment = false,
+  recursiveDeclarations = new Set()
 ) => {
   const entries = memo.get(memoKey)
   if (entries === undefined) return undefined
@@ -1065,7 +1110,8 @@ const readTypeMembersMemo = (
     filePath,
     substitutions,
     typeArguments,
-    !declarationEnvironment
+    !declarationEnvironment,
+    recursiveDeclarations
   )
   const entry = entries.find(
     ({ substitutionEntries, referenceArguments }) =>
@@ -1074,11 +1120,16 @@ const readTypeMembersMemo = (
         filePath,
         new Map(substitutionEntries),
         referenceArguments,
-        !declarationEnvironment
+        !declarationEnvironment,
+        recursiveDeclarations
       ) === environmentKey
   )
   if (entry === undefined) return undefined
-  if ([...entry.result.declarationDependencies].some((dependency) => seen.has(dependency))) {
+  if (
+    [...entry.result.declarationDependencies].some(
+      (dependency) => seen.has(dependency) && !recursiveDeclarations.has(dependency)
+    )
+  ) {
     failCanonicalType(filePath, contextNode, "recursive type declaration")
   }
   if ([...entry.result.substitutionDependencies].some((dependency) => substitutionPath.has(dependency))) {
@@ -1104,7 +1155,8 @@ const typeMembers = (
   substitutions = new Map(),
   memo = new Map(),
   substitutionPath = new Set(),
-  genericScope = ""
+  genericScope = "",
+  recursiveDeclarations = analysis.recursiveDeclarations
 ) => {
   const reference =
     (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) ||
@@ -1119,7 +1171,9 @@ const typeMembers = (
       filePath,
       [],
       typeNode,
-      analysis
+      analysis,
+      false,
+      recursiveDeclarations
     )
     if (cached !== undefined) return cached
   }
@@ -1128,7 +1182,17 @@ const typeMembers = (
       memo,
       typeNode,
       substitutions,
-      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
+      typeMembers(
+        typeNode.type,
+        analysis,
+        filePath,
+        seen,
+        substitutions,
+        memo,
+        substitutionPath,
+        genericScope,
+        recursiveDeclarations
+      )
     )
   }
   if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword) {
@@ -1136,14 +1200,34 @@ const typeMembers = (
       memo,
       typeNode,
       substitutions,
-      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
+      typeMembers(
+        typeNode.type,
+        analysis,
+        filePath,
+        seen,
+        substitutions,
+        memo,
+        substitutionPath,
+        genericScope,
+        recursiveDeclarations
+      )
     )
   }
   if (TypeScript.isArrayTypeNode(typeNode)) {
     const result = typeMembersResult()
     collectTypeMembersResult(
       result,
-      typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope),
+      typeMembers(
+        typeNode.elementType,
+        analysis,
+        filePath,
+        seen,
+        substitutions,
+        memo,
+        substitutionPath,
+        genericScope,
+        recursiveDeclarations
+      ),
       false
     )
     result.resolved = false
@@ -1158,7 +1242,17 @@ const typeMembers = (
       }
       collectTypeMembersResult(
         result,
-        typeMembers(elementType, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope),
+        typeMembers(
+          elementType,
+          analysis,
+          filePath,
+          seen,
+          substitutions,
+          memo,
+          substitutionPath,
+          genericScope,
+          recursiveDeclarations
+        ),
         false
       )
     }
@@ -1170,7 +1264,17 @@ const typeMembers = (
     for (const member of typeNode.types) {
       collectTypeMembersResult(
         result,
-        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope),
+        typeMembers(
+          member,
+          analysis,
+          filePath,
+          seen,
+          substitutions,
+          memo,
+          substitutionPath,
+          genericScope,
+          recursiveDeclarations
+        ),
         false
       )
     }
@@ -1181,7 +1285,8 @@ const typeMembers = (
     const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions, {
       depth: 0,
       genericScope,
-      substitutionPath
+      substitutionPath,
+      recursiveDeclarations
     })
     const result = typeMembersResult()
     for (const parameter of typeNode.parameters) {
@@ -1196,7 +1301,8 @@ const typeMembers = (
             generic.substitutions,
             memo,
             substitutionPath,
-            generic.childGenericScope
+            generic.childGenericScope,
+            recursiveDeclarations
           ),
           false
         )
@@ -1213,7 +1319,8 @@ const typeMembers = (
           generic.substitutions,
           memo,
           substitutionPath,
-          generic.childGenericScope
+          generic.childGenericScope,
+          recursiveDeclarations
         ),
         false
       )
@@ -1226,7 +1333,17 @@ const typeMembers = (
     for (const member of typeNode.types) {
       collectTypeMembersResult(
         result,
-        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
+        typeMembers(
+          member,
+          analysis,
+          filePath,
+          seen,
+          substitutions,
+          memo,
+          substitutionPath,
+          genericScope,
+          recursiveDeclarations
+        )
       )
     }
     return writeTypeMembersMemo(memo, typeNode, substitutions, result)
@@ -1238,7 +1355,17 @@ const typeMembers = (
         for (const heritageType of clause.types) {
           collectTypeMembersResult(
             result,
-            typeMembers(heritageType, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
+            typeMembers(
+              heritageType,
+              analysis,
+              filePath,
+              seen,
+              substitutions,
+              memo,
+              substitutionPath,
+              genericScope,
+              recursiveDeclarations
+            )
           )
         }
       }
@@ -1255,7 +1382,7 @@ const typeMembers = (
         filePath,
         substitutions,
         seen,
-        { depth: 0, genericScope, substitutionPath },
+        { depth: 0, genericScope, substitutionPath, recursiveDeclarations },
         memo,
         substitutionPath
       )
@@ -1279,7 +1406,8 @@ const typeMembers = (
         binding.substitutions,
         memo,
         new Set(substitutionPath).add(binding),
-        genericScope
+        genericScope,
+        recursiveDeclarations
       )
       return writeTypeMembersMemo(memo, typeNode, substitutions, withSubstitutionDependency(result, binding))
     }
@@ -1296,7 +1424,8 @@ const typeMembers = (
           substitutions,
           memo,
           substitutionPath,
-          genericScope
+          genericScope,
+          recursiveDeclarations
         )
         if (argumentResult.resolved) resolvedArgument = true
         collectTypeMembersResult(result, argumentResult, false)
@@ -1306,7 +1435,10 @@ const typeMembers = (
     }
     const declarationName = declaration.node.name.text
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
-    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    if (seen.has(declarationKey)) {
+      if (recursiveDeclarations.has(declarationKey)) return typeMembersResult(new Map(), false)
+      failCanonicalType(filePath, typeNode, "recursive type declaration")
+    }
     const typeArguments = typeNode.typeArguments ?? []
     const effectiveTypeArguments = declarationEffectiveTypeArguments(declaration.node, typeArguments)
     const cached = readTypeMembersMemo(
@@ -1319,7 +1451,8 @@ const typeMembers = (
       effectiveTypeArguments,
       typeNode,
       analysis,
-      true
+      true,
+      recursiveDeclarations
     )
     if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
@@ -1344,7 +1477,8 @@ const typeMembers = (
             nextSubstitutions,
             memo,
             substitutionPath,
-            genericScope
+            genericScope,
+            recursiveDeclarations
           ),
           declarationKey
         ),
@@ -1365,7 +1499,8 @@ const typeMembers = (
             nextSubstitutions,
             memo,
             substitutionPath,
-            genericScope
+            genericScope,
+            recursiveDeclarations
           ),
           declarationKey
         ),
@@ -1387,7 +1522,8 @@ const typeMembers = (
           substitutions,
           memo,
           substitutionPath,
-          genericScope
+          genericScope,
+          recursiveDeclarations
         )
         if (argumentResult.resolved) resolvedArgument = true
         collectTypeMembersResult(result, argumentResult, false)
@@ -1397,7 +1533,10 @@ const typeMembers = (
     }
     const declarationName = declaration.node.name.text
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
-    if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+    if (seen.has(declarationKey)) {
+      if (recursiveDeclarations.has(declarationKey)) return typeMembersResult(new Map(), false)
+      failCanonicalType(filePath, typeNode, "recursive type declaration")
+    }
     const typeArguments = typeNode.typeArguments ?? []
     const effectiveTypeArguments = declarationEffectiveTypeArguments(declaration.node, typeArguments)
     const cached = readTypeMembersMemo(
@@ -1410,7 +1549,8 @@ const typeMembers = (
       effectiveTypeArguments,
       typeNode,
       analysis,
-      true
+      true,
+      recursiveDeclarations
     )
     if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
@@ -1435,7 +1575,8 @@ const typeMembers = (
             nextSubstitutions,
             memo,
             substitutionPath,
-            genericScope
+            genericScope,
+            recursiveDeclarations
           ),
           declarationKey
         ),
@@ -1456,7 +1597,8 @@ const typeMembers = (
             nextSubstitutions,
             memo,
             substitutionPath,
-            genericScope
+            genericScope,
+            recursiveDeclarations
           ),
           declarationKey
         ),
@@ -1467,7 +1609,12 @@ const typeMembers = (
   return writeTypeMembersMemo(memo, typeNode, substitutions, typeMembersResult())
 }
 
-const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSources(sources)) => {
+const callableParameterTypesInSources = (
+  sources,
+  filePath,
+  analysis = analyzeSources(sources),
+  recursiveDeclarations = new Set()
+) => {
   const module = analysis.modules.get(filePath)
   if (module === undefined) return new Map()
   const exports = new Map()
@@ -1480,7 +1627,11 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
     contextualTypeParameters
   ) => {
     const publicTypeParameters = contextualTypeParameters ?? initializerTypeParameters
-    const callableGeneric = genericDescriptor(publicTypeParameters, analysis, filePath, new Map())
+    const callableGeneric = genericDescriptor(publicTypeParameters, analysis, filePath, new Map(), {
+      depth: 0,
+      substitutionPath: new Set(),
+      recursiveDeclarations
+    })
     const callableSubstitutions = new Map(callableGeneric.substitutions)
     if (contextualTypeParameters !== undefined && initializerTypeParameters !== undefined) {
       for (const [index, parameter] of initializerTypeParameters.entries()) {
@@ -1507,7 +1658,8 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
             callableSubstitutions,
             new Map(),
             new Set(),
-            callableGeneric.childGenericScope
+            callableGeneric.childGenericScope,
+            recursiveDeclarations
           )
     const contextualReturnType = contextualType?.type
     const effectiveReturnType = returnType ?? contextualReturnType
@@ -1520,7 +1672,8 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
           : canonicalTypeText(effectiveReturnType, analysis, filePath, callableSubstitutions, new Set(), {
               depth: 0,
               genericScope: callableGeneric.childGenericScope,
-              substitutionPath: new Set()
+              substitutionPath: new Set(),
+              recursiveDeclarations
             }),
       returnResolved: effectiveReturnType !== undefined
     })
@@ -1677,7 +1830,8 @@ const publicCallableChanges = (
   previousSources,
   currentSources,
   previousEntryPoints,
-  currentEntryPoints = previousEntryPoints
+  currentEntryPoints = previousEntryPoints,
+  { recursiveDeclarations = new Set() } = {}
 ) => {
   const signatures = (sources, entryPoints) => {
     const analysis = analyzeSources(sources)
@@ -1686,7 +1840,9 @@ const publicCallableChanges = (
       sources,
       entryPoints
     )) {
-      const signature = callableParameterTypesInSources(sources, target.filePath, analysis).get(target.name)
+      const signature = callableParameterTypesInSources(sources, target.filePath, analysis, recursiveDeclarations).get(
+        target.name
+      )
       if (signature === undefined) continue
       const identity = `${entryPoint}\u0000${exportedName}`
       const existing = result.get(identity) ?? []
@@ -2732,6 +2888,43 @@ const runSelfTest = () => {
       "type Loop = ReadonlyArray<Loop>\ntype Props = { value: Loop }\nexport const Public = (props: Props) => props.value"
     ]
   ])
+  const unchangedRecursiveDeclarationPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type CommentThread = { replies: CommentThread[] }\nexport type Props = { thread: CommentThread; label: string }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Props } from "./types.js"\nexport const Public = (props: Props) => props.label'
+    ]
+  ])
+  const unchangedRecursiveDeclarationCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/types.ts",
+      "export type CommentThread = { replies: CommentThread[] }\nexport type Props = { thread: CommentThread; label: number }"
+    ],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Props } from "./types.js"\nexport const Public = (props: Props) => props.label'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(
+      unchangedRecursiveDeclarationPrevious,
+      unchangedRecursiveDeclarationCurrent,
+      ["packages/public/src/index.ts"],
+      ["packages/public/src/index.ts"],
+      {
+        recursiveDeclarations: unchangedDeclarationKeys(
+          unchangedRecursiveDeclarationPrevious,
+          unchangedRecursiveDeclarationCurrent
+        )
+      }
+    ),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["label"] }]
+  )
   assert.throws(
     () => publicCallableChanges(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]),
     (cause) =>
@@ -4731,7 +4924,10 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         previousRelativeSourceFiles
       )
       const callableChanges = yield* Effect.try({
-        try: () => publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints),
+        try: () =>
+          publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints, {
+            recursiveDeclarations: unchangedDeclarationKeys(previousSources, currentSources)
+          }),
         catch: toPublicCallableChangesError
       })
       for (const change of callableChanges) {
