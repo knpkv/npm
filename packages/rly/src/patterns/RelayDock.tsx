@@ -134,7 +134,7 @@ const isRadioInput = (element: Element): element is RadioInput =>
 
 interface ComposedElement {
   readonly element: Element
-  readonly scope: ParentNode
+  readonly nativeRoot: Node
 }
 
 interface ComposedHTMLElement extends ComposedElement {
@@ -142,7 +142,7 @@ interface ComposedHTMLElement extends ComposedElement {
 }
 
 interface SlotElement extends Element {
-  readonly assignedElements: () => Array<Element>
+  readonly assignedElements: (options?: { readonly flatten?: boolean }) => Array<Element>
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
@@ -150,14 +150,14 @@ const isSlotElement = (element: Element): element is SlotElement =>
 
 const isSequentiallyFocusableRadio = (
   element: RadioInput,
-  scope: ParentNode,
+  nativeRoot: Node,
   elements: ReadonlyArray<ComposedElement>
 ): boolean => {
   if (element.name.length === 0) return true
   const group = elements
     .filter(
-      ({ element: candidate, scope: candidateScope }) =>
-        candidateScope === scope &&
+      ({ element: candidate, nativeRoot: candidateRoot }) =>
+        candidateRoot === nativeRoot &&
         isRadioInput(candidate) &&
         candidate.name === element.name &&
         candidate.form === element.form &&
@@ -171,24 +171,24 @@ const isSequentiallyFocusableRadio = (
 
 const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
   const elements: Array<ComposedElement> = []
-  const visitElement = (element: Element, scope: ParentNode): void => {
-    elements.push({ element, scope })
+  const visitElement = (element: Element): void => {
     if (isSlotElement(element)) {
-      const assigned = element.assignedElements()
+      const assigned = element.assignedElements({ flatten: true })
       if (assigned.length > 0) {
-        for (const assignedElement of assigned) visitElement(assignedElement, scope)
+        for (const assignedElement of assigned) visitElement(assignedElement)
         return
       }
     }
-    if (element.shadowRoot !== null) visitScope(element.shadowRoot, element.shadowRoot)
-    else visitScope(element, scope)
+    elements.push({ element, nativeRoot: element.getRootNode() })
+    if (element.shadowRoot !== null) visitScope(element.shadowRoot)
+    else visitScope(element)
   }
-  const visitScope = (scope: ParentNode, treeScope: ParentNode): void => {
+  const visitScope = (scope: ParentNode): void => {
     for (const child of scope.children) {
-      visitElement(child, treeScope)
+      visitElement(child)
     }
   }
-  visitScope(root, root)
+  visitScope(root)
   return elements
 }
 
@@ -512,10 +512,10 @@ const DockLayer = ({
     const composed = composedElementsInScope(panel)
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
-        const { element, scope } = entry
+        const { element, nativeRoot } = entry
         if (!isHTMLElement(element) || !element.matches(focusableSelector)) return false
         if (!isRenderedFocusable(element)) return false
-        if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, scope, composed)) return false
+        if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed)) return false
         return (
           element.tabIndex >= 0 ||
           (element.isContentEditable && !element.hasAttribute("tabindex")) ||

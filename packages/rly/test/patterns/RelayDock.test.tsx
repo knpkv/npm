@@ -769,6 +769,36 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("does not treat a slot replaced by non-focusable assigned content as a tab stop", async () => {
+    const footer = (
+      <>
+        <button data-rly-slot-preceding-action="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-slot-placeholder-host="">
+          <span>Assigned decoration</span>
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-slot-placeholder-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-slot-preceding-action]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock slot placeholder fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.tabIndex = 0
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("keeps only the checked radio as a shadow-scope tab stop", async () => {
     const footer = <div data-rly-radio-focus-host="" />
     const { portal } = await mount(dock({ defaultOpen: true, footer }))
@@ -791,6 +821,36 @@ describe("RelayDock", () => {
     expect(forward.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
     expect(shadow.activeElement).not.toBe(unchecked)
+  })
+
+  it("groups an assigned radio with its light-DOM native peers", async () => {
+    const footer = (
+      <>
+        <input data-rly-native-radio="" defaultChecked name="document-review-route" type="radio" />
+        <div data-rly-radio-slot-host="">
+          <input data-rly-assigned-radio="" name="document-review-route" type="radio" />
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-radio-slot-host]")
+    const native = portal.querySelector<HTMLInputElement>("[data-rly-native-radio]")
+    if (dialog === null || close === null || host === null || native === null) {
+      throw new Error("RelayDock assigned radio fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    shadow.append(document.createElement("slot"))
+    const assigned = host.querySelector<HTMLInputElement>("[data-rly-assigned-radio]")
+    if (assigned === null) throw new Error("RelayDock assigned radio did not render")
+
+    native.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+    expect(document.activeElement).not.toBe(assigned)
   })
 
   it("keeps a shadow descendant of the first closed-details summary in the modal boundary", async () => {
