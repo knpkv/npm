@@ -531,6 +531,67 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
+  it.effect("rejects fallback creation when a terminal numeric row still has a container", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "orphaned-numeric-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is unavailable")
+      }
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("allows fallback creation when a terminal numeric row has no container", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () => Effect.succeed([])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
   it.effect("creates a first fallback sandbox without a numeric collision", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never)

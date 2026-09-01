@@ -81,6 +81,8 @@ const isRegionlessSandbox = (row: Pick<SandboxRow, "region">): boolean =>
 const isPreContainerSandboxStatus = (status: string): boolean =>
   status === "creating" || status === "cloning" || status === "starting"
 
+const isTerminalSandboxStatus = (status: string): boolean => status === "stopped" || status === "error"
+
 const isCompletedLegacyRetirement = (
   row: Pick<SandboxRow, "accessPassword" | "legacyRetiredAt" | "status">
 ): boolean => row.accessPassword !== null && row.status === "stopped" && row.legacyRetiredAt !== null
@@ -303,14 +305,20 @@ const makeSandboxService = Effect.gen(function*() {
           ? existing.value
           : undefined
         const fallbackCollision = !isDiscoveredAwsAccountId(params.awsAccountId)
-          ? (yield* repo.findAll()).find((row) =>
-            isDiscoveredAwsAccountId(row.awsAccountId) &&
-            row.status !== "stopped" &&
-            row.status !== "error" &&
-            row.pullRequestId === params.pullRequestId &&
-            row.repositoryName === params.repositoryName &&
-            row.region === params.region
-          )
+          ? yield* Effect.gen(function*() {
+            const candidates = (yield* repo.findAll()).filter((row) =>
+              isDiscoveredAwsAccountId(row.awsAccountId) &&
+              row.pullRequestId === params.pullRequestId &&
+              row.repositoryName === params.repositoryName &&
+              row.region === params.region
+            )
+            for (const candidate of candidates) {
+              if (!isTerminalSandboxStatus(candidate.status)) return candidate
+              const containers = yield* docker.listContainersByLabel("codecommit.sandbox.id", candidate.id)
+              if (containers.length > 0) return candidate
+            }
+            return undefined
+          })
           : undefined
         if (fallbackCollision !== undefined) {
           return yield* new SandboxError({
