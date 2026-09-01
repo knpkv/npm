@@ -87,6 +87,12 @@ describe("PR detail coordinates", () => {
         profilePullRequest
       )
     ).toBe(true)
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        profilePullRequest
+      )
+    ).toBe(false)
   })
 
   it("gives review APIs a validated account-coordinate token", () => {
