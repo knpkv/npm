@@ -37,6 +37,7 @@ const compactViewportQuery = "(max-width: 40rem), (max-height: 40rem) and (point
 const focusableSelector = [
   "a[href]",
   "button:not([disabled])",
+  'iframe:not([tabindex="-1"])',
   "input:not([disabled])",
   "select:not([disabled])",
   "details > summary:first-of-type",
@@ -233,6 +234,7 @@ const isSequentiallyFocusableRadio = (
         isRadioInput(candidate) &&
         candidate.name === element.name &&
         candidate.form === element.form &&
+        candidate.tabIndex >= 0 &&
         isRenderedFocusable(candidate, composedParents)
     )
     .map(({ element: candidate }) => candidate)
@@ -243,6 +245,7 @@ const isSequentiallyFocusableRadio = (
 
 interface ScopeTraversal {
   readonly entries: ReadonlyArray<ComposedElement>
+  readonly deferredNested: ReadonlySet<Element>
   readonly nested: ReadonlyMap<Element, ScopeTraversal>
 }
 
@@ -253,6 +256,7 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
     composedParent: Node | null
   ): ScopeTraversal => {
     const entries: Array<ComposedElement> = []
+    const deferredNested = new Set<Element>()
     const nested = new Map<Element, ScopeTraversal>()
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
@@ -266,8 +270,11 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
         )
         return
       }
-      if (isSlotElement(element) && isHTMLElement(element) && element.tabIndex > 0) {
-        nested.set(element, visitScopeElements([...element.children], element, element))
+      if (isSlotElement(element)) {
+        if (!hasExplicitNegativeTabIndex(element)) {
+          nested.set(element, visitScopeElements([...element.children], element, element))
+          if (!isHTMLElement(element) || element.tabIndex <= 0) deferredNested.add(element)
+        }
         return
       }
       if (
@@ -280,20 +287,23 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
       }
     }
     for (const element of elements) visitElement(element, composedParent)
-    return { entries, nested }
+    return { deferredNested, entries, nested }
   }
   const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): ScopeTraversal =>
     visitScopeElements([...scope.children], focusScope, composedParent)
   const flattenScope = (scope: ScopeTraversal): Array<ComposedElement> => {
     const ordered = [...scope.entries].sort((left, right) => compareSequentialTabOrder(left.element, right.element))
     const flattened: Array<ComposedElement> = []
+    const deferred: Array<ScopeTraversal> = []
     for (const entry of ordered) {
       flattened.push(entry)
       const nested = scope.nested.get(entry.element)
       if (nested !== undefined) {
-        for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
+        if (scope.deferredNested.has(entry.element)) deferred.push(nested)
+        else for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
       }
     }
+    for (const nested of deferred) for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
     return flattened
   }
   return flattenScope(visitScope(root, root, root))

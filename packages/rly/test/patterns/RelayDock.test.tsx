@@ -1970,6 +1970,9 @@ describe("RelayDock", () => {
       throw new Error("RelayDock display-contents fixture did not render")
     }
     const shadow = host.attachShadow({ mode: "open" })
+    const valid = shadow.appendChild(document.createElement("button"))
+    valid.dataset.rlyDisplayContentsValid = ""
+    valid.type = "button"
     const action = shadow.appendChild(document.createElement("div"))
     action.tabIndex = 0
     action.style.display = "contents"
@@ -1977,7 +1980,17 @@ describe("RelayDock", () => {
     preceding.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
     await act(async () => dialog.dispatchEvent(forward))
-    expect(forward.defaultPrevented).toBe(true)
+    expect(forward.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(preceding)
+    valid.focus()
+    const closeForward = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab"
+    })
+    await act(async () => dialog.dispatchEvent(closeForward))
+    expect(closeForward.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
   })
 
@@ -2084,6 +2097,145 @@ describe("RelayDock", () => {
     const slot = shadow.appendChild(document.createElement("slot"))
     slot.name = "negative"
     slot.tabIndex = -1
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("keeps an implicit iframe in the modal focus sequence", async () => {
+    const footer = (
+      <>
+        <button data-rly-iframe-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-iframe-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-iframe-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-iframe-preceding]")
+    if (dialog === null || host === null || preceding === null)
+      throw new Error("RelayDock iframe fixture did not render")
+    const shadow = host.attachShadow({ mode: "open" })
+    const frame = shadow.appendChild(document.createElement("iframe"))
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(false)
+    expect(frame.tabIndex).toBe(0)
+  })
+
+  it("skips an explicitly negative iframe endpoint", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-iframe-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-negative-iframe-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-negative-iframe-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-iframe-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock negative iframe fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const frame = shadow.appendChild(document.createElement("iframe"))
+    frame.tabIndex = -1
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("chooses the first non-negative radio in an unchecked native group", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-radio-group-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-negative-radio-group-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-negative-radio-group-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-radio-group-preceding]")
+    if (dialog === null || host === null || preceding === null) {
+      throw new Error("RelayDock negative radio group fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const negative = shadow.appendChild(document.createElement("input"))
+    negative.name = "unchecked-negative-radio-group"
+    negative.type = "radio"
+    negative.tabIndex = -1
+    const sequential = shadow.appendChild(document.createElement("input"))
+    sequential.name = negative.name
+    sequential.type = "radio"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(false)
+    expect(sequential.tabIndex).toBe(0)
+  })
+
+  it("defers implicit and zero light-DOM slot scopes behind parent positives", async () => {
+    const footer = (
+      <>
+        <slot data-rly-implicit-light-slot="">
+          <button data-rly-implicit-light-slot-fallback="" tabIndex={2} type="button" />
+        </slot>
+        <slot data-rly-zero-light-slot="" tabIndex={0}>
+          <button data-rly-zero-light-slot-fallback="" tabIndex={2} type="button" />
+        </slot>
+        <button data-rly-light-slot-parent-sibling="" tabIndex={3} type="button" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const sibling = portal.querySelector<HTMLButtonElement>("[data-rly-light-slot-parent-sibling]")
+    if (dialog === null || close === null || sibling === null)
+      throw new Error("RelayDock light slot fixture did not render")
+    close.tabIndex = -1
+    const outside = document.createElement("button")
+    document.body.append(outside)
+    outside.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(sibling)
+  })
+
+  it("omits the owned scope of a negative light-DOM slot", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-light-slot-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <slot data-rly-negative-light-slot="" tabIndex={-1}>
+          <button data-rly-negative-light-slot-fallback="" type="button" />
+        </slot>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-light-slot-preceding]")
+    if (dialog === null || close === null || preceding === null) {
+      throw new Error("RelayDock negative light slot fixture did not render")
+    }
 
     preceding.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })

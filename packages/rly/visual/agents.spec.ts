@@ -896,10 +896,10 @@ test("modal Relay focus traversal keeps programmatic focus inside an interior de
 
   await second.focus()
   await page.keyboard.press("Tab")
-  expect(await dock.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
+  await expect(dock.locator("[data-rly-interior-delegates-focus-after]")).toBeFocused()
   await second.focus()
   await page.keyboard.press("Shift+Tab")
-  expect(await dock.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
+  await expect(dock.locator("[data-rly-interior-delegates-focus-before]")).toBeFocused()
 })
 
 test("modal Relay focus traversal excludes a negative target after a sequential delegated target", async ({ page }) => {
@@ -1514,6 +1514,10 @@ test("modal Relay focus traversal skips display-contents shadow endpoints", asyn
     const host = document.createElement("div")
     host.dataset.rlyDisplayContentsHost = ""
     const shadow = host.attachShadow({ mode: "open" })
+    const valid = shadow.appendChild(document.createElement("button"))
+    valid.dataset.rlyDisplayContentsValid = ""
+    valid.textContent = "Rendered shadow action"
+    valid.type = "button"
     const action = shadow.appendChild(document.createElement("div"))
     action.dataset.rlyDisplayContentsAction = ""
     action.tabIndex = 0
@@ -1521,8 +1525,11 @@ test("modal Relay focus traversal skips display-contents shadow endpoints", asyn
     element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
   })
   const preceding = dock.locator("[data-rly-display-contents-preceding]")
+  const valid = dock.locator("[data-rly-display-contents-valid]")
 
   await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(valid).toBeFocused()
   await page.keyboard.press("Tab")
   await expect(close).toBeFocused()
 })
@@ -1632,6 +1639,160 @@ test("modal Relay focus traversal keeps radio grouping across a negative slot", 
     element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, peer, host)
   })
   const preceding = dock.locator("[data-rly-negative-radio-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal includes native iframe stops", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyIframePreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    host.dataset.rlyIframeHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const frame = shadow.appendChild(document.createElement("iframe"))
+    frame.dataset.rlyIframe = ""
+    frame.srcdoc = "<button>Frame action</button>"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-iframe-preceding]")
+  const frame = dock.locator("[data-rly-iframe]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(frame).toBeFocused()
+})
+
+test("modal Relay focus traversal skips a negative iframe", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyNegativeIframePreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    const shadow = host.attachShadow({ mode: "open" })
+    const frame = shadow.appendChild(document.createElement("iframe"))
+    frame.tabIndex = -1
+    frame.srcdoc = "<button>Frame action</button>"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-negative-iframe-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal chooses the first non-negative radio in an unchecked group", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyNegativeRadioGroupPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    host.dataset.rlyNegativeRadioGroupHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const negative = shadow.appendChild(document.createElement("input"))
+    negative.name = "unchecked-negative-radio-group"
+    negative.type = "radio"
+    negative.tabIndex = -1
+    const sequential = shadow.appendChild(document.createElement("input"))
+    sequential.dataset.rlyNegativeRadioGroupSequential = ""
+    sequential.name = negative.name
+    sequential.type = "radio"
+    const validHost = document.createElement("div")
+    const validShadow = validHost.attachShadow({ mode: "open" })
+    const valid = validShadow.appendChild(document.createElement("input"))
+    valid.dataset.rlyNegativeRadioGroupValid = ""
+    valid.name = "valid-negative-radio-group"
+    valid.type = "radio"
+    const validNegative = validShadow.appendChild(document.createElement("input"))
+    validNegative.name = valid.name
+    validNegative.type = "radio"
+    validNegative.tabIndex = -1
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host, validHost)
+  })
+  const preceding = dock.locator("[data-rly-negative-radio-group-preceding]")
+  const sequential = dock.locator("[data-rly-negative-radio-group-sequential]")
+  const valid = dock.locator("[data-rly-negative-radio-group-valid]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(sequential).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(valid).toBeFocused()
+})
+
+test("modal Relay focus traversal defers implicit and zero light-slot scopes behind parent positives", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const close = element.querySelector<HTMLButtonElement>("[aria-label=\"Close Relay\"]")
+    if (close !== null) close.tabIndex = -1
+    const outside = document.createElement("button")
+    outside.dataset.rlyLightSlotParentOutside = ""
+    outside.textContent = "Outside action"
+    const implicit = document.createElement("slot")
+    const implicitFallback = implicit.appendChild(document.createElement("button"))
+    implicitFallback.dataset.rlyImplicitLightSlotFallback = ""
+    implicitFallback.tabIndex = 2
+    const zero = document.createElement("slot")
+    zero.tabIndex = 0
+    const zeroFallback = zero.appendChild(document.createElement("button"))
+    zeroFallback.dataset.rlyZeroLightSlotFallback = ""
+    zeroFallback.tabIndex = 2
+    const sibling = document.createElement("button")
+    sibling.dataset.rlyLightSlotParentSibling = ""
+    sibling.tabIndex = 3
+    document.body.append(outside)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(implicit, zero, sibling)
+    outside.focus()
+  })
+  const sibling = dock.locator("[data-rly-light-slot-parent-sibling]")
+
+  await dock.evaluate((element) =>
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" }))
+  )
+  await expect(sibling).toBeFocused()
+})
+
+test("modal Relay focus traversal omits a negative light-slot scope", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyNegativeLightSlotPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const slot = document.createElement("slot")
+    slot.tabIndex = -1
+    const fallback = slot.appendChild(document.createElement("button"))
+    fallback.dataset.rlyNegativeLightSlotFallback = ""
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, slot)
+  })
+  const preceding = dock.locator("[data-rly-negative-light-slot-preceding]")
 
   await preceding.focus()
   await page.keyboard.press("Tab")
