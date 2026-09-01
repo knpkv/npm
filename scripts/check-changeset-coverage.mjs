@@ -76,7 +76,18 @@ class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") 
 const hasReadonlyModifier = (node) =>
   node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ReadonlyKeyword) === true
 
-const analyzeSources = (sources, recursiveDeclarations = new Set()) => {
+const sourceAnalysisCache = new WeakMap()
+
+const analyzeSources = (
+  sources,
+  recursiveDeclarations = new Set(),
+  { programFactory = TypeScript.createProgram } = {}
+) => {
+  const cachedByFactory = sourceAnalysisCache.get(sources)
+  const cached = cachedByFactory?.get(programFactory)
+  if (cached !== undefined) {
+    return cached.recursiveDeclarations === recursiveDeclarations ? cached : { ...cached, recursiveDeclarations }
+  }
   const modules = new Map()
   for (const [filePath, source] of sources) {
     const sourceFile = sourceFileFor(source, filePath)
@@ -196,8 +207,18 @@ const analyzeSources = (sources, recursiveDeclarations = new Set()) => {
     const sourceFile = sourceFileForCompilerPath(fileName)
     return sourceFile === undefined ? defaultReadFile(fileName) : sourceFile.getFullText()
   }
-  const program = TypeScript.createProgram([...sources.keys()], compilerOptions, compilerHost)
-  return { checker: program.getTypeChecker(), modules, program, recursiveDeclarations, sources }
+  let checker
+  const getChecker = () => {
+    if (checker === undefined) {
+      checker = programFactory([...sources.keys()], compilerOptions, compilerHost).getTypeChecker()
+    }
+    return checker
+  }
+  const analysis = { getChecker, modules, recursiveDeclarations, sources }
+  const analyses = cachedByFactory ?? new Map()
+  analyses.set(programFactory, analysis)
+  sourceAnalysisCache.set(sources, analyses)
+  return analysis
 }
 
 const resolveTypeDeclaration = (analysis, filePath, name, seen = new Set()) => {
@@ -890,7 +911,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       )
       return members.some((member) => member === undefined) ? undefined : `union(${members.toSorted().join("|")})`
     }
-    if (TypeScript.isArrayTypeNode(target)) {
+    if (TypeScript.isArrayTypeNode(target) && indexKey?.startsWith('["number",') === true) {
       return canonicalTypeText(
         target.elementType,
         analysis,
@@ -970,7 +991,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
             ) {
               continue
             }
-            return canonicalTypeText(
+            const canonicalMemberType = canonicalTypeText(
               member.type,
               analysis,
               targetFilePath,
@@ -978,6 +999,9 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
               targetSeen,
               nextCanonicalTypeContext(targetContext)
             )
+            return member.questionToken === undefined
+              ? canonicalMemberType
+              : `union(${[canonicalMemberType, "undefined"].toSorted().join("|")})`
           }
         }
       }
@@ -2641,8 +2665,7 @@ const callableParameterTypesInSources = (
         return undefined
       }
     }
-    const checker = analysis.checker
-    if (checker === undefined) return undefined
+    const checker = analysis.getChecker()
     const type = checker.getTypeAtLocation(node)
     const signature = checker.getSignaturesOfType(type, TypeScript.SignatureKind.Call)[0]
     if (signature === undefined) return undefined
@@ -2824,8 +2847,8 @@ const normalizeEntryPoints = (entryPoints) =>
 
 const conditionPathKey = (conditionPath) => (conditionPath ?? []).join("\u0000")
 
-const reachableCallableEntries = (sources, entryPoints) => {
-  const info = analyzeSources(sources).modules
+const reachableCallableEntries = (sources, entryPoints, analysis = analyzeSources(sources)) => {
+  const info = analysis.modules
   const resolved = new Map()
   const resolving = new Set()
   const exportsFor = (filePath) => {
@@ -2892,14 +2915,15 @@ const publicCallableChanges = (
   currentSources,
   previousEntryPoints,
   currentEntryPoints = previousEntryPoints,
-  { recursiveDeclarations = new Set() } = {}
+  { recursiveDeclarations = new Set(), programFactory = TypeScript.createProgram } = {}
 ) => {
   const signatures = (sources, entryPoints) => {
-    const analysis = analyzeSources(sources)
+    const analysis = analyzeSources(sources, recursiveDeclarations, { programFactory })
     const result = new Map()
     for (const { conditionPath, entryPoint, exportedName, publicSubpath, target } of reachableCallableEntries(
       sources,
-      entryPoints
+      entryPoints,
+      analysis
     )) {
       const signature = callableParameterTypesInSources(sources, target.filePath, analysis, recursiveDeclarations).get(
         target.name
@@ -6402,6 +6426,61 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(indexedPrevious, indexedCurrent, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
   ])
+  const indexedArrayLengthPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: string[]["length"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedArrayLengthCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", "type Props = { value: string }\nexport const Public = (props: Props) => props"]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedArrayLengthPrevious, indexedArrayLengthCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const indexedArrayElementPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: string[][0] }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedArrayElementPrevious, indexedArrayLengthCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
+  const indexedOptionalPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: { value?: string }["value"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedRequiredCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: { value: string }["value"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedOptionalPrevious, indexedRequiredCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const indexedReadonlyPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: { readonly value: string }["value"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedReadonlyPrevious, indexedRequiredCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
   const interfaceReturnPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     ["packages/public/src/view.tsx", 'interface Result { a: string }\nexport const Public = (): Result => ({ a: "" })']
@@ -6426,6 +6505,52 @@ const runSelfTest = () => {
     publicCallableChanges(inferredReturnPrevious, inferredReturnCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  let checkerProgramCount = 0
+  const countingProgramFactory = (...arguments_) => {
+    checkerProgramCount += 1
+    return TypeScript.createProgram(...arguments_)
+  }
+  const explicitReturnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'export const Public = (): string => "value"']
+  ])
+  const explicitReturnCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", "export const Public = (): number => 1"]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(
+      explicitReturnPrevious,
+      explicitReturnCurrent,
+      ["packages/public/src/index.ts"],
+      ["packages/public/src/index.ts"],
+      { programFactory: countingProgramFactory }
+    ),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  assert.equal(checkerProgramCount, 0)
+  assert.deepEqual(
+    publicCallableChanges(
+      inferredReturnPrevious,
+      inferredReturnCurrent,
+      ["packages/public/src/index.ts"],
+      ["packages/public/src/index.ts"],
+      { programFactory: countingProgramFactory }
+    ),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  assert.equal(checkerProgramCount, 2)
+  assert.deepEqual(
+    publicCallableChanges(
+      inferredReturnPrevious,
+      inferredReturnPrevious,
+      ["packages/public/src/index.ts"],
+      ["packages/public/src/index.ts"],
+      { programFactory: countingProgramFactory }
+    ),
+    []
+  )
+  assert.equal(checkerProgramCount, 2)
   const defaultPrevious = new Map([
     ["packages/public/src/index.ts", 'export { default as Public } from "./view.js"'],
     ["packages/public/src/view.tsx", "export default function Public(props: { a: string }): string { return props.a }"]
