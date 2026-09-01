@@ -210,24 +210,24 @@ const declarationEffectiveTypeArguments = (declaration, typeArguments) => {
     collect(node)
     return names
   }
-  const visit = (node, shadowed) => {
+  const visit = (node, shadowed, targetIndexes = usedIndexes) => {
     if (TypeScript.isTypeReferenceNode(node) && TypeScript.isIdentifier(node.typeName)) {
       const index = parameterIndexes.get(node.typeName.text)
-      if (index !== undefined && !shadowed.has(node.typeName.text)) usedIndexes.add(index)
+      if (index !== undefined && !shadowed.has(node.typeName.text)) targetIndexes.add(index)
     }
     if (TypeScript.isMappedTypeNode(node)) {
-      TypeScript.forEachChild(node.typeParameter, (child) => visit(child, shadowed))
+      TypeScript.forEachChild(node.typeParameter, (child) => visit(child, shadowed, targetIndexes))
       const mappedShadowed = new Set([...shadowed, node.typeParameter.name.text])
-      if (node.nameType !== undefined) visit(node.nameType, mappedShadowed)
-      if (node.type !== undefined) visit(node.type, mappedShadowed)
+      if (node.nameType !== undefined) visit(node.nameType, mappedShadowed, targetIndexes)
+      if (node.type !== undefined) visit(node.type, mappedShadowed, targetIndexes)
       return
     }
     if (TypeScript.isConditionalTypeNode(node)) {
-      visit(node.checkType, shadowed)
-      visit(node.extendsType, shadowed)
+      visit(node.checkType, shadowed, targetIndexes)
+      visit(node.extendsType, shadowed, targetIndexes)
       const conditionalShadowed = new Set([...shadowed, ...inferParameterNames(node.extendsType)])
-      visit(node.trueType, conditionalShadowed)
-      visit(node.falseType, shadowed)
+      visit(node.trueType, conditionalShadowed, targetIndexes)
+      visit(node.falseType, shadowed, targetIndexes)
       return
     }
     const nestedTypeParameters =
@@ -242,11 +242,30 @@ const declarationEffectiveTypeArguments = (declaration, typeArguments) => {
       nestedTypeParameters.length === 0
         ? shadowed
         : new Set([...shadowed, ...nestedTypeParameters.map((parameter) => parameter.name.text)])
-    TypeScript.forEachChild(node, (child) => visit(child, nextShadowed))
+    TypeScript.forEachChild(node, (child) => visit(child, nextShadowed, targetIndexes))
   }
   const body = TypeScript.isTypeAliasDeclaration(declaration) ? declaration.type : declaration
   visit(body, new Set())
-  return typeArguments.filter((_, index) => usedIndexes.has(index))
+  const defaultDependencies = typeParameters.map((parameter) => {
+    const dependencies = new Set()
+    if (parameter.default !== undefined) visit(parameter.default, new Set(), dependencies)
+    return dependencies
+  })
+  const effectiveIndexes = new Set(usedIndexes)
+  let changed = true
+  while (changed) {
+    changed = false
+    for (const index of effectiveIndexes) {
+      if (typeArguments[index] !== undefined) continue
+      for (const dependency of defaultDependencies[index] ?? []) {
+        if (!effectiveIndexes.has(dependency)) {
+          effectiveIndexes.add(dependency)
+          changed = true
+        }
+      }
+    }
+  }
+  return typeArguments.filter((_, index) => effectiveIndexes.has(index))
 }
 
 const nextCanonicalTypeContext = (context, substitutionPath = context.substitutionPath) => ({
@@ -4213,6 +4232,32 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(defaultedAliasPrevious, defaultedAliasValueChanged, ["packages/public/src/index.ts"]),
+    []
+  )
+  const defaultForwardedIntersectionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Box<T, U = T> = { value: U }\ntype Props = Box<string> & Box<string>\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const defaultForwardedIntersectionChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Box<T, U = T> = { value: U }\ntype Props = Box<string> & Box<number>\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(defaultForwardedIntersectionPrevious, defaultForwardedIntersectionChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(defaultForwardedIntersectionPrevious, defaultForwardedIntersectionPrevious, [
+      "packages/public/src/index.ts"
+    ]),
     []
   )
   const operatorAliasKeyChanged = new Map([
