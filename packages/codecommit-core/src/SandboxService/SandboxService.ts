@@ -246,9 +246,7 @@ const makeSandboxService = Effect.gen(function*() {
             row.awsAccountId === "" &&
             row.pullRequestId === params.pullRequestId &&
             row.repositoryName === params.repositoryName &&
-            row.region === params.region &&
-            row.status !== "stopped" &&
-            row.status !== "error"
+            row.region === params.region
           )
         const effectiveExisting = yield* Effect.forEach(emptyAccountRows, retireLegacySandbox, { discard: true }).pipe(
           Effect.as(exactExisting)

@@ -733,6 +733,14 @@ describe("SandboxWorkerScope", () => {
           accessPassword: "protected"
         }, {
           ...legacyRow,
+          id: "legacy-sandbox-error",
+          awsAccountId: "",
+          region: createParams.region,
+          containerId: "legacy-container-error",
+          accessPassword: "protected",
+          status: "error"
+        }, {
+          ...legacyRow,
           id: "legacy-other-region",
           awsAccountId: "",
           region: "eu-west-1",
@@ -753,7 +761,7 @@ describe("SandboxWorkerScope", () => {
           const sandbox = yield* sandboxes.create(profileParams)
           expect(sandbox.awsAccountId).toBe(profileParams.awsAccountId)
           expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
-          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(2)
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(3)
           expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
             awsAccountId: "profile-account",
             status: "creating"
