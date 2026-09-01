@@ -188,6 +188,15 @@ const declarationEffectiveTypeArguments = (declaration, typeArguments) => {
   if (typeParameters.length === 0 || typeArguments.length === 0) return []
   const parameterIndexes = new Map(typeParameters.map((parameter, index) => [parameter.name.text, index]))
   const usedIndexes = new Set()
+  const inferParameterNames = (node) => {
+    const names = new Set()
+    const collect = (child) => {
+      if (TypeScript.isInferTypeNode(child)) names.add(child.typeParameter.name.text)
+      TypeScript.forEachChild(child, collect)
+    }
+    collect(node)
+    return names
+  }
   const visit = (node, shadowed) => {
     if (TypeScript.isTypeReferenceNode(node) && TypeScript.isIdentifier(node.typeName)) {
       const index = parameterIndexes.get(node.typeName.text)
@@ -198,6 +207,14 @@ const declarationEffectiveTypeArguments = (declaration, typeArguments) => {
       const mappedShadowed = new Set([...shadowed, node.typeParameter.name.text])
       if (node.nameType !== undefined) visit(node.nameType, mappedShadowed)
       if (node.type !== undefined) visit(node.type, mappedShadowed)
+      return
+    }
+    if (TypeScript.isConditionalTypeNode(node)) {
+      visit(node.checkType, shadowed)
+      visit(node.extendsType, shadowed)
+      const conditionalShadowed = new Set([...shadowed, ...inferParameterNames(node.extendsType)])
+      visit(node.trueType, conditionalShadowed)
+      visit(node.falseType, shadowed)
       return
     }
     const nestedTypeParameters =
@@ -527,6 +544,9 @@ const canonicalPrimitiveKeyofOperandText = (
   seen = new Set(),
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
+  if (context.depth > canonicalTypeMaxDepth) {
+    failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
+  }
   if (TypeScript.isParenthesizedTypeNode(typeNode)) {
     return canonicalPrimitiveKeyofOperandText(
       typeNode.type,
@@ -538,7 +558,7 @@ const canonicalPrimitiveKeyofOperandText = (
     )
   }
   const category = canonicalPrimitiveKeyofCategory(typeNode)
-  if (category !== undefined) return `primitive(${category})`
+  if (category !== undefined) return category === "never" ? "never" : `primitive(${category})`
   if (TypeScript.isUnionTypeNode(typeNode)) {
     const categories = typeNode.types.map((member) =>
       canonicalPrimitiveKeyofOperandText(
@@ -572,7 +592,10 @@ const canonicalPrimitiveKeyofOperandText = (
     if (declaration !== undefined && TypeScript.isTypeAliasDeclaration(declaration.node)) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
-      if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+      if (seen.has(key)) {
+        if (context.recursiveDeclarations?.has(key) === true) return normalizeTypeText(typeNode)
+        failCanonicalType(filePath, typeNode, "recursive type declaration")
+      }
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
         const argument = typeNode.typeArguments?.[index]
@@ -602,6 +625,40 @@ const canonicalPropertyKeyText = (name) => {
 }
 
 const canonicalNeverKey = JSON.stringify(["never"])
+const canonicalStringKey = JSON.stringify(["string"])
+const canonicalNumberKey = JSON.stringify(["number"])
+const canonicalSymbolKey = JSON.stringify(["symbol"])
+
+const canonicalKeyContains = (container, key) => {
+  if (container === key) return true
+  if (container === canonicalStringKey) return key.startsWith('["string",')
+  if (container === canonicalNumberKey) return key.startsWith('["number",')
+  if (container === canonicalSymbolKey) return key.startsWith('["symbol",')
+  return false
+}
+
+const canonicalKeySetUnion = (left, right) => {
+  const result = new Set()
+  for (const key of [...left, ...right]) {
+    if ([...result].some((existing) => canonicalKeyContains(existing, key))) continue
+    for (const existing of result) {
+      if (canonicalKeyContains(key, existing)) result.delete(existing)
+    }
+    result.add(key)
+  }
+  return result
+}
+
+const canonicalKeySetIntersection = (left, right) => {
+  const result = new Set()
+  for (const leftKey of left) {
+    for (const rightKey of right) {
+      if (canonicalKeyContains(leftKey, rightKey)) result.add(rightKey)
+      else if (canonicalKeyContains(rightKey, leftKey)) result.add(leftKey)
+    }
+  }
+  return result
+}
 
 const canonicalLiteralTypeValue = (
   typeNode,
@@ -655,7 +712,10 @@ const canonicalLiteralTypeValue = (
     if (declaration !== undefined && TypeScript.isTypeAliasDeclaration(declaration.node)) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
-      if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+      if (seen.has(key)) {
+        if (context.recursiveDeclarations?.has(key) === true) return undefined
+        failCanonicalType(filePath, typeNode, "recursive type declaration")
+      }
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
         const argument = typeNode.typeArguments?.[index]
@@ -820,16 +880,12 @@ const hasContradictoryLiteralIntersection = (members, analysis, filePath, substi
 const canonicalTupleArrayKeySet = (typeNode, context) => {
   const readonly = context.readonlyContainer === true ? "readonly" : "mutable"
   const kind = TypeScript.isTupleTypeNode(typeNode) ? "tuple" : "array"
-  const keys = new Set([
-    JSON.stringify([kind, readonly]),
-    JSON.stringify(["number"]),
-    JSON.stringify(["string", "length"])
-  ])
+  const keys = new Set([JSON.stringify([kind, readonly]), canonicalNumberKey, JSON.stringify(["string", "length"])])
   if (TypeScript.isTupleTypeNode(typeNode)) {
     for (const [index, element] of typeNode.elements.entries()) {
       if (TypeScript.isRestTypeNode(element)) continue
       if (TypeScript.isNamedTupleMember(element) && element.dotDotDotToken !== undefined) continue
-      keys.add(JSON.stringify(["tuple-index", String(index)]))
+      keys.add(JSON.stringify(["number", String(index)]))
     }
   }
   return keys
@@ -893,7 +949,10 @@ const canonicalKeySetForNode = (
     if (declaration !== undefined) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
-      if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+      if (seen.has(key)) {
+        if (context.recursiveDeclarations?.has(key) === true) return undefined
+        failCanonicalType(filePath, typeNode, "recursive type declaration")
+      }
       const nextSeen = new Set(seen).add(key)
       const nextSubstitutions = new Map(substitutions)
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
@@ -916,7 +975,11 @@ const canonicalKeySetForNode = (
     }
     if (reference.name === "Array" || reference.name === "ReadonlyArray") {
       const readonly = reference.name === "ReadonlyArray" || context.readonlyContainer === true
-      return new Set([JSON.stringify(["array", readonly ? "readonly" : "mutable"]), JSON.stringify(["number"])])
+      return new Set([
+        JSON.stringify(["array", readonly ? "readonly" : "mutable"]),
+        canonicalNumberKey,
+        JSON.stringify(["string", "length"])
+      ])
     }
   }
   if (TypeScript.isTypeLiteralNode(typeNode) || TypeScript.isInterfaceDeclaration(typeNode)) {
@@ -944,7 +1007,25 @@ const canonicalKeySetForNode = (
         keys.add(key)
         continue
       }
-      if (TypeScript.isIndexSignatureDeclaration(member)) return undefined
+      if (TypeScript.isIndexSignatureDeclaration(member)) {
+        const parameter = member.parameters[0]
+        const parameterType = parameter?.type
+        if (parameterType === undefined) return undefined
+        if (parameterType.kind === TypeScript.SyntaxKind.StringKeyword) {
+          keys.add(canonicalStringKey)
+          keys.add(canonicalNumberKey)
+          continue
+        }
+        if (parameterType.kind === TypeScript.SyntaxKind.NumberKeyword) {
+          keys.add(canonicalNumberKey)
+          continue
+        }
+        if (parameterType.kind === TypeScript.SyntaxKind.ESSymbolKeyword) {
+          keys.add(canonicalSymbolKey)
+          continue
+        }
+        return undefined
+      }
     }
     return keys
   }
@@ -965,17 +1046,15 @@ const canonicalKeySetForNode = (
     return undefined
   }
   if (TypeScript.isTypeOperatorNode(typeNode)) {
+    if (typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword) return undefined
     if (
-      typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword ||
       typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword ||
       typeNode.operator === TypeScript.SyntaxKind.UniqueKeyword
     ) {
       const operandContext =
-        typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword
-          ? { ...nextCanonicalTypeContext(context), keySetMode: undefined }
-          : typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword
-            ? { ...nextCanonicalTypeContext(context), readonlyContainer: true }
-            : nextCanonicalTypeContext(context)
+        typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword
+          ? { ...nextCanonicalTypeContext(context), readonlyContainer: true }
+          : nextCanonicalTypeContext(context)
       return canonicalKeySetForNode(typeNode.type, analysis, filePath, substitutions, seen, operandContext)
     }
   }
@@ -985,13 +1064,13 @@ const canonicalKeySetForNode = (
     )
     if (memberSets.some((keys) => keys === undefined)) return undefined
     if (context.keySetMode === "mapped-domain") {
-      return new Set(memberSets.flatMap((keys) => (keys === undefined ? [] : [...keys])))
+      return memberSets.reduce((keys, memberKeys) => canonicalKeySetUnion(keys, memberKeys ?? new Set()), new Set())
     }
     const nonNeverMemberSets = memberSets.filter((keys) => keys?.has(canonicalNeverKey) !== true)
     if (nonNeverMemberSets.length === 0) return new Set([canonicalNeverKey])
     const [first, ...rest] = nonNeverMemberSets
     if (first === undefined) return undefined
-    return rest.reduce((keys, memberKeys) => new Set([...keys].filter((key) => memberKeys?.has(key) === true)), first)
+    return rest.reduce(canonicalKeySetIntersection, first)
   }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
     if (
@@ -1007,10 +1086,10 @@ const canonicalKeySetForNode = (
     if (context.keySetMode === "mapped-domain") {
       const [first, ...rest] = memberSets
       if (first === undefined) return undefined
-      return rest.reduce((keys, memberKeys) => new Set([...keys].filter((key) => memberKeys?.has(key) === true)), first)
+      return rest.reduce(canonicalKeySetIntersection, first)
     }
     if (memberSets.some((keys) => keys?.has(canonicalNeverKey) === true)) return new Set([canonicalNeverKey])
-    return new Set(memberSets.flatMap((keys) => (keys === undefined ? [] : [...keys])))
+    return memberSets.reduce((keys, memberKeys) => canonicalKeySetUnion(keys, memberKeys ?? new Set()), new Set())
   }
   return undefined
 }
@@ -1086,6 +1165,9 @@ const canonicalKeyofOperandText = (
   seen = new Set(),
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
+  if (context.depth > canonicalTypeMaxDepth) {
+    failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
+  }
   const keySetText = (keys) => (keys.has(canonicalNeverKey) ? "never" : `keys(${[...keys].toSorted().join("|")})`)
   if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword) {
     return `nested-keyof(${canonicalKeyofOperandText(
@@ -4201,6 +4283,34 @@ const runSelfTest = () => {
     publicCallableChanges(arrayLengthUnionPrevious, arrayLengthUnionElementChanged, ["packages/public/src/index.ts"]),
     []
   )
+  const stringIndexPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { [key: string]: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const stringIndexValueChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { [key: string]: number }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(stringIndexPrevious, stringIndexValueChanged, ["packages/public/src/index.ts"]),
+    []
+  )
+  const numberIndexChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { [key: number]: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(stringIndexPrevious, numberIndexChanged, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
   const mappedKeyPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -4431,6 +4541,17 @@ const runSelfTest = () => {
     ]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  const explicitNeverModel = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = never\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(contradictoryIntersectionPrevious, explicitNeverModel, ["packages/public/src/index.ts"]),
+    []
+  )
   const aliasedContradictoryIntersectionPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -4538,6 +4659,44 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(mappedShadowedPhantomSources, mappedShadowedPhantomSources, ["packages/public/src/index.ts"]),
+    []
+  )
+  const inferShadowedPhantomSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Loop<T> = readonly Loop<T[]>[]\ntype Phantom<T> = unknown extends infer T ? { value: T } : never\ntype Props = { left: Phantom<Loop<string>>; right: Phantom<Loop<string>> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(inferShadowedPhantomSources, inferShadowedPhantomSources, ["packages/public/src/index.ts"]),
+    []
+  )
+  const inferOuterReferenceSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Loop<T> = readonly Loop<T[]>[]\ntype Phantom<T> = T extends infer U ? { value: T } : never\ntype Props = { value: Phantom<Loop<string>> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(inferOuterReferenceSources, inferOuterReferenceSources, ["packages/public/src/index.ts"]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/view.tsx: recursive type declaration while canonicalizing Loop<T[]>"
+  )
+  const recursiveKeyofSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Node = { child: Node; keys: keyof Node }\ntype Props = { value: Node }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(recursiveKeyofSources, recursiveKeyofSources, ["packages/public/src/index.ts"], undefined, {
+      recursiveDeclarations: unchangedDeclarationKeys(recursiveKeyofSources, recursiveKeyofSources)
+    }),
     []
   )
   const mappedOuterPhantomSources = new Map([
