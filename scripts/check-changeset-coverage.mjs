@@ -76,6 +76,9 @@ class ChangesetCoverageError extends Data.TaggedError("ChangesetCoverageError") 
 const hasReadonlyModifier = (node) =>
   node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ReadonlyKeyword) === true
 
+const hasStaticModifier = (node) =>
+  node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.StaticKeyword) === true
+
 const sourceAnalysisCache = new WeakMap()
 
 const defaultCompilerOptions = {
@@ -1597,7 +1600,7 @@ const canonicalKeySetForNode = (
         }
       }
       for (const member of declarationNode.members) {
-        if (hasNonPublicModifier(member)) continue
+        if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
         if (
           TypeScript.isPropertySignature(member) ||
           TypeScript.isMethodSignature(member) ||
@@ -2408,7 +2411,7 @@ const typeMembers = (
         }
       }
       for (const member of declarationNode.members) {
-        if (hasNonPublicModifier(member)) continue
+        if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
         if (
           !TypeScript.isPropertySignature(member) &&
           !TypeScript.isMethodSignature(member) &&
@@ -2707,7 +2710,7 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
       }
     }
     for (const member of declarationNode.members) {
-      if (hasNonPublicModifier(member)) continue
+      if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
       if (
         !TypeScript.isPropertySignature(member) &&
         !TypeScript.isMethodSignature(member) &&
@@ -6648,6 +6651,37 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(inheritedInterfaceReturnPrevious, inheritedInterfaceReturnChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const staticClassReturnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Result { static a: string; value: string }\nexport const Public = (): Result => ({ value: "" })'
+    ]
+  ])
+  const staticClassReturnRenamed = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Result { static b: string; value: string }\nexport const Public = (): Result => ({ value: "" })'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(staticClassReturnPrevious, staticClassReturnRenamed, ["packages/public/src/index.ts"]),
+    []
+  )
+  const staticClassReturnInstanceChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "class Result { static a: string; value: number }\nexport const Public = (): Result => ({ value: 1 })"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(staticClassReturnPrevious, staticClassReturnInstanceChanged, [
       "packages/public/src/index.ts"
     ]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
