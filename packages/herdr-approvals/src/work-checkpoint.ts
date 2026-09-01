@@ -33,24 +33,32 @@ const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(
   if (known === undefined) {
     return yield* new FleetValidationError({ detail: `unknown host: ${target}` })
   }
+  if (config.crossHost) {
+    if (known.host.toLowerCase() !== config.approvalHub.host.toLowerCase()) {
+      return yield* new FleetValidationError({
+        detail: "work commands can only target the canonical approval hub"
+      })
+    }
+    return config.approvalHub.url
+  }
   if (known.host.toLowerCase() !== config.host.toLowerCase()) {
     return yield* new FleetValidationError({
       detail: "work commands can only target the local host"
     })
   }
-  return `http://127.0.0.1:${config.localPort}`
+  return `http://127.0.0.1:${config.port}`
 })
 
 export const workCheckpointUrl = Effect.fn("Fleetctl.workCheckpointUrl")(function*(
   config: HostConfiguration,
   target: string
 ) {
-  return `${yield* workLocalBaseUrl(config, target)}${workCheckpointPath}`
+  return new URL(workCheckpointPath, yield* workLocalBaseUrl(config, target)).href
 })
 
 export const workSnapshotUrl = Effect.fn("Fleetctl.workSnapshotUrl")(function*(
   config: HostConfiguration,
   target: string
 ) {
-  return `${yield* workLocalBaseUrl(config, target)}${workSnapshotPath}`
+  return new URL(workSnapshotPath, yield* workLocalBaseUrl(config, target)).href
 })

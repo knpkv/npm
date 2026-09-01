@@ -56,9 +56,9 @@ const program = Effect.gen(function*() {
     (running) => Effect.promise(running.close)
   )
   yield* Console.log(
-    `hostd: ${config.host} local=${server.url} tailnet=${server.tailnetUrl ?? "disabled"} approval=${
-      server.approvalUrl ?? "disabled"
-    } serve=${server.serveUrl ?? "disabled"}`
+    `hostd: ${config.host} local=${server.url} work=${server.workUrl ?? "canonical"} tailnet=${
+      server.tailnetUrl ?? "disabled"
+    } approval=${server.approvalUrl ?? "disabled"} serve=${server.serveUrl ?? "disabled"}`
   )
   return yield* Effect.never
 })

@@ -81,7 +81,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
 import { resolveApprovalPage } from "./approval-url.js"
-import { authorize, authorizeLoopback, type LoopbackActor } from "./auth.js"
+import { authorize, authorizeLoopback } from "./auth.js"
 import {
   type ApprovalDirectory,
   type DashboardHistoryPage,
@@ -161,7 +161,7 @@ type Runner = {
   readonly enqueue: (jobId: string) => Promise<boolean>
 }
 
-type ListenerMode = "local" | "tailnet" | "approval" | "serve"
+type ListenerMode = "local" | "tailnet" | "approval" | "serve" | "work"
 
 type TlsCredentials = {
   readonly certificate: string
@@ -396,8 +396,8 @@ const authorizeOriginlessMutation = (request: IncomingMessage) => {
 }
 
 export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkCheckpointRequest")(
-  function*<AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
-    authorization: Effect.Effect<LoopbackActor, AuthorizationError, AuthorizationRequirements>,
+  function*<Authorization, AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
+    authorization: Effect.Effect<Authorization, AuthorizationError, AuthorizationRequirements>,
     decode: Effect.Effect<WorkGoalCheckpointType, DecodeError, DecodeRequirements>,
     work: WorkService,
     approvalPage?: (host: string) => Effect.Effect<string, FleetValidationError | FleetOperationError>
@@ -1156,6 +1156,7 @@ export const startHttpServer = async (
   readonly tailnetUrl: string | null
   readonly approvalUrl: string | null
   readonly serveUrl: string | null
+  readonly workUrl: string | null
 }> => {
   const isHub = config.crossHost &&
     config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
@@ -1643,7 +1644,13 @@ export const startHttpServer = async (
       ) => {
         try {
           const url = pathOf(request)
-          if (header(request, "host")?.toLowerCase() !== expectedHost) {
+          const workRoute = (request.method === "GET" && url.pathname === workSnapshotPath) ||
+            (request.method === "POST" && url.pathname === workCheckpointPath)
+          if (mode === "work" && !workRoute) {
+            json(response, 404, { error: "not_found" })
+            return
+          }
+          if (mode !== "work" && header(request, "host")?.toLowerCase() !== expectedHost) {
             json(response, 403, {
               error: "FleetAuthorizationError",
               actor: "host"
@@ -1885,30 +1892,45 @@ export const startHttpServer = async (
             return
           }
 
+          const servesWork = mode === "serve" || mode === "work" || (mode === "local" && !config.crossHost)
           if (
-            (mode === "local" || mode === "serve") &&
+            servesWork &&
             request.method === "GET" &&
             url.pathname === workSnapshotPath
           ) {
-            const workAuthorization = mode === "local" ? loopbackAuthorized : authorized
+            const workAuthorization = mode === "work"
+              ? Effect.succeed("lan")
+              : mode === "local"
+              ? loopbackAuthorized
+              : authorized
             await respond(response, Effect.andThen(workAuthorization, work.snapshots(now())))
             return
           }
 
           if (
-            mode === "local" &&
+            servesWork &&
             request.method === "POST" &&
             url.pathname === workCheckpointPath
           ) {
+            const workAuthorization = mode === "work"
+              ? Effect.succeed("lan")
+              : mode === "local"
+              ? loopbackAuthorized
+              : authorized
             const effect = Effect.gen(function*() {
-              const tailscale = yield* Tailscale
+              const approvalPage = mode === "work"
+                ? undefined
+                : yield* Effect.map(
+                  Tailscale,
+                  (tailscale) => (host: string) => resolveApprovalPage(config, tailscale, host)
+                )
               return yield* recordWorkCheckpointRequest(
-                loopbackAuthorized,
+                workAuthorization,
                 authorizeOriginlessMutation(request).pipe(
                   Effect.andThen(readJson(request, WorkGoalCheckpoint))
                 ),
                 work,
-                (host) => resolveApprovalPage(config, tailscale, host)
+                approvalPage
               )
             })
             await respond(response, effect, 201)
@@ -2383,6 +2405,7 @@ export const startHttpServer = async (
     const recoveredJobIds = await Effect.runPromise(service.recover())
     const local = await listen("127.0.0.1", config.localPort, "local")
     if (tailscaleIp === null) {
+      const work = await listen("0.0.0.0", config.port, "work")
       for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
       acceptingRequests = true
       return {
@@ -2390,6 +2413,7 @@ export const startHttpServer = async (
         tailnetUrl: null,
         approvalUrl: null,
         serveUrl: null,
+        workUrl: work.url,
         close: shutdown
       }
     }
@@ -2422,6 +2446,7 @@ export const startHttpServer = async (
       tailnetUrl: remote.url,
       approvalUrl: approval?.url ?? serve?.url ?? null,
       serveUrl: serve?.url ?? null,
+      workUrl: null,
       close: shutdown
     }
   } catch (error) {

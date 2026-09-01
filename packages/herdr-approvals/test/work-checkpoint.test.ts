@@ -35,7 +35,7 @@ const config: HostConfiguration = {
   browserMcpRecoverCommand: null,
   checkCommand: ["nix", "flake", "check"],
   coordinatorCommand: ["coordinator"],
-  crossHost: true,
+  crossHost: false,
   herdrCommand: "herdr",
   host: "ALPHA",
   localPort: 4_777,
@@ -53,20 +53,38 @@ const config: HostConfiguration = {
 }
 
 describe("fleetctl work commands", () => {
-  it.effect("decodes checkpoints and targets only the local loopback listener", () =>
+  it.effect("decodes checkpoints and targets the local Work listener", () =>
     Effect.gen(function*() {
       expect(yield* workCheckpointFromJson(JSON.stringify(checkpoint))).toEqual(checkpoint)
       expect(yield* workCheckpointUrl(config, "alpha")).toBe(
-        "http://127.0.0.1:4777/v1/work/checkpoints"
+        "http://127.0.0.1:4778/v1/work/checkpoints"
       )
       expect(yield* workSnapshotUrl(config, "ALPHA")).toBe(
-        "http://127.0.0.1:4777/v1/work"
+        "http://127.0.0.1:4778/v1/work"
       )
       const remote = yield* Effect.result(workCheckpointUrl(config, "SER8"))
       expect(remote).toMatchObject({
         failure: {
           _tag: "FleetValidationError",
           detail: "work commands can only target the local host"
+        }
+      })
+    }))
+
+  it.effect("targets only the canonical approval hub when cross-host control is enabled", () =>
+    Effect.gen(function*() {
+      const crossHostConfig = { ...config, crossHost: true }
+      expect(yield* workCheckpointUrl(crossHostConfig, "ser8")).toBe(
+        "https://ser8.example.test:4779/v1/work/checkpoints"
+      )
+      expect(yield* workSnapshotUrl(crossHostConfig, "SER8")).toBe(
+        "https://ser8.example.test:4779/v1/work"
+      )
+      const nonHub = yield* Effect.result(workSnapshotUrl(crossHostConfig, "ALPHA"))
+      expect(nonHub).toMatchObject({
+        failure: {
+          _tag: "FleetValidationError",
+          detail: "work commands can only target the canonical approval hub"
         }
       })
     }))
