@@ -89,7 +89,7 @@ describe("PR detail coordinates", () => {
         { awsAccountId: "production", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
         changedAccountPullRequest
       )
-    ).toBe(true)
+    ).toBe(false)
   })
 
   it("uses the profile for sandbox identity when the account id is empty", () => {

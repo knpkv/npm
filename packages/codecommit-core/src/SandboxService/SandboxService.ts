@@ -81,6 +81,8 @@ const isRegionlessSandbox = (row: Pick<SandboxRow, "region">): boolean =>
 const isPreContainerSandboxStatus = (status: string): boolean =>
   status === "creating" || status === "cloning" || status === "starting"
 
+const isDiscoveredAwsAccountId = (value: string): boolean => /^\d{12}$/u.test(value)
+
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
 )
@@ -267,13 +269,8 @@ const makeSandboxService = Effect.gen(function*() {
           params.repositoryName,
           params.region
         )
-        const profileExisting = Option.isSome(existing) || params.awsAccountId.length === 0
-          ? Option.none<SandboxRow>()
-          : yield* repo.findByPr(params.profile, params.pullRequestId, params.repositoryName, params.region)
         const exactExisting = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
-          : Option.isSome(profileExisting) && profileExisting.value.region === params.region
-          ? profileExisting.value
           : undefined
         const emptyAccountRows = params.awsAccountId.length === 0
           ? []
@@ -283,7 +280,17 @@ const makeSandboxService = Effect.gen(function*() {
             row.repositoryName === params.repositoryName &&
             row.region === params.region
           )
-        const effectiveExisting = yield* Effect.forEach(emptyAccountRows, retireLegacySandbox, { discard: true }).pipe(
+        const profileRows = isDiscoveredAwsAccountId(params.awsAccountId)
+          ? (yield* repo.findAll()).filter((row) =>
+            row.awsAccountId === params.profile &&
+            row.pullRequestId === params.pullRequestId &&
+            row.repositoryName === params.repositoryName &&
+            row.region === params.region
+          )
+          : []
+        const effectiveExisting = yield* Effect.forEach([...emptyAccountRows, ...profileRows], retireLegacySandbox, {
+          discard: true
+        }).pipe(
           Effect.as(exactExisting)
         )
         const regionless = yield* repo.findRegionlessByPrAll(
@@ -529,8 +536,7 @@ const makeSandboxService = Effect.gen(function*() {
           ),
           // Observe and persist unexpected defects without recovering them.
           // `tapDefect` leaves the original Cause / Exit unchanged.
-          Effect.tapDefect((defect) => recordCreationFailure(id, defect)),
-          Effect.ensuring(releaseWorkerReservation())
+          Effect.tapDefect((defect) => recordCreationFailure(id, defect))
         )
         yield* repo.insert({
           id,
@@ -547,7 +553,7 @@ const makeSandboxService = Effect.gen(function*() {
         }).pipe(
           Effect.andThen(
             Effect.uninterruptible(
-              ownerScope.fork(worker).pipe(
+              ownerScope.fork(worker, releaseWorkerReservation()).pipe(
                 Effect.flatMap(({ fiber, started }) =>
                   Effect.race(
                     started.pipe(Effect.as(true)),

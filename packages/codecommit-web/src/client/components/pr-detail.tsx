@@ -116,8 +116,7 @@ export const sandboxMatchesPullRequest = (
   },
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
 ): boolean =>
-  (sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) ||
-    sandbox.awsAccountId === pullRequest.account.profile) &&
+  sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) &&
   sandbox.pullRequestId === String(pullRequest.id) &&
   sandbox.repositoryName === String(pullRequest.repositoryName) &&
   sandbox.region === String(pullRequest.account.region)

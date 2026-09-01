@@ -9,7 +9,8 @@ export interface SandboxWorkerHandle<A, E> {
 
 export interface SandboxWorkerScopeContract {
   readonly fork: <A, E, R>(
-    worker: EffectType.Effect<A, E, R>
+    worker: EffectType.Effect<A, E, R>,
+    release: EffectType.Effect<void>
   ) => EffectType.Effect<SandboxWorkerHandle<A, E>, never, R>
 }
 
@@ -26,11 +27,15 @@ export class SandboxWorkerScope extends Context.Service<SandboxWorkerScope, Sand
     SandboxWorkerScope,
     Effect.map(Effect.scope, (scope) =>
       SandboxWorkerScope.of({
-        fork: (worker) =>
+        fork: (worker, release) =>
           Effect.gen(function*() {
             const started = yield* Deferred.make<void>()
             const fiber = yield* Effect.forkIn(
-              Effect.uninterruptible(Deferred.succeed(started, undefined)).pipe(Effect.andThen(worker)),
+              Effect.acquireUseRelease(
+                Deferred.succeed(started, undefined),
+                () => worker,
+                () => release
+              ),
               scope
             )
             return { fiber, started: Deferred.await(started) }

@@ -154,6 +154,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           const configured = [options?.emptyAccountByPr, ...(options?.emptyAccountByPrAll ?? [])].filter(
             (candidate): candidate is SandboxRow => candidate !== undefined
           )
+          if (options?.profileByPr !== undefined) configured.push(options.profileByPr)
           const rows = row === undefined ? configured : [row, ...configured]
           return Array.from(new Map(rows.map((candidate) => [candidate.id, candidate])).values())
         })
@@ -311,22 +312,23 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       SandboxWorkerScope,
       Effect.map(Effect.scope, (scope) =>
         SandboxWorkerScope.of({
-          fork: (worker) =>
+          fork: (worker, release) =>
             Effect.gen(function*() {
               const started = yield* Deferred.make<void>()
               const forkScope = options?.closedFork === true ? yield* Scope.make() : scope
               if (options?.closedFork === true) yield* Scope.close(forkScope, Exit.void)
               const fiber = yield* Effect.forkIn(
-                Effect.uninterruptible(Deferred.succeed(started, undefined)).pipe(
-                  Effect.andThen(
+                Effect.acquireUseRelease(
+                  Deferred.succeed(started, undefined),
+                  () =>
                     worker.pipe(
                       Effect.onExit((exit) =>
                         Exit.isFailure(exit)
                           ? Deferred.succeed(workerCause, exit.cause)
                           : Effect.void
                       )
-                    )
-                  )
+                    ),
+                  () => release
                 ),
                 forkScope
               )
@@ -800,7 +802,7 @@ describe("SandboxWorkerScope", () => {
       )
     }))
 
-  it.effect("reuses a profile-keyed legacy row after account discovery", () =>
+  it.effect("retires a profile-keyed legacy row before account-keyed creation", () =>
     Effect.gen(function*() {
       const profileRow = {
         ...legacyRow,
@@ -808,7 +810,15 @@ describe("SandboxWorkerScope", () => {
         region: createParams.region,
         accessPassword: "protected"
       }
-      const fixture = yield* makeFixture(() => Effect.never, { profileByPr: profileRow })
+      const fixture = yield* makeFixture(() => Effect.never, {
+        profileByPr: profileRow,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
 
       const result = yield* Effect.scoped(
         SandboxService.pipe(
@@ -817,8 +827,9 @@ describe("SandboxWorkerScope", () => {
         )
       )
 
-      expect(result.id).toBe(profileRow.id)
-      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(result.id).not.toBe(profileRow.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
     }))
 
   it.effect("does not retire an empty-account worker after its container is persisted", () =>
