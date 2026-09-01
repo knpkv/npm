@@ -1,11 +1,31 @@
-import { AgentConnectTarget } from "@knpkv/herdr-fleet/model"
+import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+// Approval hosts are bounded identifiers, not DNS names; the approvals app also
+// accepts labels such as "PI 5".
+const ApprovalHostName = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
 const Text = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096), Schema.isPattern(/^[^\p{Cc}]+$/u))
 const Timestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
+)
+/**
+ * Credential-free HTTP(S) URL persisted for an outbound handoff. Provider
+ * credentials and private locators never belong in this representation.
+ */
+const LinkUrl = Schema.String.check(
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
+    (value) => {
+      if (!URL.canParse(value)) return false
+      const url = new URL(value)
+      return (url.protocol === "http:" || url.protocol === "https:") &&
+        url.username === "" &&
+        url.password === ""
+    },
+    { expected: "an HTTP(S) URL without embedded credentials" }
+  )
 )
 
 export const workHistoryMaxEvents = 16_384
@@ -41,6 +61,88 @@ export const WorkBlocker = Schema.Struct({
 })
 export interface WorkBlocker extends Schema.Schema.Type<typeof WorkBlocker> {}
 
+export const WorkAgentHierarchy = Schema.Struct({
+  agent: AgentWorkerIdentity
+})
+export interface WorkAgentHierarchy extends Schema.Schema.Type<typeof WorkAgentHierarchy> {}
+
+export const WorkActivityKind = Schema.Literals([
+  "note",
+  "status",
+  "blocker",
+  "request",
+  "review",
+  "shipment"
+])
+export type WorkActivityKind = typeof WorkActivityKind.Type
+
+export const WorkActivity = Schema.Struct({
+  id: Identifier,
+  kind: WorkActivityKind,
+  summary: Text,
+  occurredAt: Timestamp
+})
+export interface WorkActivity extends Schema.Schema.Type<typeof WorkActivity> {}
+
+export const WorkApprovalTarget = Schema.Struct({
+  host: ApprovalHostName,
+  jobId: Identifier,
+  url: LinkUrl
+}).check(
+  Schema.makeFilter(
+    ({ host, jobId, url }) => {
+      const parsed = new URL(url)
+      const queryKeys = [...parsed.searchParams.keys()]
+      const approvalHosts = parsed.searchParams.getAll("approvalHost")
+      const approvalJobs = parsed.searchParams.getAll("approvalJob")
+      return parsed.pathname === "/" &&
+        parsed.hash === "" &&
+        queryKeys.length === 3 &&
+        parsed.searchParams.getAll("tab").length === 1 &&
+        parsed.searchParams.get("tab") === "approvals" &&
+        approvalHosts.length === 1 &&
+        approvalJobs.length === 1 &&
+        approvalHosts[0]?.toLowerCase() === host.toLowerCase() &&
+        approvalJobs[0] === jobId
+    },
+    { expected: "an approval URL with matching host and job identity" }
+  )
+)
+export interface WorkApprovalTarget extends Schema.Schema.Type<typeof WorkApprovalTarget> {}
+
+/**
+ * Checks a decoded approval target against the origin resolved by the
+ * configuration-aware approvals boundary before the target is persisted.
+ */
+export const approvalTargetMatchesOrigin = (
+  target: WorkApprovalTarget,
+  authoritativeOrigin: string
+): boolean => new URL(target.url).origin === authoritativeOrigin
+
+export const WorkRequestState = Schema.Literals(["open", "approved", "rejected", "fulfilled"])
+export type WorkRequestState = typeof WorkRequestState.Type
+
+export const WorkRequest = Schema.Struct({
+  id: Identifier,
+  summary: Text,
+  state: WorkRequestState,
+  requestedAt: Timestamp,
+  approvalTarget: Schema.NullOr(WorkApprovalTarget)
+})
+export interface WorkRequest extends Schema.Schema.Type<typeof WorkRequest> {}
+
+export const WorkReviewState = Schema.Literals(["not_requested", "requested", "changes_requested", "approved"])
+export type WorkReviewState = typeof WorkReviewState.Type
+
+/** Review status plus the persisted credential-free destination, when known. */
+export const WorkReview = Schema.Struct({
+  state: WorkReviewState,
+  summary: Schema.NullOr(Text),
+  updatedAt: Timestamp,
+  url: Schema.NullOr(LinkUrl)
+})
+export interface WorkReview extends Schema.Schema.Type<typeof WorkReview> {}
+
 export const WorkGoal = Schema.Struct({
   id: WorkGoalId,
   title: Text,
@@ -53,12 +155,66 @@ export const WorkGoal = Schema.Struct({
   delivery: DeliveryStage,
   blocker: Schema.NullOr(WorkBlocker),
   connectTarget: Schema.NullOr(AgentConnectTarget),
+  agentHierarchy: Schema.optionalKey(Schema.NullOr(WorkAgentHierarchy)),
+  activity: Schema.optionalKey(
+    Schema.Array(WorkActivity)
+      .check(Schema.isMaxLength(128))
+      .check(
+        Schema.makeFilter(
+          (activities) => new Set(activities.map(({ id }) => id)).size === activities.length,
+          { expected: "unique activity ids" }
+        )
+      )
+  ),
+  blockers: Schema.optionalKey(
+    Schema.Array(WorkBlocker)
+      .check(Schema.isMaxLength(32))
+      .check(
+        Schema.makeFilter(
+          (blockers) =>
+            new Set(blockers.map(({ since, summary }) => `${since}\u0000${summary}`)).size === blockers.length,
+          { expected: "unique blocker records" }
+        )
+      )
+  ),
+  requests: Schema.optionalKey(
+    Schema.Array(WorkRequest)
+      .check(Schema.isMaxLength(32))
+      .check(
+        Schema.makeFilter(
+          (requests) => new Set(requests.map(({ id }) => id)).size === requests.length,
+          { expected: "unique request ids" }
+        )
+      )
+  ),
+  review: Schema.optionalKey(Schema.NullOr(WorkReview)),
+  approvalTarget: Schema.optionalKey(Schema.NullOr(WorkApprovalTarget)),
   createdAt: Timestamp,
   updatedAt: Timestamp
 }).check(
   Schema.makeFilter(
-    (goal) => goal.updatedAt >= goal.createdAt && ((goal.state === "blocked") === (goal.blocker !== null)),
-    { expected: "ordered goal timestamps and blocker present exactly for blocked state" }
+    (goal) => {
+      const hasBlocker = goal.blocker !== null ||
+        (goal.blockers !== undefined && goal.blockers.length > 0)
+      const agent = goal.agentHierarchy?.agent
+      const isDetailTimestamp = (timestamp: number): boolean =>
+        timestamp >= goal.createdAt && timestamp <= goal.updatedAt
+      return goal.updatedAt >= goal.createdAt &&
+        ((goal.state === "blocked") === hasBlocker) &&
+        (goal.blockers === undefined || goal.blocker === null) &&
+        (goal.blocker === null || isDetailTimestamp(goal.blocker.since)) &&
+        (goal.blockers === undefined || goal.blockers.every(({ since }) => isDetailTimestamp(since))) &&
+        (goal.activity === undefined || goal.activity.every(({ occurredAt }) => isDetailTimestamp(occurredAt))) &&
+        (goal.requests === undefined || goal.requests.every(({ requestedAt }) => isDetailTimestamp(requestedAt))) &&
+        (goal.review === undefined || goal.review === null || isDetailTimestamp(goal.review.updatedAt)) &&
+        (agent === undefined || agent === null || (
+          (agent.relationship === undefined || agent.relationship.parentAgentId !== agent.agentId) &&
+          goal.connectTarget !== null &&
+          goal.connectTarget.agentId === agent.agentId &&
+          goal.connectTarget.host.toLowerCase() === agent.host.toLowerCase()
+        ))
+    },
+    { expected: "ordered goal timestamps, blocker state, and non-cyclic authoritative agent target" }
   )
 )
 export interface WorkGoal extends Schema.Schema.Type<typeof WorkGoal> {}

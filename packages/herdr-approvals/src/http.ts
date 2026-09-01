@@ -53,13 +53,14 @@ import {
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
 import type { WorkCheckpointConflictError, WorkProjectionError, WorkService, WorkStoreError } from "@knpkv/herdr-work"
-import { makeWorkService, WorkStore } from "@knpkv/herdr-work"
+import { approvalTargetMatchesOrigin, makeWorkService, WorkStore } from "@knpkv/herdr-work"
 import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
 import {
   Cause,
   Clock,
   Crypto,
   Effect,
+  Equal,
   Exit,
   Fiber,
   FileSystem,
@@ -79,6 +80,7 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
+import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback, type LoopbackActor } from "./auth.js"
 import {
   type ApprovalDirectory,
@@ -397,10 +399,62 @@ export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkChe
   function*<AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
     authorization: Effect.Effect<LoopbackActor, AuthorizationError, AuthorizationRequirements>,
     decode: Effect.Effect<WorkGoalCheckpointType, DecodeError, DecodeRequirements>,
-    work: WorkService
+    work: WorkService,
+    approvalPage?: (host: string) => Effect.Effect<string, FleetValidationError | FleetOperationError>
   ) {
     yield* authorization
     const checkpoint = yield* decode
+    const targets = [
+      checkpoint.goal.approvalTarget,
+      ...(checkpoint.goal.requests ?? []).map(({ approvalTarget }) => approvalTarget)
+    ].filter((target): target is NonNullable<typeof target> => target !== undefined && target !== null)
+    if (targets.length > 0) {
+      const snapshots = yield* work.snapshots(checkpoint.occurredAt)
+      const exactReplay = snapshots.now.goals.some(
+        (goal) => goal.id === checkpoint.goal.id && Equal.equals(goal, checkpoint.goal)
+      )
+      if (exactReplay) return yield* work.record(checkpoint)
+    }
+    if (approvalPage === undefined) {
+      if (targets.length > 0) {
+        return yield* new FleetValidationError({
+          detail: "approval target origin cannot be validated without an authoritative page resolver"
+        })
+      }
+      return yield* work.record(checkpoint)
+    }
+    const approvalPageCache = new Map<
+      string,
+      Effect.Effect<string, FleetValidationError | FleetOperationError>
+    >()
+    for (const target of targets) {
+      const hostKey = target.host.toLowerCase()
+      let approvalPageEffect = approvalPageCache.get(hostKey)
+      if (approvalPageEffect === undefined) {
+        approvalPageEffect = yield* Effect.cached(approvalPage(target.host))
+        approvalPageCache.set(hostKey, approvalPageEffect)
+      }
+      const approvalPageUrl = yield* approvalPageEffect
+      const expectedOrigin = yield* Effect.try({
+        try: () => new URL(approvalPageUrl).origin,
+        catch: (cause) =>
+          new FleetValidationError({
+            detail: `invalid authoritative approval page: ${String(cause)}`
+          })
+      })
+      const matchesOrigin = yield* Effect.try({
+        try: () => approvalTargetMatchesOrigin(target, expectedOrigin),
+        catch: (cause) =>
+          new FleetValidationError({
+            detail: `invalid approval target URL: ${String(cause)}`
+          })
+      })
+      if (!matchesOrigin) {
+        return yield* new FleetValidationError({
+          detail: `approval target origin does not match configured page for ${target.host}`
+        })
+      }
+    }
     return yield* work.record(checkpoint)
   }
 )
@@ -1846,13 +1900,17 @@ export const startHttpServer = async (
             request.method === "POST" &&
             url.pathname === workCheckpointPath
           ) {
-            const effect = recordWorkCheckpointRequest(
-              loopbackAuthorized,
-              authorizeOriginlessMutation(request).pipe(
-                Effect.andThen(readJson(request, WorkGoalCheckpoint))
-              ),
-              work
-            )
+            const effect = Effect.gen(function*() {
+              const tailscale = yield* Tailscale
+              return yield* recordWorkCheckpointRequest(
+                loopbackAuthorized,
+                authorizeOriginlessMutation(request).pipe(
+                  Effect.andThen(readJson(request, WorkGoalCheckpoint))
+                ),
+                work,
+                (host) => resolveApprovalPage(config, tailscale, host)
+              )
+            })
             await respond(response, effect, 201)
             return
           }

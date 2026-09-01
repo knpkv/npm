@@ -1,7 +1,18 @@
 import { Button, Divider, StateLabel, Surface, Text, type RlyStateTone } from "@knpkv/rly/primitives"
 import { StageRail, type RlyStage } from "@knpkv/rly/patterns"
 import { useState, type ReactElement } from "react"
-import type { DeliveryStage, WorkGoal, WorkSnapshot, WorkSnapshots, WorkSnapshotWindow } from "./model.js"
+import type {
+  DeliveryStage,
+  WorkActivity,
+  WorkApprovalTarget,
+  WorkGoal,
+  WorkRequest,
+  WorkReview,
+  WorkSnapshot,
+  WorkSnapshots,
+  WorkSnapshotWindow,
+  WorkBlocker
+} from "./model.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
 const stageOrder: ReadonlyArray<DeliveryStage> = ["local", "review", "pull_request", "merged", "deployed"]
@@ -30,6 +41,20 @@ const deliveryLabel = {
   deployed: "Deployed"
 } satisfies Readonly<Record<DeliveryStage, string>>
 
+const reviewPresentation = {
+  not_requested: { label: "Not requested", tone: "neutral" },
+  requested: { label: "Requested", tone: "caution" },
+  changes_requested: { label: "Changes requested", tone: "critical" },
+  approved: { label: "Approved", tone: "positive" }
+} satisfies Readonly<Record<NonNullable<WorkReview>["state"], { readonly label: string; readonly tone: RlyStateTone }>>
+
+const requestPresentation = {
+  open: { label: "Open", tone: "caution" },
+  approved: { label: "Approved", tone: "positive" },
+  rejected: { label: "Rejected", tone: "critical" },
+  fulfilled: { label: "Fulfilled", tone: "positive" }
+} satisfies Readonly<Record<WorkRequest["state"], { readonly label: string; readonly tone: RlyStateTone }>>
+
 const formatTimestamp = (timestamp: number): string =>
   new Intl.DateTimeFormat("en-GB", {
     dateStyle: "medium",
@@ -43,6 +68,48 @@ const formatSpend = (goal: WorkGoal): string =>
         style: "currency",
         currency: goal.spend.currency
       }).format(goal.spend.minorUnits / 100)
+
+const blockersFor = (goal: WorkGoal): ReadonlyArray<WorkBlocker> => {
+  if (goal.blockers !== undefined) return goal.blockers
+  return goal.blocker === null ? [] : [goal.blocker]
+}
+
+const activityFor = (goal: WorkGoal): ReadonlyArray<WorkActivity> => goal.activity ?? []
+
+const requestsFor = (goal: WorkGoal): ReadonlyArray<WorkRequest> => goal.requests ?? []
+
+const hierarchyLabel = (goal: WorkGoal): string => {
+  const hierarchy = goal.agentHierarchy
+  if (hierarchy === undefined || hierarchy === null) return "No agent hierarchy recorded"
+  return `${hierarchy.agent.host} / ${hierarchy.agent.name}`
+}
+
+/** Renders the persisted approval deep link after its origin is bound at ingress. */
+const exactLink = (target: WorkApprovalTarget, label: string): ReactElement => (
+  <a className="work-exact-link" href={target.url}>
+    {label} →
+  </a>
+)
+
+/** Renders the persisted review destination without rewriting its credential-free URL. */
+const reviewLink = (url: string): ReactElement => (
+  <a className="work-exact-link" href={url}>
+    Open review →
+  </a>
+)
+
+const reviewLabel = (review: WorkReview | null | undefined): ReactElement => {
+  if (review === undefined || review === null) {
+    return <Text tone="secondary">No review recorded.</Text>
+  }
+  return (
+    <StateLabel
+      label={reviewPresentation[review.state].label}
+      size="compact"
+      tone={reviewPresentation[review.state].tone}
+    />
+  )
+}
 
 const stagesFor = (goal: WorkGoal): ReadonlyArray<RlyStage> => {
   const current = stageOrder.indexOf(goal.delivery)
@@ -78,6 +145,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
   const counts = {
     blocked: snapshot.goals.filter(({ state }) => state === "blocked").length,
     deployed: snapshot.goals.filter(({ state }) => state === "deployed").length,
+    openRequests: snapshot.goals.reduce(
+      (count, goal) => count + requestsFor(goal).filter(({ state }) => state === "open").length,
+      0
+    ),
     review: snapshot.goals.filter(({ state }) => state === "review").length,
     working: snapshot.goals.filter(({ state }) => state === "working").length
   }
@@ -86,10 +157,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
       <header className="work-page-intro">
         <div>
           <Text as="h1" id="work-board-title" variant="page-title">
-            Fleet departure board
+            Daily fleet Work
           </Text>
           <Text tone="secondary" variant="body-large">
-            Exceptions first. Delivery evidence and exact agent context stay one click away.
+            One durable view of who owns the work, what is blocked, and what ships next.
           </Text>
         </div>
         <div className="work-snapshot-stamp">
@@ -131,6 +202,7 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
         <SummaryCell label="Goals" value={String(snapshot.goals.length)} />
         <SummaryCell label="Working" value={String(counts.working)} />
         <SummaryCell label="Blocked" value={String(counts.blocked)} />
+        <SummaryCell label="Open requests" value={String(counts.openRequests)} />
         <SummaryCell label="In review" value={String(counts.review)} />
         <SummaryCell label="Deployed" value={String(counts.deployed)} />
       </div>
@@ -148,8 +220,9 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
               <span>Status</span>
               <span>Work</span>
               <span>Owner</span>
+              <span>Agent / host</span>
               <span>Repository</span>
-              <span>Delivery</span>
+              <span>Shipment</span>
               <span>Spend</span>
             </div>
             {snapshot.goals.map((goal) => (
@@ -174,13 +247,22 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                   </Text>
                 </span>
                 <Text data-label="Owner">{goal.owner.name}</Text>
+                <span className="work-board-copy" data-label="Agent / host">
+                  <Text>{hierarchyLabel(goal)}</Text>
+                  {goal.agentHierarchy?.agent.relationship === undefined ? null : (
+                    <Text tone="secondary" variant="meta">
+                      {goal.agentHierarchy.agent.relationship.relation} ·{" "}
+                      {goal.agentHierarchy.agent.relationship.parentAgentId}
+                    </Text>
+                  )}
+                </span>
                 <span className="work-board-copy" data-label="Repository">
                   <Text variant="code">{goal.repository.repository}</Text>
                   <Text tone="secondary" variant="meta">
                     {goal.repository.branch}
                   </Text>
                 </span>
-                <Text data-label="Delivery">{deliveryLabel[goal.delivery]}</Text>
+                <Text data-label="Shipment">{deliveryLabel[goal.delivery]}</Text>
                 <Text data-label="Spend" variant="code">
                   {formatSpend(goal)}
                 </Text>
@@ -197,14 +279,33 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                 {selected.title}
               </Text>
               <Text tone="secondary">{selected.detail}</Text>
-              {selected.blocker === null ? null : (
-                <Surface padding="compact" tone="secondary">
-                  <Text variant="meta" tone="secondary">
-                    Blocked since {formatTimestamp(selected.blocker.since)}
-                  </Text>
-                  <Text>{selected.blocker.summary}</Text>
-                </Surface>
-              )}
+              <div className="work-inspector-section">
+                <Text as="h3" variant="label">
+                  Agent hierarchy
+                </Text>
+                {selected.agentHierarchy === undefined || selected.agentHierarchy === null ? (
+                  <Text tone="secondary">No authoritative agent assignment recorded.</Text>
+                ) : (
+                  <>
+                    <Text>
+                      {selected.agentHierarchy.agent.host} / {selected.agentHierarchy.agent.name}
+                    </Text>
+                    <Text tone="secondary" variant="code">
+                      {selected.agentHierarchy.agent.agentId}
+                    </Text>
+                    {selected.agentHierarchy.agent.relationship === undefined ? (
+                      <Text tone="secondary" variant="meta">
+                        Fleet root agent
+                      </Text>
+                    ) : (
+                      <Text tone="secondary" variant="meta">
+                        {selected.agentHierarchy.agent.relationship.relation} from{" "}
+                        {selected.agentHierarchy.agent.relationship.parentAgentId}
+                      </Text>
+                    )}
+                  </>
+                )}
+              </div>
               <Divider />
               <dl className="work-facts">
                 <div>
@@ -220,16 +321,109 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                   <dd>{selected.repository.branch}</dd>
                 </div>
                 <div>
+                  <dt>Shipment stage</dt>
+                  <dd>{deliveryLabel[selected.delivery]}</dd>
+                </div>
+                <div>
                   <dt>Spend</dt>
                   <dd>{formatSpend(selected)}</dd>
                 </div>
               </dl>
+              <div className="work-inspector-section">
+                <Text as="h3" variant="label">
+                  Blockers
+                </Text>
+                {blockersFor(selected).length === 0 ? (
+                  <Text tone="secondary">No blockers recorded.</Text>
+                ) : (
+                  blockersFor(selected).map((blocker) => (
+                    <Surface key={`${blocker.since}-${blocker.summary}`} padding="compact" tone="secondary">
+                      <Text variant="meta" tone="secondary">
+                        Since {formatTimestamp(blocker.since)}
+                      </Text>
+                      <Text>{blocker.summary}</Text>
+                    </Surface>
+                  ))
+                )}
+              </div>
+              <div className="work-inspector-section">
+                <Text as="h3" variant="label">
+                  Activity
+                </Text>
+                {selected.activity === undefined ? (
+                  <Text tone="secondary">No activity recorded.</Text>
+                ) : activityFor(selected).length === 0 ? (
+                  <Text tone="secondary">Activity is clear.</Text>
+                ) : (
+                  <ul className="work-detail-list">
+                    {activityFor(selected).map((entry) => (
+                      <li key={entry.id}>
+                        <Text variant="meta" tone="secondary">
+                          {entry.kind} · {formatTimestamp(entry.occurredAt)}
+                        </Text>
+                        <Text>{entry.summary}</Text>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="work-inspector-section">
+                <Text as="h3" variant="label">
+                  Requests
+                </Text>
+                {selected.requests === undefined ? (
+                  <Text tone="secondary">No requests recorded.</Text>
+                ) : requestsFor(selected).length === 0 ? (
+                  <Text tone="secondary">No outstanding requests.</Text>
+                ) : (
+                  <ul className="work-detail-list">
+                    {requestsFor(selected).map((request) => (
+                      <li key={request.id}>
+                        <div className="work-request-heading">
+                          <Text>{request.summary}</Text>
+                          <StateLabel
+                            label={requestPresentation[request.state].label}
+                            size="compact"
+                            tone={requestPresentation[request.state].tone}
+                          />
+                        </div>
+                        {request.approvalTarget === null ? (
+                          <Text tone="secondary" variant="meta">
+                            No approval link recorded.
+                          </Text>
+                        ) : (
+                          exactLink(request.approvalTarget, `Open ${request.approvalTarget.host} approval`)
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <div className="work-inspector-section">
+                <Text as="h3" variant="label">
+                  Review
+                </Text>
+                <div className="work-review-heading">
+                  {reviewLabel(selected.review)}
+                  {selected.review?.url === null || selected.review?.url === undefined
+                    ? null
+                    : reviewLink(selected.review.url)}
+                </div>
+                {selected.review?.summary === null || selected.review?.summary === undefined ? null : (
+                  <Text tone="secondary">{selected.review.summary}</Text>
+                )}
+              </div>
               {selected.connectTarget === null ? (
-                <Text tone="secondary">No worker has started for this goal.</Text>
+                <Text tone="secondary">No exact Connect target recorded.</Text>
               ) : (
                 <a className="work-connect-link" href={selected.connectTarget.url}>
                   Open exact agent in Connect →
                 </a>
+              )}
+              {selected.approvalTarget === undefined || selected.approvalTarget === null ? (
+                <Text tone="secondary">No exact approval target recorded.</Text>
+              ) : (
+                exactLink(selected.approvalTarget, `Open ${selected.approvalTarget.host} approval`)
               )}
             </Surface>
           )}
@@ -237,7 +431,7 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
       )}
       {selected === null ? null : (
         <Surface className="work-delivery-evidence" padding="spacious">
-          <StageRail heading={`Delivery path · ${selected.title}`} stages={stagesFor(selected)} />
+          <StageRail heading={`Shipment path · ${selected.title}`} stages={stagesFor(selected)} />
         </Surface>
       )}
     </section>
