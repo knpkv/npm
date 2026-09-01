@@ -397,6 +397,49 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("does not retire the exact row when profile and account keys match", () =>
+    Effect.gen(function*() {
+      const exact = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "running"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: exact,
+        existingByPr: exact
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(exact.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
+  it.effect("converges concurrent creates on one account-keyed row", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never)
+
+      const results = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          return yield* Effect.all(
+            [sandboxes.create(createParams), sandboxes.create(createParams)],
+            { concurrency: 2 }
+          )
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(results[0]?.id).toBe(results[1]?.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
   it.effect("does not reuse or relabel a regionless legacy sandbox", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never, { regionlessByPr: legacyRow })

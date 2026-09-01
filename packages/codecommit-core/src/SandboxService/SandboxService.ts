@@ -211,7 +211,7 @@ const makeSandboxService = Effect.gen(function*() {
   })
 
   const retireLegacySandbox = (legacy: SandboxRow) =>
-    lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
+    Effect.gen(function*() {
       const activeWorker = yield* hasActiveWorker(legacy.id)
       if (activeWorker) {
         return yield* new SandboxError({
@@ -261,7 +261,7 @@ const makeSandboxService = Effect.gen(function*() {
         )
       )
       yield* Ref.update(retiredLegacyIds, (ids) => new Set(ids).add(legacy.id))
-    }))
+    })
 
   const markLegacyRetired = (id: SandboxId) =>
     Clock.currentTimeMillis.pipe(
@@ -271,6 +271,8 @@ const makeSandboxService = Effect.gen(function*() {
   const service = {
     create: (params: CreateSandboxParams) =>
       Effect.gen(function*() {
+        yield* Effect.uninterruptible(lifecycleAdmission.take(1))
+
         // Singleton check — one active sandbox per PR
         const existing = yield* repo.findByPr(
           params.awsAccountId,
@@ -291,6 +293,7 @@ const makeSandboxService = Effect.gen(function*() {
           )
         const profileRows = isDiscoveredAwsAccountId(params.awsAccountId)
           ? (yield* repo.findAll()).filter((row) =>
+            row.id !== exactExisting?.id &&
             row.awsAccountId === params.profile &&
             row.pullRequestId === params.pullRequestId &&
             row.repositoryName === params.repositoryName &&
@@ -582,6 +585,7 @@ const makeSandboxService = Effect.gen(function*() {
 
         return yield* repo.findById(id)
       }).pipe(
+        Effect.ensuring(lifecycleAdmission.release(1)),
         Effect.mapError((cause) =>
           Predicate.isTagged(cause, "SandboxError")
             ? cause
