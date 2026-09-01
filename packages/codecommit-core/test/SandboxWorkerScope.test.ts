@@ -484,7 +484,10 @@ describe("SandboxWorkerScope", () => {
       const fixture = yield* makeFixture(() => Effect.void, {
         initialRow: legacyRow,
         stopContainer: Effect.fail(
-          new DockerError({ operation: "stopContainer", cause: "Error: No such container: missing-container" })
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: No such container: missing-container"
+          })
         )
       })
       const outcome = yield* Effect.scoped(

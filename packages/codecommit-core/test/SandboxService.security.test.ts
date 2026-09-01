@@ -16,6 +16,7 @@ import {
 } from "../src/CacheService/internal/PrivateDatabasePathNode.js"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
 import type { SandboxConfig } from "../src/ConfigService/internal.js"
+import { DockerError } from "../src/Errors.js"
 import { DockerService, isMissingContainerError, renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
 import { makeContainerConfig, sandboxContainerIdentityForWorkspaceOwner } from "../src/SandboxService/SandboxService.js"
 
@@ -474,6 +475,17 @@ describe("sandbox security boundary", () => {
         expect(isMissingContainerError(result.failure)).toBe(false)
       }
     }))
+
+  it("classifies Docker Engine stop absence without swallowing infrastructure failures", () => {
+    expect(
+      isMissingContainerError(
+        new DockerError({
+          operation: "stopContainer",
+          cause: "Error response from daemon: No such container: missing-container"
+        })
+      )
+    ).toBe(true)
+  })
 
   it("matches a non-root workspace owner and repairs root-owned workspaces without running as root", () => {
     expect(sandboxContainerIdentityForWorkspaceOwner(1001, 1002)).toEqual({

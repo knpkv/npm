@@ -36,7 +36,7 @@ export interface ContainerInfo {
   }
 }
 
-/** Docker's inspect command reports a missing container with this exact stderr shape. */
+/** Docker reports an absent inspect/stop target with one of these exact stderr shapes. */
 export const isMissingContainerError = (error: DockerError): boolean => {
   if (
     !Predicate.isString(error.operation) ||
@@ -48,7 +48,10 @@ export const isMissingContainerError = (error: DockerError): boolean => {
     : Predicate.isError(cause)
     ? cause.message
     : undefined
-  return message !== undefined && /^Error:\s+No such (?:object|container):\s+\S+/u.test(message.trim())
+  return message !== undefined &&
+    /^(?:Error:\s+|Error response from daemon:\s+)No such (?:object|container):\s+\S+/u.test(
+      message.trim()
+    )
 }
 
 const ContainerInfoSchema = Schema.Struct({
