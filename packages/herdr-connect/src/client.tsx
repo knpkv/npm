@@ -10,6 +10,7 @@ import type * as HttpClientResponse from "effect/unstable/http/HttpClientRespons
 import { FitAddon, init, Terminal } from "ghostty-web"
 import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
+import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
 import {
   type ConnectAgent,
   type ConnectAgentCursor,
@@ -25,7 +26,7 @@ import {
   wheelScrollCommand
 } from "./terminal-input.js"
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, type AgentActivityFilter } from "./view.js"
-import { acquireTerminalSetup } from "./terminal-setup.js"
+import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
 import { bindTerminalViewport } from "./terminal-viewport.js"
 import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
@@ -239,6 +240,14 @@ const terminalWorker = (container: HTMLElement, agent: ConnectAgent, update: (st
           terminal.dispose()
         }
       )
+      const textarea = terminal.terminal.textarea
+      if (textarea === undefined) {
+        return yield* new ConnectTerminalSetupError({
+          cause: "Ghostty Web did not create the terminal input",
+          detail: "Ghostty Web terminal input unavailable"
+        })
+      }
+      applyTerminalInputIdentity(textarea)
       let ready = false
       let socket: WebSocket | null = null
       let inputOverflow = false
