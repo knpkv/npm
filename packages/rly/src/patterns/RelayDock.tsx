@@ -213,29 +213,44 @@ const isSequentiallyFocusableRadio = (
   return checked === undefined ? group[0] === element : checked === element
 }
 
+interface ScopeTraversal {
+  readonly entries: ReadonlyArray<ComposedElement>
+  readonly nested: ReadonlyMap<Element, ScopeTraversal>
+}
+
 const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
-  const elements: Array<ComposedElement> = []
-  const visitElement = (element: Element, focusScope: ParentNode, composedParent: Node | null): void => {
-    if (isSlotElement(element)) {
-      const assigned = element.assignedNodes({ flatten: true })
-      const assignedElements = assigned.filter(isElementNode).sort(compareSequentialTabOrder)
-      elements.push({ composedParent, element, focusScope, nativeRoot: element.getRootNode() })
-      for (const assignedElement of assignedElements) visitElement(assignedElement, focusScope, element)
-      return
+  const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): ScopeTraversal => {
+    const entries: Array<ComposedElement> = []
+    const nested = new Map<Element, ScopeTraversal>()
+    const visitElement = (element: Element, parent: Node | null): void => {
+      entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
+      if (isSlotElement(element)) {
+        const assignedElements = element.assignedNodes({ flatten: true }).filter(isElementNode)
+        for (const assignedElement of assignedElements) visitElement(assignedElement, element)
+        return
+      }
+      if (element.shadowRoot !== null && !hasExplicitNegativeTabIndex(element)) {
+        nested.set(element, visitScope(element.shadowRoot, element.shadowRoot, element))
+      } else if (element.shadowRoot === null) {
+        for (const child of element.children) visitElement(child, element)
+      }
     }
-    elements.push({ composedParent, element, focusScope, nativeRoot: element.getRootNode() })
-    if (element.shadowRoot !== null && !hasExplicitNegativeTabIndex(element)) {
-      visitScope(element.shadowRoot, element.shadowRoot, element)
-    } else if (element.shadowRoot === null) {
-      visitScope(element, focusScope, element)
+    for (const child of scope.children) visitElement(child, composedParent)
+    return { entries, nested }
+  }
+  const flattenScope = (scope: ScopeTraversal): Array<ComposedElement> => {
+    const ordered = [...scope.entries].sort((left, right) => compareSequentialTabOrder(left.element, right.element))
+    const flattened: Array<ComposedElement> = []
+    for (const entry of ordered) {
+      flattened.push(entry)
+      const nested = scope.nested.get(entry.element)
+      if (nested !== undefined) {
+        for (const nestedEntry of flattenScope(nested)) flattened.push(nestedEntry)
+      }
     }
+    return flattened
   }
-  const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): void => {
-    const children = [...scope.children].sort(compareSequentialTabOrder)
-    for (const child of children) visitElement(child, focusScope, composedParent)
-  }
-  visitScope(root, root, root)
-  return elements
+  return flattenScope(visitScope(root, root, root))
 }
 
 /** One explicit piece of application-owned context attached to the current Relay thread. */

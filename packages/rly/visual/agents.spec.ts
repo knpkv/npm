@@ -550,6 +550,37 @@ test("modal Relay focus traversal orders positive tabindex within a shadow scope
   await expect(higher).toBeFocused()
 })
 
+test("modal Relay focus traversal orders positive tabindex descendants across wrappers", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyPositiveWrapperHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const higherWrapper = shadow.appendChild(document.createElement("div"))
+    const higher = higherWrapper.appendChild(document.createElement("button"))
+    higher.dataset.rlyPositiveWrapper = "higher"
+    higher.textContent = "Higher priority action"
+    higher.tabIndex = 2
+    const lowerWrapper = shadow.appendChild(document.createElement("div"))
+    const lower = lowerWrapper.appendChild(document.createElement("button"))
+    lower.dataset.rlyPositiveWrapper = "lower"
+    lower.textContent = "Lower priority action"
+    lower.tabIndex = 1
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const higher = dock.locator("[data-rly-positive-wrapper=higher]")
+  const lower = dock.locator("[data-rly-positive-wrapper=lower]")
+
+  await higher.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await expect(lower).not.toBeFocused()
+})
+
 test("modal Relay focus traversal skips shadow scopes behind negative tabindex hosts", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))

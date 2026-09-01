@@ -1004,6 +1004,33 @@ describe("RelayDock", () => {
     expect(shadow.activeElement).not.toBe(lower)
   })
 
+  it("orders positive tabindex descendants across shadow-scope wrappers", async () => {
+    const footer = <div data-rly-positive-wrapper-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-positive-wrapper-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock positive wrapper fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const higherWrapper = shadow.appendChild(document.createElement("div"))
+    const higher = higherWrapper.appendChild(document.createElement("button"))
+    higher.textContent = "Higher priority action"
+    higher.tabIndex = 2
+    const lowerWrapper = shadow.appendChild(document.createElement("div"))
+    const lower = lowerWrapper.appendChild(document.createElement("button"))
+    lower.textContent = "Lower priority action"
+    lower.tabIndex = 1
+
+    higher.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+    expect(shadow.activeElement).not.toBe(lower)
+  })
+
   it("skips shadow controls behind an explicit negative host tabindex", async () => {
     const footer = (
       <>
