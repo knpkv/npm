@@ -72,6 +72,7 @@ interface FixtureOptions {
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
   readonly profileByPr?: SandboxRow
+  readonly profileKey?: string
   readonly emptyAccountByPr?: SandboxRow
   readonly emptyAccountByPrAll?: ReadonlyArray<SandboxRow>
   readonly insertGate?: {
@@ -126,7 +127,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         Effect.map((current) => {
           const configured = _awsAccountId.length === 0
             ? options?.emptyAccountByPr
-            : _awsAccountId === createParams.profile
+            : _awsAccountId === (options?.profileKey ?? createParams.profile)
             ? options?.profileByPr
             : options?.existingByPr
           const row = configured ?? current
@@ -1002,6 +1003,39 @@ describe("SandboxWorkerScope", () => {
       expect(result.id).not.toBe(profileRow.id)
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+    }))
+
+  it.effect("preserves an account row when the configured profile name is numeric", () =>
+    Effect.gen(function*() {
+      const numericProfile = "111122223333"
+      const profileRow = {
+        ...legacyRow,
+        awsAccountId: numericProfile,
+        region: createParams.region,
+        accessPassword: "protected"
+      }
+      const params = { ...createParams, awsAccountId: "999988887777", profile: numericProfile }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        profileByPr: profileRow,
+        profileKey: numericProfile,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(params)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe(params.awsAccountId)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
     }))
 
   it.effect("does not retire an empty-account worker after its container is persisted", () =>

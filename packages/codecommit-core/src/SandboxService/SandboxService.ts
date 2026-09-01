@@ -298,7 +298,9 @@ const makeSandboxService = Effect.gen(function*() {
             row.repositoryName === params.repositoryName &&
             row.region === params.region
           )
-        const profileRows = isDiscoveredAwsAccountId(params.awsAccountId) && params.profile !== params.awsAccountId
+        const profileRows = isDiscoveredAwsAccountId(params.awsAccountId) &&
+            !isDiscoveredAwsAccountId(params.profile) &&
+            params.profile !== params.awsAccountId
           ? (yield* repo.findAll()).filter((row) =>
             row.awsAccountId === params.profile &&
             row.pullRequestId === params.pullRequestId &&
