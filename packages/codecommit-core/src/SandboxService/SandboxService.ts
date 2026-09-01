@@ -769,7 +769,12 @@ const makeSandboxService = Effect.gen(function*() {
             yield* requestWorkerStop(String(id))
             // Once signalled, finish the handoff even if the caller is interrupted.
             yield* Effect.uninterruptible(
-              Effect.ensuring(stopSandbox, clearWorkerStopRequest(String(id)))
+              Effect.ensuring(
+                stopSandbox,
+                hasActiveWorker(String(id)).pipe(
+                  Effect.flatMap((activeWorker) => activeWorker ? Effect.void : clearWorkerStopRequest(String(id)))
+                )
+              )
             )
           }))
         )

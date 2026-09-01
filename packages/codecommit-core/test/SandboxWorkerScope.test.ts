@@ -1578,6 +1578,44 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
     }))
 
+  it.effect("retains stop intent until a restart worker exits", () =>
+    Effect.gen(function*() {
+      const readyReached = yield* Deferred.make<void>()
+      const readyRelease = yield* Deferred.make<void>()
+      const stopReached = yield* Deferred.make<void>()
+      const stopRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        readyGate: { reached: readyReached, release: readyRelease },
+        stopGate: { reached: stopReached, release: stopRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(readyReached)
+
+          const stop = yield* sandboxes.stop(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(stopReached)
+          yield* Deferred.succeed(stopRelease, undefined)
+          yield* Fiber.join(stop)
+          yield* Deferred.succeed(readyRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
   it.effect("does not restart a legacy row after retirement wins admission", () =>
     Effect.gen(function*() {
       const retirementReached = yield* Deferred.make<void>()
