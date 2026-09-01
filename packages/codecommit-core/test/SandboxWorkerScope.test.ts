@@ -92,6 +92,11 @@ interface FixtureOptions {
     readonly started: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly restartAdmissionGate?: {
+    readonly id: string
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly retirementGate?: {
     readonly reached: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
@@ -197,15 +202,23 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         )
       ),
     findById: (id) =>
-      Ref.get(rowRef).pipe(
-        Effect.flatMap((row) =>
-          options?.rowsById?.[String(id)] !== undefined
-            ? Effect.succeed(options.rowsById[String(id)])
-            : row === undefined
-            ? Effect.die("Sandbox row was not inserted")
-            : Effect.succeed(row)
+      (options?.restartAdmissionGate !== undefined && String(id) === options.restartAdmissionGate.id
+        ? Deferred.succeed(options.restartAdmissionGate.reached, undefined).pipe(
+          Effect.andThen(Deferred.await(options.restartAdmissionGate.release))
         )
-      ),
+        : Effect.void).pipe(
+          Effect.andThen(
+            Ref.get(rowRef).pipe(
+              Effect.flatMap((row) =>
+                options?.rowsById?.[String(id)] !== undefined
+                  ? Effect.succeed(options.rowsById[String(id)])
+                  : row === undefined
+                  ? Effect.die("Sandbox row was not inserted")
+                  : Effect.succeed(row)
+              )
+            )
+          )
+        ),
     updateStatus: (_id, status, extra) =>
       Ref.update(rowRef, (row) =>
         row === undefined
@@ -1498,6 +1511,44 @@ describe("SandboxWorkerScope", () => {
       )
 
       expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("publishes stop intent before restart can claim a worker", () =>
+    Effect.gen(function*() {
+      const restartAdmissionReached = yield* Deferred.make<void>()
+      const restartAdmissionRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        restartAdmissionGate: {
+          id: legacyRow.id,
+          reached: restartAdmissionReached,
+          release: restartAdmissionRelease
+        }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(restartAdmissionReached)
+
+          const stop = yield* sandboxes.stop(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(restartAdmissionRelease, undefined)
+          yield* Fiber.join(restart)
+          yield* Fiber.join(stop)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
     }))

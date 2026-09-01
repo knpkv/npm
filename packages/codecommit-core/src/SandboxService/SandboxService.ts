@@ -759,13 +759,13 @@ const makeSandboxService = Effect.gen(function*() {
         }))
         return restore(
           createAdmission.withPermits(1)(Effect.gen(function*() {
-            if (yield* hasActiveWorker(String(id))) {
-              yield* requestWorkerStop(String(id))
-              // Once signalled, finish the handoff even if the caller is interrupted.
-              yield* Effect.uninterruptible(stopSandbox)
-            } else {
-              yield* stopSandbox
-            }
+            // Publish the stop intent before waiting for lifecycle admission.
+            // Restart checks this marker before it can publish ownership.
+            yield* requestWorkerStop(String(id))
+            // Once signalled, finish the handoff even if the caller is interrupted.
+            yield* Effect.uninterruptible(
+              Effect.ensuring(stopSandbox, clearWorkerStopRequest(String(id)))
+            )
           }))
         )
       }).pipe(
@@ -785,6 +785,7 @@ const makeSandboxService = Effect.gen(function*() {
           ({ permitReleased, workerMarked }) =>
             Effect.gen(function*() {
               const row = yield* repo.findById(id)
+              if (yield* isStopRequested(String(id))) return
               const wasRetired = yield* Ref.get(retiredLegacyIds).pipe(Effect.map((ids) => ids.has(String(id))))
               if (wasRetired || row.legacyRetiredAt !== null) {
                 return yield* new SandboxError({
