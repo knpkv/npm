@@ -537,8 +537,13 @@ const makeSandboxService = Effect.gen(function*() {
           createdAt: now,
           lastActivityAt: now
         }).pipe(
-          Effect.andThen(ownerScope.fork(worker)),
-          Effect.andThen(Ref.set(workerTransferred, true)),
+          Effect.andThen(
+            Effect.uninterruptible(
+              ownerScope.fork(worker).pipe(
+                Effect.andThen(Ref.set(workerTransferred, true))
+              )
+            )
+          ),
           Effect.ensuring(
             Ref.get(workerTransferred).pipe(
               Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservation())

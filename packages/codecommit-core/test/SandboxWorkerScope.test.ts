@@ -59,6 +59,10 @@ interface FixtureOptions {
     readonly inserted: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly forkGate?: {
+    readonly forked: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly regionlessByPr?: SandboxRow
   readonly regionlessByPrAll?: ReadonlyArray<SandboxRow>
   readonly stopContainer?: Effect.Effect<void, DockerError>
@@ -209,16 +213,23 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       Effect.map(Effect.scope, (scope) =>
         SandboxWorkerScope.of({
           fork: (worker) =>
-            Effect.forkIn(
-              worker.pipe(
-                Effect.onExit((exit) =>
-                  Exit.isFailure(exit)
-                    ? Deferred.succeed(workerCause, exit.cause)
-                    : Effect.void
-                )
-              ),
-              scope
-            )
+            Effect.gen(function*() {
+              const fiber = yield* Effect.forkIn(
+                worker.pipe(
+                  Effect.onExit((exit) =>
+                    Exit.isFailure(exit)
+                      ? Deferred.succeed(workerCause, exit.cause)
+                      : Effect.void
+                  )
+                ),
+                scope
+              )
+              if (options?.forkGate !== undefined) {
+                yield* Deferred.succeed(options.forkGate.forked, undefined)
+                yield* Deferred.await(options.forkGate.release)
+              }
+              return fiber
+            })
         }))
     ),
     ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: "/tmp/codecommit-sandbox-worker-test" } }))
@@ -564,6 +575,34 @@ describe("SandboxWorkerScope", () => {
             status: "error",
             error: "Orphaned (no container)"
           })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("keeps the reservation when interruption arrives after worker fork", () =>
+    Effect.gen(function*() {
+      const forked = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.never, {
+        forkGate: { forked, release }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const createFiber = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.await(forked)
+          const interruptFiber = yield* Fiber.interrupt(createFiber).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "creating",
+            containerId: null,
+            error: null
+          })
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(interruptFiber)
         }).pipe(Effect.provide(fixture.layer))
       )
     }))
