@@ -230,14 +230,6 @@ const terminalWorker = (container: HTMLElement, agent: ConnectAgent, update: (st
           const fit = new FitAddon()
           value.loadAddon(fit)
           value.open(container)
-          const input = value.textarea
-          if (input === undefined) {
-            throw new ConnectTerminalSetupError({
-              cause: "Ghostty Web did not create the terminal input",
-              detail: "Ghostty Web terminal input unavailable"
-            })
-          }
-          applyTerminalInputIdentity(input)
           value.blur()
           fit.fit()
           fit.observeResize()
@@ -248,6 +240,14 @@ const terminalWorker = (container: HTMLElement, agent: ConnectAgent, update: (st
           terminal.dispose()
         }
       )
+      const textarea = terminal.terminal.textarea
+      if (textarea === undefined) {
+        return yield* new ConnectTerminalSetupError({
+          cause: "Ghostty Web did not create the terminal input",
+          detail: "Ghostty Web terminal input unavailable"
+        })
+      }
+      applyTerminalInputIdentity(textarea)
       let ready = false
       let socket: WebSocket | null = null
       let inputOverflow = false
