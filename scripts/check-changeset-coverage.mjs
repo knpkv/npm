@@ -234,6 +234,17 @@ const failCanonicalType = (filePath, typeNode, reason) => {
   })
 }
 
+const canonicalRecursiveReferenceText = (typeNode, analysis, filePath, substitutions, seen, context) => {
+  if (typeNode.typeArguments === undefined || typeNode.typeArguments.length === 0) return normalizeTypeText(typeNode)
+  const wrapper = normalizeTypeText(typeNode.typeName)
+  const argumentsText = typeNode.typeArguments
+    .map((argument) =>
+      canonicalTypeText(argument, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+    )
+    .join(",")
+  return `recursive<${wrapper}<${argumentsText}>>`
+}
+
 const canonicalTypeText = (
   typeNode,
   analysis,
@@ -271,7 +282,9 @@ const canonicalTypeText = (
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
       if (seen.has(key)) {
-        if (context.recursiveDeclarations.has(key)) return normalizeTypeText(typeNode)
+        if (context.recursiveDeclarations.has(key)) {
+          return canonicalRecursiveReferenceText(typeNode, analysis, filePath, substitutions, seen, context)
+        }
         failCanonicalType(filePath, typeNode, "recursive type declaration")
       }
       const nextSeen = new Set(seen).add(key)
@@ -360,6 +373,56 @@ const canonicalTypeText = (
       seen,
       nextCanonicalTypeContext(context)
     )}`
+  }
+  if (TypeScript.isTypeLiteralNode(typeNode)) {
+    const isRecursiveGenericBody =
+      substitutions.size > 0 && [...seen].some((declarationKey) => context.recursiveDeclarations.has(declarationKey))
+    if (!isRecursiveGenericBody) return normalizeTypeText(typeNode)
+    const members = typeNode.members.map((member) => {
+      const name = member.name
+      if (
+        (!TypeScript.isPropertySignature(member) && !TypeScript.isMethodSignature(member)) ||
+        (!TypeScript.isIdentifier(name) && !TypeScript.isStringLiteral(name) && !TypeScript.isNumericLiteral(name))
+      ) {
+        return normalizeTypeText(member)
+      }
+      const optional = member.questionToken === undefined ? "required" : "optional"
+      const readonly = hasReadonlyModifier(member) ? "readonly:" : ""
+      if (TypeScript.isMethodSignature(member)) {
+        const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions, context)
+        const genericContext = { ...context, genericScope: generic.childGenericScope }
+        const parameters = member.parameters
+          .map((parameter) =>
+            parameterDescriptor(
+              parameter,
+              analysis,
+              filePath,
+              generic.substitutions,
+              seen,
+              nextCanonicalTypeContext(genericContext)
+            )
+          )
+          .join(",")
+        const returnType =
+          member.type === undefined
+            ? "unknown"
+            : canonicalTypeText(
+                member.type,
+                analysis,
+                filePath,
+                generic.substitutions,
+                seen,
+                nextCanonicalTypeContext(genericContext)
+              )
+        return `${name.text}:${readonly}${optional}:method<${generic.descriptor}>(${parameters}):${returnType}`
+      }
+      const type =
+        member.type === undefined
+          ? "unknown"
+          : canonicalTypeText(member.type, analysis, filePath, substitutions, seen, context)
+      return `${name.text}:${readonly}${optional}:${type}`
+    })
+    return `{${members.join(",")}}`
   }
   if (TypeScript.isTypeReferenceNode(typeNode) && typeNode.typeArguments !== undefined) {
     const wrapper = normalizeTypeText(typeNode.typeName)
@@ -2510,6 +2573,44 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(recursiveForwardingPrevious, recursiveForwardingRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const observableRecursivePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Node<T> = { leaf: T; next?: Node<T> }\ntype Props = { value: Node<string> }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  const observableRecursiveCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Node<T> = { leaf: T; next?: Node<T> }\ntype Props = { value: Node<number> }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(
+      observableRecursivePrevious,
+      observableRecursiveCurrent,
+      ["packages/public/src/index.ts"],
+      ["packages/public/src/index.ts"],
+      {
+        recursiveDeclarations: unchangedDeclarationKeys(observableRecursivePrevious, observableRecursiveCurrent)
+      }
+    ),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      observableRecursivePrevious,
+      observableRecursivePrevious,
+      ["packages/public/src/index.ts"],
+      ["packages/public/src/index.ts"],
+      {
+        recursiveDeclarations: unchangedDeclarationKeys(observableRecursivePrevious, observableRecursivePrevious)
+      }
+    ),
     []
   )
   assert.throws(
