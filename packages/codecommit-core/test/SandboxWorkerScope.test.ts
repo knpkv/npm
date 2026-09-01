@@ -54,6 +54,7 @@ interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
+  readonly emptyAccountByPr?: SandboxRow
   readonly insertGate?: {
     readonly inserted: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
@@ -79,15 +80,23 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const containerDiscoveryCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
   const regionUpdates = yield* Ref.make<Array<{ readonly id: string; readonly region: string }>>([])
+  const accountUpdates = yield* Ref.make<Array<{ readonly id: string; readonly awsAccountId: string }>>([])
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
-    findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) => {
-      const row = options?.existingByPr ??
-        (options?.initialRow?.region === region ? options.initialRow : undefined)
-      return Effect.succeed(row === undefined ? Option.none<SandboxRow>() : Option.some(row))
-    },
+    findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) =>
+      Ref.get(rowRef).pipe(
+        Effect.map((current) => {
+          const configured = _awsAccountId.length === 0
+            ? options?.emptyAccountByPr
+            : options?.existingByPr
+          const row = configured ?? current
+          return row !== undefined && row.awsAccountId === _awsAccountId && row.region === region
+            ? Option.some(row)
+            : Option.none<SandboxRow>()
+        })
+      ),
     findRegionlessByPr: () =>
       Effect.succeed(
         options?.regionlessByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.regionlessByPr)
@@ -152,7 +161,16 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }),
     appendLog: (_id, line) =>
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, logs: `${row.logs ?? ""}${line}\n` }),
-    updateRegion: (id, region) => Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }])
+    updateRegion: (id, region) => Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }]),
+    updateAwsAccountId: (id, awsAccountId) =>
+      Ref.update(accountUpdates, (updates) => [...updates, { id: String(id), awsAccountId }]).pipe(
+        Effect.andThen(
+          Ref.update(rowRef, (row) => {
+            const source = row ?? options?.emptyAccountByPr
+            return source?.id === String(id) ? { ...source, awsAccountId } : row
+          })
+        )
+      )
   })
 
   const dependencies = Layer.mergeAll(
@@ -212,6 +230,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
+    accountUpdates,
     regionUpdates,
     stopContainerCalls,
     workerCause
@@ -522,6 +541,60 @@ describe("SandboxWorkerScope", () => {
           })
           yield* Deferred.succeed(release, undefined)
           yield* Fiber.join(createFiber)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("releases the worker reservation when creation is interrupted after insertion", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.never, {
+        insertGate: { inserted, release }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const createFiber = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.await(inserted)
+          yield* Fiber.interrupt(createFiber)
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "error",
+            error: "Orphaned (no container)"
+          })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("migrates an active empty-account sandbox to the profile identity", () =>
+    Effect.gen(function*() {
+      const profileParams = { ...createParams, awsAccountId: "profile-account" }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        emptyAccountByPr: {
+          ...legacyRow,
+          awsAccountId: "",
+          region: createParams.region,
+          accessPassword: "protected"
+        }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const sandbox = yield* sandboxes.create(profileParams)
+          expect(sandbox.awsAccountId).toBe(profileParams.awsAccountId)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.accountUpdates)).toEqual([{
+            id: "legacy-sandbox",
+            awsAccountId: "profile-account"
+          }])
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            id: "legacy-sandbox",
+            awsAccountId: "profile-account",
+            status: "running"
+          })
         }).pipe(Effect.provide(fixture.layer))
       )
     }))

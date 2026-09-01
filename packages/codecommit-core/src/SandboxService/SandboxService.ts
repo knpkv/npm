@@ -183,6 +183,52 @@ const makeSandboxService = Effect.gen(function*() {
     }
   })
 
+  const retireLegacySandbox = (legacy: SandboxRow) =>
+    Effect.gen(function*() {
+      if (legacy.containerId === null && isPreContainerSandboxStatus(legacy.status)) {
+        const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
+          Effect.map((ids) => ids.has(legacy.id))
+        )
+        if (activeWorker) {
+          return yield* new SandboxError({
+            sandboxId: SandboxId.make(legacy.id),
+            message: "Legacy sandbox is still starting; retry after its worker reports a container"
+          })
+        }
+      }
+
+      const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", legacy.id)
+      const containerIds = new Set([
+        ...(legacy.containerId === null || legacy.containerId.length === 0 ? [] : [legacy.containerId]),
+        ...discovered.map((container) => container.Id)
+      ])
+      if (legacy.accessPassword === null) {
+        yield* Effect.forEach(
+          containerIds,
+          (containerId) =>
+            docker.stopContainer(containerId).pipe(
+              Effect.catchIf(isMissingContainerError, () => Effect.void)
+            ),
+          { discard: true }
+        )
+        yield* updateStatus(SandboxId.make(legacy.id), "error", {
+          error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+        })
+        return
+      }
+
+      yield* Effect.forEach(
+        containerIds,
+        (containerId) =>
+          docker.inspectContainer(containerId).pipe(
+            Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
+            Effect.catchIf(isMissingContainerError, () => Effect.void)
+          ),
+        { discard: true }
+      )
+      yield* updateStatus(SandboxId.make(legacy.id), "stopped")
+    })
+
   const service = {
     create: (params: CreateSandboxParams) =>
       Effect.gen(function*() {
@@ -196,6 +242,41 @@ const makeSandboxService = Effect.gen(function*() {
         const exactExisting = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
           : undefined
+        const emptyAccountExisting = params.awsAccountId.length === 0
+          ? Option.none<SandboxRow>()
+          : yield* repo.findByPr("", params.pullRequestId, params.repositoryName, params.region)
+        const effectiveExisting = yield* Option.match(emptyAccountExisting, {
+          onNone: () => Effect.succeed(exactExisting),
+          onSome: (legacy) => {
+            if (legacy.accessPassword === null) {
+              return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
+            }
+            if (exactExisting !== undefined) {
+              return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
+            }
+            return repo.updateAwsAccountId(SandboxId.make(legacy.id), params.awsAccountId).pipe(
+              Effect.andThen(repo.findByPr(
+                params.awsAccountId,
+                params.pullRequestId,
+                params.repositoryName,
+                params.region
+              )),
+              Effect.flatMap((migrated) => {
+                const row = Option.isSome(migrated) && migrated.value.region === params.region
+                  ? migrated.value
+                  : undefined
+                return row === undefined
+                  ? Effect.fail(
+                    new SandboxError({
+                      sandboxId: SandboxId.make(legacy.id),
+                      message: "Legacy sandbox identity migration did not return the migrated row"
+                    })
+                  )
+                  : Effect.succeed(row)
+              })
+            )
+          }
+        })
         const regionless = yield* repo.findRegionlessByPrAll(
           params.awsAccountId,
           params.pullRequestId,
@@ -245,17 +326,17 @@ const makeSandboxService = Effect.gen(function*() {
             message: "Regionless legacy sandbox requires explicit cleanup before recreation"
           })
         }
-        if (exactExisting !== undefined) {
-          if (exactExisting.containerId === null && isPreContainerSandboxStatus(exactExisting.status)) {
+        if (effectiveExisting !== undefined) {
+          if (effectiveExisting.containerId === null && isPreContainerSandboxStatus(effectiveExisting.status)) {
             const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
-              Effect.map((ids) => ids.has(exactExisting.id))
+              Effect.map((ids) => ids.has(effectiveExisting.id))
             )
-            if (activeWorker) return exactExisting
-            yield* updateStatus(SandboxId.make(exactExisting.id), "error", {
+            if (activeWorker) return effectiveExisting
+            yield* updateStatus(SandboxId.make(effectiveExisting.id), "error", {
               error: "Orphaned (no container)"
             })
           } else {
-            return exactExisting
+            return effectiveExisting
           }
         }
 
@@ -270,7 +351,179 @@ const makeSandboxService = Effect.gen(function*() {
         const workspacePath = `${basePath}/${id}`
         const now = new Date(nowMs).toISOString()
 
+        const workerTransferred = yield* Ref.make(false)
+        const releaseWorkerReservation = () =>
+          Ref.update(activeWorkerIds, (ids) => {
+            const next = new Set(ids)
+            next.delete(String(id))
+            return next
+          })
         yield* Ref.update(activeWorkerIds, (ids) => new Set(ids).add(String(id)))
+        const worker = Effect.gen(function*() {
+          const fs = yield* FileSystem.FileSystem
+          const host = yield* ChildEnv.HostEnvironment
+          const log = (detail: string) => progress(id, detail)
+
+          yield* log("Sandbox config validated")
+
+          // Clone via HTTPS + AWS credential helper
+          yield* updateStatus(id, "cloning")
+          yield* fs.makeDirectory(workspacePath, { recursive: true })
+          const cloneUrl = `https://git-codecommit.${params.region}.amazonaws.com/v1/repos/${params.repositoryName}`
+          const branch = params.sourceBranch.replace(/^refs\/heads\//, "")
+          const depthLabel = sandboxCfg.cloneDepth > 0 ? ` (depth ${sandboxCfg.cloneDepth})` : ""
+          yield* log(`Cloning ${params.repositoryName}/${branch}${depthLabel}`)
+          const depthArgs: Array<string> = sandboxCfg.cloneDepth > 0
+            ? ["--depth", String(sandboxCfg.cloneDepth)]
+            : []
+          const cloneResult = yield* Effect.gen(function*() {
+            const cloneProc = yield* ChildProcess.make(
+              "git",
+              [
+                "-c",
+                "credential.helper=!aws codecommit credential-helper $@",
+                "-c",
+                "credential.UseHttpPath=true",
+                "clone",
+                ...depthArgs,
+                "-b",
+                branch,
+                cloneUrl,
+                workspacePath
+              ],
+              {
+                // `git` and the `aws` credential helper both resolve from PATH, so the
+                // profile overrides must extend the inherited environment. Ambient AWS
+                // credentials would outrank them, so profileScopedEnv drops those.
+                env: ChildEnv.profileScopedEnv(host.variables, {
+                  AWS_PROFILE: params.profile,
+                  AWS_DEFAULT_REGION: params.region,
+                  AWS_REGION: params.region
+                }),
+                extendEnv: true,
+                stderr: "pipe"
+              }
+            )
+            const exitCode = yield* cloneProc.exitCode
+            const stderrChunks = yield* Stream.runCollect(cloneProc.stderr)
+            const stderrText = Array.from(stderrChunks).map((c) => new TextDecoder().decode(c)).join("").trim()
+            return { exitCode, stderrText }
+          }).pipe(Effect.scoped)
+          if (cloneResult.exitCode !== 0) {
+            const stderrText = cloneResult.stderrText
+            yield* log(`Clone failed: ${stderrText}`)
+            yield* updateStatus(id, "error", {
+              error: stderrText || `git clone failed (exit ${cloneResult.exitCode})`
+            })
+            return
+          }
+          yield* log("Clone complete")
+
+          const workspaceInfo = yield* fs.stat(workspacePath)
+          const containerIdentity = sandboxContainerIdentityForWorkspaceOwner(
+            Option.getOrUndefined(workspaceInfo.uid),
+            Option.getOrUndefined(workspaceInfo.gid)
+          )
+          if (containerIdentity.repairRootOwnedWorkspace) {
+            yield* log("Preparing root-owned workspace for the non-root sandbox user")
+            const chownExitCode = yield* Effect.scoped(
+              ChildProcess.make("chown", ["-R", "1000:1000", "--", workspacePath]).pipe(
+                Effect.flatMap((handle) => handle.exitCode)
+              )
+            )
+            if (chownExitCode !== 0) {
+              return yield* new SandboxError({
+                sandboxId: id,
+                message: "Failed to prepare root-owned workspace for the non-root sandbox user"
+              })
+            }
+          }
+
+          // Pull image
+          yield* updateStatus(id, "starting")
+          yield* log(`Pulling image ${sandboxCfg.image}`)
+          yield* docker.pullImage(sandboxCfg.image).pipe(
+            Effect.tap(() => log("Image ready")),
+            Effect.catchIf(() => true, () => log("Image pull skipped (using cached)"))
+          )
+
+          // Create + start container
+          yield* log("Creating container")
+          yield* validateSandboxConfig(sandboxCfg, homePath)
+          const containerConfig = makeContainerConfig(
+            workspacePath,
+            port,
+            id,
+            params.pullRequestId,
+            sandboxCfg,
+            homePath,
+            containerIdentity.user,
+            accessPassword
+          )
+          const containerId = yield* docker.createContainer(containerConfig)
+          const cid = containerId.trim()
+          yield* log(`Container ${cid.slice(0, 12)} created, starting`)
+          yield* docker.startContainer(cid)
+          yield* updateStatus(id, "starting", { containerId: cid, port })
+          yield* log(`Container started on port ${port}`)
+
+          // Wait for code-server to be ready (poll health)
+          yield* log("Waiting for code-server health check")
+          yield* docker.exec(cid, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
+            Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
+            Effect.tap(() => log("code-server ready")),
+            Effect.tapError((e) => log(`Health check failed: ${String(e)}`)),
+            Effect.catchIf(() => true, () => Effect.void)
+          )
+
+          // Run plugin hooks
+          const row = yield* repo.findById(id)
+          const ctx = makeSandboxContext(row)
+          yield* log("Running plugin hooks")
+          yield* plugins.executeHook("onSandboxCreate", ctx)
+          yield* plugins.executeHook("onSandboxReady", ctx)
+
+          // Install configured extensions
+          if (sandboxCfg.extensions.length > 0) {
+            yield* log(`Installing ${sandboxCfg.extensions.length} extension(s)`)
+            yield* Effect.forEach(sandboxCfg.extensions, (ext) =>
+              log(`Installing extension: ${ext}`).pipe(
+                Effect.andThen(docker.exec(cid, ["code-server", "--install-extension", ext])),
+                Effect.tap((output) =>
+                  log(`Extension installed: ${ext}${output.length > 0 ? `\n${output.trim()}` : ""}`)
+                ),
+                Effect.tapError((e) => log(`Extension failed: ${ext} — ${String(e)}`)),
+                Effect.catchIf(() => true, () => Effect.void)
+              ), { discard: true })
+          }
+
+          // Run configured setup commands
+          if (sandboxCfg.setupCommands.length > 0) {
+            yield* log(`Running ${sandboxCfg.setupCommands.length} setup command(s)`)
+            yield* Effect.forEach(sandboxCfg.setupCommands, (cmd, i) =>
+              log(`[${i + 1}/${sandboxCfg.setupCommands.length}] ${cmd}`).pipe(
+                Effect.andThen(docker.exec(cid, ["sh", "-c", cmd])),
+                Effect.tap((output) =>
+                  log(`Command done: ${cmd.slice(0, 60)}${output.length > 0 ? `\n${output.trim()}` : ""}`)
+                ),
+                Effect.tapError((e) =>
+                  log(`Command failed: ${cmd.slice(0, 60)} — ${String(e)}`)
+                ),
+                Effect.catchIf(() => true, () => Effect.void)
+              ), { discard: true })
+          }
+
+          yield* updateStatus(id, "running")
+          yield* log("Sandbox ready")
+        }).pipe(
+          Effect.catch((error) =>
+            recordCreationFailure(id, error)
+          ),
+          // Observe and persist unexpected defects without recovering them.
+          // `tapDefect` leaves the original Cause / Exit unchanged.
+          Effect.tapDefect((defect) => recordCreationFailure(id, defect)),
+          Effect.ensuring(releaseWorkerReservation())
+        )
         yield* repo.insert({
           id,
           pullRequestId: params.pullRequestId,
@@ -284,186 +537,11 @@ const makeSandboxService = Effect.gen(function*() {
           createdAt: now,
           lastActivityAt: now
         }).pipe(
-          Effect.tapError(() =>
-            Ref.update(activeWorkerIds, (ids) => {
-              const next = new Set(ids)
-              next.delete(String(id))
-              return next
-            })
-          )
-        )
-
-        // Fork daemon for async lifecycle
-        yield* ownerScope.fork(
-          Effect.gen(function*() {
-            const fs = yield* FileSystem.FileSystem
-            const host = yield* ChildEnv.HostEnvironment
-            const log = (detail: string) => progress(id, detail)
-
-            yield* log("Sandbox config validated")
-
-            // Clone via HTTPS + AWS credential helper
-            yield* updateStatus(id, "cloning")
-            yield* fs.makeDirectory(workspacePath, { recursive: true })
-            const cloneUrl = `https://git-codecommit.${params.region}.amazonaws.com/v1/repos/${params.repositoryName}`
-            const branch = params.sourceBranch.replace(/^refs\/heads\//, "")
-            const depthLabel = sandboxCfg.cloneDepth > 0 ? ` (depth ${sandboxCfg.cloneDepth})` : ""
-            yield* log(`Cloning ${params.repositoryName}/${branch}${depthLabel}`)
-            const depthArgs: Array<string> = sandboxCfg.cloneDepth > 0
-              ? ["--depth", String(sandboxCfg.cloneDepth)]
-              : []
-            const cloneResult = yield* Effect.gen(function*() {
-              const cloneProc = yield* ChildProcess.make(
-                "git",
-                [
-                  "-c",
-                  "credential.helper=!aws codecommit credential-helper $@",
-                  "-c",
-                  "credential.UseHttpPath=true",
-                  "clone",
-                  ...depthArgs,
-                  "-b",
-                  branch,
-                  cloneUrl,
-                  workspacePath
-                ],
-                {
-                  // `git` and the `aws` credential helper both resolve from PATH, so the
-                  // profile overrides must extend the inherited environment. Ambient AWS
-                  // credentials would outrank them, so profileScopedEnv drops those.
-                  env: ChildEnv.profileScopedEnv(host.variables, {
-                    AWS_PROFILE: params.profile,
-                    AWS_DEFAULT_REGION: params.region,
-                    AWS_REGION: params.region
-                  }),
-                  extendEnv: true,
-                  stderr: "pipe"
-                }
-              )
-              const exitCode = yield* cloneProc.exitCode
-              const stderrChunks = yield* Stream.runCollect(cloneProc.stderr)
-              const stderrText = Array.from(stderrChunks).map((c) => new TextDecoder().decode(c)).join("").trim()
-              return { exitCode, stderrText }
-            }).pipe(Effect.scoped)
-            if (cloneResult.exitCode !== 0) {
-              const stderrText = cloneResult.stderrText
-              yield* log(`Clone failed: ${stderrText}`)
-              yield* updateStatus(id, "error", {
-                error: stderrText || `git clone failed (exit ${cloneResult.exitCode})`
-              })
-              return
-            }
-            yield* log("Clone complete")
-
-            const workspaceInfo = yield* fs.stat(workspacePath)
-            const containerIdentity = sandboxContainerIdentityForWorkspaceOwner(
-              Option.getOrUndefined(workspaceInfo.uid),
-              Option.getOrUndefined(workspaceInfo.gid)
-            )
-            if (containerIdentity.repairRootOwnedWorkspace) {
-              yield* log("Preparing root-owned workspace for the non-root sandbox user")
-              const chownExitCode = yield* Effect.scoped(
-                ChildProcess.make("chown", ["-R", "1000:1000", "--", workspacePath]).pipe(
-                  Effect.flatMap((handle) => handle.exitCode)
-                )
-              )
-              if (chownExitCode !== 0) {
-                return yield* new SandboxError({
-                  sandboxId: id,
-                  message: "Failed to prepare root-owned workspace for the non-root sandbox user"
-                })
-              }
-            }
-
-            // Pull image
-            yield* updateStatus(id, "starting")
-            yield* log(`Pulling image ${sandboxCfg.image}`)
-            yield* docker.pullImage(sandboxCfg.image).pipe(
-              Effect.tap(() => log("Image ready")),
-              Effect.catchIf(() => true, () => log("Image pull skipped (using cached)"))
-            )
-
-            // Create + start container
-            yield* log("Creating container")
-            yield* validateSandboxConfig(sandboxCfg, homePath)
-            const containerConfig = makeContainerConfig(
-              workspacePath,
-              port,
-              id,
-              params.pullRequestId,
-              sandboxCfg,
-              homePath,
-              containerIdentity.user,
-              accessPassword
-            )
-            const containerId = yield* docker.createContainer(containerConfig)
-            const cid = containerId.trim()
-            yield* log(`Container ${cid.slice(0, 12)} created, starting`)
-            yield* docker.startContainer(cid)
-            yield* updateStatus(id, "starting", { containerId: cid, port })
-            yield* log(`Container started on port ${port}`)
-
-            // Wait for code-server to be ready (poll health)
-            yield* log("Waiting for code-server health check")
-            yield* docker.exec(cid, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
-              Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
-              Effect.tap(() => log("code-server ready")),
-              Effect.tapError((e) => log(`Health check failed: ${String(e)}`)),
-              Effect.catchIf(() => true, () => Effect.void)
-            )
-
-            // Run plugin hooks
-            const row = yield* repo.findById(id)
-            const ctx = makeSandboxContext(row)
-            yield* log("Running plugin hooks")
-            yield* plugins.executeHook("onSandboxCreate", ctx)
-            yield* plugins.executeHook("onSandboxReady", ctx)
-
-            // Install configured extensions
-            if (sandboxCfg.extensions.length > 0) {
-              yield* log(`Installing ${sandboxCfg.extensions.length} extension(s)`)
-              yield* Effect.forEach(sandboxCfg.extensions, (ext) =>
-                log(`Installing extension: ${ext}`).pipe(
-                  Effect.andThen(docker.exec(cid, ["code-server", "--install-extension", ext])),
-                  Effect.tap((output) =>
-                    log(`Extension installed: ${ext}${output.length > 0 ? `\n${output.trim()}` : ""}`)
-                  ),
-                  Effect.tapError((e) => log(`Extension failed: ${ext} — ${String(e)}`)),
-                  Effect.catchIf(() => true, () => Effect.void)
-                ), { discard: true })
-            }
-
-            // Run configured setup commands
-            if (sandboxCfg.setupCommands.length > 0) {
-              yield* log(`Running ${sandboxCfg.setupCommands.length} setup command(s)`)
-              yield* Effect.forEach(sandboxCfg.setupCommands, (cmd, i) =>
-                log(`[${i + 1}/${sandboxCfg.setupCommands.length}] ${cmd}`).pipe(
-                  Effect.andThen(docker.exec(cid, ["sh", "-c", cmd])),
-                  Effect.tap((output) =>
-                    log(`Command done: ${cmd.slice(0, 60)}${output.length > 0 ? `\n${output.trim()}` : ""}`)
-                  ),
-                  Effect.tapError((e) =>
-                    log(`Command failed: ${cmd.slice(0, 60)} — ${String(e)}`)
-                  ),
-                  Effect.catchIf(() => true, () => Effect.void)
-                ), { discard: true })
-            }
-
-            yield* updateStatus(id, "running")
-            yield* log("Sandbox ready")
-          }).pipe(
-            Effect.catch((error) =>
-              recordCreationFailure(id, error)
-            ),
-            // Observe and persist unexpected defects without recovering them.
-            // `tapDefect` leaves the original Cause / Exit unchanged.
-            Effect.tapDefect((defect) => recordCreationFailure(id, defect)),
-            Effect.ensuring(
-              Ref.update(activeWorkerIds, (ids) => {
-                const next = new Set(ids)
-                next.delete(String(id))
-                return next
-              })
+          Effect.andThen(ownerScope.fork(worker)),
+          Effect.andThen(Ref.set(workerTransferred, true)),
+          Effect.ensuring(
+            Ref.get(workerTransferred).pipe(
+              Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservation())
             )
           )
         )
