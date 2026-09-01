@@ -1186,6 +1186,69 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(last)
   })
 
+  it("keeps a generic negative delegated target as the modal endpoint", async () => {
+    const footer = <div data-rly-generic-negative-delegates-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-generic-negative-delegates-focus-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock generic negative delegatesFocus fixture did not render")
+    }
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const action = shadow.appendChild(document.createElement("div"))
+    action.tabIndex = -1
+    action.dataset.rlyGenericNegativeDelegatedAction = ""
+    action.textContent = "Programmatic delegated action"
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(shadow.activeElement).toBe(action)
+  })
+
+  it("skips assigned controls behind a negative-tabindex shadow slot", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-slot-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-negative-slot-host="">
+          <button data-rly-negative-slot-action="" slot="negative" type="button">
+            Assigned action
+          </button>
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-negative-slot-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-slot-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock negative slot fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.name = "negative"
+    slot.tabIndex = -1
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("excludes targetless delegated hosts from modal endpoints", async () => {
     const footer = (
       <>

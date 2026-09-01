@@ -235,6 +235,7 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isSlotElement(element)) {
+        if (hasExplicitNegativeTabIndex(element)) return
         const slotNodes = element.assignedNodes({ flatten: false })
         const assignedElements = (slotNodes.length > 0 ? slotNodes : [...element.childNodes]).filter(isElementNode)
         nested.set(element, visitScopeElements(assignedElements, element, element))
@@ -617,7 +618,9 @@ const DockLayer = ({
       .filter((entry): entry is ComposedHTMLElement => {
         const { element, nativeRoot } = entry
         if (element.tagName === "SLOT") return false
-        if (!isHTMLElement(element) || !element.matches(focusableSelector)) return false
+        if (!isHTMLElement(element)) return false
+        const isDelegatedTarget = delegatedTargets.has(element)
+        if (!element.matches(focusableSelector) && !isDelegatedTarget) return false
         if (element.shadowRoot?.delegatesFocus === true) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
@@ -627,7 +630,7 @@ const DockLayer = ({
           element.tabIndex >= 0 ||
           (element.isContentEditable && !element.hasAttribute("tabindex")) ||
           element.matches("details > summary:first-of-type") ||
-          delegatedTargets.has(element)
+          isDelegatedTarget
         )
       })
       .map(({ element }) => element)
