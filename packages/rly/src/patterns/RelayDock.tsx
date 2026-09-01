@@ -72,17 +72,38 @@ const shadowHostFor = (node: Node): HTMLElement | null => {
   return isHTMLElement(root.host) ? root.host : null
 }
 
-const isWithinComposedElement = (ancestor: HTMLElement, descendant: Node | null): boolean => {
+interface AssignedSlotNode extends Node {
+  readonly assignedSlot: HTMLSlotElement | null
+}
+
+const hasAssignedSlot = (node: Node): node is AssignedSlotNode => "assignedSlot" in node
+
+const isElementNode = (node: Node): node is Element => node.nodeType === 1
+
+const composedParentFor = (node: Node, composedParents?: ReadonlyMap<Node, Node | null>): HTMLElement | null => {
+  if (composedParents !== undefined && composedParents.has(node)) {
+    const parent = composedParents.get(node)
+    return parent !== null && parent !== undefined && isElementNode(parent) && isHTMLElement(parent) ? parent : null
+  }
+  const assignedSlot = hasAssignedSlot(node) ? node.assignedSlot : null
+  return assignedSlot ?? node.parentElement ?? shadowHostFor(node)
+}
+
+const isWithinComposedElement = (
+  ancestor: HTMLElement,
+  descendant: Node | null,
+  composedParents?: ReadonlyMap<Node, Node | null>
+): boolean => {
   if (descendant === null) return false
   if (ancestor.contains(descendant)) return true
   const seen = new Set<Node>()
   let current: Node = descendant
   while (!seen.has(current)) {
     seen.add(current)
-    const host = shadowHostFor(current)
-    if (host === null) return false
-    if (host === ancestor || ancestor.contains(host)) return true
-    current = host
+    const parent = composedParentFor(current, composedParents)
+    if (parent === null) return false
+    if (parent === ancestor || ancestor.contains(parent)) return true
+    current = parent
   }
   return false
 }
@@ -100,25 +121,32 @@ const focusRestoreTarget = (ownerDocument: Document): HTMLElement | null => {
   return active === ownerDocument.body || active === ownerDocument.documentElement ? null : active
 }
 
-const isRenderedFocusable = (element: HTMLElement): boolean => {
+const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap<Node, Node | null>): boolean => {
   if (element.matches(":disabled")) return false
   const view = element.ownerDocument.defaultView
   if (view === null) return element.hidden === false
   const visibility = view.getComputedStyle(element).visibility
   if (visibility === "hidden" || visibility === "collapse") return false
+  const nativeRoot = element.getRootNode()
   let current: HTMLElement | null = element
   while (current !== null) {
+    if (current.inert) return false
     if (current.tagName === "DETAILS" && !current.hasAttribute("open")) {
       const firstSummary: HTMLElement | null = current.querySelector(":scope > summary:first-of-type")
-      if (firstSummary === null || !isWithinComposedElement(firstSummary, element)) return false
+      if (firstSummary === null || !isWithinComposedElement(firstSummary, element, composedParents)) return false
     }
-    if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
-      const firstLegend = current.querySelector(":scope > legend:first-of-type")
-      if (firstLegend === null || !firstLegend.contains(element)) return false
+    if (
+      current !== element &&
+      current.tagName === "FIELDSET" &&
+      current.hasAttribute("disabled") &&
+      current.getRootNode() === nativeRoot
+    ) {
+      const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
+      if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
     }
     const computed = view.getComputedStyle(current)
     if (current.hidden !== false || computed.display === "none") return false
-    current = current.parentElement ?? shadowHostFor(current)
+    current = composedParentFor(current, composedParents)
   }
   return true
 }
@@ -130,10 +158,12 @@ interface RadioInput extends HTMLElement {
 }
 
 const isRadioInput = (element: Element): element is RadioInput =>
-  isHTMLElement(element) && element.tagName === "INPUT" && element.getAttribute("type") === "radio"
+  isHTMLElement(element) && element.tagName === "INPUT" && element.getAttribute("type")?.toLowerCase() === "radio"
 
 interface ComposedElement {
+  readonly composedParent: Node | null
   readonly element: Element
+  readonly focusScope: ParentNode
   readonly nativeRoot: Node
 }
 
@@ -142,16 +172,30 @@ interface ComposedHTMLElement extends ComposedElement {
 }
 
 interface SlotElement extends Element {
-  readonly assignedElements: (options?: { readonly flatten?: boolean }) => Array<Element>
+  readonly assignedNodes: (options?: { readonly flatten?: boolean }) => Array<Node>
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
-  element.tagName === "SLOT" && "assignedElements" in element
+  element.tagName === "SLOT" && "assignedNodes" in element
+
+const compareSequentialTabOrder = (left: Element, right: Element): number => {
+  const leftTabIndex = isSlotElement(left) || !isHTMLElement(left) ? -1 : left.tabIndex
+  const rightTabIndex = isSlotElement(right) || !isHTMLElement(right) ? -1 : right.tabIndex
+  const leftPositive = leftTabIndex > 0
+  const rightPositive = rightTabIndex > 0
+  if (leftPositive !== rightPositive) return leftPositive ? -1 : 1
+  if (leftPositive && rightPositive && leftTabIndex !== rightTabIndex) return leftTabIndex - rightTabIndex
+  return 0
+}
+
+const hasExplicitNegativeTabIndex = (element: Element): boolean =>
+  isHTMLElement(element) && element.hasAttribute("tabindex") && element.tabIndex < 0
 
 const isSequentiallyFocusableRadio = (
   element: RadioInput,
   nativeRoot: Node,
-  elements: ReadonlyArray<ComposedElement>
+  elements: ReadonlyArray<ComposedElement>,
+  composedParents: ReadonlyMap<Node, Node | null>
 ): boolean => {
   if (element.name.length === 0) return true
   const group = elements
@@ -161,7 +205,7 @@ const isSequentiallyFocusableRadio = (
         isRadioInput(candidate) &&
         candidate.name === element.name &&
         candidate.form === element.form &&
-        isRenderedFocusable(candidate)
+        isRenderedFocusable(candidate, composedParents)
     )
     .map(({ element: candidate }) => candidate)
     .filter(isRadioInput)
@@ -171,22 +215,26 @@ const isSequentiallyFocusableRadio = (
 
 const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
   const elements: Array<ComposedElement> = []
-  const visitElement = (element: Element): void => {
+  const visitElement = (element: Element, focusScope: ParentNode, composedParent: Node | null): void => {
     if (isSlotElement(element)) {
-      const assigned = element.assignedElements({ flatten: true })
-      for (const assignedElement of assigned) visitElement(assignedElement)
+      const assigned = element.assignedNodes({ flatten: true })
+      const assignedElements = assigned.filter(isElementNode).sort(compareSequentialTabOrder)
+      elements.push({ composedParent, element, focusScope, nativeRoot: element.getRootNode() })
+      for (const assignedElement of assignedElements) visitElement(assignedElement, focusScope, element)
       return
     }
-    elements.push({ element, nativeRoot: element.getRootNode() })
-    if (element.shadowRoot !== null) visitScope(element.shadowRoot)
-    else visitScope(element)
-  }
-  const visitScope = (scope: ParentNode): void => {
-    for (const child of scope.children) {
-      visitElement(child)
+    elements.push({ composedParent, element, focusScope, nativeRoot: element.getRootNode() })
+    if (element.shadowRoot !== null && !hasExplicitNegativeTabIndex(element)) {
+      visitScope(element.shadowRoot, element.shadowRoot, element)
+    } else if (element.shadowRoot === null) {
+      visitScope(element, focusScope, element)
     }
   }
-  visitScope(root)
+  const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): void => {
+    const children = [...scope.children].sort(compareSequentialTabOrder)
+    for (const child of children) visitElement(child, focusScope, composedParent)
+  }
+  visitScope(root, root, root)
   return elements
 }
 
@@ -508,12 +556,18 @@ const DockLayer = ({
     if (!modal || event.key !== "Tab") return
 
     const composed = composedElementsInScope(panel)
+    const composedParents = new Map<Node, Node | null>(
+      composed.map(({ composedParent, element }) => [element, composedParent])
+    )
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
         const { element, nativeRoot } = entry
+        if (isSlotElement(element)) return false
         if (!isHTMLElement(element) || !element.matches(focusableSelector)) return false
-        if (!isRenderedFocusable(element)) return false
-        if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed)) return false
+        if (!isRenderedFocusable(element, composedParents)) return false
+        if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
+          return false
+        }
         return (
           element.tabIndex >= 0 ||
           (element.isContentEditable && !element.hasAttribute("tabindex")) ||
