@@ -1031,6 +1031,100 @@ describe("RelayDock", () => {
     expect(shadow.activeElement).not.toBe(lower)
   })
 
+  it("keeps assigned-slot positive tabindex ordering local to the slot scope", async () => {
+    const footer = (
+      <div data-rly-slot-order-host="">
+        <button data-rly-slot-order-assigned="" type="button" />
+      </div>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-slot-order-host]")
+    const assigned = portal.querySelector<HTMLButtonElement>("[data-rly-slot-order-assigned]")
+    if (dialog === null || close === null || host === null || assigned === null) {
+      throw new Error("RelayDock slot ordering fixture did not render")
+    }
+    assigned.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open" })
+    const direct = shadow.appendChild(document.createElement("button"))
+    direct.tabIndex = 2
+    direct.textContent = "Direct priority action"
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.tabIndex = 0
+
+    assigned.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("uses the delegated shadow control as the modal focus endpoint", async () => {
+    const footer = (
+      <>
+        <div data-rly-delegates-focus-host="" />
+        <button data-rly-delegates-focus-last="" type="button">
+          Last footer action
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-delegates-focus-host]")
+    const last = portal.querySelector<HTMLButtonElement>("[data-rly-delegates-focus-last]")
+    if (dialog === null || host === null || last === null) {
+      throw new Error("RelayDock delegatesFocus fixture did not render")
+    }
+    host.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.textContent = "Delegated action"
+
+    action.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(last)
+  })
+
+  it("excludes content-visibility-hidden shadow descendants from modal endpoints", async () => {
+    const footer = (
+      <>
+        <button data-rly-content-visibility-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-content-visibility-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-content-visibility-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-content-visibility-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock content visibility fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const hidden = shadow.appendChild(document.createElement("div"))
+    hidden.style.contentVisibility = "hidden"
+    const action = hidden.appendChild(document.createElement("button"))
+    action.textContent = "Hidden action"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("skips shadow controls behind an explicit negative host tabindex", async () => {
     const footer = (
       <>

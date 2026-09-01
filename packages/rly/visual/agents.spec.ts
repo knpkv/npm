@@ -581,6 +581,89 @@ test("modal Relay focus traversal orders positive tabindex descendants across wr
   await expect(lower).not.toBeFocused()
 })
 
+test("modal Relay focus traversal keeps positive tabindex ordering local to assigned slots", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlySlotOrderHost = ""
+    const assigned = document.createElement("button")
+    assigned.dataset.rlySlotOrderAssigned = ""
+    assigned.textContent = "Assigned priority action"
+    assigned.tabIndex = 1
+    host.append(assigned)
+    const shadow = host.attachShadow({ mode: "open" })
+    const direct = shadow.appendChild(document.createElement("button"))
+    direct.textContent = "Direct priority action"
+    direct.tabIndex = 2
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.tabIndex = 0
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const assigned = dock.locator("[data-rly-slot-order-assigned]")
+
+  await assigned.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal excludes a delegating shadow host endpoint", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyDelegatesFocusHost = ""
+    host.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.dataset.rlyDelegatedAction = ""
+    action.textContent = "Delegated action"
+    const last = document.createElement("button")
+    last.dataset.rlyDelegatesFocusLast = ""
+    last.textContent = "Last footer action"
+    last.type = "button"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host, last)
+  })
+  const action = dock.locator("[data-rly-delegated-action]")
+  const last = dock.locator("[data-rly-delegates-focus-last]")
+
+  await action.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(last).toBeFocused()
+})
+
+test("modal Relay focus traversal excludes content-visibility-hidden shadow descendants", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyContentVisibilityPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    host.dataset.rlyContentVisibilityHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const hidden = shadow.appendChild(document.createElement("div"))
+    hidden.style.contentVisibility = "hidden"
+    const action = hidden.appendChild(document.createElement("button"))
+    action.textContent = "Hidden action"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-content-visibility-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal skips shadow scopes behind negative tabindex hosts", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))

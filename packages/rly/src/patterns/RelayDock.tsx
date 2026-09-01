@@ -90,7 +90,7 @@ const composedParentFor = (node: Node, composedParents?: ReadonlyMap<Node, Node 
 }
 
 const isWithinComposedElement = (
-  ancestor: HTMLElement,
+  ancestor: Element,
   descendant: Node | null,
   composedParents?: ReadonlyMap<Node, Node | null>
 ): boolean => {
@@ -145,7 +145,7 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
       if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
     }
     const computed = view.getComputedStyle(current)
-    if (current.hidden !== false || computed.display === "none") return false
+    if (current.hidden !== false || computed.display === "none" || computed.contentVisibility === "hidden") return false
     current = composedParentFor(current, composedParents)
   }
   return true
@@ -219,14 +219,18 @@ interface ScopeTraversal {
 }
 
 const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
-  const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): ScopeTraversal => {
+  const visitScopeElements = (
+    elements: ReadonlyArray<Element>,
+    focusScope: ParentNode,
+    composedParent: Node | null
+  ): ScopeTraversal => {
     const entries: Array<ComposedElement> = []
     const nested = new Map<Element, ScopeTraversal>()
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isSlotElement(element)) {
         const assignedElements = element.assignedNodes({ flatten: true }).filter(isElementNode)
-        for (const assignedElement of assignedElements) visitElement(assignedElement, element)
+        nested.set(element, visitScopeElements(assignedElements, element, element))
         return
       }
       if (element.shadowRoot !== null && !hasExplicitNegativeTabIndex(element)) {
@@ -235,9 +239,11 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
         for (const child of element.children) visitElement(child, element)
       }
     }
-    for (const child of scope.children) visitElement(child, composedParent)
+    for (const element of elements) visitElement(element, composedParent)
     return { entries, nested }
   }
+  const visitScope = (scope: ParentNode, focusScope: ParentNode, composedParent: Node | null): ScopeTraversal =>
+    visitScopeElements([...scope.children], focusScope, composedParent)
   const flattenScope = (scope: ScopeTraversal): Array<ComposedElement> => {
     const ordered = [...scope.entries].sort((left, right) => compareSequentialTabOrder(left.element, right.element))
     const flattened: Array<ComposedElement> = []
@@ -574,11 +580,19 @@ const DockLayer = ({
     const composedParents = new Map<Node, Node | null>(
       composed.map(({ composedParent, element }) => [element, composedParent])
     )
+    const hasDelegatedFocusableDescendant = (host: Element): boolean =>
+      composed.some(({ element }) => {
+        if (element === host || !isHTMLElement(element) || !isWithinComposedElement(host, element, composedParents)) {
+          return false
+        }
+        return element.matches(focusableSelector) && isRenderedFocusable(element, composedParents)
+      })
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
         const { element, nativeRoot } = entry
         if (isSlotElement(element)) return false
         if (!isHTMLElement(element) || !element.matches(focusableSelector)) return false
+        if (element.shadowRoot?.delegatesFocus === true && hasDelegatedFocusableDescendant(element)) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
           return false
