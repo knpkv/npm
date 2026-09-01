@@ -678,7 +678,7 @@ const canonicalEnumText = (declaration, analysis, filePath) => {
       members.push(`${name}:${valueText}`)
     }
   }
-  return `enum(${declaration.node.name.text}|${members.toSorted().join(";")})`
+  return `enum(${declaration.filePath}|${declaration.node.name.text}|${members.toSorted().join(";")})`
 }
 
 const canonicalTypeMembersTextCache = new WeakMap()
@@ -3968,6 +3968,16 @@ const validateCoverage = ({ changedChangesetNames, paths, records }) =>
     .map(({ name }) => name)
     .toSorted()
 
+const validatePublicCallableChangesets = (changes, releaseTypes) =>
+  [
+    ...new Set(
+      changes
+        .map(({ packageName }) => packageName)
+        .filter(Predicate.isString)
+        .filter((packageName) => !releaseTypes.has(packageName))
+    )
+  ].toSorted()
+
 const runSelfTest = () => {
   const records = [
     {
@@ -6337,6 +6347,28 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(enumNominalPrevious, enumNominalRenamed, ["packages/public/src/index.ts"]), [
     { kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
   ])
+  const sameNamedEnumPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/a.ts", 'export enum Result { A = "a" }'],
+    ["packages/public/src/b.ts", 'export enum Result { A = "a" }'],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Result } from "./a.js"\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const sameNamedEnumChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/a.ts", 'export enum Result { A = "a" }'],
+    ["packages/public/src/b.ts", 'export enum Result { A = "a" }'],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Result } from "./b.js"\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(sameNamedEnumPrevious, sameNamedEnumChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
   const indexSignaturePrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -7690,6 +7722,21 @@ const runSelfTest = () => {
     ),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  const compilerOnlyCallableChanges = publicCallableChanges(
+    inferredIndexedReturn,
+    indexedCompilerOptionsCurrent,
+    ["packages/public/src/index.ts"],
+    undefined,
+    {
+      previousCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: false },
+      currentCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: true }
+    }
+  ).map((change) => ({ ...change, packageName: "@fixture/public" }))
+  assert.deepEqual(validatePublicCallableChangesets(compilerOnlyCallableChanges, new Map()), ["@fixture/public"])
+  assert.deepEqual(
+    validatePublicCallableChangesets(compilerOnlyCallableChanges, new Map([["@fixture/public", "patch"]])),
+    []
+  )
   const defaultPrevious = new Map([
     ["packages/public/src/index.ts", 'export { default as Public } from "./view.js"'],
     ["packages/public/src/view.tsx", "export default function Public(props: { a: string }): string { return props.a }"]
@@ -8206,6 +8253,12 @@ const program = Effect.gen(function* () {
     paths,
     records
   )
+  const missingCallableChangesets = validatePublicCallableChangesets(callableChanges, changedReleaseTypes)
+  if (missingCallableChangesets.length > 0) {
+    return yield* fail(
+      `Changeset coverage failed for public callable changes:\n- ${missingCallableChangesets.join("\n- ")}`
+    )
+  }
   const releaseDiagnostics = validatePublicCallableReleaseTypes({
     changes: callableChanges,
     releaseTypes: changedReleaseTypes
