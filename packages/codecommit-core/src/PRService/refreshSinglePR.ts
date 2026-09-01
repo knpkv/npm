@@ -98,6 +98,7 @@ const resolveAccountFromCache = (
         (coordinates === undefined ||
           (p.repositoryName === coordinates.repositoryName && p.accountRegion === coordinates.region))
     )
+    if (coordinates === undefined && candidates.length > 1) return undefined
     const sibling = coordinates === undefined && candidates.length !== 1 ? undefined : candidates[0]
     if (sibling !== undefined) {
       return resolvedAccount(sibling.accountProfile, sibling.accountRegion)
@@ -140,10 +141,12 @@ export const makeRefreshSinglePR = (
         (coordinates === undefined ||
           (p.repositoryName === coordinates.repositoryName && p.account.region === coordinates.region))
     )
+    const legacyStateAmbiguous = coordinates === undefined && stateCandidates.length > 1
     const pr = coordinates === undefined && stateCandidates.length !== 1 ? undefined : stateCandidates[0]
 
     const cachedPR = yield* prRepo.findAll().pipe(
       Effect.map((rows) => {
+        if (legacyStateAmbiguous) return Option.none<CachedPullRequest>()
         const candidates = rows.filter(
           (row) =>
             row.id === prId &&

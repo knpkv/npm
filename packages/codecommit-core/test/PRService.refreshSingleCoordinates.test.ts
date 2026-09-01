@@ -66,6 +66,17 @@ const cachedPullRequest = Schema.decodeSync(CachedPullRequest)({
   approvalRules: null
 })
 
+const secondPullRequest = Schema.decodeSync(Domain.PullRequest)({
+  ...pullRequest,
+  account: { ...pullRequest.account, region: "us-east-1" },
+  repositoryName: "identity"
+})
+const secondCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
+  ...cachedPullRequest,
+  accountRegion: "us-east-1",
+  repositoryName: "identity"
+})
+
 const config = {
   accounts: [],
   autoDetect: false,
@@ -247,5 +258,43 @@ describe("PRService.refreshSinglePR coordinates", () => {
       )
 
       expect(yield* Ref.get(providerRegions)).toEqual(["eu-west-1"])
+    }))
+
+  it.effect("rejects an ambiguous legacy route instead of choosing a configured region", () =>
+    Effect.gen(function*() {
+      const initialState: Domain.AppState = {
+        pullRequests: [pullRequest, secondPullRequest],
+        accounts: [],
+        status: "idle"
+      }
+      const state = yield* SubscriptionRef.make(initialState)
+      const providerCalls = yield* Ref.make(0)
+      const service = makeRefreshSinglePR(state)
+      const failure = yield* runWithLayer(
+        service("production", pullRequest.id).pipe(Effect.flip),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: () =>
+              Ref.update(providerCalls, (calls) => calls + 1).pipe(
+                Effect.andThen(Effect.die("unexpected provider call"))
+              ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([cachedPullRequest, secondCachedPullRequest]) }),
+          Layer.mock(CommentRepo, {}),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, {}),
+          Layer.mock(ConfigService, {
+            load: Effect.succeed({
+              ...config,
+              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+            })
+          }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(failure._tag).toBe("RefreshError")
+      expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
 })
