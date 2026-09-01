@@ -244,6 +244,7 @@ const makeSandboxService = Effect.gen(function*() {
         return
       }
 
+      yield* markLegacyRetirementStarted(SandboxId.make(legacy.id))
       yield* Effect.forEach(
         containerIds,
         (containerId) =>
@@ -267,6 +268,11 @@ const makeSandboxService = Effect.gen(function*() {
   const markLegacyRetired = (id: SandboxId) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((ms) => updateStatus(id, "stopped", { legacyRetiredAt: new Date(ms).toISOString() }))
+    )
+
+  const markLegacyRetirementStarted = (id: SandboxId) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((ms) => updateStatus(id, "stopping", { legacyRetiredAt: new Date(ms).toISOString() }))
     )
 
   const service = {
@@ -311,11 +317,19 @@ const makeSandboxService = Effect.gen(function*() {
           params.repositoryName
         )
         const legacyResults = yield* Effect.forEach(regionless, (legacy) =>
-          Effect.gen(function*() {
+          lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
+            if (legacy.accessPassword !== null && (yield* hasActiveWorker(legacy.id))) {
+              return yield* new SandboxError({
+                sandboxId: SandboxId.make(legacy.id),
+                message: "Regionless legacy sandbox is still active; retry after its worker exits"
+              })
+            }
             const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", legacy.id)
             const containerIds = new Set([
               ...(legacy.containerId === null || legacy.containerId.length === 0 ? [] : [legacy.containerId]),
-              ...discovered.map((container) => container.Id)
+              ...discovered.map((container) =>
+                container.Id
+              )
             ])
             if (
               legacy.accessPassword !== null && containerIds.size === 0 && isPreContainerSandboxStatus(legacy.status)
@@ -324,6 +338,9 @@ const makeSandboxService = Effect.gen(function*() {
                 sandboxId: SandboxId.make(legacy.id),
                 message: "Regionless legacy sandbox is still starting; retry after its worker reports a container"
               })
+            }
+            if (legacy.accessPassword !== null) {
+              yield* markLegacyRetirementStarted(SandboxId.make(legacy.id))
             }
             if (legacy.accessPassword === null) {
               yield* Effect.forEach(
@@ -352,7 +369,7 @@ const makeSandboxService = Effect.gen(function*() {
               ), { discard: true })
             yield* markLegacyRetired(SandboxId.make(legacy.id))
             return Option.none<SandboxRow>()
-          }), { concurrency: 1 })
+          })), { concurrency: 1 })
         const unauthenticated = legacyResults.find(Option.isSome)
         if (unauthenticated !== undefined && Option.isSome(unauthenticated)) {
           return yield* new SandboxError({
@@ -363,7 +380,9 @@ const makeSandboxService = Effect.gen(function*() {
         if (effectiveExisting !== undefined) {
           if (effectiveExisting.containerId === null && isPreContainerSandboxStatus(effectiveExisting.status)) {
             const activeWorker = yield* hasActiveWorker(effectiveExisting.id)
-            if (activeWorker) return effectiveExisting
+            if (activeWorker) {
+              return effectiveExisting
+            }
             yield* updateStatus(SandboxId.make(effectiveExisting.id), "error", {
               error: "Orphaned (no container)"
             })
@@ -384,7 +403,8 @@ const makeSandboxService = Effect.gen(function*() {
         const now = new Date(nowMs).toISOString()
 
         const workerTransferred = yield* Ref.make(false)
-        const releaseWorkerReservation = () => releaseWorker(String(id))
+        const releaseWorkerReservation = () =>
+          releaseWorker(String(id))
         yield* markWorkerActive(String(id))
         const worker = Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
@@ -710,7 +730,8 @@ const makeSandboxService = Effect.gen(function*() {
         const all = yield* repo.findAll()
         const activeIds = new Set(active.map((row) => row.id))
         const rows = all.filter((row) =>
-          row.accessPassword === null || activeIds.has(row.id) || isRegionlessSandbox(row)
+          row.accessPassword === null || activeIds.has(row.id) || isRegionlessSandbox(row) ||
+          (row.legacyRetiredAt !== null && row.status !== "stopped")
         )
         yield* Effect.forEach(rows, (row) =>
           Effect.gen(function*() {
@@ -747,6 +768,10 @@ const makeSandboxService = Effect.gen(function*() {
                 })
                 return
               }
+              if (yield* hasActiveWorker(row.id)) {
+                return
+              }
+              yield* markLegacyRetirementStarted(SandboxId.make(row.id))
               yield* Effect.forEach(containerIds, (containerId) =>
                 docker.inspectContainer(containerId).pipe(
                   Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
@@ -757,6 +782,23 @@ const makeSandboxService = Effect.gen(function*() {
                 ), { discard: true })
               yield* markLegacyRetired(SandboxId.make(row.id))
               yield* Effect.logInfo(`Reconciled regionless sandbox ${row.id}`)
+              return
+            }
+            if (row.accessPassword !== null && row.legacyRetiredAt !== null) {
+              const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", row.id)
+              const containerIds = new Set([
+                ...(row.containerId === null || row.containerId.length === 0 ? [] : [row.containerId]),
+                ...discovered.map((container) => container.Id)
+              ])
+              yield* Effect.forEach(containerIds, (containerId) =>
+                docker.inspectContainer(containerId).pipe(
+                  Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
+                  Effect.catchIf(
+                    (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                    () => Effect.void
+                  )
+                ), { discard: true })
+              yield* updateStatus(SandboxId.make(row.id), "stopped", { legacyRetiredAt: row.legacyRetiredAt })
               return
             }
             if (row.accessPassword === null) {

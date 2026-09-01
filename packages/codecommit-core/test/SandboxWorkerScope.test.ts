@@ -169,7 +169,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             port: null,
             statusDetail: null,
             logs: null,
-            error: null
+            error: null,
+            legacyRetiredAt: null
           })
         ),
         Effect.andThen(
@@ -882,6 +883,72 @@ describe("SandboxWorkerScope", () => {
       )
     }))
 
+  it.effect("skips regionless reconciliation while restart owns the worker", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: regionless,
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: regionless.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(regionless.id)).pipe(Effect.forkChild)
+          yield* Deferred.await(restartStarted)
+
+          expect(yield* sandboxes.reconcile()).toBe(true)
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "starting", legacyRetiredAt: null })
+
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("blocks regionless creation while restart owns the worker", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: regionless,
+        regionlessByPrAll: [regionless],
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: regionless.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(regionless.id)).pipe(Effect.forkChild)
+          yield* Deferred.await(restartStarted)
+
+          const creation = yield* sandboxes.create(createParams).pipe(Effect.result)
+          expect(creation._tag).toBe("Failure")
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
   it.effect("does not restart a durably retired legacy row after service recreation", () =>
     Effect.gen(function*() {
       const restartStarted = yield* Deferred.make<void>()
@@ -1181,7 +1248,11 @@ describe("SandboxWorkerScope", () => {
         )
       )
       expect(outcome).toBe(false)
-      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running", error: null })
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopping",
+        error: null,
+        legacyRetiredAt: expect.any(String)
+      })
     }))
 
   it.effect("treats an authenticated container exiting after inspection as stopped", () =>
