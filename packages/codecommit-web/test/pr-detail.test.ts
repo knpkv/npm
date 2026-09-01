@@ -4,6 +4,7 @@ import { Domain } from "@knpkv/codecommit-core"
 import {
   commentNavigationIdentityForCoordinates,
   isReusableSandbox,
+  isStoppingSandbox,
   reviewApiAccountId,
   sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
@@ -123,7 +124,9 @@ describe("PR detail coordinates", () => {
     }
 
     expect(isReusableSandbox(stoppingSandbox, pullRequest)).toBe(false)
+    expect(isStoppingSandbox(stoppingSandbox, pullRequest)).toBe(true)
     expect(isReusableSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(true)
+    expect(isStoppingSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(false)
   })
 
   it("gives review APIs a validated account-coordinate token", () => {

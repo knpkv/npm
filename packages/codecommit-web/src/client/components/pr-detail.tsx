@@ -131,6 +131,12 @@ export const isReusableSandbox = (
   sandbox.status !== "error" &&
   sandboxMatchesPullRequest(sandbox, pullRequest)
 
+/** Detect a matching sandbox whose stop is still in flight. */
+export const isStoppingSandbox = (
+  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean => sandbox.status === "stopping" && sandboxMatchesPullRequest(sandbox, pullRequest)
+
 /** Keep review API requests bound to the exact PR shown by this page. */
 export const reviewApiAccountId = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
@@ -1162,6 +1168,10 @@ export function PRDetail() {
     () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isReusableSandbox(sandbox, pr))),
     [pr, state.sandboxes]
   )
+  const stoppingSandbox = useMemo(
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isStoppingSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
+  )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)
 
@@ -1190,6 +1200,10 @@ export function PRDetail() {
 
   const handleSandbox = useCallback(() => {
     if (pr === null) return
+    if (stoppingSandbox !== undefined) {
+      toast.info("Sandbox is still stopping. Try again once it has stopped.")
+      return
+    }
     if (existingSandbox !== undefined) {
       navigate(`/sandbox/${existingSandbox.id}`)
       return
@@ -1197,7 +1211,7 @@ export function PRDetail() {
     if (!docker.show()) {
       proceedSandbox()
     }
-  }, [pr, existingSandbox, docker, proceedSandbox, navigate])
+  }, [pr, stoppingSandbox, existingSandbox, docker, proceedSandbox, navigate])
 
   const handleDockerContinue = () => {
     docker.dismiss()
@@ -1327,7 +1341,7 @@ export function PRDetail() {
             </Button>
             <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
               <CodeIcon className="size-3.5" />
-              {existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
+              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
             </Button>
             <RlyButton
               className={styles.actionButton}
