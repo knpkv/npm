@@ -265,7 +265,12 @@ const makeSandboxService = Effect.gen(function*() {
         })
         if (!(yield* hasActiveWorker(id))) {
           if (finalizeUnowned && hadStopRequest) {
-            yield* updateStatus(SandboxId.make(id), "stopped").pipe(
+            yield* repo.findById(SandboxId.make(id)).pipe(
+              Effect.flatMap((row) =>
+                row.containerId === null && isPreContainerSandboxStatus(row.status)
+                  ? updateStatus(SandboxId.make(id), "stopped")
+                  : Effect.void
+              ),
               Effect.catch((error) => Effect.logError(`Failed to finalize stopped sandbox ${id}`, error))
             )
           }

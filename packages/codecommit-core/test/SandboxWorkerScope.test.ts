@@ -152,6 +152,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const execCalls = yield* Ref.make(0)
   const pluginHookCalls = yield* Ref.make(0)
   const readinessHookCalls = yield* Ref.make(0)
+  const statusUpdates = yield* Ref.make<Array<{ readonly id: string; readonly status: string }>>([])
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
     findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) =>
@@ -233,23 +234,26 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           )
         ),
     updateStatus: (_id, status, extra) =>
-      Ref.update(rowRef, (row) =>
-        row === undefined || options?.preserveStatusIds?.includes(String(_id)) === true
-          ? row
-          : {
-            ...row,
-            status,
-            containerId: extra?.containerId ?? row.containerId,
-            port: extra?.port ?? row.port,
-            error: extra?.error ?? row.error,
-            legacyRetiredAt: extra?.legacyRetiredAt ?? row.legacyRetiredAt
-          }).pipe(
-          Effect.andThen(
-            status === "error"
-              ? Deferred.succeed(errorTransitioned, undefined)
-              : Effect.void
-          )
+      Ref.update(statusUpdates, (updates) => [...updates, { id: String(_id), status }]).pipe(
+        Effect.andThen(
+          Ref.update(rowRef, (row) =>
+            row === undefined || options?.preserveStatusIds?.includes(String(_id)) === true
+              ? row
+              : {
+                ...row,
+                status,
+                containerId: extra?.containerId ?? row.containerId,
+                port: extra?.port ?? row.port,
+                error: extra?.error ?? row.error,
+                legacyRetiredAt: extra?.legacyRetiredAt ?? row.legacyRetiredAt
+              })
         ),
+        Effect.andThen(
+          status === "error"
+            ? Deferred.succeed(errorTransitioned, undefined)
+            : Effect.void
+        )
+      ),
     updateDetail: (_id, detail) =>
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }),
     appendLog: (_id, line) =>
@@ -448,6 +452,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     pluginHookCalls,
     readinessHookCalls,
     startContainerCalls,
+    statusUpdates,
     stopContainerCalls,
     workerCause,
     workerCompleted
@@ -775,6 +780,41 @@ describe("SandboxWorkerScope", () => {
 
       expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("does not finalize an interrupted stop for a running sandbox", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const releaseInsert = yield* Deferred.make<void>()
+      const running = { ...legacyRow, region: createParams.region, accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: running,
+        rowsById: { [running.id]: running },
+        insertGate: { inserted, release: releaseInsert }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const competingCreate = yield* sandboxes.create({ ...createParams, awsAccountId: "123456789013" }).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(inserted)
+
+          const stop = yield* sandboxes.stop(SandboxId.make(running.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          const interruption = yield* Fiber.interrupt(stop).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.succeed(releaseInsert, undefined)
+          yield* Fiber.join(interruption)
+          yield* Fiber.interrupt(competingCreate)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.statusUpdates)).not.toContainEqual({ id: running.id, status: "stopped" })
     }))
 
   it.effect("rejects fallback creation beside a numeric account sandbox", () =>
