@@ -745,4 +745,78 @@ describe("RelayDock", () => {
     expect(reverse.defaultPrevented).toBe(true)
     expect(shadow.activeElement).toBe(internal)
   })
+
+  it("traps focus on controls assigned through an open shadow slot", async () => {
+    const footer = (
+      <div data-rly-slot-focus-host="">
+        <button type="button">Slotted footer action</button>
+      </div>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-slot-focus-host]")
+    if (dialog === null || close === null || host === null) throw new Error("RelayDock slot fixture did not render")
+    const shadow = host.attachShadow({ mode: "open" })
+    shadow.append(document.createElement("slot"))
+    const slotted = host.querySelector<HTMLButtonElement>("button")
+    if (slotted === null) throw new Error("RelayDock slotted action did not render")
+
+    slotted.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("keeps only the checked radio as a shadow-scope tab stop", async () => {
+    const footer = <div data-rly-radio-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-radio-focus-host]")
+    if (dialog === null || close === null || host === null) throw new Error("RelayDock radio fixture did not render")
+    const shadow = host.attachShadow({ mode: "open" })
+    const checked = shadow.appendChild(document.createElement("input"))
+    checked.type = "radio"
+    checked.name = "shadow-review-route"
+    checked.checked = true
+    const unchecked = shadow.appendChild(document.createElement("input"))
+    unchecked.type = "radio"
+    unchecked.name = "shadow-review-route"
+
+    checked.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+    expect(shadow.activeElement).not.toBe(unchecked)
+  })
+
+  it("keeps a shadow descendant of the first closed-details summary in the modal boundary", async () => {
+    const footer = (
+      <details>
+        <summary>
+          Collapsed evidence
+          <div data-rly-summary-focus-host="" />
+        </summary>
+        <button type="button">Collapsed evidence action</button>
+      </details>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-summary-focus-host]")
+    if (dialog === null || close === null || host === null) throw new Error("RelayDock summary fixture did not render")
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.type = "button"
+    action.textContent = "Visible shadow summary action"
+
+    action.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
 })

@@ -347,6 +347,98 @@ test("modal Relay focus traversal contains controls in a nested open shadow root
   await expect(nestedAction).toBeFocused()
 })
 
+test("modal Relay focus traversal contains controls assigned through an open shadow slot", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyShadowSlotHost = ""
+    const assigned = document.createElement("button")
+    assigned.textContent = "Slotted footer action"
+    assigned.type = "button"
+    host.append(assigned)
+    const shadow = host.attachShadow({ mode: "open" })
+    shadow.append(document.createElement("slot"))
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const slotted = dock.locator("[data-rly-shadow-slot-host] button")
+
+  await slotted.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await close.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(slotted).toBeFocused()
+})
+
+test("modal Relay focus traversal keeps only checked radios in each shadow scope", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyShadowRadioHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const checked = document.createElement("input")
+    checked.type = "radio"
+    checked.name = "shadow-review-route"
+    checked.checked = true
+    checked.dataset.rlyShadowRadio = "checked"
+    const unchecked = document.createElement("input")
+    unchecked.type = "radio"
+    unchecked.name = "shadow-review-route"
+    unchecked.dataset.rlyShadowRadio = "unchecked"
+    shadow.append(checked, unchecked)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const checked = dock.locator("[data-rly-shadow-radio-host] input[data-rly-shadow-radio=\"checked\"]")
+  const unchecked = dock.locator("[data-rly-shadow-radio-host] input[data-rly-shadow-radio=\"unchecked\"]")
+
+  await checked.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await expect(unchecked).not.toBeFocused()
+  await close.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(checked).toBeFocused()
+})
+
+test("modal Relay focus traversal contains the first closed-details summary shadow action", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const details = document.createElement("details")
+    const summary = document.createElement("summary")
+    summary.append("Collapsed evidence")
+    const host = document.createElement("div")
+    host.dataset.rlyShadowSummaryHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = document.createElement("button")
+    action.textContent = "Visible shadow summary action"
+    action.type = "button"
+    shadow.append(action)
+    summary.append(host)
+    details.append(summary)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(details)
+  })
+  const action = dock.locator("[data-rly-shadow-summary-host] button")
+
+  await action.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await close.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(action).toBeFocused()
+})
+
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_100, width: 1_200 })
   await page.goto(story("patterns-agentdrawer--interaction"))
