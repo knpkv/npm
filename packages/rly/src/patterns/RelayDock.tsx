@@ -179,7 +179,7 @@ interface SlotElement extends Element {
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
-  element.tagName === "SLOT" && "assignedElements" in element && hasShadowRootHost(element.getRootNode())
+  element.tagName === "SLOT" && "assignedElements" in element
 
 const compareSequentialTabOrder = (left: Element, right: Element): number => {
   const leftTabIndex = !isHTMLElement(left) ? -1 : left.tabIndex

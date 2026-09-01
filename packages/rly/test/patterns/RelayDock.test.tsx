@@ -1144,6 +1144,39 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("preserves a light-DOM slot scope in positive tabindex order", async () => {
+    const footer = (
+      <>
+        <slot data-rly-positive-light-slot="" tabIndex={1}>
+          <button data-rly-positive-light-slot-fallback="" type="button">
+            Light slot fallback
+          </button>
+        </slot>
+        <button data-rly-positive-light-slot-sibling="" tabIndex={2} type="button">
+          Higher-priority sibling
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const fallback = portal.querySelector<HTMLButtonElement>("[data-rly-positive-light-slot-fallback]")
+    const sibling = portal.querySelector<HTMLButtonElement>("[data-rly-positive-light-slot-sibling]")
+    if (dialog === null || close === null || fallback === null || sibling === null) {
+      throw new Error("RelayDock light-DOM slot ordering fixture did not render")
+    }
+
+    close.tabIndex = -1
+    const outside = document.createElement("button")
+    document.body.append(outside)
+    outside.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(fallback)
+    expect(document.activeElement).not.toBe(sibling)
+  })
+
   it("preserves nested fallback slot scopes", async () => {
     const footer = (
       <div data-rly-nested-slot-host="">
