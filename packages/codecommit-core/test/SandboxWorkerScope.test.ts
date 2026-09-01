@@ -705,7 +705,6 @@ describe("SandboxWorkerScope", () => {
           yield* Fiber.join(interruption)
           yield* Fiber.join(create)
           yield* Deferred.await(fixture.workerCompleted)
-          yield* sandboxes.stop(SandboxId.make(row.id))
         }).pipe(Effect.provide(fixture.layer))
       )
 

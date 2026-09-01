@@ -242,7 +242,14 @@ const makeSandboxService = Effect.gen(function*() {
     lifecycleAdmission.withPermits(1)(
       Effect.gen(function*() {
         const lastWorker = yield* releaseWorker(id)
-        if (lastWorker && !(yield* isStopOwned(id))) yield* clearWorkerStopRequest(id)
+        if (lastWorker && !(yield* isStopOwned(id))) {
+          if (yield* isStopRequested(id)) {
+            yield* updateStatus(SandboxId.make(id), "stopped").pipe(
+              Effect.catch((error) => Effect.logError(`Failed to finalize stopped sandbox ${id}`, error))
+            )
+          }
+          yield* clearWorkerStopRequest(id)
+        }
       })
     )
 
