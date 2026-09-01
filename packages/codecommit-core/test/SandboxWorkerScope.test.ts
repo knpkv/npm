@@ -800,6 +800,52 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("blocks a concurrent numeric restart during fallback collision admission", () =>
+    Effect.gen(function*() {
+      const collisionReached = yield* Deferred.make<void>()
+      const collisionRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        retirementGate: { reached: collisionReached, release: collisionRelease },
+        restartGate: { started: restartStarted, release: yield* Deferred.make<void>() },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(collisionReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          expect(yield* Deferred.isDone(restartStarted)).toBe(false)
+
+          yield* Deferred.succeed(collisionRelease, undefined)
+          const created = yield* Fiber.join(creation)
+          yield* Fiber.join(restart)
+
+          expect(created.awsAccountId).toBe("production")
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
   it.effect("creates a first fallback sandbox without a numeric collision", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never)

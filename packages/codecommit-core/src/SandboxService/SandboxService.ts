@@ -187,6 +187,33 @@ const makeSandboxService = Effect.gen(function*() {
       return next
     })
 
+  const findFallbackCandidate = (params: CreateSandboxParams) =>
+    !isDiscoveredAwsAccountId(params.awsAccountId)
+      ? Effect.gen(function*() {
+        const candidates = (yield* repo.findAll()).filter((row) =>
+          isDiscoveredAwsAccountId(row.awsAccountId) &&
+          row.awsAccountId !== params.profile &&
+          row.pullRequestId === params.pullRequestId &&
+          row.repositoryName === params.repositoryName &&
+          (row.region === params.region || row.region === null || row.region === undefined || row.region === "")
+        )
+        let terminalCandidate: SandboxRow | undefined
+        for (const candidate of candidates) {
+          if (!isTerminalSandboxStatus(candidate.status)) {
+            return { row: candidate, blocksCreation: true }
+          }
+          const containers = yield* docker.listContainersByLabel("codecommit.sandbox.id", candidate.id)
+          if (containers.some((container) => !isConfirmedStoppedContainer(container.State))) {
+            return { row: candidate, blocksCreation: true }
+          }
+          terminalCandidate ??= candidate
+        }
+        return terminalCandidate === undefined
+          ? undefined
+          : { row: terminalCandidate, blocksCreation: false }
+      })
+      : Effect.void
+
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
     Effect.catch(() => Effect.succeed(defaultSandboxConfig))
@@ -332,29 +359,6 @@ const makeSandboxService = Effect.gen(function*() {
         const exactCandidate = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
           : undefined
-        const fallbackCollision = !isDiscoveredAwsAccountId(params.awsAccountId)
-          ? yield* Effect.gen(function*() {
-            const candidates = (yield* repo.findAll()).filter((row) =>
-              isDiscoveredAwsAccountId(row.awsAccountId) &&
-              row.awsAccountId !== params.profile &&
-              row.pullRequestId === params.pullRequestId &&
-              row.repositoryName === params.repositoryName &&
-              (row.region === params.region || row.region === null || row.region === undefined || row.region === "")
-            )
-            for (const candidate of candidates) {
-              if (!isTerminalSandboxStatus(candidate.status)) return candidate
-              const containers = yield* docker.listContainersByLabel("codecommit.sandbox.id", candidate.id)
-              if (containers.some((container) => !isConfirmedStoppedContainer(container.State))) return candidate
-            }
-            return undefined
-          })
-          : undefined
-        if (fallbackCollision !== undefined) {
-          return yield* new SandboxError({
-            sandboxId: SandboxId.make(fallbackCollision.id),
-            message: "AWS account identity is unavailable; retry after account discovery"
-          })
-        }
         const exactExisting = exactCandidate !== undefined &&
             !isCompletedLegacyRetirement(exactCandidate) &&
             !isPendingLegacyRetirement(exactCandidate)
@@ -504,7 +508,6 @@ const makeSandboxService = Effect.gen(function*() {
         const workerTransferred = yield* Ref.make(false)
         const releaseWorkerReservationForCreate = () =>
           releaseWorkerReservation(String(id))
-        yield* markWorkerActive(String(id))
         const worker = Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
           const host = yield* ChildEnv.HostEnvironment
@@ -684,6 +687,21 @@ const makeSandboxService = Effect.gen(function*() {
           // `tapDefect` leaves the original Cause / Exit unchanged.
           Effect.tapDefect((defect) => recordCreationFailure(id, defect))
         )
+        const fallbackStopGuard = yield* lifecycleAdmission.withPermits(1)(
+          Effect.gen(function*() {
+            const fallbackCandidate = yield* findFallbackCandidate(params)
+            if (fallbackCandidate === undefined) return undefined
+            if (fallbackCandidate.blocksCreation) {
+              return yield* new SandboxError({
+                sandboxId: SandboxId.make(fallbackCandidate.row.id),
+                message: "AWS account identity is unavailable; retry after account discovery"
+              })
+            }
+            yield* requestWorkerStop(String(fallbackCandidate.row.id))
+            return fallbackCandidate.row.id
+          })
+        )
+        yield* markWorkerActive(String(id))
         yield* repo.insert({
           id,
           pullRequestId: params.pullRequestId,
@@ -714,6 +732,11 @@ const makeSandboxService = Effect.gen(function*() {
             Ref.get(workerTransferred).pipe(
               Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservationForCreate())
             )
+          ),
+          Effect.ensuring(
+            fallbackStopGuard === undefined
+              ? Effect.void
+              : clearWorkerStopRequest(String(fallbackStopGuard))
           )
         )
 
@@ -763,20 +786,21 @@ const makeSandboxService = Effect.gen(function*() {
           yield* Effect.logInfo(`Sandbox ${id} stopped`)
         }))
         return restore(
-          createAdmission.withPermits(1)(Effect.gen(function*() {
-            // Publish the stop intent before waiting for lifecycle admission.
-            // Restart checks this marker before it can publish ownership.
-            yield* requestWorkerStop(String(id))
-            // Once signalled, finish the handoff even if the caller is interrupted.
-            yield* Effect.uninterruptible(
+          createAdmission.withPermits(1)(
+            Effect.uninterruptible(
               Effect.ensuring(
-                stopSandbox,
+                Effect.gen(function*() {
+                  // Publish the stop intent before waiting for lifecycle admission.
+                  // Restart checks this marker before it can publish ownership.
+                  yield* requestWorkerStop(String(id))
+                  yield* stopSandbox
+                }),
                 hasActiveWorker(String(id)).pipe(
                   Effect.flatMap((activeWorker) => activeWorker ? Effect.void : clearWorkerStopRequest(String(id)))
                 )
               )
             )
-          }))
+          )
         )
       }).pipe(
         Effect.mapError((cause) => new SandboxError({ sandboxId: id, message: "Failed to stop sandbox", cause }))
