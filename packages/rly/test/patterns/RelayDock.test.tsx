@@ -822,6 +822,37 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("suppresses fallback content when a slot receives only assigned text", async () => {
+    const footer = (
+      <>
+        <button data-rly-text-slot-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-text-slot-host="">Assigned text</div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-text-slot-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-text-slot-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock text slot fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    const fallback = slot.appendChild(document.createElement("button"))
+    fallback.dataset.rlyTextSlotFallback = ""
+    fallback.textContent = "Fallback action"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+    expect(shadow.activeElement).not.toBe(fallback)
+  })
+
   it("does not treat an empty slot as a tab stop", async () => {
     const footer = (
       <>
@@ -1278,7 +1309,40 @@ describe("RelayDock", () => {
     expect(shadow.activeElement).not.toBe(first)
   })
 
-  it("excludes shadow controls in a disabled fieldset outside its first legend", async () => {
+  it("resolves nested delegated hosts to their deep focus target", async () => {
+    const footer = <div data-rly-nested-delegates-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const outer = portal.querySelector<HTMLElement>("[data-rly-nested-delegates-focus-host]")
+    if (dialog === null || close === null || outer === null) {
+      throw new Error("RelayDock nested delegatesFocus fixture did not render")
+    }
+    outer.tabIndex = 0
+    const outerShadow = outer.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(outerShadow, "delegatesFocus", { configurable: true, value: true })
+    const inner = outerShadow.appendChild(document.createElement("div"))
+    inner.tabIndex = -1
+    const innerShadow = inner.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(innerShadow, "delegatesFocus", { configurable: true, value: true })
+    const action = innerShadow.appendChild(document.createElement("button"))
+    action.tabIndex = -1
+    action.textContent = "Deep delegated action"
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(innerShadow.activeElement).toBe(action)
+  })
+
+  it("keeps shadow controls in a disabled fieldset outside its native tree", async () => {
     const footer = (
       <>
         <button data-rly-disabled-fieldset-preceding="" type="button">
@@ -1301,11 +1365,39 @@ describe("RelayDock", () => {
     const action = shadow.appendChild(document.createElement("button"))
     action.textContent = "Disabled fieldset shadow action"
 
-    preceding.focus()
+    action.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
     await act(async () => dialog.dispatchEvent(forward))
     expect(forward.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
+  })
+
+  it("excludes controls in a disabled fieldset within the same shadow tree", async () => {
+    const footer = <div data-rly-native-disabled-fieldset-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-native-disabled-fieldset-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock native disabled fieldset fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const fieldset = shadow.appendChild(document.createElement("fieldset"))
+    fieldset.disabled = true
+    const action = fieldset.appendChild(document.createElement("button"))
+    action.textContent = "Native disabled fieldset action"
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(shadow.activeElement).not.toBe(action)
   })
 
   it("skips assigned controls behind a negative-tabindex shadow slot", async () => {

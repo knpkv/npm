@@ -135,8 +135,10 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
       if (firstSummary === null || !isWithinComposedElement(firstSummary, element, composedParents)) return false
     }
     if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
-      const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
-      if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
+      if (current.getRootNode() === element.getRootNode()) {
+        const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
+        if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
+      }
     }
     const computed = view.getComputedStyle(current)
     if (
@@ -172,6 +174,7 @@ interface ComposedHTMLElement extends ComposedElement {
 }
 
 interface SlotElement extends Element {
+  readonly assignedNodes: (options?: { readonly flatten?: boolean }) => Array<Node>
   readonly assignedElements: (options?: { readonly flatten?: boolean }) => Array<Element>
 }
 
@@ -230,15 +233,19 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isSlotElement(element)) {
         if (hasExplicitNegativeTabIndex(element)) return
-        const assignedElements = element.assignedElements({ flatten: false })
+        const assignedNodes = element.assignedNodes({ flatten: false })
+        const assignedElements = assignedNodes.filter(isElementNode)
         const fallbackElements = [...element.children]
         nested.set(
           element,
-          visitScopeElements(assignedElements.length > 0 ? assignedElements : fallbackElements, element, element)
+          visitScopeElements(assignedNodes.length > 0 ? assignedElements : fallbackElements, element, element)
         )
         return
       }
-      if (element.shadowRoot !== null && !hasExplicitNegativeTabIndex(element)) {
+      if (
+        element.shadowRoot !== null &&
+        (!hasExplicitNegativeTabIndex(element) || element.shadowRoot.delegatesFocus === true)
+      ) {
         nested.set(element, visitScope(element.shadowRoot, element.shadowRoot, element))
       } else if (element.shadowRoot === null) {
         for (const child of element.children) visitElement(child, element)
@@ -598,8 +605,9 @@ const DockLayer = ({
       return null
     }
     const delegatedTargets = new Set<Element>()
-    for (const { element: host } of composed) {
-      if (!isHTMLElement(host) || host.shadowRoot?.delegatesFocus !== true || host.tabIndex < 0) continue
+    const delegatedTargetFor = (host: HTMLElement, seen: ReadonlySet<Element> = new Set()): Element | null => {
+      if (seen.has(host)) return null
+      const nextSeen = new Set(seen).add(host)
       const delegatedCandidates = composed.filter(({ element, nativeRoot }) => {
         if (element === host || !isHTMLElement(element) || element.tagName === "SLOT") return false
         if (!isWithinComposedElement(host, element, composedParents)) return false
@@ -609,9 +617,14 @@ const DockLayer = ({
       })
       const delegated =
         delegatedCandidates.find(({ element }) => element.hasAttribute("autofocus")) ?? delegatedCandidates[0]
-      if (delegated !== undefined && isHTMLElement(delegated.element) && delegated.element.tabIndex < 0) {
-        delegatedTargets.add(delegated.element)
-      }
+      if (delegated === undefined || !isHTMLElement(delegated.element)) return null
+      if (delegated.element.shadowRoot?.delegatesFocus !== true) return delegated.element
+      return delegatedTargetFor(delegated.element, nextSeen)
+    }
+    for (const { element: host } of composed) {
+      if (!isHTMLElement(host) || host.shadowRoot?.delegatesFocus !== true || host.tabIndex < 0) continue
+      const delegated = delegatedTargetFor(host)
+      if (delegated !== null && isHTMLElement(delegated) && delegated.tabIndex < 0) delegatedTargets.add(delegated)
     }
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
@@ -619,6 +632,19 @@ const DockLayer = ({
         if (element.tagName === "SLOT") return false
         if (!isHTMLElement(element)) return false
         const isDelegatedTarget = delegatedTargets.has(element)
+        let current: Node = element
+        const seen = new Set<Node>()
+        while (!seen.has(current)) {
+          seen.add(current)
+          const parent = composedParentFor(current, composedParents)
+          if (parent === null) break
+          if (parent === panel) break
+          if (hasExplicitNegativeTabIndex(parent)) {
+            if (!isDelegatedTarget) return false
+            break
+          }
+          current = parent
+        }
         if (!element.matches(focusableSelector) && !isDelegatedTarget) return false
         if (element.shadowRoot?.delegatesFocus === true) return false
         if (!isRenderedFocusable(element, composedParents)) return false
