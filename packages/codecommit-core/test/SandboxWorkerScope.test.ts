@@ -341,6 +341,33 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("retires regionless rows before reusing an exact sandbox", () =>
+    Effect.gen(function*() {
+      const exact = { ...legacyRow, id: "exact-sandbox", region: createParams.region, accessPassword: "protected" }
+      const regionless = { ...legacyRow, accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        existingByPr: exact,
+        regionlessByPrAll: [regionless],
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe("exact-sandbox")
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
   it.effect("preserves in-progress rows that have not received a container id", () =>
     Effect.gen(function*() {
       const statuses: ReadonlyArray<"creating" | "cloning" | "starting"> = ["creating", "cloning", "starting"]

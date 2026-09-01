@@ -62,7 +62,7 @@ export const mostActivePRs =
   (sql: SqlClient.SqlClient) => (weekStart: string, weekEnd: string, filters: Filters, limit = 10) => {
     const f = whereFilters(sql, filters)
     return sql<ActivePRRow>`
-      SELECT id, title, author, repository_name, comment_count, aws_account_id
+      SELECT id, title, author, repository_name, account_region, comment_count, aws_account_id
       FROM pull_requests
       WHERE COALESCE(closed_at, last_modified_date) >= ${weekStart} AND COALESCE(closed_at, last_modified_date) < ${weekEnd}
         AND comment_count > 0
@@ -138,7 +138,7 @@ export const stalePRs = (sql: SqlClient.SqlClient) => (nowISO: string, filters: 
   const f = whereFilters(sql, filters)
   return sql<StalePRRow>`
       SELECT
-        id, title, author, repository_name, aws_account_id,
+        id, title, author, repository_name, account_region, aws_account_id,
         CAST((julianday(${nowISO}) - julianday(last_modified_date)) AS INTEGER) as days_since_activity
       FROM pull_requests
       WHERE status = 'OPEN'

@@ -191,11 +191,9 @@ const makeSandboxService = Effect.gen(function*() {
           params.repositoryName,
           params.region
         )
-        if (Option.isSome(existing)) {
-          if (existing.value.region === params.region) return existing.value
-          // Regionless legacy rows have no trustworthy checkout coordinate and
-          // must not be relabeled or reused for a new request.
-        }
+        const exactExisting = Option.isSome(existing) && existing.value.region === params.region
+          ? existing.value
+          : undefined
         const regionless = yield* repo.findRegionlessByPrAll(
           params.awsAccountId,
           params.pullRequestId,
@@ -232,6 +230,7 @@ const makeSandboxService = Effect.gen(function*() {
             message: "Regionless legacy sandbox requires explicit cleanup before recreation"
           })
         }
+        if (exactExisting !== undefined) return exactExisting
 
         const sandboxCfg = yield* loadSandboxConfig
         yield* validateSandboxConfig(sandboxCfg, homePath)

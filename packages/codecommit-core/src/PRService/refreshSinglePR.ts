@@ -80,6 +80,22 @@ const matchesAccount = (
   account.repoAccountId === awsAccountId ||
   account.profile === awsAccountId
 
+const matchesRequestedAccount = (
+  account: Readonly<{
+    readonly awsAccountId?: string | null | undefined
+    readonly repoAccountId?: string | null | undefined
+    readonly profile?: string | null | undefined
+  }>,
+  awsAccountId: string,
+  coordinates: RefreshSinglePRCoordinates | undefined
+): boolean => {
+  if (coordinates === undefined) return matchesAccount(account, awsAccountId)
+  if (account.awsAccountId !== undefined && account.awsAccountId !== null && account.awsAccountId !== "") {
+    return account.awsAccountId === awsAccountId
+  }
+  return account.profile === awsAccountId || account.repoAccountId === awsAccountId
+}
+
 /** Resolve profile/region from an exact cached PR, or from config. */
 const resolveAccountFromCache = (
   prRepo: PullRequestRepoContract,
@@ -94,11 +110,15 @@ const resolveAccountFromCache = (
     )
     const candidates = allCached.filter((p) =>
       p.id === prId &&
-      matchesAccount({
-        awsAccountId: p.awsAccountId,
-        repoAccountId: p.repoAccountId,
-        profile: p.accountProfile
-      }, awsAccountId) &&
+      matchesRequestedAccount(
+        {
+          awsAccountId: p.awsAccountId,
+          repoAccountId: p.repoAccountId,
+          profile: p.accountProfile
+        },
+        awsAccountId,
+        coordinates
+      ) &&
       (coordinates === undefined ||
         (p.repositoryName === coordinates.repositoryName && p.accountRegion === coordinates.region))
     )
@@ -143,11 +163,11 @@ export const makeRefreshSinglePR = (
     const stateMatches = currentState.pullRequests.filter(
       (p) =>
         p.id === prId &&
-        matchesAccount(p.account, awsAccountId) &&
+        matchesRequestedAccount(p.account, awsAccountId, coordinates) &&
         (coordinates === undefined ||
           (p.repositoryName === coordinates.repositoryName && p.account.region === coordinates.region))
     )
-    if (coordinates === undefined && stateMatches.length > 1) {
+    if (stateMatches.length > 1) {
       return yield* new RefreshError({
         failedAccounts: [awsAccountId],
         cause: new PullRequestAmbiguityError({

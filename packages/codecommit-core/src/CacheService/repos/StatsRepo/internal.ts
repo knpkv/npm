@@ -33,6 +33,7 @@ export interface ActivePRRow {
   readonly title: string
   readonly author: string
   readonly repositoryName: string
+  readonly accountRegion: string
   readonly commentCount: number | null
   readonly awsAccountId: string
 }
@@ -61,6 +62,7 @@ export interface StalePRRow {
   readonly title: string
   readonly author: string
   readonly repositoryName: string
+  readonly accountRegion: string
   readonly daysSinceActivity: number
   readonly awsAccountId: string
 }

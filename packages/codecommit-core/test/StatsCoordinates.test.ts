@@ -5,6 +5,7 @@ import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
+import { mostActivePRs, stalePRs } from "../src/CacheService/repos/StatsRepo/queries.js"
 import { reviewerData } from "../src/CacheService/repos/StatsRepo/reviewerData.js"
 
 const comments = (id: string, author: string): string =>
@@ -44,6 +45,7 @@ describe("stats pull-request coordinates", () => {
         closed_at TEXT,
         last_modified_date TEXT NOT NULL,
         is_approved INTEGER NOT NULL,
+        comment_count INTEGER NOT NULL DEFAULT 0,
         status TEXT NOT NULL,
         merged_by TEXT,
         approved_by TEXT
@@ -64,7 +66,12 @@ describe("stats pull-request coordinates", () => {
           ('42', 'Orders', 'author', '123', 'orders', 'us-east-1',
            '2026-08-01T00:00:00.000Z', NULL, '2026-08-04T00:00:00.000Z', 0, 'MERGED'),
           ('43', 'Legacy', 'author', '123', 'legacy', 'eu-west-1',
-           '2026-08-01T00:00:00.000Z', NULL, '2026-08-04T00:00:00.000Z', 0, 'MERGED')`
+           '2026-08-01T00:00:00.000Z', NULL, '2026-08-04T00:00:00.000Z', 0, 'MERGED'),
+          ('44', 'Active', 'author', '123', 'payments', 'eu-west-1',
+           '2026-08-01T00:00:00.000Z', NULL, '2026-08-04T00:00:00.000Z', 0, 'OPEN'),
+          ('45', 'Stale', 'author', '123', 'orders', 'us-east-1',
+           '2026-08-01T00:00:00.000Z', NULL, '2026-08-01T00:00:00.000Z', 0, 'OPEN')`
+      yield* sql`UPDATE pull_requests SET comment_count = 2 WHERE id = '44'`
       yield* sql`INSERT INTO pr_comments
         (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
         VALUES
@@ -81,6 +88,15 @@ describe("stats pull-request coordinates", () => {
       expect(result.firstReviewDetails).toEqual(expect.arrayContaining([
         expect.objectContaining({ prId: "42", repositoryName: "payments", accountRegion: "eu-west-1" }),
         expect.objectContaining({ prId: "42", repositoryName: "orders", accountRegion: "us-east-1" })
+      ]))
+
+      const active = yield* mostActivePRs(sql)("2026-08-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z", {})
+      const stale = yield* stalePRs(sql)("2026-09-01T00:00:00.000Z", {})
+      expect(active).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "44", repositoryName: "payments", accountRegion: "eu-west-1" })
+      ]))
+      expect(stale).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "45", repositoryName: "orders", accountRegion: "us-east-1" })
       ]))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

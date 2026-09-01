@@ -7,6 +7,7 @@ import { PullRequestRepo } from "../src/CacheService/repos/PullRequestRepo/index
 import { StatsRepo } from "../src/CacheService/repos/StatsRepo/index.js"
 import { ConfigService } from "../src/ConfigService/index.js"
 import { StatsService } from "../src/StatsService/index.js"
+import type { WeeklyStats } from "../src/StatsService/WeeklyStats.js"
 
 // ---------------------------------------------------------------------------
 // Test layer helpers
@@ -54,6 +55,8 @@ const emptyReviewer = {
 const mockStatsRepo = (overrides: Partial<{
   volume: { prsCreated: number; prsMerged: number; prsClosed: number }
   contributors: Array<{ author: string; prCount: number }>
+  mostActivePRs: WeeklyStats["mostActivePRs"]
+  stalePRs: WeeklyStats["stalePRs"]
   health: { total: number; withComments: number; approved: number }
   mergeDetails: Array<Detail>
   reviewerData: typeof emptyReviewer
@@ -63,11 +66,11 @@ const mockStatsRepo = (overrides: Partial<{
     StatsRepo.of({
       weeklyVolume: () => Effect.succeed(overrides.volume ?? { prsCreated: 0, prsMerged: 0, prsClosed: 0 }),
       topContributors: () => Effect.succeed(overrides.contributors ?? []),
-      mostActivePRs: () => Effect.succeed([]),
+      mostActivePRs: () => Effect.succeed(overrides.mostActivePRs ?? []),
       prSizeDistribution: () => Effect.succeed(emptySize),
       avgDiffSize: () => Effect.succeed(null),
       diffSizeByContributor: () => Effect.succeed([]),
-      stalePRs: () => Effect.succeed([]),
+      stalePRs: () => Effect.succeed(overrides.stalePRs ?? []),
       healthIndicators: () => Effect.succeed(overrides.health ?? emptyHealth),
       filterOptions: () => Effect.succeed(emptyFilterOpts),
       totalComments: () => Effect.succeed(0),
@@ -205,6 +208,41 @@ describe("StatsService", () => {
       expect(stats.prsMerged).toBe(3)
       expect(stats.prsClosed).toBe(1)
     }).pipe(Effect.provide(testLayer({ volume: { prsCreated: 5, prsMerged: 3, prsClosed: 1 } }))))
+
+  it.effect("preserves exact coordinates in active and stale PR projections", () =>
+    Effect.gen(function*() {
+      const svc = yield* StatsService
+      const stats = yield* svc.getWeeklyStats("2026-W10", {})
+      expect(stats.mostActivePRs[0]).toMatchObject({
+        id: "42",
+        repositoryName: "payments",
+        accountRegion: "eu-west-1"
+      })
+      expect(stats.stalePRs[0]).toMatchObject({
+        id: "42",
+        repositoryName: "payments",
+        accountRegion: "eu-west-1"
+      })
+    }).pipe(Effect.provide(testLayer({
+      mostActivePRs: [{
+        id: "42",
+        title: "Payments",
+        author: "alice",
+        repositoryName: "payments",
+        accountRegion: "eu-west-1",
+        commentCount: 2,
+        awsAccountId: "111"
+      }],
+      stalePRs: [{
+        id: "42",
+        title: "Payments",
+        author: "alice",
+        repositoryName: "payments",
+        accountRegion: "eu-west-1",
+        daysSinceActivity: 8,
+        awsAccountId: "111"
+      }]
+    }))))
 
   // firstReviewDetails from reviewerData are sorted longest-first
   it.effect("sorts firstReviewDetails longest first", () =>
