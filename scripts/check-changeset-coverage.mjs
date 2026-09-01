@@ -1,6 +1,7 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import assert from "node:assert/strict"
+import { createHash } from "node:crypto"
 import { URL } from "node:url"
 
 import * as Config from "effect/Config"
@@ -97,27 +98,25 @@ const defaultCompilerOptions = {
 const configDiagnosticsText = (diagnostics) =>
   diagnostics.map(({ messageText }) => TypeScript.flattenDiagnosticMessageText(messageText, " ")).join("; ")
 
-const packageCompilerOptions = (sources, repositoryRoot) => {
-  if (repositoryRoot === undefined) return defaultCompilerOptions
-  const sourcePath = [...sources.keys()][0]
-  if (sourcePath === undefined) return defaultCompilerOptions
-  const packageMatch = /^(packages\/[^/]+)\/src\//u.exec(sourcePath)
-  if (packageMatch === null) {
-    throw new ChangesetCoverageError({
-      reason: `${sourcePath}: cannot resolve package tsconfig for inferred return analysis`
-    })
-  }
-  const configPath = `${repositoryRoot}/${packageMatch[1]}/tsconfig.json`
-  const config = TypeScript.readConfigFile(configPath, TypeScript.sys.readFile)
+const compilerOptionsFromConfig = (configPath, configText, configFiles = new Map()) => {
+  const config = TypeScript.parseConfigFileTextToJson(configPath, configText)
   if (config.error !== undefined) {
     throw new ChangesetCoverageError({
       reason: `${configPath}: invalid compiler configuration: ${configDiagnosticsText([config.error])}`
     })
   }
+  const normalizedConfigFiles = new Map(
+    [...configFiles].map(([fileName, content]) => [fileName.replaceAll("\\", "/"), content])
+  )
+  const configHost = {
+    ...TypeScript.sys,
+    fileExists: (fileName) => normalizedConfigFiles.has(fileName.replaceAll("\\", "/")),
+    readFile: (fileName) => normalizedConfigFiles.get(fileName.replaceAll("\\", "/"))
+  }
   const parsed = TypeScript.parseJsonConfigFileContent(
     config.config,
-    TypeScript.sys,
-    `${repositoryRoot}/${packageMatch[1]}`,
+    configHost,
+    TypeScript.getDirectoryPath(configPath),
     undefined,
     configPath
   )
@@ -133,6 +132,26 @@ const packageCompilerOptions = (sources, repositoryRoot) => {
     noEmit: true,
     skipLibCheck: true
   }
+}
+
+const packageCompilerOptions = (sources, repositoryRoot, { configText, configFiles = new Map() } = {}) => {
+  if (repositoryRoot === undefined) return defaultCompilerOptions
+  const sourcePath = [...sources.keys()][0]
+  if (sourcePath === undefined) return defaultCompilerOptions
+  const packageMatch = /^(packages\/[^/]+)\/src\//u.exec(sourcePath)
+  if (packageMatch === null) {
+    throw new ChangesetCoverageError({
+      reason: `${sourcePath}: cannot resolve package tsconfig for inferred return analysis`
+    })
+  }
+  const configPath = `${repositoryRoot}/${packageMatch[1]}/tsconfig.json`
+  const text = configText ?? TypeScript.sys.readFile(configPath)
+  if (text === undefined) {
+    throw new ChangesetCoverageError({
+      reason: `${configPath}: compiler configuration is unavailable`
+    })
+  }
+  return compilerOptionsFromConfig(configPath, text, configFiles)
 }
 
 const analyzeSources = (
@@ -161,7 +180,8 @@ const analyzeSources = (
       if (
         TypeScript.isTypeAliasDeclaration(node) ||
         TypeScript.isInterfaceDeclaration(node) ||
-        TypeScript.isClassDeclaration(node)
+        TypeScript.isClassDeclaration(node) ||
+        TypeScript.isEnumDeclaration(node)
       ) {
         const declarationName = node.name?.text
         if (declarationName !== undefined) {
@@ -262,7 +282,10 @@ const analyzeSources = (
     }
     return checker
   }
-  const analysis = { getChecker, modules, recursiveDeclarations, sources }
+  const releaseChecker = () => {
+    checker = undefined
+  }
+  const analysis = { getChecker, modules, recursiveDeclarations, releaseChecker, sources }
   const analyses = cachedByFactory ?? new Map()
   const analysesByOptions = cachedByOptions ?? new Map()
   analysesByOptions.set(compilerOptions, analysis)
@@ -574,6 +597,51 @@ const canonicalConditionalTypeText = (typeNode, analysis, filePath, substitution
   )})`
 }
 
+const canonicalEnumText = (declaration, analysis, filePath) => {
+  const members = []
+  for (const declarationNode of resolvedDeclarationNodes(analysis, declaration)) {
+    for (const [index, member] of declarationNode.members.entries()) {
+      const name = canonicalPropertyKeyText(member.name)
+      if (name === undefined) failCanonicalType(filePath, member.name, "unsupported enum member name")
+      const value = analysis.getChecker().getConstantValue(member)
+      const valueText =
+        Predicate.isString(value) || Predicate.isNumber(value)
+          ? `${Predicate.isString(value) ? "string" : "number"}:${JSON.stringify(value)}`
+          : member.initializer === undefined
+            ? `auto:${index}`
+            : failCanonicalType(filePath, member.initializer, "unsupported enum initializer")
+      members.push(`${name}:${valueText}`)
+    }
+  }
+  return `enum(${members.toSorted().join(";")})`
+}
+
+const canonicalTypeMembersTextCache = new WeakMap()
+const canonicalStructuralDigest = (text) => createHash("sha256").update(text).digest("hex")
+const canonicalTypeMembersText = (typeNode, analysis, filePath, substitutions, seen, context) => {
+  const result = typeMembers(
+    typeNode,
+    analysis,
+    filePath,
+    seen,
+    substitutions,
+    context.typeMembersMemo ?? new Map(),
+    context.substitutionPath,
+    context.genericScope ?? "",
+    context.recursiveDeclarations
+  )
+  const cached = canonicalTypeMembersTextCache.get(result)
+  if (cached !== undefined) return cached
+  const text = `object#${canonicalStructuralDigest(
+    [...result.canonicalMembers]
+      .map(([name, descriptor]) => `${name}:${descriptor}`)
+      .toSorted()
+      .join(";")
+  )}`
+  canonicalTypeMembersTextCache.set(result, text)
+  return text
+}
+
 const canonicalTypeText = (
   typeNode,
   analysis,
@@ -623,6 +691,12 @@ const canonicalTypeText = (
         filePath
       )
       if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
+        if (TypeScript.isTypeLiteralNode(declaration.node.type)) {
+          return canonicalTypeMembersText(typeNode, analysis, filePath, substitutions, seen, {
+            ...nextCanonicalTypeContext(context),
+            typeMembersMemo: context.typeMembersMemo
+          })
+        }
         return canonicalTypeText(
           declaration.node.type,
           analysis,
@@ -641,6 +715,9 @@ const canonicalTypeText = (
           nextSeen,
           nextCanonicalTypeContext(context)
         )
+      }
+      if (TypeScript.isEnumDeclaration(declaration.node)) {
+        return canonicalEnumText(declaration, analysis, filePath)
       }
     }
     if (typeNode.typeArguments !== undefined) {
@@ -819,6 +896,10 @@ const canonicalTypeText = (
             nextCanonicalTypeContext(genericContext)
           )
     }`
+  }
+  if (TypeScript.isTypeLiteralNode(typeNode)) {
+    if (typeNode.getSourceFile?.() === undefined) return normalizeTypeText(typeNode)
+    return canonicalTypeMembersText(typeNode, analysis, filePath, substitutions, seen, context)
   }
   return normalizeTypeText(typeNode)
 }
@@ -2014,6 +2095,67 @@ const memberDescriptor = (
       ...dependencies
     }
   }
+  if (TypeScript.isCallSignatureDeclaration(member) || TypeScript.isConstructSignatureDeclaration(member)) {
+    const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions, context)
+    const genericContext = { ...context, genericScope: generic.childGenericScope }
+    const parameters = member.parameters
+      .map((parameter) =>
+        parameterDescriptor(
+          parameter,
+          analysis,
+          filePath,
+          generic.substitutions,
+          seen,
+          nextCanonicalTypeContext(genericContext)
+        )
+      )
+      .join(",")
+    const returnType =
+      member.type === undefined
+        ? "unknown"
+        : canonicalTypeText(
+            member.type,
+            analysis,
+            filePath,
+            generic.substitutions,
+            seen,
+            nextCanonicalTypeContext(genericContext)
+          )
+    for (const parameter of member.parameters) {
+      if (parameter.type !== undefined) {
+        collectDependencies(
+          typeMembers(
+            parameter.type,
+            analysis,
+            filePath,
+            seen,
+            generic.substitutions,
+            memo,
+            substitutionPath,
+            generic.childGenericScope,
+            context.recursiveDeclarations
+          )
+        )
+      }
+    }
+    if (member.type !== undefined) {
+      collectDependencies(
+        typeMembers(
+          member.type,
+          analysis,
+          filePath,
+          seen,
+          generic.substitutions,
+          memo,
+          substitutionPath,
+          generic.childGenericScope,
+          context.recursiveDeclarations
+        )
+      )
+    }
+    const kind = TypeScript.isConstructSignatureDeclaration(member) ? "construct" : "call"
+    return { descriptor: `${kind}<${generic.descriptor}>(${parameters}):${returnType}`, ...dependencies }
+  }
   const type =
     member.type === undefined
       ? "unknown"
@@ -2389,6 +2531,7 @@ const typeMembers = (
     const declarationNodes = TypeScript.isTypeLiteralNode(typeNode)
       ? [typeNode]
       : (analysis.modules.get(filePath)?.declarationGroups.get(typeNode.name.text) ?? [typeNode])
+    let callSignatureIndex = 0
     for (const declarationNode of declarationNodes) {
       if (TypeScript.isInterfaceDeclaration(declarationNode)) {
         for (const clause of declarationNode.heritageClauses ?? []) {
@@ -2418,8 +2561,29 @@ const typeMembers = (
           !TypeScript.isPropertyDeclaration(member) &&
           !TypeScript.isMethodDeclaration(member) &&
           !TypeScript.isGetAccessorDeclaration(member) &&
-          !TypeScript.isSetAccessorDeclaration(member)
+          !TypeScript.isSetAccessorDeclaration(member) &&
+          !TypeScript.isCallSignatureDeclaration(member) &&
+          !TypeScript.isConstructSignatureDeclaration(member)
         ) {
+          continue
+        }
+        if (TypeScript.isCallSignatureDeclaration(member) || TypeScript.isConstructSignatureDeclaration(member)) {
+          const descriptor = memberDescriptor(
+            member,
+            analysis,
+            filePath,
+            substitutions,
+            seen,
+            { depth: 0, genericScope, substitutionPath, recursiveDeclarations, typeMembersMemo: memo },
+            memo,
+            substitutionPath
+          )
+          const canonicalName = `call#${callSignatureIndex}:${descriptor.descriptor}`
+          result.canonicalMembers.set(canonicalName, descriptor.descriptor)
+          result.members.set(canonicalName, descriptor.descriptor)
+          callSignatureIndex += 1
+          for (const dependency of descriptor.declarationDependencies) result.declarationDependencies.add(dependency)
+          for (const dependency of descriptor.substitutionDependencies) result.substitutionDependencies.add(dependency)
           continue
         }
         const name = member.name
@@ -2432,7 +2596,7 @@ const typeMembers = (
           filePath,
           substitutions,
           seen,
-          { depth: 0, genericScope, substitutionPath, recursiveDeclarations },
+          { depth: 0, genericScope, substitutionPath, recursiveDeclarations, typeMembersMemo: memo },
           memo,
           substitutionPath
         )
@@ -2674,7 +2838,13 @@ function unwrapParenthesizedExpression(node) {
 
 function canonicalResolvedDeclarationText(declaration, analysis, filePath, substitutions, seen, context) {
   const declarationNodes = resolvedDeclarationNodes(analysis, declaration)
-  const members = []
+  const members = new Map()
+  const callSignatures = []
+  const typeMembersMemo = context.typeMembersMemo ?? new Map()
+  const addMember = (name, descriptor) => {
+    const existing = members.get(name)
+    members.set(name, existing === undefined ? descriptor : mergeMemberContract(existing, descriptor))
+  }
   for (const declarationNode of declarationNodes) {
     if (TypeScript.isInterfaceDeclaration(declarationNode)) {
       for (const heritageClause of declarationNode.heritageClauses ?? []) {
@@ -2692,18 +2862,20 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
           )
           if (inherited.resolved) {
             for (const [name, descriptor] of inherited.canonicalMembers) {
-              members.push(`${name}:${descriptor}`)
+              if (name.startsWith("call#")) callSignatures.push(descriptor)
+              else addMember(name, descriptor)
             }
           } else {
-            members.push(
-              `heritage:${canonicalTypeText(
+            addMember(
+              "heritage",
+              canonicalTypeText(
                 heritageType,
                 analysis,
                 declaration.filePath,
                 substitutions,
                 seen,
                 nextCanonicalTypeContext(context)
-              )}`
+              )
             )
           }
         }
@@ -2717,8 +2889,25 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
         !TypeScript.isPropertyDeclaration(member) &&
         !TypeScript.isMethodDeclaration(member) &&
         !TypeScript.isGetAccessorDeclaration(member) &&
-        !TypeScript.isSetAccessorDeclaration(member)
+        !TypeScript.isSetAccessorDeclaration(member) &&
+        !TypeScript.isCallSignatureDeclaration(member) &&
+        !TypeScript.isConstructSignatureDeclaration(member)
       ) {
+        continue
+      }
+      if (TypeScript.isCallSignatureDeclaration(member) || TypeScript.isConstructSignatureDeclaration(member)) {
+        callSignatures.push(
+          memberDescriptor(
+            member,
+            analysis,
+            declaration.filePath,
+            substitutions,
+            seen,
+            { ...context, typeMembersMemo },
+            typeMembersMemo,
+            context.substitutionPath
+          ).descriptor
+        )
         continue
       }
       const name = member.name
@@ -2730,14 +2919,19 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
         declaration.filePath,
         substitutions,
         seen,
-        context,
-        new Map(),
+        { ...context, typeMembersMemo },
+        typeMembersMemo,
         context.substitutionPath
       )
-      members.push(`${propertyName}:${descriptor.descriptor}`)
+      addMember(propertyName, descriptor.descriptor)
     }
   }
-  return `object(${members.toSorted().join(";")})`
+  return `object(${[
+    ...[...members].map(([name, descriptor]) => `${name}:${descriptor}`),
+    ...callSignatures.map((descriptor, index) => `call#${index}:${descriptor}`)
+  ]
+    .toSorted()
+    .join(";")})`
 }
 
 const callableParameterTypesInSources = (
@@ -2752,15 +2946,6 @@ const callableParameterTypesInSources = (
   const runtimeParameters = (parameters) =>
     parameters.filter((parameter) => !(TypeScript.isIdentifier(parameter.name) && parameter.name.text === "this"))
   const inferredReturnType = (node) => {
-    if (TypeScript.isArrowFunction(node) && TypeScript.isIdentifier(node.body)) {
-      return undefined
-    }
-    if (TypeScript.isFunctionDeclaration(node) && TypeScript.isBlock(node.body) && node.body.statements.length === 1) {
-      const statement = node.body.statements[0]
-      if (TypeScript.isReturnStatement(statement) && TypeScript.isIdentifier(statement.expression)) {
-        return undefined
-      }
-    }
     const checker = analysis.getChecker()
     const type = checker.getTypeAtLocation(node)
     const signature = checker.getSignaturesOfType(type, TypeScript.SignatureKind.Call)[0]
@@ -3011,12 +3196,18 @@ const publicCallableChanges = (
   currentSources,
   previousEntryPoints,
   currentEntryPoints = previousEntryPoints,
-  { compilerOptions, programFactory = TypeScript.createProgram, recursiveDeclarations = new Set(), repositoryRoot } = {}
+  {
+    compilerOptions,
+    currentCompilerOptions,
+    previousCompilerOptions,
+    programFactory = TypeScript.createProgram,
+    recursiveDeclarations = new Set(),
+    repositoryRoot
+  } = {}
 ) => {
-  const effectiveCompilerOptions =
-    compilerOptions ??
-    packageCompilerOptions(currentSources.size > 0 ? currentSources : previousSources, repositoryRoot)
-  const signatures = (sources, entryPoints) => {
+  const signatures = (sources, entryPoints, revisionCompilerOptions) => {
+    const effectiveCompilerOptions =
+      revisionCompilerOptions ?? compilerOptions ?? packageCompilerOptions(sources, repositoryRoot)
     const analysis = analyzeSources(sources, recursiveDeclarations, {
       compilerOptions: effectiveCompilerOptions,
       programFactory
@@ -3046,10 +3237,11 @@ const publicCallableChanges = (
         result.set(identity, existing)
       }
     }
+    if (programFactory === TypeScript.createProgram) analysis.releaseChecker()
     return result
   }
-  const previous = signatures(previousSources, previousEntryPoints)
-  const current = signatures(currentSources, currentEntryPoints)
+  const previous = signatures(previousSources, previousEntryPoints, previousCompilerOptions)
+  const current = signatures(currentSources, currentEntryPoints, currentCompilerOptions)
   const changes = []
   const signatureContract = (signature) =>
     [
@@ -6655,6 +6847,88 @@ const runSelfTest = () => {
     ]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  const redeclaredInheritedPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { a: string }\ninterface Result extends Base { a: string }\nexport const Public = (): Result => ({ a: "" })'
+    ]
+  ])
+  const redeclaredInheritedCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'interface Result { a: string }\nexport const Public = (): Result => ({ a: "" })']
+  ])
+  assert.deepEqual(
+    publicCallableChanges(redeclaredInheritedPrevious, redeclaredInheritedCurrent, ["packages/public/src/index.ts"]),
+    []
+  )
+  const reorderedInlineReturnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'export const Public = (): { a: string; b: number } => ({ a: "", b: 1 })']
+  ])
+  const reorderedInlineReturnCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'export const Public = (): { b: number; a: string } => ({ a: "", b: 1 })']
+  ])
+  assert.deepEqual(
+    publicCallableChanges(reorderedInlineReturnPrevious, reorderedInlineReturnCurrent, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  const changedInlineReturnCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'export const Public = (): { b: boolean; a: string } => ({ a: "", b: true })']
+  ])
+  assert.deepEqual(
+    publicCallableChanges(reorderedInlineReturnPrevious, changedInlineReturnCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const callSignaturePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface Result { (value: string): string }\nexport const Public = (): Result => (value) => value"
+    ]
+  ])
+  const callSignatureCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface Result { (value: number): string }\nexport const Public = (): Result => (value) => String(value)"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(callSignaturePrevious, callSignatureCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const callSignatureRenamed = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "interface Result { (renamed: string): string }\nexport const Public = (): Result => (renamed) => renamed"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(callSignaturePrevious, callSignatureRenamed, ["packages/public/src/index.ts"]),
+    []
+  )
+  const enumReturnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'enum Result { A = "a", B = "b" }\nexport const Public = (): Result => Result.A']
+  ])
+  const enumReturnCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'enum Result { A = "a", C = "c" }\nexport const Public = (): Result => Result.A']
+  ])
+  assert.deepEqual(publicCallableChanges(enumReturnPrevious, enumReturnCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
+  const enumReturnReordered = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'enum Result { B = "b", A = "a" }\nexport const Public = (): Result => Result.A']
+  ])
+  assert.deepEqual(publicCallableChanges(enumReturnPrevious, enumReturnReordered, ["packages/public/src/index.ts"]), [])
   const staticClassReturnPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -6697,6 +6971,26 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(inferredReturnPrevious, inferredReturnCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const identifierReturnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'const value = { a: "" }\nexport const Public = () => value']
+  ])
+  const identifierReturnCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'const value = { b: "" }\nexport const Public = () => value']
+  ])
+  assert.deepEqual(
+    publicCallableChanges(identifierReturnPrevious, identifierReturnCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const identifierReturnRenamed = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'const renamed = { a: "" }\nexport const Public = () => renamed']
+  ])
+  assert.deepEqual(
+    publicCallableChanges(identifierReturnPrevious, identifierReturnRenamed, ["packages/public/src/index.ts"]),
+    []
   )
   let checkerProgramCount = 0
   const countingProgramFactory = (...arguments_) => {
@@ -6762,6 +7056,39 @@ const runSelfTest = () => {
   )
   assert.equal(observedCompilerOptions.length, 1)
   assert.equal(observedCompilerOptions[0].noUncheckedIndexedAccess, false)
+  const parsedFixtureCompilerOptions = compilerOptionsFromConfig(
+    "/fixture/packages/public/tsconfig.json",
+    '{"extends":"../../tsconfig.base.jsonc","files":["src/index.ts"],"compilerOptions":{"noUncheckedIndexedAccess":false}}',
+    new Map([
+      ["/fixture/tsconfig.base.jsonc", '{"compilerOptions":{"noUncheckedIndexedAccess":true,"strict":true}}'],
+      ["/fixture/packages/public/src/index.ts", ""]
+    ])
+  )
+  assert.equal(parsedFixtureCompilerOptions.noUncheckedIndexedAccess, false)
+  assert.deepEqual(
+    publicCallableChanges(inferredIndexedReturn, inferredIndexedReturn, ["packages/public/src/index.ts"], undefined, {
+      previousCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: false },
+      currentCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: false }
+    }),
+    []
+  )
+  const indexedCompilerOptionsCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", "export const Public = (values: string[]) => values[0]"]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(
+      inferredIndexedReturn,
+      indexedCompilerOptionsCurrent,
+      ["packages/public/src/index.ts"],
+      undefined,
+      {
+        previousCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: false },
+        currentCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: true }
+      }
+    ),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
   const defaultPrevious = new Map([
     ["packages/public/src/index.ts", 'export { default as Public } from "./view.js"'],
     ["packages/public/src/view.tsx", "export default function Public(props: { a: string }): string { return props.a }"]
@@ -7162,11 +7489,36 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         record.directory,
         previousRelativeSourceFiles
       )
+      const packageConfigPath = `${record.directory}/tsconfig.json`
+      const baseConfigPath = "tsconfig.base.jsonc"
+      const readConfig = (configText, baseText, sources) =>
+        sources.size === 0
+          ? defaultCompilerOptions
+          : packageCompilerOptions(sources, repositoryRoot, {
+              configText,
+              configFiles: new Map([[`${repositoryRoot}/${baseConfigPath}`, baseText]])
+            })
+      let currentCompilerOptions = defaultCompilerOptions
+      if (currentSources.size > 0) {
+        const currentConfig = yield* fileSystem.readFileString(path.join(repositoryRoot, packageConfigPath))
+        const currentBaseConfig = yield* fileSystem.readFileString(path.join(repositoryRoot, baseConfigPath))
+        currentCompilerOptions = readConfig(currentConfig, currentBaseConfig, currentSources)
+      }
+      let previousCompilerOptions = defaultCompilerOptions
+      if (previousSources.size > 0) {
+        const previousConfig = yield* gitOption(git, ["show", `${mergeBase}:${packageConfigPath}`])
+        const previousBaseConfig = yield* gitOption(git, ["show", `${mergeBase}:${baseConfigPath}`])
+        if (previousConfig === undefined || previousBaseConfig === undefined) {
+          return yield* fail(`${mergeBase}: compiler configuration for ${record.directory} is unavailable`)
+        }
+        previousCompilerOptions = readConfig(previousConfig, previousBaseConfig, previousSources)
+      }
       const callableChanges = yield* Effect.try({
         try: () =>
           publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints, {
-            recursiveDeclarations: unchangedDeclarationKeys(previousSources, currentSources),
-            repositoryRoot
+            currentCompilerOptions,
+            previousCompilerOptions,
+            recursiveDeclarations: unchangedDeclarationKeys(previousSources, currentSources)
           }),
         catch: toPublicCallableChangesError
       })
