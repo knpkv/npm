@@ -183,6 +183,7 @@ const typeSubstitutionBinding = (value, substitutions) => {
 }
 
 const nextCanonicalTypeContext = (context, substitutionPath = context.substitutionPath) => ({
+  ...context,
   depth: context.depth + 1,
   substitutionPath
 })
@@ -347,6 +348,7 @@ const canonicalTypeText = (
   }
   if (TypeScript.isFunctionTypeNode(typeNode)) {
     const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions, context)
+    const genericContext = { ...context, genericScope: generic.childGenericScope }
     return `function<${generic.descriptor}>(${typeNode.parameters
       .map((parameter) =>
         parameterDescriptor(
@@ -355,7 +357,7 @@ const canonicalTypeText = (
           filePath,
           generic.substitutions,
           seen,
-          nextCanonicalTypeContext(context)
+          nextCanonicalTypeContext(genericContext)
         )
       )
       .join(",")}):${
@@ -367,7 +369,7 @@ const canonicalTypeText = (
             filePath,
             generic.substitutions,
             seen,
-            nextCanonicalTypeContext(context)
+            nextCanonicalTypeContext(genericContext)
           )
     }`
   }
@@ -381,9 +383,14 @@ const genericDescriptor = (
   substitutions,
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
+  const genericScope = context.genericScope ?? ""
+  const childGenericScope = genericScope === "" ? "0" : `${genericScope}.0`
   const nextSubstitutions = new Map(substitutions)
   for (const [index, parameter] of (typeParameters ?? []).entries()) {
-    nextSubstitutions.set(parameter.name.text, `generic#${index}`)
+    nextSubstitutions.set(
+      parameter.name.text,
+      genericScope === "" ? `generic#${index}` : `generic#${genericScope}.${index}`
+    )
   }
   const descriptor = (typeParameters ?? [])
     .map((parameter, index) => {
@@ -412,7 +419,7 @@ const genericDescriptor = (
       return `${index}:${constraint}:${defaultType}`
     })
     .join(",")
-  return { descriptor, substitutions: nextSubstitutions }
+  return { childGenericScope, descriptor, substitutions: nextSubstitutions }
 }
 
 const parameterDescriptor = (
@@ -451,23 +458,58 @@ const memberDescriptor = (
   }
   if (TypeScript.isMethodSignature(member)) {
     const generic = genericDescriptor(member.typeParameters, analysis, filePath, substitutions, context)
+    const genericContext = { ...context, genericScope: generic.childGenericScope }
     const parameters = member.parameters
-      .map((parameter) => parameterDescriptor(parameter, analysis, filePath, generic.substitutions, seen, context))
+      .map((parameter) =>
+        parameterDescriptor(
+          parameter,
+          analysis,
+          filePath,
+          generic.substitutions,
+          seen,
+          nextCanonicalTypeContext(genericContext)
+        )
+      )
       .join(",")
     const returnType =
       member.type === undefined
         ? "unknown"
-        : canonicalTypeText(member.type, analysis, filePath, generic.substitutions, seen, context)
+        : canonicalTypeText(
+            member.type,
+            analysis,
+            filePath,
+            generic.substitutions,
+            seen,
+            nextCanonicalTypeContext(genericContext)
+          )
     for (const parameter of member.parameters) {
       if (parameter.type !== undefined) {
         collectDependencies(
-          typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath)
+          typeMembers(
+            parameter.type,
+            analysis,
+            filePath,
+            seen,
+            generic.substitutions,
+            memo,
+            substitutionPath,
+            generic.childGenericScope
+          )
         )
       }
     }
     if (member.type !== undefined) {
       collectDependencies(
-        typeMembers(member.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath)
+        typeMembers(
+          member.type,
+          analysis,
+          filePath,
+          seen,
+          generic.substitutions,
+          memo,
+          substitutionPath,
+          generic.childGenericScope
+        )
       )
     }
     return {
@@ -480,7 +522,18 @@ const memberDescriptor = (
       ? "unknown"
       : canonicalTypeText(member.type, analysis, filePath, substitutions, seen, context)
   if (member.type !== undefined) {
-    collectDependencies(typeMembers(member.type, analysis, filePath, seen, substitutions, memo, substitutionPath))
+    collectDependencies(
+      typeMembers(
+        member.type,
+        analysis,
+        filePath,
+        seen,
+        substitutions,
+        memo,
+        substitutionPath,
+        context.genericScope ?? ""
+      )
+    )
   }
   return { descriptor: `${readonly}${optional}:${type}`, ...dependencies }
 }
@@ -511,18 +564,20 @@ const withSubstitutionDependency = (result, dependency) => ({
   substitutionDependencies: new Set([...result.substitutionDependencies, dependency])
 })
 
-const canonicalMemoEnvironmentKey = (analysis, filePath, substitutions, typeArguments) => {
-  const canonicalSubstitutions = [...substitutions]
-    .toSorted(([left], [right]) => left.localeCompare(right))
-    .map(([name, value]) => {
-      if (Predicate.isString(value)) return [name, value]
-      if (!isTypeSubstitution(value)) {
-        throw new ChangesetCoverageError({
-          reason: `${filePath}: invalid type substitution while canonicalizing memo environment`
+const canonicalMemoEnvironmentKey = (analysis, filePath, substitutions, typeArguments, includeSubstitutions = true) => {
+  const canonicalSubstitutions = includeSubstitutions
+    ? [...substitutions]
+        .toSorted(([left], [right]) => left.localeCompare(right))
+        .map(([name, value]) => {
+          if (Predicate.isString(value)) return [name, value]
+          if (!isTypeSubstitution(value)) {
+            throw new ChangesetCoverageError({
+              reason: `${filePath}: invalid type substitution while canonicalizing memo environment`
+            })
+          }
+          return [name, canonicalTypeText(value.typeNode, analysis, filePath, value.substitutions)]
         })
-      }
-      return [name, canonicalTypeText(value.typeNode, analysis, filePath, value.substitutions)]
-    })
+    : []
   const canonicalArguments = typeArguments.map((argument) =>
     canonicalTypeText(argument, analysis, filePath, substitutions)
   )
@@ -538,15 +593,27 @@ const readTypeMembersMemo = (
   filePath,
   typeArguments = [],
   contextNode = memoKey,
-  analysis
+  analysis,
+  declarationEnvironment = false
 ) => {
   const entries = memo.get(memoKey)
   if (entries === undefined) return undefined
-  const environmentKey = canonicalMemoEnvironmentKey(analysis, filePath, substitutions, typeArguments)
+  const environmentKey = canonicalMemoEnvironmentKey(
+    analysis,
+    filePath,
+    substitutions,
+    typeArguments,
+    !declarationEnvironment
+  )
   const entry = entries.find(
     ({ substitutionEntries, referenceArguments }) =>
-      canonicalMemoEnvironmentKey(analysis, filePath, new Map(substitutionEntries), referenceArguments) ===
-      environmentKey
+      canonicalMemoEnvironmentKey(
+        analysis,
+        filePath,
+        new Map(substitutionEntries),
+        referenceArguments,
+        !declarationEnvironment
+      ) === environmentKey
   )
   if (entry === undefined) return undefined
   if ([...entry.result.declarationDependencies].some((dependency) => seen.has(dependency))) {
@@ -574,7 +641,8 @@ const typeMembers = (
   seen = new Set(),
   substitutions = new Map(),
   memo = new Map(),
-  substitutionPath = new Set()
+  substitutionPath = new Set(),
+  genericScope = ""
 ) => {
   const reference =
     (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) ||
@@ -598,7 +666,7 @@ const typeMembers = (
       memo,
       typeNode,
       substitutions,
-      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath)
+      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
     )
   }
   if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword) {
@@ -606,14 +674,14 @@ const typeMembers = (
       memo,
       typeNode,
       substitutions,
-      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath)
+      typeMembers(typeNode.type, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
     )
   }
   if (TypeScript.isArrayTypeNode(typeNode)) {
     const result = typeMembersResult()
     collectTypeMembersResult(
       result,
-      typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions, memo, substitutionPath),
+      typeMembers(typeNode.elementType, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope),
       false
     )
     result.resolved = false
@@ -628,7 +696,7 @@ const typeMembers = (
       }
       collectTypeMembersResult(
         result,
-        typeMembers(elementType, analysis, filePath, seen, substitutions, memo, substitutionPath),
+        typeMembers(elementType, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope),
         false
       )
     }
@@ -640,7 +708,7 @@ const typeMembers = (
     for (const member of typeNode.types) {
       collectTypeMembersResult(
         result,
-        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath),
+        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope),
         false
       )
     }
@@ -648,13 +716,26 @@ const typeMembers = (
     return writeTypeMembersMemo(memo, typeNode, substitutions, result)
   }
   if (TypeScript.isFunctionTypeNode(typeNode)) {
-    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions)
+    const generic = genericDescriptor(typeNode.typeParameters, analysis, filePath, substitutions, {
+      depth: 0,
+      genericScope,
+      substitutionPath
+    })
     const result = typeMembersResult()
     for (const parameter of typeNode.parameters) {
       if (parameter.type !== undefined) {
         collectTypeMembersResult(
           result,
-          typeMembers(parameter.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath),
+          typeMembers(
+            parameter.type,
+            analysis,
+            filePath,
+            seen,
+            generic.substitutions,
+            memo,
+            substitutionPath,
+            generic.childGenericScope
+          ),
           false
         )
       }
@@ -662,7 +743,16 @@ const typeMembers = (
     if (typeNode.type !== undefined) {
       collectTypeMembersResult(
         result,
-        typeMembers(typeNode.type, analysis, filePath, seen, generic.substitutions, memo, substitutionPath),
+        typeMembers(
+          typeNode.type,
+          analysis,
+          filePath,
+          seen,
+          generic.substitutions,
+          memo,
+          substitutionPath,
+          generic.childGenericScope
+        ),
         false
       )
     }
@@ -674,7 +764,7 @@ const typeMembers = (
     for (const member of typeNode.types) {
       collectTypeMembersResult(
         result,
-        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath)
+        typeMembers(member, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
       )
     }
     return writeTypeMembersMemo(memo, typeNode, substitutions, result)
@@ -686,7 +776,7 @@ const typeMembers = (
         for (const heritageType of clause.types) {
           collectTypeMembersResult(
             result,
-            typeMembers(heritageType, analysis, filePath, seen, substitutions, memo, substitutionPath)
+            typeMembers(heritageType, analysis, filePath, seen, substitutions, memo, substitutionPath, genericScope)
           )
         }
       }
@@ -703,7 +793,7 @@ const typeMembers = (
         filePath,
         substitutions,
         seen,
-        { depth: 0, substitutionPath },
+        { depth: 0, genericScope, substitutionPath },
         memo,
         substitutionPath
       )
@@ -726,20 +816,30 @@ const typeMembers = (
         seen,
         binding.substitutions,
         memo,
-        new Set(substitutionPath).add(binding)
+        new Set(substitutionPath).add(binding),
+        genericScope
       )
       return writeTypeMembersMemo(memo, typeNode, substitutions, withSubstitutionDependency(result, binding))
     }
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
     if (declaration === undefined) {
       const result = typeMembersResult(new Map(), false)
+      let resolvedArgument = false
       for (const argument of typeNode.typeArguments ?? []) {
-        collectTypeMembersResult(
-          result,
-          typeMembers(argument, analysis, filePath, seen, substitutions, memo, substitutionPath),
-          false
+        const argumentResult = typeMembers(
+          argument,
+          analysis,
+          filePath,
+          seen,
+          substitutions,
+          memo,
+          substitutionPath,
+          genericScope
         )
+        if (argumentResult.resolved) resolvedArgument = true
+        collectTypeMembersResult(result, argumentResult, false)
       }
+      result.resolved = resolvedArgument
       return writeTypeMembersMemo(memo, typeNode, substitutions, result)
     }
     const declarationName = declaration.node.name.text
@@ -755,7 +855,8 @@ const typeMembers = (
       filePath,
       typeArguments,
       typeNode,
-      analysis
+      analysis,
+      true
     )
     if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
@@ -779,7 +880,8 @@ const typeMembers = (
             nextSeen,
             nextSubstitutions,
             memo,
-            substitutionPath
+            substitutionPath,
+            genericScope
           ),
           declarationKey
         ),
@@ -799,7 +901,8 @@ const typeMembers = (
             nextSeen,
             nextSubstitutions,
             memo,
-            substitutionPath
+            substitutionPath,
+            genericScope
           ),
           declarationKey
         ),
@@ -811,13 +914,22 @@ const typeMembers = (
     const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
     if (declaration === undefined) {
       const result = typeMembersResult(new Map(), false)
+      let resolvedArgument = false
       for (const argument of typeNode.typeArguments ?? []) {
-        collectTypeMembersResult(
-          result,
-          typeMembers(argument, analysis, filePath, seen, substitutions, memo, substitutionPath),
-          false
+        const argumentResult = typeMembers(
+          argument,
+          analysis,
+          filePath,
+          seen,
+          substitutions,
+          memo,
+          substitutionPath,
+          genericScope
         )
+        if (argumentResult.resolved) resolvedArgument = true
+        collectTypeMembersResult(result, argumentResult, false)
       }
+      result.resolved = resolvedArgument
       return writeTypeMembersMemo(memo, typeNode, substitutions, result)
     }
     const declarationName = declaration.node.name.text
@@ -833,7 +945,8 @@ const typeMembers = (
       filePath,
       typeArguments,
       typeNode,
-      analysis
+      analysis,
+      true
     )
     if (cached !== undefined) return cached
     const nextSeen = new Set(seen).add(declarationKey)
@@ -857,7 +970,8 @@ const typeMembers = (
             nextSeen,
             nextSubstitutions,
             memo,
-            substitutionPath
+            substitutionPath,
+            genericScope
           ),
           declarationKey
         ),
@@ -877,7 +991,8 @@ const typeMembers = (
             nextSeen,
             nextSubstitutions,
             memo,
-            substitutionPath
+            substitutionPath,
+            genericScope
           ),
           declarationKey
         ),
@@ -892,8 +1007,27 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
   const module = analysis.modules.get(filePath)
   if (module === undefined) return new Map()
   const exports = new Map()
-  const addCallable = (name, parameters, returnType, contextualType, typeParameters) => {
-    const callableGeneric = genericDescriptor(typeParameters, analysis, filePath, new Map())
+  const addCallable = (
+    name,
+    parameters,
+    returnType,
+    contextualType,
+    initializerTypeParameters,
+    contextualTypeParameters
+  ) => {
+    const publicTypeParameters = contextualTypeParameters ?? initializerTypeParameters
+    const callableGeneric = genericDescriptor(publicTypeParameters, analysis, filePath, new Map())
+    const callableSubstitutions = new Map(callableGeneric.substitutions)
+    if (contextualTypeParameters !== undefined && initializerTypeParameters !== undefined) {
+      for (const [index, parameter] of initializerTypeParameters.entries()) {
+        const contextualParameter = contextualTypeParameters[index]
+        const canonical =
+          contextualParameter === undefined
+            ? undefined
+            : callableGeneric.substitutions.get(contextualParameter.name.text)
+        if (canonical !== undefined) callableSubstitutions.set(parameter.name.text, canonical)
+      }
+    }
     const contextualParameters = contextualType === undefined ? [] : contextualType.parameters
     const firstParameter = parameters[0]
     const contextualParameter = contextualParameters[0]
@@ -901,7 +1035,16 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
     const properties =
       parameterType === undefined
         ? { members: new Map(), resolved: false }
-        : typeMembers(parameterType, analysis, filePath, new Set(), callableGeneric.substitutions)
+        : typeMembers(
+            parameterType,
+            analysis,
+            filePath,
+            new Set(),
+            callableSubstitutions,
+            new Map(),
+            new Set(),
+            callableGeneric.childGenericScope
+          )
     const contextualReturnType = contextualType?.type
     const effectiveReturnType = returnType ?? contextualReturnType
     exports.set(name, {
@@ -910,7 +1053,11 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
       returnType:
         effectiveReturnType === undefined
           ? undefined
-          : canonicalTypeText(effectiveReturnType, analysis, filePath, callableGeneric.substitutions),
+          : canonicalTypeText(effectiveReturnType, analysis, filePath, callableSubstitutions, new Set(), {
+              depth: 0,
+              genericScope: callableGeneric.childGenericScope,
+              substitutionPath: new Set()
+            }),
       returnResolved: effectiveReturnType !== undefined
     })
   }
@@ -934,12 +1081,13 @@ const callableParameterTypesInSources = (sources, filePath, analysis = analyzeSo
           initializer.parameters,
           initializer.type,
           contextualType,
-          initializer.typeParameters ?? contextualType?.typeParameters
+          initializer.typeParameters,
+          contextualType?.typeParameters
         )
       }
     }
     if (TypeScript.isFunctionDeclaration(node) && node.name !== undefined && hasExportModifier(node)) {
-      addCallable(node.name.text, node.parameters, node.type, undefined, node.typeParameters)
+      addCallable(node.name.text, node.parameters, node.type, undefined, node.typeParameters, undefined)
     }
     TypeScript.forEachChild(node, visit)
   }
@@ -2248,10 +2396,11 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(diamondSources, diamondSources, ["packages/public/src/index.ts"]), [])
-  const genericDiamondTypes = ["type Diamond0<T> = { value: T }"]
+  const genericDiamondTypes = ["type Diamond0<T0> = { value: T0 }"]
   for (let index = 1; index <= 20; index++) {
+    const parameterName = `T${index}`
     genericDiamondTypes.push(
-      `type Diamond${index}<T> = { left: Diamond${index - 1}<T>; right: Diamond${index - 1}<T> }`
+      `type Diamond${index}<${parameterName}> = { left: Diamond${index - 1}<${parameterName}>; right: Diamond${index - 1}<${parameterName}> }`
     )
   }
   const genericDiamondSources = new Map([
@@ -2699,6 +2848,75 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(forwardedGenericPrevious, forwardedGenericConstraintChange, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const nestedGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", "export function Public<T>(props: { cb<U>(value: U): T }): void {}"]
+  ])
+  const nestedGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<Outer>(props: { cb<Inner>(value: Inner): Outer }): void {}"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(nestedGenericPrevious, nestedGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const nestedGenericSwap = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", "export function Public<T>(props: { cb<U>(value: T): U }): void {}"]
+  ])
+  assert.deepEqual(publicCallableChanges(nestedGenericPrevious, nestedGenericSwap, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }
+  ])
+  const contextualGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props<T> = { value: T }\nexport const Public: <T>(props: Props<T>) => void = <T,>(props) => {}"
+    ]
+  ])
+  const contextualGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props<T> = { value: T }\nexport const Public: <T>(props: Props<T>) => void = <U,>(props) => {}"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(contextualGenericPrevious, contextualGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const contextualGenericChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props<T> = { value: T }\nexport const Public: <T>(props: Props<string>) => void = <U,>(props) => {}"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(contextualGenericPrevious, contextualGenericChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const unresolvedWrapperPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = Readonly<{ wrapped: string }> & { label: string }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const unresolvedWrapperCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = Readonly<{ wrapped: string }> & { label: string; extra?: boolean }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(unresolvedWrapperPrevious, unresolvedWrapperCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "addition", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["extra"] }]
   )
   const wrappedGenericChanged = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
