@@ -746,6 +746,32 @@ test("modal Relay focus traversal excludes targetless delegated hosts", async ({
   await expect(close).toBeFocused()
 })
 
+test("modal Relay focus traversal skips delegated descendants without a sequential host", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyNonSequentialDelegatesFocusPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    host.dataset.rlyNonSequentialDelegatesFocusHost = ""
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.tabIndex = -1
+    action.textContent = "Programmatic delegated action"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-non-sequential-delegates-focus-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal excludes content-visibility-hidden shadow descendants", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))

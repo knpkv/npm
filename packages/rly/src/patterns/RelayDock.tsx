@@ -594,7 +594,9 @@ const DockLayer = ({
         seen.add(current)
         const parent = composedParentFor(current, composedParents)
         if (parent === null) return null
-        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true) return parent
+        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true && parent.tabIndex >= 0) {
+          return parent
+        }
         current = parent
       }
       return null
