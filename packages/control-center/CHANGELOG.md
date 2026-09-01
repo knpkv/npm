@@ -1,5 +1,20 @@
 # @knpkv/control-center
 
+## 0.8.0
+
+### Minor Changes
+
+- [#390](https://github.com/knpkv/npm/pull/390) [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead) Thanks [@konopkov](https://github.com/konopkov)! - Add one shared, collapsed Relay dock with durable pull-request threads, visible
+  model and profile selection, and host-to-pull-request continuation.
+
+### Patch Changes
+
+- Updated dependencies [[`dc18f2c`](https://github.com/knpkv/npm/commit/dc18f2c7149cdf6a0b4eee1461d41170311dd5fc), [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead), [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead)]:
+  - @knpkv/codecommit-core@0.15.0
+  - @knpkv/relay-product@0.1.0
+  - @knpkv/rly@0.5.0
+  - @knpkv/review@0.2.1
+
 ## 0.7.0
 
 ### Minor Changes

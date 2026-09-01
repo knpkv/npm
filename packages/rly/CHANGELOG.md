@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.5.0
+
+### Minor Changes
+
+- [#390](https://github.com/knpkv/npm/pull/390) [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead) Thanks [@konopkov](https://github.com/konopkov)! - Add the shared responsive Relay Dock presentation pattern.
+
 ## 0.4.1
 
 ### Patch Changes
