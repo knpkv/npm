@@ -384,7 +384,7 @@ const canonicalTypeText = (
         (!TypeScript.isPropertySignature(member) && !TypeScript.isMethodSignature(member)) ||
         (!TypeScript.isIdentifier(name) && !TypeScript.isStringLiteral(name) && !TypeScript.isNumericLiteral(name))
       ) {
-        return normalizeTypeText(member)
+        failCanonicalType(filePath, member, "unsupported recursive type-literal member")
       }
       const optional = member.questionToken === undefined ? "required" : "optional"
       const readonly = hasReadonlyModifier(member) ? "readonly:" : ""
@@ -2612,6 +2612,32 @@ const runSelfTest = () => {
       }
     ),
     []
+  )
+  const recursiveGenericUnsupportedMemberSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Node<T> = { (value: T): void; next?: Node<T> }\ntype Props = { value: Node<string> }\nexport const Public = (props: Props) => props.value"
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(
+        recursiveGenericUnsupportedMemberSources,
+        recursiveGenericUnsupportedMemberSources,
+        ["packages/public/src/index.ts"],
+        ["packages/public/src/index.ts"],
+        {
+          recursiveDeclarations: unchangedDeclarationKeys(
+            recursiveGenericUnsupportedMemberSources,
+            recursiveGenericUnsupportedMemberSources
+          )
+        }
+      ),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason ===
+        "packages/public/src/view.tsx: unsupported recursive type-literal member while canonicalizing (value: T): void;"
   )
   assert.throws(
     () => publicCallableChanges(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]),
