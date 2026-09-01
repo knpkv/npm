@@ -314,8 +314,11 @@ const WorkBindAddress = Schema.String.check(
   Schema.makeFilter(
     (address) => {
       const octets = address.split(".")
-      return octets.some((octet) => Number(octet) !== 0) &&
-        octets.every((octet) => Number(octet) >= 0 && Number(octet) <= 255)
+      const values = octets.map(Number)
+      return values.some((octet) => octet !== 0) &&
+        values.every(
+          (octet, index) => String(octet) === octets[index] && octet >= 0 && octet <= 255
+        )
     },
     { expected: "a specific IPv4 Work listener address, not a wildcard" }
   )

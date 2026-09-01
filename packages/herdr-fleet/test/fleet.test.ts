@@ -249,7 +249,16 @@ describe("fleet local authority", () => {
         localPort: valid.port
       })
     )).toBe(true)
-    for (const workBindAddress of ["0.0.0.0", "00.00.00.00", "0.0.0.00", "000.000.000.000"]) {
+    for (
+      const workBindAddress of [
+        "0.0.0.0",
+        "00.00.00.00",
+        "0.0.0.00",
+        "000.000.000.000",
+        "010.0.0.1",
+        "192.168.001.024"
+      ]
+    ) {
       expect(Result.isFailure(
         Schema.decodeUnknownResult(HostConfiguration)({
           ...valid,
