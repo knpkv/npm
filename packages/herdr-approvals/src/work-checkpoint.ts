@@ -49,6 +49,9 @@ const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(
   return `http://127.0.0.1:${config.port}`
 })
 
+export const workDefaultTarget = (config: HostConfiguration): HostConfiguration["host"] =>
+  config.crossHost ? config.approvalHub.host : config.host
+
 export const workCheckpointUrl = Effect.fn("Fleetctl.workCheckpointUrl")(function*(
   config: HostConfiguration,
   target: string

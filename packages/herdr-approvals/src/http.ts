@@ -1160,6 +1160,7 @@ export const startHttpServer = async (
 }> => {
   const isHub = config.crossHost &&
     config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
+  const workBindAddress = config.workBindAddress ?? "127.0.0.1"
   const approvalTls = config.approvalTls
   if (isHub && approvalTls === null) {
     throw new FleetValidationError({
@@ -2405,7 +2406,7 @@ export const startHttpServer = async (
     const recoveredJobIds = await Effect.runPromise(service.recover())
     const local = await listen("127.0.0.1", config.localPort, "local")
     if (tailscaleIp === null) {
-      const work = await listen("0.0.0.0", config.port, "work")
+      const work = await listen(workBindAddress, config.port, "work")
       for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
       acceptingRequests = true
       return {

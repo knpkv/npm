@@ -2,7 +2,12 @@ import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
 import type { WorkGoalCheckpoint } from "@knpkv/herdr-work/model"
 import { Effect, Result } from "effect"
-import { workCheckpointFromJson, workCheckpointUrl, workSnapshotUrl } from "../src/work-checkpoint.js"
+import {
+  workCheckpointFromJson,
+  workCheckpointUrl,
+  workDefaultTarget,
+  workSnapshotUrl
+} from "../src/work-checkpoint.js"
 
 const checkpoint: WorkGoalCheckpoint = {
   eventId: "event-work-created",
@@ -62,6 +67,7 @@ describe("fleetctl work commands", () => {
       expect(yield* workSnapshotUrl(config, "ALPHA")).toBe(
         "http://127.0.0.1:4778/v1/work"
       )
+      expect(workDefaultTarget(config)).toBe("ALPHA")
       const remote = yield* Effect.result(workCheckpointUrl(config, "SER8"))
       expect(remote).toMatchObject({
         failure: {
@@ -74,6 +80,7 @@ describe("fleetctl work commands", () => {
   it.effect("targets only the canonical approval hub when cross-host control is enabled", () =>
     Effect.gen(function*() {
       const crossHostConfig = { ...config, crossHost: true }
+      expect(workDefaultTarget(crossHostConfig)).toBe("SER8")
       expect(yield* workCheckpointUrl(crossHostConfig, "ser8")).toBe(
         "https://ser8.example.test:4779/v1/work/checkpoints"
       )

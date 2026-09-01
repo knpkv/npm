@@ -767,7 +767,7 @@ describe("host HTTP authority", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-work-loopback-"))
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
-      const hostConfig = config(root)
+      const hostConfig = { ...config(root), workBindAddress: "127.0.0.2" }
       const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
       const fleet = yield* makeFleetService({
@@ -782,6 +782,21 @@ describe("host HTTP authority", () => {
       )
 
       if (server.workUrl === null) return yield* Effect.die("Work listener missing")
+      const workListenerUrl = new URL(server.workUrl)
+      expect(workListenerUrl.hostname).toBe("127.0.0.2")
+
+      const untrustedInterface = yield* Effect.result(
+        Effect.tryPromise({
+          try: () => fetch(`http://127.0.0.1:${workListenerUrl.port}/v1/work`),
+          catch: (cause) =>
+            new FleetOperationError({
+              cause,
+              detail: String(cause),
+              operation: "probe untrusted Work listener interface"
+            })
+        })
+      )
+      expect(untrustedInterface._tag).toBe("Failure")
 
       const recorded = yield* Effect.promise(() =>
         fetch(`${server.workUrl}/v1/work/checkpoints`, {
