@@ -142,6 +142,7 @@ const makeSandboxService = Effect.gen(function*() {
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
   const activeWorkerIds = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
   const lifecycleAdmission = yield* Semaphore.make(1)
+  const createAdmission = yield* Semaphore.make(1)
   const retiredLegacyIds = yield* Ref.make<ReadonlySet<string>>(new Set())
   const markWorkerActive = (id: string) =>
     Ref.update(activeWorkerIds, (workers) => {
@@ -211,7 +212,7 @@ const makeSandboxService = Effect.gen(function*() {
   })
 
   const retireLegacySandbox = (legacy: SandboxRow) =>
-    Effect.gen(function*() {
+    lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
       const activeWorker = yield* hasActiveWorker(legacy.id)
       if (activeWorker) {
         return yield* new SandboxError({
@@ -261,7 +262,7 @@ const makeSandboxService = Effect.gen(function*() {
         )
       )
       yield* Ref.update(retiredLegacyIds, (ids) => new Set(ids).add(legacy.id))
-    })
+    }))
 
   const markLegacyRetired = (id: SandboxId) =>
     Clock.currentTimeMillis.pipe(
@@ -271,7 +272,7 @@ const makeSandboxService = Effect.gen(function*() {
   const service = {
     create: (params: CreateSandboxParams) =>
       Effect.gen(function*() {
-        yield* Effect.uninterruptible(lifecycleAdmission.take(1))
+        yield* Effect.uninterruptible(createAdmission.take(1))
 
         // Singleton check — one active sandbox per PR
         const existing = yield* repo.findByPr(
@@ -291,9 +292,8 @@ const makeSandboxService = Effect.gen(function*() {
             row.repositoryName === params.repositoryName &&
             row.region === params.region
           )
-        const profileRows = isDiscoveredAwsAccountId(params.awsAccountId)
+        const profileRows = isDiscoveredAwsAccountId(params.awsAccountId) && params.profile !== params.awsAccountId
           ? (yield* repo.findAll()).filter((row) =>
-            row.id !== exactExisting?.id &&
             row.awsAccountId === params.profile &&
             row.pullRequestId === params.pullRequestId &&
             row.repositoryName === params.repositoryName &&
@@ -585,7 +585,7 @@ const makeSandboxService = Effect.gen(function*() {
 
         return yield* repo.findById(id)
       }).pipe(
-        Effect.ensuring(lifecycleAdmission.release(1)),
+        Effect.ensuring(createAdmission.release(1)),
         Effect.mapError((cause) =>
           Predicate.isTagged(cause, "SandboxError")
             ? cause
@@ -704,6 +704,8 @@ const makeSandboxService = Effect.gen(function*() {
 
     reconcile: () =>
       Effect.gen(function*() {
+        yield* Effect.uninterruptible(lifecycleAdmission.take(1))
+
         const active = yield* repo.findActive()
         const all = yield* repo.findAll()
         const activeIds = new Set(active.map((row) => row.id))
@@ -800,7 +802,8 @@ const makeSandboxService = Effect.gen(function*() {
           }), { discard: true })
       }).pipe(
         Effect.as(true),
-        Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause).pipe(Effect.as(false)))
+        Effect.catch((cause) => Effect.logWarning("Sandbox reconcile failed", cause).pipe(Effect.as(false))),
+        Effect.ensuring(lifecycleAdmission.release(1))
       ),
 
     hasLegacyUnauthenticated: () =>
