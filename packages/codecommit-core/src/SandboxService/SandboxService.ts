@@ -270,6 +270,7 @@ const makeSandboxService = Effect.gen(function*() {
         const workspacePath = `${basePath}/${id}`
         const now = new Date(nowMs).toISOString()
 
+        yield* Ref.update(activeWorkerIds, (ids) => new Set(ids).add(String(id)))
         yield* repo.insert({
           id,
           pullRequestId: params.pullRequestId,
@@ -282,10 +283,17 @@ const makeSandboxService = Effect.gen(function*() {
           status: "creating",
           createdAt: now,
           lastActivityAt: now
-        })
+        }).pipe(
+          Effect.tapError(() =>
+            Ref.update(activeWorkerIds, (ids) => {
+              const next = new Set(ids)
+              next.delete(String(id))
+              return next
+            })
+          )
+        )
 
         // Fork daemon for async lifecycle
-        yield* Ref.update(activeWorkerIds, (ids) => new Set(ids).add(String(id)))
         yield* ownerScope.fork(
           Effect.gen(function*() {
             const fs = yield* FileSystem.FileSystem
