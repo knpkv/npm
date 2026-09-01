@@ -62,6 +62,7 @@ const legacyRow: SandboxRow = {
   statusDetail: null,
   logs: null,
   error: null,
+  legacyRetiredAt: null,
   createdAt: "2026-08-10T00:00:00.000Z",
   lastActivityAt: "2026-08-10T00:00:00.000Z"
 }
@@ -198,7 +199,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             status,
             containerId: extra?.containerId ?? row.containerId,
             port: extra?.port ?? row.port,
-            error: extra?.error ?? row.error
+            error: extra?.error ?? row.error,
+            legacyRetiredAt: extra?.legacyRetiredAt ?? row.legacyRetiredAt
           }).pipe(
           Effect.andThen(
             status === "error"
@@ -800,6 +802,31 @@ describe("SandboxWorkerScope", () => {
           expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
         }).pipe(Effect.provide(fixture.layer))
       )
+    }))
+
+  it.effect("does not restart a durably retired legacy row after service recreation", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected",
+          legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+        },
+        restartGate: { started: restartStarted, release: restartRelease }
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.result)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      expect(yield* Deferred.isDone(restartStarted)).toBe(false)
     }))
 
   it.effect("retires a profile-keyed legacy row before account-keyed creation", () =>

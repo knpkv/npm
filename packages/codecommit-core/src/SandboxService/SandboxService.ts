@@ -168,7 +168,7 @@ const makeSandboxService = Effect.gen(function*() {
   const updateStatus = (
     id: SandboxId,
     status: SandboxStatus,
-    extra?: { containerId?: string; port?: number; error?: string }
+    extra?: { containerId?: string; port?: number; error?: string; legacyRetiredAt?: string }
   ) => repo.updateStatus(id, status, extra)
 
   const recordCreationFailure = <UnparsedInput>(id: SandboxId, error: UnparsedInput) =>
@@ -255,9 +255,18 @@ const makeSandboxService = Effect.gen(function*() {
           ),
         { discard: true }
       )
-      yield* updateStatus(SandboxId.make(legacy.id), "stopped")
+      yield* Clock.currentTimeMillis.pipe(
+        Effect.flatMap((ms) =>
+          updateStatus(SandboxId.make(legacy.id), "stopped", { legacyRetiredAt: new Date(ms).toISOString() })
+        )
+      )
       yield* Ref.update(retiredLegacyIds, (ids) => new Set(ids).add(legacy.id))
     }))
+
+  const markLegacyRetired = (id: SandboxId) =>
+    Clock.currentTimeMillis.pipe(
+      Effect.flatMap((ms) => updateStatus(id, "stopped", { legacyRetiredAt: new Date(ms).toISOString() }))
+    )
 
   const service = {
     create: (params: CreateSandboxParams) =>
@@ -338,7 +347,7 @@ const makeSandboxService = Effect.gen(function*() {
                   () => Effect.void
                 )
               ), { discard: true })
-            yield* updateStatus(SandboxId.make(legacy.id), "stopped")
+            yield* markLegacyRetired(SandboxId.make(legacy.id))
             return Option.none<SandboxRow>()
           }), { concurrency: 1 })
         const unauthenticated = legacyResults.find(Option.isSome)
@@ -607,51 +616,69 @@ const makeSandboxService = Effect.gen(function*() {
       ),
 
     restart: (id: SandboxId) =>
-      Effect.gen(function*() {
-        const { containerId, row } = yield* lifecycleAdmission.withPermits(1)(
+      Effect.uninterruptibleMask((restore) =>
+        Effect.acquireUseRelease(
           Effect.gen(function*() {
-            const row = yield* repo.findById(id)
-            const wasRetired = yield* Ref.get(retiredLegacyIds).pipe(Effect.map((ids) => ids.has(String(id))))
-            if (wasRetired) {
-              return yield* new SandboxError({
-                sandboxId: id,
-                message: "Legacy sandbox was retired; create a replacement"
-              })
+            yield* lifecycleAdmission.take(1)
+            return {
+              permitReleased: yield* Ref.make(false),
+              workerMarked: yield* Ref.make(false)
             }
-            if (row.accessPassword === null) {
-              return yield* new SandboxError({
-                sandboxId: id,
-                message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
-              })
-            }
-            if (row.containerId === null) {
-              return yield* new SandboxError({ sandboxId: id, message: "No container to restart" })
-            }
-            yield* markWorkerActive(String(id))
-            return { row, containerId: row.containerId }
-          })
+          }),
+          ({ permitReleased, workerMarked }) =>
+            Effect.gen(function*() {
+              const row = yield* repo.findById(id)
+              const wasRetired = yield* Ref.get(retiredLegacyIds).pipe(Effect.map((ids) => ids.has(String(id))))
+              if (wasRetired || row.legacyRetiredAt !== null) {
+                return yield* new SandboxError({
+                  sandboxId: id,
+                  message: "Legacy sandbox was retired; create a replacement"
+                })
+              }
+              if (row.accessPassword === null) {
+                return yield* new SandboxError({
+                  sandboxId: id,
+                  message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
+                })
+              }
+              if (row.containerId === null) {
+                return yield* new SandboxError({ sandboxId: id, message: "No container to restart" })
+              }
+              const containerId = row.containerId
+              yield* markWorkerActive(String(id))
+              yield* Ref.set(workerMarked, true)
+              yield* lifecycleAdmission.release(1)
+              yield* Ref.set(permitReleased, true)
+              yield* restore(
+                Effect.gen(function*() {
+                  yield* updateStatus(id, "starting")
+                  yield* progress(id, "Restarting container")
+                  yield* docker.startContainer(containerId)
+                  yield* updateStatus(id, "starting", row.port !== null ? { port: row.port } : {})
+                  yield* progress(id, "Waiting for code-server health check")
+
+                  yield* docker.exec(containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
+                    Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
+                    Effect.tap(() => progress(id, "code-server ready")),
+                    Effect.catchIf(() => true, () => Effect.void)
+                  )
+
+                  const ctx = makeSandboxContext(yield* repo.findById(id))
+                  yield* plugins.executeHook("onSandboxReady", ctx)
+
+                  yield* updateStatus(id, "running")
+                  yield* progress(id, "Sandbox restarted")
+                  yield* Effect.logInfo(`Sandbox ${id} restarted`)
+                })
+              )
+            }),
+          ({ permitReleased, workerMarked }) =>
+            Effect.gen(function*() {
+              if (!(yield* Ref.getAndSet(permitReleased, true))) yield* lifecycleAdmission.release(1)
+              if (yield* Ref.getAndSet(workerMarked, false)) yield* releaseWorker(String(id))
+            })
         )
-        yield* Effect.gen(function*() {
-          yield* updateStatus(id, "starting")
-          yield* progress(id, "Restarting container")
-          yield* docker.startContainer(containerId)
-          yield* updateStatus(id, "starting", row.port !== null ? { port: row.port } : {})
-          yield* progress(id, "Waiting for code-server health check")
-
-          yield* docker.exec(containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
-            Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
-            Effect.tap(() => progress(id, "code-server ready")),
-            Effect.catchIf(() => true, () => Effect.void)
-          )
-
-          const ctx = makeSandboxContext(yield* repo.findById(id))
-          yield* plugins.executeHook("onSandboxReady", ctx)
-
-          yield* updateStatus(id, "running")
-          yield* progress(id, "Sandbox restarted")
-          yield* Effect.logInfo(`Sandbox ${id} restarted`)
-        }).pipe(Effect.ensuring(releaseWorker(String(id))))
-      }).pipe(
+      ).pipe(
         Effect.mapError((cause) => new SandboxError({ sandboxId: id, message: "Failed to restart sandbox", cause }))
       ),
 
@@ -722,7 +749,7 @@ const makeSandboxService = Effect.gen(function*() {
                     () => Effect.void
                   )
                 ), { discard: true })
-              yield* updateStatus(SandboxId.make(row.id), "stopped")
+              yield* markLegacyRetired(SandboxId.make(row.id))
               yield* Effect.logInfo(`Reconciled regionless sandbox ${row.id}`)
               return
             }
