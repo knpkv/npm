@@ -906,6 +906,7 @@ describe("CodeCommit web security boundary", () => {
       pullRequestId: "42",
       awsAccountId: "123456789012",
       repositoryName: "repo",
+      region: "eu-west-1",
       sourceBranch: "feature",
       accessPassword: "server-private-password",
       containerId: "container",

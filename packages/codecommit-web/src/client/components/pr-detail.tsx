@@ -26,7 +26,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
-import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
+import { AwsRegion, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -44,7 +44,7 @@ import {
   Text,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
-import { Option } from "effect"
+import { Option, Schema } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
@@ -836,11 +836,19 @@ export function PRDetail() {
   useEffect(() => {
     if (pr !== null || accountId === undefined || accountId.length === 0 || prId === undefined || prId.length === 0)
       return
+    const repositoryName = searchParams.get("repository")
+    const regionValue = searchParams.get("region")
+    const region =
+      regionValue === null ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(AwsRegion)(regionValue))
+    if (repositoryName === null || region === undefined || repositoryName.length === 0) return
     const key = `${accountId}:${prId}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({ params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
-  }, [pr, accountId, prId, refreshSingle])
+    refreshSingle({
+      params: { awsAccountId: accountId, prId: PullRequestId.make(prId) },
+      query: { region, repositoryName }
+    })
+  }, [pr, accountId, prId, refreshSingle, searchParams])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -986,17 +994,31 @@ export function PRDetail() {
     [commentNavigationIdentity, pr?.commentCount]
   )
   const refreshAfterApprovalMutation = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    if (pr === null || accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0)
+      return
+    void refreshSingleWithResult({
+      params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) },
+      query: { region: pr.account.region, repositoryName: pr.repositoryName }
+    }).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
-  }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
+  }, [accountKey, invalidateReview, pr, prId, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0 || isRefreshing)
+    if (
+      pr === null ||
+      accountKey === undefined ||
+      accountKey.length === 0 ||
+      prId === undefined ||
+      prId.length === 0 ||
+      isRefreshing
+    )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    void refreshSingleWithResult({
+      params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) },
+      query: { region: pr.account.region, repositoryName: pr.repositoryName }
+    }).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1008,7 +1030,7 @@ export function PRDetail() {
         })
       }
     )
-  }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
+  }, [accountKey, invalidateReview, isRefreshing, pr, prId, refreshSingleWithResult])
 
   // Copy console URL
   const consoleUrl =
@@ -1035,11 +1057,18 @@ export function PRDetail() {
   const createSandbox = useAtomSet(createSandboxAtom)
   const existingSandbox = useMemo(
     () =>
-      state.sandboxes?.find(
-        (s) =>
-          s.pullRequestId === prId && s.awsAccountId === accountId && s.status !== "stopped" && s.status !== "error"
-      ),
-    [state.sandboxes, prId, accountId]
+      pr === null
+        ? undefined
+        : state.sandboxes?.find(
+            (s) =>
+              s.pullRequestId === String(pr.id) &&
+              s.awsAccountId === (pr.account.awsAccountId ?? accountId) &&
+              s.repositoryName === String(pr.repositoryName) &&
+              s.region === String(pr.account.region) &&
+              s.status !== "stopped" &&
+              s.status !== "error"
+          ),
+    [accountId, pr, state.sandboxes]
   )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)

@@ -19,13 +19,13 @@ import { ConfigService } from "../ConfigService/index.js"
 import type { AppState, AwsProfileName, PRCommentLocation, PullRequestId } from "../Domain.js"
 import { decodeCachedPR } from "./internal.js"
 import { makeRefresh, type RefreshDeps } from "./refresh.js"
-import { makeRefreshSinglePR } from "./refreshSinglePR.js"
+import { makeRefreshSinglePR, type RefreshSinglePRCoordinates } from "./refreshSinglePR.js"
 import { makeSetAllAccounts } from "./setAllAccounts.js"
 import { makeToggleAccount } from "./toggleAccount.js"
 
 export type { SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
-export type { RefreshSinglePRError, RefreshSinglePRResult } from "./refreshSinglePR.js"
+export type { RefreshSinglePRCoordinates, RefreshSinglePRError, RefreshSinglePRResult } from "./refreshSinglePR.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition
@@ -106,7 +106,11 @@ const makePRService = Effect.gen(function*() {
       commentRepo.find(awsAccountId, prId).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       ),
-    refreshSinglePR: (awsAccountId: string, prId: PullRequestId) => provide(refreshSinglePR(awsAccountId, prId))
+    refreshSinglePR: (
+      awsAccountId: string,
+      prId: PullRequestId,
+      coordinates: RefreshSinglePRCoordinates
+    ) => provide(refreshSinglePR(awsAccountId, prId, coordinates))
   }
 })
 

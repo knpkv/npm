@@ -82,6 +82,7 @@ const SandboxWire = Schema.Struct({
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
+  region: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
@@ -204,7 +205,7 @@ export function useSSE(
                   id: `notif-${n.id}`,
                   description: n.message,
                   duration: 8000,
-                  action: n.awsAccountId && n.pullRequestId
+                  action: n.awsAccountId.length > 0 && n.pullRequestId.length > 0
                     ? {
                       label: "View",
                       onClick: () => toastClickRef.current?.(`/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`)
@@ -259,7 +260,7 @@ export function useSSE(
     return () => {
       disposed = true
       es?.close()
-      if (retryTimeout) clearTimeout(retryTimeout)
+      if (retryTimeout !== null) clearTimeout(retryTimeout)
     }
   }, [])
 

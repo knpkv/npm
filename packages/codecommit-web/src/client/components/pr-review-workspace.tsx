@@ -94,6 +94,11 @@ const MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS = 4_000_000
 const MAXIMUM_RENDERABLE_DIFF_INPUT_BYTES = 512 * 1024
 const diffTextEncoder = new TextEncoder()
 
+const pullRequestApiQuery = (pullRequest: Pick<Domain.PullRequest, "repositoryName" | "account">): string =>
+  `?repositoryName=${encodeURIComponent(String(pullRequest.repositoryName))}&region=${encodeURIComponent(
+    String(pullRequest.account.region)
+  )}`
+
 const browserRelayReviewSessionLock = (): RelayReviewSessionLock | null => {
   if (!("locks" in window.navigator)) return null
   return {
@@ -351,6 +356,8 @@ const LoadedFileDiff = ({
   onContentStateChange,
   onNavigateToComment,
   pullRequestId,
+  region,
+  repositoryName,
   revisionId,
   wrap
 }: {
@@ -365,6 +372,8 @@ const LoadedFileDiff = ({
   readonly onContentStateChange: (fileIndex: number, content: RlyDiffFileContent) => void
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequestId: Domain.PullRequestId
+  readonly region: Domain.AwsRegion
+  readonly repositoryName: string
   readonly revisionId: string
   readonly wrap: boolean
 }): ReactElement => {
@@ -372,10 +381,10 @@ const LoadedFileDiff = ({
     () =>
       ApiClient.query("prs", "diffContent", {
         params: { awsAccountId: accountId, prId: pullRequestId, fileIndex: file.index },
-        query: { revisionId, baseCommit, headCommit },
+        query: { baseCommit, headCommit, region, repositoryName, revisionId },
         timeToLive: "10 seconds"
       }),
-    [accountId, baseCommit, file.index, headCommit, pullRequestId, revisionId]
+    [accountId, baseCommit, file.index, headCommit, pullRequestId, region, repositoryName, revisionId]
   )
   const content = useAtomValue(contentAtom)
   const observedContentState = AsyncResult.isFailure(content)
@@ -1300,12 +1309,12 @@ const ReadyReviewWorkspace = ({
   const executeReview = useCallback(async (): Promise<void> => {
     if (selectedProfile === undefined) return
     const outcome = await runStream(
-      `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream`,
+      `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream${pullRequestApiQuery(pullRequest)}`,
       {
         revisionId: diff.revisionId,
         baseCommit: diff.baseCommit,
         headCommit: diff.headCommit,
-        profile: selectedProfile
+        profile: { ...selectedProfile, kind: selectedKind }
       }
     )
     if (outcome.completed) {
@@ -1316,9 +1325,10 @@ const ReadyReviewWorkspace = ({
     diff.baseCommit,
     diff.headCommit,
     diff.revisionId,
-    pullRequest.id,
+    pullRequest,
     persistReviewSnapshot,
     runStream,
+    selectedKind,
     selectedProfile
   ])
 
@@ -1349,7 +1359,7 @@ const ReadyReviewWorkspace = ({
       }
       const currentTurns = turnsRef.current
       const outcome = await runStream(
-        `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue`,
+        `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue${pullRequestApiQuery(pullRequest)}`,
         {
           revisionId: diff.revisionId,
           baseCommit: diff.baseCommit,
@@ -1381,7 +1391,7 @@ const ReadyReviewWorkspace = ({
       setMessage("")
       return { _tag: "completed" }
     },
-    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, review, reviewIsStale, runStream]
+    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest, review, reviewIsStale, runStream]
   )
 
   const postFinding = useCallback(
@@ -1395,7 +1405,11 @@ const ReadyReviewWorkspace = ({
         if (!(await persistDispositions(posting))) return
         try {
           const receipt = await postFindingRequest({
-            params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
+            params: { awsAccountId: accountId, findingId: finding.id, prId: pullRequest.id },
+            query: {
+              region: pullRequest.account.region,
+              repositoryName: pullRequest.repositoryName
+            },
             payload: {
               revisionId: review.revisionId,
               baseCommit: review.baseCommit,
@@ -1447,7 +1461,7 @@ const ReadyReviewWorkspace = ({
       onFindingPosted,
       persistDispositions,
       postFindingRequest,
-      pullRequest.id,
+      pullRequest,
       review,
       reviewIsStale,
       reviewSessionKey
@@ -1567,6 +1581,8 @@ const ReadyReviewWorkspace = ({
                   onContentStateChange={updateContentState}
                   onNavigateToComment={onNavigateToComment}
                   pullRequestId={pullRequest.id}
+                  region={pullRequest.account.region}
+                  repositoryName={pullRequest.repositoryName}
                   revisionId={diff.revisionId}
                   wrap={wrap}
                 />
@@ -1888,10 +1904,21 @@ export const PullRequestReviewWorkspace = ({
     () =>
       ApiClient.query("prs", "diff", {
         params: { awsAccountId: accountId, prId: pullRequest.id },
-        serializationKey: `${accountId}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}:${String(refreshGeneration)}`,
+        query: {
+          region: pullRequest.account.region,
+          repositoryName: pullRequest.repositoryName
+        },
+        serializationKey: `${accountId}:${pullRequest.account.region}:${pullRequest.repositoryName}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}:${String(refreshGeneration)}`,
         timeToLive: "30 seconds"
       }),
-    [accountId, pullRequest.id, pullRequest.lastModifiedDate, refreshGeneration]
+    [
+      accountId,
+      pullRequest.account.region,
+      pullRequest.id,
+      pullRequest.lastModifiedDate,
+      pullRequest.repositoryName,
+      refreshGeneration
+    ]
   )
   const diff = useAtomValue(diffAtom)
   const pullRequestIdentity = `${canonicalReviewAccountId(pullRequest.account)}:${String(pullRequest.repositoryName)}:${String(

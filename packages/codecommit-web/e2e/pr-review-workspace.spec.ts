@@ -271,7 +271,7 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -295,7 +295,9 @@ const routeReviewWorkspace = async (
     expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
-      headCommit: "b".repeat(40)
+      headCommit: "b".repeat(40),
+      repositoryName: "payments-api",
+      region: "eu-west-1"
     })
     await route.fulfill({
       body: JSON.stringify({
@@ -309,7 +311,7 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream*", async (route) => {
     reviewRunCount += 1
     await options?.runGate?.(reviewRunCount)
     await reviewGate
@@ -383,7 +385,7 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post*", async (route) => {
     const finding = route.request().postDataJSON().finding
     findingPostCount += 1
     options?.onPost?.(findingPostCount)
@@ -402,7 +404,7 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     onContinue?.(payload)
     await route.fulfill({
@@ -531,6 +533,33 @@ test("renders a substantive Relay explanation", async ({ page }) => {
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByRole("heading", { name: "Change explanation" })).toBeVisible()
   await expect(page.getByText("The patch raises the retry budget used by the payment request flow.")).toBeVisible()
+})
+
+test("sends the selected Relay review focus with the configured profile", async ({ page }) => {
+  const runs: Array<RelayRunPayload> = []
+  const streamUrls: Array<string> = []
+  page.on("request", (request) => {
+    if (request.url().includes("/relay-review/stream")) streamUrls.push(request.url())
+  })
+  await routeReviewWorkspace(page, "review", undefined, undefined, { onRun: (payload) => runs.push(payload) })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  const relayPane = page.getByRole("complementary", { name: "Relay findings" })
+  const focuses: ReadonlyArray<{ readonly label: string; readonly kind: "security" | "tests" | "explain" }> = [
+    { label: "Security", kind: "security" },
+    { label: "Tests", kind: "tests" },
+    { label: "Explain", kind: "explain" }
+  ]
+  for (const [index, focus] of focuses.entries()) {
+    await relayPane.getByRole("button", { name: focus.label, exact: true }).click()
+    await relayPane.getByRole("button", { name: index === 0 ? "Run Relay" : "Run again" }).click()
+    await expect.poll(() => runs.length).toBe(index + 1)
+    expect(runs[index]?.profile.kind).toBe(focus.kind)
+  }
+  const streamUrl = streamUrls[0]
+  expect(streamUrl).toBeDefined()
+  expect(new URL(streamUrl ?? "http://localhost").searchParams.get("repositoryName")).toBe("payments-api")
+  expect(new URL(streamUrl ?? "http://localhost").searchParams.get("region")).toBe("eu-west-1")
 })
 
 test("restores the exact profile and roundtrips its model-owned execution", async ({ page }) => {
@@ -695,7 +724,7 @@ test("preserves completed conversations when a rerun fails", async ({ page }) =>
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
 
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream*", async (route) => {
     await route.fulfill({ body: "Relay rerun unavailable", contentType: "text/plain", status: 500 })
   })
   await page.getByRole("button", { name: "Run again" }).click()
@@ -717,7 +746,7 @@ test("preserves completed conversations when a rerun fails", async ({ page }) =>
 test("retries a failed continuation without persisting the failed turn", async ({ page }) => {
   const continuations: Array<RelayContinuePayload> = []
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     continuations.push(payload)
     if (continuations.length === 1) {
@@ -767,7 +796,7 @@ test("retries a failed continuation without persisting the failed turn", async (
 
 test("keeps the prior review session atomic when frames follow completion", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     await route.fulfill({
       body: [
@@ -854,7 +883,7 @@ test("keeps the prior review session atomic when frames follow completion", asyn
 
 test("commits a staged continuation after clean EOF", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     await route.fulfill({
       body: `${
@@ -903,7 +932,7 @@ test("commits a staged continuation after clean EOF", async ({ page }) => {
 
 test("keeps a continuation reply visible when its finding is withdrawn", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     await route.fulfill({
       body: `${
@@ -1463,7 +1492,7 @@ test("preserves manual approver input when the repository account is unavailable
 test("clears a failed publication error after a successful retry", async ({ page }) => {
   let attempts = 0
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post*", async (route) => {
     attempts++
     if (attempts === 1) {
       await route.fulfill({ body: JSON.stringify({ message: "Provider rejected the comment." }), status: 500 })
@@ -1491,7 +1520,7 @@ test("clears a failed publication error after a successful retry", async ({ page
 
 test("keeps an initial diff failure blocking when no exact workspace was retained", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({ body: "diff unavailable", contentType: "text/plain", status: 500 })
   })
   await page.goto("/accounts/111111111111/prs/42")
@@ -1503,7 +1532,7 @@ test("keeps an initial diff failure blocking when no exact workspace was retaine
 test("rejects description-target findings before presenting a post action", async ({ page }) => {
   let postAttempts = 0
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream*", async (route) => {
     const payload = decodeRelayRunPayload(route.request().postDataJSON())
     await route.fulfill({
       body: JSON.stringify({
@@ -1535,7 +1564,7 @@ test("rejects description-target findings before presenting a post action", asyn
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post*", async (route) => {
     postAttempts++
     await route.abort()
   })
@@ -1572,7 +1601,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream*", async (route) => {
     const payload = decodeRelayRunPayload(route.request().postDataJSON())
     await route.fulfill({
       body: JSON.stringify({
@@ -1624,7 +1653,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     diffRequestCount++
     if (currentRevision === "revision-2" && changedDiffFailures === 0) {
       changedDiffFailures++
@@ -1664,7 +1693,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+  await page.route("**/api/prs/111111111111/42/refresh*", async (route) => {
     if (manualRefreshRequested) {
       manualRefreshCount++
       if (manualRefreshCount === 1) {
@@ -1734,7 +1763,7 @@ test("drops exceptional file state when the exact revision changes", async ({ pa
   let manualRefreshRequested = false
   const replacementContent = Promise.withResolvers<void>()
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     const replacement = currentRevision === "revision-2"
     await route.fulfill({
       body: JSON.stringify({
@@ -1794,7 +1823,7 @@ test("drops exceptional file state when the exact revision changes", async ({ pa
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+  await page.route("**/api/prs/111111111111/42/refresh*", async (route) => {
     if (manualRefreshRequested) currentRevision = "revision-2"
     await route.fulfill({
       body: JSON.stringify({ revisionId: currentRevision, headCommit: "c".repeat(40) }),
@@ -1838,7 +1867,7 @@ test("invalidates approver refreshes once per observed head without polling chur
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     diffRequestCount++
     await route.fulfill({
       body: JSON.stringify({
@@ -1877,7 +1906,7 @@ test("invalidates approver refreshes once per observed head without polling chur
     approvalRequests++
     await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
   })
-  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+  await page.route("**/api/prs/111111111111/42/refresh*", async (route) => {
     refreshRequestCount++
     if (approvalRequests > 0) currentRevision = "revision-2"
     await route.fulfill({
@@ -1932,7 +1961,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/*/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/*/diff*", async (route) => {
     const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
     if (pullRequestId === "43" && holdSecondPullRequestDiff) await heldSecondPullRequestDiff.promise
     await route.fulfill({
@@ -2077,7 +2106,7 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/*/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/*/diff*", async (route) => {
     const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
     await route.fulfill({
       body: JSON.stringify({
@@ -2112,7 +2141,7 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/111111111111/42/relay-review/stream*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ message: "Relay failed for PR 42." }),
       contentType: "application/json",
@@ -2151,7 +2180,7 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2208,7 +2237,7 @@ test("reflects loaded exceptional content states in the file tree", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2286,7 +2315,7 @@ test("uses a bounded fallback for newline- and byte-dense files", async ({ page 
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2363,7 +2392,7 @@ test("renders small disjoint and large append-only changes within the complexity
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2427,7 +2456,7 @@ test("evicts inactive file content while retaining same-file rerenders", async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",

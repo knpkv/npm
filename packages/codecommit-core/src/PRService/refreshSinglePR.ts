@@ -59,26 +59,53 @@ export interface RefreshSinglePRResult {
   readonly revisionId: string
   readonly sourceCommit: string
 }
+export interface RefreshSinglePRCoordinates {
+  readonly repositoryName: string
+  readonly region: AwsRegion
+}
 export type RefreshSinglePRError = AwsClientError | RefreshError
 
-/** Resolve profile/region from any cached PR with matching awsAccountId, or from config */
-const resolveAccountFromCache = (prRepo: PullRequestRepoContract, awsAccountId: string) =>
+const matchesAccount = (
+  account: {
+    readonly awsAccountId?: string | undefined
+    readonly repoAccountId?: string | null | undefined
+    readonly profile?: string | undefined
+  },
+  awsAccountId: string
+): boolean =>
+  account.awsAccountId === awsAccountId || account.repoAccountId === awsAccountId || account.profile === awsAccountId
+
+/** Resolve profile/region from the exact cached provider coordinates, or from config. */
+const resolveAccountFromCache = (
+  prRepo: PullRequestRepoContract,
+  awsAccountId: string,
+  prId: PullRequestId,
+  coordinates: RefreshSinglePRCoordinates
+) =>
   Effect.gen(function*() {
-    // Check other cached PRs from the same AWS account
     const allCached = yield* prRepo.findAll().pipe(
       Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([]))
     )
-    const sibling = allCached.find((p) => p.awsAccountId === awsAccountId)
-    if (sibling) {
+    const sibling = allCached.find(
+      (p) =>
+        p.id === prId &&
+        matchesAccount({
+          awsAccountId: p.awsAccountId,
+          repoAccountId: p.repoAccountId,
+          profile: p.accountProfile
+        }, awsAccountId) &&
+        p.repositoryName === coordinates.repositoryName &&
+        p.accountRegion === coordinates.region
+    )
+    if (sibling !== undefined) {
       return resolvedAccount(sibling.accountProfile, sibling.accountRegion)
     }
 
-    // Fall back to config — match by profile name (awsAccountId might be the profile name from URL)
     const configService = yield* ConfigService
     const config = yield* configService.load.pipe(Effect.catch(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
-    if (configAccount && configAccount.regions?.[0]) {
-      return resolvedAccount(configAccount.profile, configAccount.regions[0])
+    if (configAccount !== undefined && configAccount.regions.includes(coordinates.region)) {
+      return resolvedAccount(configAccount.profile, coordinates.region)
     }
 
     return undefined
@@ -87,31 +114,51 @@ const resolveAccountFromCache = (prRepo: PullRequestRepoContract, awsAccountId: 
 export const makeRefreshSinglePR = (
   state: PRState
 ) => {
-  const refreshSinglePR = Effect.fn("PRService.refreshSinglePR")(function*(awsAccountId: string, prId: PullRequestId) {
+  const refreshSinglePR = Effect.fn("PRService.refreshSinglePR")(function*(
+    awsAccountId: string,
+    prId: PullRequestId,
+    coordinates: RefreshSinglePRCoordinates
+  ) {
     const awsClient = yield* AwsClient
     const prRepo = yield* PullRequestRepo
     const commentRepo = yield* CommentRepo
     const notificationRepo = yield* NotificationRepo
     const subscriptionRepo = yield* SubscriptionRepo
 
-    // Find PR in state to get account info
     const currentState = yield* SubscriptionRef.get(state)
-    const pr = currentState.pullRequests.find((p) => p.id === prId && p.account.awsAccountId === awsAccountId)
+    const pr = currentState.pullRequests.find(
+      (p) =>
+        p.id === prId &&
+        matchesAccount(p.account, awsAccountId) &&
+        p.repositoryName === coordinates.repositoryName &&
+        p.account.region === coordinates.region
+    )
 
-    // Also check cache
-    const cachedPR = yield* prRepo.findByAccountAndId(awsAccountId, prId).pipe(
-      Effect.map((row) => Option.some(row)),
+    const cachedPR = yield* prRepo.findAll().pipe(
+      Effect.map((rows) => {
+        const match = rows.find(
+          (row) =>
+            row.id === prId &&
+            matchesAccount({
+              awsAccountId: row.awsAccountId,
+              repoAccountId: row.repoAccountId,
+              profile: row.accountProfile
+            }, awsAccountId) &&
+            row.repositoryName === coordinates.repositoryName &&
+            row.accountRegion === coordinates.region
+        )
+        return match === undefined ? Option.none<CachedPullRequest>() : Option.some(match)
+      }),
       Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
     )
 
-    // Resolve account: from state PR → cached PR → any cached PR with same awsAccountId → config
-    const account: ResolvedAccount | undefined = pr
+    const account: ResolvedAccount | undefined = pr !== undefined
       ? resolvedAccount(pr.account.profile, pr.account.region)
-      : Option.isSome(cachedPR)
+      : Option.isSome(cachedPR) === true
       ? resolvedAccount(cachedPR.value.accountProfile, cachedPR.value.accountRegion)
-      : yield* resolveAccountFromCache(prRepo, awsAccountId)
+      : yield* resolveAccountFromCache(prRepo, awsAccountId, prId, coordinates)
 
-    if (!account) return yield* new RefreshError({ failedAccounts: [awsAccountId] })
+    if (account === undefined) return yield* new RefreshError({ failedAccounts: [awsAccountId] })
 
     // Fetch fresh PR details
     const detail = yield* awsClient.getPullRequest({
@@ -143,8 +190,8 @@ export const makeRefreshSinglePR = (
       status: decodePullRequestStatus(detail.status),
       sourceBranch: detail.sourceBranch,
       destinationBranch: detail.destinationBranch,
-      isMergeable: cached ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
-      isApproved: cached ? (cached.isApproved ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
+      isMergeable: cached !== undefined ? (cached.isMergeable ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
+      isApproved: cached !== undefined ? (cached.isApproved ? 1 : 0) : detail.status === "MERGED" ? 1 : 0,
       commentCount: countAllComments(locs),
       link: cached?.link ?? pr?.link ?? codecommitConsoleUrl(account.region, detail.repositoryName, prId),
       approvedBy: detail.approvedBy,
@@ -203,7 +250,8 @@ export const makeRefreshSinglePR = (
 
   return (
     awsAccountId: string,
-    prId: PullRequestId
+    prId: PullRequestId,
+    coordinates: RefreshSinglePRCoordinates
   ): Effect.Effect<RefreshSinglePRResult, RefreshSinglePRError, RefreshSinglePREnv> =>
-    refreshSinglePR(awsAccountId, prId)
+    refreshSinglePR(awsAccountId, prId, coordinates)
 }

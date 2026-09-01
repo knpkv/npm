@@ -18,6 +18,7 @@ const sandboxState = (logs: string) =>
         port: 8080,
         pullRequestId: "42",
         repositoryName: "payments-api",
+        region: "eu-west-1",
         sourceBranch: "feature/safe-retries",
         status: "running",
         statusDetail: null
