@@ -41,6 +41,8 @@ export interface DiffablePR {
   readonly commentCount?: number | null | undefined
 }
 
+const isEnabled = (value: boolean | number): boolean => value === true || value === 1
+
 export const diffPR = (
   cached: DiffablePR,
   fresh: DiffablePR,
@@ -64,21 +66,26 @@ export const diffPR = (
     }
   }
 
-  if ((fresh.isApproved === true) !== (cached.isApproved === true)) {
+  const freshApproved = isEnabled(fresh.isApproved)
+  const cachedApproved = isEnabled(cached.isApproved)
+  const freshMergeable = isEnabled(fresh.isMergeable)
+  const cachedMergeable = isEnabled(cached.isMergeable)
+
+  if (freshApproved !== cachedApproved) {
     notifications.push({
       ...base,
       type: "approval_changed",
       title: fresh.title,
-      message: `Approval ${fresh.isApproved === true ? "granted" : "revoked"} on ${label}`
+      message: `Approval ${freshApproved ? "granted" : "revoked"} on ${label}`
     })
   }
 
-  if ((fresh.isMergeable === true) !== (cached.isMergeable === true)) {
+  if (freshMergeable !== cachedMergeable) {
     notifications.push({
       ...base,
       type: "merge_changed",
       title: fresh.title,
-      message: `${label} is ${fresh.isMergeable === true ? "now mergeable" : "no longer mergeable"}`
+      message: `${label} is ${freshMergeable ? "now mergeable" : "no longer mergeable"}`
     })
   }
 
@@ -97,7 +104,7 @@ export const diffPR = (
 
   if (fresh.status !== cached.status) {
     // CodeCommit sets isMergeable=false after merge, so CLOSED+!isMergeable = merged
-    if (fresh.status === "CLOSED" && fresh.isMergeable !== true) {
+    if (fresh.status === "CLOSED" && !freshMergeable) {
       notifications.push({ ...base, type: "pr_merged", title: fresh.title, message: `${label} was merged` })
     } else if (fresh.status === "CLOSED") {
       notifications.push({ ...base, type: "pr_closed", title: fresh.title, message: `${label} was closed` })

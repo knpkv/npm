@@ -98,6 +98,22 @@ const makeSandboxRepo = Effect.gen(function*() {
             LIMIT 1`
   })
 
+  const findRegionlessByPrAll_ = SqlSchema.findAll({
+    Result: SandboxRow,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT * FROM sandboxes
+            WHERE aws_account_id = ${req.awsAccountId}
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name = ${req.repositoryName}
+              AND region IS NULL
+            ORDER BY created_at DESC`
+  })
+
   const findActive_ = SqlSchema.findAll({
     Result: SandboxRow,
     Request: Schema.Void,
@@ -162,6 +178,11 @@ const makeSandboxRepo = Effect.gen(function*() {
 
     findRegionlessByPr: (awsAccountId: string, pullRequestId: string, repositoryName: string) =>
       findRegionlessByPr_({ awsAccountId, pullRequestId, repositoryName }).pipe(cacheError("findRegionlessByPr")),
+
+    findRegionlessByPrAll: (awsAccountId: string, pullRequestId: string, repositoryName: string) =>
+      findRegionlessByPrAll_({ awsAccountId, pullRequestId, repositoryName }).pipe(
+        cacheError("findRegionlessByPrAll")
+      ),
 
     /** Retained for migrations that can prove a legacy row's region out of band. */
     updateRegion: (id: SandboxId, region: string) =>

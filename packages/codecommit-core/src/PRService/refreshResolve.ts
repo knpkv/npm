@@ -3,10 +3,10 @@
  * Phases 1+2: Load cached PRs, resolve config/identity/subscriptions.
  */
 
-import { Clock, DateTime, Effect, Ref, Schema, SubscriptionRef } from "effect"
+import { Clock, DateTime, Effect, Option, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
-import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
+import { PullRequestRepo, type PullRequestRepoContract } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
@@ -19,6 +19,28 @@ export const subscriptionKey = (
   repositoryName?: string | null,
   accountRegion?: string | null
 ): string => `${awsAccountId}:${pullRequestId}:${repositoryName ?? ""}:${accountRegion ?? ""}`
+
+/** Resolve a legacy subscription only when the account/PR pair identifies one exact cached row. */
+export const isSubscribedForCoordinates = (
+  prRepo: Pick<PullRequestRepoContract, "findByAccountAndId">,
+  subscribed: ReadonlySet<string>,
+  awsAccountId: string,
+  pullRequestId: string,
+  repositoryName: string,
+  accountRegion: string
+): Effect.Effect<boolean, never> => {
+  if (subscribed.has(subscriptionKey(awsAccountId, pullRequestId, repositoryName, accountRegion))) {
+    return Effect.succeed(true)
+  }
+  if (!subscribed.has(subscriptionKey(awsAccountId, pullRequestId))) return Effect.succeed(false)
+  return prRepo.findByAccountAndId(awsAccountId, pullRequestId).pipe(
+    Effect.map(Option.match({
+      onNone: () => false,
+      onSome: (row) => row.repositoryName === repositoryName && row.accountRegion === accountRegion
+    })),
+    Effect.catch(() => Effect.succeed(false))
+  )
+}
 
 const decodeAwsRegion = Schema.decodeSync(AwsRegion)
 const defaultAwsRegion = decodeAwsRegion("us-east-1")

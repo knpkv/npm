@@ -1,7 +1,7 @@
 /** @effect-diagnostics strictEffectProvide:skip-file */
 
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, Effect, Exit, Layer, Ref, Schema, Stream, SubscriptionRef } from "effect"
+import { Cause, Effect, Exit, Layer, Option, Ref, Schema, Stream, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { PullRequestDetail } from "../src/AwsClient/internal.js"
 import { CacheError } from "../src/CacheService/CacheError.js"
@@ -12,6 +12,7 @@ import { AccountConfig } from "../src/ConfigService/internal.js"
 import { type AppState, PullRequest } from "../src/Domain.js"
 import { AwsApiError } from "../src/Errors.js"
 import { fetchAndUpsertPRs } from "../src/PRService/refreshFetch.js"
+import { subscriptionKey } from "../src/PRService/refreshResolve.js"
 
 describe("fetchAndUpsertPRs", () => {
   const staleOpenPR = Schema.decodeSync(CachedPullRequest)({
@@ -571,5 +572,42 @@ describe("fetchAndUpsertPRs", () => {
       expect(successfulScopes).toEqual([
         { profile: "test-profile", region: "us-east-1", awsAccountId: "123456789012" }
       ])
+    }))
+
+  it.effect("diffs a uniquely attributable legacy subscription during bulk refresh", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<AppState>({ pullRequests: [], accounts: [], status: "loading" })
+      const subscribedRef = yield* Ref.make(new Set([subscriptionKey("123456789012", "35")]))
+      const notificationCalls = yield* Ref.make(0)
+      const account = Schema.decodeSync(AccountConfig)({
+        profile: "test-profile",
+        regions: ["us-east-1"],
+        enabled: true
+      })
+      const dependencies = Layer.mergeAll(
+        Layer.mock(AwsClient, { getPullRequests: () => Stream.make(providerOpenPR) }),
+        Layer.mock(PullRequestRepo, {
+          findByAccountAndId: () => Effect.succeed(Option.some(staleOpenPR)),
+          findByCoordinates: () => Effect.succeed(Option.some(staleOpenPR)),
+          findStaleOpen: () => Effect.succeed([]),
+          upsert: () => Effect.void,
+          propagateRepoAccountId: () => Effect.void
+        }),
+        Layer.mock(NotificationRepo, {
+          add: () => Ref.update(notificationCalls, (count) => count + 1)
+        }),
+        Layer.mock(SubscriptionRepo, {})
+      )
+
+      yield* fetchAndUpsertPRs({
+        state,
+        enabledAccounts: [account],
+        accountIdMap: new Map([["test-profile", "123456789012"]]),
+        subscribedRef,
+        currentUser: undefined,
+        staleThreshold: "2026-08-03T00:00:00Z"
+      }).pipe(Effect.provide(dependencies))
+
+      expect(yield* Ref.get(notificationCalls)).toBeGreaterThan(0)
     }))
 })

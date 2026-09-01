@@ -106,6 +106,7 @@ export interface MergeTimeDetailRow {
   readonly title: string
   readonly author: string
   readonly repositoryName: string
+  readonly accountRegion: string
   readonly awsAccountId: string
   readonly creationDate: string
   readonly lastModifiedDate: string

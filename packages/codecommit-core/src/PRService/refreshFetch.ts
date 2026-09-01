@@ -21,7 +21,7 @@ import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import type { PullRequestRefreshScope } from "../Domain.js"
 import { type PRState, prToUpsertInput } from "./internal.js"
-import { subscriptionKey } from "./refreshResolve.js"
+import { isSubscribedForCoordinates, subscriptionKey } from "./refreshResolve.js"
 
 /** Resolve a stale cached PR: retain contradictory OPEN evidence, update a definitive merged/closed status. */
 const resolveStaleStatus = (
@@ -139,7 +139,14 @@ export const fetchAndUpsertPRs = (params: {
           const subscribed = yield* Ref.get(subscribedRef)
           if (
             awsAccountId !== "" &&
-            subscribed.has(subscriptionKey(awsAccountId, pr.id, pr.repositoryName, pr.account.region))
+            (yield* isSubscribedForCoordinates(
+              prRepo,
+              subscribed,
+              awsAccountId,
+              pr.id,
+              pr.repositoryName,
+              pr.account.region
+            ))
           ) {
             const cached = yield* prRepo.findByCoordinates(
               awsAccountId,

@@ -67,8 +67,23 @@ const makeSubscriptionRepo = Effect.gen(function*() {
       sql`DELETE FROM pr_subscriptions
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.prId}
-              AND repository_name = ${req.repositoryName}
-              AND account_region = ${req.accountRegion}`
+              AND (
+                (repository_name = ${req.repositoryName} AND account_region = ${req.accountRegion})
+                OR (
+                  repository_name = ${legacyCoordinate}
+                  AND account_region = ${legacyCoordinate}
+                  AND (
+                    SELECT count(*) FROM pull_requests
+                    WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.prId}
+                  ) = 1
+                  AND (
+                    SELECT count(*) FROM pull_requests
+                    WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.prId}
+                      AND repository_name = ${req.repositoryName}
+                      AND account_region = ${req.accountRegion}
+                  ) = 1
+                )
+              )`
   })
 
   const findAll_ = SqlSchema.findAll({

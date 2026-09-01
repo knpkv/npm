@@ -80,6 +80,7 @@ const LifecycleDetail = Schema.Struct({
   prTitle: Schema.String,
   author: Schema.String,
   repositoryName: Schema.String,
+  accountRegion: Schema.String,
   awsAccountId: Schema.String,
   durationMs: Schema.Number,
   fromLabel: Schema.String,

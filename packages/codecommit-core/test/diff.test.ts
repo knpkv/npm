@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
-import { diffApprovalPools } from "../src/CacheService/diff.js"
+import { type DiffablePR, diffApprovalPools, diffPR } from "../src/CacheService/diff.js"
 import { ApprovalRule } from "../src/Domain.js"
 
 const decodeApprovalRule = Schema.decodeSync(ApprovalRule)
@@ -78,5 +78,45 @@ describe("diffApprovalPools", () => {
     expect(result).toHaveLength(1)
     expect(result[0].title).toBeUndefined()
     expect(result[0].profile).toBeUndefined()
+  })
+})
+
+describe("diffPR", () => {
+  const makePR = (overrides: Partial<DiffablePR> = {}): DiffablePR => ({
+    id: "42",
+    title: "Fix bug",
+    description: "details",
+    repositoryName: "repo",
+    accountProfile: "dev",
+    accountRegion: "eu-west-1",
+    status: "OPEN",
+    isApproved: 0,
+    isMergeable: 0,
+    commentCount: 0,
+    ...overrides
+  })
+
+  it("normalizes SQLite numeric approval and mergeability flags", () => {
+    const notifications = diffPR(
+      makePR({ isApproved: 0, isMergeable: 0 }),
+      makePR({ isApproved: 1, isMergeable: 1 }),
+      "account"
+    )
+
+    expect(notifications.map(({ message, type }) => ({ type, message }))).toEqual([
+      { type: "approval_changed", message: "Approval granted on #42 Fix bug (repo)" },
+      { type: "merge_changed", message: "#42 Fix bug (repo) is now mergeable" }
+    ])
+  })
+
+  it("classifies a numeric non-mergeable closed PR as merged", () => {
+    const notifications = diffPR(
+      makePR({ status: "OPEN", isMergeable: 1 }),
+      makePR({ status: "CLOSED", isMergeable: 0 }),
+      "account"
+    )
+
+    expect(notifications.some(({ type }) => type === "pr_merged")).toBe(true)
+    expect(notifications.some(({ type }) => type === "pr_closed")).toBe(false)
   })
 })

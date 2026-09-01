@@ -190,27 +190,41 @@ const makeSandboxService = Effect.gen(function*() {
           // Regionless legacy rows have no trustworthy checkout coordinate and
           // must not be relabeled or reused for a new request.
         }
-        const regionless = yield* repo.findRegionlessByPr(
+        const regionless = yield* repo.findRegionlessByPrAll(
           params.awsAccountId,
           params.pullRequestId,
           params.repositoryName
         )
-        if (Option.isSome(regionless)) {
-          const legacy = regionless.value
-          if (legacy.accessPassword === null || legacy.containerId === null) {
-            return yield* new SandboxError({
-              sandboxId: SandboxId.make(legacy.id),
-              message: "Regionless legacy sandbox requires explicit cleanup before recreation"
-            })
-          }
-          const inspected = yield* docker.inspectContainer(legacy.containerId).pipe(
-            Effect.map(Option.some),
-            Effect.catchIf(isMissingContainerError, () => Effect.succeed(Option.none()))
-          )
-          if (Option.isSome(inspected) && inspected.value.State.Running === true) {
-            yield* docker.stopContainer(legacy.containerId)
-          }
-          yield* updateStatus(SandboxId.make(legacy.id), "stopped")
+        const legacyResults = yield* Effect.forEach(regionless, (legacy) =>
+          Effect.gen(function*() {
+            const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", legacy.id)
+            const containerIds = new Set([
+              ...(legacy.containerId === null ? [] : [legacy.containerId]),
+              ...discovered.map((container) => container.Id)
+            ])
+            if (legacy.accessPassword === null) {
+              yield* Effect.forEach(containerIds, (containerId) => docker.stopContainer(containerId), {
+                discard: true
+              })
+              yield* updateStatus(SandboxId.make(legacy.id), "error", {
+                error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+              })
+              return Option.some(legacy)
+            }
+            yield* Effect.forEach(containerIds, (containerId) =>
+              docker.inspectContainer(containerId).pipe(
+                Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
+                Effect.catchIf(isMissingContainerError, () => Effect.void)
+              ), { discard: true })
+            yield* updateStatus(SandboxId.make(legacy.id), "stopped")
+            return Option.none<SandboxRow>()
+          }), { concurrency: 1 })
+        const unauthenticated = legacyResults.find(Option.isSome)
+        if (unauthenticated !== undefined && Option.isSome(unauthenticated)) {
+          return yield* new SandboxError({
+            sandboxId: SandboxId.make(unauthenticated.value.id),
+            message: "Regionless legacy sandbox requires explicit cleanup before recreation"
+          })
         }
 
         const sandboxCfg = yield* loadSandboxConfig

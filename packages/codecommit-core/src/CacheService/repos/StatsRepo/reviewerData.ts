@@ -96,6 +96,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
           prTitle: string
           author: string
           repositoryName: string
+          accountRegion: string
           awsAccountId: string
           durationMs: number
           fromLabel: string
@@ -145,6 +146,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
               prTitle: prInfo.title,
               author: prInfo.author,
               repositoryName: prInfo.repositoryName,
+              accountRegion: prInfo.accountRegion,
               awsAccountId: prInfo.awsAccountId,
               durationMs,
               fromLabel: fmtTs(prInfo.creationDate),
@@ -175,6 +177,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
               prTitle: prInfo.title,
               author: prInfo.author,
               repositoryName: prInfo.repositoryName,
+              accountRegion: prInfo.accountRegion,
               awsAccountId: prInfo.awsAccountId,
               durationMs: avgMs,
               fromLabel: `${fmtTs(firstFeedbackFrom!)} (${prFeedbackDeltas.length} rounds)`,
@@ -197,6 +200,7 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
             prTitle: prInfo.title,
             author: prInfo.author,
             repositoryName: prInfo.repositoryName,
+            accountRegion: prInfo.accountRegion,
             awsAccountId: prInfo.awsAccountId,
             durationMs,
             fromLabel: fmtTs(prInfo.creationDate),

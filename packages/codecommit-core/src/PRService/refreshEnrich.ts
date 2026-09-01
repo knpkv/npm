@@ -12,7 +12,7 @@ import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/in
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { AwsProfileName, AwsRegion, type PRCommentLocation } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
-import { subscriptionKey } from "./refreshResolve.js"
+import { isSubscribedForCoordinates } from "./refreshResolve.js"
 
 const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
 const decodeAwsRegion = Schema.decodeSync(AwsRegion)
@@ -22,6 +22,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     const awsClient = yield* AwsClient
     const commentRepo = yield* CommentRepo
     const notificationRepo = yield* NotificationRepo
+    const prRepo = yield* PullRequestRepo
 
     const awsAccountId = row.awsAccountId
     const prId = row.id
@@ -41,7 +42,16 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
         repositoryName: row.repositoryName,
         accountRegion: row.accountRegion
       }
-      if (subscribedSnapshot.has(subscriptionKey(awsAccountId, prId, row.repositoryName, row.accountRegion))) {
+      if (
+        yield* isSubscribedForCoordinates(
+          prRepo,
+          subscribedSnapshot,
+          awsAccountId,
+          prId,
+          row.repositoryName,
+          row.accountRegion
+        )
+      ) {
         const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
           Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
         )

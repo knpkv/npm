@@ -54,6 +54,7 @@ interface FixtureOptions {
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
   readonly regionlessByPr?: SandboxRow
+  readonly regionlessByPrAll?: ReadonlyArray<SandboxRow>
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
@@ -84,6 +85,10 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     findRegionlessByPr: () =>
       Effect.succeed(
         options?.regionlessByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.regionlessByPr)
+      ),
+    findRegionlessByPrAll: () =>
+      Effect.succeed(
+        options?.regionlessByPrAll ?? (options?.regionlessByPr === undefined ? [] : [options.regionlessByPr])
       ),
     findActive: () =>
       Ref.get(rowRef).pipe(
@@ -281,6 +286,33 @@ describe("SandboxWorkerScope", () => {
       )
 
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("retires every regionless row, including terminal rows, before exact creation", () =>
+    Effect.gen(function*() {
+      const terminal = { ...legacyRow, id: "legacy-terminal", status: "stopped", containerId: "terminal-container" }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPrAll: [{ ...legacyRow, accessPassword: "protected" }, {
+          ...terminal,
+          accessPassword: "protected"
+        }],
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(2)
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 

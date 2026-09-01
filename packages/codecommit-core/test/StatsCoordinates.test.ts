@@ -78,5 +78,9 @@ describe("stats pull-request coordinates", () => {
         { author: "order-reviewer", commentCount: 1 },
         { author: "legacy-reviewer", commentCount: 1 }
       ]))
+      expect(result.firstReviewDetails).toEqual(expect.arrayContaining([
+        expect.objectContaining({ prId: "42", repositoryName: "payments", accountRegion: "eu-west-1" }),
+        expect.objectContaining({ prId: "42", repositoryName: "orders", accountRegion: "us-east-1" })
+      ]))
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

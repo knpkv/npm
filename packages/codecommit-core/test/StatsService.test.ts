@@ -1,3 +1,5 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
+
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
@@ -15,6 +17,7 @@ const makeDetail = (prId: string, durationMs: number) => ({
   prTitle: `PR ${prId}`,
   author: "alice",
   repositoryName: "repo",
+  accountRegion: "us-east-1",
   awsAccountId: "111",
   durationMs,
   fromLabel: "2026-01-01 10:00",

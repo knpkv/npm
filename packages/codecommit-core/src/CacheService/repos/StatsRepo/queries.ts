@@ -108,7 +108,7 @@ export const avgDiffSize = (sql: SqlClient.SqlClient) => (weekStart: string, wee
     `.pipe(
     Effect.map((rows) => {
       const r = rows[0]
-      if (!r || r.avgAdded == null) return null
+      if (r === undefined || r.avgAdded === null) return null
       return { filesAdded: r.avgAdded, filesModified: r.avgModified ?? 0, filesDeleted: r.avgDeleted ?? 0 }
     }),
     cacheError("avgDiffSize")
@@ -205,7 +205,7 @@ export const mergeTimeDetails =
   (sql: SqlClient.SqlClient) => (weekStart: string, weekEnd: string, filters: Filters) => {
     const f = whereFilters(sql, filters)
     return sql<MergeTimeDetailRow>`
-      SELECT id, title, author, repository_name, aws_account_id, creation_date,
+      SELECT id, title, author, repository_name, account_region, aws_account_id, creation_date,
         COALESCE(closed_at, last_modified_date) as last_modified_date,
         CAST((julianday(COALESCE(closed_at, last_modified_date)) - julianday(creation_date)) * 86400000 AS INTEGER) as duration_ms
       FROM pull_requests
@@ -220,6 +220,7 @@ export const mergeTimeDetails =
           prTitle: r.title,
           author: r.author,
           repositoryName: r.repositoryName,
+          accountRegion: r.accountRegion,
           awsAccountId: r.awsAccountId,
           durationMs: r.durationMs,
           fromLabel: fmtDate(r.creationDate),

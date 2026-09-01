@@ -16,6 +16,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router"
 import { appStateAtom, statsSyncAtom } from "../atoms/app.js"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { useWeeklyStats } from "../hooks/useWeeklyStats.js"
 import {
   formatMs,
@@ -86,7 +87,7 @@ function LifecycleDetailTable({
   goToPR
 }: {
   details: ReadonlyArray<LifecycleDetail>
-  goToPR: (awsAccountId: string, id: string) => void
+  goToPR: (awsAccountId: string, id: string, repositoryName?: string, accountRegion?: string) => void
 }) {
   if (details.length === 0) return <p className="text-xs text-muted-foreground py-2">No data points</p>
   return (
@@ -95,7 +96,7 @@ function LifecycleDetailTable({
         <div
           key={`${d.awsAccountId}:${d.prId}:${i}`}
           className="flex items-center gap-2 text-xs cursor-pointer hover:bg-accent rounded px-2 py-1"
-          onClick={() => goToPR(d.awsAccountId, d.prId)}
+          onClick={() => goToPR(d.awsAccountId, d.prId, d.repositoryName, d.accountRegion)}
         >
           <span className="text-muted-foreground font-mono shrink-0">#{d.prId}</span>
           <span className="truncate flex-1">{d.prTitle}</span>
@@ -113,7 +114,13 @@ function LifecycleDetailTable({
   )
 }
 
-function LifecycleMetrics({ data, goToPR }: { data: WeeklyStats; goToPR: (awsAccountId: string, id: string) => void }) {
+function LifecycleMetrics({
+  data,
+  goToPR
+}: {
+  data: WeeklyStats
+  goToPR: (awsAccountId: string, id: string, repositoryName?: string, accountRegion?: string) => void
+}) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const toggle = (key: string) => setExpanded((prev) => (prev === key ? null : key))
   type LifecycleDetail = WeeklyStats["mergeTimeDetails"][number]
@@ -190,7 +197,7 @@ function StatsContent({
 }: {
   data: WeeklyStats
   navigate: (path: string) => void
-  goToPR: (awsAccountId: string, id: string) => void
+  goToPR: (awsAccountId: string, id: string, repositoryName?: string, accountRegion?: string) => void
   handleSync: () => void
   syncing: boolean
 }) {
@@ -371,7 +378,7 @@ export function StatsPage() {
   const setFilter = useCallback(
     (key: string, value: string | undefined) => {
       setSearchParams((p) => {
-        if (value) p.set(key, value)
+        if (value !== undefined && value !== "") p.set(key, value)
         else p.delete(key)
         return p
       })
@@ -384,7 +391,13 @@ export function StatsPage() {
   }, [week, syncWeek])
 
   const goToPR = useCallback(
-    (awsAccountId: string, id: string) => navigate(`/accounts/${awsAccountId}/prs/${id}`),
+    (awsAccountId: string, id: string, repositoryName?: string, accountRegion?: string) => {
+      navigate(
+        repositoryName !== undefined && accountRegion !== undefined
+          ? codeCommitPullRequestHref(awsAccountId, id, repositoryName, accountRegion)
+          : `/accounts/${awsAccountId}/prs/${id}`
+      )
+    },
     [navigate]
   )
 
@@ -441,7 +454,7 @@ export function StatsPage() {
       )}
 
       {/* Active filters */}
-      {(repo || author || account) && (
+      {(repo !== undefined || author !== undefined || account !== undefined) && (
         <div className="flex gap-1 flex-wrap">
           {repo && (
             <Badge variant="secondary" className="cursor-pointer" onClick={() => setFilter("repo", undefined)}>
