@@ -423,8 +423,18 @@ export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkChe
       }
       return yield* work.record(checkpoint)
     }
+    const approvalPageCache = new Map<
+      string,
+      Effect.Effect<string, FleetValidationError | FleetOperationError>
+    >()
     for (const target of targets) {
-      const approvalPageUrl = yield* approvalPage(target.host)
+      const hostKey = target.host.toLowerCase()
+      let approvalPageEffect = approvalPageCache.get(hostKey)
+      if (approvalPageEffect === undefined) {
+        approvalPageEffect = yield* Effect.cached(approvalPage(target.host))
+        approvalPageCache.set(hostKey, approvalPageEffect)
+      }
+      const approvalPageUrl = yield* approvalPageEffect
       const expectedOrigin = yield* Effect.try({
         try: () => new URL(approvalPageUrl).origin,
         catch: (cause) =>

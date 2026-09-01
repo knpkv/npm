@@ -677,6 +677,92 @@ describe("host HTTP authority", () => {
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  it.effect("resolves each approval host once per checkpoint", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-work-approval-cache-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(root, "approval-app.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const work = yield* makeWorkService(store)
+
+      const invalidHosts: Array<string> = []
+      const invalidResolvePage = (host: string) =>
+        Effect.sync(() => {
+          invalidHosts.push(host)
+          return "https://ser8.example.test:4779/"
+        })
+      const invalidCheckpoint = {
+        ...workCheckpoint,
+        eventId: "event-work-approval-cache-invalid",
+        goal: {
+          ...workCheckpoint.goal,
+          approvalTarget: ser8ApprovalTarget,
+          id: "goal-work-approval-cache-invalid",
+          requests: [{
+            approvalTarget: {
+              ...ser8ApprovalTarget,
+              host: "ser8",
+              url: "https://evil.example.test/?tab=approvals&approvalHost=ser8&approvalJob=approval-job-42"
+            },
+            id: "request-work-approval-cache-invalid",
+            requestedAt: 1_000,
+            state: "open",
+            summary: "Reject the mismatched approval origin"
+          }]
+        }
+      }
+      const invalid = yield* Effect.result(
+        recordWorkCheckpointRequest(
+          Effect.succeed("local"),
+          decodeWorkCheckpoint(invalidCheckpoint),
+          work,
+          invalidResolvePage
+        )
+      )
+      expect(invalid).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+      expect(invalidHosts).toEqual(["SER8"])
+
+      const validHosts: Array<string> = []
+      const peerTarget: WorkApprovalTargetType = {
+        host: "PI 5",
+        jobId: "approval-job-7",
+        url: "http://100.64.0.8:4779/?tab=approvals&approvalHost=PI+5&approvalJob=approval-job-7"
+      }
+      const validResolvePage = (host: string) =>
+        Effect.sync(() => {
+          validHosts.push(host)
+          return host.toLowerCase() === "ser8"
+            ? "https://ser8.example.test:4779/"
+            : "http://100.64.0.8:4779/"
+        })
+      const validCheckpoint = {
+        ...workCheckpoint,
+        eventId: "event-work-approval-cache-valid",
+        goal: {
+          ...workCheckpoint.goal,
+          approvalTarget: ser8ApprovalTarget,
+          id: "goal-work-approval-cache-valid",
+          requests: [{
+            approvalTarget: peerTarget,
+            id: "request-work-approval-cache-valid",
+            requestedAt: 1_000,
+            state: "open",
+            summary: "Approve the peer handoff"
+          }]
+        }
+      }
+      expect(
+        yield* recordWorkCheckpointRequest(
+          Effect.succeed("local"),
+          decodeWorkCheckpoint(validCheckpoint),
+          work,
+          validResolvePage
+        )
+      ).toEqual(validCheckpoint)
+      expect(validHosts).toEqual(["SER8", "PI 5"])
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
   it.effect("records and reads Work only through the loopback listener", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-work-loopback-"))
     return Effect.gen(function*() {
