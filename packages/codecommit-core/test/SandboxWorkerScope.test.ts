@@ -616,6 +616,66 @@ describe("SandboxWorkerScope", () => {
       })
     }))
 
+  it.effect("completes a marked retirement when the container is missing", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: pending,
+        stopContainer: Effect.fail(
+          new DockerError({ operation: "stopContainer", cause: "Error: No such container: legacy-container" })
+        )
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.stop(SandboxId.make(pending.id))),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result).toBeUndefined()
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopped",
+        legacyRetiredAt: pending.legacyRetiredAt
+      })
+    }))
+
+  it.effect("completes a marked retirement when the container is already stopped", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: pending,
+        stopContainer: Effect.fail(
+          new DockerError({ operation: "stopContainer", cause: "container is already stopped" })
+        )
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.stop(SandboxId.make(pending.id))),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result).toBeUndefined()
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopped",
+        legacyRetiredAt: pending.legacyRetiredAt
+      })
+    }))
+
   it.effect("converges concurrent creates on one account-keyed row", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never)
