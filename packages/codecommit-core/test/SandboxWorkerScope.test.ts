@@ -858,6 +858,30 @@ describe("SandboxWorkerScope", () => {
       })
     }))
 
+  it.effect("treats an already-stopped legacy container as retired", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: legacyRow,
+        stopContainer: Effect.fail(
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: cannot stop container: legacy-container: container is not running"
+          })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+      })
+    }))
+
   it.effect("retains authenticated rows when container inspection fails for infrastructure", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.void, {

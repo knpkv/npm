@@ -35,7 +35,12 @@ import {
 } from "../ConfigService/index.js"
 import { PullRequestId, RepositoryName, SandboxId, type SandboxStatus } from "../Domain.js"
 import { SandboxError } from "../Errors.js"
-import { type ContainerConfig, DockerService, isMissingContainerError } from "./DockerService.js"
+import {
+  type ContainerConfig,
+  DockerService,
+  isAlreadyStoppedContainerError,
+  isMissingContainerError
+} from "./DockerService.js"
 import { PluginService, type SandboxContext } from "./PluginService.js"
 import { SandboxWorkerScope } from "./SandboxWorkerScope.js"
 
@@ -205,7 +210,10 @@ const makeSandboxService = Effect.gen(function*() {
           containerIds,
           (containerId) =>
             docker.stopContainer(containerId).pipe(
-              Effect.catchIf(isMissingContainerError, () => Effect.void)
+              Effect.catchIf(
+                (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                () => Effect.void
+              )
             ),
           { discard: true }
         )
@@ -276,7 +284,10 @@ const makeSandboxService = Effect.gen(function*() {
                 containerIds,
                 (containerId) =>
                   docker.stopContainer(containerId).pipe(
-                    Effect.catchIf(isMissingContainerError, () => Effect.void)
+                    Effect.catchIf(
+                      (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                      () => Effect.void
+                    )
                   ),
                 { discard: true }
               )
@@ -644,7 +655,10 @@ const makeSandboxService = Effect.gen(function*() {
                   containerIds,
                   (containerId) =>
                     docker.stopContainer(containerId).pipe(
-                      Effect.catchIf(isMissingContainerError, () => Effect.void)
+                      Effect.catchIf(
+                        (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                        () => Effect.void
+                      )
                     ),
                   { discard: true }
                 )
@@ -674,7 +688,10 @@ const makeSandboxService = Effect.gen(function*() {
                 containerIds,
                 (containerId) =>
                   docker.stopContainer(containerId).pipe(
-                    Effect.catchIf(isMissingContainerError, () => Effect.void)
+                    Effect.catchIf(
+                      (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                      () => Effect.void
+                    )
                   ),
                 { discard: true }
               )

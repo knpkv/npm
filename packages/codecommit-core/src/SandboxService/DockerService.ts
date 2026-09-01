@@ -54,6 +54,19 @@ export const isMissingContainerError = (error: DockerError): boolean => {
     )
 }
 
+/** Docker reports an already-stopped target when `docker stop` races its exit. */
+export const isAlreadyStoppedContainerError = (error: DockerError): boolean => {
+  if (!Predicate.isString(error.operation) || error.operation !== "stopContainer") return false
+  const cause = error.cause
+  const message = Predicate.isString(cause)
+    ? cause
+    : Predicate.isError(cause)
+    ? cause.message
+    : undefined
+  return message !== undefined &&
+    /cannot stop container:[\s\S]*\b(?:is not running|not running)\b/iu.test(message.trim())
+}
+
 const ContainerInfoSchema = Schema.Struct({
   Id: Schema.String,
   State: Schema.Struct({
