@@ -100,6 +100,8 @@ describe("activity history", () => {
     }))
     const markup = renderToStaticMarkup(<ActivityHistory records={records} />)
     expect(markup).toContain('aria-label="Search activity"')
+    expect(markup).toContain('id="work-activity-search"')
+    expect(markup).toContain('name="activity-search"')
     expect(markup).toContain('aria-label="Filter activity"')
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).toContain("24 visible · 30 matching · 30 jobs")

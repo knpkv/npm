@@ -334,6 +334,8 @@ export const ActivityHistory = ({
           <span>Search</span>
           <input
             aria-label="Search activity"
+            id="work-activity-search"
+            name="activity-search"
             onChange={(event) => setQuery(event.currentTarget.value)}
             onKeyDown={(event) => {
               if (event.key === "Escape") {
