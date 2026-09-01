@@ -68,6 +68,13 @@ describe("fleetctl work commands", () => {
       expect(yield* workSnapshotUrl(config, "ALPHA")).toBe(
         "http://127.0.0.1:4778/v1/work"
       )
+      const lanConfig = { ...config, workBindAddress: "192.168.1.24" }
+      expect(yield* workCheckpointUrl(lanConfig, "ALPHA")).toBe(
+        "http://192.168.1.24:4778/v1/work/checkpoints"
+      )
+      expect(yield* workSnapshotUrl(lanConfig, "ALPHA")).toBe(
+        "http://192.168.1.24:4778/v1/work"
+      )
       expect(workDefaultTarget(config)).toBe("ALPHA")
       expect(workSnapshotTarget(config, undefined)).toBe("ALPHA")
       expect(workSnapshotTarget(config, "ALPHA")).toBe("ALPHA")

@@ -7,7 +7,7 @@ It publishes two binaries:
 - `hostd`: local fleet authority plus optional Tailscale listeners, approvals, Connect, chat, and push
 - `fleetctl`: status, history, job submission/following, Work checkpoint recording/snapshots, and fleet-wide apply submission with per-host outcomes
 
-`hostd` reads `FLEET_CONFIG_PATH`, defaulting to `~/.config/fleet/config.json`. The file is decoded by `@knpkv/herdr-fleet`; invalid or missing fields fail startup. With `crossHost: false`, only the loopback listener and immediately queued safe jobs are available, with no Tailscale dependency. Cross-host listeners authenticate the actual socket peer with Tailscale WhoIs. Forwarded identity headers are never trusted.
+`hostd` reads `FLEET_CONFIG_PATH`, defaulting to `~/.config/fleet/config.json`. The file is decoded by `@knpkv/herdr-fleet`; invalid or missing fields fail startup. With `crossHost: false`, the loopback listener, the Work-only listener bound to `workBindAddress` (loopback by default), and immediately queued safe jobs are available, with no Tailscale dependency. Cross-host listeners authenticate the actual socket peer with Tailscale WhoIs. Forwarded identity headers are never trusted.
 
 On the approval hub, `approvalTls` names absolute certificate and private-key paths owned by the hostd user. The hub terminates TLS directly on its configured Tailscale IP and `approvalPort`; certificate provisioning and renewal remain host policy. Non-hub tailnet members keep their plain tailnet listeners. Local-only machines do not read TLS material or invoke Tailscale.
 

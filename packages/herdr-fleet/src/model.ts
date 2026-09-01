@@ -312,9 +312,11 @@ const TcpPort = Schema.Number.check(
 const WorkBindAddress = Schema.String.check(
   Schema.isPattern(/^(?:\d{1,3}\.){3}\d{1,3}$/),
   Schema.makeFilter(
-    (address) =>
-      address !== "0.0.0.0" &&
-      address.split(".").every((octet) => Number(octet) >= 0 && Number(octet) <= 255),
+    (address) => {
+      const octets = address.split(".")
+      return octets.some((octet) => Number(octet) !== 0) &&
+        octets.every((octet) => Number(octet) >= 0 && Number(octet) <= 255)
+    },
     { expected: "a specific IPv4 Work listener address, not a wildcard" }
   )
 )

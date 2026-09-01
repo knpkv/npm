@@ -46,7 +46,8 @@ const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(
       detail: "work commands can only target the local host"
     })
   }
-  return `http://127.0.0.1:${config.port}`
+  const workBindAddress = config.workBindAddress ?? "127.0.0.1"
+  return `http://${workBindAddress}:${config.port}`
 })
 
 export const workDefaultTarget = (config: HostConfiguration): HostConfiguration["host"] =>
