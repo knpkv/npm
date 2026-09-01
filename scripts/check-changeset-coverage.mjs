@@ -1216,6 +1216,15 @@ const canonicalLiteralKeyText = (node) => {
   return undefined
 }
 
+const canonicalNumericIndexText = (node) => {
+  const literal = TypeScript.isLiteralTypeNode(node) ? node.literal : node
+  if (TypeScript.isNumericLiteral(literal)) return literal.text
+  if (TypeScript.isStringLiteral(literal) || TypeScript.isNoSubstitutionTemplateLiteral(literal)) {
+    return /^(?:0|[1-9]\d*)$/u.test(literal.text) ? literal.text : undefined
+  }
+  return undefined
+}
+
 const canonicalPrimitiveKeyofCategory = (node) => {
   const kind = TypeScript.isLiteralTypeNode(node) ? node.literal.kind : node.kind
   if (kind === TypeScript.SyntaxKind.StringLiteral || kind === TypeScript.SyntaxKind.NoSubstitutionTemplateLiteral) {
@@ -1402,6 +1411,7 @@ const canonicalIndexSignatureKey = (member, analysis, filePath, substitutions, s
 
 function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substitutions, seen, context) {
   const indexKey = canonicalLiteralKeyText(typeNode.indexType)
+  const numericIndexText = canonicalNumericIndexText(typeNode.indexType)
   const canonicalTarget = (target, targetFilePath, targetSubstitutions, targetSeen, targetContext) => {
     if (TypeScript.isParenthesizedTypeNode(target)) {
       return canonicalTarget(
@@ -1424,7 +1434,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       )
       return members.some((member) => member === undefined) ? undefined : `union(${members.toSorted().join("|")})`
     }
-    if (TypeScript.isArrayTypeNode(target) && indexKey?.startsWith('["number",') === true) {
+    if (TypeScript.isArrayTypeNode(target) && numericIndexText !== undefined) {
       return canonicalTypeText(
         target.elementType,
         analysis,
@@ -1486,10 +1496,9 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
         )
       }
     }
-    if (TypeScript.isTupleTypeNode(target) && TypeScript.isLiteralTypeNode(typeNode.indexType)) {
-      const literal = typeNode.indexType.literal
-      if (TypeScript.isNumericLiteral(literal)) {
-        const element = target.elements[Number(literal.text)]
+    if (TypeScript.isTupleTypeNode(target)) {
+      if (numericIndexText !== undefined) {
+        const element = target.elements[Number(numericIndexText)]
         if (element !== undefined) {
           return canonicalTypeText(
             TypeScript.isNamedTupleMember(element) ? element.type : element,
@@ -1549,7 +1558,9 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       TypeScript.isClassDeclaration(target)
     ) {
       const declarationNodes = resolvedTypeDeclarationNodes(analysis, { filePath: targetFilePath, node: target })
-      let selected
+      let inheritedSelected
+      let localCallableSelected
+      let localPropertySelected
       if (indexKey !== undefined) {
         for (const declarationNode of declarationNodes) {
           for (const heritageType of instanceHeritageTypes(declarationNode)) {
@@ -1560,7 +1571,10 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
               targetSeen,
               nextCanonicalTypeContext(targetContext)
             )
-            if (inherited !== undefined) selected = inherited
+            if (inherited !== undefined) {
+              inheritedSelected =
+                inheritedSelected === undefined ? inherited : mergeMemberContract(inheritedSelected, inherited)
+            }
           }
           for (const member of declarationNode.members) {
             if (hasNonPublicModifier(member)) continue
@@ -1586,7 +1600,10 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
                 targetContext.typeMembersMemo ?? new Map(),
                 targetContext.substitutionPath
               ).descriptor
-              selected = selected === undefined ? descriptor : mergeMemberContract(selected, descriptor)
+              localCallableSelected =
+                localCallableSelected === undefined
+                  ? descriptor
+                  : mergeMemberContract(localCallableSelected, descriptor)
               continue
             }
             if (TypeScript.isGetAccessorDeclaration(member) || TypeScript.isSetAccessorDeclaration(member)) {
@@ -1600,7 +1617,10 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
                 targetContext.typeMembersMemo ?? new Map(),
                 targetContext.substitutionPath
               ).descriptor
-              selected = selected === undefined ? descriptor : mergeMemberContract(selected, descriptor)
+              localCallableSelected =
+                localCallableSelected === undefined
+                  ? descriptor
+                  : mergeMemberContract(localCallableSelected, descriptor)
               continue
             }
             const memberType = effectiveMemberTypeNode(member, analysis)
@@ -1617,11 +1637,16 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
               member.questionToken === undefined
                 ? canonicalMemberType
                 : `union(${[canonicalMemberType, "undefined"].toSorted().join("|")})`
-            selected = selected === undefined ? property : mergeMemberContract(selected, property)
+            localPropertySelected =
+              localPropertySelected === undefined ? property : mergeMemberContract(localPropertySelected, property)
           }
         }
       }
-      return selected
+      if (localPropertySelected !== undefined) return localPropertySelected
+      if (localCallableSelected === undefined) return inheritedSelected
+      return inheritedSelected === undefined
+        ? localCallableSelected
+        : mergeMemberContract(inheritedSelected, localCallableSelected)
     }
     return undefined
   }
@@ -3608,7 +3633,12 @@ const callableParameterTypesInSources = (
     const contextualReturnType = contextualType?.type
     const effectiveReturnType =
       returnType ?? contextualReturnType ?? (callableNode === undefined ? undefined : inferredReturnType(callableNode))
-    const referenceNode = callableNode === undefined ? undefined : (callableNode.body ?? callableNode)
+    const referenceNode =
+      callableNode === undefined
+        ? undefined
+        : returnType === undefined && contextualReturnType === undefined
+          ? (callableNode.body ?? callableNode)
+          : callableNode
     const signature = {
       genericDescriptor: callableGeneric.descriptor,
       properties,
@@ -7853,6 +7883,39 @@ const runSelfTest = () => {
     publicCallableChanges(indexedHeritagePrevious, indexedHeritageSelectedChanged, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
+  const indexedRefinedHeritagePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { selected: string; other: number }\ninterface Model extends Base { selected: "x" }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedRefinedHeritageInline = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Model { selected: "x" }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedRefinedHeritagePrevious, indexedRefinedHeritageInline, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  const indexedRefinedHeritageChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { selected: string; other: number }\ninterface Model extends Base { selected: "y" }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedRefinedHeritagePrevious, indexedRefinedHeritageChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
   const indexedMethodPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -7908,6 +7971,39 @@ const runSelfTest = () => {
     publicCallableChanges(indexedArrayElementPrevious, indexedArrayLengthCurrent, ["packages/public/src/index.ts"]),
     []
   )
+  const indexedArrayStringElementCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: string[]["0"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedArrayElementPrevious, indexedArrayStringElementCurrent, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  const indexedTupleElementPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [string][0] }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const indexedTupleStringElementCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: [string]["0"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedTupleElementPrevious, indexedTupleStringElementCurrent, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
   const indexedOptionalPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -7948,6 +8044,39 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(interfaceReturnPrevious, interfaceReturnCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const annotatedReturnShadowPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { publicValue: string }\nexport function Public(): Result { class Result { localValue = "" }; throw new Error("fixture") }'
+    ]
+  ])
+  const annotatedReturnShadowModuleChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { renamed: string }\nexport function Public(): Result { class Result { localValue = "" }; throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(annotatedReturnShadowPrevious, annotatedReturnShadowModuleChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const annotatedReturnShadowLocalChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { publicValue: string }\nexport function Public(): Result { class Result { renamed = "" }; throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(annotatedReturnShadowPrevious, annotatedReturnShadowLocalChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    []
   )
   const inheritedInterfaceReturnPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
