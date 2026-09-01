@@ -44,6 +44,7 @@ const focusableSelector = [
   '[contenteditable]:not([contenteditable="false"])',
   '[tabindex]:not([tabindex="-1"])'
 ].join(",")
+const fieldsetDisabledSelector = "button, fieldset, input, object, optgroup, option, output, select, textarea"
 
 const hasActiveElement = (node: Node): node is Node & DocumentOrShadowRoot => "activeElement" in node
 
@@ -134,7 +135,12 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
       const firstSummary: HTMLElement | null = current.querySelector(":scope > summary:first-of-type")
       if (firstSummary === null || !isWithinComposedElement(firstSummary, element, composedParents)) return false
     }
-    if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
+    if (
+      current !== element &&
+      current.tagName === "FIELDSET" &&
+      current.hasAttribute("disabled") &&
+      element.matches(fieldsetDisabledSelector)
+    ) {
       if (current.getRootNode() === element.getRootNode()) {
         const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
         if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
@@ -608,44 +614,11 @@ const DockLayer = ({
       }
       return null
     }
-    const delegatedTargets = new Set<Element>()
-    const hasDelegatingShadowAncestor = (host: HTMLElement, element: Element): boolean => {
-      let current: Node = element
-      const seen = new Set<Node>()
-      while (!seen.has(current)) {
-        seen.add(current)
-        const parent = composedParentFor(current, composedParents)
-        if (parent === null || parent === host) return false
-        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true) return true
-        current = parent
-      }
-      return false
-    }
-    const delegatedTargetFor = (host: HTMLElement): Element | null => {
-      const delegatedCandidates = composed.filter(({ element, nativeRoot }) => {
-        if (element === host || !isHTMLElement(element) || element.tagName === "SLOT") return false
-        if (element.shadowRoot?.delegatesFocus === true) return false
-        if (!isWithinComposedElement(host, element, composedParents)) return false
-        if (hasDelegatingShadowAncestor(host, element)) return false
-        if (!element.matches(focusableSelector) && !hasExplicitNegativeTabIndex(element)) return false
-        if (!isRenderedFocusable(element, composedParents)) return false
-        return !isRadioInput(element) || isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)
-      })
-      const delegated =
-        delegatedCandidates.find(({ element }) => element.hasAttribute("autofocus")) ?? delegatedCandidates[0]
-      return delegated !== undefined && isHTMLElement(delegated.element) ? delegated.element : null
-    }
-    for (const { element: host } of composed) {
-      if (!isHTMLElement(host) || host.shadowRoot?.delegatesFocus !== true || host.tabIndex < 0) continue
-      const delegated = delegatedTargetFor(host)
-      if (delegated !== null && isHTMLElement(delegated) && delegated.tabIndex < 0) delegatedTargets.add(delegated)
-    }
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
         const { element, nativeRoot } = entry
         if (element.tagName === "SLOT") return false
         if (!isHTMLElement(element)) return false
-        const isDelegatedTarget = delegatedTargets.has(element)
         let current: Node = element
         const seen = new Set<Node>()
         while (!seen.has(current)) {
@@ -654,12 +627,11 @@ const DockLayer = ({
           if (parent === null) break
           if (parent === panel) break
           if (ownsNegativeFocusScope(parent)) {
-            if (!isDelegatedTarget) return false
-            break
+            return false
           }
           current = parent
         }
-        if (!element.matches(focusableSelector) && !isDelegatedTarget) return false
+        if (!element.matches(focusableSelector)) return false
         if (element.shadowRoot?.delegatesFocus === true) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
@@ -668,8 +640,7 @@ const DockLayer = ({
         return (
           element.tabIndex >= 0 ||
           (element.isContentEditable && !element.hasAttribute("tabindex")) ||
-          element.matches("details > summary:first-of-type") ||
-          isDelegatedTarget
+          element.matches("details > summary:first-of-type")
         )
       })
       .map(({ element }) => element)

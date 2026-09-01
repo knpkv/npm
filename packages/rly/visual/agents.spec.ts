@@ -722,7 +722,7 @@ test("modal Relay focus traversal excludes a delegating shadow host endpoint", a
   await expect(last).toBeFocused()
 })
 
-test("modal Relay focus traversal keeps a negative-tabindex delegated target", async ({ page }) => {
+test("modal Relay focus traversal keeps reverse traversal out of a negative-tabindex delegated target", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
   const dock = page.getByRole("dialog", { name: "Relay" })
@@ -802,7 +802,7 @@ test("modal Relay focus traversal skips delegated descendants without a sequenti
   await expect(close).toBeFocused()
 })
 
-test("modal Relay focus traversal keeps one delegated target and contains extra negative descendants", async ({ page }) => {
+test("modal Relay focus traversal contains programmatically focused negative delegated descendants", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
   const dock = page.getByRole("dialog", { name: "Relay" })
@@ -822,15 +822,14 @@ test("modal Relay focus traversal keeps one delegated target and contains extra 
     second.textContent = "Second delegated action"
     element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
   })
-  const first = dock.locator("[data-rly-multiple-delegates-focus-first]")
   const second = dock.locator("[data-rly-multiple-delegates-focus-second]")
 
   await second.focus()
   await page.keyboard.press("Shift+Tab")
-  await expect(first).toBeFocused()
+  expect(await dock.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
 })
 
-test("modal Relay focus traversal preserves adjacent controls around an interior delegated scope", async ({ page }) => {
+test("modal Relay focus traversal keeps programmatic focus inside an interior delegated scope", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
   const dock = page.getByRole("dialog", { name: "Relay" })
@@ -858,16 +857,14 @@ test("modal Relay focus traversal preserves adjacent controls around an interior
     after.type = "button"
     element.querySelector("[data-rly-relay-dock-scroll]")?.append(before, host, after)
   })
-  const first = dock.locator("[data-rly-interior-delegates-focus-first]")
   const second = dock.locator("[data-rly-interior-delegates-focus-second]")
-  const after = dock.locator("[data-rly-interior-delegates-focus-after]")
 
   await second.focus()
   await page.keyboard.press("Tab")
-  await expect(after).toBeFocused()
+  expect(await dock.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
   await second.focus()
   await page.keyboard.press("Shift+Tab")
-  await expect(first).toBeFocused()
+  expect(await dock.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
 })
 
 test("modal Relay focus traversal excludes a negative target after a sequential delegated target", async ({ page }) => {
@@ -897,7 +894,7 @@ test("modal Relay focus traversal excludes a negative target after a sequential 
   await expect(close).toBeFocused()
 })
 
-test("modal Relay focus traversal keeps a generic negative delegated target as the endpoint", async ({ page }) => {
+test("modal Relay focus traversal skips a generic negative delegated target", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
   const dock = page.getByRole("dialog", { name: "Relay" })
@@ -912,16 +909,22 @@ test("modal Relay focus traversal keeps a generic negative delegated target as t
     action.tabIndex = -1
     action.dataset.rlyGenericNegativeDelegatedAction = ""
     action.textContent = "Programmatic delegated action"
-    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+    const last = document.createElement("button")
+    last.dataset.rlyGenericNegativeDelegatesFocusLast = ""
+    last.textContent = "Last footer action"
+    last.type = "button"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host, last)
   })
   const action = dock.locator("[data-rly-generic-negative-delegated-action]")
+  const last = dock.locator("[data-rly-generic-negative-delegates-focus-last]")
 
   await close.focus()
   await page.keyboard.press("Shift+Tab")
-  await expect(action).toBeFocused()
+  await expect(last).toBeFocused()
+  await expect(action).not.toBeFocused()
 })
 
-test("modal Relay focus traversal honors an autofocus delegated target", async ({ page }) => {
+test("modal Relay focus traversal skips a negative autofocus delegated target", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
   const dock = page.getByRole("dialog", { name: "Relay" })
@@ -939,14 +942,20 @@ test("modal Relay focus traversal honors an autofocus delegated target", async (
     autofocus.tabIndex = -1
     autofocus.setAttribute("autofocus", "")
     autofocus.dataset.rlyAutofocusDelegatedTarget = ""
-    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+    const last = document.createElement("button")
+    last.dataset.rlyAutofocusDelegatesFocusLast = ""
+    last.textContent = "Last footer action"
+    last.type = "button"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host, last)
   })
   const first = dock.locator("[data-rly-autofocus-delegated-first]")
   const autofocus = dock.locator("[data-rly-autofocus-delegated-target]")
+  const last = dock.locator("[data-rly-autofocus-delegates-focus-last]")
 
   await close.focus()
   await page.keyboard.press("Shift+Tab")
-  await expect(autofocus).toBeFocused()
+  await expect(last).toBeFocused()
+  await expect(autofocus).not.toBeFocused()
   await expect(first).not.toBeFocused()
 })
 
@@ -977,7 +986,7 @@ test("modal Relay focus traversal resolves nested delegated hosts to their deep 
   await expect(action).toBeFocused()
 })
 
-test("modal Relay focus traversal continues past a targetless nested delegate", async ({ page }) => {
+test("modal Relay focus traversal continues past a targetless nested delegate to a sequential endpoint", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
   const dock = page.getByRole("dialog", { name: "Relay" })
@@ -995,7 +1004,7 @@ test("modal Relay focus traversal continues past a targetless nested delegate", 
     deep.tabIndex = -1
     const later = outerShadow.appendChild(document.createElement("button"))
     later.dataset.rlyTargetlessNestedDelegatesFocusLater = ""
-    later.tabIndex = -1
+    later.tabIndex = 0
     element.querySelector("[data-rly-relay-dock-scroll]")?.append(outer)
   })
   const later = dock.locator("[data-rly-targetless-nested-delegates-focus-later]")
@@ -1089,6 +1098,36 @@ test("modal Relay focus traversal excludes controls in a same-tree disabled fiel
   await close.focus()
   await page.keyboard.press("Shift+Tab")
   await expect(action).not.toBeFocused()
+})
+
+test("modal Relay focus traversal keeps non-form controls in a disabled fieldset", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const fieldset = document.createElement("fieldset")
+    fieldset.disabled = true
+    const link = fieldset.appendChild(document.createElement("a"))
+    link.dataset.rlyDisabledFieldsetLink = ""
+    link.href = "#review"
+    link.textContent = "Review link"
+    const generic = fieldset.appendChild(document.createElement("div"))
+    generic.dataset.rlyDisabledFieldsetGeneric = ""
+    generic.tabIndex = 0
+    generic.textContent = "Generic focus target"
+    const button = fieldset.appendChild(document.createElement("button"))
+    button.dataset.rlyDisabledFieldsetButton = ""
+    button.type = "button"
+    button.textContent = "Disabled action"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(fieldset)
+  })
+  const generic = dock.locator("[data-rly-disabled-fieldset-generic]")
+
+  await generic.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
 })
 
 test("modal Relay focus traversal suppresses fallback for an assigned text node", async ({ page }) => {

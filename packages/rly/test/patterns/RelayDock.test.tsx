@@ -1211,7 +1211,7 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(last)
   })
 
-  it("keeps a negative-tabindex delegated control as the modal endpoint", async () => {
+  it("keeps reverse traversal out of a negative-tabindex delegated control", async () => {
     const footer = (
       <>
         <div data-rly-negative-delegates-focus-host="" />
@@ -1247,13 +1247,21 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(last)
   })
 
-  it("keeps a generic negative delegated target as the modal endpoint", async () => {
-    const footer = <div data-rly-generic-negative-delegates-focus-host="" />
+  it("skips a generic negative delegated target during sequential traversal", async () => {
+    const footer = (
+      <>
+        <div data-rly-generic-negative-delegates-focus-host="" />
+        <button data-rly-generic-negative-delegates-focus-last="" type="button">
+          Last footer action
+        </button>
+      </>
+    )
     const { portal } = await mount(dock({ defaultOpen: true, footer }))
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
     const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
     const host = portal.querySelector<HTMLElement>("[data-rly-generic-negative-delegates-focus-host]")
-    if (dialog === null || close === null || host === null) {
+    const last = portal.querySelector<HTMLButtonElement>("[data-rly-generic-negative-delegates-focus-last]")
+    if (dialog === null || close === null || host === null || last === null) {
       throw new Error("RelayDock generic negative delegatesFocus fixture did not render")
     }
     host.tabIndex = 0
@@ -1274,16 +1282,25 @@ describe("RelayDock", () => {
     })
     await act(async () => dialog.dispatchEvent(reverse))
     expect(reverse.defaultPrevented).toBe(true)
-    expect(shadow.activeElement).toBe(action)
+    expect(document.activeElement).toBe(last)
+    expect(shadow.activeElement).not.toBe(action)
   })
 
-  it("uses the autofocus delegated target as the modal endpoint", async () => {
-    const footer = <div data-rly-autofocus-delegates-focus-host="" />
+  it("skips a negative autofocus delegated target during sequential traversal", async () => {
+    const footer = (
+      <>
+        <div data-rly-autofocus-delegates-focus-host="" />
+        <button data-rly-autofocus-delegates-focus-last="" type="button">
+          Last footer action
+        </button>
+      </>
+    )
     const { portal } = await mount(dock({ defaultOpen: true, footer }))
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
     const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
     const host = portal.querySelector<HTMLElement>("[data-rly-autofocus-delegates-focus-host]")
-    if (dialog === null || close === null || host === null) {
+    const last = portal.querySelector<HTMLButtonElement>("[data-rly-autofocus-delegates-focus-last]")
+    if (dialog === null || close === null || host === null || last === null) {
       throw new Error("RelayDock autofocus delegatesFocus fixture did not render")
     }
     host.tabIndex = 0
@@ -1305,7 +1322,8 @@ describe("RelayDock", () => {
     })
     await act(async () => dialog.dispatchEvent(reverse))
     expect(reverse.defaultPrevented).toBe(true)
-    expect(shadow.activeElement).toBe(autofocus)
+    expect(document.activeElement).toBe(last)
+    expect(shadow.activeElement).not.toBe(autofocus)
     expect(shadow.activeElement).not.toBe(first)
   })
 
@@ -1342,7 +1360,7 @@ describe("RelayDock", () => {
     expect(innerShadow.activeElement).toBe(action)
   })
 
-  it("continues past a targetless nested delegate to a later negative endpoint", async () => {
+  it("continues past a targetless nested delegate to a later sequential endpoint", async () => {
     const footer = <div data-rly-targetless-nested-delegates-focus-host="" />
     const { portal } = await mount(dock({ defaultOpen: true, footer }))
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
@@ -1361,7 +1379,7 @@ describe("RelayDock", () => {
     const deep = innerShadow.appendChild(document.createElement("button"))
     deep.tabIndex = -1
     const later = outerShadow.appendChild(document.createElement("button"))
-    later.tabIndex = -1
+    later.tabIndex = 0
 
     close.focus()
     const reverse = new KeyboardEvent("keydown", {
@@ -1432,6 +1450,35 @@ describe("RelayDock", () => {
     await act(async () => dialog.dispatchEvent(reverse))
     expect(reverse.defaultPrevented).toBe(true)
     expect(shadow.activeElement).not.toBe(action)
+  })
+
+  it("keeps non-form focusables in a disabled fieldset", async () => {
+    const footer = (
+      <fieldset disabled>
+        <a data-rly-disabled-fieldset-link="" href="#review">
+          Review link
+        </a>
+        <div data-rly-disabled-fieldset-generic="" tabIndex={0}>
+          Generic focus target
+        </div>
+        <button data-rly-disabled-fieldset-button="" type="button">
+          Disabled action
+        </button>
+      </fieldset>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const generic = portal.querySelector<HTMLDivElement>("[data-rly-disabled-fieldset-generic]")
+    if (dialog === null || close === null || generic === null) {
+      throw new Error("RelayDock disabled fieldset non-form fixture did not render")
+    }
+
+    generic.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
   })
 
   it("skips assigned controls behind a negative-tabindex shadow slot", async () => {
@@ -1527,7 +1574,7 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
-  it("keeps one delegated target and contains focus from an extra negative descendant", async () => {
+  it("contains programmatically focused negative delegated descendants", async () => {
     const footer = <div data-rly-multiple-delegates-focus-host="" />
     const { portal } = await mount(dock({ defaultOpen: true, footer }))
     const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
@@ -1552,11 +1599,11 @@ describe("RelayDock", () => {
       shiftKey: true
     })
     await act(async () => dialog.dispatchEvent(reverse))
-    expect(reverse.defaultPrevented).toBe(true)
-    expect(shadow.activeElement).toBe(first)
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(shadow.activeElement).toBe(second)
   })
 
-  it("keeps reverse focus inside an interior delegated scope", async () => {
+  it("keeps programmatic focus inside an interior delegated scope", async () => {
     const footer = (
       <>
         <button data-rly-interior-delegates-focus-before="" type="button">
@@ -1593,8 +1640,8 @@ describe("RelayDock", () => {
       shiftKey: true
     })
     await act(async () => dialog.dispatchEvent(reverse))
-    expect(reverse.defaultPrevented).toBe(true)
-    expect(shadow.activeElement).toBe(first)
+    expect(dialog.contains(document.activeElement)).toBe(true)
+    expect(shadow.activeElement).toBe(second)
   })
 
   it("does not promote a negative descendant after a sequential delegated target", async () => {
