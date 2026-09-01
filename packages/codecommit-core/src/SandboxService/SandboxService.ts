@@ -157,6 +157,7 @@ const makeSandboxService = Effect.gen(function*() {
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
   const activeWorkerIds = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
   const lifecycleAdmission = yield* Semaphore.make(1)
+  const containerAdmission = yield* Semaphore.make(1)
   const createAdmission = yield* Semaphore.make(1)
   const stopRequestedIds = yield* Ref.make<ReadonlySet<string>>(new Set())
   const retiredLegacyIds = yield* Ref.make<ReadonlySet<string>>(new Set())
@@ -167,12 +168,12 @@ const makeSandboxService = Effect.gen(function*() {
       return next
     })
   const releaseWorker = (id: string) =>
-    Ref.update(activeWorkerIds, (workers) => {
+    Ref.modify(activeWorkerIds, (workers): readonly [boolean, ReadonlyMap<string, number>] => {
       const next = new Map(workers)
       const count = next.get(id) ?? 0
       if (count <= 1) next.delete(id)
       else next.set(id, count - 1)
-      return next
+      return [count <= 1, next]
     })
   const hasActiveWorker = (id: string) =>
     Ref.get(activeWorkerIds).pipe(Effect.map((workers) => (workers.get(id) ?? 0) > 0))
@@ -206,6 +207,11 @@ const makeSandboxService = Effect.gen(function*() {
       if (yield* isStopRequested(String(id))) return
       yield* updateStatus(id, status, extra)
     }))
+
+  const releaseWorkerReservation = (id: string) =>
+    releaseWorker(id).pipe(
+      Effect.flatMap((lastWorker) => lastWorker ? clearWorkerStopRequest(id) : Effect.void)
+    )
 
   const recordCreationFailure = <UnparsedInput>(id: SandboxId, error: UnparsedInput) =>
     lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
@@ -480,16 +486,13 @@ const makeSandboxService = Effect.gen(function*() {
         const now = new Date(nowMs).toISOString()
 
         const workerTransferred = yield* Ref.make(false)
-        const releaseWorkerReservation = () =>
-          clearWorkerStopRequest(String(id)).pipe(
-            Effect.andThen(releaseWorker(String(id)))
-          )
+        const releaseWorkerReservationForCreate = () =>
+          releaseWorkerReservation(String(id))
         yield* markWorkerActive(String(id))
         const worker = Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
           const host = yield* ChildEnv.HostEnvironment
-          const log = (detail: string) =>
-            progress(id, detail)
+          const log = (detail: string) => progress(id, detail)
 
           if (yield* isStopRequested(String(id))) return
           yield* log("Sandbox config validated")
@@ -680,7 +683,7 @@ const makeSandboxService = Effect.gen(function*() {
         }).pipe(
           Effect.andThen(
             Effect.uninterruptible(
-              ownerScope.fork(worker, releaseWorkerReservation()).pipe(
+              ownerScope.fork(worker, releaseWorkerReservationForCreate()).pipe(
                 Effect.flatMap(({ fiber, started }) =>
                   Effect.race(
                     started.pipe(Effect.as(true)),
@@ -693,7 +696,7 @@ const makeSandboxService = Effect.gen(function*() {
           ),
           Effect.ensuring(
             Ref.get(workerTransferred).pipe(
-              Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservation())
+              Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservationForCreate())
             )
           )
         )
@@ -718,30 +721,43 @@ const makeSandboxService = Effect.gen(function*() {
     listAll: () => repo.findAll(),
 
     stop: (id: SandboxId) =>
-      createAdmission.withPermits(1)(Effect.gen(function*() {
-        if (yield* hasActiveWorker(String(id))) yield* requestWorkerStop(String(id))
-        yield* lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
+      Effect.uninterruptibleMask((restore) => {
+        const stopSandbox = lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
           const row = yield* repo.findById(id)
           yield* updateStatus(id, "stopping")
 
           if (row.containerId !== null) {
+            const containerId = row.containerId
             const ctx = makeSandboxContext(row)
             yield* plugins.executeHook("onSandboxDestroy", ctx)
-            const stop = row.legacyRetiredAt === null
-              ? docker.stopContainer(row.containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
-              : docker.stopContainer(row.containerId).pipe(
-                Effect.catchIf(
-                  (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
-                  () => Effect.void
+            yield* containerAdmission.withPermits(1)(Effect.gen(function*() {
+              const stop = row.legacyRetiredAt === null
+                ? docker.stopContainer(containerId).pipe(Effect.catchIf(() => true, () => Effect.void))
+                : docker.stopContainer(containerId).pipe(
+                  Effect.catchIf(
+                    (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                    () => Effect.void
+                  )
                 )
-              )
-            yield* stop
+              yield* stop
+            }))
           }
 
           yield* updateStatus(id, "stopped")
           yield* Effect.logInfo(`Sandbox ${id} stopped`)
         }))
-      })).pipe(
+        return restore(
+          createAdmission.withPermits(1)(Effect.gen(function*() {
+            if (yield* hasActiveWorker(String(id))) {
+              yield* requestWorkerStop(String(id))
+              // Once signalled, finish the handoff even if the caller is interrupted.
+              yield* Effect.uninterruptible(stopSandbox)
+            } else {
+              yield* stopSandbox
+            }
+          }))
+        )
+      }).pipe(
         Effect.mapError((cause) => new SandboxError({ sandboxId: id, message: "Failed to stop sandbox", cause }))
       ),
 
@@ -779,33 +795,41 @@ const makeSandboxService = Effect.gen(function*() {
               yield* Ref.set(workerMarked, true)
               yield* lifecycleAdmission.release(1)
               yield* Ref.set(permitReleased, true)
-              yield* restore(
-                Effect.gen(function*() {
-                  yield* updateStatus(id, "starting")
-                  yield* progress(id, "Restarting container")
+              yield* restore(Effect.gen(function*() {
+                if (yield* isStopRequested(String(id))) return
+                yield* updateWorkerStatus(id, "starting")
+                if (yield* isStopRequested(String(id))) return
+                yield* progress(id, "Restarting container")
+                const started = yield* containerAdmission.withPermits(1)(Effect.gen(function*() {
+                  if (yield* isStopRequested(String(id))) return false
                   yield* docker.startContainer(containerId)
                   yield* updateStatus(id, "starting", row.port !== null ? { port: row.port } : {})
-                  yield* progress(id, "Waiting for code-server health check")
+                  return true
+                }))
+                if (!started || (yield* isStopRequested(String(id)))) return
+                yield* progress(id, "Waiting for code-server health check")
 
-                  yield* docker.exec(containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
-                    Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
-                    Effect.tap(() => progress(id, "code-server ready")),
-                    Effect.catchIf(() => true, () => Effect.void)
-                  )
+                yield* docker.exec(containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
+                  Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
+                  Effect.tap(() => progress(id, "code-server ready")),
+                  Effect.catchIf(() => true, () => Effect.void)
+                )
+                if (yield* isStopRequested(String(id))) return
 
-                  const ctx = makeSandboxContext(yield* repo.findById(id))
-                  yield* plugins.executeHook("onSandboxReady", ctx)
+                const ctx = makeSandboxContext(yield* repo.findById(id))
+                yield* plugins.executeHook("onSandboxReady", ctx)
+                if (yield* isStopRequested(String(id))) return
 
-                  yield* updateStatus(id, "running")
-                  yield* progress(id, "Sandbox restarted")
-                  yield* Effect.logInfo(`Sandbox ${id} restarted`)
-                })
-              )
+                yield* updateWorkerStatus(id, "running")
+                if (yield* isStopRequested(String(id))) return
+                yield* progress(id, "Sandbox restarted")
+                yield* Effect.logInfo(`Sandbox ${id} restarted`)
+              }))
             }),
           ({ permitReleased, workerMarked }) =>
             Effect.gen(function*() {
               if (!(yield* Ref.getAndSet(permitReleased, true))) yield* lifecycleAdmission.release(1)
-              if (yield* Ref.getAndSet(workerMarked, false)) yield* releaseWorker(String(id))
+              if (yield* Ref.getAndSet(workerMarked, false)) yield* releaseWorkerReservation(String(id))
             })
         )
       ).pipe(
