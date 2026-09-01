@@ -535,6 +535,58 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("skips a completed regionless retirement during creation", () =>
+    Effect.gen(function*() {
+      const completed: SandboxRow = {
+        ...legacyRow,
+        status: "stopped",
+        accessPassword: "protected",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPr: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe(createParams.awsAccountId)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("skips a completed regionless retirement during reconciliation", () =>
+    Effect.gen(function*() {
+      const completed: SandboxRow = {
+        ...legacyRow,
+        status: "stopped",
+        accessPassword: "protected",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result).toBe(true)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toEqual(completed)
+    }))
+
   it.effect("converges concurrent creates on one account-keyed row", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never)

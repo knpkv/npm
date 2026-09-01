@@ -332,11 +332,11 @@ const makeSandboxService = Effect.gen(function*() {
         ).pipe(
           Effect.as(exactExisting)
         )
-        const regionless = yield* repo.findRegionlessByPrAll(
+        const regionless = (yield* repo.findRegionlessByPrAll(
           params.awsAccountId,
           params.pullRequestId,
           params.repositoryName
-        )
+        )).filter((row) => !isCompletedLegacyRetirement(row))
         const legacyResults = yield* Effect.forEach(regionless, (legacy) =>
           lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
             if (legacy.accessPassword !== null && (yield* hasActiveWorker(legacy.id))) {
@@ -751,8 +751,9 @@ const makeSandboxService = Effect.gen(function*() {
         const all = yield* repo.findAll()
         const activeIds = new Set(active.map((row) => row.id))
         const rows = all.filter((row) =>
-          row.accessPassword === null || activeIds.has(row.id) || isRegionlessSandbox(row) ||
-          (row.legacyRetiredAt !== null && row.status !== "stopped")
+          !isCompletedLegacyRetirement(row) &&
+          (row.accessPassword === null || activeIds.has(row.id) || isRegionlessSandbox(row) ||
+            (row.legacyRetiredAt !== null && row.status !== "stopped"))
         )
         yield* Effect.forEach(rows, (row) =>
           Effect.gen(function*() {
