@@ -121,6 +121,16 @@ export const sandboxMatchesPullRequest = (
   sandbox.repositoryName === String(pullRequest.repositoryName) &&
   sandbox.region === String(pullRequest.account.region)
 
+/** A sandbox is reusable only while it can still serve this pull request. */
+export const isReusableSandbox = (
+  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  sandbox.status !== "stopped" &&
+  sandbox.status !== "stopping" &&
+  sandbox.status !== "error" &&
+  sandboxMatchesPullRequest(sandbox, pullRequest)
+
 /** Keep review API requests bound to the exact PR shown by this page. */
 export const reviewApiAccountId = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
@@ -1149,13 +1159,7 @@ export function PRDetail() {
   // Sandbox
   const createSandbox = useAtomSet(createSandboxAtom)
   const existingSandbox = useMemo(
-    () =>
-      pr === null
-        ? undefined
-        : state.sandboxes?.find(
-            (sandbox) =>
-              sandbox.status !== "stopped" && sandbox.status !== "error" && sandboxMatchesPullRequest(sandbox, pr)
-          ),
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isReusableSandbox(sandbox, pr))),
     [pr, state.sandboxes]
   )
 

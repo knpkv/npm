@@ -3,6 +3,7 @@ import { Domain } from "@knpkv/codecommit-core"
 
 import {
   commentNavigationIdentityForCoordinates,
+  isReusableSandbox,
   reviewApiAccountId,
   sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
@@ -55,10 +56,7 @@ describe("PR detail coordinates", () => {
 
     expect(sandboxMatchesPullRequest(sandbox, pullRequest)).toBe(false)
     expect(
-      sandboxMatchesPullRequest(
-        { ...sandbox, repositoryName: "payments", region: "eu-west-1" },
-        pullRequest
-      )
+      sandboxMatchesPullRequest({ ...sandbox, repositoryName: "payments", region: "eu-west-1" }, pullRequest)
     ).toBe(true)
   })
 
@@ -113,6 +111,19 @@ describe("PR detail coordinates", () => {
         profilePullRequest
       )
     ).toBe(false)
+  })
+
+  it("does not reuse a sandbox while its legacy retirement is stopping", () => {
+    const stoppingSandbox = {
+      awsAccountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "payments",
+      region: "eu-west-1",
+      status: "stopping"
+    }
+
+    expect(isReusableSandbox(stoppingSandbox, pullRequest)).toBe(false)
+    expect(isReusableSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(true)
   })
 
   it("gives review APIs a validated account-coordinate token", () => {
