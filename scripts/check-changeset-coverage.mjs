@@ -539,6 +539,11 @@ const resolveNamespaceQualifiedTypeDeclaration = (analysis, filePath, typeName, 
   return declaration
 }
 
+const resolvedTypeDeclarationNodes = (analysis, declaration) => {
+  if (TypeScript.isTypeLiteralNode(declaration.node)) return [declaration.node]
+  return resolvedDeclarationNodes(analysis, declaration)
+}
+
 const conditionalPrimitiveCategory = (typeNode, substitutions) => {
   if (TypeScript.isParenthesizedTypeNode(typeNode)) return conditionalPrimitiveCategory(typeNode.type, substitutions)
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
@@ -794,7 +799,7 @@ const canonicalTypeText = (
         nextCanonicalTypeContext(context, substitutionPath)
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen, typeNode)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen, context.referenceNode ?? typeNode)
     if (declaration !== undefined) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
@@ -1272,7 +1277,33 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
           declaration.filePath,
           nextSubstitutions,
           new Set(targetSeen).add(declarationKey),
-          nextCanonicalTypeContext(targetContext)
+          { ...nextCanonicalTypeContext(targetContext), referenceNode: undefined }
+        )
+      }
+    }
+    if (TypeScript.isExpressionWithTypeArguments(target) && TypeScript.isIdentifier(target.expression)) {
+      const declaration = resolveTypeDeclaration(
+        analysis,
+        targetFilePath,
+        target.expression.text,
+        targetSeen,
+        targetContext.referenceNode ?? target
+      )
+      if (declaration !== undefined) {
+        const declarationKey = `${declaration.filePath}\u0000${declaration.node.name.text}`
+        if (targetSeen.has(declarationKey)) failCanonicalType(targetFilePath, target, "recursive type declaration")
+        const nextSubstitutions = declarationSubstitutions(
+          declaration,
+          target.typeArguments ?? [],
+          targetSubstitutions,
+          targetFilePath
+        )
+        return canonicalTarget(
+          TypeScript.isTypeAliasDeclaration(declaration.node) ? declaration.node.type : declaration.node,
+          declaration.filePath,
+          nextSubstitutions,
+          new Set(targetSeen).add(declarationKey),
+          { ...nextCanonicalTypeContext(targetContext), referenceNode: undefined }
         )
       }
     }
@@ -1307,7 +1338,13 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
           nextCanonicalTypeContext(targetContext, new Set(targetContext.substitutionPath).add(binding))
         )
       }
-      const declaration = resolveTypeDeclaration(analysis, targetFilePath, target.typeName.text, targetSeen, target)
+      const declaration = resolveTypeDeclaration(
+        analysis,
+        targetFilePath,
+        target.typeName.text,
+        targetSeen,
+        targetContext.referenceNode ?? target
+      )
       if (declaration !== undefined) {
         const declarationKey = `${declaration.filePath}\u0000${declaration.node.name.text}`
         if (targetSeen.has(declarationKey)) failCanonicalType(targetFilePath, target, "recursive type declaration")
@@ -1323,7 +1360,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
           declaration.filePath,
           nextSubstitutions,
           nextSeen,
-          nextCanonicalTypeContext(targetContext)
+          { ...nextCanonicalTypeContext(targetContext), referenceNode: undefined }
         )
       }
     }
@@ -1332,9 +1369,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       TypeScript.isInterfaceDeclaration(target) ||
       TypeScript.isClassDeclaration(target)
     ) {
-      const declarationNodes = TypeScript.isTypeLiteralNode(target)
-        ? [target]
-        : (analysis.modules.get(targetFilePath)?.declarationGroups.get(target.name.text) ?? [target])
+      const declarationNodes = resolvedTypeDeclarationNodes(analysis, { filePath: targetFilePath, node: target })
       let selected
       if (indexKey !== undefined) {
         for (const declarationNode of declarationNodes) {
@@ -1351,24 +1386,59 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
           for (const member of declarationNode.members) {
             if (hasNonPublicModifier(member)) continue
             if (
-              (!TypeScript.isPropertySignature(member) && !TypeScript.isPropertyDeclaration(member)) ||
-              member.type === undefined ||
+              (!TypeScript.isPropertySignature(member) &&
+                !TypeScript.isPropertyDeclaration(member) &&
+                !TypeScript.isMethodSignature(member) &&
+                !TypeScript.isMethodDeclaration(member) &&
+                !TypeScript.isGetAccessorDeclaration(member) &&
+                !TypeScript.isSetAccessorDeclaration(member)) ||
               canonicalPropertyKeyText(member.name) !== indexKey
             ) {
               continue
             }
+            if (TypeScript.isMethodSignature(member) || TypeScript.isMethodDeclaration(member)) {
+              const descriptor = memberDescriptor(
+                member,
+                analysis,
+                targetFilePath,
+                targetSubstitutions,
+                targetSeen,
+                nextCanonicalTypeContext(targetContext),
+                targetContext.typeMembersMemo ?? new Map(),
+                targetContext.substitutionPath
+              ).descriptor
+              selected = selected === undefined ? descriptor : mergeMemberContract(selected, descriptor)
+              continue
+            }
+            if (TypeScript.isGetAccessorDeclaration(member) || TypeScript.isSetAccessorDeclaration(member)) {
+              const descriptor = memberDescriptor(
+                member,
+                analysis,
+                targetFilePath,
+                targetSubstitutions,
+                targetSeen,
+                nextCanonicalTypeContext(targetContext),
+                targetContext.typeMembersMemo ?? new Map(),
+                targetContext.substitutionPath
+              ).descriptor
+              selected = selected === undefined ? descriptor : mergeMemberContract(selected, descriptor)
+              continue
+            }
+            const memberType = effectiveMemberTypeNode(member, analysis)
+            if (memberType === undefined) failCanonicalType(targetFilePath, member, "unsupported indexed member")
             const canonicalMemberType = canonicalTypeText(
-              member.type,
+              memberType,
               analysis,
               targetFilePath,
               targetSubstitutions,
               targetSeen,
               nextCanonicalTypeContext(targetContext)
             )
-            selected =
+            const property =
               member.questionToken === undefined
                 ? canonicalMemberType
                 : `union(${[canonicalMemberType, "undefined"].toSorted().join("|")})`
+            selected = selected === undefined ? property : mergeMemberContract(selected, property)
           }
         }
       }
@@ -2191,6 +2261,15 @@ const parameterDescriptor = (
   return `${marker}${optional}:${type}`
 }
 
+const effectiveMemberTypeNode = (member, analysis) => {
+  if (member.type !== undefined) return member.type
+  if (TypeScript.isPropertyDeclaration(member) && member.initializer !== undefined) {
+    const checker = analysis.getChecker()
+    return checker.typeToTypeNode(checker.getTypeAtLocation(member), member, TypeScript.NodeBuilderFlags.NoTruncation)
+  }
+  return undefined
+}
+
 const memberDescriptor = (
   member,
   analysis,
@@ -2420,14 +2499,15 @@ const memberDescriptor = (
     const kind = TypeScript.isConstructSignatureDeclaration(member) ? "construct" : "call"
     return { descriptor: `${kind}<${generic.descriptor}>(${parameters}):${returnType}`, ...dependencies }
   }
+  const memberType = effectiveMemberTypeNode(member, analysis)
   const type =
-    member.type === undefined
+    memberType === undefined
       ? "unknown"
-      : canonicalTypeText(member.type, analysis, filePath, substitutions, seen, context)
-  if (member.type !== undefined) {
+      : canonicalTypeText(memberType, analysis, filePath, substitutions, seen, context)
+  if (memberType !== undefined) {
     collectDependencies(
       typeMembers(
-        member.type,
+        memberType,
         analysis,
         filePath,
         seen,
@@ -2477,12 +2557,18 @@ const collectTypeMembersResult = (target, result, includeMembers = true) => {
   if (!result.resolved) target.resolved = false
   if (includeMembers) {
     for (const [name, type] of result.members) {
-      const existing = target.members.get(name)
-      target.members.set(name, existing === undefined ? type : mergeMemberContract(existing, type))
+      if (name.startsWith("index:")) addIndexSignatureContract(target.members, name, type)
+      else {
+        const existing = target.members.get(name)
+        target.members.set(name, existing === undefined ? type : mergeMemberContract(existing, type))
+      }
     }
     for (const [name, type] of result.canonicalMembers) {
-      const existing = target.canonicalMembers.get(name)
-      target.canonicalMembers.set(name, existing === undefined ? type : mergeMemberContract(existing, type))
+      if (name.startsWith("index:")) addIndexSignatureContract(target.canonicalMembers, name, type)
+      else {
+        const existing = target.canonicalMembers.get(name)
+        target.canonicalMembers.set(name, existing === undefined ? type : mergeMemberContract(existing, type))
+      }
     }
   }
   for (const dependency of result.declarationDependencies) target.declarationDependencies.add(dependency)
@@ -2810,9 +2896,7 @@ const typeMembers = (
     TypeScript.isClassDeclaration(typeNode)
   ) {
     const result = typeMembersResult(new Map(), true)
-    const declarationNodes = TypeScript.isTypeLiteralNode(typeNode)
-      ? [typeNode]
-      : (analysis.modules.get(filePath)?.declarationGroups.get(typeNode.name.text) ?? [typeNode])
+    const declarationNodes = resolvedTypeDeclarationNodes(analysis, { filePath, node: typeNode })
     let callSignatureIndex = 0
     for (const declarationNode of declarationNodes) {
       if (TypeScript.isInterfaceDeclaration(declarationNode) || TypeScript.isClassDeclaration(declarationNode)) {
@@ -3146,6 +3230,10 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
   const callSignatures = []
   const typeMembersMemo = context.typeMembersMemo ?? new Map()
   const addMember = (name, descriptor) => {
+    if (name.startsWith("index:")) {
+      addIndexSignatureContract(members, name, descriptor)
+      return
+    }
     const existing = members.get(name)
     members.set(name, existing === undefined ? descriptor : mergeMemberContract(existing, descriptor))
   }
@@ -3188,6 +3276,8 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
         }
       }
     }
+  }
+  for (const declarationNode of declarationNodes) {
     for (const member of declarationNode.members) {
       if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
       if (
@@ -3336,6 +3426,7 @@ const callableParameterTypesInSources = (
     const contextualReturnType = contextualType?.type
     const effectiveReturnType =
       returnType ?? contextualReturnType ?? (callableNode === undefined ? undefined : inferredReturnType(callableNode))
+    const referenceNode = callableNode === undefined ? undefined : (callableNode.body ?? callableNode)
     const signature = {
       genericDescriptor: callableGeneric.descriptor,
       properties,
@@ -3346,7 +3437,8 @@ const callableParameterTypesInSources = (
               depth: 0,
               genericScope: callableGeneric.childGenericScope,
               substitutionPath: new Set(),
-              recursiveDeclarations
+              recursiveDeclarations,
+              referenceNode
             }),
       returnInferred:
         returnType === undefined && contextualReturnType === undefined && effectiveReturnType !== undefined,
@@ -6210,6 +6302,44 @@ const runSelfTest = () => {
     publicCallableChanges(inferredClassPrevious, inferredClassChanged, ["packages/public/src/index.ts"]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  const inferredClassPropertyChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'class Result { value = "" }\nexport const Public = () => new Result()']
+  ])
+  const inferredClassPropertyNumber = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", "class Result { value = 1 }\nexport const Public = () => new Result()"]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(inferredClassPropertyChanged, inferredClassPropertyNumber, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const localInferredClassPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'export const Public = () => { class Result { value = "" }; return new Result() }']
+  ])
+  const localInferredClassChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'export const Public = () => { class Result { renamed = "" }; return new Result() }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(localInferredClassPrevious, localInferredClassChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const localInferredClassBinderRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'export const Public = () => { class Renamed { value = "" }; return new Renamed() }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(localInferredClassPrevious, localInferredClassBinderRename, ["packages/public/src/index.ts"]),
+    []
+  )
   const implementsPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -6252,6 +6382,39 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(refinedHeritagePrevious, refinedHeritageChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const localFirstMergedRefinement = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { value: string }\ninterface Result { value: "x" }\ninterface Result extends Base {}\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const localFirstMergedRefinementInline = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { value: "x" }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(localFirstMergedRefinement, localFirstMergedRefinementInline, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  const localFirstMergedRefinementChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { value: string }\ninterface Result { value: "y" }\ninterface Result extends Base {}\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(localFirstMergedRefinement, localFirstMergedRefinementChanged, [
+      "packages/public/src/index.ts"
+    ]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
   const namespaceQualifiedPrevious = new Map([
@@ -6435,6 +6598,44 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(distinctNumberIndexPrevious, distinctNumberIndexChanged, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["index:number"] }]
+  )
+  const inheritedIndexPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface StringIndex { [key: string]: boolean }\ninterface NumberIndex { [key: number]: boolean }\ninterface Result extends StringIndex, NumberIndex {}\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const inheritedIndexInline = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { [key: string]: boolean }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(inheritedIndexPrevious, inheritedIndexInline, ["packages/public/src/index.ts"]),
+    []
+  )
+  const inheritedIndexDistinctPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface StringIndex { [key: string]: unknown }\ninterface NumberIndex { [key: number]: "x" }\ninterface Result extends StringIndex, NumberIndex {}\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const inheritedIndexDistinctChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface StringIndex { [key: string]: unknown }\ninterface NumberIndex { [key: number]: "y" }\ninterface Result extends StringIndex, NumberIndex {}\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(inheritedIndexDistinctPrevious, inheritedIndexDistinctChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
   const indexSignatureRename = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
@@ -7383,6 +7584,64 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(indexedPrevious, indexedCurrent, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }
   ])
+  const indexedHeritagePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { selected: string; other: number }\ninterface Model extends Base {}\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedHeritageUnselectedChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { selected: string; other: boolean }\ninterface Model extends Base {}\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedHeritagePrevious, indexedHeritageUnselectedChanged, ["packages/public/src/index.ts"]),
+    []
+  )
+  const indexedHeritageSelectedChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { selected: number; other: number }\ninterface Model extends Base {}\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedHeritagePrevious, indexedHeritageSelectedChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const indexedMethodPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Model { selected(value: string): string; other: number }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedMethodUnselectedChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Model { selected(value: string): string; other: boolean }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedMethodPrevious, indexedMethodUnselectedChanged, ["packages/public/src/index.ts"]),
+    []
+  )
+  const indexedMethodSelectedChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Model { selected(value: number): string; other: number }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedMethodPrevious, indexedMethodSelectedChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
   const indexedArrayLengthPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
