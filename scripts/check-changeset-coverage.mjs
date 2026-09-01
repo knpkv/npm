@@ -182,6 +182,29 @@ const typeSubstitutionBinding = (value, substitutions) => {
   return binding
 }
 
+const declarationEffectiveTypeArguments = (declaration, typeArguments) => {
+  const typeParameters = declaration.typeParameters ?? []
+  if (typeParameters.length === 0 || typeArguments.length === 0) return []
+  const parameterIndexes = new Map(typeParameters.map((parameter, index) => [parameter.name.text, index]))
+  const usedIndexes = new Set()
+  const visit = (node, shadowed) => {
+    if (TypeScript.isTypeReferenceNode(node) && TypeScript.isIdentifier(node.typeName)) {
+      const index = parameterIndexes.get(node.typeName.text)
+      if (index !== undefined && !shadowed.has(node.typeName.text)) usedIndexes.add(index)
+    }
+    const nestedTypeParameters =
+      TypeScript.isFunctionTypeNode(node) || TypeScript.isMethodSignature(node) ? (node.typeParameters ?? []) : []
+    const nextShadowed =
+      nestedTypeParameters.length === 0
+        ? shadowed
+        : new Set([...shadowed, ...nestedTypeParameters.map((parameter) => parameter.name.text)])
+    TypeScript.forEachChild(node, (child) => visit(child, nextShadowed))
+  }
+  const body = TypeScript.isTypeAliasDeclaration(declaration) ? declaration.type : declaration
+  visit(body, new Set())
+  return typeArguments.filter((_, index) => usedIndexes.has(index))
+}
+
 const nextCanonicalTypeContext = (context, substitutionPath = context.substitutionPath) => ({
   ...context,
   depth: context.depth + 1,
@@ -236,10 +259,7 @@ const canonicalTypeText = (
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
         const argument = typeNode.typeArguments?.[index]
         if (argument !== undefined) {
-          nextSubstitutions.set(
-            parameter.name.text,
-            canonicalTypeText(argument, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
-          )
+          nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions))
         }
       }
       if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
@@ -394,6 +414,9 @@ const genericDescriptor = (
   }
   const descriptor = (typeParameters ?? [])
     .map((parameter, index) => {
+      const constModifier =
+        parameter.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.ConstKeyword) === true ? "const:" : ""
+      const constraintContext = { ...context, genericScope: childGenericScope }
       const constraint =
         parameter.constraint === undefined
           ? ""
@@ -403,7 +426,7 @@ const genericDescriptor = (
               filePath,
               nextSubstitutions,
               new Set(),
-              nextCanonicalTypeContext(context)
+              nextCanonicalTypeContext(constraintContext)
             )}`
       const defaultType =
         parameter.default === undefined
@@ -414,9 +437,9 @@ const genericDescriptor = (
               filePath,
               nextSubstitutions,
               new Set(),
-              nextCanonicalTypeContext(context)
+              nextCanonicalTypeContext(constraintContext)
             )}`
-      return `${index}:${constraint}:${defaultType}`
+      return `${index}:${constModifier}${constraint}:${defaultType}`
     })
     .join(",")
   return { childGenericScope, descriptor, substitutions: nextSubstitutions }
@@ -846,6 +869,7 @@ const typeMembers = (
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
     if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
     const typeArguments = typeNode.typeArguments ?? []
+    const effectiveTypeArguments = declarationEffectiveTypeArguments(declaration.node, typeArguments)
     const cached = readTypeMembersMemo(
       memo,
       declarationKey,
@@ -853,7 +877,7 @@ const typeMembers = (
       seen,
       substitutionPath,
       filePath,
-      typeArguments,
+      effectiveTypeArguments,
       typeNode,
       analysis,
       true
@@ -885,7 +909,7 @@ const typeMembers = (
           ),
           declarationKey
         ),
-        typeArguments
+        effectiveTypeArguments
       )
     }
     if (TypeScript.isInterfaceDeclaration(declaration.node)) {
@@ -906,7 +930,7 @@ const typeMembers = (
           ),
           declarationKey
         ),
-        typeArguments
+        effectiveTypeArguments
       )
     }
   }
@@ -936,6 +960,7 @@ const typeMembers = (
     const declarationKey = `${declaration.filePath}\u0000${declarationName}`
     if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
     const typeArguments = typeNode.typeArguments ?? []
+    const effectiveTypeArguments = declarationEffectiveTypeArguments(declaration.node, typeArguments)
     const cached = readTypeMembersMemo(
       memo,
       declarationKey,
@@ -943,7 +968,7 @@ const typeMembers = (
       seen,
       substitutionPath,
       filePath,
-      typeArguments,
+      effectiveTypeArguments,
       typeNode,
       analysis,
       true
@@ -975,7 +1000,7 @@ const typeMembers = (
           ),
           declarationKey
         ),
-        typeArguments
+        effectiveTypeArguments
       )
     }
     if (TypeScript.isInterfaceDeclaration(declaration.node)) {
@@ -996,7 +1021,7 @@ const typeMembers = (
           ),
           declarationKey
         ),
-        typeArguments
+        effectiveTypeArguments
       )
     }
   }
@@ -2900,6 +2925,63 @@ const runSelfTest = () => {
     publicCallableChanges(contextualGenericPrevious, contextualGenericChanged, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
+  const nestedConstraintPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<T, V extends <U>(value: U) => T>(props: V): V { return props }"
+    ]
+  ])
+  const nestedConstraintRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<T, V extends <Inner>(value: Inner) => T>(props: V): V { return props }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(nestedConstraintPrevious, nestedConstraintRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const nestedConstraintSwap = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<T, V extends <U>(value: T) => U>(props: V): V { return props }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(nestedConstraintPrevious, nestedConstraintSwap, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const constGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<const T extends readonly string[]>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const constGenericRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<const U extends readonly string[]>(props: { value: U }): U { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(constGenericPrevious, constGenericRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const nonConstGeneric = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<T extends readonly string[]>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(constGenericPrevious, nonConstGeneric, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
   const unresolvedWrapperPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -2917,6 +2999,17 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(unresolvedWrapperPrevious, unresolvedWrapperCurrent, ["packages/public/src/index.ts"]),
     [{ kind: "addition", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["extra"] }]
+  )
+  const recursivePhantomSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Loop<T> = readonly Loop<T[]>[]\ntype Phantom<T> = { value: string }\ntype Props = { left: Phantom<Loop<string>>; right: Phantom<Loop<string>> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(recursivePhantomSources, recursivePhantomSources, ["packages/public/src/index.ts"]),
+    []
   )
   const wrappedGenericChanged = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
