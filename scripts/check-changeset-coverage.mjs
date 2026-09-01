@@ -424,7 +424,13 @@ const inferSubstitutions = (typeNode, substitutions) => {
     TypeScript.forEachChild(node, visit)
   }
   visit(typeNode)
-  for (const [index, name] of names.entries()) result.set(name, `infer#${index}`)
+  const nextToken = [...substitutions.values()]
+    .filter(Predicate.isString)
+    .map((value) => /^infer#(\d+)$/u.exec(value)?.[1])
+    .filter((value) => value !== undefined)
+    .map(Number)
+    .reduce((maximum, value) => Math.max(maximum, value + 1), 0)
+  for (const [index, name] of names.entries()) result.set(name, `infer#${nextToken + index}`)
   return result
 }
 
@@ -6241,6 +6247,24 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(inferRenamePrevious, inferRenameCurrent, ["packages/public/src/index.ts"]), [])
+  const nestedInferShadowPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Select<T> = T extends [infer U, infer V] ? U extends [infer U] ? U : never : never\nexport const Public = (): Select<["value", unknown]> => "value"'
+    ]
+  ])
+  const nestedInferShadowChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Select<T> = T extends [infer U, infer V] ? U extends [infer W] ? U : never : never\nexport const Public = (): Select<["value", unknown]> => "value"'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(nestedInferShadowPrevious, nestedInferShadowChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
   const mergedPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
