@@ -323,6 +323,30 @@ test("modal Relay focus traversal includes a native rich-text editor", async ({ 
   await expect(composingEditor).toBeFocused()
 })
 
+test("modal Relay focus traversal contains controls in a nested open shadow root", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const host = element.ownerDocument.createElement("div")
+    host.dataset.rlyShadowFocusHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = shadow.appendChild(element.ownerDocument.createElement("button"))
+    action.textContent = "Nested footer action"
+    action.type = "button"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const nestedAction = dock.locator("[data-rly-shadow-focus-host] button")
+
+  await nestedAction.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await close.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(nestedAction).toBeFocused()
+})
+
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_100, width: 1_200 })
   await page.goto(story("patterns-agentdrawer--interaction"))

@@ -15,6 +15,7 @@ import { Portal as RadixPortal } from "radix-ui"
 import { Icon } from "../foundations/Icon.js"
 import { PortalBoundary, usePortalTarget } from "../foundations/PortalProvider.js"
 import { classNames, cssClass, requireText } from "../internal/component.js"
+import * as Predicate from "../internal/predicates.js"
 import {
   invalidateModalFocusRestore,
   isHTMLElement,
@@ -46,9 +47,47 @@ const focusableSelector = [
 
 const hasActiveElement = (node: Node): node is Node & DocumentOrShadowRoot => "activeElement" in node
 
+interface ShadowRootHost extends Node {
+  readonly host: Node
+}
+
+const hasShadowRootHost = (value: Node): value is ShadowRootHost =>
+  "host" in value && Predicate.isObjectOrArray(value.host)
+
+const deepActiveElement = (root: DocumentOrShadowRoot): Element | null => {
+  const active = root.activeElement
+  if (active === null) return null
+  if (active.shadowRoot !== null) return deepActiveElement(active.shadowRoot) ?? active
+  return active
+}
+
 const activeElementFor = (panel: HTMLElement): Element | null => {
   const root = panel.getRootNode()
-  return hasActiveElement(root) ? root.activeElement : panel.ownerDocument.activeElement
+  return hasActiveElement(root) ? deepActiveElement(root) : panel.ownerDocument.activeElement
+}
+
+const hasElementInertContract = <Value extends object>(value: Value): value is Value & HTMLElement =>
+  "inert" in value && Predicate.isBoolean(value.inert)
+
+const shadowHostFor = (node: Node): HTMLElement | null => {
+  const root = node.getRootNode()
+  if (!hasShadowRootHost(root) || !hasElementInertContract(root.host)) return null
+  return root.host
+}
+
+const isWithinPanel = (panel: HTMLElement, active: Element | null): boolean => {
+  if (active === null) return false
+  if (panel.contains(active)) return true
+  const seen = new Set<Node>()
+  let current: Node = active
+  while (!seen.has(current)) {
+    seen.add(current)
+    const host = shadowHostFor(current)
+    if (host === null) return false
+    if (host === panel || panel.contains(host)) return true
+    current = host
+  }
+  return false
 }
 
 const deepActiveHTMLElement = (root: DocumentOrShadowRoot): HTMLElement | null => {
@@ -80,7 +119,7 @@ const isRenderedFocusable = (element: HTMLElement): boolean => {
     }
     const computed = view.getComputedStyle(current)
     if (current.hidden !== false || computed.display === "none") return false
-    current = current.parentElement
+    current = current.parentElement ?? shadowHostFor(current)
   }
   return true
 }
@@ -95,6 +134,19 @@ const isSequentiallyFocusableRadio = (element: HTMLElement, panel: HTMLElement):
   )
   const checked = group.find((candidate) => candidate.checked)
   return checked === undefined ? group[0] === radio : checked === radio
+}
+
+const composedElementsInScope = (root: ParentNode): Array<Element> => {
+  const elements: Array<Element> = []
+  const visitScope = (scope: ParentNode): void => {
+    for (const child of scope.children) {
+      elements.push(child)
+      if (child.shadowRoot !== null) visitScope(child.shadowRoot)
+      else visitScope(child)
+    }
+  }
+  visitScope(root)
+  return elements
 }
 
 /** One explicit piece of application-owned context attached to the current Relay thread. */
@@ -414,8 +466,10 @@ const DockLayer = ({
     }
     if (!modal || event.key !== "Tab") return
 
-    const focusable = Array.from(panel.querySelectorAll<HTMLElement>(focusableSelector)).filter(
-      (element) =>
+    const focusable = composedElementsInScope(panel).filter(
+      (element): element is HTMLElement =>
+        isHTMLElement(element) &&
+        element.matches(focusableSelector) &&
         isRenderedFocusable(element) &&
         isSequentiallyFocusableRadio(element, panel) &&
         (element.tabIndex >= 0 ||
@@ -425,8 +479,8 @@ const DockLayer = ({
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
     const active = activeElementFor(panel)
-    const leavingStart = event.shiftKey && (active === first || !panel.contains(active))
-    const leavingEnd = !event.shiftKey && (active === last || !panel.contains(active))
+    const leavingStart = event.shiftKey && (active === first || !isWithinPanel(panel, active))
+    const leavingEnd = !event.shiftKey && (active === last || !isWithinPanel(panel, active))
     if (!leavingStart && !leavingEnd) return
     event.preventDefault()
     const target = event.shiftKey ? last : first

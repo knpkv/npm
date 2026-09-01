@@ -712,4 +712,37 @@ describe("RelayDock", () => {
     expect(portal.querySelector('[role="dialog"]')).toBeNull()
     expect(host.inert).toBe(false)
   })
+
+  it("traps focus inside caller-owned nested open shadow content", async () => {
+    const { portal } = await mount(dock({ defaultOpen: true, footer: <div data-rly-shadow-footer="" /> }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    if (dialog === null) throw new Error("RelayDock shadow dialog did not render")
+    const close = dialog.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const footer = dialog.querySelector<HTMLElement>("[data-rly-shadow-footer]")
+    if (close === null || footer === null) throw new Error("RelayDock shadow footer did not render")
+
+    const host = document.createElement("div")
+    const shadow = host.attachShadow({ mode: "open" })
+    const internal = shadow.appendChild(document.createElement("button"))
+    internal.textContent = "Nested footer action"
+    footer.append(host)
+
+    internal.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(shadow.activeElement).toBe(internal)
+  })
 })
