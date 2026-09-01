@@ -663,6 +663,41 @@ test("modal Relay focus traversal orders a positive slot scope before a higher-p
   await expect(close).toBeFocused()
 })
 
+test("modal Relay focus traversal preserves a light-DOM slot scope in positive order", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const close = element.querySelector<HTMLButtonElement>("[aria-label=\"Close Relay\"]")
+    if (close !== null) close.tabIndex = -1
+    const outside = document.createElement("button")
+    outside.dataset.rlyPositiveLightSlotOutside = ""
+    outside.textContent = "Outside action"
+    const slot = document.createElement("slot")
+    slot.dataset.rlyPositiveLightSlot = ""
+    slot.tabIndex = 1
+    const fallback = slot.appendChild(document.createElement("button"))
+    fallback.dataset.rlyPositiveLightSlotFallback = ""
+    fallback.textContent = "Light slot fallback"
+    const sibling = document.createElement("button")
+    sibling.dataset.rlyPositiveLightSlotSibling = ""
+    sibling.tabIndex = 2
+    sibling.textContent = "Higher-priority sibling"
+    document.body.append(outside)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(slot, sibling)
+    outside.focus()
+  })
+  const fallback = dock.locator("[data-rly-positive-light-slot-fallback]")
+  const sibling = dock.locator("[data-rly-positive-light-slot-sibling]")
+
+  await dock.evaluate((element) =>
+    element.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" }))
+  )
+  await expect(fallback).toBeFocused()
+  await expect(sibling).not.toBeFocused()
+})
+
 test("modal Relay focus traversal preserves nested fallback slot scopes", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))

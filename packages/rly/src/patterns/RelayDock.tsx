@@ -185,7 +185,10 @@ interface SlotElement extends Element {
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
-  element.tagName === "SLOT" && "assignedElements" in element && hasShadowRootHost(element.getRootNode())
+  element.tagName === "SLOT" && "assignedElements" in element
+
+const isShadowSlotElement = (element: Element): element is SlotElement =>
+  isSlotElement(element) && hasShadowRootHost(element.getRootNode())
 
 const compareSequentialTabOrder = (left: Element, right: Element): number => {
   const leftTabIndex = !isHTMLElement(left) ? -1 : left.tabIndex
@@ -202,7 +205,7 @@ const hasExplicitNegativeTabIndex = (element: Element): boolean =>
 
 const ownsNegativeFocusScope = (element: Element): boolean =>
   hasExplicitNegativeTabIndex(element) &&
-  (isSlotElement(element) || (isHTMLElement(element) && element.shadowRoot?.delegatesFocus === true))
+  (isShadowSlotElement(element) || (isHTMLElement(element) && element.shadowRoot?.delegatesFocus === true))
 
 const isSequentiallyFocusableRadio = (
   element: RadioInput,
@@ -241,7 +244,7 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
     const nested = new Map<Element, ScopeTraversal>()
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
-      if (isSlotElement(element)) {
+      if (isShadowSlotElement(element)) {
         if (hasExplicitNegativeTabIndex(element)) return
         const assignedNodes = element.assignedNodes({ flatten: false })
         const assignedElements = assignedNodes.filter(isElementNode)
@@ -250,6 +253,10 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
           element,
           visitScopeElements(assignedNodes.length > 0 ? assignedElements : fallbackElements, element, element)
         )
+        return
+      }
+      if (isSlotElement(element) && isHTMLElement(element) && element.tabIndex > 0) {
+        nested.set(element, visitScopeElements([...element.children], element, element))
         return
       }
       if (
