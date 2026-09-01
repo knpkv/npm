@@ -629,6 +629,68 @@ const canonicalStringKey = JSON.stringify(["string"])
 const canonicalNumberKey = JSON.stringify(["number"])
 const canonicalSymbolKey = JSON.stringify(["symbol"])
 
+const canonicalBuiltinArrayKeySourcePath = "/__herdr_changeset_array_keys__.ts"
+const canonicalBuiltinArrayKeySource = TypeScript.createSourceFile(
+  canonicalBuiltinArrayKeySourcePath,
+  "type Mutable = keyof Array<string>\ntype Readonly = keyof ReadonlyArray<string>",
+  TypeScript.ScriptTarget.Latest,
+  true,
+  TypeScript.ScriptKind.TS
+)
+const canonicalBuiltinArrayCompilerOptions = { noEmit: true, target: TypeScript.ScriptTarget.Latest }
+const canonicalBuiltinArrayCompilerHost = TypeScript.createCompilerHost(canonicalBuiltinArrayCompilerOptions)
+const canonicalBuiltinArrayGetSourceFile = canonicalBuiltinArrayCompilerHost.getSourceFile.bind(
+  canonicalBuiltinArrayCompilerHost
+)
+canonicalBuiltinArrayCompilerHost.getSourceFile = (fileName, languageVersion) =>
+  fileName === canonicalBuiltinArrayKeySourcePath
+    ? canonicalBuiltinArrayKeySource
+    : canonicalBuiltinArrayGetSourceFile(fileName, languageVersion)
+const canonicalBuiltinArrayFileExists = canonicalBuiltinArrayCompilerHost.fileExists.bind(
+  canonicalBuiltinArrayCompilerHost
+)
+canonicalBuiltinArrayCompilerHost.fileExists = (fileName) =>
+  fileName === canonicalBuiltinArrayKeySourcePath || canonicalBuiltinArrayFileExists(fileName)
+const canonicalBuiltinArrayReadFile = canonicalBuiltinArrayCompilerHost.readFile.bind(canonicalBuiltinArrayCompilerHost)
+canonicalBuiltinArrayCompilerHost.readFile = (fileName) =>
+  fileName === canonicalBuiltinArrayKeySourcePath
+    ? canonicalBuiltinArrayKeySource.getFullText()
+    : canonicalBuiltinArrayReadFile(fileName)
+const canonicalBuiltinArrayProgram = TypeScript.createProgram(
+  [canonicalBuiltinArrayKeySourcePath],
+  canonicalBuiltinArrayCompilerOptions,
+  canonicalBuiltinArrayCompilerHost
+)
+const canonicalBuiltinArrayChecker = canonicalBuiltinArrayProgram.getTypeChecker()
+const canonicalBuiltinArrayKeySets = new Map()
+for (const statement of canonicalBuiltinArrayKeySource.statements) {
+  if (!TypeScript.isTypeAliasDeclaration(statement)) continue
+  const type = canonicalBuiltinArrayChecker.getTypeFromTypeNode(statement.type)
+  const members = type.types
+  if (members === undefined) {
+    throw new ChangesetCoverageError({
+      reason: `unable to resolve built-in array keys for ${statement.name.text}`
+    })
+  }
+  const keys = new Set([canonicalNumberKey])
+  for (const member of members) {
+    if ((member.flags & TypeScript.TypeFlags.StringLiteral) !== 0 && Predicate.isString(member.value)) {
+      keys.add(JSON.stringify(["string", member.value]))
+    }
+  }
+  canonicalBuiltinArrayKeySets.set(statement.name.text, keys)
+}
+
+const canonicalArrayKeySet = (kind, readonly) => {
+  const arrayKeys = canonicalBuiltinArrayKeySets.get(readonly ? "Readonly" : "Mutable")
+  if (arrayKeys === undefined) {
+    throw new ChangesetCoverageError({
+      reason: `unable to resolve built-in array keys for ${kind}`
+    })
+  }
+  return new Set([JSON.stringify([kind, readonly ? "readonly" : "mutable"]), ...arrayKeys])
+}
+
 const canonicalKeyContains = (container, key) => {
   if (container === key) return true
   if (container === canonicalStringKey) return key.startsWith('["string",')
@@ -878,14 +940,14 @@ const hasContradictoryLiteralIntersection = (members, analysis, filePath, substi
 }
 
 const canonicalTupleArrayKeySet = (typeNode, context) => {
-  const readonly = context.readonlyContainer === true ? "readonly" : "mutable"
+  const readonly = context.readonlyContainer === true
   const kind = TypeScript.isTupleTypeNode(typeNode) ? "tuple" : "array"
-  const keys = new Set([JSON.stringify([kind, readonly]), canonicalNumberKey, JSON.stringify(["string", "length"])])
+  const keys = canonicalArrayKeySet(kind, readonly)
   if (TypeScript.isTupleTypeNode(typeNode)) {
     for (const [index, element] of typeNode.elements.entries()) {
       if (TypeScript.isRestTypeNode(element)) continue
       if (TypeScript.isNamedTupleMember(element) && element.dotDotDotToken !== undefined) continue
-      keys.add(JSON.stringify(["number", String(index)]))
+      keys.add(JSON.stringify(["string", String(index)]))
     }
   }
   return keys
@@ -975,11 +1037,7 @@ const canonicalKeySetForNode = (
     }
     if (reference.name === "Array" || reference.name === "ReadonlyArray") {
       const readonly = reference.name === "ReadonlyArray" || context.readonlyContainer === true
-      return new Set([
-        JSON.stringify(["array", readonly ? "readonly" : "mutable"]),
-        canonicalNumberKey,
-        JSON.stringify(["string", "length"])
-      ])
+      return canonicalArrayKeySet("array", readonly)
     }
   }
   if (TypeScript.isTypeLiteralNode(typeNode) || TypeScript.isInterfaceDeclaration(typeNode)) {
@@ -4282,6 +4340,42 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(arrayLengthUnionPrevious, arrayLengthUnionElementChanged, ["packages/public/src/index.ts"]),
     []
+  )
+  const arrayMethodUnionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = string[] | { length: number; push(value: string): number }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const arrayMethodUnionRemoved = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = string[] | { length: number }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(arrayMethodUnionPrevious, arrayMethodUnionRemoved, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const tupleIndexUnionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Model = [string] | { "0": string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }'
+    ]
+  ])
+  const tupleIndexUnionRemoved = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = [string] | {}\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(tupleIndexUnionPrevious, tupleIndexUnionRemoved, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
   const stringIndexPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
