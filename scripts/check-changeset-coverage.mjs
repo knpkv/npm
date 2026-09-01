@@ -169,11 +169,16 @@ const compilerConfigurationReferences = (configPath, configText) => {
   const extendsPath = config.config.extends
   const paths = []
   if (extendsPath !== undefined) {
-    if (!Predicate.isString(extendsPath)) {
-      throw new ChangesetCoverageError({ reason: `${configPath}: compiler configuration extends must be a string` })
+    const extendsPaths = Array.isArray(extendsPath) ? extendsPath : [extendsPath]
+    if (extendsPaths.some((value) => !Predicate.isString(value))) {
+      throw new ChangesetCoverageError({
+        reason: `${configPath}: compiler configuration extends must contain only strings`
+      })
     }
-    const localPath = localCompilerConfigPath(configPath, extendsPath)
-    if (localPath !== undefined) paths.push(localPath)
+    for (const extendsEntry of extendsPaths) {
+      const localPath = localCompilerConfigPath(configPath, extendsEntry)
+      if (localPath !== undefined) paths.push(localPath)
+    }
   }
   if (references !== undefined) {
     if (!Array.isArray(references)) {
@@ -254,7 +259,7 @@ const configFileNames = (configPath, configText, configFiles) => {
 const packageCompilerOptions = (
   sources,
   repositoryRoot,
-  { configText, configFiles = new Map(), configurationPaths = [], entryPoints = [] } = {}
+  { configText, configFiles = new Map(), configurationPaths = [], entryPoints = [], entryPointSourcePath } = {}
 ) => {
   if (repositoryRoot === undefined) return defaultCompilerOptions
   const sourcePath = [...sources.keys()][0]
@@ -280,7 +285,9 @@ const packageCompilerOptions = (
       candidate.startsWith(`${repositoryRoot}/${packageMatch[1]}/`) && candidates.indexOf(candidate) === index
   )
   const sourcePathsForConfig = [
-    ...new Set([...entryPoints.map(({ sourcePath: entrySourcePath }) => entrySourcePath), ...sources.keys()])
+    ...(entryPointSourcePath === undefined
+      ? new Set([...entryPoints.map(({ sourcePath: entrySourcePath }) => entrySourcePath), ...sources.keys()])
+      : [entryPointSourcePath])
   ].map((source) => `${repositoryRoot}/${source}`)
   const configScore = (candidate) => {
     const candidateText =
@@ -401,6 +408,7 @@ const analyzeSources = (
           if (sourceSpecifier !== undefined) stars.push(sourceSpecifier)
         } else if (TypeScript.isNamedExports(clause)) {
           for (const element of clause.elements) {
+            if (node.isTypeOnly || element.isTypeOnly) continue
             aliases.set(element.name.text, {
               importedName: element.propertyName?.text ?? element.name.text,
               sourceSpecifier
@@ -794,7 +802,12 @@ const canonicalConditionalTypeText = (typeNode, analysis, filePath, substitution
   const extendsCategory = conditionalPrimitiveCategory(typeNode.extendsType, substitutions)
   const checkLiteral = conditionalPrimitiveLiteral(typeNode.checkType, substitutions)
   const extendsLiteral = conditionalPrimitiveLiteral(typeNode.extendsType, extendsSubstitutions)
-  const literalsMatch = checkLiteral === undefined || extendsLiteral === undefined || checkLiteral === extendsLiteral
+  const literalsMatch =
+    checkLiteral === undefined && extendsLiteral === undefined
+      ? true
+      : checkLiteral === undefined
+        ? false
+        : extendsLiteral === undefined || checkLiteral === extendsLiteral
   const branch =
     checkCategory !== undefined && extendsCategory !== undefined
       ? checkCategory === "never"
@@ -844,6 +857,78 @@ const canonicalConditionalTypeText = (typeNode, analysis, filePath, substitution
     seen,
     nextCanonicalTypeContext(context)
   )})`
+}
+
+const canonicalTupleElementText = (element, analysis, filePath, substitutions, seen, context) => {
+  const namedMember = TypeScript.isNamedTupleMember(element)
+  const elementText = canonicalTypeText(
+    namedMember ? element.type : element,
+    analysis,
+    filePath,
+    substitutions,
+    seen,
+    nextCanonicalTypeContext(context)
+  )
+  if (!namedMember) return elementText
+  if (element.dotDotDotToken !== undefined) return `...${elementText}`
+  return element.questionToken === undefined ? elementText : `${elementText}?`
+}
+
+const canonicalClassValueText = (declaration, analysis, filePath, substitutions, seen, context) => {
+  const staticMembers = new Map()
+  const constructors = []
+  const typeMembersMemo = context.typeMembersMemo ?? new Map()
+  const addMember = (name, descriptor) => {
+    const existing = staticMembers.get(name)
+    staticMembers.set(name, existing === undefined ? descriptor : mergeMemberContract(existing, descriptor))
+  }
+  for (const declarationNode of resolvedDeclarationNodes(analysis, declaration)) {
+    if (!TypeScript.isClassDeclaration(declarationNode)) continue
+    for (const member of declarationNode.members) {
+      if (hasNonPublicModifier(member)) continue
+      if (TypeScript.isConstructorDeclaration(member)) {
+        constructors.push(
+          `construct(${member.parameters
+            .map((parameter) =>
+              parameterDescriptor(parameter, analysis, declaration.filePath, substitutions, seen, context)
+            )
+            .join(",")})`
+        )
+        continue
+      }
+      if (!hasStaticModifier(member)) continue
+      const name = member.name === undefined ? undefined : canonicalPropertyKeyText(member.name)
+      if (name === undefined) continue
+      if (
+        !TypeScript.isPropertyDeclaration(member) &&
+        !TypeScript.isMethodDeclaration(member) &&
+        !TypeScript.isGetAccessorDeclaration(member) &&
+        !TypeScript.isSetAccessorDeclaration(member)
+      ) {
+        continue
+      }
+      addMember(
+        name,
+        memberDescriptor(
+          member,
+          analysis,
+          declaration.filePath,
+          substitutions,
+          seen,
+          { ...context, typeMembersMemo },
+          typeMembersMemo,
+          context.substitutionPath
+        ).descriptor
+      )
+    }
+  }
+  if (constructors.length === 0) constructors.push("construct()")
+  return `value(${declaration.filePath}#${declaration.node.name.text};${[
+    ...[...staticMembers].map(([name, descriptor]) => `${name}:${descriptor}`),
+    ...constructors.map((descriptor, index) => `construct#${index}:${descriptor}`)
+  ]
+    .toSorted()
+    .join(";")})`
 }
 
 const canonicalEnumText = (declaration, analysis, filePath) => {
@@ -959,6 +1044,23 @@ const canonicalTypeText = (
   if (TypeScript.isParenthesizedTypeNode(typeNode)) {
     return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
   }
+  if (TypeScript.isTypeQueryNode(typeNode)) {
+    const declaration = TypeScript.isIdentifier(typeNode.exprName)
+      ? resolveTypeDeclaration(analysis, filePath, typeNode.exprName.text, seen, typeNode)
+      : resolveNamespaceQualifiedTypeDeclaration(analysis, filePath, typeNode.exprName, seen, typeNode)
+    if (declaration !== undefined && TypeScript.isClassDeclaration(declaration.node)) {
+      const declarationKey = `${declaration.filePath}\u0000${declaration.node.name.text}`
+      if (seen.has(declarationKey)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+      return canonicalClassValueText(
+        declaration,
+        analysis,
+        filePath,
+        substitutions,
+        new Set(seen).add(declarationKey),
+        nextCanonicalTypeContext(context)
+      )
+    }
+  }
   if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
     const typeName = typeNode.typeName.text
     const substituted = substitutions.get(typeName)
@@ -1045,20 +1147,7 @@ const canonicalTypeText = (
   }
   if (TypeScript.isTupleTypeNode(typeNode)) {
     return `[${typeNode.elements
-      .map((element) => {
-        const namedMember = TypeScript.isNamedTupleMember(element)
-        const elementText = canonicalTypeText(
-          namedMember ? element.type : element,
-          analysis,
-          filePath,
-          substitutions,
-          seen,
-          nextCanonicalTypeContext(context)
-        )
-        if (!namedMember) return elementText
-        if (element.dotDotDotToken !== undefined) return `...${elementText}`
-        return element.questionToken === undefined ? elementText : `${elementText}?`
-      })
+      .map((element) => canonicalTupleElementText(element, analysis, filePath, substitutions, seen, context))
       .join(",")}]`
   }
   if (TypeScript.isTypeOperatorNode(typeNode)) {
@@ -1223,6 +1312,13 @@ const canonicalNumericIndexText = (node) => {
     return /^(?:0|[1-9]\d*)$/u.test(literal.text) ? literal.text : undefined
   }
   return undefined
+}
+
+const canonicalIndexedAccessDomains = (node) => {
+  const numericIndexText = canonicalNumericIndexText(node)
+  if (numericIndexText !== undefined) return ["number", "string"]
+  const literal = TypeScript.isLiteralTypeNode(node) ? node.literal : node
+  return TypeScript.isStringLiteral(literal) || TypeScript.isNoSubstitutionTemplateLiteral(literal) ? ["string"] : []
 }
 
 const canonicalPrimitiveKeyofCategory = (node) => {
@@ -1434,6 +1530,21 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       )
       return members.some((member) => member === undefined) ? undefined : `union(${members.toSorted().join("|")})`
     }
+    if (TypeScript.isIntersectionTypeNode(target)) {
+      const members = target.types
+        .map((member) =>
+          canonicalTarget(
+            member,
+            targetFilePath,
+            targetSubstitutions,
+            targetSeen,
+            nextCanonicalTypeContext(targetContext)
+          )
+        )
+        .filter((member) => member !== undefined)
+      const uniqueMembers = [...new Set(members)]
+      return uniqueMembers.length === 0 ? undefined : uniqueMembers.reduce(mergeMemberContract)
+    }
     if (TypeScript.isArrayTypeNode(target) && numericIndexText !== undefined) {
       return canonicalTypeText(
         target.elementType,
@@ -1500,13 +1611,13 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       if (numericIndexText !== undefined) {
         const element = target.elements[Number(numericIndexText)]
         if (element !== undefined) {
-          return canonicalTypeText(
-            TypeScript.isNamedTupleMember(element) ? element.type : element,
+          return canonicalTupleElementText(
+            element,
             analysis,
             targetFilePath,
             targetSubstitutions,
             targetSeen,
-            nextCanonicalTypeContext(targetContext)
+            targetContext
           )
         }
       }
@@ -1561,6 +1672,8 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
       let inheritedSelected
       let localCallableSelected
       let localPropertySelected
+      const localIndexSelected = new Map()
+      const indexedAccessDomains = canonicalIndexedAccessDomains(typeNode.indexType)
       if (indexKey !== undefined) {
         for (const declarationNode of declarationNodes) {
           for (const heritageType of instanceHeritageTypes(declarationNode)) {
@@ -1578,6 +1691,28 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
           }
           for (const member of declarationNode.members) {
             if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
+            if (TypeScript.isIndexSignatureDeclaration(member)) {
+              const domain = canonicalIndexSignatureDomain(
+                member.parameters[0]?.type,
+                analysis,
+                targetFilePath,
+                targetSubstitutions,
+                targetSeen,
+                nextCanonicalTypeContext(targetContext)
+              )
+              if (domain === undefined || !indexedAccessDomains.includes(domain) || member.type === undefined) continue
+              const value = canonicalTypeText(
+                member.type,
+                analysis,
+                targetFilePath,
+                targetSubstitutions,
+                targetSeen,
+                nextCanonicalTypeContext(targetContext)
+              )
+              const existing = localIndexSelected.get(domain)
+              localIndexSelected.set(domain, existing === undefined ? value : mergeMemberContract(existing, value))
+              continue
+            }
             if (
               (!TypeScript.isPropertySignature(member) &&
                 !TypeScript.isPropertyDeclaration(member) &&
@@ -1643,10 +1778,13 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
         }
       }
       if (localPropertySelected !== undefined) return localPropertySelected
-      if (localCallableSelected === undefined) return inheritedSelected
-      return inheritedSelected === undefined
-        ? localCallableSelected
-        : mergeMemberContract(inheritedSelected, localCallableSelected)
+      if (localCallableSelected !== undefined) {
+        return inheritedSelected === undefined
+          ? localCallableSelected
+          : mergeMemberContract(inheritedSelected, localCallableSelected)
+      }
+      if (inheritedSelected !== undefined) return inheritedSelected
+      return indexedAccessDomains.map((domain) => localIndexSelected.get(domain)).find((value) => value !== undefined)
     }
     return undefined
   }
@@ -2457,7 +2595,7 @@ const parameterDescriptor = (
   context = { depth: 0, substitutionPath: new Set(), recursiveDeclarations: new Set() }
 ) => {
   const marker = parameter.dotDotDotToken === undefined ? "" : "..."
-  const optional = parameter.questionToken === undefined ? "" : "?"
+  const optional = parameter.questionToken === undefined && parameter.initializer === undefined ? "" : "?"
   const type =
     parameter.type === undefined
       ? "unknown"
@@ -3442,6 +3580,14 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
     members.set(name, existing === undefined ? descriptor : mergeMemberContract(existing, descriptor))
   }
   const inheritedMemberNames = new Set()
+  const overloadedMethodNames = new Set(
+    declarationNodes.flatMap((declarationNode) =>
+      declarationNode.members
+        .filter((member) => TypeScript.isMethodDeclaration(member) && member.body === undefined)
+        .map((member) => canonicalPropertyKeyText(member.name))
+        .filter((name) => name !== undefined)
+    )
+  )
   const addInheritedMember = (name, descriptor) => {
     addMember(name, descriptor)
     inheritedMemberNames.add(name)
@@ -3484,6 +3630,15 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
   for (const declarationNode of declarationNodes) {
     for (const member of declarationNode.members) {
       if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
+      const memberName = member.name === undefined ? undefined : canonicalPropertyKeyText(member.name)
+      if (
+        TypeScript.isMethodDeclaration(member) &&
+        member.body !== undefined &&
+        memberName !== undefined &&
+        overloadedMethodNames.has(memberName)
+      ) {
+        continue
+      }
       if (
         !TypeScript.isPropertySignature(member) &&
         !TypeScript.isMethodSignature(member) &&
@@ -3564,7 +3719,7 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
     .toSorted()
     .join(";")})`
   return TypeScript.isClassDeclaration(declaration.node) && hasNominalClassIdentity(declaration, analysis)
-    ? `class(${declaration.node.name.text};${structuralText})`
+    ? `class(${declaration.filePath}#${declaration.node.name.text};${structuralText})`
     : structuralText
 }
 
@@ -3850,50 +4005,77 @@ const publicCallableChanges = (
   currentEntryPoints = previousEntryPoints,
   {
     compilerOptions,
+    compilerOptionsByEntryPoint,
     currentCompilerOptions,
+    currentCompilerOptionsByEntryPoint,
     previousCompilerOptions,
+    previousCompilerOptionsByEntryPoint,
     programFactory = TypeScript.createProgram,
     recursiveDeclarations = new Set(),
     repositoryRoot
   } = {}
 ) => {
-  const signatures = (sources, entryPoints, revisionCompilerOptions) => {
-    const effectiveCompilerOptions =
-      revisionCompilerOptions ?? compilerOptions ?? packageCompilerOptions(sources, repositoryRoot)
-    const analysis = analyzeSources(sources, recursiveDeclarations, {
-      compilerOptions: effectiveCompilerOptions,
-      programFactory
-    })
+  const signatures = (sources, entryPoints, revisionCompilerOptions, revisionCompilerOptionsByEntryPoint) => {
+    const analyses = new Set()
     const result = new Map()
-    for (const { conditionPath, entryPoint, exportedName, publicSubpath, target } of reachableCallableEntries(
-      sources,
-      entryPoints,
-      analysis
-    )) {
-      const signature = callableParameterTypesInSources(sources, target.filePath, analysis, recursiveDeclarations).get(
-        target.name
-      )
-      if (signature === undefined) continue
-      const identity = `${entryPoint}\u0000${exportedName}`
-      const existing = result.get(identity) ?? []
-      if (
-        !existing.some(
-          ({ conditionPath: existingConditionPath, filePath, name, publicSubpath: existingPublicSubpath }) =>
-            filePath === target.filePath &&
-            name === target.name &&
-            conditionPathKey(existingConditionPath) === conditionPathKey(conditionPath) &&
-            existingPublicSubpath === publicSubpath
-        )
-      ) {
-        existing.push({ conditionPath, filePath: target.filePath, name: target.name, publicSubpath, ...signature })
-        result.set(identity, existing)
+    const normalizedEntryPoints = normalizeEntryPoints(entryPoints ?? [])
+    for (const entryPointDescriptor of normalizedEntryPoints) {
+      const effectiveCompilerOptions =
+        revisionCompilerOptionsByEntryPoint?.get(entryPointDescriptor.sourcePath) ??
+        revisionCompilerOptions ??
+        compilerOptionsByEntryPoint?.get(entryPointDescriptor.sourcePath) ??
+        compilerOptions ??
+        packageCompilerOptions(sources, repositoryRoot, { entryPointSourcePath: entryPointDescriptor.sourcePath })
+      const analysis = analyzeSources(sources, recursiveDeclarations, {
+        compilerOptions: effectiveCompilerOptions,
+        programFactory
+      })
+      analyses.add(analysis)
+      for (const { conditionPath, entryPoint, exportedName, publicSubpath, target } of reachableCallableEntries(
+        sources,
+        [entryPointDescriptor],
+        analysis
+      )) {
+        const signature = callableParameterTypesInSources(
+          sources,
+          target.filePath,
+          analysis,
+          recursiveDeclarations
+        ).get(target.name)
+        if (signature === undefined) continue
+        const identity = `${entryPoint}\u0000${exportedName}`
+        const existing = result.get(identity) ?? []
+        if (
+          !existing.some(
+            ({ conditionPath: existingConditionPath, filePath, name, publicSubpath: existingPublicSubpath }) =>
+              filePath === target.filePath &&
+              name === target.name &&
+              conditionPathKey(existingConditionPath) === conditionPathKey(conditionPath) &&
+              existingPublicSubpath === publicSubpath
+          )
+        ) {
+          existing.push({ conditionPath, filePath: target.filePath, name: target.name, publicSubpath, ...signature })
+          result.set(identity, existing)
+        }
       }
     }
-    if (programFactory === TypeScript.createProgram) analysis.releaseChecker()
+    if (programFactory === TypeScript.createProgram) {
+      for (const analysis of analyses) analysis.releaseChecker()
+    }
     return result
   }
-  const previous = signatures(previousSources, previousEntryPoints, previousCompilerOptions)
-  const current = signatures(currentSources, currentEntryPoints, currentCompilerOptions)
+  const previous = signatures(
+    previousSources,
+    previousEntryPoints,
+    previousCompilerOptions,
+    previousCompilerOptionsByEntryPoint
+  )
+  const current = signatures(
+    currentSources,
+    currentEntryPoints,
+    currentCompilerOptions,
+    currentCompilerOptionsByEntryPoint
+  )
   const changes = []
   const signatureContract = (signature) =>
     [
@@ -8488,6 +8670,335 @@ const runSelfTest = () => {
       { kind: "callable-removal", filePath: "packages/public/src/shared.tsx", name: "Public", properties: [] }
     ]
   )
+
+  assert.deepEqual(
+    compilerConfigurationReferences(
+      "/fixture/packages/public/tsconfig.json",
+      '{"extends":["../../tsconfig.base.jsonc","./tsconfig.local.json"]}'
+    ),
+    ["/fixture/tsconfig.base.jsonc", "/fixture/packages/public/tsconfig.local.json"]
+  )
+  assert.throws(
+    () =>
+      compilerConfigurationReferences(
+        "/fixture/packages/public/tsconfig.json",
+        '{"extends":["../../tsconfig.base.jsonc",42]}'
+      ),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason ===
+        "/fixture/packages/public/tsconfig.json: compiler configuration extends must contain only strings"
+  )
+  const arrayExtendsCompilerOptions = compilerOptionsFromConfig(
+    "/fixture/packages/public/tsconfig.json",
+    '{"extends":["../../tsconfig.base.jsonc","./tsconfig.local.json"],"files":["src/index.ts"]}',
+    new Map([
+      ["/fixture/tsconfig.base.jsonc", '{"compilerOptions":{"noUncheckedIndexedAccess":true}}'],
+      ["/fixture/packages/public/tsconfig.local.json", '{"compilerOptions":{"noUncheckedIndexedAccess":false}}'],
+      ["/fixture/packages/public/src/index.ts", ""]
+    ])
+  )
+  assert.equal(arrayExtendsCompilerOptions.noUncheckedIndexedAccess, false)
+
+  const perProjectPrevious = new Map([
+    ["packages/public/src/client.ts", "export const Public = (values: string[]) => values[0]"],
+    ["packages/public/src/server.ts", "export const Public = (values: string[]) => values[0]"]
+  ])
+  const perProjectCompilerOptions = (noUncheckedIndexedAccess) => ({
+    ...defaultCompilerOptions,
+    noUncheckedIndexedAccess
+  })
+  assert.deepEqual(
+    publicCallableChanges(
+      perProjectPrevious,
+      perProjectPrevious,
+      ["packages/public/src/client.ts", "packages/public/src/server.ts"],
+      undefined,
+      {
+        previousCompilerOptionsByEntryPoint: new Map([
+          ["packages/public/src/client.ts", perProjectCompilerOptions(false)],
+          ["packages/public/src/server.ts", perProjectCompilerOptions(false)]
+        ]),
+        currentCompilerOptionsByEntryPoint: new Map([
+          ["packages/public/src/client.ts", perProjectCompilerOptions(false)],
+          ["packages/public/src/server.ts", perProjectCompilerOptions(true)]
+        ])
+      }
+    ),
+    [{ kind: "return-type-change", filePath: "packages/public/src/server.ts", name: "Public", properties: [] }]
+  )
+
+  const typeOnlyAliasPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Added } from "./view.js"'],
+    ["packages/public/src/view.tsx", "export function Added(): void {}"]
+  ])
+  const typeOnlyAliasCurrent = new Map([
+    ["packages/public/src/index.ts", 'export type { Added } from "./view.js"'],
+    ["packages/public/src/view.tsx", "export function Added(): void {}"]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(typeOnlyAliasPrevious, typeOnlyAliasCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Added", properties: [] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      typeOnlyAliasPrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { type Added } from "./view.js"'],
+        ["packages/public/src/view.tsx", "export function Added(): void {}"]
+      ]),
+      ["packages/public/src/index.ts"]
+    ),
+    [{ kind: "callable-removal", filePath: "packages/public/src/view.tsx", name: "Added", properties: [] }]
+  )
+
+  const namedOptionalTuplePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [value?: string][0] }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const namedOptionalTupleRequired = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { value: [value: string][0] }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namedOptionalTuplePrevious, namedOptionalTupleRequired, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      namedOptionalTuplePrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          "type Props = { value: [renamed?: string][0] }\nexport const Public = (props: Props) => props"
+        ]
+      ]),
+      ["packages/public/src/index.ts"]
+    ),
+    []
+  )
+  const namedRestTuple = (element) =>
+    new Map([
+      ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+      [
+        "packages/public/src/view.tsx",
+        `type Props = { value: ${element}[0] }\nexport const Public = (props: Props) => props`
+      ]
+    ])
+  assert.deepEqual(
+    publicCallableChanges(namedRestTuple("[...values: string[]]"), namedRestTuple("[...string[]]"), [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+
+  const indexedAccessSignaturePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Model = { [key: string]: string }\ntype Props = { value: Model["x"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexSignatureExplicitMember = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Model = { [key: string]: string; x: string }\ntype Props = { value: Model["x"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedAccessSignaturePrevious, indexSignatureExplicitMember, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      indexedAccessSignaturePrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          'type Model = { [key: string]: number }\ntype Props = { value: Model["x"] }\nexport const Public = (props: Props) => props'
+        ]
+      ]),
+      ["packages/public/src/index.ts"]
+    ),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
+  const indexedIntersectionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Left = { selected: string }\ntype Right = { other: number }\ntype Model = Left & Right\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedIntersectionUnselected = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Left = { selected: string }\ntype Right = { other: boolean }\ntype Model = Left & Right\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedIntersectionPrevious, indexedIntersectionUnselected, ["packages/public/src/index.ts"]),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      indexedIntersectionPrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          'type Left = { selected: number }\ntype Right = { other: number }\ntype Model = Left & Right\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+        ]
+      ]),
+      ["packages/public/src/index.ts"]
+    ),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
+  const reverseConditionalPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: string extends "a" ? string : number }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const reverseConditionalFalseChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Props = { value: string extends "a" ? string : boolean }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(reverseConditionalPrevious, reverseConditionalFalseChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      reverseConditionalPrevious,
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          'type Props = { value: string extends "a" ? boolean : number }\nexport const Public = (props: Props) => props'
+        ]
+      ]),
+      ["packages/public/src/index.ts"]
+    ),
+    []
+  )
+
+  const defaultedMethod = (parameter) =>
+    new Map([
+      ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+      [
+        "packages/public/src/view.tsx",
+        `class Model { m(${parameter}): string { return "" } }\ntype Props = { value: Model }\nexport const Public = (props: Props) => props`
+      ]
+    ])
+  assert.deepEqual(
+    publicCallableChanges(defaultedMethod('x: string = ""'), defaultedMethod("x: string"), [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(defaultedMethod('x: string = ""'), defaultedMethod('x: string = "changed"'), [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+
+  const classOverloadImplementation = (implementationParameter) =>
+    new Map([
+      ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+      [
+        "packages/public/src/view.tsx",
+        `class Model { m(x: string): string\n m(${implementationParameter}): string { return "" } }\ntype Props = { value: Model }\nexport const Public = (props: Props) => props`
+      ]
+    ])
+  assert.deepEqual(
+    publicCallableChanges(classOverloadImplementation("x: any"), classOverloadImplementation("x: unknown"), [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      classOverloadImplementation("x: any"),
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          'class Model { m(x: number): string\n m(x: any): string { return "" } }\ntype Props = { value: Model }\nexport const Public = (props: Props) => props'
+        ]
+      ]),
+      ["packages/public/src/index.ts"]
+    ),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
+  const typeQuerySource = (staticType, constructorType, body = "") =>
+    new Map([
+      ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+      [
+        "packages/public/src/view.tsx",
+        `class Result { static selected: ${staticType}; constructor(value: ${constructorType}) { ${body} } }\ntype Props = { value: typeof Result }\nexport const Public = (props: Props) => props`
+      ]
+    ])
+  assert.deepEqual(
+    publicCallableChanges(typeQuerySource("string", "string"), typeQuerySource("number", "string"), [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(typeQuerySource("string", "string"), typeQuerySource("string", "number"), [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(typeQuerySource("string", "string", "return value"), typeQuerySource("string", "string"), [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+
+  const nominalOriginPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/a.ts", 'export class Result { private brand = "a"; value = "" }'],
+    ["packages/public/src/b.ts", 'export class Result { private brand = "b"; value = "" }'],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Result } from "./a.js"\ntype Props = { value: Result }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const nominalOriginCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/a.ts", 'export class Result { private brand = "a"; value = "" }'],
+    ["packages/public/src/b.ts", 'export class Result { private brand = "b"; value = "" }'],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Result } from "./b.js"\ntype Props = { value: Result }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(nominalOriginPrevious, nominalOriginCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
 }
 
 const decodeJson = Effect.fn("ChangesetCoverage.decodeJson")(function* (content, location) {
@@ -8847,30 +9358,40 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         record.directory,
         previousRelativeSourceFiles
       )
-      const readConfig = (configText, configFiles, sources, entryPoints, configurationPaths) =>
-        sources.size === 0
-          ? defaultCompilerOptions
-          : packageCompilerOptions(sources, repositoryRoot, {
-              configText,
-              configFiles: new Map([
-                ...configFiles,
-                ...[...sources.keys()].map((sourcePath) => [path.join(repositoryRoot, sourcePath), ""])
-              ]),
-              configurationPaths,
-              entryPoints
-            })
-      let currentCompilerOptions = defaultCompilerOptions
-      if (currentSources.size > 0) {
-        currentCompilerOptions = readConfig(currentConfig, currentConfigFiles, currentSources, currentEntryPoints, [
-          ...currentConfigFiles.keys()
+      const readConfig = (configText, configFiles, sources, entryPoints, configurationPaths) => {
+        const normalizedEntryPoints = normalizeEntryPoints(entryPoints)
+        const sourceFiles = new Map([
+          ...configFiles,
+          ...[...sources.keys()].map((sourcePath) => [path.join(repositoryRoot, sourcePath), ""])
         ])
+        return new Map(
+          [...new Set(normalizedEntryPoints.map(({ sourcePath }) => sourcePath))].map((entryPointSourcePath) => [
+            entryPointSourcePath,
+            packageCompilerOptions(sources, repositoryRoot, {
+              configText,
+              configFiles: sourceFiles,
+              configurationPaths,
+              entryPointSourcePath
+            })
+          ])
+        )
       }
-      let previousCompilerOptions = defaultCompilerOptions
+      let currentCompilerOptionsByEntryPoint = new Map()
+      if (currentSources.size > 0) {
+        currentCompilerOptionsByEntryPoint = readConfig(
+          currentConfig,
+          currentConfigFiles,
+          currentSources,
+          currentEntryPoints,
+          [...currentConfigFiles.keys()]
+        )
+      }
+      let previousCompilerOptionsByEntryPoint = new Map()
       if (previousSources.size > 0) {
         if (previousConfig === undefined) {
           return yield* fail(`${mergeBase}: compiler configuration for ${record.directory} is unavailable`)
         }
-        previousCompilerOptions = readConfig(
+        previousCompilerOptionsByEntryPoint = readConfig(
           previousConfig,
           previousConfigFiles,
           previousSources,
@@ -8881,8 +9402,8 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
       const callableChanges = yield* Effect.try({
         try: () =>
           publicCallableChanges(previousSources, currentSources, previousEntryPoints, currentEntryPoints, {
-            currentCompilerOptions,
-            previousCompilerOptions,
+            currentCompilerOptionsByEntryPoint,
+            previousCompilerOptionsByEntryPoint,
             recursiveDeclarations: unchangedDeclarationKeys(previousSources, currentSources)
           }),
         catch: toPublicCallableChangesError
