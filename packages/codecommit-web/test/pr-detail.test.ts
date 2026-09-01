@@ -2,6 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Domain } from "@knpkv/codecommit-core"
 
 import {
+  commentNavigationIdentityForCoordinates,
   reviewApiAccountId,
   sandboxMatchesPullRequest,
   selectCodeCommitPullRequest
@@ -33,6 +34,16 @@ const pullRequest = new Domain.PullRequest({
 })
 
 describe("PR detail coordinates", () => {
+  it("isolates comment state by the complete PR coordinate", () => {
+    const payment = commentNavigationIdentityForCoordinates("111122223333", "42", "payments", "eu-west-1")
+    const orders = commentNavigationIdentityForCoordinates("111122223333", "42", "orders", "eu-west-1")
+    const otherRegion = commentNavigationIdentityForCoordinates("111122223333", "42", "payments", "us-east-1")
+
+    expect(payment).not.toBe(orders)
+    expect(payment).not.toBe(otherRegion)
+    expect(payment).toBe(commentNavigationIdentityForCoordinates("111122223333", "42", "payments", "eu-west-1"))
+  })
+
   it("does not reuse a sandbox from another repository or region", () => {
     const sandbox = {
       awsAccountId: "111122223333",

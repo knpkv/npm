@@ -127,6 +127,14 @@ export const reviewApiAccountId = (
     region: pullRequest.account.region
   })
 
+/** Keep optimistic comment state isolated to one exact pull-request coordinate. */
+export const commentNavigationIdentityForCoordinates = (
+  accountId: string | undefined,
+  pullRequestId: string | undefined,
+  repositoryName: string | undefined,
+  region: string | undefined
+): string => JSON.stringify([accountId ?? "", pullRequestId ?? "", repositoryName ?? "", region ?? ""])
+
 /** Select a cached PR only when the route identifies exactly one coordinate. */
 export const selectCodeCommitPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
@@ -946,7 +954,12 @@ export function PRDetail() {
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
   const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
   const commentRefreshTimersRef = useRef<Set<number>>(new Set())
-  const commentNavigationIdentity = `${accountKey ?? ""}:${prId ?? ""}`
+  const commentNavigationIdentity = commentNavigationIdentityForCoordinates(
+    accountKey ?? accountId,
+    prId,
+    pr === null ? refreshRepositoryName : String(pr.repositoryName),
+    pr === null ? refreshRegion : String(pr.account.region)
+  )
   const [commentCountState, setCommentCountState] = useState<OptimisticCommentCount | null>(null)
   const authoritativeCommentCount = pr?.commentCount
   const commentCount = (() => {

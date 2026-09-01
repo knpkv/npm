@@ -325,8 +325,28 @@ describe("PR handler selection", () => {
           String(regionalPullRequest.account.region)
         ]))
       }`
-      const emptyPartFailure = yield* decodePullRequestCoordinates(emptyPartToken).pipe(Effect.flip)
-      expect(emptyPartFailure.message).toContain("Invalid pull-request")
+      const emptyPartCoordinates = yield* decodePullRequestCoordinates(emptyPartToken)
+      expect(emptyPartCoordinates._tag).toBe("None")
+
+      const jsonScalarProfile = `cc1_${Encoding.encodeBase64Url(JSON.stringify(123))}`
+      const scalarCoordinates = yield* decodePullRequestCoordinates(jsonScalarProfile)
+      expect(scalarCoordinates._tag).toBe("None")
+      const scalarProfile = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make(jsonScalarProfile),
+          region: pullRequest.account.region,
+          awsAccountId: undefined,
+          repoAccountId: undefined
+        })
+      })
+      const selectedScalarProfile = yield* cachedPullRequest(
+        { findAll: () => Effect.succeed([Schema.encodeSync(PRService.CachedPRToPullRequest)(scalarProfile)]) },
+        jsonScalarProfile,
+        scalarProfile.id,
+        { repositoryName: "payments", region: "eu-west-1" }
+      )
+      expect(selectedScalarProfile.account.profile).toBe(jsonScalarProfile)
     }))
 
   it.effect("binds coordinate tokens to the credential account, not repository ownership", () =>

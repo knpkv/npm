@@ -152,7 +152,7 @@ test("resets push navigation, restores history, and preserves queue position for
   expect(await page.evaluate(() => window.scrollY)).toBe(queueY)
 
   await page.getByRole("link", { name: /PR #42/ }).click()
-  await expect(page).toHaveURL(/\/accounts\/111111111111\/prs\/42/)
+  await expect(page).toHaveURL(/\/accounts\/production\/prs\/42\?repository=payments-api&region=eu-west-1/)
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
 
   await page.goBack()

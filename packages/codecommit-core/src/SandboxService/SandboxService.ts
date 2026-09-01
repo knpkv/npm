@@ -527,12 +527,6 @@ const makeSandboxService = Effect.gen(function*() {
                 ...(row.containerId === null ? [] : [row.containerId]),
                 ...discovered.map((container) => container.Id)
               ])
-              if (
-                row.accessPassword !== null &&
-                row.containerId === null &&
-                containerIds.size === 0 &&
-                isActiveSandboxStatus(row.status)
-              ) return
               if (row.accessPassword === null) {
                 yield* Effect.forEach(
                   containerIds,

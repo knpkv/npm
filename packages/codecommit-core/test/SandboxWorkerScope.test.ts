@@ -373,7 +373,13 @@ describe("SandboxWorkerScope", () => {
       const statuses: ReadonlyArray<"creating" | "cloning" | "starting"> = ["creating", "cloning", "starting"]
       for (const status of statuses) {
         const fixture = yield* makeFixture(() => Effect.void, {
-          initialRow: { ...legacyRow, accessPassword: "protected", containerId: null, status }
+          initialRow: {
+            ...legacyRow,
+            region: createParams.region,
+            accessPassword: "protected",
+            containerId: null,
+            status
+          }
         })
         yield* Effect.scoped(
           SandboxService.pipe(
@@ -383,6 +389,23 @@ describe("SandboxWorkerScope", () => {
         )
         expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status, containerId: null })
       }
+    }))
+
+  it.effect("terminalizes an active regionless row without worker evidence", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: { ...legacyRow, accessPassword: "protected", containerId: null, status: "creating" }
+      })
+
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped", region: "" })
     }))
 
   it.effect("marks an authenticated row stopped only for a confirmed missing container", () =>

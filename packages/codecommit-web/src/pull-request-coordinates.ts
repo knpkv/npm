@@ -108,9 +108,9 @@ export const decodePullRequestCoordinates = (
                 Effect.map(([accountId, pullRequestId, repositoryName, region]) =>
                   Option.some(toCoordinates({ accountId, pullRequestId, repositoryName, region }))
                 ),
-                Effect.mapError(() =>
-                  new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinates" })
-                )
+                // A profile alias may decode as JSON while still not being a coordinate tuple.
+                // Leave it to the ordinary account lookup rather than reserving that alias.
+                Effect.catch(() => Effect.succeed(Option.none()))
               )
           })
         )
