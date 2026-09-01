@@ -1637,5 +1637,5 @@ cat '${maximumEventPath}'
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
-  })
+  }, { timeout: 10_000 })
 })
