@@ -82,6 +82,8 @@ const hasStaticModifier = (node) =>
 
 const sourceAnalysisCache = new WeakMap()
 
+const isLexicalScopeNode = (node) => TypeScript.isBlock(node) || TypeScript.isModuleBlock(node)
+
 const defaultCompilerOptions = {
   allowJs: false,
   exactOptionalPropertyTypes: true,
@@ -174,9 +176,17 @@ const analyzeSources = (
     const imports = new Map()
     const declarations = new Map()
     const declarationGroups = new Map()
+    const declarationsByScope = new Map()
+    const declarationGroupsByScope = new Map()
     const exportedTypes = new Set()
     let defaultExportName
-    const visit = (node) => {
+    const scopeByNode = new WeakMap()
+    const scopeParents = new Map()
+    const moduleScope = filePath + "\u0000module"
+    const visit = (node, parentScope) => {
+      const scope = isLexicalScopeNode(node) ? filePath + "\u0000scope:" + node.pos + ":" + node.end : parentScope
+      scopeByNode.set(node, scope)
+      if (scope !== parentScope) scopeParents.set(scope, parentScope)
       if (
         TypeScript.isTypeAliasDeclaration(node) ||
         TypeScript.isInterfaceDeclaration(node) ||
@@ -185,12 +195,22 @@ const analyzeSources = (
       ) {
         const declarationName = node.name?.text
         if (declarationName !== undefined) {
-          if (!declarations.has(declarationName)) declarations.set(declarationName, node)
-          const group = declarationGroups.get(declarationName) ?? []
+          const scopedDeclarations = declarationsByScope.get(scope) ?? new Map()
+          if (!scopedDeclarations.has(declarationName)) scopedDeclarations.set(declarationName, node)
+          declarationsByScope.set(scope, scopedDeclarations)
+          const scopedGroups = declarationGroupsByScope.get(scope) ?? new Map()
+          const group = scopedGroups.get(declarationName) ?? []
           group.push(node)
-          declarationGroups.set(declarationName, group)
+          scopedGroups.set(declarationName, group)
+          declarationGroupsByScope.set(scope, scopedGroups)
+          if (scope === moduleScope) {
+            if (!declarations.has(declarationName)) declarations.set(declarationName, node)
+            declarationGroups.set(declarationName, group)
+          }
         }
-        if (hasExportModifier(node) && declarationName !== undefined) exportedTypes.add(declarationName)
+        if (scope === moduleScope && hasExportModifier(node) && declarationName !== undefined) {
+          exportedTypes.add(declarationName)
+        }
       }
       if ((TypeScript.isVariableStatement(node) || TypeScript.isFunctionDeclaration(node)) && hasExportModifier(node)) {
         if (TypeScript.isVariableStatement(node)) {
@@ -198,10 +218,10 @@ const analyzeSources = (
             if (TypeScript.isIdentifier(declaration.name)) local.add(declaration.name.text)
           }
         } else if (node.name !== undefined) {
-          if (!hasDefaultModifier(node)) local.add(node.name.text)
-          if (hasDefaultModifier(node)) defaultExportName = node.name.text
+          if (scope === moduleScope && !hasDefaultModifier(node)) local.add(node.name.text)
+          if (scope === moduleScope && hasDefaultModifier(node)) defaultExportName = node.name.text
         } else if (hasDefaultModifier(node)) {
-          defaultExportName = "default"
+          if (scope === moduleScope) defaultExportName = "default"
         }
       }
       if (TypeScript.isImportDeclaration(node) && TypeScript.isStringLiteral(node.moduleSpecifier)) {
@@ -240,17 +260,22 @@ const analyzeSources = (
           }
         }
       }
-      TypeScript.forEachChild(node, visit)
+      TypeScript.forEachChild(node, (child) => visit(child, scope))
     }
-    visit(sourceFile)
+    visit(sourceFile, moduleScope)
     modules.set(filePath, {
       aliases,
       declarationGroups,
+      declarationGroupsByScope,
       declarations,
+      declarationsByScope,
       defaultExportName,
       exportedTypes,
       imports,
       local,
+      moduleScope,
+      scopeByNode,
+      scopeParents,
       sourceFile,
       stars
     })
@@ -294,10 +319,20 @@ const analyzeSources = (
   return analysis
 }
 
-const resolveTypeDeclaration = (analysis, filePath, name, seen = new Set()) => {
+const declarationsInScope = (module, name, referenceNode) => {
+  let scope = referenceNode === undefined ? module.moduleScope : module.scopeByNode.get(referenceNode)
+  while (scope !== undefined) {
+    const declaration = module.declarationsByScope.get(scope)?.get(name)
+    if (declaration !== undefined) return declaration
+    scope = module.scopeParents.get(scope)
+  }
+  return undefined
+}
+
+const resolveTypeDeclaration = (analysis, filePath, name, seen = new Set(), referenceNode) => {
   const module = analysis.modules.get(filePath)
   if (module === undefined) return undefined
-  const local = module.declarations.get(name)
+  const local = declarationsInScope(module, name, referenceNode)
   if (local !== undefined) return { filePath, node: local }
   const key = `${filePath}\u0000${name}`
   if (seen.has(key)) return undefined
@@ -331,8 +366,12 @@ const resolveExportedType = (analysis, filePath, name, seen = new Set()) => {
   return localAlias === undefined ? undefined : { filePath, node: localAlias }
 }
 
-const resolvedDeclarationNodes = (analysis, declaration) =>
-  analysis.modules.get(declaration.filePath)?.declarationGroups.get(declaration.node.name.text) ?? [declaration.node]
+const resolvedDeclarationNodes = (analysis, declaration) => {
+  const module = analysis.modules.get(declaration.filePath)
+  if (module === undefined) return [declaration.node]
+  const scope = module.scopeByNode.get(declaration.node) ?? module.moduleScope
+  return module.declarationGroupsByScope.get(scope)?.get(declaration.node.name.text) ?? [declaration.node]
+}
 
 const canonicalTypeMaxDepth = 128
 
@@ -472,6 +511,23 @@ const failCanonicalType = (filePath, typeNode, reason) => {
   throw new ChangesetCoverageError({
     reason: `${filePath}: ${reason} while canonicalizing ${normalizeTypeText(typeNode)}`
   })
+}
+
+const resolveNamespaceQualifiedTypeDeclaration = (analysis, filePath, typeName, seen, typeNode) => {
+  if (!TypeScript.isQualifiedName(typeName)) return undefined
+  let root = typeName
+  while (TypeScript.isQualifiedName(root)) root = root.left
+  if (!TypeScript.isIdentifier(root)) return undefined
+  const imported = analysis.modules.get(filePath)?.imports.get(root.text)
+  if (imported?.importedName !== "*") return undefined
+  if (!TypeScript.isIdentifier(typeName.left) || !TypeScript.isIdentifier(typeName.right)) {
+    failCanonicalType(filePath, typeNode, "unsupported nested namespace-qualified type")
+  }
+  const target = resolveLocalModule(filePath, imported.sourceSpecifier, analysis.sources)
+  if (target === undefined) failCanonicalType(filePath, typeNode, "unresolved namespace-qualified type")
+  const declaration = resolveExportedType(analysis, target, typeName.right.text, seen)
+  if (declaration === undefined) failCanonicalType(filePath, typeNode, "unresolved namespace-qualified type")
+  return declaration
 }
 
 const conditionalPrimitiveCategory = (typeNode, substitutions) => {
@@ -642,6 +698,45 @@ const canonicalTypeMembersText = (typeNode, analysis, filePath, substitutions, s
   return text
 }
 
+function canonicalResolvedTypeDeclaration(typeNode, declaration, analysis, filePath, substitutions, seen, context) {
+  const declarationName = declaration.node.name.text
+  const key = declaration.filePath + "\u0000" + declarationName
+  if (seen.has(key)) {
+    if (context.recursiveDeclarations.has(key)) return normalizeTypeText(typeNode)
+    failCanonicalType(filePath, typeNode, "recursive type declaration")
+  }
+  const nextSeen = new Set(seen).add(key)
+  const nextSubstitutions = declarationSubstitutions(declaration, typeNode.typeArguments ?? [], substitutions, filePath)
+  if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
+    if (TypeScript.isTypeLiteralNode(declaration.node.type)) {
+      return canonicalTypeMembersText(typeNode, analysis, filePath, substitutions, seen, {
+        ...nextCanonicalTypeContext(context),
+        typeMembersMemo: context.typeMembersMemo
+      })
+    }
+    return canonicalTypeText(
+      declaration.node.type,
+      analysis,
+      declaration.filePath,
+      nextSubstitutions,
+      nextSeen,
+      nextCanonicalTypeContext(context)
+    )
+  }
+  if (TypeScript.isInterfaceDeclaration(declaration.node) || TypeScript.isClassDeclaration(declaration.node)) {
+    return canonicalResolvedDeclarationText(
+      declaration,
+      analysis,
+      filePath,
+      nextSubstitutions,
+      nextSeen,
+      nextCanonicalTypeContext(context)
+    )
+  }
+  if (TypeScript.isEnumDeclaration(declaration.node)) return canonicalEnumText(declaration, analysis, filePath)
+  return normalizeTypeText(typeNode)
+}
+
 const canonicalTypeText = (
   typeNode,
   analysis,
@@ -652,6 +747,21 @@ const canonicalTypeText = (
 ) => {
   if (context.depth > canonicalTypeMaxDepth) {
     failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
+  }
+  if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isQualifiedName(typeNode.typeName)) {
+    const declaration = resolveNamespaceQualifiedTypeDeclaration(analysis, filePath, typeNode.typeName, seen, typeNode)
+    if (declaration !== undefined) {
+      return canonicalResolvedTypeDeclaration(typeNode, declaration, analysis, filePath, substitutions, seen, context)
+    }
+    if (typeNode.typeArguments !== undefined) {
+      const wrapper = normalizeTypeText(typeNode.typeName)
+      const argumentsText = typeNode.typeArguments
+        .map((argument) =>
+          canonicalTypeText(argument, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+        )
+        .join(",")
+      return wrapper + "<" + argumentsText + ">"
+    }
   }
   if (TypeScript.isParenthesizedTypeNode(typeNode)) {
     return canonicalTypeText(typeNode.type, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
@@ -675,7 +785,7 @@ const canonicalTypeText = (
         nextCanonicalTypeContext(context, substitutionPath)
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen, typeNode)
     if (declaration !== undefined) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
@@ -997,7 +1107,7 @@ const canonicalPrimitiveKeyofOperandText = (
         nextCanonicalTypeContext(context, new Set(context.substitutionPath).add(binding))
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen, typeNode)
     if (declaration !== undefined && TypeScript.isTypeAliasDeclaration(declaration.node)) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
@@ -1030,6 +1140,15 @@ const canonicalPropertyKeyText = (name) => {
   if (TypeScript.isNumericLiteral(name)) return JSON.stringify(["number", name.text])
   if (TypeScript.isComputedPropertyName(name)) return canonicalLiteralKeyText(name.expression)
   return undefined
+}
+
+const canonicalIndexSignatureKey = (member, analysis, filePath, substitutions, seen, context) => {
+  const parameterType = member.parameters[0]?.type
+  if (parameterType === undefined) failCanonicalType(filePath, member, "unsupported index signature")
+  return (
+    "index:" +
+    canonicalTypeText(parameterType, analysis, filePath, substitutions, seen, nextCanonicalTypeContext(context))
+  )
 }
 
 function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substitutions, seen, context) {
@@ -1097,7 +1216,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
           nextCanonicalTypeContext(targetContext, new Set(targetContext.substitutionPath).add(binding))
         )
       }
-      const declaration = resolveTypeDeclaration(analysis, targetFilePath, target.typeName.text, targetSeen)
+      const declaration = resolveTypeDeclaration(analysis, targetFilePath, target.typeName.text, targetSeen, target)
       if (declaration !== undefined) {
         const declarationKey = `${declaration.filePath}\u0000${declaration.node.name.text}`
         if (targetSeen.has(declarationKey)) failCanonicalType(targetFilePath, target, "recursive type declaration")
@@ -1302,7 +1421,7 @@ const canonicalLiteralTypeValue = (
         nextCanonicalTypeContext(context, new Set(context.substitutionPath).add(binding))
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen, node)
     if (declaration !== undefined && TypeScript.isTypeAliasDeclaration(declaration.node)) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
@@ -1385,7 +1504,7 @@ const canonicalRequiredLiteralProperties = (
         nextCanonicalTypeContext(context, new Set(context.substitutionPath).add(binding))
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen, node)
     if (declaration !== undefined) {
       const declarationName = declaration.node.name.text
       const key = `${declaration.filePath}\u0000${declarationName}`
@@ -1505,7 +1624,7 @@ const canonicalTupleSpreadDomain = (typeNode, analysis, filePath, substitutions,
         new Set(active).add(binding)
       )
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen, typeNode)
     if (declaration !== undefined && TypeScript.isTypeAliasDeclaration(declaration.node)) {
       const declarationKey = `${declaration.filePath}\u0000${declaration.node.name.text}`
       if (active.has(declarationKey)) return { fixedCount: 0, kind: "unknown" }
@@ -1611,7 +1730,7 @@ const canonicalKeySetForNode = (
         ? { name: typeNode.expression.text, typeArguments: typeNode.typeArguments }
         : undefined
   if (reference !== undefined) {
-    const declaration = resolveTypeDeclaration(analysis, filePath, reference.name, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, reference.name, seen, typeNode)
     const module = analysis.modules.get(filePath)
     const locallyBound =
       module?.declarations.has(reference.name) === true ||
@@ -1664,7 +1783,7 @@ const canonicalKeySetForNode = (
       ? [typeNode]
       : (analysis.modules.get(filePath)?.declarationGroups.get(typeNode.name.text) ?? [typeNode])
     for (const declarationNode of declarationNodes) {
-      if (TypeScript.isInterfaceDeclaration(declarationNode)) {
+      if (TypeScript.isInterfaceDeclaration(declarationNode) || TypeScript.isClassDeclaration(declarationNode)) {
         for (const clause of declarationNode.heritageClauses ?? []) {
           for (const heritageType of clause.types) {
             const inherited = canonicalKeySetForNode(
@@ -1808,7 +1927,7 @@ const canonicalMappedTypeText = (typeNode, analysis, filePath, substitutions, se
 
 const canonicalMappedTypeReferenceText = (typeNode, analysis, filePath, substitutions, seen, context) => {
   if (!TypeScript.isTypeReferenceNode(typeNode) || !TypeScript.isIdentifier(typeNode.typeName)) return undefined
-  const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
+  const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen, typeNode)
   if (declaration === undefined || !TypeScript.isTypeAliasDeclaration(declaration.node)) return undefined
   const declarationName = declaration.node.name.text
   const key = `${declaration.filePath}\u0000${declarationName}`
@@ -1986,6 +2105,48 @@ const memberDescriptor = (
   const collectDependencies = (result) => {
     for (const dependency of result.declarationDependencies) dependencies.declarationDependencies.add(dependency)
     for (const dependency of result.substitutionDependencies) dependencies.substitutionDependencies.add(dependency)
+  }
+  if (TypeScript.isIndexSignatureDeclaration(member)) {
+    const parameterType = member.parameters[0]?.type
+    if (parameterType === undefined || member.type === undefined) {
+      failCanonicalType(filePath, member, "unsupported index signature")
+    }
+    const parameter = canonicalTypeText(
+      parameterType,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )
+    const value = canonicalTypeText(member.type, analysis, filePath, substitutions, seen, context)
+    collectDependencies(
+      typeMembers(
+        parameterType,
+        analysis,
+        filePath,
+        seen,
+        substitutions,
+        memo,
+        substitutionPath,
+        context.genericScope ?? "",
+        context.recursiveDeclarations
+      )
+    )
+    collectDependencies(
+      typeMembers(
+        member.type,
+        analysis,
+        filePath,
+        seen,
+        substitutions,
+        memo,
+        substitutionPath,
+        context.genericScope ?? "",
+        context.recursiveDeclarations
+      )
+    )
+    return { descriptor: readonly + "index(" + parameter + "):" + value, ...dependencies }
   }
   if (TypeScript.isGetAccessorDeclaration(member)) {
     const returnType =
@@ -2533,7 +2694,7 @@ const typeMembers = (
       : (analysis.modules.get(filePath)?.declarationGroups.get(typeNode.name.text) ?? [typeNode])
     let callSignatureIndex = 0
     for (const declarationNode of declarationNodes) {
-      if (TypeScript.isInterfaceDeclaration(declarationNode)) {
+      if (TypeScript.isInterfaceDeclaration(declarationNode) || TypeScript.isClassDeclaration(declarationNode)) {
         for (const clause of declarationNode.heritageClauses ?? []) {
           for (const heritageType of clause.types) {
             collectTypeMembersResult(
@@ -2562,9 +2723,44 @@ const typeMembers = (
           !TypeScript.isMethodDeclaration(member) &&
           !TypeScript.isGetAccessorDeclaration(member) &&
           !TypeScript.isSetAccessorDeclaration(member) &&
+          !TypeScript.isIndexSignatureDeclaration(member) &&
           !TypeScript.isCallSignatureDeclaration(member) &&
           !TypeScript.isConstructSignatureDeclaration(member)
         ) {
+          continue
+        }
+        if (TypeScript.isIndexSignatureDeclaration(member)) {
+          const descriptor = memberDescriptor(
+            member,
+            analysis,
+            filePath,
+            substitutions,
+            seen,
+            { depth: 0, genericScope, substitutionPath, recursiveDeclarations, typeMembersMemo: memo },
+            memo,
+            substitutionPath
+          )
+          const canonicalName = canonicalIndexSignatureKey(member, analysis, filePath, substitutions, seen, {
+            depth: 0,
+            genericScope,
+            substitutionPath,
+            recursiveDeclarations,
+            typeMembersMemo: memo
+          })
+          const existing = result.members.get(canonicalName)
+          result.members.set(
+            canonicalName,
+            existing === undefined ? descriptor.descriptor : mergeMemberContract(existing, descriptor.descriptor)
+          )
+          const existingCanonical = result.canonicalMembers.get(canonicalName)
+          result.canonicalMembers.set(
+            canonicalName,
+            existingCanonical === undefined
+              ? descriptor.descriptor
+              : mergeMemberContract(existingCanonical, descriptor.descriptor)
+          )
+          for (const dependency of descriptor.declarationDependencies) result.declarationDependencies.add(dependency)
+          for (const dependency of descriptor.substitutionDependencies) result.substitutionDependencies.add(dependency)
           continue
         }
         if (TypeScript.isCallSignatureDeclaration(member) || TypeScript.isConstructSignatureDeclaration(member)) {
@@ -2640,7 +2836,7 @@ const typeMembers = (
       )
       return writeTypeMembersMemo(memo, typeNode, substitutions, withSubstitutionDependency(result, binding))
     }
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.typeName.text, seen, typeNode)
     if (declaration === undefined) {
       const result = typeMembersResult(new Map(), false)
       for (const argument of typeNode.typeArguments ?? []) {
@@ -2711,7 +2907,7 @@ const typeMembers = (
         canonicalMemoReferenceArguments(effectiveTypeArguments, filePath, substitutions)
       )
     }
-    if (TypeScript.isInterfaceDeclaration(declaration.node)) {
+    if (TypeScript.isInterfaceDeclaration(declaration.node) || TypeScript.isClassDeclaration(declaration.node)) {
       return writeTypeMembersMemo(
         memo,
         declarationKey,
@@ -2735,7 +2931,7 @@ const typeMembers = (
     }
   }
   if (TypeScript.isExpressionWithTypeArguments(typeNode) && TypeScript.isIdentifier(typeNode.expression)) {
-    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen)
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeNode.expression.text, seen, typeNode)
     if (declaration === undefined) {
       const result = typeMembersResult(new Map(), false)
       for (const argument of typeNode.typeArguments ?? []) {
@@ -2806,7 +3002,7 @@ const typeMembers = (
         canonicalMemoReferenceArguments(effectiveTypeArguments, filePath, substitutions)
       )
     }
-    if (TypeScript.isInterfaceDeclaration(declaration.node)) {
+    if (TypeScript.isInterfaceDeclaration(declaration.node) || TypeScript.isClassDeclaration(declaration.node)) {
       return writeTypeMembersMemo(
         memo,
         declarationKey,
@@ -2846,7 +3042,7 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
     members.set(name, existing === undefined ? descriptor : mergeMemberContract(existing, descriptor))
   }
   for (const declarationNode of declarationNodes) {
-    if (TypeScript.isInterfaceDeclaration(declarationNode)) {
+    if (TypeScript.isInterfaceDeclaration(declarationNode) || TypeScript.isClassDeclaration(declarationNode)) {
       for (const heritageClause of declarationNode.heritageClauses ?? []) {
         for (const heritageType of heritageClause.types) {
           const inherited = typeMembers(
@@ -2890,9 +3086,30 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
         !TypeScript.isMethodDeclaration(member) &&
         !TypeScript.isGetAccessorDeclaration(member) &&
         !TypeScript.isSetAccessorDeclaration(member) &&
+        !TypeScript.isIndexSignatureDeclaration(member) &&
         !TypeScript.isCallSignatureDeclaration(member) &&
         !TypeScript.isConstructSignatureDeclaration(member)
       ) {
+        continue
+      }
+      if (TypeScript.isIndexSignatureDeclaration(member)) {
+        const descriptor = memberDescriptor(
+          member,
+          analysis,
+          declaration.filePath,
+          substitutions,
+          seen,
+          { ...context, typeMembersMemo },
+          typeMembersMemo,
+          context.substitutionPath
+        )
+        addMember(
+          canonicalIndexSignatureKey(member, analysis, declaration.filePath, substitutions, seen, {
+            ...context,
+            typeMembersMemo
+          }),
+          descriptor.descriptor
+        )
         continue
       }
       if (TypeScript.isCallSignatureDeclaration(member) || TypeScript.isConstructSignatureDeclaration(member)) {
@@ -5832,6 +6049,103 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(heritageKeyPrevious, heritageKeyChanged, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
   ])
+  const classHeritagePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Base { inherited: string = "" }\nclass Model extends Base {}\nexport function Public(): Model { return new Model() }'
+    ]
+  ])
+  const classHeritageChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Base { renamed: string = "" }\nclass Model extends Base {}\nexport function Public(): Model { return new Model() }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(classHeritagePrevious, classHeritageChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const namespaceQualifiedPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/model.ts", "export interface Result { value: string }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type * as Models from "./model.js"\nexport function Public(): Models.Result { throw new Error("fixture") }'
+    ]
+  ])
+  const namespaceQualifiedChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/model.ts", "export interface Result { renamed: string }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type * as Models from "./model.js"\nexport function Public(): Models.Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namespaceQualifiedPrevious, namespaceQualifiedChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const namespaceQualifiedRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/model.ts", "export interface Result { value: string }"],
+    [
+      "packages/public/src/view.tsx",
+      'import type * as Renamed from "./model.js"\nexport function Public(): Renamed.Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(namespaceQualifiedPrevious, namespaceQualifiedRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const indexSignaturePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { [key: string]: string }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  const indexSignatureChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { [name: string]: number }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexSignaturePrevious, indexSignatureChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["index:string"] }]
+  )
+  const indexSignatureRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Props = { [name: string]: string }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexSignaturePrevious, indexSignatureRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const lexicalDeclarationPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { value: string }\nfunction helper() { interface Result { value: number } return (value: Result) => value }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const lexicalDeclarationChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { value: string }\nfunction helper() { interface Result { value: boolean } return (value: Result) => value }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(lexicalDeclarationPrevious, lexicalDeclarationChanged, ["packages/public/src/index.ts"]),
+    []
+  )
   const keyofAliasChain = Array.from(
     { length: canonicalTypeMaxDepth + 2 },
     (_, index) => `type Alias${index} = ${index === 0 ? "{ value: string }" : `Alias${index - 1}`}`
