@@ -84,9 +84,17 @@ const hierarchyLabel = (goal: WorkGoal): string => {
   return `${hierarchy.agent.host} / ${hierarchy.agent.name}`
 }
 
+/** Renders the persisted approval deep link after its origin is bound at ingress. */
 const exactLink = (target: WorkApprovalTarget, label: string): ReactElement => (
   <a className="work-exact-link" href={target.url}>
     {label} →
+  </a>
+)
+
+/** Renders the persisted review destination without rewriting its credential-free URL. */
+const reviewLink = (url: string): ReactElement => (
+  <a className="work-exact-link" href={url}>
+    Open review →
   </a>
 )
 
@@ -397,11 +405,9 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                 </Text>
                 <div className="work-review-heading">
                   {reviewLabel(selected.review)}
-                  {selected.review?.url === null || selected.review?.url === undefined ? null : (
-                    <a className="work-exact-link" href={selected.review.url}>
-                      Open review →
-                    </a>
-                  )}
+                  {selected.review?.url === null || selected.review?.url === undefined
+                    ? null
+                    : reviewLink(selected.review.url)}
                 </div>
                 {selected.review?.summary === null || selected.review?.summary === undefined ? null : (
                   <Text tone="secondary">{selected.review.summary}</Text>

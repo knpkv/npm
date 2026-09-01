@@ -10,6 +10,10 @@ const Timestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
 )
+/**
+ * Credential-free HTTP(S) URL persisted for an outbound handoff. Provider
+ * credentials and private locators never belong in this representation.
+ */
 const LinkUrl = Schema.String.check(
   Schema.isMaxLength(2_048),
   Schema.makeFilter(
@@ -103,6 +107,15 @@ export const WorkApprovalTarget = Schema.Struct({
 )
 export interface WorkApprovalTarget extends Schema.Schema.Type<typeof WorkApprovalTarget> {}
 
+/**
+ * Checks a decoded approval target against the origin resolved by the
+ * configuration-aware approvals boundary before the target is persisted.
+ */
+export const approvalTargetMatchesOrigin = (
+  target: WorkApprovalTarget,
+  authoritativeOrigin: string
+): boolean => new URL(target.url).origin === authoritativeOrigin
+
 export const WorkRequestState = Schema.Literals(["open", "approved", "rejected", "fulfilled"])
 export type WorkRequestState = typeof WorkRequestState.Type
 
@@ -118,6 +131,7 @@ export interface WorkRequest extends Schema.Schema.Type<typeof WorkRequest> {}
 export const WorkReviewState = Schema.Literals(["not_requested", "requested", "changes_requested", "approved"])
 export type WorkReviewState = typeof WorkReviewState.Type
 
+/** Review status plus the persisted credential-free destination, when known. */
 export const WorkReview = Schema.Struct({
   state: WorkReviewState,
   summary: Schema.NullOr(Text),

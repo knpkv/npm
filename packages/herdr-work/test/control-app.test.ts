@@ -2,7 +2,14 @@ import { describe, expect, it } from "@effect/vitest"
 import { Schema } from "effect"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { WorkBoard, WorkGoal, type WorkSnapshot, type WorkSnapshots } from "../src/index.js"
+import {
+  approvalTargetMatchesOrigin,
+  type WorkApprovalTarget,
+  WorkBoard,
+  WorkGoal,
+  type WorkSnapshot,
+  type WorkSnapshots
+} from "../src/index.js"
 
 const workGoalInput = {
   blocker: null,
@@ -101,6 +108,17 @@ describe("Work control app", () => {
     expect(workGoal.approvalTarget?.url).toBe(
       "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
     )
+  })
+
+  it("binds approval targets to the origin resolved by the approvals boundary", () => {
+    const target: WorkApprovalTarget = {
+      host: "SER8",
+      jobId: "approval-job-42",
+      url: "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
+    }
+
+    expect(approvalTargetMatchesOrigin(target, "https://ser8.example.test")).toBe(true)
+    expect(approvalTargetMatchesOrigin(target, "https://evil.example.test")).toBe(false)
   })
 
   it("rejects a Connect target that diverges from the authoritative agent", () => {

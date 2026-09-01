@@ -53,7 +53,7 @@ import {
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
 import type { WorkCheckpointConflictError, WorkProjectionError, WorkService, WorkStoreError } from "@knpkv/herdr-work"
-import { makeWorkService, WorkStore } from "@knpkv/herdr-work"
+import { approvalTargetMatchesOrigin, makeWorkService, WorkStore } from "@knpkv/herdr-work"
 import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
 import {
   Cause,
@@ -424,14 +424,14 @@ export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkChe
             detail: `invalid authoritative approval page: ${String(cause)}`
           })
       })
-      const actualOrigin = yield* Effect.try({
-        try: () => new URL(target.url).origin,
+      const matchesOrigin = yield* Effect.try({
+        try: () => approvalTargetMatchesOrigin(target, expectedOrigin),
         catch: (cause) =>
           new FleetValidationError({
             detail: `invalid approval target URL: ${String(cause)}`
           })
       })
-      if (actualOrigin !== expectedOrigin) {
+      if (!matchesOrigin) {
         return yield* new FleetValidationError({
           detail: `approval target origin does not match configured page for ${target.host}`
         })
