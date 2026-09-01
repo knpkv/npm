@@ -174,10 +174,8 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
   const visitElement = (element: Element): void => {
     if (isSlotElement(element)) {
       const assigned = element.assignedElements({ flatten: true })
-      if (assigned.length > 0) {
-        for (const assignedElement of assigned) visitElement(assignedElement)
-        return
-      }
+      for (const assignedElement of assigned) visitElement(assignedElement)
+      return
     }
     elements.push({ element, nativeRoot: element.getRootNode() })
     if (element.shadowRoot !== null) visitScope(element.shadowRoot)

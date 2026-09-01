@@ -799,6 +799,46 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("does not treat an empty slot as a tab stop", async () => {
+    const footer = (
+      <>
+        <button data-rly-empty-slot-preceding-action="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-empty-slot-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-empty-slot-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-empty-slot-preceding-action]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock empty slot fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.tabIndex = 0
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(preceding)
+  })
+
   it("keeps only the checked radio as a shadow-scope tab stop", async () => {
     const footer = <div data-rly-radio-focus-host="" />
     const { portal } = await mount(dock({ defaultOpen: true, footer }))

@@ -401,6 +401,35 @@ test("modal Relay focus traversal skips a slot replaced by non-focusable assigne
   await expect(close).toBeFocused()
 })
 
+test("modal Relay focus traversal skips an empty slot", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyEmptySlotPrecedingAction = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    host.dataset.rlyEmptySlotHost = ""
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.tabIndex = 0
+    const footer = element.querySelector("[data-rly-relay-dock-scroll]")
+    footer?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-empty-slot-preceding-action]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+  await close.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(preceding).toBeFocused()
+})
+
 test("modal Relay focus traversal keeps only checked radios in each shadow scope", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
