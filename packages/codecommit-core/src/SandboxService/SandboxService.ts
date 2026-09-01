@@ -185,16 +185,14 @@ const makeSandboxService = Effect.gen(function*() {
 
   const retireLegacySandbox = (legacy: SandboxRow) =>
     Effect.gen(function*() {
-      if (legacy.containerId === null && isPreContainerSandboxStatus(legacy.status)) {
-        const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
-          Effect.map((ids) => ids.has(legacy.id))
-        )
-        if (activeWorker) {
-          return yield* new SandboxError({
-            sandboxId: SandboxId.make(legacy.id),
-            message: "Legacy sandbox is still starting; retry after its worker reports a container"
-          })
-        }
+      const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
+        Effect.map((ids) => ids.has(legacy.id))
+      )
+      if (activeWorker) {
+        return yield* new SandboxError({
+          sandboxId: SandboxId.make(legacy.id),
+          message: "Legacy sandbox is still active; retry after its worker exits"
+        })
       }
 
       const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", legacy.id)

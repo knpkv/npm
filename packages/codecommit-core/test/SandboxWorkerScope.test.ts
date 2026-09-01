@@ -2,7 +2,21 @@
 
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Fiber, Layer, Option, Predicate, Ref } from "effect"
+import {
+  Cause,
+  ConfigProvider,
+  Crypto,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Sink,
+  Stream
+} from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
@@ -61,6 +75,10 @@ interface FixtureOptions {
   }
   readonly forkGate?: {
     readonly forked: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly readyGate?: {
+    readonly reached: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
   readonly regionlessByPr?: SandboxRow
@@ -172,6 +190,10 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     // The clone spawn tombstones the ambient AWS variables it would otherwise inherit.
     ChildEnv.layerHostEnvironment({ PATH: "/usr/bin" }),
     Layer.mock(DockerService, {
+      pullImage: () => Effect.void,
+      createContainer: () => Effect.succeed("worker-container"),
+      startContainer: () => Effect.void,
+      exec: () => Effect.succeed(""),
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
           Effect.flatMap((attempt) =>
@@ -186,11 +208,59 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           Effect.as([...(options?.untrackedContainers ?? [])])
         )
     }),
-    Layer.mock(PluginService, {}),
+    Layer.mock(PluginService, {
+      executeHook: (hook) =>
+        hook === "onSandboxReady" && options?.readyGate !== undefined
+          ? Deferred.succeed(options.readyGate.reached, undefined).pipe(
+            Effect.andThen(Deferred.await(options.readyGate.release))
+          )
+          : Effect.void
+    }),
     Layer.mock(ConfigService, { load: Effect.succeed(options?.config ?? config) }),
-    Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of({ makeDirectory })),
+    Layer.succeed(
+      FileSystem.FileSystem,
+      FileSystem.FileSystem.of({
+        makeDirectory,
+        stat: () =>
+          Effect.succeed({
+            type: "Directory",
+            mtime: Option.none<Date>(),
+            atime: Option.none<Date>(),
+            birthtime: Option.none<Date>(),
+            dev: 0,
+            ino: Option.none<number>(),
+            mode: 0o755,
+            nlink: Option.none<number>(),
+            uid: Option.none<number>(),
+            gid: Option.none<number>(),
+            rdev: Option.none<number>(),
+            size: FileSystem.Size(0),
+            blksize: Option.none<FileSystem.Size>(),
+            blocks: Option.none<number>()
+          })
+      })
+    ),
     NodePath.layer,
-    Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),
+    Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make(() =>
+        Effect.succeed(
+          ChildProcessSpawner.makeHandle({
+            all: Stream.empty,
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            pid: ChildProcessSpawner.ProcessId(42),
+            stderr: Stream.empty,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          })
+        )
+      )
+    ),
     Layer.succeed(
       Crypto.Crypto,
       Crypto.make({
@@ -592,6 +662,44 @@ describe("SandboxWorkerScope", () => {
           })
           yield* Deferred.succeed(release, undefined)
           yield* Fiber.join(interruptFiber)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("does not retire an empty-account worker after its container is persisted", () =>
+    Effect.gen(function*() {
+      const reached = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        readyGate: { reached, release },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "worker-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.create({ ...createParams, awsAccountId: "" })
+          yield* Deferred.await(reached)
+
+          const result = yield* sandboxes.create({ ...createParams, awsAccountId: "profile-account" }).pipe(
+            Effect.result
+          )
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure.message).toContain("Legacy sandbox is still active")
+          }
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "starting",
+            containerId: "worker-container"
+          })
+
+          yield* Deferred.succeed(release, undefined)
         }).pipe(Effect.provide(fixture.layer))
       )
     }))
