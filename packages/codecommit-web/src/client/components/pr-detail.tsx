@@ -146,6 +146,7 @@ export const hasFallbackSandboxCollision = (
   sandboxes.some(
     (sandbox) =>
       /^\d{12}$/u.test(sandbox.awsAccountId) &&
+      sandbox.awsAccountId !== pullRequest.account.profile &&
       sandbox.status !== "stopped" &&
       sandbox.status !== "error" &&
       sandbox.pullRequestId === String(pullRequest.id) &&

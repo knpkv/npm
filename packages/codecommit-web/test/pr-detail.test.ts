@@ -147,6 +147,31 @@ describe("PR detail coordinates", () => {
     expect(hasFallbackSandboxCollision([numericSandbox], pullRequest)).toBe(false)
   })
 
+  it("does not classify the configured numeric profile sandbox as an account collision", () => {
+    const numericProfilePullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({
+        ...pullRequest.account,
+        awsAccountId: "",
+        profile: Domain.AwsProfileName.make("111122223333")
+      })
+    })
+    const profileSandbox = {
+      awsAccountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "payments",
+      region: "eu-west-1"
+    }
+
+    expect(hasFallbackSandboxCollision([profileSandbox], numericProfilePullRequest)).toBe(false)
+    expect(
+      hasFallbackSandboxCollision(
+        [{ ...profileSandbox, awsAccountId: "999988887777" }],
+        numericProfilePullRequest
+      )
+    ).toBe(true)
+  })
+
   it("gives review APIs a validated account-coordinate token", () => {
     const token = reviewApiAccountId(pullRequest)
     expect(token.startsWith("cc1_")).toBe(true)
