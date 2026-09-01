@@ -1951,4 +1951,144 @@ describe("RelayDock", () => {
     expect(forward.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
   })
+
+  it("excludes display-contents shadow elements from modal endpoints", async () => {
+    const footer = (
+      <>
+        <button data-rly-display-contents-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-display-contents-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-display-contents-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-display-contents-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock display-contents fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = shadow.appendChild(document.createElement("div"))
+    action.tabIndex = 0
+    action.style.display = "contents"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("contains programmatic focus in a non-delegating shadow scope", async () => {
+    const footer = <div data-rly-non-delegating-shadow-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-non-delegating-shadow-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock non-delegating shadow fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.tabIndex = -1
+    action.textContent = "Programmatic shadow action"
+
+    action.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("excludes a negative first summary from modal endpoints", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-summary-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <details>
+          <summary data-rly-negative-summary="" tabIndex={-1}>
+            Collapsed evidence
+          </summary>
+          <button type="button">Collapsed evidence action</button>
+        </details>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-summary-preceding]")
+    if (dialog === null || close === null || preceding === null) {
+      throw new Error("RelayDock negative summary fixture did not render")
+    }
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("excludes nested contenteditable regions without explicit tabindex", async () => {
+    const footer = <div data-rly-nested-editor-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-nested-editor-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock nested editor fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const outer = shadow.appendChild(document.createElement("div"))
+    outer.contentEditable = "true"
+    const inner = outer.appendChild(document.createElement("div"))
+    inner.contentEditable = "true"
+    inner.textContent = "Nested editor"
+
+    outer.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("keeps radio-group metadata for assigned controls behind a negative slot", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-radio-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <input data-rly-negative-radio-peer="" name="negative-slot-route" type="radio" />
+        <div data-rly-negative-radio-host="">
+          <input
+            data-rly-negative-radio-assigned=""
+            defaultChecked
+            name="negative-slot-route"
+            slot="negative"
+            type="radio"
+          />
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-negative-radio-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-negative-radio-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock negative radio fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.name = "negative"
+    slot.tabIndex = -1
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
 })

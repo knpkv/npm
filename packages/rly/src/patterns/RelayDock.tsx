@@ -150,6 +150,7 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
     if (
       (isHTMLElement(current) && current.hidden !== false) ||
       computed.display === "none" ||
+      (current === element && computed.display === "contents") ||
       (current !== element && computed.contentVisibility === "hidden")
     ) {
       return false
@@ -157,6 +158,17 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
     current = composedParentFor(current, composedParents)
   }
   return true
+}
+
+const hasContentEditableAncestor = (element: HTMLElement, composedParents: ReadonlyMap<Node, Node | null>): boolean => {
+  const seen = new Set<Node>()
+  let current = composedParentFor(element, composedParents)
+  while (current !== null && !seen.has(current)) {
+    seen.add(current)
+    if (isHTMLElement(current) && current.isContentEditable) return true
+    current = composedParentFor(current, composedParents)
+  }
+  return false
 }
 
 interface RadioInput extends HTMLElement {
@@ -245,7 +257,6 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isShadowSlotElement(element)) {
-        if (hasExplicitNegativeTabIndex(element)) return
         const assignedNodes = element.assignedNodes({ flatten: false })
         const assignedElements = assignedNodes.filter(isElementNode)
         const fallbackElements = [...element.children]
@@ -646,8 +657,10 @@ const DockLayer = ({
         }
         return (
           element.tabIndex >= 0 ||
-          (element.isContentEditable && !element.hasAttribute("tabindex")) ||
-          element.matches("details > summary:first-of-type")
+          (element.isContentEditable &&
+            !element.hasAttribute("tabindex") &&
+            !hasContentEditableAncestor(element, composedParents)) ||
+          (element.matches("details > summary:first-of-type") && !hasExplicitNegativeTabIndex(element))
         )
       })
       .map(({ element }) => element)
@@ -655,17 +668,15 @@ const DockLayer = ({
     const last = focusable[focusable.length - 1] ?? panel
     const active = activeElementFor(panel)
     const focusableElements = new Set<Element>(focusable)
-    const activeIsUnlistedDelegatedDescendant =
+    const activeIsUnlistedShadowDescendant =
       active !== null &&
       isWithinPanel(panel, active) &&
       !focusable.some((element) => element === active) &&
-      delegatingShadowHostFor(active) !== null
+      (delegatingShadowHostFor(active) !== null || shadowHostFor(active) !== null)
     const activeDelegatingHost =
-      activeIsUnlistedDelegatedDescendant && active !== null ? delegatingShadowHostFor(active) : null
+      activeIsUnlistedShadowDescendant && active !== null ? delegatingShadowHostFor(active) : null
     const activeComposedIndex =
-      activeIsUnlistedDelegatedDescendant && active !== null
-        ? composed.findIndex(({ element }) => element === active)
-        : -1
+      activeIsUnlistedShadowDescendant && active !== null ? composed.findIndex(({ element }) => element === active) : -1
     const adjacentFocusable = (step: -1 | 1): HTMLElement | null => {
       if (activeComposedIndex < 0) return null
       for (let index = activeComposedIndex + step; index >= 0 && index < composed.length; index += step) {
@@ -674,27 +685,21 @@ const DockLayer = ({
       }
       return null
     }
-    const adjacent = activeIsUnlistedDelegatedDescendant ? adjacentFocusable(event.shiftKey ? -1 : 1) : null
+    const adjacent = activeIsUnlistedShadowDescendant ? adjacentFocusable(event.shiftKey ? -1 : 1) : null
     const adjacentIsInActiveDelegatingHost =
       activeDelegatingHost !== null &&
       adjacent !== null &&
       isWithinComposedElement(activeDelegatingHost, adjacent, composedParents)
-    const unlistedDelegatedBoundary =
-      activeIsUnlistedDelegatedDescendant &&
+    const unlistedShadowBoundary =
+      activeIsUnlistedShadowDescendant &&
       !adjacentIsInActiveDelegatingHost &&
       (adjacent === null || !isWithinPanel(panel, adjacent))
     const leavingStart =
       event.shiftKey &&
-      (active === first ||
-        !isWithinPanel(panel, active) ||
-        adjacentIsInActiveDelegatingHost ||
-        unlistedDelegatedBoundary)
+      (active === first || !isWithinPanel(panel, active) || adjacentIsInActiveDelegatingHost || unlistedShadowBoundary)
     const leavingEnd =
       !event.shiftKey &&
-      (active === last ||
-        !isWithinPanel(panel, active) ||
-        adjacentIsInActiveDelegatingHost ||
-        unlistedDelegatedBoundary)
+      (active === last || !isWithinPanel(panel, active) || adjacentIsInActiveDelegatingHost || unlistedShadowBoundary)
     if (!leavingStart && !leavingEnd) return
     event.preventDefault()
     const target = adjacentIsInActiveDelegatingHost && adjacent !== null ? adjacent : event.shiftKey ? last : first
