@@ -207,22 +207,35 @@ export const cachedPullRequest = (
   pullRequestId: Domain.PullRequestId,
   directCoordinates?: PullRequestSelectionCoordinates
 ): Effect.Effect<Domain.PullRequest, ApiError> => {
-  const coordinatesEffect = directCoordinates === undefined
-    ? decodePullRequestCoordinates(awsAccountId).pipe(
-      Effect.mapError((error) => new ApiError({ message: error.message }))
-    )
-    : Effect.succeed(Option.some<PullRequestCoordinates>({
-      accountId: awsAccountId,
-      pullRequestId,
-      repositoryName: Domain.RepositoryName.make(directCoordinates.repositoryName),
-      region: Domain.AwsRegion.make(directCoordinates.region)
-    }))
+  const coordinatesEffect = decodePullRequestCoordinates(awsAccountId).pipe(
+    Effect.mapError((error) => new ApiError({ message: error.message })),
+    Effect.flatMap((token) => {
+      if (Option.isSome(token)) {
+        if (token.value.pullRequestId !== pullRequestId) {
+          return Effect.fail(new ApiError({ message: "The pull-request coordinate token does not match its route" }))
+        }
+        if (
+          directCoordinates !== undefined &&
+          (token.value.repositoryName !== directCoordinates.repositoryName ||
+            token.value.region !== directCoordinates.region)
+        ) {
+          return Effect.fail(new ApiError({ message: "The pull-request coordinates do not match its route" }))
+        }
+        return Effect.succeed(token)
+      }
+      return directCoordinates === undefined
+        ? Effect.succeed(Option.none<PullRequestCoordinates>())
+        : Effect.succeed(Option.some<PullRequestCoordinates>({
+          accountId: awsAccountId,
+          pullRequestId,
+          repositoryName: Domain.RepositoryName.make(directCoordinates.repositoryName),
+          region: Domain.AwsRegion.make(directCoordinates.region)
+        }))
+    })
+  )
   return coordinatesEffect.pipe(
     Effect.flatMap((coordinatesOption) => {
       const coordinates = Option.getOrUndefined(coordinatesOption)
-      if (coordinates !== undefined && coordinates.pullRequestId !== pullRequestId) {
-        return Effect.fail(new ApiError({ message: "The pull-request coordinate token does not match its route" }))
-      }
       return pullRequestRepo.findAll().pipe(
         Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
         Effect.mapError(() =>

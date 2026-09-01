@@ -290,6 +290,30 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("reconciles an authenticated sandbox with an empty migrated region", () =>
+    Effect.gen(function*() {
+      const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: regionless,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped", region: "" })
+    }))
+
   it.effect("retires every regionless row, including terminal rows, before exact creation", () =>
     Effect.gen(function*() {
       const terminal = { ...legacyRow, id: "legacy-terminal", status: "stopped", containerId: "terminal-container" }

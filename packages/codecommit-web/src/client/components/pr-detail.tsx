@@ -127,6 +127,18 @@ export const reviewApiAccountId = (
     region: pullRequest.account.region
   })
 
+/** Select a cached PR only when the route identifies exactly one coordinate. */
+export const selectCodeCommitPullRequest = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  route: CodeCommitPullRequestRouteCoordinates
+) => {
+  const matches = pullRequests.filter((candidate) => matchesCodeCommitPullRequestRoute(candidate, route))
+  return {
+    pullRequest: matches.length === 1 ? (matches[0] ?? null) : null,
+    ambiguous: matches.length > 1
+  }
+}
+
 const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
   tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
 
@@ -819,21 +831,19 @@ export function PRDetail() {
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
-  const pr = useMemo(
-    () =>
-      prId !== undefined && prId.length > 0
-        ? (() => {
-            let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
-            if (accountId !== undefined) route = { ...route, accountId }
-            if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
-            if (searchParams.has("repository")) {
-              route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
-            }
-            return state.pullRequests.find((p) => matchesCodeCommitPullRequestRoute(p, route)) ?? null
-          })()
-        : null,
-    [accountId, prId, searchParams, state.pullRequests]
-  )
+  const routeSelection = useMemo(() => {
+    if (prId === undefined || prId.length === 0) return { pullRequest: null, ambiguous: false }
+    let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
+    if (accountId !== undefined) route = { ...route, accountId }
+    if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
+    if (searchParams.has("repository")) {
+      route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
+    }
+    return selectCodeCommitPullRequest(state.pullRequests, route)
+  }, [accountId, prId, searchParams, state.pullRequests])
+  const pr = routeSelection.pullRequest
+  const routeHasPartialCoordinates = searchParams.has("repository") !== searchParams.has("region")
+  const routeAmbiguous = routeHasPartialCoordinates || routeSelection.ambiguous
   const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
   const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
   const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
@@ -865,6 +875,7 @@ export function PRDetail() {
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
     if (
+      routeAmbiguous ||
       pr !== null ||
       refreshAccountId === undefined ||
       refreshAccountId.length === 0 ||
@@ -882,7 +893,7 @@ export function PRDetail() {
           ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
           : {}
     })
-  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle])
+  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle, routeAmbiguous])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -1200,6 +1211,19 @@ export function PRDetail() {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [consoleUrl, handleOpen, handleSandbox, navigate, pr])
+
+  if (routeAmbiguous) {
+    return (
+      <section className={styles.loadingState}>
+        <StatePanel
+          announce="assertive"
+          description="Choose both repository and region to identify this pull request."
+          title="Pull request coordinates are ambiguous"
+          tone="critical"
+        />
+      </section>
+    )
+  }
 
   if (pr === null) {
     return (

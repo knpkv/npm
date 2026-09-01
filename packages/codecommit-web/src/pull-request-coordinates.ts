@@ -92,14 +92,28 @@ export const decodePullRequestCoordinates = (
   if (!value.startsWith(coordinateTokenPrefix)) return Effect.succeed(Option.none())
   const encoded = value.slice(coordinateTokenPrefix.length)
   return Effect.fromResult(Encoding.decodeBase64UrlString(encoded)).pipe(
-    Effect.mapError(() => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinate token" })),
-    Effect.flatMap((json) =>
-      Schema.decodeUnknownEffect(Schema.fromJsonString(coordinateTuple))(json).pipe(
-        Effect.map(([accountId, pullRequestId, repositoryName, region]) =>
-          Option.some(toCoordinates({ accountId, pullRequestId, repositoryName, region }))
-        ),
-        Effect.mapError(() => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinates" }))
-      )
-    )
+    Effect.matchEffect({
+      // Profile aliases may legitimately begin with the token prefix. A value
+      // that is not even base64 is therefore still an ordinary account route.
+      onFailure: () => Effect.succeed(Option.none()),
+      onSuccess: (json) =>
+        Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown))(json).pipe(
+          Effect.matchEffect({
+            // A base64-looking profile alias is still an ordinary account route
+            // when its payload is not JSON; a JSON payload must satisfy the
+            // coordinate tuple contract below.
+            onFailure: () => Effect.succeed(Option.none()),
+            onSuccess: (value) =>
+              Schema.decodeUnknownEffect(coordinateTuple)(value).pipe(
+                Effect.map(([accountId, pullRequestId, repositoryName, region]) =>
+                  Option.some(toCoordinates({ accountId, pullRequestId, repositoryName, region }))
+                ),
+                Effect.mapError(() =>
+                  new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinates" })
+                )
+              )
+          })
+        )
+    })
   )
 }

@@ -1,7 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Domain } from "@knpkv/codecommit-core"
 
-import { reviewApiAccountId, sandboxMatchesPullRequest } from "../src/client/components/pr-detail.js"
+import {
+  reviewApiAccountId,
+  sandboxMatchesPullRequest,
+  selectCodeCommitPullRequest
+} from "../src/client/components/pr-detail.js"
 
 const pullRequest = new Domain.PullRequest({
   account: new Domain.Account({
@@ -52,5 +56,30 @@ describe("PR detail coordinates", () => {
     expect(token).toMatch(/^[A-Za-z0-9_-]+$/)
     expect(token.length).toBeLessThan(100)
     expect(token).not.toBe("111122223333")
+  })
+
+  it("does not select an arbitrary cached PR from an ambiguous legacy route", () => {
+    const other = new Domain.PullRequest({
+      ...pullRequest,
+      repositoryName: Domain.RepositoryName.make("orders"),
+      account: new Domain.Account({
+        ...pullRequest.account,
+        region: Domain.AwsRegion.make("us-east-1")
+      })
+    })
+
+    const ambiguous = selectCodeCommitPullRequest([pullRequest, other], {
+      accountId: "111122223333",
+      pullRequestId: "42"
+    })
+    expect(ambiguous).toEqual({ pullRequest: null, ambiguous: true })
+
+    const exact = selectCodeCommitPullRequest([pullRequest, other], {
+      accountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "orders",
+      region: "us-east-1"
+    })
+    expect(exact).toEqual({ pullRequest: other, ambiguous: false })
   })
 })

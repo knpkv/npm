@@ -243,6 +243,27 @@ describe("PR handler selection", () => {
       expect(repositoryMatch.repositoryName).toBe("identity")
     }))
 
+  it.effect("keeps profile routes that begin with the coordinate prefix addressable", () =>
+    Effect.gen(function*() {
+      const prefixedProfile = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make("cc1_production"),
+          region: pullRequest.account.region,
+          awsAccountId: undefined,
+          repoAccountId: undefined
+        })
+      })
+      const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(prefixedProfile)
+      const selected = yield* cachedPullRequest(
+        { findAll: () => Effect.succeed([cached]) },
+        "cc1_production",
+        prefixedProfile.id,
+        { repositoryName: "payments", region: "eu-west-1" }
+      )
+      expect(selected.account.profile).toBe("cc1_production")
+    }))
+
   it.effect("requires exact coordinates when duplicate account and PR identifiers exist", () =>
     Effect.gen(function*() {
       const regionalPullRequest = new Domain.PullRequest({
