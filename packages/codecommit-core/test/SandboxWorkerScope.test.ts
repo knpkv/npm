@@ -114,6 +114,10 @@ interface FixtureOptions {
     readonly reached: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly healthGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
   readonly listContainersByLabel?: () => Effect.Effect<
     ReadonlyArray<{ readonly Id: string; readonly State: string; readonly Labels: Record<string, string> }>,
@@ -139,6 +143,9 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
   const workerCompleted = yield* Deferred.make<void>()
+  const execCalls = yield* Ref.make(0)
+  const pluginHookCalls = yield* Ref.make(0)
+  const readinessHookCalls = yield* Ref.make(0)
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
     findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) =>
@@ -267,7 +274,17 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
               )
           )
         ),
-      exec: () => Effect.succeed(""),
+      exec: (_containerId, args) =>
+        Ref.update(execCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            args[0] === "curl" && options?.healthGate !== undefined
+              ? Deferred.succeed(options.healthGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.healthGate.release))
+              )
+              : Effect.void
+          ),
+          Effect.as("")
+        ),
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
           Effect.flatMap((attempt) =>
@@ -302,11 +319,20 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     }),
     Layer.mock(PluginService, {
       executeHook: (hook) =>
-        hook === "onSandboxReady" && options?.readyGate !== undefined
-          ? Deferred.succeed(options.readyGate.reached, undefined).pipe(
-            Effect.andThen(Deferred.await(options.readyGate.release))
+        Ref.update(pluginHookCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            (hook === "onSandboxCreate" || hook === "onSandboxReady")
+              ? Ref.update(readinessHookCalls, (count) => count + 1)
+              : Effect.void
+          ),
+          Effect.andThen(
+            hook === "onSandboxReady" && options?.readyGate !== undefined
+              ? Deferred.succeed(options.readyGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.readyGate.release))
+              )
+              : Effect.void
           )
-          : Effect.void
+        )
     }),
     Layer.mock(ConfigService, { load: Effect.succeed(options?.config ?? config) }),
     Layer.succeed(
@@ -399,11 +425,14 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 
   return {
     containerDiscoveryCalls,
+    execCalls,
     errorTransitioned,
     insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
     regionUpdates,
+    pluginHookCalls,
+    readinessHookCalls,
     startContainerCalls,
     stopContainerCalls,
     workerCause,
@@ -561,6 +590,33 @@ describe("SandboxWorkerScope", () => {
 
       expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("does not run readiness hooks after stop wins during health polling", () =>
+    Effect.gen(function*() {
+      const healthReached = yield* Deferred.make<void>()
+      const healthRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        healthGate: { reached: healthReached, release: healthRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const create = yield* sandboxes.create(createParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(healthReached)
+          const row = yield* Ref.get(fixture.rowRef)
+          if (row === undefined) return yield* Effect.die("Sandbox row was not inserted")
+
+          yield* sandboxes.stop(SandboxId.make(row.id))
+          yield* Deferred.succeed(healthRelease, undefined)
+          yield* Fiber.join(create)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.readinessHookCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.execCalls)).toBe(1)
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
     }))
 
@@ -1203,7 +1259,7 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
-  it.effect("preserves a numeric profile-keyed regionless sandbox after account discovery", () =>
+  it.effect("blocks an ambiguous numeric profile-keyed regionless sandbox", () =>
     Effect.gen(function*() {
       const numericProfileParams = { ...createParams, profile: "123456789013" }
       const foreign = {
@@ -1219,13 +1275,17 @@ describe("SandboxWorkerScope", () => {
       const result = yield* Effect.scoped(
         SandboxService.pipe(
           Effect.flatMap((sandboxes) => sandboxes.create(numericProfileParams)),
+          Effect.result,
           Effect.provide(fixture.layer)
         )
       )
 
-      expect(result.awsAccountId).toBe(numericProfileParams.awsAccountId)
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is ambiguous")
+      }
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
-      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
   it.effect("does not replace a regionless worker that is still starting", () =>
@@ -1652,6 +1712,11 @@ describe("SandboxWorkerScope", () => {
           yield* Deferred.await(stopReached)
           yield* Deferred.succeed(stopRelease, undefined)
           yield* Fiber.join(stop)
+          const queuedRestart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Fiber.join(queuedRestart)
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
           yield* Deferred.succeed(readyRelease, undefined)
           yield* Fiber.join(restart)
         }).pipe(Effect.provide(fixture.layer))

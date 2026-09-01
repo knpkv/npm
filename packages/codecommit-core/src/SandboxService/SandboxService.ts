@@ -160,6 +160,7 @@ const makeSandboxService = Effect.gen(function*() {
   const containerAdmission = yield* Semaphore.make(1)
   const createAdmission = yield* Semaphore.make(1)
   const stopRequestedIds = yield* Ref.make<ReadonlySet<string>>(new Set())
+  const stopOwnerIds = yield* Ref.make<ReadonlySet<string>>(new Set())
   const retiredLegacyIds = yield* Ref.make<ReadonlySet<string>>(new Set())
   const markWorkerActive = (id: string) =>
     Ref.update(activeWorkerIds, (workers) => {
@@ -179,6 +180,8 @@ const makeSandboxService = Effect.gen(function*() {
     Ref.get(activeWorkerIds).pipe(Effect.map((workers) => (workers.get(id) ?? 0) > 0))
   const isStopRequested = (id: string) => Ref.get(stopRequestedIds).pipe(Effect.map((ids) => ids.has(id)))
   const requestWorkerStop = (id: string) => Ref.update(stopRequestedIds, (ids) => new Set(ids).add(id))
+  const claimStopOwner = (id: string) => Ref.update(stopOwnerIds, (ids) => new Set(ids).add(id))
+  const isStopOwned = (id: string) => Ref.get(stopOwnerIds).pipe(Effect.map((ids) => ids.has(id)))
   const clearWorkerStopRequest = (id: string) =>
     Ref.update(stopRequestedIds, (ids) => {
       if (!ids.has(id)) return ids
@@ -236,8 +239,24 @@ const makeSandboxService = Effect.gen(function*() {
     }))
 
   const releaseWorkerReservation = (id: string) =>
-    releaseWorker(id).pipe(
-      Effect.flatMap((lastWorker) => lastWorker ? clearWorkerStopRequest(id) : Effect.void)
+    lifecycleAdmission.withPermits(1)(
+      Effect.gen(function*() {
+        const lastWorker = yield* releaseWorker(id)
+        if (lastWorker && !(yield* isStopOwned(id))) yield* clearWorkerStopRequest(id)
+      })
+    )
+
+  const releaseStopOwner = (id: string) =>
+    lifecycleAdmission.withPermits(1)(
+      Effect.gen(function*() {
+        yield* Ref.update(stopOwnerIds, (ids) => {
+          if (!ids.has(id)) return ids
+          const next = new Set(ids)
+          next.delete(id)
+          return next
+        })
+        if (!(yield* hasActiveWorker(id))) yield* clearWorkerStopRequest(id)
+      })
     )
 
   const recordCreationFailure = <UnparsedInput>(id: SandboxId, error: UnparsedInput) =>
@@ -396,7 +415,7 @@ const makeSandboxService = Effect.gen(function*() {
         const regionlessKeys = Array.from(
           new Set([
             params.awsAccountId,
-            isDiscoveredAwsAccountId(params.awsAccountId) && !isDiscoveredAwsAccountId(params.profile)
+            isDiscoveredAwsAccountId(params.awsAccountId)
               ? params.profile
               : undefined
           ])
@@ -413,6 +432,15 @@ const makeSandboxService = Effect.gen(function*() {
               candidate.id === row.id
             ) === index
         )
+        const ambiguousNumericProfile = isDiscoveredAwsAccountId(params.profile)
+          ? regionless.find((row) => row.awsAccountId === params.profile)
+          : undefined
+        if (ambiguousNumericProfile !== undefined) {
+          return yield* new SandboxError({
+            sandboxId: SandboxId.make(ambiguousNumericProfile.id),
+            message: "Configured numeric profile matches an existing regionless sandbox; account identity is ambiguous"
+          })
+        }
         const legacyResults = yield* Effect.forEach(regionless, (legacy) =>
           lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
             if (legacy.accessPassword !== null && (yield* hasActiveWorker(legacy.id))) {
@@ -639,6 +667,7 @@ const makeSandboxService = Effect.gen(function*() {
             Effect.tapError((e) => log(`Health check failed: ${String(e)}`)),
             Effect.catchIf(() => true, () => Effect.void)
           )
+          if (yield* isStopRequested(String(id))) return
 
           // Run plugin hooks
           const row = yield* repo.findById(id)
@@ -792,12 +821,11 @@ const makeSandboxService = Effect.gen(function*() {
                 Effect.gen(function*() {
                   // Publish the stop intent before waiting for lifecycle admission.
                   // Restart checks this marker before it can publish ownership.
+                  yield* claimStopOwner(String(id))
                   yield* requestWorkerStop(String(id))
                   yield* stopSandbox
                 }),
-                hasActiveWorker(String(id)).pipe(
-                  Effect.flatMap((activeWorker) => activeWorker ? Effect.void : clearWorkerStopRequest(String(id)))
-                )
+                releaseStopOwner(String(id))
               )
             )
           )
