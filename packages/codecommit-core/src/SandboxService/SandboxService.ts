@@ -82,6 +82,7 @@ const isPreContainerSandboxStatus = (status: string): boolean =>
   status === "creating" || status === "cloning" || status === "starting"
 
 const isTerminalSandboxStatus = (status: string): boolean => status === "stopped" || status === "error"
+const isConfirmedStoppedContainer = (state: string): boolean => state === "exited" || state === "dead"
 
 const isCompletedLegacyRetirement = (
   row: Pick<SandboxRow, "accessPassword" | "legacyRetiredAt" | "status">
@@ -331,12 +332,12 @@ const makeSandboxService = Effect.gen(function*() {
               isDiscoveredAwsAccountId(row.awsAccountId) &&
               row.pullRequestId === params.pullRequestId &&
               row.repositoryName === params.repositoryName &&
-              row.region === params.region
+              (row.region === params.region || row.region === null || row.region === undefined || row.region === "")
             )
             for (const candidate of candidates) {
               if (!isTerminalSandboxStatus(candidate.status)) return candidate
               const containers = yield* docker.listContainersByLabel("codecommit.sandbox.id", candidate.id)
-              if (containers.length > 0) return candidate
+              if (containers.some((container) => !isConfirmedStoppedContainer(container.State))) return candidate
             }
             return undefined
           })

@@ -661,6 +661,103 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("rejects fallback creation beside a regionless numeric row with a container", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: null,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "regionless-numeric-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is unavailable")
+      }
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("allows fallback creation beside a terminal numeric row in another region", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: "eu-west-1",
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "other-region-numeric-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("allows fallback creation when a terminal numeric row has exited containers", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
   it.effect("creates a first fallback sandbox without a numeric collision", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never)
