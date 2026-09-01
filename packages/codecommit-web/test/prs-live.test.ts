@@ -1,10 +1,17 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, Domain, Errors, PRService } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Schema } from "effect"
+import { Deferred, Effect, Encoding, Schema } from "effect"
+import {
+  coordinateRouterMaxParamLength,
+  decodePullRequestCoordinates,
+  encodePullRequestCoordinates
+} from "../src/pull-request-coordinates.js"
 
+import { SubscriptionPayload } from "../src/server/Api.js"
 import {
   cachedPullRequest,
   completeSinglePullRequestRefresh,
+  refreshRouteCoordinates,
   resolveRelayReviewExecution,
   resolveRelayReviewProfile,
   selectedPullRequest
@@ -49,6 +56,24 @@ const otherRepositoryPullRequest = new Domain.PullRequest({
 })
 
 describe("PR handler selection", () => {
+  it("rejects partial subscription coordinates", () => {
+    const decode = Schema.decodeUnknownResult(SubscriptionPayload)
+    expect(decode({ awsAccountId: "123", pullRequestId: "42", repositoryName: "payments" })._tag).toBe("Failure")
+    expect(decode({ awsAccountId: "123", pullRequestId: "42", region: "eu-west-1" })._tag).toBe("Failure")
+    expect(decode({ awsAccountId: "123", pullRequestId: "42" })._tag).toBe("Success")
+    expect(
+      decode({ awsAccountId: "123", pullRequestId: "42", repositoryName: "", region: "" })._tag
+    ).toBe("Failure")
+    expect(
+      decode({
+        awsAccountId: "123",
+        pullRequestId: "42",
+        repositoryName: "payments",
+        region: "eu-west-1"
+      })._tag
+    ).toBe("Success")
+  })
+
   it.effect("accepts only the exact server-owned Relay profile snapshot", () =>
     Effect.gen(function*() {
       const configured = ConfigService.defaultReviewConfig.profiles[0]
@@ -157,6 +182,13 @@ describe("PR handler selection", () => {
       })
       expect(selected).toBe(pullRequest)
 
+      const selectedByProfile = yield* selectedPullRequest([pullRequest], "production", pullRequest.id, {
+        accountId: "production",
+        region: "eu-west-1",
+        repositoryName: "payments"
+      })
+      expect(selectedByProfile).toBe(pullRequest)
+
       const byAwsAccount = yield* selectedPullRequest(
         [awsAccountPullRequest],
         "444455556666",
@@ -217,4 +249,221 @@ describe("PR handler selection", () => {
       })
       expect(repositoryMatch.repositoryName).toBe("identity")
     }))
+
+  it.effect("keeps profile routes that begin with the coordinate prefix addressable", () =>
+    Effect.gen(function*() {
+      const prefixedProfile = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make("cc1_production"),
+          region: pullRequest.account.region,
+          awsAccountId: undefined,
+          repoAccountId: undefined
+        })
+      })
+      const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(prefixedProfile)
+      const selected = yield* cachedPullRequest(
+        { findAll: () => Effect.succeed([cached]) },
+        "cc1_production",
+        prefixedProfile.id,
+        { repositoryName: "payments", region: "eu-west-1" }
+      )
+      expect(selected.account.profile).toBe("cc1_production")
+
+      const legacyPrefixedProfile = new Domain.PullRequest({
+        ...prefixedProfile,
+        account: new Domain.Account({
+          ...prefixedProfile.account,
+          profile: Domain.AwsProfileName.make("ccpr:production")
+        })
+      })
+      const legacySelected = yield* cachedPullRequest(
+        { findAll: () => Effect.succeed([Schema.encodeSync(PRService.CachedPRToPullRequest)(legacyPrefixedProfile)]) },
+        "ccpr:production",
+        legacyPrefixedProfile.id,
+        { repositoryName: "payments", region: "eu-west-1" }
+      )
+      expect(legacySelected.account.profile).toBe("ccpr:production")
+    }))
+
+  it.effect("requires exact coordinates when duplicate account and PR identifiers exist", () =>
+    Effect.gen(function*() {
+      const regionalPullRequest = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: pullRequest.account.profile,
+          region: Domain.AwsRegion.make("us-east-1"),
+          awsAccountId: "111122223333",
+          repoAccountId: pullRequest.account.repoAccountId
+        }),
+        repositoryName: Domain.RepositoryName.make("payments-us")
+      })
+      const ambiguous = yield* selectedPullRequest(
+        [pullRequest, regionalPullRequest],
+        pullRequest.account.profile,
+        pullRequest.id
+      ).pipe(Effect.flip)
+      expect(ambiguous.message).toContain("ambiguous")
+
+      const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(regionalPullRequest)
+      const first = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
+      const cache = { findAll: () => Effect.succeed([first, cached]) }
+      const token = encodePullRequestCoordinates({
+        accountId: "111122223333",
+        pullRequestId: regionalPullRequest.id,
+        repositoryName: regionalPullRequest.repositoryName,
+        region: regionalPullRequest.account.region
+      })
+
+      const selected = yield* cachedPullRequest(cache, token, regionalPullRequest.id)
+      expect(selected.repositoryName).toBe(regionalPullRequest.repositoryName)
+      expect(selected.account.region).toBe(regionalPullRequest.account.region)
+
+      const invalidToken = yield* cachedPullRequest(cache, "ccpr:not-json", regionalPullRequest.id).pipe(Effect.flip)
+      expect(invalidToken.message).toContain("not available")
+
+      const whitespaceAccountToken = `cc1_${
+        Encoding.encodeBase64Url(JSON.stringify([
+          "  production  ",
+          String(regionalPullRequest.id),
+          `  ${String(regionalPullRequest.repositoryName)}  `,
+          `  ${String(regionalPullRequest.account.region)}  `
+        ]))
+      }`
+      const whitespaceCoordinates = yield* decodePullRequestCoordinates(whitespaceAccountToken)
+      expect(whitespaceCoordinates._tag).toBe("Some")
+      if (whitespaceCoordinates._tag === "Some") {
+        expect(whitespaceCoordinates.value).toMatchObject({
+          accountId: "production",
+          repositoryName: String(regionalPullRequest.repositoryName),
+          region: String(regionalPullRequest.account.region)
+        })
+      }
+
+      const emptyPartToken = `cc1_${
+        Encoding.encodeBase64Url(JSON.stringify([
+          "production",
+          String(regionalPullRequest.id),
+          "   ",
+          String(regionalPullRequest.account.region)
+        ]))
+      }`
+      const emptyPartCoordinates = yield* decodePullRequestCoordinates(emptyPartToken)
+      expect(emptyPartCoordinates._tag).toBe("None")
+
+      const jsonScalarProfile = `cc1_${Encoding.encodeBase64Url(JSON.stringify(123))}`
+      const scalarCoordinates = yield* decodePullRequestCoordinates(jsonScalarProfile)
+      expect(scalarCoordinates._tag).toBe("None")
+      const scalarProfile = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make(jsonScalarProfile),
+          region: pullRequest.account.region,
+          awsAccountId: undefined,
+          repoAccountId: undefined
+        })
+      })
+      const selectedScalarProfile = yield* cachedPullRequest(
+        { findAll: () => Effect.succeed([Schema.encodeSync(PRService.CachedPRToPullRequest)(scalarProfile)]) },
+        jsonScalarProfile,
+        scalarProfile.id,
+        { repositoryName: "payments", region: "eu-west-1" }
+      )
+      expect(selectedScalarProfile.account.profile).toBe(jsonScalarProfile)
+    }))
+
+  it.effect("binds coordinate tokens to the credential account, not repository ownership", () =>
+    Effect.gen(function*() {
+      const intended = new Domain.PullRequest({
+        ...pullRequest,
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make("credential-profile"),
+          region: Domain.AwsRegion.make("eu-west-1"),
+          awsAccountId: "credential-account",
+          repoAccountId: "repository-account"
+        })
+      })
+      const foreign = new Domain.PullRequest({
+        ...intended,
+        account: new Domain.Account({
+          profile: Domain.AwsProfileName.make("foreign-profile"),
+          region: intended.account.region,
+          awsAccountId: "foreign-account",
+          repoAccountId: "credential-account"
+        })
+      })
+      const coordinates = {
+        accountId: "credential-account",
+        pullRequestId: intended.id,
+        repositoryName: intended.repositoryName,
+        region: intended.account.region,
+        accountIdSource: "coordinate-token"
+      } satisfies {
+        readonly accountId: string
+        readonly pullRequestId: string
+        readonly repositoryName: string
+        readonly region: string
+        readonly accountIdSource: "coordinate-token"
+      }
+      const selected = yield* selectedPullRequest([intended, foreign], "credential-account", intended.id, coordinates)
+      expect(selected).toBe(intended)
+
+      const profileCollision = new Domain.PullRequest({
+        ...foreign,
+        account: new Domain.Account({
+          ...foreign.account,
+          profile: Domain.AwsProfileName.make("credential-account")
+        })
+      })
+      const rejectedProfileCollision = yield* selectedPullRequest(
+        [profileCollision],
+        "credential-account",
+        intended.id,
+        coordinates
+      ).pipe(Effect.flip)
+      expect(rejectedProfileCollision.message).toContain("not available")
+    }))
+
+  it.effect("carries exact coordinates through a refresh route", () =>
+    Effect.gen(function*() {
+      const token = encodePullRequestCoordinates({
+        accountId: "111122223333",
+        pullRequestId: pullRequest.id,
+        repositoryName: pullRequest.repositoryName,
+        region: pullRequest.account.region
+      })
+      const fromToken = yield* refreshRouteCoordinates(token, pullRequest.id, {})
+      expect(fromToken).toEqual({
+        accountId: "111122223333",
+        coordinates: {
+          repositoryName: "payments",
+          region: "eu-west-1",
+          accountIdSource: "coordinate-token"
+        }
+      })
+
+      const fromQuery = yield* refreshRouteCoordinates("111122223333", pullRequest.id, {
+        repositoryName: "payments",
+        region: pullRequest.account.region
+      })
+      expect(fromQuery.coordinates).toEqual({ repositoryName: "payments", region: "eu-west-1" })
+    }))
+
+  it("keeps provider-valid maximum repository tokens inside the router bound", () => {
+    const token = encodePullRequestCoordinates({
+      accountId: "a".repeat(128),
+      pullRequestId: Domain.PullRequestId.make("p".repeat(128)),
+      repositoryName: Domain.RepositoryName.make("r".repeat(100)),
+      region: Domain.AwsRegion.make("e".repeat(64))
+    })
+    expect(token.length).toBeLessThanOrEqual(coordinateRouterMaxParamLength)
+    expect(() =>
+      encodePullRequestCoordinates({
+        accountId: "a".repeat(181),
+        pullRequestId: Domain.PullRequestId.make("42"),
+        repositoryName: Domain.RepositoryName.make("payments"),
+        region: Domain.AwsRegion.make("eu-west-1")
+      })
+    ).toThrow()
+  })
 })

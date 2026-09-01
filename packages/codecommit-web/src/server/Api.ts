@@ -362,6 +362,8 @@ export const NotificationResponse = Schema.Struct({
   type: Schema.String,
   title: Schema.String,
   profile: Schema.String,
+  repositoryName: Schema.String,
+  accountRegion: Schema.String,
   message: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
@@ -671,14 +673,25 @@ export class AccountsGroup extends HttpApiGroup.make("accounts")
 {}
 
 // Subscription endpoints
-const SubscriptionPayload = Schema.Struct({
+const subscriptionCoordinate = Schema.Trim.check(Schema.isNonEmpty())
+export const SubscriptionPayload = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: PullRequestId
-})
+  pullRequestId: PullRequestId,
+  repositoryName: Schema.optional(subscriptionCoordinate),
+  region: Schema.optional(subscriptionCoordinate)
+}).check(
+  Schema.makeFilter((payload) =>
+    (payload.repositoryName === undefined) === (payload.region === undefined)
+      ? undefined
+      : "repositoryName and region must be provided together"
+  )
+)
 
 const SubscriptionResponse = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: Schema.String
+  pullRequestId: Schema.String,
+  repositoryName: Schema.NullOr(Schema.String),
+  accountRegion: Schema.NullOr(Schema.String)
 })
 
 export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
@@ -758,8 +771,8 @@ export const SandboxResponse = Schema.Struct({
   id: Schema.String,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
+  region: Schema.NullOr(Schema.String),
   repositoryName: Schema.String,
-  region: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),

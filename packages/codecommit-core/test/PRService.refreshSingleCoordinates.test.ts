@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Ref, Schema, SubscriptionRef } from "effect"
+import { Effect, Layer, Option, Ref, Schema, SubscriptionRef } from "effect"
 import { AwsClient } from "../src/AwsClient/index.js"
 import { EventsHub } from "../src/CacheService/EventsHub.js"
 import { CommentRepo } from "../src/CacheService/repos/CommentRepo.js"
@@ -77,6 +77,22 @@ const secondCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
   repositoryName: "identity"
 })
 
+const foreignPullRequest = Schema.decodeSync(Domain.PullRequest)({
+  ...pullRequest,
+  account: {
+    ...pullRequest.account,
+    awsAccountId: "999988887777",
+    profile: "foreign",
+    repoAccountId: "111122223333"
+  }
+})
+const foreignCachedPullRequest = Schema.encodeSync(CachedPullRequest)({
+  ...cachedPullRequest,
+  awsAccountId: "999988887777",
+  accountProfile: "foreign",
+  repoAccountId: "111122223333"
+})
+
 const config = {
   accounts: [],
   autoDetect: false,
@@ -135,6 +151,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
             upsert: () => Effect.void
           }),
@@ -169,7 +187,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
-          Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([cachedPullRequest]) }),
+          Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([cachedPullRequest])
+          }),
           Layer.mock(CommentRepo, {}),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
@@ -181,6 +203,60 @@ describe("PRService.refreshSinglePR coordinates", () => {
       expect(failure._tag).toBe("RefreshError")
       expect(failure.failedAccounts).toEqual(["111122223333"])
       expect(yield* Ref.get(providerCalls)).toBe(0)
+    }))
+
+  it.effect("binds exact refreshes to the requested credential account", () =>
+    Effect.gen(function*() {
+      const initialState: Domain.AppState = {
+        pullRequests: [foreignPullRequest, pullRequest],
+        accounts: [],
+        status: "idle"
+      }
+      const state = yield* SubscriptionRef.make(initialState)
+      const providerProfiles = yield* Ref.make<ReadonlyArray<string>>([])
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("111122223333", pullRequest.id, {
+          region: "eu-west-1",
+          repositoryName: "payments"
+        }),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: ({ account }) =>
+              Ref.update(providerProfiles, (profiles) => [...profiles, account.profile]).pipe(
+                Effect.andThen(Effect.succeed({
+                  revisionId: "revision-exact",
+                  sourceCommit: "d".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                }))
+              ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([foreignCachedPullRequest, cachedPullRequest]),
+            upsert: () => Effect.void
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(yield* Ref.get(providerProfiles)).toEqual(["production"])
     }))
 
   it.effect("rejects a same-id refresh with a different repository", () =>
@@ -202,7 +278,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
-          Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([cachedPullRequest]) }),
+          Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([cachedPullRequest])
+          }),
           Layer.mock(CommentRepo, {}),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
@@ -246,6 +326,8 @@ describe("PRService.refreshSinglePR coordinates", () => {
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
           Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
             findAll: () => Effect.succeed([cachedPullRequest]),
             upsert: () => Effect.void
           }),
@@ -258,6 +340,96 @@ describe("PRService.refreshSinglePR coordinates", () => {
       )
 
       expect(yield* Ref.get(providerRegions)).toEqual(["eu-west-1"])
+    }))
+
+  it.effect("does not use a repository-owner collision for a legacy refresh", () =>
+    Effect.gen(function*() {
+      const initialState: Domain.AppState = {
+        pullRequests: [foreignPullRequest, pullRequest],
+        accounts: [],
+        status: "idle"
+      }
+      const state = yield* SubscriptionRef.make(initialState)
+      const providerProfiles = yield* Ref.make<ReadonlyArray<string>>([])
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("111122223333", pullRequest.id),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: ({ account }) =>
+              Ref.update(providerProfiles, (profiles) => [...profiles, account.profile]).pipe(
+                Effect.andThen(Effect.succeed({
+                  revisionId: "revision-legacy-collision",
+                  sourceCommit: "g".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                }))
+              ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([]),
+            upsert: () => Effect.void
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(yield* Ref.get(providerProfiles)).toEqual(["production"])
+    }))
+
+  it.effect("keeps token refreshes bound to durable accounts", () =>
+    Effect.gen(function*() {
+      const tokenCollision = { ...foreignCachedPullRequest, accountProfile: "111122223333" }
+      const state = yield* SubscriptionRef.make<Domain.AppState>({
+        pullRequests: [],
+        accounts: [],
+        status: "idle"
+      })
+      const providerCalls = yield* Ref.make(0)
+      const service = makeRefreshSinglePR(state)
+      const failure = yield* runWithLayer(
+        service("111122223333", pullRequest.id, {
+          repositoryName: "payments",
+          region: "eu-west-1",
+          accountIdSource: "coordinate-token"
+        }).pipe(Effect.flip),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: () =>
+              Ref.update(providerCalls, (calls) => calls + 1).pipe(
+                Effect.andThen(Effect.die("unexpected provider call"))
+              ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([tokenCollision])
+          }),
+          Layer.mock(CommentRepo, {}),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, {}),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(failure._tag).toBe("RefreshError")
+      expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
 
   it.effect("rejects an ambiguous legacy route instead of choosing a configured region", () =>
@@ -280,7 +452,11 @@ describe("PRService.refreshSinglePR coordinates", () => {
               ),
             getCommentsForPullRequest: () => Effect.succeed([])
           }),
-          Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([cachedPullRequest, secondCachedPullRequest]) }),
+          Layer.mock(PullRequestRepo, {
+            findByAccountAndId: () => Effect.succeed(Option.none()),
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([cachedPullRequest, secondCachedPullRequest])
+          }),
           Layer.mock(CommentRepo, {}),
           Layer.mock(NotificationRepo, {}),
           Layer.mock(SubscriptionRepo, {}),
@@ -296,5 +472,95 @@ describe("PRService.refreshSinglePR coordinates", () => {
 
       expect(failure._tag).toBe("RefreshError")
       expect(yield* Ref.get(providerCalls)).toBe(0)
+    }))
+
+  it.effect("accepts an exact profile alias without replacing its durable account", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<Domain.AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const upserted = yield* Ref.make<string | undefined>(undefined)
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: () =>
+              Effect.succeed({
+                revisionId: "revision-profile",
+                sourceCommit: "e".repeat(40),
+                title: "Coordinate refresh",
+                author: "reviewer",
+                status: "OPEN",
+                repositoryName: "payments",
+                sourceBranch: "feature",
+                destinationBranch: "main",
+                creationDate: new Date(0),
+                lastActivityDate: new Date(2_000),
+                approvedBy: [],
+                approvedByArns: [],
+                approvalRules: []
+              }),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([cachedPullRequest]),
+            upsert: (input) => Ref.set(upserted, input.awsAccountId)
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+      expect(yield* Ref.get(upserted)).toBe("111122223333")
+    }))
+
+  it.effect("resolves a profile identity before persisting an uncached exact refresh", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<Domain.AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const upserted = yield* Ref.make<string | undefined>(undefined)
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "111122223333" }),
+            getPullRequest: () =>
+              Effect.succeed({
+                revisionId: "revision-uncached-profile",
+                sourceCommit: "f".repeat(40),
+                title: "Coordinate refresh",
+                author: "reviewer",
+                status: "OPEN",
+                repositoryName: "payments",
+                sourceBranch: "feature",
+                destinationBranch: "main",
+                creationDate: new Date(0),
+                lastActivityDate: new Date(2_000),
+                approvedBy: [],
+                approvedByArns: [],
+                approvalRules: []
+              }),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([]),
+            upsert: (input) => Ref.set(upserted, input.awsAccountId)
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, {
+            load: Effect.succeed({
+              ...config,
+              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+            })
+          }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+      expect(yield* Ref.get(upserted)).toBe("111122223333")
     }))
 })

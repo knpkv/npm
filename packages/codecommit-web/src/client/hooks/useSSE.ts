@@ -24,6 +24,7 @@ import { Effect, Schema } from "effect"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import type { AppState } from "../atoms/app.js"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { ownerSessionReady } from "../ownerSession.js"
 
 const PullRequestWire = Schema.Struct({
@@ -72,6 +73,8 @@ const NotificationWire = Schema.Struct({
   type: Schema.String,
   title: Schema.String,
   profile: Schema.String,
+  repositoryName: Schema.String,
+  accountRegion: Schema.String,
   message: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
@@ -81,8 +84,8 @@ const SandboxWire = Schema.Struct({
   id: Schema.String,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
+  region: Schema.NullOr(Schema.String),
   repositoryName: Schema.String,
-  region: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),
   port: Schema.NullOr(Schema.Number),
@@ -159,13 +162,25 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
   }
 }
 
+/** Decode one server-sent snapshot, retaining nullable sandbox coordinates. */
+export const decodeSseState = (json: string): AppState => toAppState(decode(json))
+
 export type ConnectionState = "connected" | "reconnecting" | "disconnected"
 
 export function useSSE(
   onState: (state: AppState) => void,
   onToastClick?: (path?: string) => void,
   onDesktopNotify?: (
-    n: { id?: number; type: string; title: string; message: string; awsAccountId?: string; pullRequestId?: string }
+    n: {
+      id?: number
+      type: string
+      title: string
+      message: string
+      awsAccountId?: string
+      pullRequestId?: string
+      repositoryName?: string
+      accountRegion?: string
+    }
   ) => void
 ) {
   const callbackRef = useRef(onState)
@@ -205,10 +220,19 @@ export function useSSE(
                   id: `notif-${n.id}`,
                   description: n.message,
                   duration: 8000,
-                  action: n.awsAccountId.length > 0 && n.pullRequestId.length > 0
+                  action: n.awsAccountId !== "" && n.pullRequestId !== "" &&
+                      n.repositoryName !== "" && n.accountRegion !== ""
                     ? {
                       label: "View",
-                      onClick: () => toastClickRef.current?.(`/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`)
+                      onClick: () =>
+                        toastClickRef.current?.(
+                          codeCommitPullRequestHref(
+                            n.awsAccountId,
+                            n.pullRequestId,
+                            n.repositoryName,
+                            n.accountRegion
+                          )
+                        )
                     }
                     : { label: "View", onClick: () => toastClickRef.current?.("/notifications") }
                 })
@@ -218,7 +242,9 @@ export function useSSE(
                   title: n.title || "CodeCommit",
                   message: n.message,
                   awsAccountId: n.awsAccountId,
-                  pullRequestId: n.pullRequestId
+                  pullRequestId: n.pullRequestId,
+                  repositoryName: n.repositoryName,
+                  accountRegion: n.accountRegion
                 })
               }
             }
@@ -260,7 +286,7 @@ export function useSSE(
     return () => {
       disposed = true
       es?.close()
-      if (retryTimeout !== null) clearTimeout(retryTimeout)
+      if (retryTimeout !== undefined && retryTimeout !== null) clearTimeout(retryTimeout)
     }
   }, [])
 

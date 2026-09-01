@@ -5,7 +5,7 @@
  *
  * @module
  */
-import { Context, Effect, Layer, Schema, Stream } from "effect"
+import { Context, Effect, Layer, Predicate, Schema, Stream } from "effect"
 import type { Success } from "effect/Effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { DockerError } from "../Errors.js"
@@ -34,6 +34,24 @@ export interface ContainerInfo {
   readonly NetworkSettings: {
     readonly Ports: Record<string, ReadonlyArray<{ HostPort: string }> | null>
   }
+}
+
+/** Docker reports an absent inspect/stop target with one of these exact stderr shapes. */
+export const isMissingContainerError = (error: DockerError): boolean => {
+  if (
+    !Predicate.isString(error.operation) ||
+    (error.operation !== "inspectContainer" && error.operation !== "stopContainer")
+  ) return false
+  const cause = error.cause
+  const message = Predicate.isString(cause)
+    ? cause
+    : Predicate.isError(cause)
+    ? cause.message
+    : undefined
+  return message !== undefined &&
+    /^(?:Error:\s+|Error response from daemon:\s+)No such (?:object|container):\s+\S+/u.test(
+      message.trim()
+    )
 }
 
 const ContainerInfoSchema = Schema.Struct({
@@ -83,6 +101,17 @@ const makeDockerService = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const docker = (...args: Array<string>) =>
     spawner.string(ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`]))
+  const dockerWithResult = (...args: Array<string>) =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const handle = yield* spawner.spawn(
+          ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`])
+        )
+        const output = yield* Stream.mkString(Stream.decodeText(handle.stdout))
+        const exitCode = yield* handle.exitCode
+        return { output, exitCode }
+      })
+    )
   const dockerWithInput = (input: string, ...args: Array<string>) =>
     spawner.string(
       ChildProcess.make("sh", ["-c", `docker ${args.map(shellEscape).join(" ")} 2>&1`], {
@@ -118,7 +147,7 @@ const makeDockerService = Effect.gen(function*() {
       }
 
       // Network mode
-      if (config.HostConfig.NetworkMode) {
+      if (config.HostConfig.NetworkMode !== undefined) {
         args.push("--network", config.HostConfig.NetworkMode)
       }
 
@@ -126,7 +155,7 @@ const makeDockerService = Effect.gen(function*() {
         args.push("--cap-drop", capability)
       }
 
-      if (config.User) {
+      if (config.User !== undefined) {
         args.push("--user", config.User)
       }
 
@@ -153,30 +182,43 @@ const makeDockerService = Effect.gen(function*() {
       docker("start", containerId).pipe(Effect.asVoid, dockerError("startContainer")),
 
     stopContainer: (containerId: string, timeout = 10) =>
-      docker("stop", "-t", String(timeout), containerId).pipe(Effect.asVoid, dockerError("stopContainer")),
+      dockerWithResult("stop", "-t", String(timeout), containerId).pipe(
+        Effect.mapError((cause) => new DockerError({ operation: "stopContainer", cause })),
+        Effect.flatMap((result) =>
+          Number(result.exitCode) === 0
+            ? Effect.void
+            : Effect.fail(
+              new DockerError({
+                operation: "stopContainer",
+                cause: result.output.trim() || `docker stop exited with code ${String(result.exitCode)}`
+              })
+            )
+        )
+      ),
 
     removeContainer: (containerId: string) =>
       docker("rm", "-f", containerId).pipe(Effect.asVoid, dockerError("removeContainer")),
 
     inspectContainer: (containerId: string) =>
-      docker("inspect", containerId).pipe(
-        dockerError("inspectContainer"),
-        Effect.flatMap((output) =>
-          Effect.try({
-            try: () => {
-              const arr = decodeContainerInfoArray(JSON.parse(output))
-              if (arr.length === 0) return undefined
-              return arr[0]
-            },
-            catch: (cause) => new DockerError({ operation: "inspectContainer", cause })
-          })
-        ),
-        Effect.flatMap((containerInfo) =>
-          containerInfo === undefined
-            ? Effect.fail(new DockerError({ operation: "inspectContainer", cause: "Empty inspect result" }))
-            : Effect.succeed(containerInfo)
+      Effect.gen(function*() {
+        const result = yield* dockerWithResult("inspect", containerId).pipe(
+          Effect.mapError((cause) => new DockerError({ operation: "inspectContainer", cause }))
         )
-      ),
+        if (Number(result.exitCode) !== 0) {
+          return yield* new DockerError({
+            operation: "inspectContainer",
+            cause: result.output.trim() || `docker inspect exited with code ${String(result.exitCode)}`
+          })
+        }
+        const arr = yield* Effect.try({
+          try: () => decodeContainerInfoArray(JSON.parse(result.output)),
+          catch: (cause) => new DockerError({ operation: "inspectContainer", cause })
+        })
+        const containerInfo = arr[0]
+        return containerInfo === undefined
+          ? yield* new DockerError({ operation: "inspectContainer", cause: "Empty inspect result" })
+          : containerInfo
+      }),
 
     exec: (containerId: string, cmd: ReadonlyArray<string>) =>
       docker("exec", containerId, ...cmd).pipe(dockerError("exec")),
@@ -187,7 +229,7 @@ const makeDockerService = Effect.gen(function*() {
         Effect.flatMap((output) =>
           Effect.try({
             try: () => {
-              if (!output) return emptyDockerPsContainers()
+              if (output.length === 0) return emptyDockerPsContainers()
               return output.split("\n").map((line) => {
                 const obj = decodeDockerPsRow(JSON.parse(line))
                 return {

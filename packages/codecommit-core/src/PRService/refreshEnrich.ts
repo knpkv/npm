@@ -12,6 +12,7 @@ import type { CachedPullRequest } from "../CacheService/repos/PullRequestRepo/in
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { AwsProfileName, AwsRegion, type PRCommentLocation } from "../Domain.js"
 import { countAllComments, type PRState } from "./internal.js"
+import { isSubscribedForCoordinates } from "./refreshResolve.js"
 
 const decodeAwsProfileName = Schema.decodeSync(AwsProfileName)
 const decodeAwsRegion = Schema.decodeSync(AwsRegion)
@@ -21,6 +22,7 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
     const awsClient = yield* AwsClient
     const commentRepo = yield* CommentRepo
     const notificationRepo = yield* NotificationRepo
+    const prRepo = yield* PullRequestRepo
 
     const awsAccountId = row.awsAccountId
     const prId = row.id
@@ -32,31 +34,54 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       },
       pullRequestId: prId,
       repositoryName: row.repositoryName
-    }).pipe(Effect.catch(() => Effect.succeed<Array<PRCommentLocation> | undefined>(undefined)))
+    }).pipe(Effect.catch(() => Effect.void.pipe(Effect.as(undefined))))
 
-    if (locs && awsAccountId) {
+    if (locs !== undefined && awsAccountId !== "") {
       // Diff comments for subscribed PRs
-      if (subscribedSnapshot.has(`${awsAccountId}:${prId}`)) {
-        const cachedComments = yield* commentRepo.find(awsAccountId, prId).pipe(
+      const coordinates = {
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      }
+      if (
+        yield* isSubscribedForCoordinates(
+          prRepo,
+          subscribedSnapshot,
+          awsAccountId,
+          prId,
+          row.repositoryName,
+          row.accountRegion
+        )
+      ) {
+        const cachedComments = yield* commentRepo.find(awsAccountId, prId, coordinates).pipe(
           Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
         )
         if (Option.isSome(cachedComments)) {
-          const notifications = diffComments(cachedComments.value, locs, prId, awsAccountId)
+          const notifications = diffComments(
+            cachedComments.value,
+            locs,
+            prId,
+            awsAccountId,
+            row.repositoryName,
+            row.accountRegion
+          )
           yield* Effect.forEach(notifications, (n) => notificationRepo.add(n), { discard: true }).pipe(
             Effect.catch(() => Effect.void)
           )
         }
       }
       // Cache comments
-      yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs)).pipe(
+      yield* commentRepo.upsert(awsAccountId, prId, JSON.stringify(locs), coordinates).pipe(
         Effect.catch(() => Effect.void)
       )
     }
 
     // Fallback: use cached comment count from DB
-    let commentCount = locs ? countAllComments(locs) : 0
-    if (!locs && awsAccountId) {
-      const cached = yield* commentRepo.find(awsAccountId, prId).pipe(
+    let commentCount = locs !== undefined ? countAllComments(locs) : 0
+    if (locs === undefined && awsAccountId !== "") {
+      const cached = yield* commentRepo.find(awsAccountId, prId, {
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      }).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       )
       if (Option.isSome(cached)) {
@@ -64,7 +89,15 @@ const enrichSinglePR = (row: CachedPullRequest, subscribedSnapshot: Set<string>)
       }
     }
 
-    return awsAccountId ? Option.some({ awsAccountId, commentCount, id: prId }) : Option.none()
+    return awsAccountId !== ""
+      ? Option.some({
+        awsAccountId,
+        commentCount,
+        id: prId,
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      })
+      : Option.none()
   })
 
 export const enrichComments = (params: {
@@ -105,8 +138,8 @@ export const enrichComments = (params: {
       (r) =>
         Option.match(r, {
           onNone: () => Effect.void,
-          onSome: ({ awsAccountId, commentCount, id }) =>
-            prRepo.updateCommentCount(awsAccountId, id, commentCount).pipe(
+          onSome: ({ accountRegion, awsAccountId, commentCount, id, repositoryName }) =>
+            prRepo.updateCommentCount(awsAccountId, id, commentCount, { repositoryName, accountRegion }).pipe(
               Effect.catch(() => Effect.void)
             )
         }),

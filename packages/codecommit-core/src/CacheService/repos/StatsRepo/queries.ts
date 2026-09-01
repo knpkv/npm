@@ -62,7 +62,7 @@ export const mostActivePRs =
   (sql: SqlClient.SqlClient) => (weekStart: string, weekEnd: string, filters: Filters, limit = 10) => {
     const f = whereFilters(sql, filters)
     return sql<ActivePRRow>`
-      SELECT id, title, author, repository_name, comment_count, aws_account_id
+      SELECT id, title, author, repository_name, account_region, comment_count, aws_account_id
       FROM pull_requests
       WHERE COALESCE(closed_at, last_modified_date) >= ${weekStart} AND COALESCE(closed_at, last_modified_date) < ${weekEnd}
         AND comment_count > 0
@@ -108,7 +108,7 @@ export const avgDiffSize = (sql: SqlClient.SqlClient) => (weekStart: string, wee
     `.pipe(
     Effect.map((rows) => {
       const r = rows[0]
-      if (!r || r.avgAdded == null) return null
+      if (r === undefined || r.avgAdded === null) return null
       return { filesAdded: r.avgAdded, filesModified: r.avgModified ?? 0, filesDeleted: r.avgDeleted ?? 0 }
     }),
     cacheError("avgDiffSize")
@@ -138,7 +138,7 @@ export const stalePRs = (sql: SqlClient.SqlClient) => (nowISO: string, filters: 
   const f = whereFilters(sql, filters)
   return sql<StalePRRow>`
       SELECT
-        id, title, author, repository_name, aws_account_id,
+        id, title, author, repository_name, account_region, aws_account_id,
         CAST((julianday(${nowISO}) - julianday(last_modified_date)) AS INTEGER) as days_since_activity
       FROM pull_requests
       WHERE status = 'OPEN'
@@ -205,7 +205,7 @@ export const mergeTimeDetails =
   (sql: SqlClient.SqlClient) => (weekStart: string, weekEnd: string, filters: Filters) => {
     const f = whereFilters(sql, filters)
     return sql<MergeTimeDetailRow>`
-      SELECT id, title, author, repository_name, aws_account_id, creation_date,
+      SELECT id, title, author, repository_name, account_region, aws_account_id, creation_date,
         COALESCE(closed_at, last_modified_date) as last_modified_date,
         CAST((julianday(COALESCE(closed_at, last_modified_date)) - julianday(creation_date)) * 86400000 AS INTEGER) as duration_ms
       FROM pull_requests
@@ -220,6 +220,7 @@ export const mergeTimeDetails =
           prTitle: r.title,
           author: r.author,
           repositoryName: r.repositoryName,
+          accountRegion: r.accountRegion,
           awsAccountId: r.awsAccountId,
           durationMs: r.durationMs,
           fromLabel: fmtDate(r.creationDate),

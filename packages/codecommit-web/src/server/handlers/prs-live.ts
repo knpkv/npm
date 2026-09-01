@@ -12,13 +12,16 @@
  */
 import { AwsClient, CacheService, ChildEnv, ConfigService, PRService, ReadClient } from "@knpkv/codecommit-core"
 import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
+import type { RefreshSinglePRCoordinates } from "@knpkv/codecommit-core/PRService/index.js"
+import { Chunk, Effect, Option, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { decodePullRequestCoordinates } from "../../pull-request-coordinates.js"
+import type { PullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   ApiError,
   CodeCommitApi,
@@ -153,58 +156,109 @@ export const selectedPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
   awsAccountId: string,
   pullRequestId: Domain.PullRequestId,
-  coordinates: PullRequestCoordinates
+  coordinates?: PullRequestSelectionCoordinates
 ): Effect.Effect<Domain.PullRequest, ApiError> => {
-  const pullRequest = pullRequests.find(
+  const routeAccountId = coordinates?.accountId ?? awsAccountId
+  const accountMatches = (candidate: Domain.PullRequest): boolean =>
+    coordinates === undefined
+      ? candidate.account.awsAccountId === routeAccountId
+        || candidate.account.repoAccountId === routeAccountId
+        || candidate.account.profile === routeAccountId
+      : coordinates.accountIdSource === "coordinate-token"
+      ? candidate.account.awsAccountId !== undefined && candidate.account.awsAccountId !== ""
+        && candidate.account.awsAccountId === routeAccountId
+      : candidate.account.awsAccountId === routeAccountId
+        || candidate.account.repoAccountId === routeAccountId
+        || candidate.account.profile === routeAccountId
+  const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&
-      (candidate.account.awsAccountId === awsAccountId ||
-        candidate.account.repoAccountId === awsAccountId ||
-        candidate.account.profile === awsAccountId) &&
-      String(candidate.repositoryName) === coordinates.repositoryName &&
-      String(candidate.account.region) === coordinates.region
+      accountMatches(candidate) &&
+      (coordinates === undefined ||
+        (candidate.repositoryName === coordinates.repositoryName && candidate.account.region === coordinates.region))
   )
-  return pullRequest === undefined
-    ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
-    : Effect.succeed(pullRequest)
+  if (matches.length === 1) {
+    const pullRequest = matches[0]
+    return pullRequest === undefined
+      ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
+      : Effect.succeed(pullRequest)
+  }
+  return Effect.fail(
+    new ApiError({
+      message: matches.length === 0
+        ? "The selected pull request is not available in the local workspace"
+        : "The selected pull request is ambiguous; repository and region coordinates are required"
+    })
+  )
 }
 
 interface PullRequestLookup {
   readonly findAll: PullRequestRepoContract["findAll"]
 }
 
-interface PullRequestCoordinates {
+interface PullRequestSelectionCoordinates {
+  readonly accountId?: string
   readonly repositoryName: string
   readonly region: string
+  readonly accountIdSource?: "coordinate-token"
 }
-
-interface PullRequestRefreshQuery {
-  readonly repositoryName?: string | undefined
-  readonly region?: Domain.AwsRegion | undefined
-}
-
-/** Keep coordinate-free legacy refresh links working only when the route is unambiguous. */
-const refreshCoordinates = (
-  query: PullRequestRefreshQuery
-): PRService.RefreshSinglePRCoordinates | undefined =>
-  query.repositoryName !== undefined && query.region !== undefined
-    ? { repositoryName: query.repositoryName, region: query.region }
-    : undefined
 
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
 export const cachedPullRequest = (
   pullRequestRepo: PullRequestLookup,
   awsAccountId: string,
   pullRequestId: Domain.PullRequestId,
-  coordinates: PullRequestCoordinates
-): Effect.Effect<Domain.PullRequest, ApiError> =>
-  pullRequestRepo.findAll().pipe(
-    Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-    Effect.mapError(() =>
-      new ApiError({ message: "The selected pull request is not available in the local workspace" })
-    ),
-    Effect.flatMap((pullRequests) => selectedPullRequest(pullRequests, awsAccountId, pullRequestId, coordinates))
+  directCoordinates?: PullRequestSelectionCoordinates
+): Effect.Effect<Domain.PullRequest, ApiError> => {
+  const coordinatesEffect = decodePullRequestCoordinates(awsAccountId).pipe(
+    Effect.mapError((error) => new ApiError({ message: error.message })),
+    Effect.flatMap((token) => {
+      if (Option.isSome(token)) {
+        if (token.value.pullRequestId !== pullRequestId) {
+          return Effect.fail(new ApiError({ message: "The pull-request coordinate token does not match its route" }))
+        }
+        if (
+          directCoordinates !== undefined &&
+          (token.value.repositoryName !== directCoordinates.repositoryName ||
+            token.value.region !== directCoordinates.region)
+        ) {
+          return Effect.fail(new ApiError({ message: "The pull-request coordinates do not match its route" }))
+        }
+        return Effect.succeed(Option.some<PullRequestSelectionCoordinates>({
+          ...token.value,
+          accountIdSource: "coordinate-token"
+        }))
+      }
+      return directCoordinates === undefined
+        ? Effect.succeed(Option.none<PullRequestCoordinates>())
+        : Effect.succeed(Option.some<PullRequestCoordinates>({
+          accountId: awsAccountId,
+          pullRequestId,
+          repositoryName: Domain.RepositoryName.make(directCoordinates.repositoryName),
+          region: Domain.AwsRegion.make(directCoordinates.region)
+        }))
+    })
   )
+  return coordinatesEffect.pipe(
+    Effect.flatMap((coordinatesOption) => {
+      const coordinates = Option.getOrUndefined(coordinatesOption)
+      return pullRequestRepo.findAll().pipe(
+        Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+        Effect.mapError(() =>
+          new ApiError({ message: "The selected pull request is not available in the local workspace" })
+        ),
+        Effect.flatMap((pullRequests) =>
+          selectedPullRequest(
+            pullRequests,
+            coordinates?.accountId ?? awsAccountId,
+            pullRequestId,
+            coordinates
+          )
+        )
+      )
+    })
+  )
+}
 
 /** Keep proprietary source revisions out of browser and intermediary caches. */
 export const makeDiffContentResponse = (content: PullRequestDiffContentResponse) =>
@@ -219,6 +273,50 @@ export const completeSinglePullRequestRefresh = <E, R>(
   refresh.pipe(
     Effect.map(({ revisionId, sourceCommit }) => ({ revisionId, headCommit: sourceCommit }))
   )
+
+export const refreshRouteCoordinates = (
+  accountId: string,
+  pullRequestId: Domain.PullRequestId,
+  query: {
+    readonly repositoryName?: string | undefined
+    readonly region?: Domain.AwsRegion | undefined
+  }
+): Effect.Effect<
+  { readonly accountId: string; readonly coordinates?: RefreshSinglePRCoordinates },
+  ApiError
+> =>
+  Effect.gen(function*() {
+    const token = yield* decodePullRequestCoordinates(accountId).pipe(
+      Effect.mapError((error) => new ApiError({ message: error.message }))
+    )
+    if (Option.isSome(token)) {
+      if (token.value.pullRequestId !== pullRequestId) {
+        return yield* new ApiError({ message: "The pull-request coordinate token does not match its route" })
+      }
+      return {
+        accountId: token.value.accountId,
+        coordinates: {
+          repositoryName: token.value.repositoryName,
+          region: token.value.region,
+          accountIdSource: "coordinate-token"
+        }
+      }
+    }
+    if (query.repositoryName === undefined && query.region === undefined) return { accountId }
+    if (query.repositoryName === undefined || query.region === undefined) {
+      return yield* new ApiError({ message: "Pull-request refresh coordinates require repository and region together" })
+    }
+    const repositoryName = yield* Schema.decodeUnknownEffect(Domain.RepositoryName)(query.repositoryName).pipe(
+      Effect.mapError(() => new ApiError({ message: "Invalid pull-request repository coordinate" }))
+    )
+    return {
+      accountId,
+      coordinates: {
+        repositoryName,
+        region: query.region
+      }
+    }
+  })
 
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
@@ -262,10 +360,15 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("refreshSingle", ({ params, query }) =>
-        completeSinglePullRequestRefresh(
-          prService.refreshSinglePR(params.awsAccountId, params.prId, refreshCoordinates(query))
-        ).pipe(
-          Effect.mapError((error) => new ApiError({ message: extractAwsMessage(error) }))
+        Effect.gen(function*() {
+          const route = yield* refreshRouteCoordinates(params.awsAccountId, params.prId, query)
+          return yield* completeSinglePullRequestRefresh(
+            prService.refreshSinglePR(route.accountId, params.prId, route.coordinates)
+          )
+        }).pipe(
+          Effect.mapError((error) =>
+            Predicate.isTagged(error, "ApiError") ? error : new ApiError({ message: extractAwsMessage(error) })
+          )
         ))
       .handle("create", ({ payload }) =>
         awsClient.createPullRequest({

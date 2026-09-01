@@ -12,7 +12,7 @@ export const SandboxRow = Schema.Struct({
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
-  region: Schema.String.pipe(Schema.withDecodingDefaultTypeKey(Effect.succeed(""))),
+  region: Schema.optional(Schema.NullOr(Schema.String)),
   sourceBranch: Schema.String,
   accessPassword: Schema.NullOr(Schema.String),
   containerId: Schema.NullOr(Schema.String),
@@ -64,13 +64,54 @@ const makeSandboxRepo = Effect.gen(function*() {
 
   const findByPr_ = SqlSchema.findOneOption({
     Result: SandboxRow,
-    Request: Schema.Struct({ awsAccountId: Schema.String, pullRequestId: Schema.String, region: Schema.String }),
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String,
+      region: Schema.String
+    }),
     execute: (req) =>
       sql`SELECT * FROM sandboxes
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
-              AND region = ${req.region}
-              AND status NOT IN ('stopped', 'error')`
+              AND repository_name = ${req.repositoryName}
+            AND region = ${req.region}
+            AND status NOT IN ('stopped', 'error')
+            LIMIT 1`
+  })
+
+  const findRegionlessByPr_ = SqlSchema.findOneOption({
+    Result: SandboxRow,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT * FROM sandboxes
+            WHERE aws_account_id = ${req.awsAccountId}
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name = ${req.repositoryName}
+              AND (region IS NULL OR region = '')
+              AND status NOT IN ('stopped', 'error')
+            ORDER BY created_at DESC
+            LIMIT 1`
+  })
+
+  const findRegionlessByPrAll_ = SqlSchema.findAll({
+    Result: SandboxRow,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT * FROM sandboxes
+            WHERE aws_account_id = ${req.awsAccountId}
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name = ${req.repositoryName}
+              AND (region IS NULL OR region = '')
+            ORDER BY created_at DESC`
   })
 
   const findActive_ = SqlSchema.findAll({
@@ -132,8 +173,23 @@ const makeSandboxRepo = Effect.gen(function*() {
         Effect.withSpan("SandboxRepo.findById")
       ),
 
-    findByPr: (awsAccountId: string, pullRequestId: string, region: string) =>
-      findByPr_({ awsAccountId, pullRequestId, region }).pipe(cacheError("findByPr")),
+    findByPr: (awsAccountId: string, pullRequestId: string, repositoryName: string, region: string) =>
+      findByPr_({ awsAccountId, pullRequestId, repositoryName, region }).pipe(cacheError("findByPr")),
+
+    findRegionlessByPr: (awsAccountId: string, pullRequestId: string, repositoryName: string) =>
+      findRegionlessByPr_({ awsAccountId, pullRequestId, repositoryName }).pipe(cacheError("findRegionlessByPr")),
+
+    findRegionlessByPrAll: (awsAccountId: string, pullRequestId: string, repositoryName: string) =>
+      findRegionlessByPrAll_({ awsAccountId, pullRequestId, repositoryName }).pipe(
+        cacheError("findRegionlessByPrAll")
+      ),
+
+    /** Retained for migrations that can prove a legacy row's region out of band. */
+    updateRegion: (id: SandboxId, region: string) =>
+      sql`UPDATE sandboxes SET region = ${region} WHERE id = ${id}`.pipe(
+        Effect.tap(() => publish),
+        cacheError("updateRegion")
+      ),
 
     findActive: () => findActive_(voidRequest).pipe(cacheError("findActive")),
 

@@ -24,6 +24,8 @@ export interface NotificationItem {
   readonly type: string
   readonly title: string
   readonly profile: string
+  readonly repositoryName: string
+  readonly accountRegion: string
   readonly message: string
   readonly createdAt: string
   readonly read: number
@@ -34,7 +36,7 @@ export interface SandboxItem {
   readonly pullRequestId: string
   readonly awsAccountId: string
   readonly repositoryName: string
-  readonly region: string
+  readonly region: string | null
   readonly sourceBranch: string
   readonly containerId: string | null
   readonly port: number | null

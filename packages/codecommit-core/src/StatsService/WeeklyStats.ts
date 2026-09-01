@@ -38,6 +38,7 @@ const ActivePR = Schema.Struct({
   title: Schema.String,
   author: Schema.String,
   repositoryName: Schema.String,
+  accountRegion: Schema.String,
   commentCount: Schema.Number,
   awsAccountId: Schema.String
 })
@@ -66,6 +67,7 @@ const StalePR = Schema.Struct({
   title: Schema.String,
   author: Schema.String,
   repositoryName: Schema.String,
+  accountRegion: Schema.String,
   daysSinceActivity: Schema.Number,
   awsAccountId: Schema.String
 })
@@ -80,6 +82,7 @@ const LifecycleDetail = Schema.Struct({
   prTitle: Schema.String,
   author: Schema.String,
   repositoryName: Schema.String,
+  accountRegion: Schema.String,
   awsAccountId: Schema.String,
   durationMs: Schema.Number,
   fromLabel: Schema.String,

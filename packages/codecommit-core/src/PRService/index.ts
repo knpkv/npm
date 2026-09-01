@@ -9,11 +9,13 @@ import type { Success } from "effect/Effect"
 import { AwsClient } from "../AwsClient/index.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import { CommentRepo } from "../CacheService/repos/CommentRepo.js"
+import type { CommentCoordinates } from "../CacheService/repos/CommentRepo.js"
 import { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
 import type { PaginatedNotifications } from "../CacheService/repos/NotificationRepo.js"
 import type { CachedPullRequest, SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 import { PullRequestRepo } from "../CacheService/repos/PullRequestRepo/index.js"
 import { SubscriptionRepo } from "../CacheService/repos/SubscriptionRepo.js"
+import type { SubscriptionCoordinates } from "../CacheService/repos/SubscriptionRepo.js"
 import { SyncMetadataRepo } from "../CacheService/repos/SyncMetadataRepo.js"
 import { ConfigService } from "../ConfigService/index.js"
 import type { AppState, AwsProfileName, PRCommentLocation, PullRequestId } from "../Domain.js"
@@ -25,12 +27,7 @@ import { makeToggleAccount } from "./toggleAccount.js"
 
 export type { SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
-export type {
-  RefreshSinglePRCoordinates,
-  RefreshSinglePRError,
-  RefreshSinglePRRequest,
-  RefreshSinglePRResult
-} from "./refreshSinglePR.js"
+export type { RefreshSinglePRCoordinates, RefreshSinglePRError, RefreshSinglePRResult } from "./refreshSinglePR.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition
@@ -88,16 +85,25 @@ const makePRService = Effect.gen(function*() {
         Effect.tapError((e) => Effect.logWarning("PRService.searchPullRequests", e)),
         Effect.catch(() => Effect.succeed<SearchResult>({ items: [], total: 0, hasMore: false }))
       ),
-    subscribe: (awsAccountId: string, prId: PullRequestId) =>
-      subscriptionRepo.subscribe(awsAccountId, prId).pipe(Effect.catch(() => Effect.void)),
-    unsubscribe: (awsAccountId: string, prId: PullRequestId) =>
-      subscriptionRepo.unsubscribe(awsAccountId, prId).pipe(Effect.catch(() => Effect.void)),
+    subscribe: (awsAccountId: string, prId: PullRequestId, coordinates?: SubscriptionCoordinates) =>
+      subscriptionRepo.subscribe(awsAccountId, prId, coordinates).pipe(Effect.catch(() => Effect.void)),
+    unsubscribe: (awsAccountId: string, prId: PullRequestId, coordinates?: SubscriptionCoordinates) =>
+      subscriptionRepo.unsubscribe(awsAccountId, prId, coordinates).pipe(Effect.catch(() => Effect.void)),
     getSubscriptions: () =>
       subscriptionRepo.findAll().pipe(
-        Effect.catch(() => Effect.succeed<ReadonlyArray<{ awsAccountId: string; pullRequestId: string }>>([]))
+        Effect.catch(() =>
+          Effect.succeed<
+            ReadonlyArray<{
+              awsAccountId: string
+              pullRequestId: string
+              repositoryName: string | null
+              accountRegion: string | null
+            }>
+          >([])
+        )
       ),
-    isSubscribed: (awsAccountId: string, prId: PullRequestId) =>
-      subscriptionRepo.isSubscribed(awsAccountId, prId).pipe(Effect.catch(() => Effect.succeed(false))),
+    isSubscribed: (awsAccountId: string, prId: PullRequestId, coordinates?: SubscriptionCoordinates) =>
+      subscriptionRepo.isSubscribed(awsAccountId, prId, coordinates).pipe(Effect.catch(() => Effect.succeed(false))),
     getPersistentNotifications: (
       opts?: { readonly unreadOnly?: boolean; readonly limit?: number; readonly cursor?: number }
     ) =>
@@ -107,8 +113,8 @@ const makePRService = Effect.gen(function*() {
     markNotificationRead: (id: number) => notificationRepo.markRead(id).pipe(Effect.catch(() => Effect.void)),
     markAllNotificationsRead: () => notificationRepo.markAllRead().pipe(Effect.catch(() => Effect.void)),
     getUnreadNotificationCount: () => notificationRepo.unreadCount().pipe(Effect.catch(() => Effect.succeed(0))),
-    getCachedComments: (awsAccountId: string, prId: PullRequestId) =>
-      commentRepo.find(awsAccountId, prId).pipe(
+    getCachedComments: (awsAccountId: string, prId: PullRequestId, coordinates?: CommentCoordinates) =>
+      commentRepo.find(awsAccountId, prId, coordinates).pipe(
         Effect.catch(() => Effect.succeed(Option.none<ReadonlyArray<PRCommentLocation>>()))
       ),
     refreshSinglePR: (
