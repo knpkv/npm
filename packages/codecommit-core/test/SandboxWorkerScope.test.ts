@@ -83,6 +83,11 @@ interface FixtureOptions {
     readonly forked: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly workerReleaseGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+    readonly completed: Deferred.Deferred<void>
+  }
   readonly closedFork?: boolean
   readonly readyGate?: {
     readonly reached: Deferred.Deferred<void>
@@ -396,6 +401,14 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
               const started = yield* Deferred.make<void>()
               const forkScope = options?.closedFork === true ? yield* Scope.make() : scope
               if (options?.closedFork === true) yield* Scope.close(forkScope, Exit.void)
+              const gatedRelease = options?.workerReleaseGate === undefined
+                ? release
+                : Effect.gen(function*() {
+                  yield* Deferred.succeed(options.workerReleaseGate.reached, undefined)
+                  yield* Deferred.await(options.workerReleaseGate.release)
+                  yield* release
+                  yield* Deferred.succeed(options.workerReleaseGate.completed, undefined)
+                })
               const fiber = yield* Effect.forkIn(
                 Effect.acquireUseRelease(
                   Deferred.succeed(started, undefined),
@@ -409,7 +422,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
                           )
                       )
                     ),
-                  () => release
+                  () => gatedRelease
                 ),
                 forkScope
               )
@@ -710,6 +723,57 @@ describe("SandboxWorkerScope", () => {
 
       expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("finalizes an interrupted stop after worker ownership releases", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const releaseInsert = yield* Deferred.make<void>()
+      const forked = yield* Deferred.make<void>()
+      const releaseFork = yield* Deferred.make<void>()
+      const workerReleaseReached = yield* Deferred.make<void>()
+      const releaseWorker = yield* Deferred.make<void>()
+      const workerReleaseCompleted = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        insertGate: { inserted, release: releaseInsert },
+        forkGate: { forked, release: releaseFork },
+        workerReleaseGate: {
+          reached: workerReleaseReached,
+          release: releaseWorker,
+          completed: workerReleaseCompleted
+        }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const create = yield* sandboxes.create(createParams).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(inserted)
+          const row = yield* Ref.get(fixture.rowRef)
+          if (row === undefined) return yield* Effect.die("Sandbox row was not inserted")
+
+          const stop = yield* sandboxes.stop(SandboxId.make(row.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.succeed(releaseInsert, undefined)
+          yield* Deferred.await(forked)
+          yield* Deferred.await(workerReleaseReached)
+          yield* Deferred.succeed(releaseWorker, undefined)
+          yield* Deferred.await(workerReleaseCompleted)
+
+          const interruption = yield* Fiber.interrupt(stop).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Fiber.join(interruption)
+          yield* Deferred.succeed(releaseFork, undefined)
+          yield* Fiber.join(create)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
     }))
 
