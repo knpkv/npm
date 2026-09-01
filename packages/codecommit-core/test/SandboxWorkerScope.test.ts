@@ -18,7 +18,6 @@ const createParams = {
   pullRequestId: "42",
   awsAccountId: "123456789012",
   repositoryName: "repository",
-  region: "",
   sourceBranch: "refs/heads/feature",
   profile: "test-profile",
   region: "us-east-1"
@@ -37,6 +36,7 @@ const legacyRow: SandboxRow = {
   pullRequestId: "42",
   awsAccountId: "123456789012",
   repositoryName: "repository",
+  region: "",
   sourceBranch: "refs/heads/feature",
   accessPassword: null,
   workspacePath: "/tmp/codecommit-sandbox-worker-test/legacy-sandbox",
