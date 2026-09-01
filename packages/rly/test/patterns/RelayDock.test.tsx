@@ -1246,6 +1246,84 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("keeps one delegated target and contains focus from an extra negative descendant", async () => {
+    const footer = <div data-rly-multiple-delegates-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-multiple-delegates-focus-host]")
+    if (dialog === null || host === null) throw new Error("RelayDock multiple delegatesFocus fixture did not render")
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const first = shadow.appendChild(document.createElement("button"))
+    first.tabIndex = -1
+    first.textContent = "First delegated action"
+    const second = shadow.appendChild(document.createElement("button"))
+    second.tabIndex = -1
+    second.textContent = "Second delegated action"
+
+    second.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(shadow.activeElement).toBe(first)
+  })
+
+  it("does not promote a negative descendant after a sequential delegated target", async () => {
+    const footer = <div data-rly-mixed-delegates-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-mixed-delegates-focus-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock mixed delegatesFocus fixture did not render")
+    }
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const sequential = shadow.appendChild(document.createElement("button"))
+    sequential.textContent = "Sequential delegated action"
+    const negative = shadow.appendChild(document.createElement("button"))
+    negative.tabIndex = -1
+    negative.textContent = "Trailing programmatic action"
+
+    sequential.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("skips an empty light-DOM slot even when it has a tabindex", async () => {
+    const footer = (
+      <>
+        <button data-rly-empty-light-slot-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <slot data-rly-empty-light-slot="" tabIndex={0} />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-empty-light-slot-preceding]")
+    if (dialog === null || close === null || preceding === null) {
+      throw new Error("RelayDock empty light-DOM slot fixture did not render")
+    }
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("excludes content-visibility-hidden shadow descendants from modal endpoints", async () => {
     const footer = (
       <>

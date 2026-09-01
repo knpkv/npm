@@ -594,37 +594,55 @@ const DockLayer = ({
         seen.add(current)
         const parent = composedParentFor(current, composedParents)
         if (parent === null) return null
-        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true && parent.tabIndex >= 0) {
-          return parent
-        }
+        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true) return parent
         current = parent
       }
       return null
     }
+    const delegatedTargets = new Set<Element>()
+    for (const { element: host } of composed) {
+      if (!isHTMLElement(host) || host.shadowRoot?.delegatesFocus !== true || host.tabIndex < 0) continue
+      const delegated = composed.find(({ element, nativeRoot }) => {
+        if (element === host || !isHTMLElement(element) || element.tagName === "SLOT") return false
+        if (!isWithinComposedElement(host, element, composedParents)) return false
+        if (!element.matches(focusableSelector) && !hasExplicitNegativeTabIndex(element)) return false
+        if (!isRenderedFocusable(element, composedParents)) return false
+        return !isRadioInput(element) || isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)
+      })
+      if (delegated !== undefined && isHTMLElement(delegated.element) && delegated.element.tabIndex < 0) {
+        delegatedTargets.add(delegated.element)
+      }
+    }
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
         const { element, nativeRoot } = entry
-        if (isSlotElement(element)) return false
+        if (element.tagName === "SLOT") return false
         if (!isHTMLElement(element) || !element.matches(focusableSelector)) return false
         if (element.shadowRoot?.delegatesFocus === true) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
           return false
         }
-        const delegatingHost = delegatingShadowHostFor(element)
         return (
           element.tabIndex >= 0 ||
           (element.isContentEditable && !element.hasAttribute("tabindex")) ||
           element.matches("details > summary:first-of-type") ||
-          delegatingHost !== null
+          delegatedTargets.has(element)
         )
       })
       .map(({ element }) => element)
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
     const active = activeElementFor(panel)
-    const leavingStart = event.shiftKey && (active === first || !isWithinPanel(panel, active))
-    const leavingEnd = !event.shiftKey && (active === last || !isWithinPanel(panel, active))
+    const activeIsUnlistedDelegatedDescendant =
+      active !== null &&
+      isWithinPanel(panel, active) &&
+      !focusable.some((element) => element === active) &&
+      delegatingShadowHostFor(active) !== null
+    const leavingStart =
+      event.shiftKey && (active === first || !isWithinPanel(panel, active) || activeIsUnlistedDelegatedDescendant)
+    const leavingEnd =
+      !event.shiftKey && (active === last || !isWithinPanel(panel, active) || activeIsUnlistedDelegatedDescendant)
     if (!leavingStart && !leavingEnd) return
     event.preventDefault()
     const target = event.shiftKey ? last : first

@@ -772,6 +772,84 @@ test("modal Relay focus traversal skips delegated descendants without a sequenti
   await expect(close).toBeFocused()
 })
 
+test("modal Relay focus traversal keeps one delegated target and contains extra negative descendants", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyMultipleDelegatesFocusHost = ""
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    const first = shadow.appendChild(document.createElement("button"))
+    first.tabIndex = -1
+    first.dataset.rlyMultipleDelegatesFocusFirst = ""
+    first.textContent = "First delegated action"
+    const second = shadow.appendChild(document.createElement("button"))
+    second.tabIndex = -1
+    second.dataset.rlyMultipleDelegatesFocusSecond = ""
+    second.textContent = "Second delegated action"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const first = dock.locator("[data-rly-multiple-delegates-focus-first]")
+  const second = dock.locator("[data-rly-multiple-delegates-focus-second]")
+
+  await second.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(first).toBeFocused()
+})
+
+test("modal Relay focus traversal excludes a negative target after a sequential delegated target", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyMixedDelegatesFocusHost = ""
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    const sequential = shadow.appendChild(document.createElement("button"))
+    sequential.dataset.rlyMixedDelegatesFocusSequential = ""
+    sequential.textContent = "Sequential delegated action"
+    const negative = shadow.appendChild(document.createElement("button"))
+    negative.tabIndex = -1
+    negative.dataset.rlyMixedDelegatesFocusNegative = ""
+    negative.textContent = "Trailing programmatic action"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const sequential = dock.locator("[data-rly-mixed-delegates-focus-sequential]")
+
+  await sequential.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal skips an empty light-DOM slot with a tabindex", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyEmptyLightSlotPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const slot = document.createElement("slot")
+    slot.dataset.rlyEmptyLightSlot = ""
+    slot.tabIndex = 0
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, slot)
+  })
+  const preceding = dock.locator("[data-rly-empty-light-slot-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal excludes content-visibility-hidden shadow descendants", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
