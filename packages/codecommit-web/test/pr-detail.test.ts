@@ -4,6 +4,7 @@ import { Domain } from "@knpkv/codecommit-core"
 import {
   commentNavigationIdentityForCoordinates,
   reviewApiAccountId,
+  sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
   selectCodeCommitPullRequest
 } from "../src/client/components/pr-detail.js"
@@ -56,6 +57,16 @@ describe("PR detail coordinates", () => {
     expect(
       sandboxMatchesPullRequest(
         { ...sandbox, repositoryName: "payments", region: "eu-west-1" },
+        pullRequest
+      )
+    ).toBe(true)
+  })
+
+  it("keeps the profile as the sandbox identity after account discovery", () => {
+    expect(sandboxAccountIdForPullRequest(pullRequest)).toBe("production")
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "production", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
         pullRequest
       )
     ).toBe(true)

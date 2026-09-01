@@ -101,13 +101,9 @@ const PullRequestReviewWorkspace = lazy(() =>
   }))
 )
 
-/** Match a persisted sandbox to every coordinate of the selected pull request. */
-const sandboxAccountIdForPullRequest = (pullRequest: Pick<Domain.PullRequest, "account">): string => {
-  if (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) {
-    return pullRequest.account.profile
-  }
-  return pullRequest.account.awsAccountId
-}
+/** Use the profile as the durable sandbox key while retaining numeric rows from older runs. */
+export const sandboxAccountIdForPullRequest = (pullRequest: Pick<Domain.PullRequest, "account">): string =>
+  pullRequest.account.profile
 
 export const sandboxMatchesPullRequest = (
   sandbox: {
@@ -118,7 +114,8 @@ export const sandboxMatchesPullRequest = (
   },
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
 ): boolean =>
-  sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) &&
+  (sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) ||
+    sandbox.awsAccountId === (pullRequest.account.awsAccountId ?? "")) &&
   sandbox.pullRequestId === String(pullRequest.id) &&
   sandbox.repositoryName === String(pullRequest.repositoryName) &&
   sandbox.region === String(pullRequest.account.region)
