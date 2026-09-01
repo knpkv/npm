@@ -1783,6 +1783,65 @@ test("modal Relay focus traversal chooses the first non-negative radio in an unc
   await expect(valid).toBeFocused()
 })
 
+test("modal Relay focus traversal enters an unchecked radio group from the end in reverse", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const first = document.createElement("input")
+    first.dataset.rlyReverseUncheckedRadioFirst = ""
+    first.name = "reverse-unchecked-radio-group"
+    first.type = "radio"
+    const second = document.createElement("input")
+    second.dataset.rlyReverseUncheckedRadioSecond = ""
+    second.name = first.name
+    second.type = "radio"
+    const following = document.createElement("button")
+    following.dataset.rlyReverseUncheckedRadioFollowing = ""
+    following.textContent = "Following action"
+    following.type = "button"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(first, second, following)
+  })
+  const second = dock.locator("[data-rly-reverse-unchecked-radio-second]")
+
+  const following = dock.locator("[data-rly-reverse-unchecked-radio-following]")
+  await following.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(second).toBeFocused()
+})
+
+test("modal Relay focus traversal skips an unchecked peer behind a checked negative radio", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyCheckedNegativeRadioPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    const shadow = host.attachShadow({ mode: "open" })
+    const checked = shadow.appendChild(document.createElement("input"))
+    checked.name = "checked-negative-radio-group"
+    checked.type = "radio"
+    checked.checked = true
+    checked.tabIndex = -1
+    const peer = shadow.appendChild(document.createElement("input"))
+    peer.dataset.rlyCheckedNegativeRadioPeer = ""
+    peer.name = checked.name
+    peer.type = "radio"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-checked-negative-radio-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal defers implicit and zero light-slot scopes behind parent positives", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
@@ -1927,6 +1986,33 @@ test("modal Relay focus traversal skips a negative SVG link", async ({ page }) =
   await preceding.focus()
   await page.keyboard.press("Tab")
   await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal reaches an SVG endpoint after unlisted focus", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const target = document.createElement("button")
+    target.dataset.rlySvgAdjacentTarget = ""
+    target.tabIndex = -1
+    target.type = "button"
+    const host = document.createElement("div")
+    const shadow = host.attachShadow({ mode: "open" })
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    const link = svg.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "a"))
+    link.dataset.rlySvgAdjacentLink = ""
+    link.setAttribute("href", "/review")
+    shadow.append(svg)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(target, host)
+  })
+  const target = dock.locator("[data-rly-svg-adjacent-target]")
+  const link = dock.locator("[data-rly-svg-adjacent-link]")
+
+  await target.focus()
+  await page.keyboard.press("Tab")
+  await expect(link).toBeFocused()
 })
 
 test("modal Relay focus traversal keeps shadow editing hosts independent", async ({ page }) => {

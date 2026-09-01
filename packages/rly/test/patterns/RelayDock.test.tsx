@@ -2223,6 +2223,76 @@ describe("RelayDock", () => {
     expect(sequential.tabIndex).toBe(0)
   })
 
+  it("keeps every non-negative radio available for reverse native entry", async () => {
+    const footer = (
+      <>
+        <div data-rly-reverse-radio-host="" />
+        <button data-rly-reverse-radio-following="" type="button">
+          Following footer action
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-reverse-radio-host]")
+    const following = portal.querySelector<HTMLButtonElement>("[data-rly-reverse-radio-following]")
+    if (dialog === null || host === null || following === null) {
+      throw new Error("RelayDock reverse radio fixture did not render")
+    }
+    const first = host.appendChild(document.createElement("input"))
+    first.name = "reverse-unchecked-radio-group"
+    first.type = "radio"
+    const second = host.appendChild(document.createElement("input"))
+    second.name = first.name
+    second.type = "radio"
+
+    following.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(false)
+    expect(second.tabIndex).toBe(0)
+  })
+
+  it("does not promote an unchecked peer when the checked radio is negative", async () => {
+    const footer = (
+      <>
+        <button data-rly-checked-negative-radio-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-checked-negative-radio-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-checked-negative-radio-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-checked-negative-radio-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock checked negative radio fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const checked = shadow.appendChild(document.createElement("input"))
+    checked.name = "checked-negative-radio-group"
+    checked.type = "radio"
+    checked.checked = true
+    checked.tabIndex = -1
+    const peer = shadow.appendChild(document.createElement("input"))
+    peer.name = checked.name
+    peer.type = "radio"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("defers implicit and zero light-DOM slot scopes behind parent positives", async () => {
     const footer = (
       <>

@@ -252,13 +252,12 @@ const isSequentiallyFocusableRadio = (
         isRadioInput(candidate) &&
         candidate.name === element.name &&
         candidate.form === element.form &&
-        candidate.tabIndex >= 0 &&
         isRenderedFocusable(candidate, composedParents)
     )
     .map(({ element: candidate }) => candidate)
     .filter(isRadioInput)
   const checked = group.find((candidate) => candidate.checked)
-  return checked === undefined ? group[0] === element : checked === element
+  return checked === undefined ? element.tabIndex >= 0 : checked === element
 }
 
 interface ScopeTraversal {
@@ -826,11 +825,12 @@ const DockLayer = ({
     }
     const activeDelegatingHost = activeIsUnlistedFocusTarget && active !== null ? delegatingShadowHostFor(active) : null
     const activeComposedIndex = activeIsUnlistedFocusTarget && active !== null ? composedIndexForActive(active) : -1
-    const adjacentFocusable = (step: -1 | 1): HTMLElement | null => {
+    const adjacentFocusable = (step: -1 | 1): TabIndexedElement | null => {
       if (activeComposedIndex < 0) return null
       for (let index = activeComposedIndex + step; index >= 0 && index < composed.length; index += step) {
         const candidate = composed[index]?.element
-        if (candidate !== undefined && focusableElements.has(candidate) && isHTMLElement(candidate)) return candidate
+        if (candidate !== undefined && focusableElements.has(candidate) && hasTabIndexProperty(candidate))
+          return candidate
       }
       return null
     }
