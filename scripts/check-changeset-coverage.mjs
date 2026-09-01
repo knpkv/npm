@@ -669,7 +669,7 @@ const canonicalEnumText = (declaration, analysis, filePath) => {
       members.push(`${name}:${valueText}`)
     }
   }
-  return `enum(${members.toSorted().join(";")})`
+  return `enum(${declaration.node.name.text}|${members.toSorted().join(";")})`
 }
 
 const canonicalTypeMembersTextCache = new WeakMap()
@@ -3041,6 +3041,11 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
     const existing = members.get(name)
     members.set(name, existing === undefined ? descriptor : mergeMemberContract(existing, descriptor))
   }
+  const inheritedMemberNames = new Set()
+  const addInheritedMember = (name, descriptor) => {
+    addMember(name, descriptor)
+    inheritedMemberNames.add(name)
+  }
   for (const declarationNode of declarationNodes) {
     if (TypeScript.isInterfaceDeclaration(declarationNode) || TypeScript.isClassDeclaration(declarationNode)) {
       for (const heritageClause of declarationNode.heritageClauses ?? []) {
@@ -3059,7 +3064,7 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
           if (inherited.resolved) {
             for (const [name, descriptor] of inherited.canonicalMembers) {
               if (name.startsWith("call#")) callSignatures.push(descriptor)
-              else addMember(name, descriptor)
+              else addInheritedMember(name, descriptor)
             }
           } else {
             addMember(
@@ -3140,7 +3145,15 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
         typeMembersMemo,
         context.substitutionPath
       )
-      addMember(propertyName, descriptor.descriptor)
+      if (
+        inheritedMemberNames.has(propertyName) &&
+        (TypeScript.isPropertySignature(member) || TypeScript.isPropertyDeclaration(member))
+      ) {
+        members.set(propertyName, descriptor.descriptor)
+        inheritedMemberNames.delete(propertyName)
+      } else {
+        addMember(propertyName, descriptor.descriptor)
+      }
     }
   }
   return `object(${[
@@ -3915,6 +3928,7 @@ const runSelfTest = () => {
   )
   assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: true }, []), true)
   assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, []), false)
+  assert.equal(shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, [], true), true)
   assert.equal(
     shouldAnalyzePublicCallableChanges({ ...records[0], changedReleaseManifest: false }, [
       "packages/public/src/index.ts"
@@ -6067,6 +6081,35 @@ const runSelfTest = () => {
     publicCallableChanges(classHeritagePrevious, classHeritageChanged, ["packages/public/src/index.ts"]),
     [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  const refinedHeritagePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { value: string }\ninterface Result extends Base { value: "x" }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const refinedHeritageEquivalent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Result { value: "x" }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(refinedHeritagePrevious, refinedHeritageEquivalent, ["packages/public/src/index.ts"]),
+    []
+  )
+  const refinedHeritageChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'interface Base { value: string }\ninterface Result extends Base { value: "y" }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(refinedHeritagePrevious, refinedHeritageChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
   const namespaceQualifiedPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     ["packages/public/src/model.ts", "export interface Result { value: string }"],
@@ -6099,6 +6142,35 @@ const runSelfTest = () => {
     publicCallableChanges(namespaceQualifiedPrevious, namespaceQualifiedRename, ["packages/public/src/index.ts"]),
     []
   )
+  const structuralIndexPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Result = { [key: string]: string }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  const structuralIndexChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Result = { [key: string]: number }\nexport function Public(): Result { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(structuralIndexPrevious, structuralIndexChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const enumNominalPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'enum Result { A = "a" }\nexport function Public(): Result { return Result.A }']
+  ])
+  const enumNominalRenamed = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/view.tsx", 'enum Renamed { A = "a" }\nexport function Public(): Renamed { return Renamed.A }']
+  ])
+  assert.deepEqual(publicCallableChanges(enumNominalPrevious, enumNominalRenamed, ["packages/public/src/index.ts"]), [
+    { kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
   const indexSignaturePrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -7770,8 +7842,8 @@ const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
   }
 )
 
-const shouldAnalyzePublicCallableChanges = (record, changedSourceFiles) =>
-  record.publishable && (changedSourceFiles.length > 0 || record.changedReleaseManifest)
+const shouldAnalyzePublicCallableChanges = (record, changedSourceFiles, changedCompilerConfiguration = false) =>
+  record.publishable && (changedSourceFiles.length > 0 || record.changedReleaseManifest || changedCompilerConfiguration)
 
 const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicCallableChanges")(
   function* (git, fileSystem, path, repositoryRoot, mergeBase, paths, records) {
@@ -7781,7 +7853,9 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
       const changedSourceFiles = sourcePaths(paths).filter((changedPath) =>
         changedPath.startsWith(`${record.directory}/`)
       )
-      if (!shouldAnalyzePublicCallableChanges(record, changedSourceFiles)) continue
+      const changedCompilerConfiguration =
+        paths.has(record.directory + "/tsconfig.json") || paths.has("tsconfig.base.jsonc")
+      if (!shouldAnalyzePublicCallableChanges(record, changedSourceFiles, changedCompilerConfiguration)) continue
       const sourceRoot = path.join(repositoryRoot, record.directory, "src")
       const relativeSourceFiles = yield* collectSourceFiles(fileSystem, path, sourceRoot, `${record.directory}/src`)
       const currentSources = new Map()
