@@ -11,6 +11,318 @@ const expectNoHorizontalOverflow = async (page: Page): Promise<void> => {
   expect(dimensions.scroll).toBeLessThanOrEqual(dimensions.client)
 }
 
+test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iPhone sheet", async ({
+  browser,
+  page
+}, testInfo) => {
+  await page.setViewportSize({ height: 900, width: 1_440 })
+  await page.goto(story("patterns-relaydock--desktop-rail"))
+
+  const rail = page.locator("[data-rly-relay-dock-presentation=\"rail\"]")
+  await expect(rail).toBeVisible()
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Open Relay" })).toHaveCount(0)
+  await expect(rail.getByRole("button", { name: "Close Relay" })).toHaveCount(1)
+  await expect(rail.getByRole("combobox")).toHaveCount(2)
+  await expect(rail.locator("[data-rly-relay-dock-context=\"pull-request\"]")).toContainText("#184")
+  const changedFile = page.getByRole("button", { name: "Changed file: src/review.ts" })
+  await expect(changedFile).toBeEnabled()
+  await changedFile.focus()
+  await expect(changedFile).toBeFocused()
+  await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("relay-dock-rail.png") })
+
+  const draft = page.getByRole("textbox", { name: "Message Relay" })
+  await draft.fill("Keep this draft across presentations")
+  await page.getByRole("button", { name: "Thread marker: 0" }).click()
+  await page.setViewportSize({ height: 844, width: 390 })
+  const responsiveSheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(responsiveSheet).toBeVisible()
+  await expect(draft).toHaveValue("Keep this draft across presentations")
+  await expect(page.getByRole("button", { name: "Thread marker: 1" })).toBeVisible()
+  await page.setViewportSize({ height: 900, width: 1_440 })
+  await expect(rail).toBeVisible()
+  await expect(rail.getByRole("button", { name: "Close Relay" })).toBeFocused()
+  await expect(draft).toHaveValue("Keep this draft across presentations")
+  await expect(page.getByRole("button", { name: "Thread marker: 1" })).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("button", { name: "Open Relay" })).toBeFocused()
+
+  await page.setViewportSize({ height: 844, width: 390 })
+  await page.goto(story("patterns-relaydock--mobile-sheet"))
+  const sheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(sheet).toBeVisible()
+  await expect(sheet).toHaveAttribute("role", "dialog")
+  const box = await sheet.boundingBox()
+  expect(box?.width).toBe(390)
+  expect(box?.height).toBe(844)
+  await expect(sheet.getByRole("combobox")).toHaveCount(2)
+  await expectNoHorizontalOverflow(page)
+
+  for (let index = 0; index < 10; index += 1) await page.keyboard.press("Tab")
+  expect(await sheet.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
+  expect(
+    await sheet.evaluate((element) =>
+      [...element.ownerDocument.styleSheets].some((styleSheet) =>
+        [...styleSheet.cssRules].some((rule) => rule.cssText.includes("safe-area-inset-bottom"))
+      )
+    )
+  ).toBe(true)
+  expect(
+    await sheet.evaluate((element) =>
+      getComputedStyle(element).getPropertyValue("--rly-motion-standard-duration").trim()
+    )
+  ).toBe("0s")
+  await page.screenshot({ animations: "disabled", fullPage: true, path: testInfo.outputPath("relay-dock-iphone.png") })
+
+  await page.setViewportSize({ height: 390, width: 390 })
+  const shortFinePointerSheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  const shortFinePointerScrollRegion = shortFinePointerSheet.locator("[data-rly-relay-dock-scroll]")
+  expect(
+    await shortFinePointerScrollRegion.evaluate((element) => ({
+      overflowY: getComputedStyle(element).overflowY,
+      scrollable: element.scrollHeight > element.clientHeight
+    }))
+  ).toEqual({ overflowY: "auto", scrollable: true })
+  const shortFinePointerDraft = shortFinePointerSheet.getByRole("textbox", { name: "Message Relay" })
+  await shortFinePointerDraft.scrollIntoViewIfNeeded()
+  await expect(shortFinePointerDraft).toBeInViewport()
+  const shortFinePointerAction = shortFinePointerSheet.getByRole("button", { name: "Ask Relay" })
+  await shortFinePointerAction.scrollIntoViewIfNeeded()
+  await expect(shortFinePointerAction).toBeInViewport()
+
+  const landscapeContext = await browser.newContext({
+    hasTouch: true,
+    isMobile: true,
+    viewport: { height: 390, width: 844 }
+  })
+  try {
+    const landscapePage = await landscapeContext.newPage()
+    await landscapePage.goto(story("patterns-relaydock--mobile-sheet"))
+    const landscapeSheet = landscapePage.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+    await expect(landscapeSheet).toBeVisible()
+    const landscapeBox = await landscapeSheet.boundingBox()
+    expect(landscapeBox?.width).toBe(844)
+    expect(landscapeBox?.height).toBe(390)
+    expect(
+      await landscapeSheet.evaluate((element) => {
+        const computedStyle = getComputedStyle(element)
+        return {
+          borderEndStartRadius: computedStyle.borderEndStartRadius,
+          borderInlineStartWidth: computedStyle.borderInlineStartWidth,
+          borderStartStartRadius: computedStyle.borderStartStartRadius
+        }
+      })
+    ).toEqual({
+      borderEndStartRadius: "0px",
+      borderInlineStartWidth: "0px",
+      borderStartStartRadius: "0px"
+    })
+    expect(
+      await landscapeSheet.locator(":scope > :first-child").evaluate((header) => {
+        const sheetClasses = [...(header.parentElement?.classList ?? [])].filter((className) =>
+          className.includes("RelayDock")
+        )
+        return [...header.ownerDocument.styleSheets].some((styleSheet) =>
+          [...styleSheet.cssRules].some(
+            (rule) =>
+              sheetClasses.some((className) => rule.cssText.includes(`.${CSS.escape(className)} > :first-child`)) &&
+              rule.cssText.includes("safe-area-inset-left") &&
+              rule.cssText.includes("safe-area-inset-right")
+          )
+        )
+      })
+    ).toBe(true)
+    await expectNoHorizontalOverflow(landscapePage)
+    const scrollRegion = landscapeSheet.locator("[data-rly-relay-dock-scroll]")
+    expect(
+      await scrollRegion.evaluate((element) => ({
+        clientHeight: element.clientHeight,
+        overflowY: getComputedStyle(element).overflowY,
+        scrollHeight: element.scrollHeight
+      }))
+    ).toMatchObject({ overflowY: "auto" })
+    expect(await scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    const landscapeThread = landscapeSheet.getByRole("region", { name: "Relay thread" })
+    await landscapeThread.scrollIntoViewIfNeeded()
+    expect((await landscapeThread.boundingBox())?.height).toBeGreaterThan(0)
+    const landscapeDraft = landscapeSheet.getByRole("textbox", { name: "Message Relay" })
+    await landscapeDraft.scrollIntoViewIfNeeded()
+    await expect(landscapeDraft).toBeInViewport()
+    const askRelay = landscapeSheet.getByRole("button", { name: "Ask Relay" })
+    await askRelay.scrollIntoViewIfNeeded()
+    await expect(askRelay).toBeInViewport()
+  } finally {
+    await landscapeContext.close()
+  }
+})
+
+test("resolves compact Relay layout from a cross-window portal target", async ({ page }) => {
+  await page.setViewportSize({ height: 900, width: 1_440 })
+  await page.goto(story("patterns-relaydock--cross-window-viewport"))
+
+  const frame = page.frameLocator("iframe[aria-label=\"Relay portal viewport\"]")
+  const sheet = frame.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(sheet).toBeVisible()
+  await expect(sheet).toHaveAttribute("role", "dialog")
+  expect(
+    await sheet.evaluate((element) => {
+      const box = element.getBoundingClientRect()
+      const computed = getComputedStyle(element)
+      return {
+        backgroundColor: computed.backgroundColor,
+        height: box.height,
+        position: computed.position,
+        styleSheets: element.ownerDocument.styleSheets.length,
+        width: box.width,
+        x: box.x,
+        y: box.y
+      }
+    })
+  ).toEqual({
+    backgroundColor: "rgb(23, 24, 28)",
+    height: 844,
+    position: "fixed",
+    styleSheets: expect.any(Number),
+    width: 320,
+    x: 0,
+    y: 0
+  })
+  expect(await sheet.evaluate((element) => element.ownerDocument.styleSheets.length)).toBeGreaterThan(0)
+  expect(
+    await frame.locator("html").evaluate((element) => ({
+      client: element.clientWidth,
+      scroll: element.scrollWidth
+    }))
+  ).toMatchObject({ client: 320, scroll: 320 })
+})
+
+test("modal Relay presentations isolate and scroll-lock the page without swallowing nested modal keys", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--modal-isolation"))
+  const background = page.locator("main")
+  const overlay = page.locator("[data-rly-relay-dock-overlay]")
+
+  await expect.poll(() => background.evaluate((element) => element.hasAttribute("inert"))).toBe(true)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+  await overlay.hover()
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+
+  await page.setViewportSize({ height: 600, width: 390 })
+  const sheet = page.locator("[data-rly-relay-dock-presentation=\"mobile-sheet\"]")
+  await expect(sheet).toBeVisible()
+  await sheet.locator(":scope > header").hover()
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.getByRole("button", { name: "Close Relay" }).click()
+  await expect.poll(() => background.evaluate((element) => element.hasAttribute("inert"))).toBe(false)
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  await page.goto(story("patterns-relaydock--rail-scrolling"))
+  await expect(page.getByRole("complementary", { name: "Relay" })).toBeVisible()
+  await expect.poll(() => page.locator("main").evaluate((element) => element.hasAttribute("inert"))).toBe(false)
+  await page.mouse.wheel(0, 1_000)
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(0)
+
+  await page.goto(story("patterns-relaydock--nested-modal"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.getByRole("button", { name: "Open nested action" }).click()
+  const nested = page.getByRole("dialog", { name: "Nested Relay action" })
+  await expect(nested).toBeVisible()
+  await page.keyboard.press("Tab")
+  expect(await nested.evaluate((element) => element.contains(element.ownerDocument.activeElement))).toBe(true)
+  await page.keyboard.press("Escape")
+  await expect(nested).toHaveCount(0)
+  await expect(dock).toBeVisible()
+})
+
+test("modal Relay focus traversal includes a native rich-text editor", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const thread = dock.getByRole("region", { name: "Relay thread" })
+  const editor = dock.getByRole("textbox", { name: "Rich Relay reply" })
+  const visibleReplyAction = dock.getByRole("button", { name: "Visible reply action" })
+  const enabledFieldsetAction = dock.getByRole("button", { name: "Enabled fieldset action" })
+  const expandedSummary = dock.getByText("Expanded evidence", { exact: true })
+  const expandedAction = dock.getByRole("button", { name: "Expanded evidence action" })
+  const collapsedSummary = dock.locator("summary").filter({ hasText: "Collapsed evidence" })
+  const visibleSummaryAction = dock.getByRole("button", { name: "Visible summary action" })
+  const collapsedAction = dock.getByRole("button", { name: "Collapsed evidence action", includeHidden: true })
+  const checkedRadio = dock.getByRole("radio", { exact: true, name: "Checked review route" })
+  const uncheckedRadio = dock.getByRole("radio", { exact: true, name: "Unchecked review route" })
+
+  await collapsedSummary.evaluate((summary) => {
+    const action = summary.ownerDocument.createElement("button")
+    action.textContent = "Visible summary action"
+    action.type = "button"
+    summary.append(action)
+  })
+
+  await thread.focus()
+  await page.keyboard.press("Tab")
+  await expect(editor).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(visibleReplyAction).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(enabledFieldsetAction).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(expandedSummary).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(expandedAction).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(checkedRadio).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(collapsedSummary).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(visibleSummaryAction).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(dock.getByRole("button", { name: "Close Relay" })).toBeFocused()
+  await expect(collapsedAction).not.toBeFocused()
+  await expect(uncheckedRadio).not.toBeFocused()
+  await page.keyboard.press("Shift+Tab")
+  await expect(visibleSummaryAction).toBeFocused()
+
+  const composingEditor = dock.getByRole("textbox", { name: "Composing Relay reply" })
+  await dock.evaluate((element) => {
+    const editor = element.ownerDocument.createElement("textarea")
+    editor.setAttribute("aria-label", "Composing Relay reply")
+    element.append(editor)
+  })
+  await composingEditor.focus()
+  expect(
+    await composingEditor.evaluate((editor) => {
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+        key: "Tab"
+      })
+      editor.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+  ).toBe(true)
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await expect(close).toBeFocused()
+  expect(
+    await close.evaluate((button) => {
+      const event = new KeyboardEvent("keydown", {
+        bubbles: true,
+        cancelable: true,
+        isComposing: true,
+        key: "Tab",
+        shiftKey: true
+      })
+      button.dispatchEvent(event)
+      return event.defaultPrevented
+    })
+  ).toBe(true)
+  await expect(composingEditor).toBeFocused()
+})
+
 test("opens exact context before the agent composer without stealing focus", async ({ page }, testInfo) => {
   await page.setViewportSize({ height: 1_100, width: 1_200 })
   await page.goto(story("patterns-agentdrawer--interaction"))

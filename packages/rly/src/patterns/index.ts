@@ -66,6 +66,15 @@ export type {
 } from "./RelationshipChain.js"
 export { RelationshipTable } from "./RelationshipTable.js"
 export type { RelationshipTableProps } from "./RelationshipTable.js"
+export { RelayDock } from "./RelayDock.js"
+export type {
+  RelayDockProps,
+  RlyRelayDockContextChip,
+  RlyRelayDockDesktopPresentation,
+  RlyRelayDockSelection,
+  RlyRelayDockSelectionControl,
+  RlyRelayDockState
+} from "./RelayDock.js"
 export { ReleasePreview } from "./ReleasePreview.js"
 export type { ReleasePreviewProps, RlyReleasePreviewPresentation } from "./ReleasePreview.js"
 export {

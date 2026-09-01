@@ -1378,7 +1378,7 @@ describe("Connect public seams", () => {
     )
   })
 
-  it.effect("kills before interrupting a timed-out release wait", () => {
+  it.effect("reaps a timed-out release wait and kills once", () => {
     let kills = 0
     let releaseInterruptions = 0
     return Effect.gen(function*() {
@@ -1402,6 +1402,79 @@ describe("Connect public seams", () => {
       expect(kills).toBe(1)
       expect(releaseInterruptions).toBe(1)
       expect(fiber.pollUnsafe()).toBeDefined()
+    }).pipe(provideTestClock)
+  })
+
+  it.effect("kills at the watchdog while release cleanup is still pending", () => {
+    let kills = 0
+    let releaseInterruptions = 0
+    let cleanupCompleted = false
+    let killObservedPendingCleanup = false
+    return Effect.gen(function*() {
+      const fiber = yield* releaseTerminalControl(
+        Effect.never.pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              releaseInterruptions += 1
+            }).pipe(
+              Effect.andThen(Effect.sleep("5 seconds")),
+              Effect.andThen(
+                Effect.sync(() => {
+                  cleanupCompleted = true
+                })
+              )
+            )
+          )
+        ),
+        Effect.never,
+        Effect.sync(() => {
+          kills += 1
+          killObservedPendingCleanup = !cleanupCompleted
+        })
+      ).pipe(Effect.forkChild({ startImmediately: true, uninterruptible: false }))
+
+      yield* TestClock.adjust("1 second")
+      expect(kills).toBe(1)
+      expect(releaseInterruptions).toBe(1)
+      expect(killObservedPendingCleanup).toBe(true)
+      expect(cleanupCompleted).toBe(false)
+      expect(fiber.pollUnsafe()).toBeDefined()
+
+      yield* Effect.yieldNow
+      yield* TestClock.adjust("5 seconds")
+      yield* Fiber.join(fiber)
+      expect(cleanupCompleted).toBe(true)
+    }).pipe(provideTestClock)
+  })
+
+  it.effect("starts release interruption while kill acknowledgement is pending", () => {
+    let kills = 0
+    let releaseInterruptions = 0
+    return Effect.gen(function*() {
+      const fiber = yield* releaseTerminalControl(
+        Effect.never.pipe(
+          Effect.onInterrupt(() =>
+            Effect.sync(() => {
+              releaseInterruptions += 1
+            })
+          )
+        ),
+        Effect.never,
+        Effect.sleep("5 seconds").pipe(
+          Effect.andThen(
+            Effect.sync(() => {
+              kills += 1
+            })
+          )
+        )
+      ).pipe(Effect.forkChild({ startImmediately: true, uninterruptible: false }))
+
+      yield* TestClock.adjust("1 second")
+      expect(releaseInterruptions).toBe(1)
+      expect(kills).toBe(0)
+      yield* TestClock.adjust("5 seconds")
+      yield* Fiber.join(fiber)
+      expect(kills).toBe(1)
     }).pipe(provideTestClock)
   })
 

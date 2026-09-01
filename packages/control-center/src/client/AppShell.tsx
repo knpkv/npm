@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
 import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
+import { ControlCenterRelayDock } from "./controlCenterRelayDockShell.js"
 import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
@@ -119,7 +120,7 @@ export const AppShell = (): ReactElement => {
     </>
   )
 
-  return (
+  const content = (
     <div className={styles.root} data-workspace-density={density}>
       <header className={styles.header}>
         {isAuthorizedShare ? (
@@ -177,4 +178,6 @@ export const AppShell = (): ReactElement => {
       <WorkspaceScrollRestoration />
     </div>
   )
+
+  return <ControlCenterRelayDock>{content}</ControlCenterRelayDock>
 }

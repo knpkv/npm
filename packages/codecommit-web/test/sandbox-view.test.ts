@@ -27,6 +27,7 @@ const sandbox = (status: "running" | "stopped") => ({
   port: status === "running" ? 8080 : null,
   pullRequestId: "42",
   repositoryName: "payments-api",
+  region: "eu-west-1",
   sourceBranch: "feature/safe-retries",
   status,
   statusDetail: null

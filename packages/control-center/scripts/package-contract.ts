@@ -68,6 +68,7 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     "@knpkv/control-center-sql",
     "@knpkv/jira-api-client",
     "@knpkv/review",
+    "@knpkv/relay-product",
     "@knpkv/rly",
     "@distilled.cloud/aws",
     "effect",
@@ -103,6 +104,7 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     | "@knpkv/confluence-to-markdown"
     | "@knpkv/jira-api-client"
     | "@knpkv/review"
+    | "@knpkv/relay-product"
   > = [
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
@@ -113,7 +115,8 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     "@knpkv/confluence-api-client",
     "@knpkv/confluence-to-markdown",
     "@knpkv/jira-api-client",
-    "@knpkv/review"
+    "@knpkv/review",
+    "@knpkv/relay-product"
   ]
   for (const dependency of workspaceDependencies) {
     if (manifest.dependencies[dependency] !== "workspace:^") {

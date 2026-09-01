@@ -5,6 +5,8 @@ export const terminalKillOptions = {
   forceKillAfter: "1 second"
 } satisfies KillOptions
 
+export const terminalReleaseKillOptions = { killSignal: "SIGKILL" } satisfies KillOptions
+
 export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(function*<
   ReleaseError,
   ExitError,
@@ -21,18 +23,21 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
     Scope.make(),
     (releaseScope) =>
       Effect.gen(function*() {
-        const releaseFiber = yield* Effect.forkIn(
-          release.pipe(
-            Effect.ignore,
-            Effect.andThen(exitCode),
-            Effect.ignore
-          ),
-          releaseScope
+        const releaseFiber = yield* Effect.forkDetach( // eslint-disable-line local-rules/no-unowned-detached-fiber -- ast-grep-ignore: no-unowned-detached-fiber -- the release fiber must outlive scope close while the child process is being killed; its interruption is explicitly scheduled below.
+          release.pipe(Effect.ignore, Effect.andThen(exitCode), Effect.ignore),
+          { startImmediately: true, uninterruptible: false }
+        )
+        yield* Scope.addFinalizer(
+          releaseScope,
+          Effect.sync(() => releaseFiber.interruptUnsafe())
         )
         const released = yield* Fiber.await(releaseFiber).pipe(
           Effect.timeoutOption(terminalKillOptions.forceKillAfter)
         )
-        if (Option.isNone(released)) yield* kill.pipe(Effect.ignore)
+        if (Option.isNone(released)) {
+          yield* Effect.sync(() => releaseFiber.interruptUnsafe())
+          yield* kill.pipe(Effect.ignore)
+        }
       }),
     (releaseScope, exit) => Scope.close(releaseScope, exit)
   )

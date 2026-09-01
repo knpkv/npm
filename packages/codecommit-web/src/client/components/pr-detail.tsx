@@ -26,7 +26,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
-import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
+import { AwsRegion, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -44,7 +44,7 @@ import {
   Text,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
-import { Option } from "effect"
+import { Option, Schema } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
@@ -61,7 +61,7 @@ import {
 } from "lucide-react"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import { toast } from "sonner"
@@ -80,6 +80,13 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
+import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
+import {
+  matchesPullRequestSandbox,
+  pullRequestRefreshKey,
+  pullRequestSandboxAccountId,
+  type PullRequestRefreshCoordinates
+} from "../pr-detail-coordinates.js"
 import {
   type ReviewCommentNavigation,
   type ReviewCommentNavigationTarget,
@@ -784,6 +791,7 @@ const pullRequestStatusTone = (status: Domain.PullRequest["status"]): RlyStateTo
 
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
+  const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
   const refreshSingle = useAtomSet(refreshSinglePrAtom)
   const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
@@ -793,11 +801,17 @@ export function PRDetail() {
   const pr = useMemo(
     () =>
       prId !== undefined && prId.length > 0
-        ? (state.pullRequests.find(
-            (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
-          ) ?? null)
+        ? (() => {
+            let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
+            if (accountId !== undefined) route = { ...route, accountId }
+            if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
+            if (searchParams.has("repository")) {
+              route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
+            }
+            return state.pullRequests.find((p) => matchesCodeCommitPullRequestRoute(p, route)) ?? null
+          })()
         : null,
-    [accountId, prId, state.pullRequests]
+    [accountId, prId, searchParams, state.pullRequests]
   )
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
@@ -828,11 +842,24 @@ export function PRDetail() {
   useEffect(() => {
     if (pr !== null || accountId === undefined || accountId.length === 0 || prId === undefined || prId.length === 0)
       return
-    const key = `${accountId}:${prId}`
+    const repositoryName = searchParams.get("repository")
+    const regionValue = searchParams.get("region")
+    const region =
+      regionValue === null ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(AwsRegion)(regionValue))
+    const hasRouteCoordinates = repositoryName !== null || regionValue !== null
+    if (hasRouteCoordinates && (repositoryName === null || repositoryName.length === 0 || region === undefined)) return
+    const coordinates: PullRequestRefreshCoordinates | undefined =
+      repositoryName !== null && region !== undefined ? { region, repositoryName } : undefined
+    const key = pullRequestRefreshKey(accountId, prId, coordinates)
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({ params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
-  }, [pr, accountId, prId, refreshSingle])
+    const request = { params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } }
+    if (coordinates === undefined) {
+      refreshSingle({ ...request, query: {} })
+    } else {
+      refreshSingle({ ...request, query: coordinates })
+    }
+  }, [pr, accountId, prId, refreshSingle, searchParams])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -978,17 +1005,31 @@ export function PRDetail() {
     [commentNavigationIdentity, pr?.commentCount]
   )
   const refreshAfterApprovalMutation = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    if (pr === null || accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0)
+      return
+    void refreshSingleWithResult({
+      params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) },
+      query: { region: pr.account.region, repositoryName: pr.repositoryName }
+    }).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
-  }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
+  }, [accountKey, invalidateReview, pr, prId, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0 || isRefreshing)
+    if (
+      pr === null ||
+      accountKey === undefined ||
+      accountKey.length === 0 ||
+      prId === undefined ||
+      prId.length === 0 ||
+      isRefreshing
+    )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    void refreshSingleWithResult({
+      params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) },
+      query: { region: pr.account.region, repositoryName: pr.repositoryName }
+    }).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1000,7 +1041,7 @@ export function PRDetail() {
         })
       }
     )
-  }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
+  }, [accountKey, invalidateReview, isRefreshing, pr, prId, refreshSingleWithResult])
 
   // Copy console URL
   const consoleUrl =
@@ -1026,12 +1067,8 @@ export function PRDetail() {
   // Sandbox
   const createSandbox = useAtomSet(createSandboxAtom)
   const existingSandbox = useMemo(
-    () =>
-      state.sandboxes?.find(
-        (s) =>
-          s.pullRequestId === prId && s.awsAccountId === accountId && s.status !== "stopped" && s.status !== "error"
-      ),
-    [state.sandboxes, prId, accountId]
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => matchesPullRequestSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
   )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)
@@ -1045,7 +1082,7 @@ export function PRDetail() {
 
   const proceedSandbox = useCallback(() => {
     if (pr === null) return
-    const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
+    const sandboxAccountKey = pullRequestSandboxAccountId(pr.account)
     createSandbox({
       payload: {
         pullRequestId: pr.id,
