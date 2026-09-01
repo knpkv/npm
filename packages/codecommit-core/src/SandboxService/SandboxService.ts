@@ -21,6 +21,7 @@ import {
   Ref,
   Result,
   Schedule,
+  Semaphore,
   Stream
 } from "effect"
 import type { Success } from "effect/Effect"
@@ -138,6 +139,8 @@ const makeSandboxService = Effect.gen(function*() {
   const homePath = yield* homeDir.pipe(Effect.orDie)
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
   const activeWorkerIds = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
+  const lifecycleAdmission = yield* Semaphore.make(1)
+  const retiredLegacyIds = yield* Ref.make<ReadonlySet<string>>(new Set())
   const markWorkerActive = (id: string) =>
     Ref.update(activeWorkerIds, (workers) => {
       const next = new Map(workers)
@@ -206,7 +209,7 @@ const makeSandboxService = Effect.gen(function*() {
   })
 
   const retireLegacySandbox = (legacy: SandboxRow) =>
-    Effect.gen(function*() {
+    lifecycleAdmission.withPermits(1)(Effect.gen(function*() {
       const activeWorker = yield* hasActiveWorker(legacy.id)
       if (activeWorker) {
         return yield* new SandboxError({
@@ -251,7 +254,8 @@ const makeSandboxService = Effect.gen(function*() {
         { discard: true }
       )
       yield* updateStatus(SandboxId.make(legacy.id), "stopped")
-    })
+      yield* Ref.update(retiredLegacyIds, (ids) => new Set(ids).add(legacy.id))
+    }))
 
   const service = {
     create: (params: CreateSandboxParams) =>
@@ -263,8 +267,13 @@ const makeSandboxService = Effect.gen(function*() {
           params.repositoryName,
           params.region
         )
+        const profileExisting = Option.isSome(existing) || params.awsAccountId.length === 0
+          ? Option.none<SandboxRow>()
+          : yield* repo.findByPr(params.profile, params.pullRequestId, params.repositoryName, params.region)
         const exactExisting = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
+          : Option.isSome(profileExisting) && profileExisting.value.region === params.region
+          ? profileExisting.value
           : undefined
         const emptyAccountRows = params.awsAccountId.length === 0
           ? []
@@ -593,19 +602,29 @@ const makeSandboxService = Effect.gen(function*() {
 
     restart: (id: SandboxId) =>
       Effect.gen(function*() {
-        const row = yield* repo.findById(id)
-        if (row.accessPassword === null) {
-          return yield* new SandboxError({
-            sandboxId: id,
-            message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
+        const { containerId, row } = yield* lifecycleAdmission.withPermits(1)(
+          Effect.gen(function*() {
+            const row = yield* repo.findById(id)
+            const wasRetired = yield* Ref.get(retiredLegacyIds).pipe(Effect.map((ids) => ids.has(String(id))))
+            if (wasRetired) {
+              return yield* new SandboxError({
+                sandboxId: id,
+                message: "Legacy sandbox was retired; create a replacement"
+              })
+            }
+            if (row.accessPassword === null) {
+              return yield* new SandboxError({
+                sandboxId: id,
+                message: "Legacy sandbox has no authenticated access credential; delete and recreate it"
+              })
+            }
+            if (row.containerId === null) {
+              return yield* new SandboxError({ sandboxId: id, message: "No container to restart" })
+            }
+            yield* markWorkerActive(String(id))
+            return { row, containerId: row.containerId }
           })
-        }
-        if (row.containerId === null) {
-          return yield* new SandboxError({ sandboxId: id, message: "No container to restart" })
-        }
-        const containerId = row.containerId
-
-        yield* markWorkerActive(String(id))
+        )
         yield* Effect.gen(function*() {
           yield* updateStatus(id, "starting")
           yield* progress(id, "Restarting container")

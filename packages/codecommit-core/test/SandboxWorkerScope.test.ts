@@ -70,6 +70,7 @@ interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
+  readonly profileByPr?: SandboxRow
   readonly emptyAccountByPr?: SandboxRow
   readonly emptyAccountByPrAll?: ReadonlyArray<SandboxRow>
   readonly insertGate?: {
@@ -89,6 +90,11 @@ interface FixtureOptions {
     readonly started: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly retirementGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly rowsById?: Readonly<Record<string, SandboxRow>>
   readonly regionlessByPr?: SandboxRow
   readonly regionlessByPrAll?: ReadonlyArray<SandboxRow>
   readonly stopContainer?: Effect.Effect<void, DockerError>
@@ -119,6 +125,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         Effect.map((current) => {
           const configured = _awsAccountId.length === 0
             ? options?.emptyAccountByPr
+            : _awsAccountId === createParams.profile
+            ? options?.profileByPr
             : options?.existingByPr
           const row = configured ?? current
           return row !== undefined && row.awsAccountId === _awsAccountId && row.region === region
@@ -170,10 +178,12 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             )
         )
       ),
-    findById: () =>
+    findById: (id) =>
       Ref.get(rowRef).pipe(
         Effect.flatMap((row) =>
-          row === undefined
+          options?.rowsById?.[String(id)] !== undefined
+            ? Effect.succeed(options.rowsById[String(id)])
+            : row === undefined
             ? Effect.die("Sandbox row was not inserted")
             : Effect.succeed(row)
         )
@@ -227,6 +237,13 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           Effect.fail(new DockerError({ operation: "inspectContainer", cause: "not configured" })),
       listContainersByLabel: () =>
         Ref.update(containerDiscoveryCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            options?.retirementGate === undefined
+              ? Effect.void
+              : Deferred.succeed(options.retirementGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.retirementGate.release))
+              )
+          ),
           Effect.as([...(options?.untrackedContainers ?? [])])
         )
     }),
@@ -742,6 +759,66 @@ describe("SandboxWorkerScope", () => {
           expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running" })
         }).pipe(Effect.provide(fixture.layer))
       )
+    }))
+
+  it.effect("does not restart a legacy row after retirement wins admission", () =>
+    Effect.gen(function*() {
+      const retirementReached = yield* Deferred.make<void>()
+      const retirementRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const retired = { ...legacyRow, awsAccountId: "", region: createParams.region, accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        emptyAccountByPrAll: [retired],
+        rowsById: { [retired.id]: retired },
+        retirementGate: { reached: retirementReached, release: retirementRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: retired.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(createParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(retirementReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(retired.id)).pipe(Effect.result, Effect.forkChild)
+          const reachedStart = yield* Deferred.isDone(restartStarted)
+          expect(reachedStart).toBe(false)
+
+          yield* Deferred.succeed(retirementRelease, undefined)
+          yield* Fiber.join(creation)
+          const restartResult = yield* Fiber.join(restart)
+          expect(restartResult._tag).toBe("Failure")
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("reuses a profile-keyed legacy row after account discovery", () =>
+    Effect.gen(function*() {
+      const profileRow = {
+        ...legacyRow,
+        awsAccountId: createParams.profile,
+        region: createParams.region,
+        accessPassword: "protected"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, { profileByPr: profileRow })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(profileRow.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
   it.effect("does not retire an empty-account worker after its container is persisted", () =>
