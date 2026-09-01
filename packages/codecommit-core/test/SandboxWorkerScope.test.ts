@@ -290,6 +290,30 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("does not replace a regionless worker that is still starting", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPrAll: [{
+          ...legacyRow,
+          accessPassword: "protected",
+          containerId: null,
+          status: "cloning"
+        }]
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
   it.effect("reconciles an authenticated sandbox with an empty migrated region", () =>
     Effect.gen(function*() {
       const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
@@ -391,10 +415,10 @@ describe("SandboxWorkerScope", () => {
       }
     }))
 
-  it.effect("terminalizes an active regionless row without worker evidence", () =>
+  it.effect("requires Docker admission for a terminal regionless row", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.void, {
-        initialRow: { ...legacyRow, accessPassword: "protected", containerId: null, status: "creating" }
+        initialRow: { ...legacyRow, accessPassword: "protected", containerId: null, status: "error" }
       })
 
       const outcome = yield* Effect.scoped(
@@ -428,6 +452,27 @@ describe("SandboxWorkerScope", () => {
       )
       expect(outcome).toBe(true)
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("treats a confirmed missing stop target as already reconciled", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: legacyRow,
+        stopContainer: Effect.fail(
+          new DockerError({ operation: "stopContainer", cause: "Error: No such container: missing-container" })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+      })
     }))
 
   it.effect("retains authenticated rows when container inspection fails for infrastructure", () =>
@@ -648,11 +693,11 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
     }))
 
-  it.effect("does not require Docker admission for a terminal authenticated row", () =>
+  it.effect("does not require Docker admission for a terminal exact-region row", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(
         () => Effect.void,
-        { initialRow: { ...legacyRow, accessPassword: "protected", status: "error" } }
+        { initialRow: { ...legacyRow, region: createParams.region, accessPassword: "protected", status: "error" } }
       )
 
       const hasLegacy = yield* Effect.scoped(

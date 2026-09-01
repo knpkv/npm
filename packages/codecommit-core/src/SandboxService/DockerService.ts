@@ -38,7 +38,10 @@ export interface ContainerInfo {
 
 /** Docker's inspect command reports a missing container with this exact stderr shape. */
 export const isMissingContainerError = (error: DockerError): boolean => {
-  if (!Predicate.isString(error.operation) || error.operation !== "inspectContainer") return false
+  if (
+    !Predicate.isString(error.operation) ||
+    (error.operation !== "inspectContainer" && error.operation !== "stopContainer")
+  ) return false
   const cause = error.cause
   const message = Predicate.isString(cause)
     ? cause

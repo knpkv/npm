@@ -164,10 +164,9 @@ export const selectedPullRequest = (
       ? candidate.account.awsAccountId === routeAccountId
         || candidate.account.repoAccountId === routeAccountId
         || candidate.account.profile === routeAccountId
-      : candidate.account.awsAccountId === routeAccountId ||
-        ((candidate.account.awsAccountId === undefined || candidate.account.awsAccountId === "") &&
-          candidate.account.repoAccountId === routeAccountId) ||
-        candidate.account.profile === routeAccountId
+      : candidate.account.awsAccountId !== undefined && candidate.account.awsAccountId !== ""
+      ? candidate.account.awsAccountId === routeAccountId
+      : candidate.account.repoAccountId === routeAccountId || candidate.account.profile === routeAccountId
   const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&

@@ -262,6 +262,21 @@ describe("PR handler selection", () => {
         { repositoryName: "payments", region: "eu-west-1" }
       )
       expect(selected.account.profile).toBe("cc1_production")
+
+      const legacyPrefixedProfile = new Domain.PullRequest({
+        ...prefixedProfile,
+        account: new Domain.Account({
+          ...prefixedProfile.account,
+          profile: Domain.AwsProfileName.make("ccpr:production")
+        })
+      })
+      const legacySelected = yield* cachedPullRequest(
+        { findAll: () => Effect.succeed([Schema.encodeSync(PRService.CachedPRToPullRequest)(legacyPrefixedProfile)]) },
+        "ccpr:production",
+        legacyPrefixedProfile.id,
+        { repositoryName: "payments", region: "eu-west-1" }
+      )
+      expect(legacySelected.account.profile).toBe("ccpr:production")
     }))
 
   it.effect("requires exact coordinates when duplicate account and PR identifiers exist", () =>
@@ -297,7 +312,7 @@ describe("PR handler selection", () => {
       expect(selected.account.region).toBe(regionalPullRequest.account.region)
 
       const invalidToken = yield* cachedPullRequest(cache, "ccpr:not-json", regionalPullRequest.id).pipe(Effect.flip)
-      expect(invalidToken.message).toContain("Invalid pull-request")
+      expect(invalidToken.message).toContain("not available")
 
       const whitespaceAccountToken = `cc1_${
         Encoding.encodeBase64Url(JSON.stringify([
@@ -377,6 +392,21 @@ describe("PR handler selection", () => {
       }
       const selected = yield* selectedPullRequest([intended, foreign], "credential-account", intended.id, coordinates)
       expect(selected).toBe(intended)
+
+      const profileCollision = new Domain.PullRequest({
+        ...foreign,
+        account: new Domain.Account({
+          ...foreign.account,
+          profile: Domain.AwsProfileName.make("credential-account")
+        })
+      })
+      const rejectedProfileCollision = yield* selectedPullRequest(
+        [profileCollision],
+        "credential-account",
+        intended.id,
+        coordinates
+      ).pipe(Effect.flip)
+      expect(rejectedProfileCollision.message).toContain("not available")
     }))
 
   it.effect("carries exact coordinates through a refresh route", () =>

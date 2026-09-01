@@ -7,6 +7,7 @@ import { Context, Effect, FileSystem, Layer, Predicate, Schema } from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import migration0018 from "../src/CacheService/migrations/0018_pull_request_coordinates.js"
 import migration0019 from "../src/CacheService/migrations/0019_dependent_pr_coordinates.js"
+import migration0020 from "../src/CacheService/migrations/0020_notification_coordinates.js"
 import { UpsertInput } from "../src/CacheService/repos/PullRequestRepo/internal.js"
 import { mutations } from "../src/CacheService/repos/PullRequestRepo/mutations.js"
 
@@ -263,5 +264,24 @@ describe("pull request coordinate migration", () => {
         { repositoryName: "payments", commentedBy: "payment-reviewer" },
         { repositoryName: "single", commentedBy: "order-reviewer" }
       ])
+    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+
+  it.effect("fails notification migration when the schema operation is not duplicate-column idempotence", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-notification-migration-" })
+      const context = yield* Layer.build(LibsqlClient.layer({ url: `file:${root}/cache.db` }))
+      const sql = Context.get(context, SqlClient.SqlClient)
+
+      const missingTable = yield* migration0020.pipe(
+        Effect.provideService(SqlClient.SqlClient, sql),
+        Effect.result
+      )
+      expect(missingTable._tag).toBe("Failure")
+
+      yield* sql`CREATE TABLE notifications (id INTEGER PRIMARY KEY)`
+      yield* migration0020.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+      const columns = yield* sql<{ readonly name: string }>`PRAGMA table_info(notifications)`
+      expect(columns.map((column) => column.name)).toEqual(["id", "repository_name", "account_region"])
     }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
 })

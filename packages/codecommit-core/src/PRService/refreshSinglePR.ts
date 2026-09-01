@@ -37,6 +37,7 @@ import { countAllComments, type PRState } from "./internal.js"
 interface ResolvedAccount {
   readonly profile: AwsProfileName
   readonly region: AwsRegion
+  readonly durableAccountId?: string
 }
 
 const decodeAwsProfileName = Schema.decodeUnknownSync(AwsProfileName)
@@ -91,7 +92,7 @@ const matchesRequestedAccount = (
 ): boolean => {
   if (coordinates === undefined) return matchesAccount(account, awsAccountId)
   if (account.awsAccountId !== undefined && account.awsAccountId !== null && account.awsAccountId !== "") {
-    return account.awsAccountId === awsAccountId
+    return account.awsAccountId === awsAccountId || account.profile === awsAccountId
   }
   return account.profile === awsAccountId || account.repoAccountId === awsAccountId
 }
@@ -125,7 +126,10 @@ const resolveAccountFromCache = (
     if (coordinates === undefined && candidates.length !== 1) return undefined
     const sibling = candidates[0]
     if (sibling !== undefined) {
-      return resolvedAccount(sibling.accountProfile, coordinates?.region ?? sibling.accountRegion)
+      return {
+        ...resolvedAccount(sibling.accountProfile, coordinates?.region ?? sibling.accountRegion),
+        durableAccountId: sibling.awsAccountId
+      }
     }
 
     // Fall back to config only when the requested region is configured.
@@ -220,7 +224,10 @@ export const makeRefreshSinglePR = (
 
     // Build fresh upsert — PullRequestDetail lacks some fields, fall back to cache
     const cached = Option.isSome(cachedPR) ? cachedPR.value : undefined
-    const durableAccountId = cached?.awsAccountId ?? pr?.account.awsAccountId ?? awsAccountId
+    const durableAccountId = cached?.awsAccountId ?? pr?.account.awsAccountId ?? account.durableAccountId ??
+      (account.profile === awsAccountId
+        ? (yield* awsClient.getCallerIdentity(account)).accountId
+        : awsAccountId)
     const lastModifiedDate = cached !== undefined
       ? cached.lastModifiedDate.toISOString()
       : yield* Clock.currentTimeMillis.pipe(Effect.map((nowMs) => new Date(nowMs).toISOString()))

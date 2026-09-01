@@ -44,6 +44,9 @@ describe("SubscriptionRepo coordinate migration", () => {
           'orders', '2026-08-01T00:00:00.000Z', '2026-08-02T00:00:00.000Z', 'OPEN',
           'feature', 'main', 'https://example.invalid/pr/42-orders'
         )`
+        expect(
+          yield* repo.isSubscribed("123", "42", { repositoryName: "payments", accountRegion: "eu-west-1" })
+        ).toBe(false)
         yield* repo.unsubscribe("123", "42", { repositoryName: "payments", accountRegion: "eu-west-1" })
         expect(yield* repo.isSubscribed("123", "42")).toBe(true)
       }).pipe(Effect.provide(services), Effect.scoped)

@@ -77,6 +77,7 @@ describe("stats pull-request coordinates", () => {
         VALUES
           ('42', '123', 'payments', 'eu-west-1', ${comments("payment-comment", "payment-reviewer")}),
           ('42', '123', 'orders', 'us-east-1', ${comments("order-comment", "order-reviewer")}),
+          ('42', '123', '', '', ${comments("stale-legacy-comment", "stale-legacy-reviewer")}),
           ('43', '123', '', '', ${comments("legacy-comment", "legacy-reviewer")})`
 
       const result = yield* reviewerData(sql)("2026-08-01T00:00:00.000Z", "2026-09-01T00:00:00.000Z", {})
@@ -84,6 +85,9 @@ describe("stats pull-request coordinates", () => {
         { author: "payment-reviewer", commentCount: 1 },
         { author: "order-reviewer", commentCount: 1 },
         { author: "legacy-reviewer", commentCount: 1 }
+      ]))
+      expect(result.topReviewers).not.toEqual(expect.arrayContaining([
+        { author: "stale-legacy-reviewer", commentCount: 1 }
       ]))
       expect(result.firstReviewDetails).toEqual(expect.arrayContaining([
         expect.objectContaining({ prId: "42", repositoryName: "payments", accountRegion: "eu-west-1" }),

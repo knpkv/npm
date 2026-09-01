@@ -117,6 +117,12 @@ const makeSubscriptionRepo = Effect.gen(function*() {
                     SELECT count(*) FROM pull_requests
                     WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.prId}
                     ) = 1
+                  AND (
+                    SELECT count(*) FROM pull_requests
+                    WHERE aws_account_id = ${req.awsAccountId} AND id = ${req.prId}
+                      AND repository_name = ${req.repositoryName}
+                      AND account_region = ${req.accountRegion}
+                  ) = 1
               )
             )
             ORDER BY CASE

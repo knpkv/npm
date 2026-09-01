@@ -70,8 +70,8 @@ export const sandboxRuntimeXdgDataHome = `${sandboxRuntimeHome}/.local/share`
 const isRegionlessSandbox = (row: Pick<SandboxRow, "region">): boolean =>
   row.region === undefined || row.region === null || row.region === ""
 
-const isActiveSandboxStatus = (status: string): boolean =>
-  status === "creating" || status === "cloning" || status === "starting" || status === "running"
+const isPreContainerSandboxStatus = (status: string): boolean =>
+  status === "creating" || status === "cloning" || status === "starting"
 
 const homeDir = Config.string("HOME").pipe(
   Config.orElse(() => Config.string("USERPROFILE"))
@@ -203,13 +203,26 @@ const makeSandboxService = Effect.gen(function*() {
           Effect.gen(function*() {
             const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", legacy.id)
             const containerIds = new Set([
-              ...(legacy.containerId === null ? [] : [legacy.containerId]),
+              ...(legacy.containerId === null || legacy.containerId.length === 0 ? [] : [legacy.containerId]),
               ...discovered.map((container) => container.Id)
             ])
-            if (legacy.accessPassword === null) {
-              yield* Effect.forEach(containerIds, (containerId) => docker.stopContainer(containerId), {
-                discard: true
+            if (
+              legacy.accessPassword !== null && containerIds.size === 0 && isPreContainerSandboxStatus(legacy.status)
+            ) {
+              return yield* new SandboxError({
+                sandboxId: SandboxId.make(legacy.id),
+                message: "Regionless legacy sandbox is still starting; retry after its worker reports a container"
               })
+            }
+            if (legacy.accessPassword === null) {
+              yield* Effect.forEach(
+                containerIds,
+                (containerId) =>
+                  docker.stopContainer(containerId).pipe(
+                    Effect.catchIf(isMissingContainerError, () => Effect.void)
+                  ),
+                { discard: true }
+              )
               yield* updateStatus(SandboxId.make(legacy.id), "error", {
                 error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
               })
@@ -524,13 +537,21 @@ const makeSandboxService = Effect.gen(function*() {
             if (isRegionlessSandbox(row)) {
               const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", row.id)
               const containerIds = new Set([
-                ...(row.containerId === null ? [] : [row.containerId]),
+                ...(row.containerId === null || row.containerId.length === 0 ? [] : [row.containerId]),
                 ...discovered.map((container) => container.Id)
               ])
+              if (
+                row.accessPassword !== null &&
+                containerIds.size === 0 &&
+                isPreContainerSandboxStatus(row.status)
+              ) return
               if (row.accessPassword === null) {
                 yield* Effect.forEach(
                   containerIds,
-                  (containerId) => docker.stopContainer(containerId),
+                  (containerId) =>
+                    docker.stopContainer(containerId).pipe(
+                      Effect.catchIf(isMissingContainerError, () => Effect.void)
+                    ),
                   { discard: true }
                 )
                 yield* updateStatus(SandboxId.make(row.id), "error", {
@@ -550,14 +571,17 @@ const makeSandboxService = Effect.gen(function*() {
             if (row.accessPassword === null) {
               const discovered = yield* docker.listContainersByLabel("codecommit.sandbox.id", row.id)
               const containerIds = new Set([
-                ...(row.containerId === null ? [] : [row.containerId]),
+                ...(row.containerId === null || row.containerId.length === 0 ? [] : [row.containerId]),
                 ...discovered.map((container) => container.Id)
               ])
               // Do not consider any legacy row reconciled until every persisted
               // or labeled passwordless container has confirmed shutdown.
               yield* Effect.forEach(
                 containerIds,
-                (containerId) => docker.stopContainer(containerId),
+                (containerId) =>
+                  docker.stopContainer(containerId).pipe(
+                    Effect.catchIf(isMissingContainerError, () => Effect.void)
+                  ),
                 { discard: true }
               )
               yield* updateStatus(SandboxId.make(row.id), "error", {
@@ -586,11 +610,7 @@ const makeSandboxService = Effect.gen(function*() {
 
     hasLegacyUnauthenticated: () =>
       repo.findAll().pipe(
-        Effect.map((rows) =>
-          rows.some((row) =>
-            row.accessPassword === null || (isRegionlessSandbox(row) && isActiveSandboxStatus(row.status))
-          )
-        )
+        Effect.map((rows) => rows.some((row) => row.accessPassword === null || isRegionlessSandbox(row)))
       ),
 
     gcIdle: (idleTimeout = Duration.minutes(30), cleanupDelay = Duration.hours(24)) =>

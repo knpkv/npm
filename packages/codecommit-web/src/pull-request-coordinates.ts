@@ -77,6 +77,10 @@ export const decodePullRequestCoordinates = (
 ): Effect.Effect<Option.Option<PullRequestCoordinates>, PullRequestCoordinateDecodeError> => {
   if (value.startsWith(legacyCoordinateTokenPrefix)) {
     const encoded = value.slice(legacyCoordinateTokenPrefix.length)
+    // A plain profile alias may legally use the historical token prefix. Only
+    // reserve values that have the encoded JSON shape of a legacy token; all
+    // other values remain ordinary account routes.
+    if (!/^(?:%7B|%5B|\{|\[)/iu.test(encoded)) return Effect.succeed(Option.none())
     return Effect.try({
       try: () => decodeURIComponent(encoded),
       catch: () => new PullRequestCoordinateDecodeError({ message: "Invalid pull-request coordinate token" })

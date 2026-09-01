@@ -383,4 +383,94 @@ describe("PRService.refreshSinglePR coordinates", () => {
       expect(failure._tag).toBe("RefreshError")
       expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
+
+  it.effect("accepts an exact profile alias without replacing its durable account", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<Domain.AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const upserted = yield* Ref.make<string | undefined>(undefined)
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: () =>
+              Effect.succeed({
+                revisionId: "revision-profile",
+                sourceCommit: "e".repeat(40),
+                title: "Coordinate refresh",
+                author: "reviewer",
+                status: "OPEN",
+                repositoryName: "payments",
+                sourceBranch: "feature",
+                destinationBranch: "main",
+                creationDate: new Date(0),
+                lastActivityDate: new Date(2_000),
+                approvedBy: [],
+                approvedByArns: [],
+                approvalRules: []
+              }),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([cachedPullRequest]),
+            upsert: (input) => Ref.set(upserted, input.awsAccountId)
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+      expect(yield* Ref.get(upserted)).toBe("111122223333")
+    }))
+
+  it.effect("resolves a profile identity before persisting an uncached exact refresh", () =>
+    Effect.gen(function*() {
+      const state = yield* SubscriptionRef.make<Domain.AppState>({ pullRequests: [], accounts: [], status: "idle" })
+      const upserted = yield* Ref.make<string | undefined>(undefined)
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("production", pullRequest.id, { repositoryName: "payments", region: "eu-west-1" }),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getCallerIdentity: () => Effect.succeed({ username: "viewer", accountId: "111122223333" }),
+            getPullRequest: () =>
+              Effect.succeed({
+                revisionId: "revision-uncached-profile",
+                sourceCommit: "f".repeat(40),
+                title: "Coordinate refresh",
+                author: "reviewer",
+                status: "OPEN",
+                repositoryName: "payments",
+                sourceBranch: "feature",
+                destinationBranch: "main",
+                creationDate: new Date(0),
+                lastActivityDate: new Date(2_000),
+                approvedBy: [],
+                approvedByArns: [],
+                approvalRules: []
+              }),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findByCoordinates: () => Effect.succeed(Option.none()),
+            findAll: () => Effect.succeed([]),
+            upsert: (input) => Ref.set(upserted, input.awsAccountId)
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, {
+            load: Effect.succeed({
+              ...config,
+              accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }]
+            })
+          }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+      expect(yield* Ref.get(upserted)).toBe("111122223333")
+    }))
 })

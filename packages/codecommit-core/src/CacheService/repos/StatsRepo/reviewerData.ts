@@ -46,6 +46,13 @@ export const reviewerData = (sql: SqlClient.SqlClient) => (weekStart: string, we
                 SELECT count(*) FROM pull_requests p2
                 WHERE p2.aws_account_id = c.aws_account_id AND p2.id = c.pull_request_id
               ) = 1
+              AND NOT EXISTS (
+                SELECT 1 FROM pr_comments c2
+                WHERE c2.pull_request_id = c.pull_request_id
+                  AND c2.aws_account_id = c.aws_account_id
+                  AND c2.repository_name = p.repository_name
+                  AND c2.account_region = p.account_region
+              )
             )
           )
         WHERE COALESCE(p.closed_at, p.last_modified_date) >= ${weekStart} AND COALESCE(p.closed_at, p.last_modified_date) < ${weekEnd}
