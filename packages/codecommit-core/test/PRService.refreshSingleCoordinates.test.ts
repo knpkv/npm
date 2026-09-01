@@ -171,4 +171,81 @@ describe("PRService.refreshSinglePR coordinates", () => {
       expect(failure.failedAccounts).toEqual(["111122223333"])
       expect(yield* Ref.get(providerCalls)).toBe(0)
     }))
+
+  it.effect("rejects a same-id refresh with a different repository", () =>
+    Effect.gen(function*() {
+      const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
+      const state = yield* SubscriptionRef.make(initialState)
+      const providerCalls = yield* Ref.make(0)
+      const service = makeRefreshSinglePR(state)
+      const failure = yield* runWithLayer(
+        service("111122223333", pullRequest.id, {
+          region: "eu-west-1",
+          repositoryName: "other-repository"
+        }).pipe(Effect.flip),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: () =>
+              Ref.update(providerCalls, (calls) => calls + 1).pipe(
+                Effect.andThen(Effect.die("unexpected provider call"))
+              ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, { findAll: () => Effect.succeed([cachedPullRequest]) }),
+          Layer.mock(CommentRepo, {}),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, {}),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(failure._tag).toBe("RefreshError")
+      expect(yield* Ref.get(providerCalls)).toBe(0)
+    }))
+
+  it.effect("keeps a unique legacy route refresh working without coordinates", () =>
+    Effect.gen(function*() {
+      const initialState: Domain.AppState = { pullRequests: [pullRequest], accounts: [], status: "idle" }
+      const state = yield* SubscriptionRef.make(initialState)
+      const providerRegions = yield* Ref.make<ReadonlyArray<string>>([])
+      const service = makeRefreshSinglePR(state)
+      yield* runWithLayer(
+        service("111122223333", pullRequest.id),
+        Layer.mergeAll(
+          Layer.mock(AwsClient, {
+            getPullRequest: ({ account }) =>
+              Ref.update(providerRegions, (regions) => [...regions, account.region]).pipe(
+                Effect.andThen(Effect.succeed({
+                  revisionId: "revision-legacy",
+                  sourceCommit: "c".repeat(40),
+                  title: "Coordinate refresh",
+                  author: "reviewer",
+                  status: "OPEN",
+                  repositoryName: "payments",
+                  sourceBranch: "feature",
+                  destinationBranch: "main",
+                  creationDate: new Date(0),
+                  lastActivityDate: new Date(2_000),
+                  approvedBy: [],
+                  approvedByArns: [],
+                  approvalRules: []
+                }))
+              ),
+            getCommentsForPullRequest: () => Effect.succeed([])
+          }),
+          Layer.mock(PullRequestRepo, {
+            findAll: () => Effect.succeed([cachedPullRequest]),
+            upsert: () => Effect.void
+          }),
+          Layer.mock(CommentRepo, { upsert: () => Effect.void }),
+          Layer.mock(NotificationRepo, {}),
+          Layer.mock(SubscriptionRepo, { isSubscribed: () => Effect.succeed(false) }),
+          Layer.mock(ConfigService, { load: Effect.succeed(config) }),
+          Layer.mock(EventsHub, {})
+        )
+      )
+
+      expect(yield* Ref.get(providerRegions)).toEqual(["eu-west-1"])
+    }))
 })

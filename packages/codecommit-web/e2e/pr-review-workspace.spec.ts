@@ -110,6 +110,12 @@ const RelayRunPayload = Schema.Struct({
 type RelayRunPayload = typeof RelayRunPayload.Type
 const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
 
+const expectExactProviderCoordinates = (requestUrl: string): void => {
+  const query = new URL(requestUrl).searchParams
+  expect(query.get("repositoryName")).toBe("payments-api")
+  expect(query.get("region")).toBe("eu-west-1")
+}
+
 interface ReviewWorkspaceOptions {
   readonly commentCount?: () => number
   readonly commentFindingCount?: () => number
@@ -272,6 +278,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/diff*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -292,6 +299,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
@@ -312,6 +320,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review/stream*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     reviewRunCount += 1
     await options?.runGate?.(reviewRunCount)
     await reviewGate
@@ -386,6 +395,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     const finding = route.request().postDataJSON().finding
     findingPostCount += 1
     options?.onPost?.(findingPostCount)
@@ -405,6 +415,7 @@ const routeReviewWorkspace = async (
     })
   })
   await page.route("**/api/prs/111111111111/42/relay-review/continue*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     onContinue?.(payload)
     await route.fulfill({
@@ -1695,6 +1706,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   })
   await page.route("**/api/prs/111111111111/42/refresh*", async (route) => {
     if (manualRefreshRequested) {
+      expectExactProviderCoordinates(route.request().url())
       manualRefreshCount++
       if (manualRefreshCount === 1) {
         await route.fulfill({ body: "refresh failed", contentType: "text/plain", status: 500 })

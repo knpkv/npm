@@ -25,7 +25,12 @@ import { makeToggleAccount } from "./toggleAccount.js"
 
 export type { SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
-export type { RefreshSinglePRCoordinates, RefreshSinglePRError, RefreshSinglePRResult } from "./refreshSinglePR.js"
+export type {
+  RefreshSinglePRCoordinates,
+  RefreshSinglePRError,
+  RefreshSinglePRRequest,
+  RefreshSinglePRResult
+} from "./refreshSinglePR.js"
 
 // ---------------------------------------------------------------------------
 // Service Definition
@@ -109,7 +114,7 @@ const makePRService = Effect.gen(function*() {
     refreshSinglePR: (
       awsAccountId: string,
       prId: PullRequestId,
-      coordinates: RefreshSinglePRCoordinates
+      coordinates?: RefreshSinglePRCoordinates
     ) => provide(refreshSinglePR(awsAccountId, prId, coordinates))
   }
 })

@@ -43,6 +43,11 @@ const awsAccountPullRequest = new Domain.PullRequest({
   })
 })
 
+const otherRepositoryPullRequest = new Domain.PullRequest({
+  ...pullRequest,
+  repositoryName: Domain.RepositoryName.make("identity")
+})
+
 describe("PR handler selection", () => {
   it.effect("accepts only the exact server-owned Relay profile snapshot", () =>
     Effect.gen(function*() {
@@ -165,13 +170,22 @@ describe("PR handler selection", () => {
         repositoryName: "payments"
       }).pipe(Effect.flip)
       expect(failure.message).toContain("not available")
+
+      const selectedRepository = yield* selectedPullRequest(
+        [pullRequest, otherRepositoryPullRequest],
+        "111122223333",
+        pullRequest.id,
+        { region: "eu-west-1", repositoryName: "identity" }
+      )
+      expect(selectedRepository).toBe(otherRepositoryPullRequest)
     }))
 
   it.effect("resolves a direct-linked pull request from the durable SSE cache", () =>
     Effect.gen(function*() {
       const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
+      const cachedOtherRepository = Schema.encodeSync(PRService.CachedPRToPullRequest)(otherRepositoryPullRequest)
       const cache = {
-        findAll: () => Effect.succeed([cached])
+        findAll: () => Effect.succeed([cached, cachedOtherRepository])
       }
 
       const selected = yield* cachedPullRequest(cache, "111122223333", pullRequest.id, {
@@ -196,5 +210,11 @@ describe("PR handler selection", () => {
         repositoryName: "payments"
       }).pipe(Effect.flip)
       expect(regionalMismatch.message).toContain("not available")
+
+      const repositoryMatch = yield* cachedPullRequest(cache, "111122223333", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "identity"
+      })
+      expect(repositoryMatch.repositoryName).toBe("identity")
     }))
 })

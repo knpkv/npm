@@ -120,6 +120,17 @@ const PullRequestCoordinates = Schema.Struct({
   region: AwsRegion
 })
 
+/** Legacy refresh links may omit coordinates, but a partial coordinate is never valid. */
+const PullRequestRefreshCoordinates = Schema.Struct({
+  repositoryName: Schema.optional(Schema.String),
+  region: Schema.optional(AwsRegion)
+}).check(
+  Schema.makeFilter(
+    ({ region, repositoryName }) => (repositoryName === undefined) === (region === undefined),
+    { expected: "repositoryName and region must be provided together" }
+  )
+)
+
 /** Bounded text for one inventory entry; exceptional content remains explicit. */
 export const PullRequestDiffContentResponse = Schema.Struct({
   fileIndex: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -384,7 +395,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
-      query: PullRequestCoordinates,
+      query: PullRequestRefreshCoordinates,
       success: PullRequestRefreshResponse,
       error: ApiError
     })

@@ -182,6 +182,10 @@ describe("CodeCommit Relay dock adapter", () => {
       repositoryName: "payments"
     })).toBe(true)
     expect(matchesCodeCommitPullRequestRoute(candidate, {
+      accountId: "credential-account",
+      pullRequestId: "42"
+    })).toBe(true)
+    expect(matchesCodeCommitPullRequestRoute(candidate, {
       accountId: "repository-account",
       pullRequestId: "42",
       region: "eu-central-1",

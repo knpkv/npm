@@ -82,6 +82,12 @@ import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
 import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
 import {
+  matchesPullRequestSandbox,
+  pullRequestRefreshKey,
+  pullRequestSandboxAccountId,
+  type PullRequestRefreshCoordinates
+} from "../pr-detail-coordinates.js"
+import {
   type ReviewCommentNavigation,
   type ReviewCommentNavigationTarget,
   reviewCommentNavigationTarget
@@ -840,14 +846,19 @@ export function PRDetail() {
     const regionValue = searchParams.get("region")
     const region =
       regionValue === null ? undefined : Option.getOrUndefined(Schema.decodeUnknownOption(AwsRegion)(regionValue))
-    if (repositoryName === null || region === undefined || repositoryName.length === 0) return
-    const key = `${accountId}:${prId}`
+    const hasRouteCoordinates = repositoryName !== null || regionValue !== null
+    if (hasRouteCoordinates && (repositoryName === null || repositoryName.length === 0 || region === undefined)) return
+    const coordinates: PullRequestRefreshCoordinates | undefined =
+      repositoryName !== null && region !== undefined ? { region, repositoryName } : undefined
+    const key = pullRequestRefreshKey(accountId, prId, coordinates)
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({
-      params: { awsAccountId: accountId, prId: PullRequestId.make(prId) },
-      query: { region, repositoryName }
-    })
+    const request = { params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } }
+    if (coordinates === undefined) {
+      refreshSingle({ ...request, query: {} })
+    } else {
+      refreshSingle({ ...request, query: coordinates })
+    }
   }, [pr, accountId, prId, refreshSingle, searchParams])
 
   const score: HealthScore | undefined = useMemo(
@@ -1056,19 +1067,8 @@ export function PRDetail() {
   // Sandbox
   const createSandbox = useAtomSet(createSandboxAtom)
   const existingSandbox = useMemo(
-    () =>
-      pr === null
-        ? undefined
-        : state.sandboxes?.find(
-            (s) =>
-              s.pullRequestId === String(pr.id) &&
-              s.awsAccountId === (pr.account.awsAccountId ?? accountId) &&
-              s.repositoryName === String(pr.repositoryName) &&
-              s.region === String(pr.account.region) &&
-              s.status !== "stopped" &&
-              s.status !== "error"
-          ),
-    [accountId, pr, state.sandboxes]
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => matchesPullRequestSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
   )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)
@@ -1082,7 +1082,7 @@ export function PRDetail() {
 
   const proceedSandbox = useCallback(() => {
     if (pr === null) return
-    const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
+    const sandboxAccountKey = pullRequestSandboxAccountId(pr.account)
     createSandbox({
       payload: {
         pullRequestId: pr.id,

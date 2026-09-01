@@ -63,6 +63,7 @@ export interface RefreshSinglePRCoordinates {
   readonly repositoryName: string
   readonly region: AwsRegion
 }
+export type RefreshSinglePRRequest = RefreshSinglePRCoordinates | undefined
 export type RefreshSinglePRError = AwsClientError | RefreshError
 
 const matchesAccount = (
@@ -80,13 +81,13 @@ const resolveAccountFromCache = (
   prRepo: PullRequestRepoContract,
   awsAccountId: string,
   prId: PullRequestId,
-  coordinates: RefreshSinglePRCoordinates
+  coordinates: RefreshSinglePRRequest
 ) =>
   Effect.gen(function*() {
     const allCached = yield* prRepo.findAll().pipe(
       Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([]))
     )
-    const sibling = allCached.find(
+    const candidates = allCached.filter(
       (p) =>
         p.id === prId &&
         matchesAccount({
@@ -94,9 +95,10 @@ const resolveAccountFromCache = (
           repoAccountId: p.repoAccountId,
           profile: p.accountProfile
         }, awsAccountId) &&
-        p.repositoryName === coordinates.repositoryName &&
-        p.accountRegion === coordinates.region
+        (coordinates === undefined ||
+          (p.repositoryName === coordinates.repositoryName && p.accountRegion === coordinates.region))
     )
+    const sibling = coordinates === undefined && candidates.length !== 1 ? undefined : candidates[0]
     if (sibling !== undefined) {
       return resolvedAccount(sibling.accountProfile, sibling.accountRegion)
     }
@@ -104,8 +106,13 @@ const resolveAccountFromCache = (
     const configService = yield* ConfigService
     const config = yield* configService.load.pipe(Effect.catch(() => Effect.succeed({ accounts: [] })))
     const configAccount = config.accounts.find((a) => a.profile === awsAccountId && a.enabled)
-    if (configAccount !== undefined && configAccount.regions.includes(coordinates.region)) {
-      return resolvedAccount(configAccount.profile, coordinates.region)
+    if (configAccount !== undefined) {
+      const region = coordinates !== undefined
+        ? configAccount.regions.includes(coordinates.region) ? coordinates.region : undefined
+        : configAccount.regions.length === 1
+        ? configAccount.regions[0]
+        : undefined
+      if (region !== undefined) return resolvedAccount(configAccount.profile, region)
     }
 
     return undefined
@@ -117,7 +124,7 @@ export const makeRefreshSinglePR = (
   const refreshSinglePR = Effect.fn("PRService.refreshSinglePR")(function*(
     awsAccountId: string,
     prId: PullRequestId,
-    coordinates: RefreshSinglePRCoordinates
+    coordinates: RefreshSinglePRRequest
   ) {
     const awsClient = yield* AwsClient
     const prRepo = yield* PullRequestRepo
@@ -126,17 +133,18 @@ export const makeRefreshSinglePR = (
     const subscriptionRepo = yield* SubscriptionRepo
 
     const currentState = yield* SubscriptionRef.get(state)
-    const pr = currentState.pullRequests.find(
+    const stateCandidates = currentState.pullRequests.filter(
       (p) =>
         p.id === prId &&
         matchesAccount(p.account, awsAccountId) &&
-        p.repositoryName === coordinates.repositoryName &&
-        p.account.region === coordinates.region
+        (coordinates === undefined ||
+          (p.repositoryName === coordinates.repositoryName && p.account.region === coordinates.region))
     )
+    const pr = coordinates === undefined && stateCandidates.length !== 1 ? undefined : stateCandidates[0]
 
     const cachedPR = yield* prRepo.findAll().pipe(
       Effect.map((rows) => {
-        const match = rows.find(
+        const candidates = rows.filter(
           (row) =>
             row.id === prId &&
             matchesAccount({
@@ -144,9 +152,10 @@ export const makeRefreshSinglePR = (
               repoAccountId: row.repoAccountId,
               profile: row.accountProfile
             }, awsAccountId) &&
-            row.repositoryName === coordinates.repositoryName &&
-            row.accountRegion === coordinates.region
+            (coordinates === undefined ||
+              (row.repositoryName === coordinates.repositoryName && row.accountRegion === coordinates.region))
         )
+        const match = coordinates === undefined && candidates.length !== 1 ? undefined : candidates[0]
         return match === undefined ? Option.none<CachedPullRequest>() : Option.some(match)
       }),
       Effect.catch(() => Effect.succeed(Option.none<CachedPullRequest>()))
@@ -251,7 +260,7 @@ export const makeRefreshSinglePR = (
   return (
     awsAccountId: string,
     prId: PullRequestId,
-    coordinates: RefreshSinglePRCoordinates
+    coordinates?: RefreshSinglePRCoordinates
   ): Effect.Effect<RefreshSinglePRResult, RefreshSinglePRError, RefreshSinglePREnv> =>
     refreshSinglePR(awsAccountId, prId, coordinates)
 }

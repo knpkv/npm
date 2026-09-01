@@ -178,6 +178,19 @@ interface PullRequestCoordinates {
   readonly region: string
 }
 
+interface PullRequestRefreshQuery {
+  readonly repositoryName?: string | undefined
+  readonly region?: Domain.AwsRegion | undefined
+}
+
+/** Keep coordinate-free legacy refresh links working only when the route is unambiguous. */
+const refreshCoordinates = (
+  query: PullRequestRefreshQuery
+): PRService.RefreshSinglePRCoordinates | undefined =>
+  query.repositoryName !== undefined && query.region !== undefined
+    ? { repositoryName: query.repositoryName, region: query.region }
+    : undefined
+
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
 export const cachedPullRequest = (
   pullRequestRepo: PullRequestLookup,
@@ -249,10 +262,10 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
       .handle("refreshSingle", ({ params, query }) =>
-        completeSinglePullRequestRefresh(prService.refreshSinglePR(params.awsAccountId, params.prId, query)).pipe(
-          Effect.mapError((error) =>
-            new ApiError({ message: extractAwsMessage(error) })
-          )
+        completeSinglePullRequestRefresh(
+          prService.refreshSinglePR(params.awsAccountId, params.prId, refreshCoordinates(query))
+        ).pipe(
+          Effect.mapError((error) => new ApiError({ message: extractAwsMessage(error) }))
         ))
       .handle("create", ({ payload }) =>
         awsClient.createPullRequest({
@@ -331,9 +344,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Stream.provideService(FileSystem.FileSystem, fileSystem),
             Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
           ))
-        }).pipe(Effect.mapError((error) =>
-          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
-        )))
+        }).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+          )
+        ))
       .handleRaw("relayReviewContinueStream", ({ params, query }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
@@ -361,9 +376,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Stream.provideService(FileSystem.FileSystem, fileSystem),
             Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
           ))
-        }).pipe(Effect.mapError((error) =>
-          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
-        )))
+        }).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+          )
+        ))
       .handle("postRelayFinding", ({ params, payload, query }) =>
         Effect.gen(function*() {
           if (payload.finding.id !== params.findingId) {
