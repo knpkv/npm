@@ -146,6 +146,19 @@ describe("Work control app", () => {
     expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
   })
 
+  it("accepts approval host identifiers supported by the approvals app", () => {
+    const supported = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      approvalTarget: {
+        host: "PI 5",
+        jobId: "job/7",
+        url: "https://ser8.example.test/?tab=approvals&approvalHost=PI+5&approvalJob=job%2F7"
+      }
+    })
+
+    expect(supported._tag).toBe("Success")
+  })
+
   it("rejects a self-parenting agent hierarchy", () => {
     const selfParent = Schema.decodeUnknownResult(WorkGoal)({
       ...workGoalInput,
@@ -204,6 +217,49 @@ describe("Work control app", () => {
 
     expect(futureBlocker._tag).toBe("Failure")
     expect(blockerAtUpdate._tag).toBe("Success")
+  })
+
+  it("rejects detail timestamps before goal creation and accepts creation-time details", () => {
+    const preGoalActivity = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      activity: [{ ...workGoalInput.activity[0], occurredAt: workGoalInput.createdAt - 1 }]
+    })
+    const preGoalRequest = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      requests: [{ ...workGoalInput.requests[0], requestedAt: workGoalInput.createdAt - 1 }]
+    })
+    const preGoalReview = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      review: { ...workGoalInput.review, updatedAt: workGoalInput.createdAt - 1 }
+    })
+    const preGoalBlockers = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      blocker: null,
+      blockers: [{ since: workGoalInput.createdAt - 1, summary: "Pre-goal blocker" }],
+      state: "blocked"
+    })
+    const preGoalLegacyBlocker = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      blocker: { since: workGoalInput.createdAt - 1, summary: "Pre-goal blocker" },
+      blockers: [],
+      state: "blocked"
+    })
+    const atCreation = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      activity: [{ ...workGoalInput.activity[0], occurredAt: workGoalInput.createdAt }],
+      blocker: null,
+      blockers: [{ since: workGoalInput.createdAt, summary: "Creation-time blocker" }],
+      requests: [{ ...workGoalInput.requests[0], requestedAt: workGoalInput.createdAt }],
+      review: { ...workGoalInput.review, updatedAt: workGoalInput.createdAt },
+      state: "blocked"
+    })
+
+    expect(preGoalActivity._tag).toBe("Failure")
+    expect(preGoalRequest._tag).toBe("Failure")
+    expect(preGoalReview._tag).toBe("Failure")
+    expect(preGoalBlockers._tag).toBe("Failure")
+    expect(preGoalLegacyBlocker._tag).toBe("Failure")
+    expect(atCreation._tag).toBe("Success")
   })
 
   it("rejects duplicate activity and request identities", () => {

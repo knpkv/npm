@@ -1,7 +1,10 @@
-import { AgentConnectTarget, AgentWorkerIdentity, FleetHostName } from "@knpkv/herdr-fleet/model"
+import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+// Approval hosts are bounded identifiers, not DNS names; the approvals app also
+// accepts labels such as "PI 5".
+const ApprovalHostName = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
 const Text = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096), Schema.isPattern(/^[^\p{Cc}]+$/u))
 const Timestamp = Schema.Number.check(
   Schema.isInt(),
@@ -78,7 +81,7 @@ export const WorkActivity = Schema.Struct({
 export interface WorkActivity extends Schema.Schema.Type<typeof WorkActivity> {}
 
 export const WorkApprovalTarget = Schema.Struct({
-  host: FleetHostName,
+  host: ApprovalHostName,
   jobId: Identifier,
   url: LinkUrl
 }).check(
@@ -177,13 +180,16 @@ export const WorkGoal = Schema.Struct({
       const hasBlocker = goal.blocker !== null ||
         (goal.blockers !== undefined && goal.blockers.length > 0)
       const agent = goal.agentHierarchy?.agent
+      const isDetailTimestamp = (timestamp: number): boolean =>
+        timestamp >= goal.createdAt && timestamp <= goal.updatedAt
       return goal.updatedAt >= goal.createdAt &&
         ((goal.state === "blocked") === hasBlocker) &&
         (goal.blockers === undefined || goal.blocker === null) &&
-        (goal.blockers === undefined || goal.blockers.every(({ since }) => since <= goal.updatedAt)) &&
-        (goal.activity === undefined || goal.activity.every(({ occurredAt }) => occurredAt <= goal.updatedAt)) &&
-        (goal.requests === undefined || goal.requests.every(({ requestedAt }) => requestedAt <= goal.updatedAt)) &&
-        (goal.review === undefined || goal.review === null || goal.review.updatedAt <= goal.updatedAt) &&
+        (goal.blocker === null || isDetailTimestamp(goal.blocker.since)) &&
+        (goal.blockers === undefined || goal.blockers.every(({ since }) => isDetailTimestamp(since))) &&
+        (goal.activity === undefined || goal.activity.every(({ occurredAt }) => isDetailTimestamp(occurredAt))) &&
+        (goal.requests === undefined || goal.requests.every(({ requestedAt }) => isDetailTimestamp(requestedAt))) &&
+        (goal.review === undefined || goal.review === null || isDetailTimestamp(goal.review.updatedAt)) &&
         (agent === undefined || agent === null || (
           (agent.relationship === undefined || agent.relationship.parentAgentId !== agent.agentId) &&
           goal.connectTarget !== null &&

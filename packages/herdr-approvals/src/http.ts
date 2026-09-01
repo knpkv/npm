@@ -79,6 +79,7 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
+import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback, type LoopbackActor } from "./auth.js"
 import {
   type ApprovalDirectory,
@@ -397,10 +398,45 @@ export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkChe
   function*<AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
     authorization: Effect.Effect<LoopbackActor, AuthorizationError, AuthorizationRequirements>,
     decode: Effect.Effect<WorkGoalCheckpointType, DecodeError, DecodeRequirements>,
-    work: WorkService
+    work: WorkService,
+    approvalPage?: (host: string) => Effect.Effect<string, FleetValidationError | FleetOperationError>
   ) {
     yield* authorization
     const checkpoint = yield* decode
+    const targets = [
+      checkpoint.goal.approvalTarget,
+      ...(checkpoint.goal.requests ?? []).map(({ approvalTarget }) => approvalTarget)
+    ].filter((target): target is NonNullable<typeof target> => target !== undefined && target !== null)
+    if (approvalPage === undefined) {
+      if (targets.length > 0) {
+        return yield* new FleetValidationError({
+          detail: "approval target origin cannot be validated without an authoritative page resolver"
+        })
+      }
+      return yield* work.record(checkpoint)
+    }
+    for (const target of targets) {
+      const approvalPageUrl = yield* approvalPage(target.host)
+      const expectedOrigin = yield* Effect.try({
+        try: () => new URL(approvalPageUrl).origin,
+        catch: (cause) =>
+          new FleetValidationError({
+            detail: `invalid authoritative approval page: ${String(cause)}`
+          })
+      })
+      const actualOrigin = yield* Effect.try({
+        try: () => new URL(target.url).origin,
+        catch: (cause) =>
+          new FleetValidationError({
+            detail: `invalid approval target URL: ${String(cause)}`
+          })
+      })
+      if (actualOrigin !== expectedOrigin) {
+        return yield* new FleetValidationError({
+          detail: `approval target origin does not match configured page for ${target.host}`
+        })
+      }
+    }
     return yield* work.record(checkpoint)
   }
 )
@@ -1846,13 +1882,17 @@ export const startHttpServer = async (
             request.method === "POST" &&
             url.pathname === workCheckpointPath
           ) {
-            const effect = recordWorkCheckpointRequest(
-              loopbackAuthorized,
-              authorizeOriginlessMutation(request).pipe(
-                Effect.andThen(readJson(request, WorkGoalCheckpoint))
-              ),
-              work
-            )
+            const effect = Effect.gen(function*() {
+              const tailscale = yield* Tailscale
+              return yield* recordWorkCheckpointRequest(
+                loopbackAuthorized,
+                authorizeOriginlessMutation(request).pipe(
+                  Effect.andThen(readJson(request, WorkGoalCheckpoint))
+                ),
+                work,
+                (host) => resolveApprovalPage(config, tailscale, host)
+              )
+            })
             await respond(response, effect, 201)
             return
           }

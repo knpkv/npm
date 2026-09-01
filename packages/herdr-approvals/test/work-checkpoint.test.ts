@@ -80,4 +80,20 @@ describe("fleetctl work commands", () => {
       expect(Result.isFailure(malformed)).toBe(true)
       expect(widened).toMatchObject({ failure: { _tag: "FleetValidationError" } })
     }))
+
+  it.effect("rejects malformed approval targets before persistence", () =>
+    Effect.gen(function*() {
+      const malformed = yield* Effect.result(workCheckpointFromJson(JSON.stringify({
+        ...checkpoint,
+        goal: {
+          ...checkpoint.goal,
+          approvalTarget: {
+            host: "SER8",
+            jobId: "approval-job-42",
+            url: "javascript:alert(1)"
+          }
+        }
+      })))
+      expect(malformed).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+    }))
 })

@@ -26,6 +26,7 @@ import {
 import { Tailscale, type TailscaleClient, TailscaleCommandError } from "@knpkv/herdr-tailscale"
 import {
   makeWorkService,
+  type WorkApprovalTarget as WorkApprovalTargetType,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
   WorkSnapshots,
@@ -181,6 +182,14 @@ const workCheckpoint: WorkGoalCheckpointType = {
   },
   occurredAt: 1_000,
   version: "herdr.work.event.v1"
+}
+
+const approvalPage = (_host: string) => Effect.succeed("https://ser8.example.test:4779/")
+
+const ser8ApprovalTarget: WorkApprovalTargetType = {
+  host: "SER8",
+  jobId: "approval-job-42",
+  url: "https://ser8.example.test:4779/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
 }
 
 const maximumTextWorkCheckpoint = (index: number): WorkGoalCheckpointType => {
@@ -505,7 +514,8 @@ describe("host HTTP authority", () => {
         recordWorkCheckpointRequest(
           Effect.fail(new FleetAuthorizationError({ actor: "mallory@example.com" })),
           decodeWorkCheckpoint(workCheckpoint),
-          work
+          work,
+          approvalPage
         )
       )
       expect(unauthorized).toMatchObject({ failure: { _tag: "FleetAuthorizationError" } })
@@ -514,7 +524,8 @@ describe("host HTTP authority", () => {
         recordWorkCheckpointRequest(
           Effect.succeed("local"),
           decodeWorkCheckpoint({ ...workCheckpoint, command: ["sh", "-c", "id"] }),
-          work
+          work,
+          approvalPage
         )
       )
       expect(malformed).toMatchObject({ failure: { _tag: "FleetValidationError" } })
@@ -523,18 +534,91 @@ describe("host HTTP authority", () => {
         yield* recordWorkCheckpointRequest(
           Effect.succeed("local"),
           decodeWorkCheckpoint(workCheckpoint),
-          work
+          work,
+          approvalPage
         )
       ).toEqual(workCheckpoint)
       const replay = yield* Effect.result(
         recordWorkCheckpointRequest(
           Effect.succeed("local"),
           decodeWorkCheckpoint(workCheckpoint),
-          work
+          work,
+          approvalPage
         )
       )
       expect(replay).toMatchObject({ _tag: "Success", success: workCheckpoint })
       expect((yield* work.snapshots(1_000)).now.goals).toEqual([workCheckpoint.goal])
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("binds persisted approval links to the resolved page origin", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-work-approval-origin-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(root, "approval-app.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const work = yield* makeWorkService(store)
+      const resolvePage = (host: string) =>
+        Effect.succeed(
+          host === "PI 5" ? "http://100.64.0.8:4779/" : "https://ser8.example.test:4779/"
+        )
+      const peerTarget: WorkApprovalTargetType = {
+        host: "PI 5",
+        jobId: "job/7",
+        url: "http://100.64.0.8:4779/?tab=approvals&approvalHost=PI+5&approvalJob=job%2F7"
+      }
+      const matching = yield* recordWorkCheckpointRequest(
+        Effect.succeed("local"),
+        decodeWorkCheckpoint({
+          ...workCheckpoint,
+          goal: { ...workCheckpoint.goal, approvalTarget: peerTarget }
+        }),
+        work,
+        resolvePage
+      )
+      expect(matching.goal.approvalTarget).toEqual(peerTarget)
+
+      const mismatchedUrl = "https://evil.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42"
+      const mismatched = yield* Effect.result(
+        recordWorkCheckpointRequest(
+          Effect.succeed("local"),
+          decodeWorkCheckpoint({
+            ...workCheckpoint,
+            eventId: "event-work-mismatched-origin",
+            goal: {
+              ...workCheckpoint.goal,
+              approvalTarget: { ...ser8ApprovalTarget, url: mismatchedUrl }
+            }
+          }),
+          work,
+          resolvePage
+        )
+      )
+      expect(mismatched).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+
+      const nestedMismatch = yield* Effect.result(
+        recordWorkCheckpointRequest(
+          Effect.succeed("local"),
+          decodeWorkCheckpoint({
+            ...workCheckpoint,
+            eventId: "event-work-nested-mismatched-origin",
+            goal: {
+              ...workCheckpoint.goal,
+              requests: [{
+                approvalTarget: { ...ser8ApprovalTarget, url: mismatchedUrl },
+                id: "request-approval",
+                requestedAt: workCheckpoint.goal.updatedAt,
+                state: "open",
+                summary: "Approve the package shipment"
+              }]
+            }
+          }),
+          work,
+          resolvePage
+        )
+      )
+      expect(nestedMismatch).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+      expect((yield* work.snapshots(1_000)).now.goals).toEqual([matching.goal])
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
