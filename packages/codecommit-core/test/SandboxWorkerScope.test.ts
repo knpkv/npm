@@ -105,6 +105,10 @@ interface FixtureOptions {
     readonly reached: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly createContainerGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
   readonly listContainersByLabel?: () => Effect.Effect<
     ReadonlyArray<{ readonly Id: string; readonly State: string; readonly Labels: Record<string, string> }>,
@@ -125,9 +129,11 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const insertCalls = yield* Ref.make(0)
   const containerDiscoveryCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
+  const startContainerCalls = yield* Ref.make(0)
   const regionUpdates = yield* Ref.make<Array<{ readonly id: string; readonly region: string }>>([])
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
+  const workerCompleted = yield* Deferred.make<void>()
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
     findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) =>
@@ -231,13 +237,23 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     ChildEnv.layerHostEnvironment({ PATH: "/usr/bin" }),
     Layer.mock(DockerService, {
       pullImage: () => Effect.void,
-      createContainer: () => Effect.succeed("worker-container"),
-      startContainer: () =>
-        options?.restartGate === undefined
-          ? Effect.void
-          : Deferred.succeed(options.restartGate.started, undefined).pipe(
-            Effect.andThen(Deferred.await(options.restartGate.release))
+      createContainer: () =>
+        options?.createContainerGate === undefined
+          ? Effect.succeed("worker-container")
+          : Deferred.succeed(options.createContainerGate.reached, undefined).pipe(
+            Effect.andThen(Deferred.await(options.createContainerGate.release)),
+            Effect.as("worker-container")
           ),
+      startContainer: () =>
+        Ref.update(startContainerCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            options?.restartGate === undefined
+              ? Effect.void
+              : Deferred.succeed(options.restartGate.started, undefined).pipe(
+                Effect.andThen(Deferred.await(options.restartGate.release))
+              )
+          )
+        ),
       exec: () => Effect.succeed(""),
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
@@ -346,9 +362,11 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
                   () =>
                     worker.pipe(
                       Effect.onExit((exit) =>
-                        Exit.isFailure(exit)
+                        (Exit.isFailure(exit)
                           ? Deferred.succeed(workerCause, exit.cause)
-                          : Effect.void
+                          : Effect.void).pipe(
+                            Effect.andThen(Deferred.succeed(workerCompleted, undefined))
+                          )
                       )
                     ),
                   () => release
@@ -373,8 +391,10 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
     regionUpdates,
+    startContainerCalls,
     stopContainerCalls,
-    workerCause
+    workerCause,
+    workerCompleted
   }
 })
 
@@ -503,6 +523,55 @@ describe("SandboxWorkerScope", () => {
 
       expect(result.id).not.toBe(running.id)
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("stops a provisioning worker before it starts its container", () =>
+    Effect.gen(function*() {
+      const createReached = yield* Deferred.make<void>()
+      const createRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        createContainerGate: { reached: createReached, release: createRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const created = yield* sandboxes.create(createParams)
+          yield* Deferred.await(createReached)
+          const stop = yield* sandboxes.stop(SandboxId.make(created.id)).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(createRelease, undefined)
+          yield* Fiber.join(stop)
+          yield* Deferred.await(fixture.workerCompleted)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("keeps unsignalled provisioning through container start", () =>
+    Effect.gen(function*() {
+      const createReached = yield* Deferred.make<void>()
+      const createRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        createContainerGate: { reached: createReached, release: createRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.create(createParams)
+          yield* Deferred.await(createReached)
+          yield* Deferred.succeed(createRelease, undefined)
+          yield* Deferred.await(fixture.workerCompleted)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running" })
     }))
 
   it.effect("rejects fallback creation beside a numeric account sandbox", () =>
