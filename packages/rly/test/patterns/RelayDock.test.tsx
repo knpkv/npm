@@ -1083,6 +1083,36 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("orders a positive slot scope before a higher-priority sibling", async () => {
+    const footer = (
+      <div data-rly-positive-slot-scope-host="">
+        <button data-rly-positive-slot-scope-assigned="" type="button">
+          Assigned action
+        </button>
+      </div>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-positive-slot-scope-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock positive slot scope fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const slot = shadow.appendChild(document.createElement("slot"))
+    slot.tabIndex = 1
+    const direct = shadow.appendChild(document.createElement("button"))
+    direct.tabIndex = 2
+    direct.dataset.rlyPositiveSlotScopeDirect = ""
+    direct.textContent = "Direct priority action"
+
+    direct.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("preserves nested fallback slot scopes", async () => {
     const footer = (
       <div data-rly-nested-slot-host="">
@@ -1216,6 +1246,68 @@ describe("RelayDock", () => {
     expect(shadow.activeElement).toBe(action)
   })
 
+  it("uses the autofocus delegated target as the modal endpoint", async () => {
+    const footer = <div data-rly-autofocus-delegates-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-autofocus-delegates-focus-host]")
+    if (dialog === null || close === null || host === null) {
+      throw new Error("RelayDock autofocus delegatesFocus fixture did not render")
+    }
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open" })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const first = shadow.appendChild(document.createElement("button"))
+    first.tabIndex = -1
+    const autofocus = shadow.appendChild(document.createElement("button"))
+    autofocus.tabIndex = -1
+    autofocus.setAttribute("autofocus", "")
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(shadow.activeElement).toBe(autofocus)
+    expect(shadow.activeElement).not.toBe(first)
+  })
+
+  it("excludes shadow controls in a disabled fieldset outside its first legend", async () => {
+    const footer = (
+      <>
+        <button data-rly-disabled-fieldset-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <fieldset disabled>
+          <div data-rly-disabled-fieldset-host="" />
+        </fieldset>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-disabled-fieldset-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-disabled-fieldset-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock disabled fieldset fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.textContent = "Disabled fieldset shadow action"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("skips assigned controls behind a negative-tabindex shadow slot", async () => {
     const footer = (
       <>
@@ -1323,6 +1415,47 @@ describe("RelayDock", () => {
     first.textContent = "First delegated action"
     const second = shadow.appendChild(document.createElement("button"))
     second.tabIndex = -1
+    second.textContent = "Second delegated action"
+
+    second.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(shadow.activeElement).toBe(first)
+  })
+
+  it("keeps reverse focus inside an interior delegated scope", async () => {
+    const footer = (
+      <>
+        <button data-rly-interior-delegates-focus-before="" type="button">
+          Before delegated scope
+        </button>
+        <div data-rly-interior-delegates-focus-host="" />
+        <button data-rly-interior-delegates-focus-after="" type="button">
+          After delegated scope
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-interior-delegates-focus-host]")
+    if (dialog === null || host === null) throw new Error("RelayDock interior delegatesFocus fixture did not render")
+    host.tabIndex = 0
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const first = shadow.appendChild(document.createElement("button"))
+    first.tabIndex = -1
+    first.dataset.rlyInteriorDelegatesFocusFirst = ""
+    first.textContent = "First delegated action"
+    const second = shadow.appendChild(document.createElement("button"))
+    second.tabIndex = -1
+    second.dataset.rlyInteriorDelegatesFocusSecond = ""
     second.textContent = "Second delegated action"
 
     second.focus()

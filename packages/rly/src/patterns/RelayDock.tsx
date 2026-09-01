@@ -127,7 +127,6 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
   if (view === null) return element.hidden === false
   const visibility = view.getComputedStyle(element).visibility
   if (visibility === "hidden" || visibility === "collapse") return false
-  const nativeRoot = element.getRootNode()
   let current: Element | null = element
   while (current !== null) {
     if (isHTMLElement(current) && current.inert) return false
@@ -135,12 +134,7 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
       const firstSummary: HTMLElement | null = current.querySelector(":scope > summary:first-of-type")
       if (firstSummary === null || !isWithinComposedElement(firstSummary, element, composedParents)) return false
     }
-    if (
-      current !== element &&
-      current.tagName === "FIELDSET" &&
-      current.hasAttribute("disabled") &&
-      current.getRootNode() === nativeRoot
-    ) {
+    if (current !== element && current.tagName === "FIELDSET" && current.hasAttribute("disabled")) {
       const firstLegend: HTMLElement | null = current.querySelector(":scope > legend:first-of-type")
       if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
     }
@@ -178,15 +172,15 @@ interface ComposedHTMLElement extends ComposedElement {
 }
 
 interface SlotElement extends Element {
-  readonly assignedNodes: (options?: { readonly flatten?: boolean }) => Array<Node>
+  readonly assignedElements: (options?: { readonly flatten?: boolean }) => Array<Element>
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
-  element.tagName === "SLOT" && "assignedNodes" in element && hasShadowRootHost(element.getRootNode())
+  element.tagName === "SLOT" && "assignedElements" in element && hasShadowRootHost(element.getRootNode())
 
 const compareSequentialTabOrder = (left: Element, right: Element): number => {
-  const leftTabIndex = isSlotElement(left) || !isHTMLElement(left) ? -1 : left.tabIndex
-  const rightTabIndex = isSlotElement(right) || !isHTMLElement(right) ? -1 : right.tabIndex
+  const leftTabIndex = !isHTMLElement(left) ? -1 : left.tabIndex
+  const rightTabIndex = !isHTMLElement(right) ? -1 : right.tabIndex
   const leftPositive = leftTabIndex > 0
   const rightPositive = rightTabIndex > 0
   if (leftPositive !== rightPositive) return leftPositive ? -1 : 1
@@ -236,9 +230,12 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isSlotElement(element)) {
         if (hasExplicitNegativeTabIndex(element)) return
-        const slotNodes = element.assignedNodes({ flatten: false })
-        const assignedElements = (slotNodes.length > 0 ? slotNodes : [...element.childNodes]).filter(isElementNode)
-        nested.set(element, visitScopeElements(assignedElements, element, element))
+        const assignedElements = element.assignedElements({ flatten: false })
+        const fallbackElements = [...element.children]
+        nested.set(
+          element,
+          visitScopeElements(assignedElements.length > 0 ? assignedElements : fallbackElements, element, element)
+        )
         return
       }
       if (element.shadowRoot !== null && !hasExplicitNegativeTabIndex(element)) {
@@ -603,13 +600,15 @@ const DockLayer = ({
     const delegatedTargets = new Set<Element>()
     for (const { element: host } of composed) {
       if (!isHTMLElement(host) || host.shadowRoot?.delegatesFocus !== true || host.tabIndex < 0) continue
-      const delegated = composed.find(({ element, nativeRoot }) => {
+      const delegatedCandidates = composed.filter(({ element, nativeRoot }) => {
         if (element === host || !isHTMLElement(element) || element.tagName === "SLOT") return false
         if (!isWithinComposedElement(host, element, composedParents)) return false
         if (!element.matches(focusableSelector) && !hasExplicitNegativeTabIndex(element)) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         return !isRadioInput(element) || isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)
       })
+      const delegated =
+        delegatedCandidates.find(({ element }) => element.hasAttribute("autofocus")) ?? delegatedCandidates[0]
       if (delegated !== undefined && isHTMLElement(delegated.element) && delegated.element.tabIndex < 0) {
         delegatedTargets.add(delegated.element)
       }
@@ -637,18 +636,50 @@ const DockLayer = ({
     const first = focusable[0] ?? panel
     const last = focusable[focusable.length - 1] ?? panel
     const active = activeElementFor(panel)
+    const focusableElements = new Set<Element>(focusable)
     const activeIsUnlistedDelegatedDescendant =
       active !== null &&
       isWithinPanel(panel, active) &&
       !focusable.some((element) => element === active) &&
       delegatingShadowHostFor(active) !== null
+    const activeDelegatingHost =
+      activeIsUnlistedDelegatedDescendant && active !== null ? delegatingShadowHostFor(active) : null
+    const activeComposedIndex =
+      activeIsUnlistedDelegatedDescendant && active !== null
+        ? composed.findIndex(({ element }) => element === active)
+        : -1
+    const adjacentFocusable = (step: -1 | 1): HTMLElement | null => {
+      if (activeComposedIndex < 0) return null
+      for (let index = activeComposedIndex + step; index >= 0 && index < composed.length; index += step) {
+        const candidate = composed[index]?.element
+        if (candidate !== undefined && focusableElements.has(candidate) && isHTMLElement(candidate)) return candidate
+      }
+      return null
+    }
+    const adjacent = activeIsUnlistedDelegatedDescendant ? adjacentFocusable(event.shiftKey ? -1 : 1) : null
+    const adjacentIsInActiveDelegatingHost =
+      activeDelegatingHost !== null &&
+      adjacent !== null &&
+      isWithinComposedElement(activeDelegatingHost, adjacent, composedParents)
+    const unlistedDelegatedBoundary =
+      activeIsUnlistedDelegatedDescendant &&
+      !adjacentIsInActiveDelegatingHost &&
+      (adjacent === null || !isWithinPanel(panel, adjacent))
     const leavingStart =
-      event.shiftKey && (active === first || !isWithinPanel(panel, active) || activeIsUnlistedDelegatedDescendant)
+      event.shiftKey &&
+      (active === first ||
+        !isWithinPanel(panel, active) ||
+        adjacentIsInActiveDelegatingHost ||
+        unlistedDelegatedBoundary)
     const leavingEnd =
-      !event.shiftKey && (active === last || !isWithinPanel(panel, active) || activeIsUnlistedDelegatedDescendant)
+      !event.shiftKey &&
+      (active === last ||
+        !isWithinPanel(panel, active) ||
+        adjacentIsInActiveDelegatingHost ||
+        unlistedDelegatedBoundary)
     if (!leavingStart && !leavingEnd) return
     event.preventDefault()
-    const target = event.shiftKey ? last : first
+    const target = adjacentIsInActiveDelegatingHost && adjacent !== null ? adjacent : event.shiftKey ? last : first
     target.focus()
   }
 
