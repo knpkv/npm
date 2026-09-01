@@ -28,6 +28,7 @@ const sandbox = (status: "running" | "stopped") => ({
   pullRequestId: "42",
   region: "eu-west-1",
   repositoryName: "payments-api",
+  region: "eu-west-1",
   sourceBranch: "feature/safe-retries",
   status,
   statusDetail: null

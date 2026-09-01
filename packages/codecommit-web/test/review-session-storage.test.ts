@@ -2,7 +2,10 @@ import { beforeEach, describe, expect, it } from "@effect/vitest"
 import * as Result from "effect/Result"
 
 import {
+  migrateRelayReviewSession,
   readRelayReviewSession,
+  recoverRelayReviewSession,
+  relayReviewSessionIdentity,
   type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
   relayReviewSessionStorageKey,
@@ -161,6 +164,301 @@ describe("Relay review session storage", () => {
     if (Result.isSuccess(restored)) expect(restored.success).toBeNull()
   })
 
+  it("migrates a credential-keyed session when repository identity is enriched", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: ["builtin:pr-review"],
+      turns: [{ findingId: "F1", role: "user", message: "Keep this review." }],
+      dispositions: { F1: "acknowledged" }
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      immediateLock
+    )
+
+    expect(Result.isSuccess(migrated)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.identity).toBe(relayReviewSessionIdentity(targetResource, review))
+      expect(restored.success?.resource).toEqual(targetResource)
+      expect(restored.success?.turns).toEqual([{ findingId: "F1", role: "user", message: "Keep this review." }])
+      expect(restored.success?.dispositions).toEqual({ F1: "acknowledged" })
+    }
+  })
+
+  it("redirects a legacy writer to the canonical resource after migration", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+    await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      immediateLock
+    )
+
+    const redirected = await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: [],
+      turns: [{ id: "legacy-turn", findingId: "F1", role: "user", message: "Keep this turn." }],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(redirected)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) expect(restored.success?.turns.map(({ id }) => id)).toEqual(["legacy-turn"])
+  })
+
+  it("keeps a newer canonical rerun when a redirected legacy writer arrives later", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "credential-head",
+      resource: sourceResource,
+      review,
+      skillIds: ["old-skill"],
+      turns: [],
+      dispositions: {}
+    })
+    await migrateRelayReviewSession(localStorage, sourceKey, sourceResource, targetKey, targetResource, immediateLock)
+    await writeSession(localStorage, targetKey, {
+      expectedIdentity: relayReviewSessionIdentity(targetResource, review),
+      expectedVersion: 1,
+      identity: "canonical-rerun",
+      resource: targetResource,
+      review: { ...review, revisionId: "revision-2" },
+      skillIds: ["new-skill"],
+      turns: [],
+      dispositions: {}
+    })
+
+    const redirected = await writeSession(localStorage, sourceKey, {
+      expectedIdentity: "credential-head",
+      expectedVersion: 1,
+      identity: "credential-head",
+      resource: sourceResource,
+      review,
+      skillIds: ["old-skill"],
+      turns: [{ id: "legacy-turn", findingId: "F1", role: "user", message: "Keep this turn." }],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(redirected)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.identity).toBe("canonical-rerun")
+      expect(restored.success?.review.revisionId).toBe("revision-2")
+      expect(restored.success?.skillIds).toEqual(["new-skill"])
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(["legacy-turn"])
+    }
+  })
+
+  it("keeps an older migrated review stale against the current head", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "credential-old-head",
+      resource: sourceResource,
+      review: { ...review, revisionId: "revision-old" },
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      immediateLock
+    )
+
+    expect(Result.isSuccess(migrated)).toBe(true)
+    if (Result.isSuccess(migrated)) {
+      expect(migrated.success?.identity).toBe(
+        relayReviewSessionIdentity(targetResource, { ...review, revisionId: "revision-old" })
+      )
+    }
+  })
+
+  it("returns the canonical winner when a target appears before migration commits", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "credential-head",
+      resource: sourceResource,
+      review,
+      skillIds: ["legacy"],
+      turns: [],
+      dispositions: {}
+    })
+    const canonicalReview = { ...review, revisionId: "revision-canonical" }
+    await writeSession(localStorage, targetKey, {
+      identity: "canonical-head",
+      resource: targetResource,
+      review: canonicalReview,
+      skillIds: ["canonical"],
+      turns: [],
+      dispositions: {}
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      immediateLock
+    )
+
+    expect(Result.isSuccess(migrated)).toBe(true)
+    if (Result.isSuccess(migrated)) {
+      expect(migrated.success?.identity).toBe("canonical-head")
+      expect(migrated.success?.review.revisionId).toBe("revision-canonical")
+      expect(migrated.success?.skillIds).toEqual(["canonical"])
+    }
+  })
+
+  it("keeps a current canonical rerun when migration finishes after it", async () => {
+    const sourceResource: RelayReviewSessionResourceIdentity = { ...resource, accountKind: "credential" }
+    const sourceKey = relayReviewSessionStorageKey(sourceResource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    const targetKey = relayReviewSessionStorageKey(targetResource)
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource: sourceResource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+    const migrationGate = Promise.withResolvers<void>()
+    let lockCalls = 0
+    const lock: RelayReviewSessionLock = {
+      request: async (_name, effect) => {
+        lockCalls++
+        if (lockCalls === 1) await migrationGate.promise
+        return effect()
+      }
+    }
+    const migration = migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      sourceResource,
+      targetKey,
+      targetResource,
+      lock
+    )
+    await Promise.resolve()
+    const rerun = await writeRelayReviewSession(localStorage, targetKey, {
+      expectedIdentity: "exact-head-2",
+      expectedVersion: 0,
+      identity: "exact-head-2",
+      resource: targetResource,
+      review: { ...review, revisionId: "revision-2" },
+      skillIds: ["rerun"],
+      turns: [],
+      dispositions: {}
+    }, lock)
+    expect(Result.isSuccess(rerun)).toBe(true)
+    migrationGate.resolve()
+    await migration
+
+    const restored = readRelayReviewSession(localStorage, targetKey, targetResource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.review.revisionId).toBe("revision-2")
+      expect(restored.success?.skillIds).toEqual(["rerun"])
+    }
+  })
+
+  it("fails closed when a legacy session has no account provenance", async () => {
+    const sourceKey = relayReviewSessionStorageKey(resource)
+    const targetResource: RelayReviewSessionResourceIdentity = {
+      ...resource,
+      accountId: "222222222222",
+      accountKind: "repository"
+    }
+    await writeSession(localStorage, sourceKey, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: {}
+    })
+
+    const migrated = await migrateRelayReviewSession(
+      localStorage,
+      sourceKey,
+      resource,
+      relayReviewSessionStorageKey(targetResource),
+      targetResource,
+      immediateLock
+    )
+
+    expect(Result.isFailure(migrated)).toBe(true)
+    if (Result.isFailure(migrated)) expect(migrated.failure._tag).toBe("RelayReviewSessionMigrationAmbiguous")
+  })
+
   it("merges stale tab writes without losing turns or regressing publication state", async () => {
     const key = relayReviewSessionStorageKey(resource)
     const staleTab = {
@@ -178,7 +476,8 @@ describe("Relay review session storage", () => {
     })
     await writeSession(localStorage, key, {
       ...staleTab,
-      turns: [{ findingId: "F1", role: "user", message: "Second tab" }]
+      appendedTurnIds: ["second-tab"],
+      turns: [{ id: "second-tab", findingId: "F1", role: "user", message: "Second tab" }]
     })
 
     const restored = readRelayReviewSession(localStorage, key, resource)
@@ -238,11 +537,51 @@ describe("Relay review session storage", () => {
     expect(Result.isSuccess(restored)).toBe(true)
     if (Result.isSuccess(restored)) {
       expect(restored.success?.dispositions).toEqual({
+        interrupted: "posting",
+        pending: "pending",
+        posted: "posted"
+      })
+    }
+
+    const recovered = await recoverRelayReviewSession(sessionStorage, key, resource, immediateLock)
+    expect(Result.isSuccess(recovered)).toBe(true)
+    if (Result.isSuccess(recovered)) {
+      expect(recovered.success?.dispositions).toEqual({
         interrupted: "failed",
         pending: "pending",
         posted: "posted"
       })
     }
+  })
+
+  it("waits for a live publication owner before recovering its marker", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [],
+      dispositions: { F1: "posting" }
+    })
+    const release = Promise.withResolvers<void>()
+    const lock: RelayReviewSessionLock = {
+      request: async (name, effect) => {
+        if (name.includes(":publication:")) await release.promise
+        return effect()
+      }
+    }
+
+    const recovery = recoverRelayReviewSession(localStorage, key, resource, lock)
+    await Promise.resolve()
+    const active = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(active)).toBe(true)
+    if (Result.isSuccess(active)) expect(active.success?.dispositions.F1).toBe("posting")
+
+    release.resolve()
+    const recovered = await recovery
+    expect(Result.isSuccess(recovered)).toBe(true)
+    if (Result.isSuccess(recovered)) expect(recovered.success?.dispositions.F1).toBe("failed")
   })
 
   it("reports blocked storage instead of silently discarding the durable thread", () => {
@@ -428,7 +767,7 @@ describe("Relay review session storage", () => {
       resource,
       review,
       skillIds: [],
-      turns: window(1, 40),
+      turns: window(1, 40).map((item, index) => index === 0 ? { ...item, findingId: "PR" } : item),
       dispositions: {}
     })
 
@@ -509,6 +848,212 @@ describe("Relay review session storage", () => {
     }
   })
 
+  it("does not append an unidentified short disjoint stale window", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (index: number): RelayReviewConversationTurn => ({
+      id: `turn-${index}`,
+      findingId: "F1",
+      role: "user",
+      message: `Turn ${index}`
+    })
+    const window = (first: number, last: number): ReadonlyArray<RelayReviewConversationTurn> =>
+      Array.from({ length: last - first + 1 }, (_, offset) => turn(first + offset))
+
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 45),
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 45),
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(1, 2),
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual(
+        Array.from({ length: 5 }, (_, offset) => `turn-${offset + 41}`)
+      )
+    }
+  })
+
+  it("retains an identified new turn from a disjoint stale window", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (index: number): RelayReviewConversationTurn => ({
+      id: `turn-${index}`,
+      findingId: "F1",
+      role: "user",
+      message: `Turn ${index}`
+    })
+    const window = (first: number, last: number): ReadonlyArray<RelayReviewConversationTurn> =>
+      Array.from({ length: last - first + 1 }, (_, offset) => turn(first + offset))
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 80),
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: window(41, 80),
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      appendedTurnIds: ["turn-81"],
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [...window(2, 40), turn(81)],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.map(({ id }) => id)).toEqual([
+        ...Array.from({ length: 39 }, (_, offset) => `turn-${offset + 42}`),
+        "turn-81"
+      ])
+    }
+  })
+
+  it("retains the complete appended exchange from a disjoint stale window", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (id: string, role: "user" | "assistant"): RelayReviewConversationTurn => ({
+      id,
+      findingId: "F1",
+      role,
+      message: id
+    })
+    const currentTurns = Array.from({ length: 40 }, (_, index) => turn(`turn-${String(index + 41)}`, "user"))
+    await writeSession(localStorage, key, {
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      appendedTurnIds: ["turn-81", "turn-82"],
+      expectedVersion: 1,
+      identity: "exact-head-1",
+      resource,
+      review,
+      skillIds: [],
+      turns: [
+        ...Array.from({ length: 38 }, (_, index) => turn(`turn-${String(index + 2)}`, "user")),
+        turn("turn-81", "user"),
+        turn("turn-82", "assistant")
+      ],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) {
+      expect(restored.success?.turns.slice(-2).map(({ id }) => id)).toEqual(["turn-81", "turn-82"])
+      expect(restored.success?.turns).toHaveLength(40)
+    }
+  })
+
+  it("drops an appended exchange whose finding changed in the durable review", async () => {
+    const key = relayReviewSessionStorageKey(resource)
+    const turn = (id: string): RelayReviewConversationTurn => ({
+      id,
+      findingId: "F1",
+      role: "user",
+      message: id
+    })
+    const currentTurns = Array.from({ length: 40 }, (_, index) => turn(`turn-${String(index + 41)}`))
+    await writeSession(localStorage, key, {
+      identity: "exact-head-2",
+      resource,
+      review: {
+        ...review,
+        revisionId: "revision-2",
+        result: { ...review.result, findings: [{ ...review.result.findings[0], summary: "Fixed in head." }] }
+      },
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+    await writeSession(localStorage, key, {
+      expectedVersion: 1,
+      identity: "exact-head-2",
+      resource,
+      review: {
+        ...review,
+        revisionId: "revision-2",
+        result: { ...review.result, findings: [{ ...review.result.findings[0], summary: "Fixed in head." }] }
+      },
+      skillIds: [],
+      turns: currentTurns,
+      dispositions: {}
+    })
+
+    const staleWrite = await writeSession(localStorage, key, {
+      appendedTurnIds: ["turn-81", "turn-82"],
+      expectedVersion: 1,
+      identity: "exact-head-2",
+      resource,
+      review,
+      skillIds: [],
+      turns: [
+        ...Array.from({ length: 38 }, (_, index) => turn(`turn-${String(index + 2)}`)),
+        turn("turn-81"),
+        turn("turn-82")
+      ],
+      dispositions: {}
+    })
+
+    expect(Result.isSuccess(staleWrite)).toBe(true)
+    const restored = readRelayReviewSession(localStorage, key, resource)
+    expect(Result.isSuccess(restored)).toBe(true)
+    if (Result.isSuccess(restored)) expect(restored.success?.turns).toHaveLength(40)
+  })
+
   it("serializes cross-tab writes through the session lock", async () => {
     const key = relayReviewSessionStorageKey(resource)
     let tail = Promise.resolve()
@@ -538,6 +1083,7 @@ describe("Relay review session storage", () => {
       dispositions: {}
     }, lock)
     const second = writeRelayReviewSession(localStorage, key, {
+      appendedTurnIds: ["second"],
       expectedIdentity: "exact-head-1",
       expectedVersion: 0,
       identity: "exact-head-1",

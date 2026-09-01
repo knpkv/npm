@@ -50,6 +50,11 @@ const awsAccountPullRequest = new Domain.PullRequest({
   })
 })
 
+const otherRepositoryPullRequest = new Domain.PullRequest({
+  ...pullRequest,
+  repositoryName: Domain.RepositoryName.make("identity")
+})
+
 describe("PR handler selection", () => {
   it("rejects partial subscription coordinates", () => {
     const decode = Schema.decodeUnknownResult(SubscriptionPayload)
@@ -171,34 +176,71 @@ describe("PR handler selection", () => {
 
   it.effect("matches the repository account identifier used by browser routes", () =>
     Effect.gen(function*() {
-      const selected = yield* selectedPullRequest([pullRequest], "111122223333", pullRequest.id)
+      const selected = yield* selectedPullRequest([pullRequest], "111122223333", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "payments"
+      })
       expect(selected).toBe(pullRequest)
 
       const byAwsAccount = yield* selectedPullRequest(
         [awsAccountPullRequest],
         "444455556666",
-        awsAccountPullRequest.id
+        awsAccountPullRequest.id,
+        { region: "eu-west-1", repositoryName: "payments" }
       )
       expect(byAwsAccount).toBe(awsAccountPullRequest)
 
-      const failure = yield* selectedPullRequest([pullRequest], "999900001111", pullRequest.id).pipe(Effect.flip)
+      const failure = yield* selectedPullRequest([pullRequest], "999900001111", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "payments"
+      }).pipe(Effect.flip)
       expect(failure.message).toContain("not available")
+
+      const selectedRepository = yield* selectedPullRequest(
+        [pullRequest, otherRepositoryPullRequest],
+        "111122223333",
+        pullRequest.id,
+        { region: "eu-west-1", repositoryName: "identity" }
+      )
+      expect(selectedRepository).toBe(otherRepositoryPullRequest)
     }))
 
   it.effect("resolves a direct-linked pull request from the durable SSE cache", () =>
     Effect.gen(function*() {
       const cached = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
+      const cachedOtherRepository = Schema.encodeSync(PRService.CachedPRToPullRequest)(otherRepositoryPullRequest)
       const cache = {
-        findAll: () => Effect.succeed([cached])
+        findAll: () => Effect.succeed([cached, cachedOtherRepository])
       }
 
-      const selected = yield* cachedPullRequest(cache, "111122223333", pullRequest.id)
+      const selected = yield* cachedPullRequest(cache, "111122223333", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "payments"
+      })
       expect(selected.id).toBe(pullRequest.id)
-      const selectedByProfile = yield* cachedPullRequest(cache, "production", pullRequest.id)
+      const selectedByProfile = yield* cachedPullRequest(cache, "production", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "payments"
+      })
       expect(selectedByProfile.id).toBe(pullRequest.id)
 
-      const mismatch = yield* cachedPullRequest(cache, "unrelated", pullRequest.id).pipe(Effect.flip)
+      const mismatch = yield* cachedPullRequest(cache, "unrelated", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "payments"
+      }).pipe(Effect.flip)
       expect(mismatch.message).toContain("not available")
+
+      const regionalMismatch = yield* cachedPullRequest(cache, "111122223333", pullRequest.id, {
+        region: "us-east-1",
+        repositoryName: "payments"
+      }).pipe(Effect.flip)
+      expect(regionalMismatch.message).toContain("not available")
+
+      const repositoryMatch = yield* cachedPullRequest(cache, "111122223333", pullRequest.id, {
+        region: "eu-west-1",
+        repositoryName: "identity"
+      })
+      expect(repositoryMatch.repositoryName).toBe("identity")
     }))
 
   it.effect("requires exact coordinates when duplicate account and PR identifiers exist", () =>

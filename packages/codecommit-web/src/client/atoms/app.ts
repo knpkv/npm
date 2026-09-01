@@ -35,8 +35,8 @@ export interface SandboxItem {
   readonly id: string
   readonly pullRequestId: string
   readonly awsAccountId: string
-  readonly region: string | null
   readonly repositoryName: string
+  readonly region: string | null
   readonly sourceBranch: string
   readonly containerId: string | null
   readonly port: number | null

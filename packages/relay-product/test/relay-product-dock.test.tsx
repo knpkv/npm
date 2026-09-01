@@ -7,12 +7,14 @@ import { act, type ReactElement } from "react"
 import { createRoot, type Root } from "react-dom/client"
 
 import {
+  type ContinuePullRequestConversationRequest,
   PullRequestConversation,
   RelayProductDock,
   RelayProductDockChromeBoundary,
   type RelayProductDockHost,
   type RelayPullRequestDockRegistration,
   RelaySelectorState,
+  relaySelectionMatchesRegistration,
   useRelayPullRequestDock
 } from "../src/index.js"
 
@@ -250,6 +252,89 @@ describe("RelayProductDock", () => {
       await click(queryRequired(rendered.portal, 'button[type="submit"]'))
 
       expect(continuations).toEqual(["Verify the fix on the current head."])
+    } finally {
+      await disposeDock(rendered)
+    }
+  })
+
+  it("allows an advertised alternate profile and model to continue the registered PR", async () => {
+    const conversation = await Effect.runPromise(
+      Schema.decodeUnknownEffect(PullRequestConversation)({
+        _tag: "control-center",
+        route: {
+          entityId: "019c3df0-2222-7000-8000-000000000002",
+          href: "/w/019c3df0-1111-7000-8000-000000000001/items/019c3df0-2222-7000-8000-000000000002"
+        },
+        selection: {
+          modelId: "security",
+          models: [
+            { id: "security", label: "Security" },
+            { id: "architecture", label: "Architecture" }
+          ],
+          profileId: "security",
+          profiles: [
+            { id: "security", label: "Security" },
+            { id: "architecture", label: "Architecture" }
+          ]
+        },
+        thread: {
+          pluginConnectionId: "019c3df0-3333-7000-8000-000000000003",
+          pullRequestId: "184",
+          repositoryName: "payments",
+          workspaceId: "019c3df0-1111-7000-8000-000000000001"
+        }
+      })
+    )
+    const delivered: Array<typeof ContinuePullRequestConversationRequest.Type> = []
+    const registration: RelayPullRequestDockRegistration = {
+      context: [{ id: "pull-request", label: "PR", value: "#184" }],
+      conversation,
+      continuePullRequestConversation: (request) =>
+        Effect.sync(() => {
+          delivered.push(request)
+        }),
+      messages: [],
+      selection: conversation.selection,
+      status: "ready"
+    }
+    const rendered = await renderDock(
+      <RelayProductDock host={host}>
+        <RegisteredThread registration={registration} />
+      </RelayProductDock>
+    )
+    try {
+      await click(queryRequired(rendered.container, "[data-rly-relay-dock-trigger]"))
+      const selectors = rendered.portal.querySelectorAll<HTMLButtonElement>('[role="combobox"]')
+      expect(selectors).toHaveLength(2)
+      const profileSelector = selectors.item(0)
+      const modelSelector = selectors.item(1)
+      if (profileSelector === null || modelSelector === null) {
+        throw new MissingDockTestElement({ selector: '[role="combobox"]' })
+      }
+      await click(profileSelector)
+      await click(queryRequired(rendered.portal, '[role="option"]:nth-of-type(2)'))
+      await click(modelSelector)
+      await click(queryRequired(rendered.portal, '[role="option"]:nth-of-type(2)'))
+      expect(
+        relaySelectionMatchesRegistration(
+          {
+            modelId: "architecture",
+            models: conversation.selection.models,
+            profileId: "architecture",
+            profiles: conversation.selection.profiles
+          },
+          registration
+        )
+      ).toBe(true)
+
+      await setTextareaValue(
+        queryRequired<HTMLTextAreaElement>(rendered.portal, "textarea"),
+        "Continue with architecture."
+      )
+      await click(queryRequired(rendered.portal, 'button[type="submit"]'))
+
+      expect(delivered).toHaveLength(1)
+      expect(delivered[0]?.selection).toMatchObject({ modelId: "architecture", profileId: "architecture" })
     } finally {
       await disposeDock(rendered)
     }

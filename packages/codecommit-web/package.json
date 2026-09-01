@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/codecommit-web",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "Web server and frontend for CodeCommit PR browser",
   "type": "module",
   "main": "src/index.ts",
@@ -33,8 +33,8 @@
     "@formkit/auto-animate": "^0.10.0",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
-    "@knpkv/relay-product": "workspace:^",
     "@knpkv/review": "workspace:^",
+    "@knpkv/relay-product": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "@tailwindcss/typography": "^0.5.20",
     "@tailwindcss/vite": "^4.3.3",

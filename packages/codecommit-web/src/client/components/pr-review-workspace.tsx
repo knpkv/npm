@@ -37,7 +37,12 @@ import {
 } from "../../server/Api.js"
 import { configQueryAtom } from "../atoms/app.js"
 import { ApiClient } from "../atoms/runtime.js"
-import { CodeCommitRelayThread, type CodeCommitRelayContinuationOutcome } from "../codecommitRelayDock.js"
+import {
+  codeCommitRelayAccountKind,
+  codeCommitRelayExecutionProfile,
+  CodeCommitRelayThread,
+  type CodeCommitRelayContinuationOutcome
+} from "../codecommitRelayDock.js"
 import { useComments } from "../hooks/useComments.js"
 import {
   applyFindingDecision,
@@ -53,9 +58,14 @@ import {
 import { runRelayReviewStream } from "../relay-review-stream.js"
 import {
   readRelayReviewSession,
+  migrateRelayReviewSession,
+  recoverRelayReviewSession,
+  relayReviewSessionPublicationLockName,
   type RelayReviewSessionLock,
   type RelayReviewSessionResourceIdentity,
+  type RelayReviewSessionWrite,
   relayReviewSessionStorageKey,
+  relayReviewSessionIdentity,
   writeRelayReviewSession
 } from "../review-session-storage.js"
 import {
@@ -84,6 +94,11 @@ const MAXIMUM_RENDERABLE_DIFF_LINE_PAIRS = 4_000_000
 const MAXIMUM_RENDERABLE_DIFF_INPUT_BYTES = 512 * 1024
 const diffTextEncoder = new TextEncoder()
 
+const pullRequestApiQuery = (pullRequest: Pick<Domain.PullRequest, "repositoryName" | "account">): string =>
+  `?repositoryName=${encodeURIComponent(String(pullRequest.repositoryName))}&region=${encodeURIComponent(
+    String(pullRequest.account.region)
+  )}`
+
 const browserRelayReviewSessionLock = (): RelayReviewSessionLock | null => {
   if (!("locks" in window.navigator)) return null
   return {
@@ -97,11 +112,19 @@ interface HydratedSessionMarker {
   pendingInitialPass: boolean
 }
 
+interface RelayReviewSessionMigrationState {
+  readonly key: string
+  readonly status: "failed" | "pending"
+}
+
 const sessionFingerprint = (
   completedReview: RelayReviewCompletion | null,
   turns: ReadonlyArray<RelayReviewConversationTurn>,
   dispositions: FindingDispositions
 ): string => JSON.stringify({ completedReview, dispositions, turns })
+
+const hasPostingDisposition = (dispositions: FindingDispositions): boolean =>
+  Object.values(dispositions).some((disposition) => disposition === "posting")
 
 const lineCount = (text: string): number => {
   if (text.length === 0) return 0
@@ -183,7 +206,11 @@ const exactReviewIdentity = (
   `${accountId}:${repositoryName}:${region}:${pullRequestId}:${diff.revisionId}:${diff.baseCommit}:${diff.headCommit}`
 
 const canonicalReviewAccountId = (account: Domain.Account): string =>
-  String(account.repoAccountId ?? account.awsAccountId ?? account.profile)
+  account.repoAccountId !== undefined && account.repoAccountId.length > 0
+    ? account.repoAccountId
+    : account.awsAccountId !== undefined && account.awsAccountId.length > 0
+      ? account.awsAccountId
+      : account.profile
 
 export const fileIndexForFinding = (
   files: PullRequestDiffResponse["files"],
@@ -329,6 +356,8 @@ const LoadedFileDiff = ({
   onContentStateChange,
   onNavigateToComment,
   pullRequestId,
+  region,
+  repositoryName,
   revisionId,
   wrap
 }: {
@@ -343,6 +372,8 @@ const LoadedFileDiff = ({
   readonly onContentStateChange: (fileIndex: number, content: RlyDiffFileContent) => void
   readonly onNavigateToComment: (target: ReviewCommentNavigationTarget) => void
   readonly pullRequestId: Domain.PullRequestId
+  readonly region: Domain.AwsRegion
+  readonly repositoryName: string
   readonly revisionId: string
   readonly wrap: boolean
 }): ReactElement => {
@@ -350,10 +381,10 @@ const LoadedFileDiff = ({
     () =>
       ApiClient.query("prs", "diffContent", {
         params: { awsAccountId: accountId, prId: pullRequestId, fileIndex: file.index },
-        query: { revisionId, baseCommit, headCommit },
+        query: { baseCommit, headCommit, region, repositoryName, revisionId },
         timeToLive: "10 seconds"
       }),
-    [accountId, baseCommit, file.index, headCommit, pullRequestId, revisionId]
+    [accountId, baseCommit, file.index, headCommit, pullRequestId, region, repositoryName, revisionId]
   )
   const content = useAtomValue(contentAtom)
   const observedContentState = AsyncResult.isFailure(content)
@@ -669,10 +700,19 @@ const ReadyReviewWorkspace = ({
     diff
   )
   const reviewResource = useMemo<RelayReviewSessionResourceIdentity | null>(() => {
-    const stableAccountId = pullRequest.account.repoAccountId ?? pullRequest.account.awsAccountId
+    const repositoryAccountId =
+      pullRequest.account.repoAccountId !== undefined && pullRequest.account.repoAccountId.length > 0
+        ? pullRequest.account.repoAccountId
+        : undefined
+    const stableAccountId =
+      repositoryAccountId ??
+      (pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
+        ? pullRequest.account.awsAccountId
+        : undefined)
     return stableAccountId === undefined
       ? null
       : {
+          accountKind: codeCommitRelayAccountKind(pullRequest.account),
           accountId: stableAccountId,
           pullRequestId: String(pullRequest.id),
           region: String(pullRequest.account.region),
@@ -685,14 +725,44 @@ const ReadyReviewWorkspace = ({
     pullRequest.id,
     pullRequest.repositoryName
   ])
+  const legacyReviewResource = useMemo<RelayReviewSessionResourceIdentity | null>(() => {
+    const credentialAccountId = pullRequest.account.awsAccountId
+    const repositoryAccountId = pullRequest.account.repoAccountId
+    if (
+      credentialAccountId === undefined ||
+      repositoryAccountId === undefined ||
+      credentialAccountId === repositoryAccountId
+    )
+      return null
+    return {
+      accountKind: "credential",
+      accountId: credentialAccountId,
+      pullRequestId: String(pullRequest.id),
+      region: String(pullRequest.account.region),
+      repositoryName: String(pullRequest.repositoryName)
+    }
+  }, [
+    pullRequest.account.awsAccountId,
+    pullRequest.account.repoAccountId,
+    pullRequest.account.region,
+    pullRequest.id,
+    pullRequest.repositoryName
+  ])
   const [contentStateCache, setContentStateCache] = useState<{
     readonly identity: string
     readonly values: ReadonlyMap<number, RlyDiffFileContent>
   }>(() => ({ identity: reviewIdentity, values: new Map() }))
   const reviewSessionKey = reviewResource === null ? null : relayReviewSessionStorageKey(reviewResource)
+  const legacyReviewSessionKey =
+    legacyReviewResource === null ? null : relayReviewSessionStorageKey(legacyReviewResource)
+  const sessionMigrationKeyRef = useRef(reviewSessionKey)
+  sessionMigrationKeyRef.current = reviewSessionKey
+  const sessionMigrationStatusRef = useRef<RelayReviewSessionMigrationState["status"] | "idle">("idle")
   const reviewSessionVersionRef = useRef(0)
   const skipSessionWriteRef = useRef<string | null>(null)
   const hydratedSessionRef = useRef<HydratedSessionMarker | null>(null)
+  const hydratedProfileKeyRef = useRef<string | null>(null)
+  const appendedTurnIdsRef = useRef<ReadonlyArray<string> | undefined>(undefined)
   const [completedReview, setCompletedReview] = useState<RelayReviewCompletion | null>(null)
   const completedReviewRef = useRef(completedReview)
   completedReviewRef.current = completedReview
@@ -700,6 +770,7 @@ const ReadyReviewWorkspace = ({
     readonly description: string
     readonly title: string
   } | null>(null)
+  const [sessionMigration, setSessionMigration] = useState<RelayReviewSessionMigrationState | null>(null)
   const [navigationNotice, setNavigationNotice] = useState<string | null>(null)
   const [isReviewing, setIsReviewing] = useState(false)
   const [progress, setProgress] = useState<
@@ -730,7 +801,98 @@ const ReadyReviewWorkspace = ({
   const files = diff.files.map((file) => toRlyFile(file, contentStates.get(file.index) ?? { state: "ready" }))
   const inventory: RlyDiffInventory = { files, state: "ready" }
 
+  const persistDispositions = useCallback(
+    async (nextDispositions: FindingDispositions): Promise<boolean> => {
+      const currentReview = completedReviewRef.current
+      if (currentReview === null || reviewResource === null || reviewSessionKey === null) return true
+      const lock = browserRelayReviewSessionLock()
+      if (lock === null) return true
+      const written = await writeRelayReviewSession(
+        window.localStorage,
+        reviewSessionKey,
+        {
+          dispositions: nextDispositions,
+          expectedIdentity: currentReview.expectedIdentity,
+          expectedVersion: reviewSessionVersionRef.current,
+          identity: currentReview.identity,
+          resource: reviewResource,
+          review: currentReview.value,
+          skillIds: currentReview.skillIds,
+          turns: turnsRef.current
+        },
+        lock
+      )
+      if (Result.isFailure(written)) {
+        setReviewFailure({
+          description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
+          title: "PR conversation not saved"
+        })
+        return false
+      }
+      reviewSessionVersionRef.current = written.success.session.version
+      return true
+    },
+    [reviewResource, reviewSessionKey]
+  )
+
+  const persistReviewSnapshot = useCallback(async (): Promise<boolean> => {
+    const currentReview = completedReviewRef.current
+    if (currentReview === null || reviewResource === null || reviewSessionKey === null) return true
+    const lock = browserRelayReviewSessionLock()
+    if (lock === null) {
+      setReviewFailure({
+        description:
+          "This browser cannot coordinate Relay writes across tabs. Relay did not save this PR conversation.",
+        title: "PR conversation not saved"
+      })
+      return false
+    }
+    const written = await writeRelayReviewSession(
+      window.localStorage,
+      reviewSessionKey,
+      {
+        dispositions: dispositionsRef.current,
+        expectedIdentity: currentReview.expectedIdentity,
+        expectedVersion: reviewSessionVersionRef.current,
+        identity: currentReview.identity,
+        resource: reviewResource,
+        review: currentReview.value,
+        skillIds: currentReview.skillIds,
+        turns: turnsRef.current
+      },
+      lock
+    )
+    if (Result.isFailure(written)) {
+      setReviewFailure({
+        description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
+        title: "PR conversation not saved"
+      })
+      return false
+    }
+    reviewSessionVersionRef.current = written.success.session.version
+    hydratedSessionRef.current = {
+      fingerprint: sessionFingerprint(currentReview, turnsRef.current, dispositionsRef.current),
+      key: reviewSessionKey,
+      pendingInitialPass: false
+    }
+    if (
+      written.success._tag === "stale-review-preserved" &&
+      written.success.session.identity !== currentReview.identity
+    ) {
+      setReviewFailure({
+        description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
+        title: "Newer PR review preserved"
+      })
+      return false
+    }
+    return true
+  }, [reviewResource, reviewSessionKey])
+
   useEffect(() => {
+    if (reviewSessionKey !== null && hydratedProfileKeyRef.current === reviewSessionKey) {
+      hydratedProfileKeyRef.current = null
+      return
+    }
     if (!AsyncResult.isSuccess(config) || selectedProfileId !== null) return
     const profile =
       config.value.review.profiles.find(({ id }) => id === config.value.review.defaultProfileId) ??
@@ -738,7 +900,7 @@ const ReadyReviewWorkspace = ({
     if (profile !== undefined) {
       setSelectedProfileId(profile.id)
     }
-  }, [config, selectedProfileId])
+  }, [config, reviewSessionKey, selectedProfileId])
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -761,7 +923,10 @@ const ReadyReviewWorkspace = ({
   }, [commentNavigation, diff])
 
   useEffect(() => {
+    sessionMigrationStatusRef.current = "idle"
+    setSessionMigration(null)
     if (reviewResource === null || reviewSessionKey === null) {
+      hydratedProfileKeyRef.current = null
       skipSessionWriteRef.current = null
       hydratedSessionRef.current = null
       reviewSessionVersionRef.current = 0
@@ -771,6 +936,7 @@ const ReadyReviewWorkspace = ({
       })
       return
     }
+    hydratedProfileKeyRef.current = null
     const stored = readRelayReviewSession(window.localStorage, reviewSessionKey, reviewResource)
     if (Result.isFailure(stored)) {
       skipSessionWriteRef.current = null
@@ -785,7 +951,102 @@ const ReadyReviewWorkspace = ({
       })
       return
     }
-    if (stored.success === null) {
+    let hydrated = stored.success
+    let hydratedFromLegacy = false
+    if (hydrated === null && legacyReviewResource !== null && legacyReviewSessionKey !== null) {
+      const legacy = readRelayReviewSession(window.localStorage, legacyReviewSessionKey, legacyReviewResource)
+      if (Result.isFailure(legacy)) {
+        setReviewFailure({
+          description:
+            legacy.failure._tag === "RelayReviewSessionInvalid"
+              ? "The saved PR conversation is invalid. Clear this site's local data before starting a new review."
+              : "Local storage is unavailable. Relay cannot durably retain this PR conversation.",
+          title: "PR conversation unavailable"
+        })
+        return
+      }
+      hydrated = legacy.success
+      hydratedFromLegacy = hydrated !== null
+      if (hydrated !== null) {
+        if (hydrated.resource.accountKind !== "credential") {
+          sessionMigrationStatusRef.current = "failed"
+          setSessionMigration({ key: reviewSessionKey, status: "failed" })
+          setReviewFailure({
+            description:
+              "Relay cannot safely migrate this legacy PR conversation because its account provenance is ambiguous.",
+            title: "PR conversation migration unavailable"
+          })
+          return
+        }
+        const lock = browserRelayReviewSessionLock()
+        if (lock === null) {
+          sessionMigrationStatusRef.current = "failed"
+          setSessionMigration({ key: reviewSessionKey, status: "failed" })
+          setReviewFailure({
+            description:
+              "This browser cannot coordinate Relay writes across tabs. Relay did not migrate this PR conversation.",
+            title: "PR conversation not saved"
+          })
+        } else {
+          sessionMigrationStatusRef.current = "pending"
+          setSessionMigration({ key: reviewSessionKey, status: "pending" })
+          const migrationIdentity = relayReviewSessionIdentity(reviewResource, hydrated.review)
+          void migrateRelayReviewSession(
+            window.localStorage,
+            legacyReviewSessionKey,
+            legacyReviewResource,
+            reviewSessionKey,
+            reviewResource,
+            lock
+          ).then((migrated) => {
+            if (Result.isFailure(migrated)) {
+              if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                sessionMigrationStatusRef.current = "failed"
+                setSessionMigration({ key: reviewSessionKey, status: "failed" })
+                setReviewFailure({
+                  description: "Local storage is unavailable. Relay could not migrate this PR conversation.",
+                  title: "PR conversation not saved"
+                })
+              }
+            } else if (migrated.success !== null) {
+              if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                if (migrated.success.identity !== migrationIdentity) {
+                  const adopted = replaceRelayReviewPreservingTurns(migrated.success.turns, {
+                    expectedIdentity: migrated.success.identity,
+                    identity: migrated.success.identity,
+                    skillIds: migrated.success.skillIds,
+                    value: migrated.success.review
+                  })
+                  completedReviewRef.current = adopted
+                  setCompletedReview(adopted)
+                  dispositionsRef.current = migrated.success.dispositions
+                  setDispositions(migrated.success.dispositions)
+                  setSelectedProfileId(migrated.success.review.profile.id)
+                  setTurns(migrated.success.turns)
+                  setSelectedFindingId(
+                    migrated.success.turns.at(-1)?.findingId ?? migrated.success.review.result.findings[0]?.id ?? null
+                  )
+                  hydratedSessionRef.current = {
+                    fingerprint: sessionFingerprint(adopted, migrated.success.turns, migrated.success.dispositions),
+                    key: reviewSessionKey,
+                    pendingInitialPass: false
+                  }
+                }
+                sessionMigrationStatusRef.current = "idle"
+                reviewSessionVersionRef.current = migrated.success.version
+                setSessionMigration((current) => (current?.key === reviewSessionKey ? null : current))
+              }
+            } else {
+              if (sessionMigrationKeyRef.current === reviewSessionKey) {
+                sessionMigrationStatusRef.current = "idle"
+                setSessionMigration((current) => (current?.key === reviewSessionKey ? null : current))
+              }
+            }
+          })
+        }
+      }
+    }
+    if (hydrated === null) {
       skipSessionWriteRef.current = reviewSessionKey
       hydratedSessionRef.current = {
         fingerprint: sessionFingerprint(null, [], {}),
@@ -795,32 +1056,62 @@ const ReadyReviewWorkspace = ({
       reviewSessionVersionRef.current = 0
       if (completedReviewRef.current !== null) return
       setCompletedReview(null)
+      setSelectedProfileId(null)
       setTurns([])
       setDispositions({})
       setSelectedFindingId(null)
       return
     }
+    hydratedProfileKeyRef.current = reviewSessionKey
     skipSessionWriteRef.current = reviewSessionKey
-    reviewSessionVersionRef.current = stored.success.version
-    const restored = replaceRelayReviewPreservingTurns(stored.success.turns, {
-      expectedIdentity: stored.success.identity,
-      identity: stored.success.identity,
-      skillIds: stored.success.skillIds,
-      value: stored.success.review
+    reviewSessionVersionRef.current = hydrated.version
+    const hydratedIdentity =
+      hydratedFromLegacy && reviewResource !== null
+        ? relayReviewSessionIdentity(reviewResource, hydrated.review)
+        : hydrated.identity
+    const restored = replaceRelayReviewPreservingTurns(hydrated.turns, {
+      expectedIdentity: hydratedIdentity,
+      identity: hydratedIdentity,
+      skillIds: hydrated.skillIds,
+      value: hydrated.review
     })
     completedReviewRef.current = restored
-    dispositionsRef.current = stored.success.dispositions
+    dispositionsRef.current = hydrated.dispositions
     setCompletedReview(restored)
-    setSelectedProfileId(stored.success.review.profile.id)
-    setTurns(stored.success.turns)
-    setDispositions(stored.success.dispositions)
-    setSelectedFindingId(stored.success.turns.at(-1)?.findingId ?? stored.success.review.result.findings[0]?.id ?? null)
+    setSelectedProfileId(hydrated.review.profile.id)
+    setTurns(hydrated.turns)
+    setDispositions(hydrated.dispositions)
+    setSelectedFindingId(hydrated.turns.at(-1)?.findingId ?? hydrated.review.result.findings[0]?.id ?? null)
     hydratedSessionRef.current = {
-      fingerprint: sessionFingerprint(restored, stored.success.turns, stored.success.dispositions),
+      fingerprint: sessionFingerprint(restored, hydrated.turns, hydrated.dispositions),
       key: reviewSessionKey,
       pendingInitialPass: true
     }
-  }, [reviewIdentity, reviewResource, reviewSessionKey])
+    const lock = browserRelayReviewSessionLock()
+    if (lock !== null && hasPostingDisposition(hydrated.dispositions)) {
+      void recoverRelayReviewSession(
+        window.localStorage,
+        reviewSessionKey,
+        reviewResource ?? hydrated.resource,
+        lock
+      ).then((recovered) => {
+        if (
+          sessionMigrationKeyRef.current !== reviewSessionKey ||
+          Result.isFailure(recovered) ||
+          recovered.success === null
+        )
+          return
+        reviewSessionVersionRef.current = recovered.success.version
+        dispositionsRef.current = recovered.success.dispositions
+        setDispositions(recovered.success.dispositions)
+        hydratedSessionRef.current = {
+          fingerprint: sessionFingerprint(restored, hydrated.turns, recovered.success.dispositions),
+          key: reviewSessionKey,
+          pendingInitialPass: false
+        }
+      })
+    }
+  }, [legacyReviewResource, legacyReviewSessionKey, reviewIdentity, reviewResource, reviewSessionKey])
 
   useEffect(() => {
     const hydratedSession = hydratedSessionRef.current
@@ -831,6 +1122,7 @@ const ReadyReviewWorkspace = ({
       }
       if (hydratedSession.fingerprint === sessionFingerprint(completedReview, turns, dispositions)) {
         hydratedSessionRef.current = null
+        if (skipSessionWriteRef.current === reviewSessionKey) skipSessionWriteRef.current = null
         return
       }
       hydratedSessionRef.current = null
@@ -839,9 +1131,12 @@ const ReadyReviewWorkspace = ({
       skipSessionWriteRef.current = null
       return
     }
+    if (sessionMigrationStatusRef.current !== "idle" || sessionMigration !== null) return
+    const currentCompletedReview = completedReviewRef.current
+    const currentTurns = turnsRef.current
     if (
-      completedReview === null ||
-      completedReview.identity !== reviewIdentity ||
+      currentCompletedReview === null ||
+      currentCompletedReview.identity !== reviewIdentity ||
       reviewResource === null ||
       reviewSessionKey === null
     )
@@ -856,22 +1151,21 @@ const ReadyReviewWorkspace = ({
       return
     }
     let active = true
-    void writeRelayReviewSession(
-      window.localStorage,
-      reviewSessionKey,
-      {
-        expectedIdentity: completedReview.expectedIdentity,
-        expectedVersion: reviewSessionVersionRef.current,
-        identity: completedReview.identity,
-        resource: reviewResource,
-        review: completedReview.value,
-        skillIds: completedReview.skillIds,
-        turns,
-        dispositions
-      },
-      lock
-    ).then((written) => {
+    const appendedTurnIds = appendedTurnIdsRef.current
+    const session = {
+      expectedIdentity: currentCompletedReview.expectedIdentity,
+      expectedVersion: reviewSessionVersionRef.current,
+      identity: currentCompletedReview.identity,
+      resource: reviewResource,
+      review: currentCompletedReview.value,
+      skillIds: currentCompletedReview.skillIds,
+      turns: currentTurns,
+      dispositions
+    } satisfies RelayReviewSessionWrite
+    const sessionToPersist = appendedTurnIds === undefined ? session : { ...session, appendedTurnIds }
+    void writeRelayReviewSession(window.localStorage, reviewSessionKey, sessionToPersist, lock).then((written) => {
       if (!active) return
+      if (appendedTurnIdsRef.current === appendedTurnIds) appendedTurnIdsRef.current = undefined
       if (Result.isFailure(written)) {
         setReviewFailure({
           description: "Local storage is unavailable. Relay could not durably retain this PR conversation.",
@@ -881,6 +1175,7 @@ const ReadyReviewWorkspace = ({
       }
       reviewSessionVersionRef.current = written.success.session.version
       if (written.success._tag === "stale-review-preserved") {
+        const newerIdentity = written.success.session.identity !== currentCompletedReview.identity
         skipSessionWriteRef.current = reviewSessionKey
         const preserved = replaceRelayReviewPreservingTurns(written.success.session.turns, {
           expectedIdentity: written.success.session.identity,
@@ -893,16 +1188,18 @@ const ReadyReviewWorkspace = ({
         dispositionsRef.current = written.success.session.dispositions
         setTurns(written.success.session.turns)
         setDispositions(written.success.session.dispositions)
-        setReviewFailure({
-          description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
-          title: "Newer PR review preserved"
-        })
+        if (newerIdentity) {
+          setReviewFailure({
+            description: "A newer exact-head review remains current. This tab's conversation turn was retained there.",
+            title: "Newer PR review preserved"
+          })
+        }
       }
     })
     return () => {
       active = false
     }
-  }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, turns])
+  }, [completedReview, dispositions, reviewIdentity, reviewResource, reviewSessionKey, sessionMigration, turns])
 
   useEffect(() => {
     if (selectedFileIndex !== null && diff.files.some(({ index }) => index === selectedFileIndex)) return
@@ -1012,23 +1309,24 @@ const ReadyReviewWorkspace = ({
   const executeReview = useCallback(async (): Promise<void> => {
     if (selectedProfile === undefined) return
     const outcome = await runStream(
-      `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream`,
+      `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/stream${pullRequestApiQuery(pullRequest)}`,
       {
         revisionId: diff.revisionId,
         baseCommit: diff.baseCommit,
         headCommit: diff.headCommit,
-        profile: selectedProfile
+        profile: { ...selectedProfile, kind: selectedKind }
       }
     )
     if (outcome.completed) {
-      setMessage("")
+      if (await persistReviewSnapshot()) setMessage("")
     }
   }, [
     accountId,
     diff.baseCommit,
     diff.headCommit,
     diff.revisionId,
-    pullRequest.id,
+    pullRequest,
+    persistReviewSnapshot,
     runStream,
     selectedKind,
     selectedProfile
@@ -1045,8 +1343,9 @@ const ReadyReviewWorkspace = ({
         }
         return { _tag: "failed" }
       }
+      const userTurnId = window.crypto.randomUUID()
       const userTurn: RelayReviewConversationTurn = {
-        id: window.crypto.randomUUID(),
+        id: userTurnId,
         findingId,
         role: "user",
         message: nextMessage
@@ -1060,7 +1359,7 @@ const ReadyReviewWorkspace = ({
       }
       const currentTurns = turnsRef.current
       const outcome = await runStream(
-        `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue`,
+        `/api/prs/${encodeURIComponent(accountId)}/${encodeURIComponent(pullRequest.id)}/relay-review/continue${pullRequestApiQuery(pullRequest)}`,
         {
           revisionId: diff.revisionId,
           baseCommit: diff.baseCommit,
@@ -1074,71 +1373,99 @@ const ReadyReviewWorkspace = ({
       )
       if (!outcome.completed) return { _tag: "failed" }
       const retainedTurns = completedReviewRef.current?.turns ?? currentTurns
+      const assistantTurnId = outcome.reply === undefined ? undefined : window.crypto.randomUUID()
       const nextTurns = appendReviewTurn(retainedTurns, userTurn)
-      setTurns(
-        outcome.reply === undefined
-          ? nextTurns
-          : appendReviewTurn(nextTurns, {
-              id: window.crypto.randomUUID(),
-              findingId,
-              role: "assistant",
-              message: outcome.reply
-            })
-      )
+      if (assistantTurnId === undefined || outcome.reply === undefined) {
+        appendedTurnIdsRef.current = [userTurnId]
+        setTurns(nextTurns)
+      } else {
+        const assistantTurn: RelayReviewConversationTurn = {
+          id: assistantTurnId,
+          findingId,
+          role: "assistant",
+          message: outcome.reply
+        }
+        appendedTurnIdsRef.current = [userTurnId, assistantTurnId]
+        setTurns(appendReviewTurn(nextTurns, assistantTurn))
+      }
       setMessage("")
       return { _tag: "completed" }
     },
-    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest.id, review, reviewIsStale, runStream]
+    [accountId, diff.baseCommit, diff.headCommit, diff.revisionId, pullRequest, review, reviewIsStale, runStream]
   )
 
   const postFinding = useCallback(
     async (finding: RelayReviewFinding): Promise<void> => {
       if (review === null || reviewIsStale) return
-      setReviewFailure(null)
-      setDispositions((current) => ({ ...current, [finding.id]: "posting" }))
-      try {
-        const receipt = await postFindingRequest({
-          params: { awsAccountId: accountId, prId: pullRequest.id, findingId: finding.id },
-          payload: {
-            revisionId: review.revisionId,
-            baseCommit: review.baseCommit,
-            headCommit: review.headCommit,
-            finding
-          }
-        })
-        onFindingPosted(receipt.operationId)
-        setDispositions((current) => {
+      const publish = async (): Promise<void> => {
+        setReviewFailure(null)
+        const posting = { ...dispositionsRef.current, [finding.id]: "posting" } satisfies FindingDispositions
+        dispositionsRef.current = posting
+        setDispositions(posting)
+        if (!(await persistDispositions(posting))) return
+        try {
+          const receipt = await postFindingRequest({
+            params: { awsAccountId: accountId, findingId: finding.id, prId: pullRequest.id },
+            query: {
+              region: pullRequest.account.region,
+              repositoryName: pullRequest.repositoryName
+            },
+            payload: {
+              revisionId: review.revisionId,
+              baseCommit: review.baseCommit,
+              headCommit: review.headCommit,
+              finding
+            }
+          })
+          onFindingPosted(receipt.operationId)
           const settlement = settleFindingPublication(
             completedReviewRef.current?.value.result.findings ?? [],
             finding,
-            current,
+            dispositionsRef.current,
             "posted"
           )
+          dispositionsRef.current = settlement.dispositions
+          setDispositions(settlement.dispositions)
           if (settlement.stale) {
             setReviewFailure({
               description: "CodeCommit received an older finding snapshot. Re-review before relying on it.",
               title: "Finding post needs review"
             })
           }
-          return settlement.dispositions
-        })
-      } catch (cause) {
-        setDispositions(
-          (current) =>
-            settleFindingPublication(
-              completedReviewRef.current?.value.result.findings ?? [],
-              finding,
-              current,
-              "failed"
-            ).dispositions
-        )
-        setReviewFailure({
-          description: failureMessage(cause, "CodeCommit did not accept this finding."),
-          title: "Finding post failed"
-        })
+          await persistDispositions(settlement.dispositions)
+        } catch (cause) {
+          const settlement = settleFindingPublication(
+            completedReviewRef.current?.value.result.findings ?? [],
+            finding,
+            dispositionsRef.current,
+            "failed"
+          )
+          dispositionsRef.current = settlement.dispositions
+          setDispositions(settlement.dispositions)
+          setReviewFailure({
+            description: failureMessage(cause, "CodeCommit did not accept this finding."),
+            title: "Finding post failed"
+          })
+          await persistDispositions(settlement.dispositions)
+        }
       }
+      const lock = browserRelayReviewSessionLock()
+      if (lock === null || reviewSessionKey === null) {
+        await publish()
+        return
+      }
+      await lock.request(relayReviewSessionPublicationLockName(reviewSessionKey, finding.id), publish)
     },
-    [accountId, onFindingPosted, postFindingRequest, pullRequest.id, review, reviewIsStale]
+    [
+      accountId,
+      onFindingPosted,
+      persistDispositions,
+      postFindingRequest,
+      pullRequest,
+      review,
+      reviewIsStale,
+      reviewSessionKey
+    ]
   )
 
   const selectFinding = useCallback(
@@ -1167,7 +1494,7 @@ const ReadyReviewWorkspace = ({
         continueReview={continueReview}
         diff={diff}
         isReviewing={isReviewing}
-        profile={selectedProfile}
+        profile={codeCommitRelayExecutionProfile(review, selectedProfile)}
         pullRequest={pullRequest}
         review={review}
         reviewIsStale={reviewIsStale}
@@ -1254,6 +1581,8 @@ const ReadyReviewWorkspace = ({
                   onContentStateChange={updateContentState}
                   onNavigateToComment={onNavigateToComment}
                   pullRequestId={pullRequest.id}
+                  region={pullRequest.account.region}
+                  repositoryName={pullRequest.repositoryName}
                   revisionId={diff.revisionId}
                   wrap={wrap}
                 />
@@ -1575,10 +1904,21 @@ export const PullRequestReviewWorkspace = ({
     () =>
       ApiClient.query("prs", "diff", {
         params: { awsAccountId: accountId, prId: pullRequest.id },
-        serializationKey: `${accountId}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}:${String(refreshGeneration)}`,
+        query: {
+          region: pullRequest.account.region,
+          repositoryName: pullRequest.repositoryName
+        },
+        serializationKey: `${accountId}:${pullRequest.account.region}:${pullRequest.repositoryName}:${pullRequest.id}:${pullRequest.lastModifiedDate.toISOString()}:${String(refreshGeneration)}`,
         timeToLive: "30 seconds"
       }),
-    [accountId, pullRequest.id, pullRequest.lastModifiedDate, refreshGeneration]
+    [
+      accountId,
+      pullRequest.account.region,
+      pullRequest.id,
+      pullRequest.lastModifiedDate,
+      pullRequest.repositoryName,
+      refreshGeneration
+    ]
   )
   const diff = useAtomValue(diffAtom)
   const pullRequestIdentity = `${canonicalReviewAccountId(pullRequest.account)}:${String(pullRequest.repositoryName)}:${String(

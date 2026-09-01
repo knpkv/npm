@@ -17,9 +17,12 @@ import {
   matchesCodeCommitPullRequestRoute
 } from "../src/client/codecommit-route.js"
 import {
+  codeCommitRelayAccountKind,
+  codeCommitRelayExecutionProfile,
   codeCommitRepositoryAccountIdentity,
   codeCommitRouteAccountIdentity,
   makeCodeCommitRelayConversation,
+  makeCodeCommitRelaySelection,
   makeCodeCommitRelayThreadRegistration
 } from "../src/client/codecommitRelayDock.js"
 import type { PullRequestRelayReviewResponse } from "../src/server/Api.js"
@@ -98,6 +101,19 @@ describe("CodeCommit Relay dock adapter", () => {
     ).toBe(false)
   })
 
+  it("shows the completed profile's concrete model in the dock selector", () => {
+    const selected = makeCodeCommitRelaySelection({ id: "thorough", model: "gpt-5.6-luna", name: "Thorough" })
+
+    expect(selected.modelId).toBe("gpt-5.6-luna")
+    expect(selected.models).toEqual([{ id: "gpt-5.6-luna", label: "gpt-5.6-luna" }])
+  })
+
+  it("keeps dock continuation on the completed profile after the main selector changes", () => {
+    const selected = { id: "security", model: "configured-default", name: "Security review" }
+
+    expect(codeCommitRelayExecutionProfile(explainReview, selected)).toEqual(explainReview.profile)
+  })
+
   it("uses repository account identity without changing the credential route alias", () => {
     const account = new Domain.Account({
       awsAccountId: "credential-account",
@@ -107,7 +123,41 @@ describe("CodeCommit Relay dock adapter", () => {
     })
 
     expect(codeCommitRepositoryAccountIdentity(account)).toBe("repository-account")
+    expect(codeCommitRelayAccountKind(account)).toBe("repository")
     expect(codeCommitRouteAccountIdentity(account)).toBe("credential-account")
+  })
+
+  it("uses the credential account when repository identity is empty", () => {
+    const account = new Domain.Account({
+      awsAccountId: "credential-account",
+      profile: "dev-administratoraccess",
+      region: "eu-central-1",
+      repoAccountId: ""
+    })
+
+    expect(codeCommitRepositoryAccountIdentity(account)).toBe("credential-account")
+    expect(codeCommitRelayAccountKind(account)).toBe("credential")
+    expect(
+      makeCodeCommitRelayConversation(
+        "credential-account",
+        {
+          account,
+          id: Domain.PullRequestId.make("42"),
+          repositoryName: Domain.RepositoryName.make("payments")
+        },
+        selection
+      ).thread.accountId
+    ).toBe("credential-account")
+    expect(
+      codeCommitRouteAccountIdentity(
+        new Domain.Account({
+          awsAccountId: "",
+          profile: "dev-administratoraccess",
+          region: "eu-central-1",
+          repoAccountId: ""
+        })
+      )
+    ).toBe("dev-administratoraccess")
   })
 
   it("keeps the located repository and region in the redirect route", () => {
@@ -130,6 +180,10 @@ describe("CodeCommit Relay dock adapter", () => {
       pullRequestId: "42",
       region: "eu-central-1",
       repositoryName: "payments"
+    })).toBe(true)
+    expect(matchesCodeCommitPullRequestRoute(candidate, {
+      accountId: "credential-account",
+      pullRequestId: "42"
     })).toBe(true)
     expect(matchesCodeCommitPullRequestRoute(candidate, {
       accountId: "repository-account",

@@ -20,7 +20,8 @@ import * as FileSystem from "effect/FileSystem"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-import { decodePullRequestCoordinates, type PullRequestCoordinates } from "../../pull-request-coordinates.js"
+import { decodePullRequestCoordinates } from "../../pull-request-coordinates.js"
+import type { PullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   ApiError,
   CodeCommitApi,
@@ -155,7 +156,7 @@ export const selectedPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
   awsAccountId: string,
   pullRequestId: Domain.PullRequestId,
-  coordinates?: PullRequestCoordinates
+  coordinates?: PullRequestSelectionCoordinates
 ): Effect.Effect<Domain.PullRequest, ApiError> => {
   const routeAccountId = coordinates?.accountId ?? awsAccountId
   const accountMatches = (candidate: Domain.PullRequest): boolean =>
@@ -163,7 +164,10 @@ export const selectedPullRequest = (
       ? candidate.account.awsAccountId === routeAccountId
         || candidate.account.repoAccountId === routeAccountId
         || candidate.account.profile === routeAccountId
-      : candidate.account.awsAccountId === routeAccountId || candidate.account.profile === routeAccountId
+      : candidate.account.awsAccountId === routeAccountId ||
+        ((candidate.account.awsAccountId === undefined || candidate.account.awsAccountId === "") &&
+          candidate.account.repoAccountId === routeAccountId) ||
+        candidate.account.profile === routeAccountId
   const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&
@@ -190,14 +194,30 @@ interface PullRequestLookup {
   readonly findAll: PullRequestRepoContract["findAll"]
 }
 
+interface PullRequestSelectionCoordinates {
+  readonly accountId?: string
+  readonly repositoryName: string
+  readonly region: string
+}
+
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
 export const cachedPullRequest = (
   pullRequestRepo: PullRequestLookup,
   awsAccountId: string,
-  pullRequestId: Domain.PullRequestId
-): Effect.Effect<Domain.PullRequest, ApiError> =>
-  decodePullRequestCoordinates(awsAccountId).pipe(
-    Effect.mapError((error) => new ApiError({ message: error.message })),
+  pullRequestId: Domain.PullRequestId,
+  directCoordinates?: PullRequestSelectionCoordinates
+): Effect.Effect<Domain.PullRequest, ApiError> => {
+  const coordinatesEffect = directCoordinates === undefined
+    ? decodePullRequestCoordinates(awsAccountId).pipe(
+      Effect.mapError((error) => new ApiError({ message: error.message }))
+    )
+    : Effect.succeed(Option.some<PullRequestCoordinates>({
+      accountId: awsAccountId,
+      pullRequestId,
+      repositoryName: Domain.RepositoryName.make(directCoordinates.repositoryName),
+      region: Domain.AwsRegion.make(directCoordinates.region)
+    }))
+  return coordinatesEffect.pipe(
     Effect.flatMap((coordinatesOption) => {
       const coordinates = Option.getOrUndefined(coordinatesOption)
       if (coordinates !== undefined && coordinates.pullRequestId !== pullRequestId) {
@@ -219,6 +239,7 @@ export const cachedPullRequest = (
       )
     })
   )
+}
 
 /** Keep proprietary source revisions out of browser and intermediary caches. */
 export const makeDiffContentResponse = (content: PullRequestDiffContentResponse) =>

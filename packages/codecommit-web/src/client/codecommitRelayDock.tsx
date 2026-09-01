@@ -41,11 +41,17 @@ const hostSelection = Schema.decodeUnknownSync(RelaySelectorState)({
   profiles: [{ id: "configured-review", label: "Configured review" }]
 })
 
+const nonEmptyAccountId = (accountId: string | undefined): string | undefined =>
+  accountId !== undefined && accountId.length > 0 ? accountId : undefined
+
 export const codeCommitRepositoryAccountIdentity = (account: Domain.Account): string =>
-  account.repoAccountId ?? account.awsAccountId ?? account.profile
+  nonEmptyAccountId(account.repoAccountId) ?? nonEmptyAccountId(account.awsAccountId) ?? account.profile
+
+export const codeCommitRelayAccountKind = (account: Domain.Account): "credential" | "repository" =>
+  nonEmptyAccountId(account.repoAccountId) === undefined ? "credential" : "repository"
 
 export const codeCommitRouteAccountIdentity = (account: Domain.Account): string =>
-  account.awsAccountId ?? account.profile
+  nonEmptyAccountId(account.awsAccountId) ?? account.profile
 
 /** Construct the canonical Relay conversation while retaining the credential URL alias. */
 export const makeCodeCommitRelayConversation = (
@@ -143,10 +149,24 @@ export const CodeCommitRelayDock = ({ children }: { readonly children: ReactNode
   return <RelayProductDock host={host}>{children}</RelayProductDock>
 }
 
-interface ReviewProfileSelection {
+export interface ReviewProfileSelection {
   readonly id: string
+  readonly model: string
   readonly name: string
 }
+
+export const makeCodeCommitRelaySelection = (profile: ReviewProfileSelection | undefined): RelaySelectorState =>
+  Schema.decodeUnknownSync(RelaySelectorState)({
+    modelId: profile?.model ?? "configured-default",
+    models: [{ id: profile?.model ?? "configured-default", label: profile?.model ?? "Configured default" }],
+    profileId: profile?.id ?? "configured-review",
+    profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
+  })
+
+export const codeCommitRelayExecutionProfile = (
+  review: PullRequestRelayReviewResponse | null,
+  selectedProfile: ReviewProfileSelection | undefined
+): ReviewProfileSelection | undefined => review?.profile ?? selectedProfile
 
 interface CodeCommitRelayThreadProps {
   readonly accountId: string
@@ -281,16 +301,7 @@ export const CodeCommitRelayThread = ({
   selectedFindingId,
   turns
 }: CodeCommitRelayThreadProps): null => {
-  const selection = useMemo(
-    () =>
-      Schema.decodeUnknownSync(RelaySelectorState)({
-        modelId: "configured-default",
-        models: [{ id: "configured-default", label: "Configured default" }],
-        profileId: profile?.id ?? "configured-review",
-        profiles: [{ id: profile?.id ?? "configured-review", label: profile?.name ?? "Configured review" }]
-      }),
-    [profile?.id, profile?.name]
-  )
+  const selection = useMemo(() => makeCodeCommitRelaySelection(profile), [profile?.id, profile?.model, profile?.name])
   const repositoryAccountId = codeCommitRepositoryAccountIdentity(pullRequest.account)
   const conversation = useMemo(
     () => makeCodeCommitRelayConversation(accountId, pullRequest, selection),
