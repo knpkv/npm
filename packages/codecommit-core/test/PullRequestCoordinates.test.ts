@@ -25,9 +25,9 @@ const insertPullRequest = (
     'OPEN', 'feature', 'main', 'https://example.invalid/pr/42'
   )`
 
-const upsertInput = (repositoryName: string, region: string, title: string) =>
+const upsertInput = (repositoryName: string, region: string, title: string, id = "42") =>
   Schema.decodeSync(UpsertInput)({
-    id: "42",
+    id,
     awsAccountId: "123456789012",
     repoAccountId: null,
     accountProfile: "production",
@@ -96,6 +96,16 @@ describe("pull request coordinate migration", () => {
       const repo = mutations(sql, Effect.void)
       yield* repo.upsert(upsertInput("orders", "us-east-1", "Orders updated"))
       yield* repo.upsert(upsertInput("payments", "eu-west-1", "Payments updated"))
+      yield* repo.upsert(upsertInput("orders", "us-east-1", "Another orders PR", "43"))
+      yield* sql`UPDATE pull_requests SET repo_account_id = 'repository-account'
+        WHERE aws_account_id = '123456789012' AND id = '42'
+          AND repository_name = 'orders' AND account_region = 'us-east-1'`
+      yield* repo.propagateRepoAccountId()
+      const propagated = yield* sql<{ readonly repoAccountId: string | null }>`
+        SELECT repo_account_id AS repoAccountId FROM pull_requests
+        WHERE aws_account_id = '123456789012' AND id = '43'
+          AND repository_name = 'orders' AND account_region = 'us-east-1'`
+      expect(propagated).toEqual([{ repoAccountId: "repository-account" }])
 
       const rows = yield* sql<
         { readonly repositoryName: string; readonly accountRegion: string; readonly title: string }
@@ -137,11 +147,35 @@ describe("pull request coordinate migration", () => {
         subscribed_at TEXT NOT NULL DEFAULT (datetime('now')),
         PRIMARY KEY (aws_account_id, pull_request_id)
       )`
+      yield* sql`CREATE TABLE pull_requests (
+        id TEXT NOT NULL,
+        aws_account_id TEXT NOT NULL,
+        repository_name TEXT NOT NULL,
+        account_region TEXT NOT NULL,
+        author TEXT NOT NULL,
+        repo_account_id TEXT,
+        commented_by TEXT,
+        PRIMARY KEY (aws_account_id, id, repository_name, account_region)
+      )`
       yield* sql`INSERT INTO pr_comments (pull_request_id, aws_account_id, locations_json)
-        VALUES ('42', '123456789012', 'legacy')`
+        VALUES ('42', '123456789012', 'legacy'),
+               ('43', '123456789012', 'legacy-single')`
       yield* sql`INSERT INTO pr_subscriptions (pull_request_id, aws_account_id)
-        VALUES ('42', '123456789012')`
+        VALUES ('42', '123456789012'),
+               ('43', '123456789012')`
+      yield* sql`INSERT INTO pull_requests
+        (id, aws_account_id, repository_name, account_region, author)
+        VALUES ('42', '123456789012', 'payments', 'eu-west-1', 'author'),
+               ('42', '123456789012', 'orders', 'us-east-1', 'author'),
+               ('43', '123456789012', 'single', 'eu-west-1', 'author')`
       yield* migration0019.pipe(Effect.provideService(SqlClient.SqlClient, sql))
+
+      const migratedSingle = yield* sql<{
+        readonly repositoryName: string
+        readonly accountRegion: string
+      }>`SELECT repository_name AS repositoryName, account_region AS accountRegion
+        FROM pr_subscriptions WHERE pull_request_id = '43'`
+      expect(migratedSingle).toEqual([{ repositoryName: "single", accountRegion: "eu-west-1" }])
 
       yield* sql`INSERT OR REPLACE INTO pr_comments
         (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
@@ -153,20 +187,6 @@ describe("pull request coordinate migration", () => {
         (pull_request_id, aws_account_id, repository_name, account_region)
         VALUES ('42', '123456789012', '', '')`
 
-      yield* sql`CREATE TABLE pull_requests (
-        id TEXT NOT NULL,
-        aws_account_id TEXT NOT NULL,
-        repository_name TEXT NOT NULL,
-        account_region TEXT NOT NULL,
-        author TEXT NOT NULL,
-        commented_by TEXT,
-        PRIMARY KEY (aws_account_id, id, repository_name, account_region)
-      )`
-      yield* sql`INSERT INTO pull_requests
-        (id, aws_account_id, repository_name, account_region, author)
-        VALUES ('42', '123456789012', 'payments', 'eu-west-1', 'author'),
-               ('42', '123456789012', 'orders', 'us-east-1', 'author'),
-               ('43', '123456789012', 'single', 'eu-west-1', 'author')`
       const paymentComments = JSON.stringify([{
         comments: [{
           root: {
@@ -209,7 +229,7 @@ describe("pull request coordinate migration", () => {
         VALUES ('42', '123456789012', 'orders', 'us-east-1', ${orderComments})`
       yield* sql`INSERT OR REPLACE INTO pr_comments
         (pull_request_id, aws_account_id, repository_name, account_region, locations_json)
-        VALUES ('43', '123456789012', '', '', ${orderComments})`
+        VALUES ('43', '123456789012', 'single', 'eu-west-1', ${orderComments})`
       yield* mutations(sql, Effect.void).refreshCommentedBy()
 
       const comments = yield* sql<{ readonly repositoryName: string | null; readonly locationsJson: string }>`

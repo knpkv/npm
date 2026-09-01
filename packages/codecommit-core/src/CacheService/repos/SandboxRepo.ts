@@ -92,7 +92,7 @@ const makeSandboxRepo = Effect.gen(function*() {
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
               AND repository_name = ${req.repositoryName}
-              AND region IS NULL
+              AND (region IS NULL OR region = '')
               AND status NOT IN ('stopped', 'error')
             ORDER BY created_at DESC
             LIMIT 1`
@@ -110,7 +110,7 @@ const makeSandboxRepo = Effect.gen(function*() {
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
               AND repository_name = ${req.repositoryName}
-              AND region IS NULL
+              AND (region IS NULL OR region = '')
             ORDER BY created_at DESC`
   })
 

@@ -267,7 +267,6 @@ export const mutations = (sql: SqlClient.SqlClient, publish: Effect.Effect<void>
             SELECT p2.repo_account_id FROM pull_requests p2
             WHERE p2.repo_account_id IS NOT NULL
               AND p2.aws_account_id = pull_requests.aws_account_id
-              AND p2.id = pull_requests.id
               AND p2.repository_name = pull_requests.repository_name
               AND p2.account_region = pull_requests.account_region
             LIMIT 1

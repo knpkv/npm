@@ -367,14 +367,14 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.map(encodeClientVisibleCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
-      .handle("diff", ({ params }) =>
+      .handle("diff", ({ params, query }) =>
         Effect.gen(function*() {
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handleRaw("diffContent", ({ params, query }) =>
         Effect.gen(function*() {
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           const content = yield* loadPullRequestDiffContent(
             readClient,
             pullRequest,
@@ -384,11 +384,11 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           return yield* makeDiffContentResponse(content)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
-      .handle("relayReview", ({ params, payload }) =>
+      .handle("relayReview", ({ params, payload, query }) =>
         Effect.gen(function*() {
           const skills = yield* discoverReviewSkills()
           const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* withRelayReviewPermit(
             relaySemaphore,
             runPullRequestRelayReview(
@@ -401,12 +401,12 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             )
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
-      .handleRaw("relayReviewStream", ({ params }) =>
+      .handleRaw("relayReviewStream", ({ params, query }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewStreamRequest)
           const skills = yield* discoverReviewSkills()
           const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayReview(
@@ -429,12 +429,12 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
           )
         ))
-      .handleRaw("relayReviewContinueStream", ({ params }) =>
+      .handleRaw("relayReviewContinueStream", ({ params, query }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
           const skills = yield* discoverReviewSkills()
           const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayConversation(
@@ -461,12 +461,12 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
           )
         ))
-      .handle("postRelayFinding", ({ params, payload }) =>
+      .handle("postRelayFinding", ({ params, payload, query }) =>
         Effect.gen(function*() {
           if (payload.finding.id !== params.findingId) {
             return yield* new ApiError({ message: "The finding route does not match the submitted finding" })
           }
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* postPullRequestRelayFinding(
             readClient,
             relayFindingPublisher,
