@@ -603,45 +603,216 @@ const canonicalPropertyKeyText = (name) => {
 
 const canonicalNeverKey = JSON.stringify(["never"])
 
-const canonicalLiteralTypeValue = (typeNode) => {
-  if (TypeScript.isParenthesizedTypeNode(typeNode)) return canonicalLiteralTypeValue(typeNode.type)
-  if (!TypeScript.isLiteralTypeNode(typeNode)) return undefined
-  const literal = typeNode.literal
-  if (TypeScript.isStringLiteral(literal) || TypeScript.isNoSubstitutionTemplateLiteral(literal)) {
-    return `string:${literal.text}`
+const canonicalLiteralTypeValue = (
+  typeNode,
+  analysis,
+  filePath,
+  substitutions = new Map(),
+  seen = new Set(),
+  context = { depth: 0, substitutionPath: new Set() }
+) => {
+  if (context.depth > canonicalTypeMaxDepth) {
+    failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
   }
-  if (TypeScript.isNumericLiteral(literal)) return `number:${literal.text}`
-  if (literal.kind === TypeScript.SyntaxKind.BigIntLiteral) return `bigint:${literal.text}`
-  if (literal.kind === TypeScript.SyntaxKind.TrueKeyword) return "boolean:true"
-  if (literal.kind === TypeScript.SyntaxKind.FalseKeyword) return "boolean:false"
+  if (TypeScript.isParenthesizedTypeNode(typeNode)) {
+    return canonicalLiteralTypeValue(
+      typeNode.type,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )
+  }
+  if (TypeScript.isLiteralTypeNode(typeNode)) {
+    const literal = typeNode.literal
+    if (TypeScript.isStringLiteral(literal) || TypeScript.isNoSubstitutionTemplateLiteral(literal)) {
+      return `string:${literal.text}`
+    }
+    if (TypeScript.isNumericLiteral(literal)) return `number:${literal.text}`
+    if (literal.kind === TypeScript.SyntaxKind.BigIntLiteral) return `bigint:${literal.text}`
+    if (literal.kind === TypeScript.SyntaxKind.TrueKeyword) return "boolean:true"
+    if (literal.kind === TypeScript.SyntaxKind.FalseKeyword) return "boolean:false"
+    return undefined
+  }
+  if (TypeScript.isTypeReferenceNode(typeNode) && TypeScript.isIdentifier(typeNode.typeName)) {
+    const typeName = typeNode.typeName.text
+    const substituted = substitutions.get(typeName)
+    if (substituted !== undefined) {
+      if (Predicate.isString(substituted)) return undefined
+      const binding = typeSubstitutionBinding(substituted, substitutions, filePath)
+      if (context.substitutionPath.has(binding)) failCanonicalType(filePath, typeNode, "recursive type substitution")
+      return canonicalLiteralTypeValue(
+        binding.typeNode,
+        analysis,
+        binding.filePath,
+        binding.substitutions,
+        seen,
+        nextCanonicalTypeContext(context, new Set(context.substitutionPath).add(binding))
+      )
+    }
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
+    if (declaration !== undefined && TypeScript.isTypeAliasDeclaration(declaration.node)) {
+      const declarationName = declaration.node.name.text
+      const key = `${declaration.filePath}\u0000${declarationName}`
+      if (seen.has(key)) failCanonicalType(filePath, typeNode, "recursive type declaration")
+      const nextSubstitutions = new Map(substitutions)
+      for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
+        const argument = typeNode.typeArguments?.[index]
+        if (argument !== undefined) {
+          nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions, filePath))
+        }
+      }
+      return canonicalLiteralTypeValue(
+        declaration.node.type,
+        analysis,
+        declaration.filePath,
+        nextSubstitutions,
+        new Set(seen).add(key),
+        nextCanonicalTypeContext(context)
+      )
+    }
+  }
   return undefined
 }
 
-const canonicalRequiredLiteralProperties = (typeNode) => {
+const mergeCanonicalLiteralProperties = (target, source) => {
+  let contradictory = false
+  for (const [key, value] of source) {
+    const previous = target.get(key)
+    if (previous !== undefined && previous !== value) contradictory = true
+    target.set(key, value)
+  }
+  return contradictory
+}
+
+const canonicalRequiredLiteralProperties = (
+  typeNode,
+  analysis,
+  filePath,
+  substitutions = new Map(),
+  seen = new Set(),
+  context = { depth: 0, substitutionPath: new Set() }
+) => {
+  if (context.depth > canonicalTypeMaxDepth) {
+    failCanonicalType(filePath, typeNode, `type depth exceeded ${canonicalTypeMaxDepth}`)
+  }
   const node = TypeScript.isParenthesizedTypeNode(typeNode) ? typeNode.type : typeNode
+  if (TypeScript.isIntersectionTypeNode(node)) {
+    const properties = new Map()
+    let contradictory = false
+    for (const member of node.types) {
+      const nested = canonicalRequiredLiteralProperties(
+        member,
+        analysis,
+        filePath,
+        substitutions,
+        seen,
+        nextCanonicalTypeContext(context)
+      )
+      if (nested === undefined) return undefined
+      if (nested.contradictory) contradictory = true
+      if (mergeCanonicalLiteralProperties(properties, nested.properties)) contradictory = true
+    }
+    return { properties, contradictory }
+  }
+  if (TypeScript.isTypeReferenceNode(node) && TypeScript.isIdentifier(node.typeName)) {
+    const typeName = node.typeName.text
+    const substituted = substitutions.get(typeName)
+    if (substituted !== undefined) {
+      if (Predicate.isString(substituted)) return undefined
+      const binding = typeSubstitutionBinding(substituted, substitutions, filePath)
+      if (context.substitutionPath.has(binding)) failCanonicalType(filePath, node, "recursive type substitution")
+      return canonicalRequiredLiteralProperties(
+        binding.typeNode,
+        analysis,
+        binding.filePath,
+        binding.substitutions,
+        seen,
+        nextCanonicalTypeContext(context, new Set(context.substitutionPath).add(binding))
+      )
+    }
+    const declaration = resolveTypeDeclaration(analysis, filePath, typeName, seen)
+    if (declaration !== undefined) {
+      const declarationName = declaration.node.name.text
+      const key = `${declaration.filePath}\u0000${declarationName}`
+      if (seen.has(key)) failCanonicalType(filePath, node, "recursive type declaration")
+      const nextSubstitutions = new Map(substitutions)
+      for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
+        const argument = node.typeArguments?.[index]
+        if (argument !== undefined) {
+          nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions, filePath))
+        }
+      }
+      const declarationBody = TypeScript.isTypeAliasDeclaration(declaration.node)
+        ? declaration.node.type
+        : declaration.node
+      return canonicalRequiredLiteralProperties(
+        declarationBody,
+        analysis,
+        declaration.filePath,
+        nextSubstitutions,
+        new Set(seen).add(key),
+        nextCanonicalTypeContext(context)
+      )
+    }
+  }
   if (!TypeScript.isTypeLiteralNode(node) && !TypeScript.isInterfaceDeclaration(node)) return undefined
   const properties = new Map()
+  let contradictory = false
+  if (TypeScript.isInterfaceDeclaration(node)) {
+    for (const clause of node.heritageClauses ?? []) {
+      for (const heritageType of clause.types) {
+        const inherited = canonicalRequiredLiteralProperties(
+          heritageType,
+          analysis,
+          filePath,
+          substitutions,
+          seen,
+          nextCanonicalTypeContext(context)
+        )
+        if (inherited === undefined) continue
+        if (inherited.contradictory) contradictory = true
+        if (mergeCanonicalLiteralProperties(properties, inherited.properties)) contradictory = true
+      }
+    }
+  }
   for (const member of node.members) {
     if (!TypeScript.isPropertySignature(member) || member.questionToken !== undefined || member.type === undefined) {
       continue
     }
     const key = canonicalPropertyKeyText(member.name)
-    const value = canonicalLiteralTypeValue(member.type)
-    if (key !== undefined && value !== undefined) properties.set(key, value)
-  }
-  return properties
-}
-
-const hasContradictoryLiteralIntersection = (members) => {
-  const properties = new Map()
-  for (const member of members) {
-    const literalProperties = canonicalRequiredLiteralProperties(member)
-    if (literalProperties === undefined) continue
-    for (const [key, value] of literalProperties) {
+    const value = canonicalLiteralTypeValue(
+      member.type,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )
+    if (key !== undefined && value !== undefined) {
       const previous = properties.get(key)
-      if (previous !== undefined && previous !== value) return true
+      if (previous !== undefined && previous !== value) contradictory = true
       properties.set(key, value)
     }
+  }
+  return { properties, contradictory }
+}
+
+const hasContradictoryLiteralIntersection = (members, analysis, filePath, substitutions, seen, context) => {
+  const properties = new Map()
+  for (const member of members) {
+    const literalProperties = canonicalRequiredLiteralProperties(
+      member,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      context
+    )
+    if (literalProperties === undefined) continue
+    if (literalProperties.contradictory) return true
+    if (mergeCanonicalLiteralProperties(properties, literalProperties.properties)) return true
   }
   return false
 }
@@ -649,9 +820,17 @@ const hasContradictoryLiteralIntersection = (members) => {
 const canonicalTupleArrayKeySet = (typeNode, context) => {
   const readonly = context.readonlyContainer === true ? "readonly" : "mutable"
   const kind = TypeScript.isTupleTypeNode(typeNode) ? "tuple" : "array"
-  const keys = new Set([JSON.stringify([kind, readonly]), JSON.stringify(["number"])])
+  const keys = new Set([
+    JSON.stringify([kind, readonly]),
+    JSON.stringify(["number"]),
+    JSON.stringify(["string", "length"])
+  ])
   if (TypeScript.isTupleTypeNode(typeNode)) {
-    for (const [index] of typeNode.elements.entries()) keys.add(JSON.stringify(["tuple-index", String(index)]))
+    for (const [index, element] of typeNode.elements.entries()) {
+      if (TypeScript.isRestTypeNode(element)) continue
+      if (TypeScript.isNamedTupleMember(element) && element.dotDotDotToken !== undefined) continue
+      keys.add(JSON.stringify(["tuple-index", String(index)]))
+    }
   }
   return keys
 }
@@ -815,7 +994,10 @@ const canonicalKeySetForNode = (
     return rest.reduce((keys, memberKeys) => new Set([...keys].filter((key) => memberKeys?.has(key) === true)), first)
   }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
-    if (context.keySetMode !== "mapped-domain" && hasContradictoryLiteralIntersection(typeNode.types)) {
+    if (
+      context.keySetMode !== "mapped-domain" &&
+      hasContradictoryLiteralIntersection(typeNode.types, analysis, filePath, substitutions, seen, context)
+    ) {
       return new Set([canonicalNeverKey])
     }
     const memberSets = typeNode.types.map((member) =>
@@ -905,6 +1087,16 @@ const canonicalKeyofOperandText = (
   context = { depth: 0, substitutionPath: new Set() }
 ) => {
   const keySetText = (keys) => (keys.has(canonicalNeverKey) ? "never" : `keys(${[...keys].toSorted().join("|")})`)
+  if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword) {
+    return `nested-keyof(${canonicalKeyofOperandText(
+      typeNode.type,
+      analysis,
+      filePath,
+      substitutions,
+      seen,
+      nextCanonicalTypeContext(context)
+    )})`
+  }
   const primitive = canonicalPrimitiveKeyofOperandText(typeNode, analysis, filePath, substitutions, seen, context)
   if (primitive !== undefined) return primitive
   if (TypeScript.isMappedTypeNode(typeNode)) {
@@ -3889,6 +4081,34 @@ const runSelfTest = () => {
     publicCallableChanges(primitiveKeyofPrevious, primitiveKeyofObject, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
   )
+  const nestedKeyofPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { id: string }\nexport function Public<T extends keyof keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const nestedKeyofDirect = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { id: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(nestedKeyofPrevious, nestedKeyofDirect, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
+  const nestedKeyofValueChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { id: number }\nexport function Public<T extends keyof keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(nestedKeyofPrevious, nestedKeyofValueChanged, ["packages/public/src/index.ts"]),
+    []
+  )
   const tupleKeyPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -3917,6 +4137,23 @@ const runSelfTest = () => {
   assert.deepEqual(publicCallableChanges(tupleKeyPrevious, tupleKeyExpanded, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
   ])
+  const restTuplePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<T extends keyof [...string[]]>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const restTupleFixed = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "export function Public<T extends keyof [string]>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(restTuplePrevious, restTupleFixed, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
   const arrayKeyPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -3933,6 +4170,35 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(arrayKeyPrevious, arrayKeyElementChanged, ["packages/public/src/index.ts"]),
+    []
+  )
+  const arrayLengthUnionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = string[] | { length: number }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const arrayLengthUnionRemoved = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = string[] | {}\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(arrayLengthUnionPrevious, arrayLengthUnionRemoved, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const arrayLengthUnionElementChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = number[] | { length: number }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(arrayLengthUnionPrevious, arrayLengthUnionElementChanged, ["packages/public/src/index.ts"]),
     []
   )
   const mappedKeyPrevious = new Map([
@@ -4161,6 +4427,19 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(contradictoryIntersectionPrevious, contradictoryIntersectionChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const aliasedContradictoryIntersectionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Left = { kind: "a"; a: unknown }\ntype Right = { kind: "b"; b: unknown }\ntype Model = Left & Right\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(aliasedContradictoryIntersectionPrevious, contradictoryIntersectionChanged, [
       "packages/public/src/index.ts"
     ]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
