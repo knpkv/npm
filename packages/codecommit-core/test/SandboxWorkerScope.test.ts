@@ -1726,4 +1726,29 @@ describe("SandboxWorkerScope", () => {
       expect(hasLegacy).toBe(false)
       expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
     }))
+
+  it.effect("does not require Docker admission for a completed regionless retirement", () =>
+    Effect.gen(function*() {
+      const completed: SandboxRow = {
+        ...legacyRow,
+        accessPassword: "protected",
+        status: "stopped",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
+
+      const hasLegacy = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.hasLegacyUnauthenticated()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(hasLegacy).toBe(false)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+    }))
 })

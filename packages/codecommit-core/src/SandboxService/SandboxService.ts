@@ -875,7 +875,11 @@ const makeSandboxService = Effect.gen(function*() {
 
     hasLegacyUnauthenticated: () =>
       repo.findAll().pipe(
-        Effect.map((rows) => rows.some((row) => row.accessPassword === null || isRegionlessSandbox(row)))
+        Effect.map((rows) =>
+          rows.some((row) =>
+            row.accessPassword === null || (isRegionlessSandbox(row) && !isCompletedLegacyRetirement(row))
+          )
+        )
       ),
 
     gcIdle: (idleTimeout = Duration.minutes(30), cleanupDelay = Duration.hours(24)) =>
