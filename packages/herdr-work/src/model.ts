@@ -92,9 +92,12 @@ export const WorkApprovalTarget = Schema.Struct({
   Schema.makeFilter(
     ({ host, jobId, url }) => {
       const parsed = new URL(url)
+      const queryKeys = [...parsed.searchParams.keys()]
       const approvalHosts = parsed.searchParams.getAll("approvalHost")
       const approvalJobs = parsed.searchParams.getAll("approvalJob")
       return parsed.pathname === "/" &&
+        parsed.hash === "" &&
+        queryKeys.length === 3 &&
         parsed.searchParams.getAll("tab").length === 1 &&
         parsed.searchParams.get("tab") === "approvals" &&
         approvalHosts.length === 1 &&

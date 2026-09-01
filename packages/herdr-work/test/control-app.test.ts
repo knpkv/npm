@@ -164,6 +164,28 @@ describe("Work control app", () => {
     expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
   })
 
+  it("rejects approval targets with extra query data or fragments", () => {
+    const secretQuery = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      approvalTarget: {
+        host: "SER8",
+        jobId: "approval-job-42",
+        url: "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42&secret=leak"
+      }
+    })
+    const fragment = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      approvalTarget: {
+        host: "SER8",
+        jobId: "approval-job-42",
+        url: "https://ser8.example.test/?tab=approvals&approvalHost=SER8&approvalJob=approval-job-42#secret"
+      }
+    })
+
+    expect(secretQuery._tag).toBe("Failure")
+    expect(fragment._tag).toBe("Failure")
+  })
+
   it("accepts approval host identifiers supported by the approvals app", () => {
     const supported = Schema.decodeUnknownResult(WorkGoal)({
       ...workGoalInput,
