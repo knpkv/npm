@@ -18,6 +18,8 @@ The package exports:
 
 `HostConfiguration.machines` stores `{ host, nodeId }` for every fleet machine. Both fields must be unique. Tailscale adapters use the stable node ID as authority and treat the hostname only as a consistency check.
 
+`HostConfiguration.workBindAddress` is the explicit IPv4 address for the local-only Work listener. It defaults to loopback; wildcard addresses are invalid. The Work and local listeners must use distinct ports when `crossHost` is disabled.
+
 Callers provide `HostOperations`. This keeps Nix, Git, and Herdr command execution out of the protocol package.
 
 When an `agent.delegate` worker starts, `JobRecord` persists its exact identity and matching `AgentConnectTarget` in the same transition. Records before start, including pending, rejected, expired, and failed-before-start jobs, contain neither field. Terminal observation time remains separate and appears only after that exact started job succeeds or fails.

@@ -309,6 +309,21 @@ const TcpPort = Schema.Number.check(
   Schema.isBetween({ minimum: 1, maximum: 65_535 })
 )
 
+const WorkBindAddress = Schema.String.check(
+  Schema.isPattern(/^(?:\d{1,3}\.){3}\d{1,3}$/),
+  Schema.makeFilter(
+    (address) => {
+      const octets = address.split(".")
+      const values = octets.map(Number)
+      return values.some((octet) => octet !== 0) &&
+        values.every(
+          (octet, index) => String(octet) === octets[index] && octet >= 0 && octet <= 255
+        )
+    },
+    { expected: "a specific IPv4 Work listener address, not a wildcard" }
+  )
+)
+
 export const HostConfiguration = Schema.Struct({
   host: FleetHostName,
   repository: Schema.String,
@@ -316,6 +331,7 @@ export const HostConfiguration = Schema.Struct({
   crossHost: Schema.Boolean,
   port: TcpPort,
   localPort: TcpPort,
+  workBindAddress: Schema.optionalKey(WorkBindAddress),
   approvalPort: TcpPort,
   allowedUsers: Schema.Array(Schema.String),
   approvalNodes: Schema.Array(Schema.String),
@@ -375,6 +391,7 @@ export const HostConfiguration = Schema.Struct({
         localConfigured &&
         approvalHubUrl !== null &&
         approvalHubPort === configuration.approvalPort &&
+        (configuration.crossHost || configuration.port !== configuration.localPort) &&
         (
           !configuration.crossHost ||
           (

@@ -1,5 +1,16 @@
 # @knpkv/herdr-work
 
+## 0.3.0
+
+### Minor Changes
+
+- [#392](https://github.com/knpkv/npm/pull/392) [`da8c8c0`](https://github.com/knpkv/npm/commit/da8c8c08b144a2ea8dfd837ecfa433cae1ad13a7) Thanks [@konopkov](https://github.com/konopkov)! - Add the typed daily fleet Work control view with authoritative agent hierarchy, activity, requests, review state, shipment stages, and exact Connect and approval links.
+
+### Patch Changes
+
+- Updated dependencies [[`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead)]:
+  - @knpkv/rly@0.5.0
+
 ## 0.2.0
 
 ### Minor Changes
