@@ -2243,4 +2243,129 @@ describe("RelayDock", () => {
     expect(forward.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(close)
   })
+
+  it("keeps native SVG links in the modal focus sequence", async () => {
+    const footer = (
+      <>
+        <button data-rly-svg-link-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-svg-link-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-svg-link-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-svg-link-preceding]")
+    if (dialog === null || host === null || preceding === null)
+      throw new Error("RelayDock SVG link fixture did not render")
+    const shadow = host.attachShadow({ mode: "open" })
+    const link = shadow.appendChild(document.createElementNS("http://www.w3.org/2000/svg", "a"))
+    link.setAttribute("href", "/review")
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(false)
+  })
+
+  it("contains a terminal unlisted light-DOM focus target", async () => {
+    const footer = (
+      <>
+        <button data-rly-unlisted-light-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <button data-rly-unlisted-light-target="" tabIndex={-1} type="button">
+          Programmatic footer action
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const target = portal.querySelector<HTMLButtonElement>("[data-rly-unlisted-light-target]")
+    if (dialog === null || close === null || target === null) {
+      throw new Error("RelayDock unlisted light target fixture did not render")
+    }
+
+    target.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("preserves a light editing host boundary around an open shadow editor", async () => {
+    const footer = (
+      <>
+        <button data-rly-shadow-editor-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-shadow-editor-outer-contenteditable="" contentEditable="true">
+          <div data-rly-shadow-editor-host="" />
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-shadow-editor-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-shadow-editor-preceding]")
+    if (dialog === null || host === null || preceding === null) {
+      throw new Error("RelayDock shadow editor fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const editor = shadow.appendChild(document.createElement("div"))
+    editor.contentEditable = "true"
+    const outer = portal.querySelector<HTMLElement>("[data-rly-shadow-editor-outer-contenteditable]")
+    if (outer === null) throw new Error("RelayDock outer editor fixture did not render")
+    outer.tabIndex = -1
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(false)
+  })
+
+  it("keeps programmatic focus in an interior non-delegating shadow scope", async () => {
+    const footer = (
+      <>
+        <button data-rly-interior-shadow-before="" type="button">
+          Before shadow scope
+        </button>
+        <div data-rly-interior-shadow-host="" />
+        <button data-rly-interior-shadow-after="" type="button">
+          After shadow scope
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-interior-shadow-host]")
+    const before = portal.querySelector<HTMLButtonElement>("[data-rly-interior-shadow-before]")
+    const after = portal.querySelector<HTMLButtonElement>("[data-rly-interior-shadow-after]")
+    if (dialog === null || host === null || before === null || after === null) {
+      throw new Error("RelayDock interior shadow fixture did not render")
+    }
+    host.tabIndex = -1
+    const shadow = host.attachShadow({ mode: "open" })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.tabIndex = -1
+
+    action.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(false)
+    expect(shadow.activeElement).toBe(action)
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(false)
+    expect(shadow.activeElement).toBe(action)
+    expect(before).not.toBe(after)
+  })
 })

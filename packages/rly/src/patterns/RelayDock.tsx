@@ -123,10 +123,10 @@ const focusRestoreTarget = (ownerDocument: Document): HTMLElement | null => {
   return active === ownerDocument.body || active === ownerDocument.documentElement ? null : active
 }
 
-const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap<Node, Node | null>): boolean => {
+const isRenderedFocusable = (element: Element, composedParents?: ReadonlyMap<Node, Node | null>): boolean => {
   if (element.matches(":disabled")) return false
   const view = element.ownerDocument.defaultView
-  if (view === null) return element.hidden === false
+  if (view === null) return !isHTMLElement(element) || element.hidden === false
   const visibility = view.getComputedStyle(element).visibility
   if (visibility === "hidden" || visibility === "collapse") return false
   let current: Element | null = element
@@ -162,10 +162,12 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
 }
 
 const hasContentEditableAncestor = (element: HTMLElement, composedParents: ReadonlyMap<Node, Node | null>): boolean => {
+  const nativeRoot = element.getRootNode()
   const seen = new Set<Node>()
   let current = composedParentFor(element, composedParents)
   while (current !== null && !seen.has(current)) {
     seen.add(current)
+    if (current.getRootNode() !== nativeRoot) return false
     if (isHTMLElement(current) && current.isContentEditable) return true
     current = composedParentFor(current, composedParents)
   }
@@ -188,8 +190,24 @@ interface ComposedElement {
   readonly nativeRoot: Node
 }
 
-interface ComposedHTMLElement extends ComposedElement {
-  readonly element: HTMLElement
+interface TabIndexedElement extends Element {
+  readonly focus: (options?: FocusOptions) => void
+  readonly tabIndex: number
+}
+
+const hasTabIndexProperty = (element: Element): element is TabIndexedElement =>
+  "tabIndex" in element && Predicate.isNumber(element.tabIndex)
+
+const svgNamespace = "http://www.w3.org/2000/svg"
+
+const tabIndexFor = (element: Element): number | null => {
+  if (element.namespaceURI === svgNamespace && element.localName === "a" && element.hasAttribute("href")) {
+    const attribute = element.getAttribute("tabindex")
+    if (attribute === null) return 0
+    const parsed = Number.parseInt(attribute, 10)
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+  return hasTabIndexProperty(element) ? element.tabIndex : null
 }
 
 interface SlotElement extends Element {
@@ -204,8 +222,8 @@ const isShadowSlotElement = (element: Element): element is SlotElement =>
   isSlotElement(element) && hasShadowRootHost(element.getRootNode())
 
 const compareSequentialTabOrder = (left: Element, right: Element): number => {
-  const leftTabIndex = !isHTMLElement(left) ? -1 : left.tabIndex
-  const rightTabIndex = !isHTMLElement(right) ? -1 : right.tabIndex
+  const leftTabIndex = tabIndexFor(left) ?? -1
+  const rightTabIndex = tabIndexFor(right) ?? -1
   const leftPositive = leftTabIndex > 0
   const rightPositive = rightTabIndex > 0
   if (leftPositive !== rightPositive) return leftPositive ? -1 : 1
@@ -213,8 +231,10 @@ const compareSequentialTabOrder = (left: Element, right: Element): number => {
   return 0
 }
 
-const hasExplicitNegativeTabIndex = (element: Element): boolean =>
-  isHTMLElement(element) && element.hasAttribute("tabindex") && element.tabIndex < 0
+const hasExplicitNegativeTabIndex = (element: Element): boolean => {
+  const tabIndex = tabIndexFor(element)
+  return tabIndex !== null && element.hasAttribute("tabindex") && tabIndex < 0
+}
 
 const ownsNegativeFocusScope = (element: Element): boolean =>
   hasExplicitNegativeTabIndex(element) &&
@@ -643,10 +663,11 @@ const DockLayer = ({
       return null
     }
     const focusable = composed
-      .filter((entry): entry is ComposedHTMLElement => {
+      .filter((entry): entry is ComposedElement & { readonly element: TabIndexedElement } => {
         const { element, nativeRoot } = entry
         if (element.tagName === "SLOT") return false
-        if (!isHTMLElement(element)) return false
+        const tabIndex = tabIndexFor(element)
+        if (tabIndex === null) return false
         let current: Node = element
         const seen = new Set<Node>()
         while (!seen.has(current)) {
@@ -666,8 +687,9 @@ const DockLayer = ({
           return false
         }
         return (
-          element.tabIndex >= 0 ||
-          (element.isContentEditable &&
+          tabIndex >= 0 ||
+          (isHTMLElement(element) &&
+            element.isContentEditable &&
             !element.hasAttribute("tabindex") &&
             !hasContentEditableAncestor(element, composedParents)) ||
           (element.matches("details > summary:first-of-type") && !hasExplicitNegativeTabIndex(element))
@@ -678,15 +700,23 @@ const DockLayer = ({
     const last = focusable[focusable.length - 1] ?? panel
     const active = activeElementFor(panel)
     const focusableElements = new Set<Element>(focusable)
-    const activeIsUnlistedShadowDescendant =
-      active !== null &&
-      isWithinPanel(panel, active) &&
-      !focusable.some((element) => element === active) &&
-      (delegatingShadowHostFor(active) !== null || shadowHostFor(active) !== null)
-    const activeDelegatingHost =
-      activeIsUnlistedShadowDescendant && active !== null ? delegatingShadowHostFor(active) : null
-    const activeComposedIndex =
-      activeIsUnlistedShadowDescendant && active !== null ? composed.findIndex(({ element }) => element === active) : -1
+    const activeIsUnlistedFocusTarget =
+      active !== null && isWithinPanel(panel, active) && !focusable.some((element) => element === active)
+    const composedIndexForActive = (element: Element): number => {
+      const seen = new Set<Node>()
+      let current: Node = element
+      while (!seen.has(current)) {
+        seen.add(current)
+        const index = composed.findIndex(({ element: candidate }) => candidate === current)
+        if (index >= 0) return index
+        const parent = composedParentFor(current, composedParents)
+        if (parent === null) return -1
+        current = parent
+      }
+      return -1
+    }
+    const activeDelegatingHost = activeIsUnlistedFocusTarget && active !== null ? delegatingShadowHostFor(active) : null
+    const activeComposedIndex = activeIsUnlistedFocusTarget && active !== null ? composedIndexForActive(active) : -1
     const adjacentFocusable = (step: -1 | 1): HTMLElement | null => {
       if (activeComposedIndex < 0) return null
       for (let index = activeComposedIndex + step; index >= 0 && index < composed.length; index += step) {
@@ -695,21 +725,21 @@ const DockLayer = ({
       }
       return null
     }
-    const adjacent = activeIsUnlistedShadowDescendant ? adjacentFocusable(event.shiftKey ? -1 : 1) : null
+    const adjacent = activeIsUnlistedFocusTarget ? adjacentFocusable(event.shiftKey ? -1 : 1) : null
     const adjacentIsInActiveDelegatingHost =
       activeDelegatingHost !== null &&
       adjacent !== null &&
       isWithinComposedElement(activeDelegatingHost, adjacent, composedParents)
-    const unlistedShadowBoundary =
-      activeIsUnlistedShadowDescendant &&
+    const unlistedFocusBoundary =
+      activeIsUnlistedFocusTarget &&
       !adjacentIsInActiveDelegatingHost &&
       (adjacent === null || !isWithinPanel(panel, adjacent))
     const leavingStart =
       event.shiftKey &&
-      (active === first || !isWithinPanel(panel, active) || adjacentIsInActiveDelegatingHost || unlistedShadowBoundary)
+      (active === first || !isWithinPanel(panel, active) || adjacentIsInActiveDelegatingHost || unlistedFocusBoundary)
     const leavingEnd =
       !event.shiftKey &&
-      (active === last || !isWithinPanel(panel, active) || adjacentIsInActiveDelegatingHost || unlistedShadowBoundary)
+      (active === last || !isWithinPanel(panel, active) || adjacentIsInActiveDelegatingHost || unlistedFocusBoundary)
     if (!leavingStart && !leavingEnd) return
     event.preventDefault()
     const target = adjacentIsInActiveDelegatingHost && adjacent !== null ? adjacent : event.shiftKey ? last : first
