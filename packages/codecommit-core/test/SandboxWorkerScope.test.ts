@@ -1157,6 +1157,31 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
+  it.effect("preserves a numeric profile-keyed regionless sandbox after account discovery", () =>
+    Effect.gen(function*() {
+      const numericProfileParams = { ...createParams, profile: "123456789013" }
+      const foreign = {
+        ...legacyRow,
+        awsAccountId: numericProfileParams.profile,
+        region: null,
+        accessPassword: "protected"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPrAll: [foreign]
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(numericProfileParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe(numericProfileParams.awsAccountId)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
   it.effect("does not replace a regionless worker that is still starting", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.never, {

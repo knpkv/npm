@@ -389,9 +389,14 @@ const makeSandboxService = Effect.gen(function*() {
         ).pipe(
           Effect.as(exactExisting)
         )
-        const regionlessKeys = Array.from(new Set([params.awsAccountId, params.profile])).filter(
-          (key) => key.length > 0
-        )
+        const regionlessKeys = Array.from(
+          new Set([
+            params.awsAccountId,
+            isDiscoveredAwsAccountId(params.awsAccountId) && !isDiscoveredAwsAccountId(params.profile)
+              ? params.profile
+              : undefined
+          ])
+        ).filter((key): key is string => key !== undefined && key.length > 0)
         const regionlessCandidates = (yield* Effect.forEach(regionlessKeys, (key) =>
           repo.findRegionlessByPrAll(key, params.pullRequestId, params.repositoryName), { concurrency: 1 })).flat()
           .filter(
