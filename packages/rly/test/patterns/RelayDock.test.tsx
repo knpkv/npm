@@ -1144,39 +1144,6 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
-  it("preserves a light-DOM slot scope in positive tabindex order", async () => {
-    const footer = (
-      <>
-        <slot data-rly-positive-light-slot="" tabIndex={1}>
-          <button data-rly-positive-light-slot-fallback="" type="button">
-            Light slot fallback
-          </button>
-        </slot>
-        <button data-rly-positive-light-slot-sibling="" tabIndex={2} type="button">
-          Higher-priority sibling
-        </button>
-      </>
-    )
-    const { portal } = await mount(dock({ defaultOpen: true, footer }))
-    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
-    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
-    const fallback = portal.querySelector<HTMLButtonElement>("[data-rly-positive-light-slot-fallback]")
-    const sibling = portal.querySelector<HTMLButtonElement>("[data-rly-positive-light-slot-sibling]")
-    if (dialog === null || close === null || fallback === null || sibling === null) {
-      throw new Error("RelayDock light-DOM slot ordering fixture did not render")
-    }
-
-    close.tabIndex = -1
-    const outside = document.createElement("button")
-    document.body.append(outside)
-    outside.focus()
-    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
-    await act(async () => dialog.dispatchEvent(forward))
-    expect(forward.defaultPrevented).toBe(true)
-    expect(document.activeElement).toBe(fallback)
-    expect(document.activeElement).not.toBe(sibling)
-  })
-
   it("preserves nested fallback slot scopes", async () => {
     const footer = (
       <div data-rly-nested-slot-host="">
@@ -1355,11 +1322,11 @@ describe("RelayDock", () => {
     const outerShadow = outer.attachShadow({ mode: "open", delegatesFocus: true })
     Object.defineProperty(outerShadow, "delegatesFocus", { configurable: true, value: true })
     const inner = outerShadow.appendChild(document.createElement("div"))
-    inner.tabIndex = -1
+    inner.tabIndex = 0
     const innerShadow = inner.attachShadow({ mode: "open", delegatesFocus: true })
     Object.defineProperty(innerShadow, "delegatesFocus", { configurable: true, value: true })
     const action = innerShadow.appendChild(document.createElement("button"))
-    action.tabIndex = -1
+    action.tabIndex = 0
     action.textContent = "Deep delegated action"
 
     close.focus()
@@ -1373,6 +1340,40 @@ describe("RelayDock", () => {
     await act(async () => dialog.dispatchEvent(reverse))
     expect(reverse.defaultPrevented).toBe(true)
     expect(innerShadow.activeElement).toBe(action)
+  })
+
+  it("continues past a targetless nested delegate to a later negative endpoint", async () => {
+    const footer = <div data-rly-targetless-nested-delegates-focus-host="" />
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const outer = portal.querySelector<HTMLElement>("[data-rly-targetless-nested-delegates-focus-host]")
+    if (dialog === null || close === null || outer === null) {
+      throw new Error("RelayDock targetless nested delegatesFocus fixture did not render")
+    }
+    outer.tabIndex = 0
+    const outerShadow = outer.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(outerShadow, "delegatesFocus", { configurable: true, value: true })
+    const inner = outerShadow.appendChild(document.createElement("div"))
+    inner.tabIndex = -1
+    const innerShadow = inner.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(innerShadow, "delegatesFocus", { configurable: true, value: true })
+    const deep = innerShadow.appendChild(document.createElement("button"))
+    deep.tabIndex = -1
+    const later = outerShadow.appendChild(document.createElement("button"))
+    later.tabIndex = -1
+
+    close.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(outerShadow.activeElement).toBe(later)
   })
 
   it("keeps shadow controls in a disabled fieldset outside its native tree", async () => {
@@ -1752,6 +1753,34 @@ describe("RelayDock", () => {
     action.textContent = "Negative host shadow action"
 
     preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("keeps controls below an ordinary negative wrapper", async () => {
+    const footer = (
+      <>
+        <button data-rly-negative-wrapper-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-negative-wrapper="" tabIndex={-1}>
+          <button data-rly-negative-wrapper-action="" type="button">
+            Nested footer action
+          </button>
+        </div>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const action = portal.querySelector<HTMLButtonElement>("[data-rly-negative-wrapper-action]")
+    if (dialog === null || close === null || action === null) {
+      throw new Error("RelayDock ordinary negative wrapper fixture did not render")
+    }
+
+    action.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
     await act(async () => dialog.dispatchEvent(forward))
     expect(forward.defaultPrevented).toBe(true)

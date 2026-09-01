@@ -179,7 +179,7 @@ interface SlotElement extends Element {
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
-  element.tagName === "SLOT" && "assignedElements" in element
+  element.tagName === "SLOT" && "assignedElements" in element && hasShadowRootHost(element.getRootNode())
 
 const compareSequentialTabOrder = (left: Element, right: Element): number => {
   const leftTabIndex = !isHTMLElement(left) ? -1 : left.tabIndex
@@ -193,6 +193,10 @@ const compareSequentialTabOrder = (left: Element, right: Element): number => {
 
 const hasExplicitNegativeTabIndex = (element: Element): boolean =>
   isHTMLElement(element) && element.hasAttribute("tabindex") && element.tabIndex < 0
+
+const ownsNegativeFocusScope = (element: Element): boolean =>
+  hasExplicitNegativeTabIndex(element) &&
+  (isSlotElement(element) || (isHTMLElement(element) && element.shadowRoot?.delegatesFocus === true))
 
 const isSequentiallyFocusableRadio = (
   element: RadioInput,
@@ -605,21 +609,31 @@ const DockLayer = ({
       return null
     }
     const delegatedTargets = new Set<Element>()
-    const delegatedTargetFor = (host: HTMLElement, seen: ReadonlySet<Element> = new Set()): Element | null => {
-      if (seen.has(host)) return null
-      const nextSeen = new Set(seen).add(host)
+    const hasDelegatingShadowAncestor = (host: HTMLElement, element: Element): boolean => {
+      let current: Node = element
+      const seen = new Set<Node>()
+      while (!seen.has(current)) {
+        seen.add(current)
+        const parent = composedParentFor(current, composedParents)
+        if (parent === null || parent === host) return false
+        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true) return true
+        current = parent
+      }
+      return false
+    }
+    const delegatedTargetFor = (host: HTMLElement): Element | null => {
       const delegatedCandidates = composed.filter(({ element, nativeRoot }) => {
         if (element === host || !isHTMLElement(element) || element.tagName === "SLOT") return false
+        if (element.shadowRoot?.delegatesFocus === true) return false
         if (!isWithinComposedElement(host, element, composedParents)) return false
+        if (hasDelegatingShadowAncestor(host, element)) return false
         if (!element.matches(focusableSelector) && !hasExplicitNegativeTabIndex(element)) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         return !isRadioInput(element) || isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)
       })
       const delegated =
         delegatedCandidates.find(({ element }) => element.hasAttribute("autofocus")) ?? delegatedCandidates[0]
-      if (delegated === undefined || !isHTMLElement(delegated.element)) return null
-      if (delegated.element.shadowRoot?.delegatesFocus !== true) return delegated.element
-      return delegatedTargetFor(delegated.element, nextSeen)
+      return delegated !== undefined && isHTMLElement(delegated.element) ? delegated.element : null
     }
     for (const { element: host } of composed) {
       if (!isHTMLElement(host) || host.shadowRoot?.delegatesFocus !== true || host.tabIndex < 0) continue
@@ -639,7 +653,7 @@ const DockLayer = ({
           const parent = composedParentFor(current, composedParents)
           if (parent === null) break
           if (parent === panel) break
-          if (hasExplicitNegativeTabIndex(parent)) {
+          if (ownsNegativeFocusScope(parent)) {
             if (!isDelegatedTarget) return false
             break
           }
