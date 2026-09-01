@@ -2483,6 +2483,35 @@ const runSelfTest = () => {
     ),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["label"] }]
   )
+  const recursiveForwardingPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<T> }\nexport const Public = (props: Props<string>) => props.value"
+    ]
+  ])
+  const recursiveForwardingCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<T> }\nexport const Public = (props: Props<number>) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(recursiveForwardingPrevious, recursiveForwardingCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const recursiveForwardingRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<U> = U\ntype Props<T> = { value: Identity<T> }\nexport const Public = (props: Props<string>) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(recursiveForwardingPrevious, recursiveForwardingRename, ["packages/public/src/index.ts"]),
+    []
+  )
   assert.throws(
     () => publicCallableChanges(directCyclicSources, directCyclicSources, ["packages/public/src/index.ts"]),
     (cause) =>
