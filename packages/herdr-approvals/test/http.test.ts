@@ -763,11 +763,11 @@ describe("host HTTP authority", () => {
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
-  it.effect("records and reads Work only through the loopback listener", () => {
+  it.effect("records and reads Work only through the loopback/LAN listener", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-work-loopback-"))
     return Effect.gen(function*() {
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
-      const hostConfig = config(root)
+      const hostConfig = { ...config(root), workBindAddress: "127.0.0.2" }
       const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
       const fleet = yield* makeFleetService({
@@ -781,8 +781,34 @@ describe("host HTTP authority", () => {
         (running) => Effect.promise(running.close)
       )
 
+      if (server.workUrl === null) return yield* Effect.die("Work listener missing")
+      const workListenerUrl = new URL(server.workUrl)
+      expect(workListenerUrl.hostname).toBe("127.0.0.2")
+
+      const untrustedInterface = yield* Effect.result(
+        Effect.tryPromise({
+          try: () => fetch(`http://127.0.0.1:${workListenerUrl.port}/v1/work`),
+          catch: (cause) =>
+            new FleetOperationError({
+              cause,
+              detail: String(cause),
+              operation: "probe untrusted Work listener interface"
+            })
+        })
+      )
+      expect(untrustedInterface._tag).toBe("Failure")
+
+      expect(
+        yield* Effect.promise(() =>
+          requestStatus(
+            `${server.workUrl}/v1/work`,
+            `attacker.example:${workListenerUrl.port}`
+          )
+        )
+      ).toBe(403)
+
       const recorded = yield* Effect.promise(() =>
-        fetch(`${server.url}/v1/work/checkpoints`, {
+        fetch(`${server.workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify(workCheckpoint),
           headers: { "content-type": "application/json" },
           method: "POST"
@@ -793,20 +819,45 @@ describe("host HTTP authority", () => {
         workCheckpoint
       )
 
-      const snapshot = yield* Effect.promise(() => fetch(`${server.url}/v1/work`))
+      const conflict = yield* Effect.promise(() =>
+        fetch(`${server.workUrl}/v1/work/checkpoints`, {
+          body: JSON.stringify({
+            ...workCheckpoint,
+            goal: { ...workCheckpoint.goal, title: "Changed checkpoint" }
+          }),
+          headers: { "content-type": "application/json" },
+          method: "POST"
+        })
+      )
+      expect(conflict.status).toBe(409)
+      expect(yield* Effect.promise(() => conflict.json())).toEqual({
+        error: "WorkCheckpointConflictError",
+        eventId: workCheckpoint.eventId
+      })
+
+      const snapshot = yield* Effect.promise(() => fetch(`${server.workUrl}/v1/work`))
       expect(snapshot.status).toBe(200)
       expect(Schema.decodeUnknownSync(WorkSnapshots)(yield* Effect.promise(() => snapshot.json())).now.goals).toEqual([
         workCheckpoint.goal
       ])
 
       const browserWrite = yield* Effect.promise(() =>
-        fetch(`${server.url}/v1/work/checkpoints`, {
+        fetch(`${server.workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify(workCheckpoint),
-          headers: { "content-type": "application/json", origin: server.url },
+          headers: { "content-type": "application/json", origin: server.workUrl },
           method: "POST"
         })
       )
       expect(browserWrite.status).toBe(403)
+
+      const genericJob = yield* Effect.promise(() =>
+        fetch(`${server.workUrl}/v1/jobs`, {
+          body: JSON.stringify({ payload: { kind: "nix.check" } }),
+          headers: { "content-type": "application/json" },
+          method: "POST"
+        })
+      )
+      expect(genericJob.status).toBe(404)
     }).pipe(Effect.scoped, provideNodeServices)
   })
 

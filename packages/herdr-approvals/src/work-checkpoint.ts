@@ -33,24 +33,41 @@ const workLocalBaseUrl = Effect.fn("Fleetctl.workLocalBaseUrl")(function*(
   if (known === undefined) {
     return yield* new FleetValidationError({ detail: `unknown host: ${target}` })
   }
+  if (config.crossHost) {
+    if (known.host.toLowerCase() !== config.approvalHub.host.toLowerCase()) {
+      return yield* new FleetValidationError({
+        detail: "work commands can only target the canonical approval hub"
+      })
+    }
+    return config.approvalHub.url
+  }
   if (known.host.toLowerCase() !== config.host.toLowerCase()) {
     return yield* new FleetValidationError({
       detail: "work commands can only target the local host"
     })
   }
-  return `http://127.0.0.1:${config.localPort}`
+  const workBindAddress = config.workBindAddress ?? "127.0.0.1"
+  return `http://${workBindAddress}:${config.port}`
 })
+
+export const workDefaultTarget = (config: HostConfiguration): HostConfiguration["host"] =>
+  config.crossHost ? config.approvalHub.host : config.host
+
+export const workSnapshotTarget = (
+  config: HostConfiguration,
+  target: string | undefined
+): HostConfiguration["host"] => target ?? workDefaultTarget(config)
 
 export const workCheckpointUrl = Effect.fn("Fleetctl.workCheckpointUrl")(function*(
   config: HostConfiguration,
   target: string
 ) {
-  return `${yield* workLocalBaseUrl(config, target)}${workCheckpointPath}`
+  return new URL(workCheckpointPath, yield* workLocalBaseUrl(config, target)).href
 })
 
 export const workSnapshotUrl = Effect.fn("Fleetctl.workSnapshotUrl")(function*(
   config: HostConfiguration,
   target: string
 ) {
-  return `${yield* workLocalBaseUrl(config, target)}${workSnapshotPath}`
+  return new URL(workSnapshotPath, yield* workLocalBaseUrl(config, target)).href
 })

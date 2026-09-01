@@ -242,6 +242,36 @@ describe("fleet local authority", () => {
         port: valid.approvalPort
       })
     )).toBe(true)
+    expect(Result.isFailure(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        crossHost: false,
+        localPort: valid.port
+      })
+    )).toBe(true)
+    for (
+      const workBindAddress of [
+        "0.0.0.0",
+        "00.00.00.00",
+        "0.0.0.00",
+        "000.000.000.000",
+        "010.0.0.1",
+        "192.168.001.024"
+      ]
+    ) {
+      expect(Result.isFailure(
+        Schema.decodeUnknownResult(HostConfiguration)({
+          ...valid,
+          workBindAddress
+        })
+      )).toBe(true)
+    }
+    expect(Result.isSuccess(
+      Schema.decodeUnknownResult(HostConfiguration)({
+        ...valid,
+        workBindAddress: "192.168.1.24"
+      })
+    )).toBe(true)
     expect(Result.isSuccess(
       Schema.decodeUnknownResult(HostConfiguration)({
         ...valid,
