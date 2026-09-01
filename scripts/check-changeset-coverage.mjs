@@ -1577,7 +1577,7 @@ function canonicalIndexedAccessTypeText(typeNode, analysis, filePath, substituti
             }
           }
           for (const member of declarationNode.members) {
-            if (hasNonPublicModifier(member)) continue
+            if (hasNonPublicModifier(member) || hasStaticModifier(member)) continue
             if (
               (!TypeScript.isPropertySignature(member) &&
                 !TypeScript.isPropertyDeclaration(member) &&
@@ -7943,6 +7943,26 @@ const runSelfTest = () => {
   ])
   assert.deepEqual(
     publicCallableChanges(indexedMethodPrevious, indexedMethodSelectedChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const indexedStaticInstancePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Model { static selected: string = ""; selected(): string { return "" } }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const indexedStaticInstanceChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Model { static selected: string = ""; selected(): number { return 0 } }\ntype Props = { value: Model["selected"] }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(indexedStaticInstancePrevious, indexedStaticInstanceChanged, [
+      "packages/public/src/index.ts"
+    ]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
   const indexedArrayLengthPrevious = new Map([
