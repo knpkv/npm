@@ -677,6 +677,43 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
     }))
 
+  it.effect("publishes stop intent before an interrupted create-admission wait", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const releaseInsert = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        insertGate: { inserted, release: releaseInsert }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const create = yield* sandboxes.create(createParams).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(inserted)
+          const row = yield* Ref.get(fixture.rowRef)
+          if (row === undefined) return yield* Effect.die("Sandbox row was not inserted")
+
+          const stop = yield* sandboxes.stop(SandboxId.make(row.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          const interruption = yield* Fiber.interrupt(stop).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.succeed(releaseInsert, undefined)
+          yield* Fiber.join(interruption)
+          yield* Fiber.join(create)
+          yield* Deferred.await(fixture.workerCompleted)
+          yield* sandboxes.stop(SandboxId.make(row.id))
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
   it.effect("rejects fallback creation beside a numeric account sandbox", () =>
     Effect.gen(function*() {
       const numeric: SandboxRow = {

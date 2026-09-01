@@ -817,21 +817,19 @@ const makeSandboxService = Effect.gen(function*() {
           yield* updateStatus(id, "stopped")
           yield* Effect.logInfo(`Sandbox ${id} stopped`)
         }))
-        return restore(
-          createAdmission.withPermits(1)(
-            Effect.uninterruptible(
-              Effect.ensuring(
-                Effect.gen(function*() {
-                  // Publish the stop intent before waiting for lifecycle admission.
-                  // Restart checks this marker before it can publish ownership.
-                  yield* claimStopOwners([String(id)])
-                  yield* requestWorkerStops([String(id)])
-                  yield* stopSandbox
-                }),
-                releaseStopOwner(String(id))
+        return Effect.ensuring(
+          Effect.gen(function*() {
+            // Publish the stop intent before waiting for create admission.
+            // A provisioning worker may hold that permit while it inserts its row.
+            yield* claimStopOwners([String(id)])
+            yield* requestWorkerStops([String(id)])
+            yield* restore(
+              createAdmission.withPermits(1)(
+                Effect.uninterruptible(stopSandbox)
               )
             )
-          )
+          }),
+          releaseStopOwner(String(id))
         )
       }).pipe(
         Effect.mapError((cause) => new SandboxError({ sandboxId: id, message: "Failed to stop sandbox", cause }))
