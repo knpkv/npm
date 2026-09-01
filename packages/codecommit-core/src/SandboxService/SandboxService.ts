@@ -254,27 +254,7 @@ const makeSandboxService = Effect.gen(function*() {
             if (exactExisting !== undefined) {
               return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
             }
-            return repo.updateAwsAccountId(SandboxId.make(legacy.id), params.awsAccountId).pipe(
-              Effect.andThen(repo.findByPr(
-                params.awsAccountId,
-                params.pullRequestId,
-                params.repositoryName,
-                params.region
-              )),
-              Effect.flatMap((migrated) => {
-                const row = Option.isSome(migrated) && migrated.value.region === params.region
-                  ? migrated.value
-                  : undefined
-                return row === undefined
-                  ? Effect.fail(
-                    new SandboxError({
-                      sandboxId: SandboxId.make(legacy.id),
-                      message: "Legacy sandbox identity migration did not return the migrated row"
-                    })
-                  )
-                  : Effect.succeed(row)
-              })
-            )
+            return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
           }
         })
         const regionless = yield* repo.findRegionlessByPrAll(

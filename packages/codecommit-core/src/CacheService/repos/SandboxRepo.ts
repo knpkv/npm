@@ -191,13 +191,6 @@ const makeSandboxRepo = Effect.gen(function*() {
         cacheError("updateRegion")
       ),
 
-    /** Migrate a legacy sandbox from an empty account key to its profile identity. */
-    updateAwsAccountId: (id: SandboxId, awsAccountId: string) =>
-      sql`UPDATE sandboxes SET aws_account_id = ${awsAccountId} WHERE id = ${id}`.pipe(
-        Effect.tap(() => publish),
-        cacheError("updateAwsAccountId")
-      ),
-
     findActive: () => findActive_(voidRequest).pipe(cacheError("findActive")),
 
     findAll: () => findAll_(voidRequest).pipe(cacheError("findAll")),

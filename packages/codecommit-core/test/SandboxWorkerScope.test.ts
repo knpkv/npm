@@ -84,7 +84,6 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const containerDiscoveryCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
   const regionUpdates = yield* Ref.make<Array<{ readonly id: string; readonly region: string }>>([])
-  const accountUpdates = yield* Ref.make<Array<{ readonly id: string; readonly awsAccountId: string }>>([])
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
 
@@ -165,16 +164,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }),
     appendLog: (_id, line) =>
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, logs: `${row.logs ?? ""}${line}\n` }),
-    updateRegion: (id, region) => Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }]),
-    updateAwsAccountId: (id, awsAccountId) =>
-      Ref.update(accountUpdates, (updates) => [...updates, { id: String(id), awsAccountId }]).pipe(
-        Effect.andThen(
-          Ref.update(rowRef, (row) => {
-            const source = row ?? options?.emptyAccountByPr
-            return source?.id === String(id) ? { ...source, awsAccountId } : row
-          })
-        )
-      )
+    updateRegion: (id, region) => Ref.update(regionUpdates, (updates) => [...updates, { id: String(id), region }])
   })
 
   const dependencies = Layer.mergeAll(
@@ -241,7 +231,6 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
-    accountUpdates,
     regionUpdates,
     stopContainerCalls,
     workerCause
@@ -607,7 +596,7 @@ describe("SandboxWorkerScope", () => {
       )
     }))
 
-  it.effect("migrates an active empty-account sandbox to the profile identity", () =>
+  it.effect("retires an unattributed empty-account sandbox before creating a profile sandbox", () =>
     Effect.gen(function*() {
       const profileParams = { ...createParams, awsAccountId: "profile-account" }
       const fixture = yield* makeFixture(() => Effect.never, {
@@ -616,7 +605,13 @@ describe("SandboxWorkerScope", () => {
           awsAccountId: "",
           region: createParams.region,
           accessPassword: "protected"
-        }
+        },
+        inspectContainer: (containerId) =>
+          Effect.succeed({
+            Id: containerId,
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
       })
 
       yield* Effect.scoped(
@@ -624,15 +619,11 @@ describe("SandboxWorkerScope", () => {
           const sandboxes = yield* SandboxService
           const sandbox = yield* sandboxes.create(profileParams)
           expect(sandbox.awsAccountId).toBe(profileParams.awsAccountId)
-          expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
-          expect(yield* Ref.get(fixture.accountUpdates)).toEqual([{
-            id: "legacy-sandbox",
-            awsAccountId: "profile-account"
-          }])
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
           expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
-            id: "legacy-sandbox",
             awsAccountId: "profile-account",
-            status: "running"
+            status: "creating"
           })
         }).pipe(Effect.provide(fixture.layer))
       )
