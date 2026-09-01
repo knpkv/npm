@@ -97,6 +97,7 @@ interface FixtureOptions {
     readonly reached: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly preserveStatusIds?: ReadonlyArray<string>
   readonly retirementGate?: {
     readonly reached: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
@@ -228,7 +229,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         ),
     updateStatus: (_id, status, extra) =>
       Ref.update(rowRef, (row) =>
-        row === undefined
+        row === undefined || options?.preserveStatusIds?.includes(String(_id)) === true
           ? row
           : {
             ...row,
@@ -598,6 +599,10 @@ describe("SandboxWorkerScope", () => {
       const healthReached = yield* Deferred.make<void>()
       const healthRelease = yield* Deferred.make<void>()
       const fixture = yield* makeFixture(() => Effect.void, {
+        config: {
+          ...config,
+          sandbox: { ...config.sandbox, setupCommands: ["printf setup"] }
+        },
         healthGate: { reached: healthReached, release: healthRelease }
       })
 
@@ -900,6 +905,160 @@ describe("SandboxWorkerScope", () => {
           expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
         }).pipe(Effect.provide(fixture.layer))
       )
+    }))
+
+  it.effect("guards every terminal numeric row during fallback admission", () =>
+    Effect.gen(function*() {
+      const collisionReached = yield* Deferred.make<void>()
+      const collisionRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const first: SandboxRow = {
+        ...legacyRow,
+        id: "first-numeric-sandbox",
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const second: SandboxRow = {
+        ...first,
+        id: "second-numeric-sandbox"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: first,
+        emptyAccountByPrAll: [second],
+        rowsById: { [second.id]: second },
+        retirementGate: { reached: collisionReached, release: collisionRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": first.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(collisionReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(second.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          expect(yield* Deferred.isDone(restartStarted)).toBe(false)
+
+          yield* Deferred.succeed(collisionRelease, undefined)
+          const created = yield* Fiber.join(creation)
+          yield* Fiber.join(restart)
+
+          expect(created.awsAccountId).toBe("production")
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("releases fallback guards when insertion is interrupted", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const insertRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        rowsById: { [numeric.id]: numeric },
+        insertGate: { inserted, release: insertRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(inserted)
+          yield* Fiber.interrupt(creation)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(restartStarted)
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("retains fallback guards after an admitted restart exits", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const inserted = yield* Deferred.make<void>()
+      const insertRelease = yield* Deferred.make<void>()
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: numeric,
+        rowsById: { [numeric.id]: numeric },
+        preserveStatusIds: [numeric.id],
+        insertGate: { inserted, release: insertRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const firstRestart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(restartStarted)
+
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(inserted)
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(firstRestart)
+
+          const secondRestart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Fiber.join(secondRestart)
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+
+          yield* Deferred.succeed(insertRelease, undefined)
+          yield* Fiber.join(creation)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
   it.effect("creates a first fallback sandbox without a numeric collision", () =>

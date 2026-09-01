@@ -179,8 +179,10 @@ const makeSandboxService = Effect.gen(function*() {
   const hasActiveWorker = (id: string) =>
     Ref.get(activeWorkerIds).pipe(Effect.map((workers) => (workers.get(id) ?? 0) > 0))
   const isStopRequested = (id: string) => Ref.get(stopRequestedIds).pipe(Effect.map((ids) => ids.has(id)))
-  const requestWorkerStop = (id: string) => Ref.update(stopRequestedIds, (ids) => new Set(ids).add(id))
-  const claimStopOwner = (id: string) => Ref.update(stopOwnerIds, (ids) => new Set(ids).add(id))
+  const requestWorkerStops = (ids: ReadonlyArray<string>) =>
+    Ref.update(stopRequestedIds, (requested) => new Set([...requested, ...ids]))
+  const claimStopOwners = (ids: ReadonlyArray<string>) =>
+    Ref.update(stopOwnerIds, (owners) => new Set([...owners, ...ids]))
   const isStopOwned = (id: string) => Ref.get(stopOwnerIds).pipe(Effect.map((ids) => ids.has(id)))
   const clearWorkerStopRequest = (id: string) =>
     Ref.update(stopRequestedIds, (ids) => {
@@ -190,7 +192,7 @@ const makeSandboxService = Effect.gen(function*() {
       return next
     })
 
-  const findFallbackCandidate = (params: CreateSandboxParams) =>
+  const findFallbackCandidates = (params: CreateSandboxParams) =>
     !isDiscoveredAwsAccountId(params.awsAccountId)
       ? Effect.gen(function*() {
         const candidates = (yield* repo.findAll()).filter((row) =>
@@ -200,22 +202,20 @@ const makeSandboxService = Effect.gen(function*() {
           row.repositoryName === params.repositoryName &&
           (row.region === params.region || row.region === null || row.region === undefined || row.region === "")
         )
-        let terminalCandidate: SandboxRow | undefined
+        const terminalCandidates: Array<SandboxRow> = []
         for (const candidate of candidates) {
           if (!isTerminalSandboxStatus(candidate.status)) {
-            return { row: candidate, blocksCreation: true }
+            return [{ row: candidate, blocksCreation: true }]
           }
           const containers = yield* docker.listContainersByLabel("codecommit.sandbox.id", candidate.id)
           if (containers.some((container) => !isConfirmedStoppedContainer(container.State))) {
-            return { row: candidate, blocksCreation: true }
+            return [{ row: candidate, blocksCreation: true }]
           }
-          terminalCandidate ??= candidate
+          terminalCandidates.push(candidate)
         }
-        return terminalCandidate === undefined
-          ? undefined
-          : { row: terminalCandidate, blocksCreation: false }
+        return terminalCandidates.map((row) => ({ row, blocksCreation: false }))
       })
-      : Effect.void
+      : Effect.succeed<ReadonlyArray<{ readonly row: SandboxRow; readonly blocksCreation: boolean }>>([])
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
@@ -716,57 +716,60 @@ const makeSandboxService = Effect.gen(function*() {
           // `tapDefect` leaves the original Cause / Exit unchanged.
           Effect.tapDefect((defect) => recordCreationFailure(id, defect))
         )
-        const fallbackStopGuard = yield* lifecycleAdmission.withPermits(1)(
-          Effect.gen(function*() {
-            const fallbackCandidate = yield* findFallbackCandidate(params)
-            if (fallbackCandidate === undefined) return undefined
-            if (fallbackCandidate.blocksCreation) {
-              return yield* new SandboxError({
-                sandboxId: SandboxId.make(fallbackCandidate.row.id),
-                message: "AWS account identity is unavailable; retry after account discovery"
-              })
-            }
-            yield* requestWorkerStop(String(fallbackCandidate.row.id))
-            return fallbackCandidate.row.id
-          })
-        )
-        yield* markWorkerActive(String(id))
-        yield* repo.insert({
-          id,
-          pullRequestId: params.pullRequestId,
-          awsAccountId: params.awsAccountId,
-          repositoryName: params.repositoryName,
-          region: params.region,
-          sourceBranch: params.sourceBranch,
-          accessPassword,
-          workspacePath,
-          status: "creating",
-          createdAt: now,
-          lastActivityAt: now
-        }).pipe(
-          Effect.andThen(
-            Effect.uninterruptible(
-              ownerScope.fork(worker, releaseWorkerReservationForCreate()).pipe(
-                Effect.flatMap(({ fiber, started }) =>
-                  Effect.race(
-                    started.pipe(Effect.as(true)),
-                    Fiber.await(fiber).pipe(Effect.as(false))
+        yield* Effect.acquireUseRelease(
+          lifecycleAdmission.withPermits(1)(
+            Effect.gen(function*() {
+              const fallbackCandidates = yield* findFallbackCandidates(params)
+              const blockingCandidate = fallbackCandidates.find((candidate) => candidate.blocksCreation)
+              if (blockingCandidate !== undefined) {
+                return yield* new SandboxError({
+                  sandboxId: SandboxId.make(blockingCandidate.row.id),
+                  message: "AWS account identity is unavailable; retry after account discovery"
+                })
+              }
+              const fallbackStopGuards = fallbackCandidates.map((candidate) => candidate.row.id)
+              yield* claimStopOwners(fallbackStopGuards)
+              yield* requestWorkerStops(fallbackStopGuards)
+              return fallbackStopGuards
+            })
+          ),
+          () =>
+            Effect.gen(function*() {
+              yield* markWorkerActive(String(id))
+              yield* repo.insert({
+                id,
+                pullRequestId: params.pullRequestId,
+                awsAccountId: params.awsAccountId,
+                repositoryName: params.repositoryName,
+                region: params.region,
+                sourceBranch: params.sourceBranch,
+                accessPassword,
+                workspacePath,
+                status: "creating",
+                createdAt: now,
+                lastActivityAt: now
+              }).pipe(
+                Effect.andThen(
+                  Effect.uninterruptible(
+                    ownerScope.fork(worker, releaseWorkerReservationForCreate()).pipe(
+                      Effect.flatMap(({ fiber, started }) =>
+                        Effect.race(
+                          started.pipe(Effect.as(true)),
+                          Fiber.await(fiber).pipe(Effect.as(false))
+                        )
+                      ),
+                      Effect.flatMap((started) => started ? Ref.set(workerTransferred, true) : Effect.void)
+                    )
                   )
                 ),
-                Effect.flatMap((started) => started ? Ref.set(workerTransferred, true) : Effect.void)
+                Effect.ensuring(
+                  Ref.get(workerTransferred).pipe(
+                    Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservationForCreate())
+                  )
+                )
               )
-            )
-          ),
-          Effect.ensuring(
-            Ref.get(workerTransferred).pipe(
-              Effect.flatMap((transferred) => transferred ? Effect.void : releaseWorkerReservationForCreate())
-            )
-          ),
-          Effect.ensuring(
-            fallbackStopGuard === undefined
-              ? Effect.void
-              : clearWorkerStopRequest(String(fallbackStopGuard))
-          )
+            }),
+          (fallbackStopGuards) => Effect.forEach(fallbackStopGuards, releaseStopOwner, { discard: true })
         )
 
         return yield* repo.findById(id)
@@ -821,8 +824,8 @@ const makeSandboxService = Effect.gen(function*() {
                 Effect.gen(function*() {
                   // Publish the stop intent before waiting for lifecycle admission.
                   // Restart checks this marker before it can publish ownership.
-                  yield* claimStopOwner(String(id))
-                  yield* requestWorkerStop(String(id))
+                  yield* claimStopOwners([String(id)])
+                  yield* requestWorkerStops([String(id)])
                   yield* stopSandbox
                 }),
                 releaseStopOwner(String(id))
