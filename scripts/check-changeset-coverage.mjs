@@ -595,14 +595,10 @@ const canonicalKeySetForNode = (
   if (TypeScript.isMappedTypeNode(typeNode)) {
     const constraint = typeNode.typeParameter.constraint
     if (constraint === undefined) return undefined
-    const sourceKeys = canonicalKeySetForNode(
-      constraint,
-      analysis,
-      filePath,
-      substitutions,
-      seen,
-      nextCanonicalTypeContext(context)
-    )
+    const sourceKeys = canonicalKeySetForNode(constraint, analysis, filePath, substitutions, seen, {
+      ...nextCanonicalTypeContext(context),
+      keySetMode: "mapped-domain"
+    })
     if (sourceKeys === undefined || typeNode.nameType === undefined) return sourceKeys
     const remappedKey = canonicalLiteralKeyText(typeNode.nameType)
     if (remappedKey !== undefined) return new Set([remappedKey])
@@ -617,14 +613,11 @@ const canonicalKeySetForNode = (
       typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword ||
       typeNode.operator === TypeScript.SyntaxKind.UniqueKeyword
     ) {
-      return canonicalKeySetForNode(
-        typeNode.type,
-        analysis,
-        filePath,
-        substitutions,
-        seen,
-        nextCanonicalTypeContext(context)
-      )
+      const operandContext =
+        typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword
+          ? { ...nextCanonicalTypeContext(context), keySetMode: undefined }
+          : nextCanonicalTypeContext(context)
+      return canonicalKeySetForNode(typeNode.type, analysis, filePath, substitutions, seen, operandContext)
     }
   }
   if (TypeScript.isUnionTypeNode(typeNode)) {
@@ -634,6 +627,9 @@ const canonicalKeySetForNode = (
     if (memberSets.some((keys) => keys === undefined)) return undefined
     const [first, ...rest] = memberSets
     if (first === undefined) return undefined
+    if (context.keySetMode === "mapped-domain") {
+      return new Set(memberSets.flatMap((keys) => (keys === undefined ? [] : [...keys])))
+    }
     return rest.reduce((keys, memberKeys) => new Set([...keys].filter((key) => memberKeys?.has(key) === true)), first)
   }
   if (TypeScript.isIntersectionTypeNode(typeNode)) {
@@ -3465,6 +3461,34 @@ const runSelfTest = () => {
     ]
   ])
   assert.deepEqual(publicCallableChanges(mappedKeyPrevious, mappedKeyRemap, ["packages/public/src/index.ts"]), [
+    { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
+  ])
+  const mappedDomainPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Model = { [K in "a" | "b"]: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }'
+    ]
+  ])
+  const mappedDomainReordered = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Model = { [K in "b" | "a"]: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(mappedDomainPrevious, mappedDomainReordered, ["packages/public/src/index.ts"]),
+    []
+  )
+  const mappedDomainChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'type Model = { [K in "c" | "d"]: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }'
+    ]
+  ])
+  assert.deepEqual(publicCallableChanges(mappedDomainPrevious, mappedDomainChanged, ["packages/public/src/index.ts"]), [
     { kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }
   ])
   const mappedTemplatePrevious = new Map([
