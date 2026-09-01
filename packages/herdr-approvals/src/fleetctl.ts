@@ -27,7 +27,7 @@ import { submitToHost } from "./fleetctl-submission.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
-import { workCheckpointFromJson, workCheckpointUrl, workDefaultTarget, workSnapshotUrl } from "./work-checkpoint.js"
+import { workCheckpointFromJson, workCheckpointUrl, workSnapshotTarget, workSnapshotUrl } from "./work-checkpoint.js"
 
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
@@ -334,7 +334,7 @@ const main = Effect.gen(function*() {
         return
       }
       if (operation === "snapshot" && (rest.length === 1 || rest.length === 2)) {
-        const snapshot = yield* snapshotWork(config, rest[1] ?? workDefaultTarget(config))
+        const snapshot = yield* snapshotWork(config, workSnapshotTarget(config, rest[1]))
         yield* Console.log(JSON.stringify(snapshot, null, 2))
         return
       }

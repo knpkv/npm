@@ -1651,7 +1651,7 @@ export const startHttpServer = async (
             json(response, 404, { error: "not_found" })
             return
           }
-          if (mode !== "work" && header(request, "host")?.toLowerCase() !== expectedHost) {
+          if (header(request, "host")?.toLowerCase() !== expectedHost) {
             json(response, 403, {
               error: "FleetAuthorizationError",
               actor: "host"

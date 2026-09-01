@@ -798,6 +798,15 @@ describe("host HTTP authority", () => {
       )
       expect(untrustedInterface._tag).toBe("Failure")
 
+      expect(
+        yield* Effect.promise(() =>
+          requestStatus(
+            `${server.workUrl}/v1/work`,
+            `attacker.example:${workListenerUrl.port}`
+          )
+        )
+      ).toBe(403)
+
       const recorded = yield* Effect.promise(() =>
         fetch(`${server.workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify(workCheckpoint),

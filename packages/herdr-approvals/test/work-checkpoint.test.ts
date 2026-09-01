@@ -6,6 +6,7 @@ import {
   workCheckpointFromJson,
   workCheckpointUrl,
   workDefaultTarget,
+  workSnapshotTarget,
   workSnapshotUrl
 } from "../src/work-checkpoint.js"
 
@@ -68,6 +69,8 @@ describe("fleetctl work commands", () => {
         "http://127.0.0.1:4778/v1/work"
       )
       expect(workDefaultTarget(config)).toBe("ALPHA")
+      expect(workSnapshotTarget(config, undefined)).toBe("ALPHA")
+      expect(workSnapshotTarget(config, "ALPHA")).toBe("ALPHA")
       const remote = yield* Effect.result(workCheckpointUrl(config, "SER8"))
       expect(remote).toMatchObject({
         failure: {
@@ -81,6 +84,8 @@ describe("fleetctl work commands", () => {
     Effect.gen(function*() {
       const crossHostConfig = { ...config, crossHost: true }
       expect(workDefaultTarget(crossHostConfig)).toBe("SER8")
+      expect(workSnapshotTarget(crossHostConfig, undefined)).toBe("SER8")
+      expect(workSnapshotTarget(crossHostConfig, "SER8")).toBe("SER8")
       expect(yield* workCheckpointUrl(crossHostConfig, "ser8")).toBe(
         "https://ser8.example.test:4779/v1/work/checkpoints"
       )
