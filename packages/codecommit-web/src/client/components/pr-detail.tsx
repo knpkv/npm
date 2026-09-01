@@ -44,7 +44,7 @@ import {
   Text,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
-import { Option } from "effect"
+import { Exit, Option } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
@@ -101,7 +101,12 @@ const PullRequestReviewWorkspace = lazy(() =>
   }))
 )
 
-/** Match a persisted sandbox to every coordinate of the selected pull request. */
+/** Use the discovered account as the durable sandbox key, with profile identity for undiscovered accounts. */
+export const sandboxAccountIdForPullRequest = (pullRequest: Pick<Domain.PullRequest, "account">): string =>
+  pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
+    ? pullRequest.account.awsAccountId
+    : pullRequest.account.profile
+
 export const sandboxMatchesPullRequest = (
   sandbox: {
     readonly awsAccountId: string
@@ -111,10 +116,43 @@ export const sandboxMatchesPullRequest = (
   },
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
 ): boolean =>
-  sandbox.awsAccountId === (pullRequest.account.awsAccountId ?? pullRequest.account.profile) &&
+  sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) &&
   sandbox.pullRequestId === String(pullRequest.id) &&
   sandbox.repositoryName === String(pullRequest.repositoryName) &&
   sandbox.region === String(pullRequest.account.region)
+
+/** A sandbox is reusable only while it can still serve this pull request. */
+export const isReusableSandbox = (
+  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  sandbox.status !== "stopped" &&
+  sandbox.status !== "stopping" &&
+  sandbox.status !== "error" &&
+  sandboxMatchesPullRequest(sandbox, pullRequest)
+
+/** Detect a matching sandbox whose stop is still in flight. */
+export const isStoppingSandbox = (
+  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean => sandbox.status === "stopping" && sandboxMatchesPullRequest(sandbox, pullRequest)
+
+/** Block fallback-account creation when an active numeric sandbox cannot be attributed safely. */
+export const hasFallbackSandboxCollision = (
+  sandboxes: ReadonlyArray<Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status?: string }>,
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) &&
+  sandboxes.some(
+    (sandbox) =>
+      /^\d{12}$/u.test(sandbox.awsAccountId) &&
+      sandbox.awsAccountId !== pullRequest.account.profile &&
+      sandbox.status !== "stopped" &&
+      sandbox.status !== "error" &&
+      sandbox.pullRequestId === String(pullRequest.id) &&
+      sandbox.repositoryName === String(pullRequest.repositoryName) &&
+      sandbox.region === String(pullRequest.account.region)
+  )
 
 /** Keep review API requests bound to the exact PR shown by this page. */
 export const reviewApiAccountId = (
@@ -1142,15 +1180,17 @@ export function PRDetail() {
   }, [consoleUrl])
 
   // Sandbox
-  const createSandbox = useAtomSet(createSandboxAtom)
+  const createSandbox = useAtomSet(createSandboxAtom, { mode: "promiseExit" })
   const existingSandbox = useMemo(
-    () =>
-      pr === null
-        ? undefined
-        : state.sandboxes?.find(
-            (sandbox) =>
-              sandbox.status !== "stopped" && sandbox.status !== "error" && sandboxMatchesPullRequest(sandbox, pr)
-          ),
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isReusableSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
+  )
+  const stoppingSandbox = useMemo(
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isStoppingSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
+  )
+  const fallbackSandboxCollision = useMemo(
+    () => (pr === null ? false : hasFallbackSandboxCollision(state.sandboxes ?? [], pr)),
     [pr, state.sandboxes]
   )
 
@@ -1165,8 +1205,8 @@ export function PRDetail() {
 
   const proceedSandbox = useCallback(() => {
     if (pr === null) return
-    const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
-    createSandbox({
+    const sandboxAccountKey = sandboxAccountIdForPullRequest(pr)
+    const request = createSandbox({
       payload: {
         pullRequestId: pr.id,
         awsAccountId: sandboxAccountKey,
@@ -1177,10 +1217,29 @@ export function PRDetail() {
       }
     })
     setSandboxCreating(true)
+    void request.then((exit) => {
+      if (Exit.isFailure(exit)) {
+        setSandboxCreating(false)
+        const description = Option.match(Exit.findErrorOption(exit), {
+          onNone: () => "Try again once the current sandbox has stopped.",
+          onSome: (error) =>
+            Predicate.isError(error) ? error.message : "Try again once the current sandbox has stopped."
+        })
+        toast.error("Unable to create sandbox", { description })
+      }
+    })
   }, [pr, createSandbox])
 
   const handleSandbox = useCallback(() => {
     if (pr === null) return
+    if (fallbackSandboxCollision) {
+      toast.info("AWS account discovery is unavailable. Refresh before creating a sandbox.")
+      return
+    }
+    if (stoppingSandbox !== undefined) {
+      toast.info("Sandbox is still stopping. Try again once it has stopped.")
+      return
+    }
     if (existingSandbox !== undefined) {
       navigate(`/sandbox/${existingSandbox.id}`)
       return
@@ -1188,7 +1247,7 @@ export function PRDetail() {
     if (!docker.show()) {
       proceedSandbox()
     }
-  }, [pr, existingSandbox, docker, proceedSandbox, navigate])
+  }, [pr, fallbackSandboxCollision, stoppingSandbox, existingSandbox, docker, proceedSandbox, navigate])
 
   const handleDockerContinue = () => {
     docker.dismiss()
@@ -1318,7 +1377,7 @@ export function PRDetail() {
             </Button>
             <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
               <CodeIcon className="size-3.5" />
-              {existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
+              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
             </Button>
             <RlyButton
               className={styles.actionButton}

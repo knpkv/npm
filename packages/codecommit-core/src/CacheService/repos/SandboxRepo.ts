@@ -22,6 +22,7 @@ export const SandboxRow = Schema.Struct({
   statusDetail: Schema.NullOr(Schema.String),
   logs: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
+  legacyRetiredAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   lastActivityAt: Schema.String
 })
@@ -142,7 +143,7 @@ const makeSandboxRepo = Effect.gen(function*() {
     updateStatus: (
       id: SandboxId,
       status: SandboxStatus,
-      extra?: { containerId?: string; port?: number; error?: string }
+      extra?: { containerId?: string; port?: number; error?: string; legacyRetiredAt?: string }
     ) =>
       isoNow.pipe(
         Effect.flatMap((now) =>
@@ -156,6 +157,7 @@ const makeSandboxRepo = Effect.gen(function*() {
           }
                 ${extra?.port !== undefined ? sql`, port = ${extra.port}` : sql``}
                 ${extra?.error !== undefined && extra.error.length > 0 ? sql`, error = ${extra.error}` : sql``}
+                ${extra?.legacyRetiredAt !== undefined ? sql`, legacy_retired_at = ${extra.legacyRetiredAt}` : sql``}
                 WHERE id = ${id}`.pipe(
             Effect.tap(() => publish)
           )

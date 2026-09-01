@@ -2,12 +2,28 @@
 
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { Cause, ConfigProvider, Crypto, Deferred, Effect, Exit, Layer, Option, Predicate, Ref } from "effect"
+import {
+  Cause,
+  ConfigProvider,
+  Crypto,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Option,
+  Predicate,
+  Ref,
+  Scope,
+  Sink,
+  Stream
+} from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
 import * as ChildEnv from "../src/ChildEnv.js"
 import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
+import { SandboxId } from "../src/Domain.js"
 import { DockerError } from "../src/Errors.js"
 import { type ContainerInfo, DockerService } from "../src/SandboxService/DockerService.js"
 import { PluginService } from "../src/SandboxService/PluginService.js"
@@ -46,6 +62,7 @@ const legacyRow: SandboxRow = {
   statusDetail: null,
   logs: null,
   error: null,
+  legacyRetiredAt: null,
   createdAt: "2026-08-10T00:00:00.000Z",
   lastActivityAt: "2026-08-10T00:00:00.000Z"
 }
@@ -54,11 +71,65 @@ interface FixtureOptions {
   readonly config?: typeof config
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
+  readonly profileByPr?: SandboxRow
+  readonly profileKey?: string
+  readonly emptyAccountByPr?: SandboxRow
+  readonly emptyAccountByPrAll?: ReadonlyArray<SandboxRow>
+  readonly insertGate?: {
+    readonly inserted: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly forkGate?: {
+    readonly forked: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly workerReleaseGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+    readonly completed: Deferred.Deferred<void>
+  }
+  readonly insertContainerId?: string
+  readonly closedFork?: boolean
+  readonly readyGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly restartGate?: {
+    readonly started: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly restartAdmissionGate?: {
+    readonly id: string
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly preserveStatusIds?: ReadonlyArray<string>
+  readonly retirementGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly rowsById?: Readonly<Record<string, SandboxRow>>
   readonly regionlessByPr?: SandboxRow
   readonly regionlessByPrAll?: ReadonlyArray<SandboxRow>
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
+  readonly stopGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly createContainerGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly healthGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
+  readonly listContainersByLabel?: () => Effect.Effect<
+    ReadonlyArray<{ readonly Id: string; readonly State: string; readonly Labels: Record<string, string> }>,
+    DockerError
+  >
   readonly untrackedContainers?: ReadonlyArray<{
     readonly Id: string
     readonly State: string
@@ -74,16 +145,31 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const insertCalls = yield* Ref.make(0)
   const containerDiscoveryCalls = yield* Ref.make(0)
   const stopContainerCalls = yield* Ref.make(0)
+  const startContainerCalls = yield* Ref.make(0)
   const regionUpdates = yield* Ref.make<Array<{ readonly id: string; readonly region: string }>>([])
   const errorTransitioned = yield* Deferred.make<void>()
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
+  const workerCompleted = yield* Deferred.make<void>()
+  const execCalls = yield* Ref.make(0)
+  const pluginHookCalls = yield* Ref.make(0)
+  const readinessHookCalls = yield* Ref.make(0)
+  const statusUpdates = yield* Ref.make<Array<{ readonly id: string; readonly status: string }>>([])
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
-    findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) => {
-      const row = options?.existingByPr ??
-        (options?.initialRow?.region === region ? options.initialRow : undefined)
-      return Effect.succeed(row === undefined ? Option.none<SandboxRow>() : Option.some(row))
-    },
+    findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) =>
+      Ref.get(rowRef).pipe(
+        Effect.map((current) => {
+          const configured = _awsAccountId.length === 0
+            ? options?.emptyAccountByPr
+            : _awsAccountId === (options?.profileKey ?? createParams.profile)
+            ? options?.profileByPr
+            : options?.existingByPr
+          const row = configured ?? current
+          const matches = row !== undefined && row.status !== "stopped" && row.status !== "error" &&
+            row.awsAccountId === _awsAccountId && row.region === region
+          return matches ? Option.some(row) : Option.none<SandboxRow>()
+        })
+      ),
     findRegionlessByPr: () =>
       Effect.succeed(
         options?.regionlessByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.regionlessByPr)
@@ -98,45 +184,77 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           row !== undefined && ["creating", "cloning", "starting", "running"].includes(row.status) ? [row] : []
         )
       ),
-    findAll: () => Ref.get(rowRef).pipe(Effect.map((row) => row === undefined ? [] : [row])),
+    findAll: () =>
+      Ref.get(rowRef).pipe(
+        Effect.map((row) => {
+          const configured = [options?.emptyAccountByPr, ...(options?.emptyAccountByPrAll ?? [])].filter(
+            (candidate): candidate is SandboxRow => candidate !== undefined
+          )
+          if (options?.profileByPr !== undefined) configured.push(options.profileByPr)
+          const rows = row === undefined ? configured : [row, ...configured]
+          return Array.from(new Map(rows.map((candidate) => [candidate.id, candidate])).values())
+        })
+      ),
     insert: (input) =>
       Ref.update(insertCalls, (count) => count + 1).pipe(
         Effect.andThen(
           Ref.set(rowRef, {
             ...input,
-            containerId: null,
+            containerId: options?.insertContainerId ?? null,
             port: null,
             statusDetail: null,
             logs: null,
-            error: null
+            error: null,
+            legacyRetiredAt: null
           })
+        ),
+        Effect.andThen(
+          options?.insertGate === undefined
+            ? Effect.void
+            : Deferred.succeed(options.insertGate.inserted, undefined).pipe(
+              Effect.andThen(Deferred.await(options.insertGate.release))
+            )
         )
       ),
-    findById: () =>
-      Ref.get(rowRef).pipe(
-        Effect.flatMap((row) =>
-          row === undefined
-            ? Effect.die("Sandbox row was not inserted")
-            : Effect.succeed(row)
+    findById: (id) =>
+      (options?.restartAdmissionGate !== undefined && String(id) === options.restartAdmissionGate.id
+        ? Deferred.succeed(options.restartAdmissionGate.reached, undefined).pipe(
+          Effect.andThen(Deferred.await(options.restartAdmissionGate.release))
         )
-      ),
-    updateStatus: (_id, status, extra) =>
-      Ref.update(rowRef, (row) =>
-        row === undefined
-          ? row
-          : {
-            ...row,
-            status,
-            containerId: extra?.containerId ?? row.containerId,
-            port: extra?.port ?? row.port,
-            error: extra?.error ?? row.error
-          }).pipe(
+        : Effect.void).pipe(
           Effect.andThen(
-            status === "error"
-              ? Deferred.succeed(errorTransitioned, undefined)
-              : Effect.void
+            Ref.get(rowRef).pipe(
+              Effect.flatMap((row) =>
+                options?.rowsById?.[String(id)] !== undefined
+                  ? Effect.succeed(options.rowsById[String(id)])
+                  : row === undefined
+                  ? Effect.die("Sandbox row was not inserted")
+                  : Effect.succeed(row)
+              )
+            )
           )
         ),
+    updateStatus: (_id, status, extra) =>
+      Ref.update(statusUpdates, (updates) => [...updates, { id: String(_id), status }]).pipe(
+        Effect.andThen(
+          Ref.update(rowRef, (row) =>
+            row === undefined || options?.preserveStatusIds?.includes(String(_id)) === true
+              ? row
+              : {
+                ...row,
+                status,
+                containerId: extra?.containerId ?? row.containerId,
+                port: extra?.port ?? row.port,
+                error: extra?.error ?? row.error,
+                legacyRetiredAt: extra?.legacyRetiredAt ?? row.legacyRetiredAt
+              })
+        ),
+        Effect.andThen(
+          status === "error"
+            ? Deferred.succeed(errorTransitioned, undefined)
+            : Effect.void
+        )
+      ),
     updateDetail: (_id, detail) =>
       Ref.update(rowRef, (row) => row === undefined ? row : { ...row, statusDetail: detail }),
     appendLog: (_id, line) =>
@@ -149,10 +267,47 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     // The clone spawn tombstones the ambient AWS variables it would otherwise inherit.
     ChildEnv.layerHostEnvironment({ PATH: "/usr/bin" }),
     Layer.mock(DockerService, {
+      pullImage: () => Effect.void,
+      createContainer: () =>
+        options?.createContainerGate === undefined
+          ? Effect.succeed("worker-container")
+          : Deferred.succeed(options.createContainerGate.reached, undefined).pipe(
+            Effect.andThen(Deferred.await(options.createContainerGate.release)),
+            Effect.as("worker-container")
+          ),
+      startContainer: () =>
+        Ref.update(startContainerCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            options?.restartGate === undefined
+              ? Effect.void
+              : Deferred.succeed(options.restartGate.started, undefined).pipe(
+                Effect.andThen(Deferred.await(options.restartGate.release))
+              )
+          )
+        ),
+      exec: (_containerId, args) =>
+        Ref.update(execCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            args[0] === "curl" && options?.healthGate !== undefined
+              ? Deferred.succeed(options.healthGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.healthGate.release))
+              )
+              : Effect.void
+          ),
+          Effect.as("")
+        ),
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
           Effect.flatMap((attempt) =>
-            options?.stopContainerByAttempt?.(attempt) ?? options?.stopContainer ?? Effect.void
+            (options?.stopGate === undefined
+              ? Effect.void
+              : Deferred.succeed(options.stopGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.stopGate.release))
+              )).pipe(
+                Effect.andThen(
+                  options?.stopContainerByAttempt?.(attempt) ?? options?.stopContainer ?? Effect.void
+                )
+              )
           )
         ),
       inspectContainer: (containerId) =>
@@ -160,14 +315,81 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           Effect.fail(new DockerError({ operation: "inspectContainer", cause: "not configured" })),
       listContainersByLabel: () =>
         Ref.update(containerDiscoveryCalls, (count) => count + 1).pipe(
-          Effect.as([...(options?.untrackedContainers ?? [])])
+          Effect.andThen(
+            options?.retirementGate === undefined
+              ? Effect.void
+              : Deferred.succeed(options.retirementGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.retirementGate.release))
+              )
+          ),
+          Effect.andThen(
+            options?.listContainersByLabel?.() ??
+              Effect.succeed([...(options?.untrackedContainers ?? [])])
+          )
         )
     }),
-    Layer.mock(PluginService, {}),
+    Layer.mock(PluginService, {
+      executeHook: (hook) =>
+        Ref.update(pluginHookCalls, (count) => count + 1).pipe(
+          Effect.andThen(
+            (hook === "onSandboxCreate" || hook === "onSandboxReady")
+              ? Ref.update(readinessHookCalls, (count) => count + 1)
+              : Effect.void
+          ),
+          Effect.andThen(
+            hook === "onSandboxReady" && options?.readyGate !== undefined
+              ? Deferred.succeed(options.readyGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.readyGate.release))
+              )
+              : Effect.void
+          )
+        )
+    }),
     Layer.mock(ConfigService, { load: Effect.succeed(options?.config ?? config) }),
-    Layer.succeed(FileSystem.FileSystem, FileSystem.FileSystem.of({ makeDirectory })),
+    Layer.succeed(
+      FileSystem.FileSystem,
+      FileSystem.FileSystem.of({
+        makeDirectory,
+        stat: () =>
+          Effect.succeed({
+            type: "Directory",
+            mtime: Option.none<Date>(),
+            atime: Option.none<Date>(),
+            birthtime: Option.none<Date>(),
+            dev: 0,
+            ino: Option.none<number>(),
+            mode: 0o755,
+            nlink: Option.none<number>(),
+            uid: Option.none<number>(),
+            gid: Option.none<number>(),
+            rdev: Option.none<number>(),
+            size: FileSystem.Size(0),
+            blksize: Option.none<FileSystem.Size>(),
+            blocks: Option.none<number>()
+          })
+      })
+    ),
     NodePath.layer,
-    Layer.mock(ChildProcessSpawner.ChildProcessSpawner, {}),
+    Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make(() =>
+        Effect.succeed(
+          ChildProcessSpawner.makeHandle({
+            all: Stream.empty,
+            exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+            getInputFd: () => Sink.drain,
+            getOutputFd: () => Stream.empty,
+            isRunning: Effect.succeed(false),
+            kill: () => Effect.void,
+            pid: ChildProcessSpawner.ProcessId(42),
+            stderr: Stream.empty,
+            stdin: Sink.drain,
+            stdout: Stream.empty,
+            unref: Effect.succeed(Effect.void)
+          })
+        )
+      )
+    ),
     Layer.succeed(
       Crypto.Crypto,
       Crypto.make({
@@ -179,17 +401,42 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       SandboxWorkerScope,
       Effect.map(Effect.scope, (scope) =>
         SandboxWorkerScope.of({
-          fork: (worker) =>
-            Effect.forkIn(
-              worker.pipe(
-                Effect.onExit((exit) =>
-                  Exit.isFailure(exit)
-                    ? Deferred.succeed(workerCause, exit.cause)
-                    : Effect.void
-                )
-              ),
-              scope
-            )
+          fork: (worker, release) =>
+            Effect.gen(function*() {
+              const started = yield* Deferred.make<void>()
+              const forkScope = options?.closedFork === true ? yield* Scope.make() : scope
+              if (options?.closedFork === true) yield* Scope.close(forkScope, Exit.void)
+              const gatedRelease = options?.workerReleaseGate === undefined
+                ? release
+                : Effect.gen(function*() {
+                  yield* Deferred.succeed(options.workerReleaseGate.reached, undefined)
+                  yield* Deferred.await(options.workerReleaseGate.release)
+                  yield* release
+                  yield* Deferred.succeed(options.workerReleaseGate.completed, undefined)
+                })
+              const fiber = yield* Effect.forkIn(
+                Effect.acquireUseRelease(
+                  Deferred.succeed(started, undefined),
+                  () =>
+                    worker.pipe(
+                      Effect.onExit((exit) =>
+                        (Exit.isFailure(exit)
+                          ? Deferred.succeed(workerCause, exit.cause)
+                          : Effect.void).pipe(
+                            Effect.andThen(Deferred.succeed(workerCompleted, undefined))
+                          )
+                      )
+                    ),
+                  () => gatedRelease
+                ),
+                forkScope
+              )
+              if (options?.forkGate !== undefined) {
+                yield* Deferred.succeed(options.forkGate.forked, undefined)
+                yield* Deferred.await(options.forkGate.release)
+              }
+              return { fiber, started: Deferred.await(started) }
+            })
         }))
     ),
     ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: "/tmp/codecommit-sandbox-worker-test" } }))
@@ -197,13 +444,19 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
 
   return {
     containerDiscoveryCalls,
+    execCalls,
     errorTransitioned,
     insertCalls,
     layer: SandboxService.layer.pipe(Layer.provideMerge(dependencies)),
     rowRef,
     regionUpdates,
+    pluginHookCalls,
+    readinessHookCalls,
+    startContainerCalls,
+    statusUpdates,
     stopContainerCalls,
-    workerCause
+    workerCause,
+    workerCompleted
   }
 })
 
@@ -244,6 +497,987 @@ describe("SandboxWorkerScope", () => {
         )
       )
 
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("does not retire the exact row when profile and account keys match", () =>
+    Effect.gen(function*() {
+      const exact = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "running"
+      }
+      const params = { ...createParams, profile: createParams.awsAccountId }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: exact,
+        existingByPr: exact
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(params)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(exact.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
+  it.effect("reports an ordinary stopping sandbox instead of returning it for creation", () =>
+    Effect.gen(function*() {
+      const stopping: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: null
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: stopping,
+        existingByPr: stopping
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("still stopping")
+      }
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
+  it.effect("serializes stop before a concurrent create", () =>
+    Effect.gen(function*() {
+      const stopReached = yield* Deferred.make<void>()
+      const stopRelease = yield* Deferred.make<void>()
+      const running: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "running"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: running,
+        stopGate: { reached: stopReached, release: stopRelease }
+      })
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const stop = yield* sandboxes.stop(SandboxId.make(running.id)).pipe(Effect.forkChild)
+          yield* Deferred.await(stopReached)
+          const create = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.succeed(stopRelease, undefined)
+          yield* Fiber.join(stop)
+          return yield* Fiber.join(create)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(result.id).not.toBe(running.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("stops a provisioning worker before it starts its container", () =>
+    Effect.gen(function*() {
+      const createReached = yield* Deferred.make<void>()
+      const createRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        createContainerGate: { reached: createReached, release: createRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const created = yield* sandboxes.create(createParams)
+          yield* Deferred.await(createReached)
+          const stop = yield* sandboxes.stop(SandboxId.make(created.id)).pipe(Effect.forkChild)
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(createRelease, undefined)
+          yield* Fiber.join(stop)
+          yield* Deferred.await(fixture.workerCompleted)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("does not run readiness hooks after stop wins during health polling", () =>
+    Effect.gen(function*() {
+      const healthReached = yield* Deferred.make<void>()
+      const healthRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        config: {
+          ...config,
+          sandbox: { ...config.sandbox, setupCommands: ["printf setup"] }
+        },
+        healthGate: { reached: healthReached, release: healthRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const create = yield* sandboxes.create(createParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(healthReached)
+          const row = yield* Ref.get(fixture.rowRef)
+          if (row === undefined) return yield* Effect.die("Sandbox row was not inserted")
+
+          yield* sandboxes.stop(SandboxId.make(row.id))
+          yield* Deferred.succeed(healthRelease, undefined)
+          yield* Fiber.join(create)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.readinessHookCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.execCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("keeps unsignalled provisioning through container start", () =>
+    Effect.gen(function*() {
+      const createReached = yield* Deferred.make<void>()
+      const createRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        createContainerGate: { reached: createReached, release: createRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.create(createParams)
+          yield* Deferred.await(createReached)
+          yield* Deferred.succeed(createRelease, undefined)
+          yield* Deferred.await(fixture.workerCompleted)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running" })
+    }))
+
+  it.effect("completes a signalled stop when interruption arrives during provisioning", () =>
+    Effect.gen(function*() {
+      const createReached = yield* Deferred.make<void>()
+      const createRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        createContainerGate: { reached: createReached, release: createRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const created = yield* sandboxes.create(createParams)
+          yield* Deferred.await(createReached)
+          const stop = yield* sandboxes.stop(SandboxId.make(created.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          const interruption = yield* Fiber.interrupt(stop).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.succeed(createRelease, undefined)
+          yield* Fiber.join(interruption)
+          yield* Deferred.await(fixture.workerCompleted)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("publishes stop intent before an interrupted create-admission wait", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const releaseInsert = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        insertGate: { inserted, release: releaseInsert }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const create = yield* sandboxes.create(createParams).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(inserted)
+          const row = yield* Ref.get(fixture.rowRef)
+          if (row === undefined) return yield* Effect.die("Sandbox row was not inserted")
+
+          const stop = yield* sandboxes.stop(SandboxId.make(row.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          const interruption = yield* Fiber.interrupt(stop).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.succeed(releaseInsert, undefined)
+          yield* Fiber.join(interruption)
+          yield* Fiber.join(create)
+          yield* Deferred.await(fixture.workerCompleted)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("finalizes an interrupted stop after worker ownership releases with an empty container id", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const releaseInsert = yield* Deferred.make<void>()
+      const forked = yield* Deferred.make<void>()
+      const releaseFork = yield* Deferred.make<void>()
+      const workerReleaseReached = yield* Deferred.make<void>()
+      const releaseWorker = yield* Deferred.make<void>()
+      const workerReleaseCompleted = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        insertGate: { inserted, release: releaseInsert },
+        insertContainerId: "",
+        forkGate: { forked, release: releaseFork },
+        workerReleaseGate: {
+          reached: workerReleaseReached,
+          release: releaseWorker,
+          completed: workerReleaseCompleted
+        }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const create = yield* sandboxes.create(createParams).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(inserted)
+          const row = yield* Ref.get(fixture.rowRef)
+          if (row === undefined) return yield* Effect.die("Sandbox row was not inserted")
+
+          const stop = yield* sandboxes.stop(SandboxId.make(row.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.succeed(releaseInsert, undefined)
+          yield* Deferred.await(forked)
+          yield* Deferred.await(workerReleaseReached)
+          yield* Deferred.succeed(releaseWorker, undefined)
+          yield* Deferred.await(workerReleaseCompleted)
+
+          const interruption = yield* Fiber.interrupt(stop).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Fiber.join(interruption)
+          yield* Deferred.succeed(releaseFork, undefined)
+          yield* Fiber.join(create)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("does not finalize an interrupted stop for a running sandbox", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const releaseInsert = yield* Deferred.make<void>()
+      const running = { ...legacyRow, region: createParams.region, accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: running,
+        rowsById: { [running.id]: running },
+        insertGate: { inserted, release: releaseInsert }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const competingCreate = yield* sandboxes.create({ ...createParams, awsAccountId: "123456789013" }).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(inserted)
+
+          const stop = yield* sandboxes.stop(SandboxId.make(running.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          const interruption = yield* Fiber.interrupt(stop).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.succeed(releaseInsert, undefined)
+          yield* Fiber.join(interruption)
+          yield* Fiber.interrupt(competingCreate)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.statusUpdates)).not.toContainEqual({ id: running.id, status: "stopped" })
+    }))
+
+  it.effect("rejects fallback creation beside a numeric account sandbox", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "running"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, { initialRow: numeric })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is unavailable")
+      }
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("rejects fallback creation when a terminal numeric row still has a container", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "orphaned-numeric-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is unavailable")
+      }
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("allows fallback creation when a terminal numeric row has no container", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () => Effect.succeed([])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("rejects fallback creation beside a regionless numeric row with a container", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: null,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "regionless-numeric-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is unavailable")
+      }
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("allows fallback creation beside a terminal numeric row in another region", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: "eu-west-1",
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "other-region-numeric-container",
+            State: "running",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("allows fallback creation when a terminal numeric row has exited containers", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("blocks a concurrent numeric restart during fallback collision admission", () =>
+    Effect.gen(function*() {
+      const collisionReached = yield* Deferred.make<void>()
+      const collisionRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        retirementGate: { reached: collisionReached, release: collisionRelease },
+        restartGate: { started: restartStarted, release: yield* Deferred.make<void>() },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(collisionReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          expect(yield* Deferred.isDone(restartStarted)).toBe(false)
+
+          yield* Deferred.succeed(collisionRelease, undefined)
+          const created = yield* Fiber.join(creation)
+          yield* Fiber.join(restart)
+
+          expect(created.awsAccountId).toBe("production")
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("guards every terminal numeric row during fallback admission", () =>
+    Effect.gen(function*() {
+      const collisionReached = yield* Deferred.make<void>()
+      const collisionRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const first: SandboxRow = {
+        ...legacyRow,
+        id: "first-numeric-sandbox",
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const second: SandboxRow = {
+        ...first,
+        id: "second-numeric-sandbox"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: first,
+        emptyAccountByPrAll: [second],
+        rowsById: { [second.id]: second },
+        retirementGate: { reached: collisionReached, release: collisionRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": first.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(collisionReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(second.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          expect(yield* Deferred.isDone(restartStarted)).toBe(false)
+
+          yield* Deferred.succeed(collisionRelease, undefined)
+          const created = yield* Fiber.join(creation)
+          yield* Fiber.join(restart)
+
+          expect(created.awsAccountId).toBe("production")
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("releases fallback guards when insertion is interrupted", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const insertRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: numeric,
+        rowsById: { [numeric.id]: numeric },
+        insertGate: { inserted, release: insertRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(inserted)
+          yield* Fiber.interrupt(creation)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(restartStarted)
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("retains fallback guards after an admitted restart exits", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const inserted = yield* Deferred.make<void>()
+      const insertRelease = yield* Deferred.make<void>()
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "error"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: numeric,
+        rowsById: { [numeric.id]: numeric },
+        preserveStatusIds: [numeric.id],
+        insertGate: { inserted, release: insertRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        listContainersByLabel: () =>
+          Effect.succeed([{
+            Id: "exited-numeric-container",
+            State: "exited",
+            Labels: { "codecommit.sandbox.id": numeric.id }
+          }])
+      })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const firstRestart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(restartStarted)
+
+          const creation = yield* sandboxes.create(fallbackParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(inserted)
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(firstRestart)
+
+          const secondRestart = yield* sandboxes.restart(SandboxId.make(numeric.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Fiber.join(secondRestart)
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+
+          yield* Deferred.succeed(insertRelease, undefined)
+          yield* Fiber.join(creation)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("creates a first fallback sandbox without a numeric collision", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never)
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("skips completed legacy retirement when reusing an exact row", () =>
+    Effect.gen(function*() {
+      const exact: SandboxRow = { ...legacyRow, region: createParams.region, status: "running" }
+      const completed: SandboxRow = {
+        ...legacyRow,
+        id: "completed-legacy",
+        awsAccountId: "",
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopped",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: exact,
+        existingByPr: exact,
+        emptyAccountByPr: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(exact.id)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toEqual(exact)
+    }))
+
+  it.effect("retries a marked legacy retirement while it is still stopping", () =>
+    Effect.gen(function*() {
+      const exact: SandboxRow = { ...legacyRow, region: createParams.region, status: "running" }
+      const stopping: SandboxRow = {
+        ...legacyRow,
+        id: "stopping-legacy",
+        awsAccountId: "",
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: exact,
+        existingByPr: exact,
+        emptyAccountByPr: stopping,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(exact.id)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+    }))
+
+  it.effect("retries a pending profile retirement during account fallback", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        awsAccountId: createParams.profile,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const params = { ...createParams, awsAccountId: createParams.profile }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        profileByPr: pending,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(params)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).not.toBe(pending.id)
+      expect(result.awsAccountId).toBe(params.awsAccountId)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("skips a completed regionless retirement during creation", () =>
+    Effect.gen(function*() {
+      const completed: SandboxRow = {
+        ...legacyRow,
+        status: "stopped",
+        accessPassword: "protected",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPr: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe(createParams.awsAccountId)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("skips a completed regionless retirement during reconciliation", () =>
+    Effect.gen(function*() {
+      const completed: SandboxRow = {
+        ...legacyRow,
+        status: "stopped",
+        accessPassword: "protected",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result).toBe(true)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toEqual(completed)
+    }))
+
+  it.effect("keeps retirement pending when an explicit stop fails", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: pending,
+        stopContainer: Effect.fail(new DockerError({ operation: "stopContainer", cause: "daemon unavailable" }))
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.stop(SandboxId.make(pending.id))),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopping",
+        legacyRetiredAt: pending.legacyRetiredAt
+      })
+    }))
+
+  it.effect("completes a marked retirement when the container is missing", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: pending,
+        stopContainer: Effect.fail(
+          new DockerError({ operation: "stopContainer", cause: "Error: No such container: legacy-container" })
+        )
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.stop(SandboxId.make(pending.id))),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result).toBeUndefined()
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopped",
+        legacyRetiredAt: pending.legacyRetiredAt
+      })
+    }))
+
+  it.effect("completes a marked retirement when the container is already stopped", () =>
+    Effect.gen(function*() {
+      const pending: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: pending,
+        stopContainer: Effect.fail(
+          new DockerError({ operation: "stopContainer", cause: "container is already stopped" })
+        )
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.stop(SandboxId.make(pending.id))),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result).toBeUndefined()
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopped",
+        legacyRetiredAt: pending.legacyRetiredAt
+      })
+    }))
+
+  it.effect("converges concurrent creates on one account-keyed row", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never)
+
+      const results = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          return yield* Effect.all(
+            [sandboxes.create(createParams), sandboxes.create(createParams)],
+            { concurrency: 2 }
+          )
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(results[0]?.id).toBe(results[1]?.id)
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
@@ -289,6 +1523,70 @@ describe("SandboxWorkerScope", () => {
 
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
       expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("retires a profile-keyed regionless sandbox after account discovery", () =>
+    Effect.gen(function*() {
+      const profileRow = {
+        ...legacyRow,
+        awsAccountId: createParams.profile,
+        region: null,
+        accessPassword: "protected"
+      }
+      const unrelatedRow = {
+        ...profileRow,
+        id: "unrelated-profile-sandbox",
+        awsAccountId: "another-profile"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPrAll: [profileRow, unrelatedRow],
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "profile-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe(createParams.awsAccountId)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("blocks an ambiguous numeric profile-keyed regionless sandbox", () =>
+    Effect.gen(function*() {
+      const numericProfileParams = { ...createParams, profile: "123456789013" }
+      const foreign = {
+        ...legacyRow,
+        awsAccountId: numericProfileParams.profile,
+        region: null,
+        accessPassword: "protected"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        regionlessByPrAll: [foreign]
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(numericProfileParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is ambiguous")
+      }
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
   it.effect("does not replace a regionless worker that is still starting", () =>
@@ -393,7 +1691,7 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
-  it.effect("marks exact-region pre-container rows orphaned after worker loss", () =>
+  it.effect("creates a replacement after exact-region worker loss", () =>
     Effect.gen(function*() {
       const statuses: ReadonlyArray<"creating" | "cloning" | "starting"> = ["creating", "cloning", "starting"]
       for (const status of statuses) {
@@ -490,6 +1788,568 @@ describe("SandboxWorkerScope", () => {
       })
     }))
 
+  it.effect("reserves a new worker before reconciliation can inspect its inserted row", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.never, {
+        insertGate: { inserted, release }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const createFiber = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.await(inserted)
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "creating",
+            containerId: null,
+            error: null
+          })
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(createFiber)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("releases the worker reservation when creation is interrupted after insertion", () =>
+    Effect.gen(function*() {
+      const inserted = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.never, {
+        insertGate: { inserted, release }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const createFiber = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.await(inserted)
+          yield* Fiber.interrupt(createFiber)
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "error",
+            error: "Orphaned (no container)"
+          })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("keeps the reservation when interruption arrives after worker fork", () =>
+    Effect.gen(function*() {
+      const forked = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.never, {
+        forkGate: { forked, release }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const createFiber = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.await(forked)
+          const interruptFiber = yield* Fiber.interrupt(createFiber).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "creating",
+            containerId: null,
+            error: null
+          })
+          yield* Deferred.succeed(release, undefined)
+          yield* Fiber.join(interruptFiber)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("releases the reservation when the owner scope is already closed", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, { closedFork: true })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const result = yield* sandboxes.create(createParams).pipe(Effect.result)
+          expect(result._tag).toBe("Success")
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "error",
+            error: "Orphaned (no container)"
+          })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("blocks legacy retirement while a sandbox restart is active", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          awsAccountId: "",
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        restartGate: { started: restartStarted, release: restartRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restartFiber = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(restartStarted)
+
+          const creation = yield* sandboxes.create(createParams).pipe(Effect.result)
+          expect(creation._tag).toBe("Failure")
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "starting" })
+
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restartFiber)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running" })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("keeps a stopped row when stop wins against restart", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected",
+          status: "stopped"
+        },
+        restartGate: { started: restartStarted, release: restartRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(restartStarted)
+          const stop = yield* sandboxes.stop(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+          yield* Fiber.join(stop)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("publishes stop intent before restart can claim a worker", () =>
+    Effect.gen(function*() {
+      const restartAdmissionReached = yield* Deferred.make<void>()
+      const restartAdmissionRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        restartAdmissionGate: {
+          id: legacyRow.id,
+          reached: restartAdmissionReached,
+          release: restartAdmissionRelease
+        }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(restartAdmissionReached)
+
+          const stop = yield* sandboxes.stop(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(restartAdmissionRelease, undefined)
+          yield* Fiber.join(restart)
+          yield* Fiber.join(stop)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("retains stop intent until a restart worker exits", () =>
+    Effect.gen(function*() {
+      const readyReached = yield* Deferred.make<void>()
+      const readyRelease = yield* Deferred.make<void>()
+      const stopReached = yield* Deferred.make<void>()
+      const stopRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        readyGate: { reached: readyReached, release: readyRelease },
+        stopGate: { reached: stopReached, release: stopRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(readyReached)
+
+          const stop = yield* sandboxes.stop(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Deferred.await(stopReached)
+          yield* Deferred.succeed(stopRelease, undefined)
+          yield* Fiber.join(stop)
+          const queuedRestart = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(
+            Effect.forkChild({ startImmediately: true })
+          )
+          yield* Fiber.join(queuedRestart)
+          expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+          yield* Deferred.succeed(readyRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.startContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
+    }))
+
+  it.effect("does not restart a legacy row after retirement wins admission", () =>
+    Effect.gen(function*() {
+      const retirementReached = yield* Deferred.make<void>()
+      const retirementRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const retired = { ...legacyRow, awsAccountId: "", region: createParams.region, accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        emptyAccountByPrAll: [retired],
+        rowsById: { [retired.id]: retired },
+        retirementGate: { reached: retirementReached, release: retirementRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: retired.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const creation = yield* sandboxes.create(createParams).pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(retirementReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(retired.id)).pipe(Effect.result, Effect.forkChild)
+          const reachedStart = yield* Deferred.isDone(restartStarted)
+          expect(reachedStart).toBe(false)
+
+          yield* Deferred.succeed(retirementRelease, undefined)
+          yield* Fiber.join(creation)
+          const restartResult = yield* Fiber.join(restart)
+          expect(restartResult._tag).toBe("Failure")
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("serializes regionless reconciliation with restart", () =>
+    Effect.gen(function*() {
+      const retirementReached = yield* Deferred.make<void>()
+      const retirementRelease = yield* Deferred.make<void>()
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: regionless,
+        retirementGate: { reached: retirementReached, release: retirementRelease },
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: regionless.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const reconciliation = yield* sandboxes.reconcile().pipe(Effect.forkChild({ startImmediately: true }))
+          yield* Deferred.await(retirementReached)
+
+          const restart = yield* sandboxes.restart(SandboxId.make(regionless.id)).pipe(Effect.result, Effect.forkChild)
+          expect(yield* Deferred.isDone(restartStarted)).toBe(false)
+
+          yield* Deferred.succeed(retirementRelease, undefined)
+          expect(yield* Fiber.join(reconciliation)).toBe(true)
+          expect((yield* Fiber.join(restart))._tag).toBe("Failure")
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("skips regionless reconciliation while restart owns the worker", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: regionless,
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: regionless.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(regionless.id)).pipe(Effect.forkChild)
+          yield* Deferred.await(restartStarted)
+
+          expect(yield* sandboxes.reconcile()).toBe(true)
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "starting", legacyRetiredAt: null })
+
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("blocks regionless creation while restart owns the worker", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const regionless = { ...legacyRow, region: "", accessPassword: "protected" }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: regionless,
+        regionlessByPrAll: [regionless],
+        restartGate: { started: restartStarted, release: restartRelease },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: regionless.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restart = yield* sandboxes.restart(SandboxId.make(regionless.id)).pipe(Effect.forkChild)
+          yield* Deferred.await(restartStarted)
+
+          const creation = yield* sandboxes.create(createParams).pipe(Effect.result)
+          expect(creation._tag).toBe("Failure")
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restart)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("does not restart a durably retired legacy row after service recreation", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected",
+          legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+        },
+        restartGate: { started: restartStarted, release: restartRelease }
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.result)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      expect(yield* Deferred.isDone(restartStarted)).toBe(false)
+    }))
+
+  it.effect("retires a profile-keyed legacy row before account-keyed creation", () =>
+    Effect.gen(function*() {
+      const profileRow = {
+        ...legacyRow,
+        awsAccountId: createParams.profile,
+        region: createParams.region,
+        accessPassword: "protected"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        profileByPr: profileRow,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).not.toBe(profileRow.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+    }))
+
+  it.effect("preserves an account row when the configured profile name is numeric", () =>
+    Effect.gen(function*() {
+      const numericProfile = "111122223333"
+      const profileRow = {
+        ...legacyRow,
+        awsAccountId: numericProfile,
+        region: createParams.region,
+        accessPassword: "protected"
+      }
+      const params = { ...createParams, awsAccountId: "999988887777", profile: numericProfile }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        profileByPr: profileRow,
+        profileKey: numericProfile,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(params)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe(params.awsAccountId)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
+  it.effect("does not retire an empty-account worker after its container is persisted", () =>
+    Effect.gen(function*() {
+      const reached = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        readyGate: { reached, release },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "worker-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.create({ ...createParams, awsAccountId: "" })
+          yield* Deferred.await(reached)
+
+          const result = yield* sandboxes.create({ ...createParams, awsAccountId: "profile-account" }).pipe(
+            Effect.result
+          )
+          expect(result._tag).toBe("Failure")
+          if (result._tag === "Failure") {
+            expect(result.failure.message).toContain("Legacy sandbox is still active")
+          }
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "starting",
+            containerId: "worker-container"
+          })
+
+          yield* Deferred.succeed(release, undefined)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("retires an unattributed empty-account sandbox before creating a profile sandbox", () =>
+    Effect.gen(function*() {
+      const profileParams = { ...createParams, awsAccountId: "profile-account" }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        emptyAccountByPr: {
+          ...legacyRow,
+          awsAccountId: "",
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        emptyAccountByPrAll: [{
+          ...legacyRow,
+          id: "legacy-sandbox-two",
+          awsAccountId: "",
+          region: createParams.region,
+          containerId: "legacy-container-two",
+          accessPassword: "protected"
+        }, {
+          ...legacyRow,
+          id: "legacy-sandbox-error",
+          awsAccountId: "",
+          region: createParams.region,
+          containerId: "legacy-container-error",
+          accessPassword: "protected",
+          status: "error"
+        }, {
+          ...legacyRow,
+          id: "legacy-other-region",
+          awsAccountId: "",
+          region: "eu-west-1",
+          containerId: "legacy-container-other-region",
+          accessPassword: "protected"
+        }],
+        inspectContainer: (containerId) =>
+          Effect.succeed({
+            Id: containerId,
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const sandbox = yield* sandboxes.create(profileParams)
+          expect(sandbox.awsAccountId).toBe(profileParams.awsAccountId)
+          expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(3)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            awsAccountId: "profile-account",
+            status: "creating"
+          })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
   it.effect("marks a regionless pre-container row orphaned after worker loss", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.void, {
@@ -578,6 +2438,54 @@ describe("SandboxWorkerScope", () => {
       })
     }))
 
+  it.effect("treats an already-stopped legacy container as retired", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: legacyRow,
+        stopContainer: Effect.fail(
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: cannot stop container: legacy-container: container is not running"
+          })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+      })
+    }))
+
+  it.effect("treats the current already-stopped Docker wording as retired", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: legacyRow,
+        stopContainer: Effect.fail(
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: container is already stopped"
+          })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+      })
+    }))
+
   it.effect("retains authenticated rows when container inspection fails for infrastructure", () =>
     Effect.gen(function*() {
       const fixture = yield* makeFixture(() => Effect.void, {
@@ -592,7 +2500,38 @@ describe("SandboxWorkerScope", () => {
         )
       )
       expect(outcome).toBe(false)
-      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running", error: null })
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "stopping",
+        error: null,
+        legacyRetiredAt: expect.any(String)
+      })
+    }))
+
+  it.effect("treats an authenticated container exiting after inspection as stopped", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: { ...legacyRow, accessPassword: "protected" },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: legacyRow.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          }),
+        stopContainer: Effect.fail(
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: cannot stop container: legacy-container: container is not running"
+          })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped", error: null })
     }))
 
   it.effect("records a production sandbox worker defect as an error", () =>
@@ -802,6 +2741,31 @@ describe("SandboxWorkerScope", () => {
         () => Effect.void,
         { initialRow: { ...legacyRow, region: createParams.region, accessPassword: "protected", status: "error" } }
       )
+
+      const hasLegacy = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.hasLegacyUnauthenticated()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(hasLegacy).toBe(false)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
+    }))
+
+  it.effect("does not require Docker admission for a completed regionless retirement", () =>
+    Effect.gen(function*() {
+      const completed: SandboxRow = {
+        ...legacyRow,
+        accessPassword: "protected",
+        status: "stopped",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
+      })
 
       const hasLegacy = yield* Effect.scoped(
         SandboxService.pipe(

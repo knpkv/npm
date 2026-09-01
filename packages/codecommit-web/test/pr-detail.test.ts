@@ -3,7 +3,11 @@ import { Domain } from "@knpkv/codecommit-core"
 
 import {
   commentNavigationIdentityForCoordinates,
+  hasFallbackSandboxCollision,
+  isReusableSandbox,
+  isStoppingSandbox,
   reviewApiAccountId,
+  sandboxAccountIdForPullRequest,
   sandboxMatchesPullRequest,
   selectCodeCommitPullRequest
 } from "../src/client/components/pr-detail.js"
@@ -54,9 +58,116 @@ describe("PR detail coordinates", () => {
 
     expect(sandboxMatchesPullRequest(sandbox, pullRequest)).toBe(false)
     expect(
+      sandboxMatchesPullRequest({ ...sandbox, repositoryName: "payments", region: "eu-west-1" }, pullRequest)
+    ).toBe(true)
+  })
+
+  it("uses the discovered account as the sandbox identity", () => {
+    expect(sandboxAccountIdForPullRequest(pullRequest)).toBe("111122223333")
+    expect(
       sandboxMatchesPullRequest(
-        { ...sandbox, repositoryName: "payments", region: "eu-west-1" },
+        { awsAccountId: "111122223333", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
         pullRequest
+      )
+    ).toBe(true)
+  })
+
+  it("does not reuse an account-keyed sandbox after the profile changes accounts", () => {
+    const changedAccountPullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({ ...pullRequest.account, awsAccountId: "999988887777" })
+    })
+
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "111122223333", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        changedAccountPullRequest
+      )
+    ).toBe(false)
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "production", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        changedAccountPullRequest
+      )
+    ).toBe(false)
+  })
+
+  it("uses the profile for sandbox identity when the account id is empty", () => {
+    const profilePullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({
+        ...pullRequest.account,
+        awsAccountId: ""
+      })
+    })
+
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "production", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        profilePullRequest
+      )
+    ).toBe(true)
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        profilePullRequest
+      )
+    ).toBe(false)
+  })
+
+  it("does not reuse a sandbox while its legacy retirement is stopping", () => {
+    const stoppingSandbox = {
+      awsAccountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "payments",
+      region: "eu-west-1",
+      status: "stopping"
+    }
+
+    expect(isReusableSandbox(stoppingSandbox, pullRequest)).toBe(false)
+    expect(isStoppingSandbox(stoppingSandbox, pullRequest)).toBe(true)
+    expect(isReusableSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(true)
+    expect(isStoppingSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(false)
+  })
+
+  it("blocks fallback-account sandbox creation beside a numeric sandbox", () => {
+    const fallbackPullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({ ...pullRequest.account, awsAccountId: "" })
+    })
+    const numericSandbox = {
+      awsAccountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "payments",
+      region: "eu-west-1"
+    }
+
+    expect(hasFallbackSandboxCollision([numericSandbox], fallbackPullRequest)).toBe(true)
+    expect(hasFallbackSandboxCollision([], fallbackPullRequest)).toBe(false)
+    expect(hasFallbackSandboxCollision([numericSandbox], pullRequest)).toBe(false)
+  })
+
+  it("does not classify the configured numeric profile sandbox as an account collision", () => {
+    const numericProfilePullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({
+        ...pullRequest.account,
+        awsAccountId: "",
+        profile: Domain.AwsProfileName.make("111122223333")
+      })
+    })
+    const profileSandbox = {
+      awsAccountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "payments",
+      region: "eu-west-1"
+    }
+
+    expect(hasFallbackSandboxCollision([profileSandbox], numericProfilePullRequest)).toBe(false)
+    expect(
+      hasFallbackSandboxCollision(
+        [{ ...profileSandbox, awsAccountId: "999988887777" }],
+        numericProfilePullRequest
       )
     ).toBe(true)
   })
