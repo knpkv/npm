@@ -240,21 +240,19 @@ const makeSandboxService = Effect.gen(function*() {
         const exactExisting = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
           : undefined
-        const emptyAccountExisting = params.awsAccountId.length === 0
-          ? Option.none<SandboxRow>()
-          : yield* repo.findByPr("", params.pullRequestId, params.repositoryName, params.region)
-        const effectiveExisting = yield* Option.match(emptyAccountExisting, {
-          onNone: () => Effect.succeed(exactExisting),
-          onSome: (legacy) => {
-            if (legacy.accessPassword === null) {
-              return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
-            }
-            if (exactExisting !== undefined) {
-              return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
-            }
-            return retireLegacySandbox(legacy).pipe(Effect.as(exactExisting))
-          }
-        })
+        const emptyAccountRows = params.awsAccountId.length === 0
+          ? []
+          : (yield* repo.findAll()).filter((row) =>
+            row.awsAccountId === "" &&
+            row.pullRequestId === params.pullRequestId &&
+            row.repositoryName === params.repositoryName &&
+            row.region === params.region &&
+            row.status !== "stopped" &&
+            row.status !== "error"
+          )
+        const effectiveExisting = yield* Effect.forEach(emptyAccountRows, retireLegacySandbox, { discard: true }).pipe(
+          Effect.as(exactExisting)
+        )
         const regionless = yield* repo.findRegionlessByPrAll(
           params.awsAccountId,
           params.pullRequestId,

@@ -69,6 +69,7 @@ interface FixtureOptions {
   readonly initialRow?: SandboxRow
   readonly existingByPr?: SandboxRow
   readonly emptyAccountByPr?: SandboxRow
+  readonly emptyAccountByPrAll?: ReadonlyArray<SandboxRow>
   readonly insertGate?: {
     readonly inserted: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
@@ -132,7 +133,16 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
           row !== undefined && ["creating", "cloning", "starting", "running"].includes(row.status) ? [row] : []
         )
       ),
-    findAll: () => Ref.get(rowRef).pipe(Effect.map((row) => row === undefined ? [] : [row])),
+    findAll: () =>
+      Ref.get(rowRef).pipe(
+        Effect.map((row) => {
+          const configured = [options?.emptyAccountByPr, ...(options?.emptyAccountByPrAll ?? [])].filter(
+            (candidate): candidate is SandboxRow => candidate !== undefined
+          )
+          const rows = row === undefined ? configured : [row, ...configured]
+          return Array.from(new Map(rows.map((candidate) => [candidate.id, candidate])).values())
+        })
+      ),
     insert: (input) =>
       Ref.update(insertCalls, (count) => count + 1).pipe(
         Effect.andThen(
@@ -714,6 +724,21 @@ describe("SandboxWorkerScope", () => {
           region: createParams.region,
           accessPassword: "protected"
         },
+        emptyAccountByPrAll: [{
+          ...legacyRow,
+          id: "legacy-sandbox-two",
+          awsAccountId: "",
+          region: createParams.region,
+          containerId: "legacy-container-two",
+          accessPassword: "protected"
+        }, {
+          ...legacyRow,
+          id: "legacy-other-region",
+          awsAccountId: "",
+          region: "eu-west-1",
+          containerId: "legacy-container-other-region",
+          accessPassword: "protected"
+        }],
         inspectContainer: (containerId) =>
           Effect.succeed({
             Id: containerId,
@@ -728,7 +753,7 @@ describe("SandboxWorkerScope", () => {
           const sandbox = yield* sandboxes.create(profileParams)
           expect(sandbox.awsAccountId).toBe(profileParams.awsAccountId)
           expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
-          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
+          expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(2)
           expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
             awsAccountId: "profile-account",
             status: "creating"
