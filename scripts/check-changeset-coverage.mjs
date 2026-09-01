@@ -268,7 +268,7 @@ const configFileNames = (configPath, configText, configFiles) => {
 const packageCompilerOptions = (
   sources,
   repositoryRoot,
-  { configText, configFiles = new Map(), configurationPaths = [], entryPoints = [], entryPointSourcePath } = {}
+  { configFiles = new Map(), configText, configurationPaths = [], entryPointSourcePath, entryPoints = [] } = {}
 ) => {
   if (repositoryRoot === undefined) return defaultCompilerOptions
   const sourcePath = [...sources.keys()][0]
@@ -899,9 +899,10 @@ const canonicalClassValueText = (declaration, analysis, filePath, substitutions,
     declaration.node.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.AbstractKeyword) === true
   const visitClass = (classDeclaration, classFilePath, classSubstitutions, classSeen, isRoot) => {
     const classKey = `${classFilePath}\u0000${classDeclaration.name.text}`
-    if (visitedClasses.has(classKey)) return
+    if (visitedClasses.has(classKey)) return []
     visitedClasses.add(classKey)
     const declarationNodes = resolvedDeclarationNodes(analysis, { filePath: classFilePath, node: classDeclaration })
+    const inheritedConstructors = []
     for (const declarationNode of declarationNodes) {
       if (!TypeScript.isClassDeclaration(declarationNode)) continue
       for (const heritageType of instanceHeritageTypes(declarationNode)) {
@@ -921,15 +922,17 @@ const canonicalClassValueText = (declaration, analysis, filePath, substitutions,
         if (base === undefined || !TypeScript.isClassDeclaration(base.node)) continue
         const baseKey = `${base.filePath}\u0000${base.node.name.text}`
         if (classSeen.has(baseKey)) failCanonicalType(classFilePath, heritageType, "recursive class heritage")
-        visitClass(
+        const baseConstructors = visitClass(
           base.node,
           base.filePath,
           declarationSubstitutions(base, heritageType.typeArguments ?? [], classSubstitutions, classFilePath),
           new Set(classSeen).add(baseKey),
           false
         )
+        for (const constructor of baseConstructors) inheritedConstructors.push(constructor)
       }
     }
+    const ownConstructors = []
     const ownStaticMembers = new Map()
     const overloadedStaticMethodNames = new Set(
       declarationNodes.flatMap((declarationNode) =>
@@ -942,7 +945,6 @@ const canonicalClassValueText = (declaration, analysis, filePath, substitutions,
       )
     )
     const hasConstructorOverloads =
-      isRoot &&
       declarationNodes.some((declarationNode) =>
         declarationNode.members.some(
           (member) => TypeScript.isConstructorDeclaration(member) && member.body === undefined
@@ -967,17 +969,16 @@ const canonicalClassValueText = (declaration, analysis, filePath, substitutions,
           valueNominalOrigins.add(`${classFilePath}#${classDeclaration.name.text}`)
         }
         if (TypeScript.isConstructorDeclaration(member)) {
-          if (!isRoot) continue
           if (hasNonPublicModifier(member)) {
             const visibility =
               member.modifiers?.some(({ kind }) => kind === TypeScript.SyntaxKind.PrivateKeyword) === true
                 ? "private"
                 : "protected"
-            constructors.push(`construct:${visibility}`)
+            ownConstructors.push(`construct:${visibility}`)
             continue
           }
           if (hasConstructorOverloads && member.body !== undefined) continue
-          constructors.push(
+          ownConstructors.push(
             `construct(${member.parameters
               .map((parameter) =>
                 parameterDescriptor(parameter, analysis, classFilePath, classSubstitutions, classSeen, context)
@@ -1021,9 +1022,18 @@ const canonicalClassValueText = (declaration, analysis, filePath, substitutions,
       }
     }
     for (const [name, descriptor] of ownStaticMembers) staticMembers.set(name, descriptor)
+    const effectiveConstructors =
+      ownConstructors.length > 0
+        ? ownConstructors
+        : inheritedConstructors.length > 0
+          ? inheritedConstructors
+          : ["construct()"]
+    if (isRoot) {
+      for (const constructor of effectiveConstructors) constructors.push(constructor)
+    }
+    return effectiveConstructors
   }
   visitClass(declaration.node, declaration.filePath, substitutions, seen, true)
-  if (constructors.length === 0) constructors.push("construct()")
   const identity = [
     abstractClass ? "abstract" : undefined,
     valueNominalOrigins.size === 0 ? undefined : `nominal(${[...valueNominalOrigins].toSorted().join("|")})`
@@ -9393,6 +9403,34 @@ const runSelfTest = () => {
     ]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
   )
+  const inheritedConstructorSource = (valueType, visibility = "") =>
+    new Map([
+      ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+      [
+        "packages/public/src/view.tsx",
+        `class Base<T> { ${visibility}constructor(value: T) {} }\nclass Result extends Base<${valueType}> {}\ntype Props = { value: typeof Result }\nexport const Public = (props: Props) => props`
+      ]
+    ])
+  assert.deepEqual(
+    publicCallableChanges(inheritedConstructorSource("string"), inheritedConstructorSource("number"), [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  assert.deepEqual(
+    publicCallableChanges(
+      inheritedConstructorSource("string", "protected "),
+      inheritedConstructorSource("string", "protected "),
+      ["packages/public/src/index.ts"]
+    ),
+    []
+  )
+  assert.deepEqual(
+    publicCallableChanges(inheritedConstructorSource("string", "protected "), inheritedConstructorSource("string"), [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
 
   const constructorVisibilitySource = (constructor) =>
     new Map([
@@ -9802,7 +9840,9 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
                 (cause) =>
                   new ChangesetCoverageError({
                     cause,
-                    reason: `${mergeBase}:${configPath.slice(repositoryRoot.length + 1)}: compiler configuration is unavailable`
+                    reason: `${mergeBase}:${configPath.slice(
+                      repositoryRoot.length + 1
+                    )}: compiler configuration is unavailable`
                   })
               )
             )
