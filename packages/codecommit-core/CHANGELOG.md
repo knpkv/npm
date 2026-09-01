@@ -1,5 +1,17 @@
 # @knpkv/codecommit-core
 
+## 0.15.0
+
+### Minor Changes
+
+- [#394](https://github.com/knpkv/npm/pull/394) [`dc18f2c`](https://github.com/knpkv/npm/commit/dc18f2c7149cdf6a0b4eee1461d41170311dd5fc) Thanks [@konopkov](https://github.com/konopkov)! - Preserve exact CodeCommit pull-request coordinates across cache, sandbox,
+  notification, and review routes.
+
+### Patch Changes
+
+- [#390](https://github.com/knpkv/npm/pull/390) [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead) Thanks [@konopkov](https://github.com/konopkov)! - Add one shared, collapsed Relay dock with durable pull-request threads, visible
+  model and profile selection, and host-to-pull-request continuation.
+
 ## 0.14.0
 
 ### Minor Changes
