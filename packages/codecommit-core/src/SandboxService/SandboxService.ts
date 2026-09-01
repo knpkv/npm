@@ -267,7 +267,7 @@ const makeSandboxService = Effect.gen(function*() {
           if (finalizeUnowned && hadStopRequest) {
             yield* repo.findById(SandboxId.make(id)).pipe(
               Effect.flatMap((row) =>
-                row.containerId === null && isPreContainerSandboxStatus(row.status)
+                (row.containerId === null || row.containerId.length === 0) && isPreContainerSandboxStatus(row.status)
                   ? updateStatus(SandboxId.make(id), "stopped")
                   : Effect.void
               ),

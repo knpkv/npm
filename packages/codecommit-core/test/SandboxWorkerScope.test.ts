@@ -88,6 +88,7 @@ interface FixtureOptions {
     readonly release: Deferred.Deferred<void>
     readonly completed: Deferred.Deferred<void>
   }
+  readonly insertContainerId?: string
   readonly closedFork?: boolean
   readonly readyGate?: {
     readonly reached: Deferred.Deferred<void>
@@ -199,7 +200,7 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         Effect.andThen(
           Ref.set(rowRef, {
             ...input,
-            containerId: null,
+            containerId: options?.insertContainerId ?? null,
             port: null,
             statusDetail: null,
             logs: null,
@@ -731,7 +732,7 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped" })
     }))
 
-  it.effect("finalizes an interrupted stop after worker ownership releases", () =>
+  it.effect("finalizes an interrupted stop after worker ownership releases with an empty container id", () =>
     Effect.gen(function*() {
       const inserted = yield* Deferred.make<void>()
       const releaseInsert = yield* Deferred.make<void>()
@@ -742,6 +743,7 @@ describe("SandboxWorkerScope", () => {
       const workerReleaseCompleted = yield* Deferred.make<void>()
       const fixture = yield* makeFixture(() => Effect.void, {
         insertGate: { inserted, release: releaseInsert },
+        insertContainerId: "",
         forkGate: { forked, release: releaseFork },
         workerReleaseGate: {
           reached: workerReleaseReached,
