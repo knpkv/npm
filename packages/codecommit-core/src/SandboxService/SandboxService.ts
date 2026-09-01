@@ -228,7 +228,10 @@ const makeSandboxService = Effect.gen(function*() {
         (containerId) =>
           docker.inspectContainer(containerId).pipe(
             Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
-            Effect.catchIf(isMissingContainerError, () => Effect.void)
+            Effect.catchIf(
+              (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+              () => Effect.void
+            )
           ),
         { discard: true }
       )
@@ -299,7 +302,10 @@ const makeSandboxService = Effect.gen(function*() {
             yield* Effect.forEach(containerIds, (containerId) =>
               docker.inspectContainer(containerId).pipe(
                 Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
-                Effect.catchIf(isMissingContainerError, () => Effect.void)
+                Effect.catchIf(
+                  (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                  () => Effect.void
+                )
               ), { discard: true })
             yield* updateStatus(SandboxId.make(legacy.id), "stopped")
             return Option.none<SandboxRow>()
@@ -670,7 +676,10 @@ const makeSandboxService = Effect.gen(function*() {
               yield* Effect.forEach(containerIds, (containerId) =>
                 docker.inspectContainer(containerId).pipe(
                   Effect.flatMap((info) => info.State.Running ? docker.stopContainer(containerId) : Effect.void),
-                  Effect.catchIf(isMissingContainerError, () => Effect.void)
+                  Effect.catchIf(
+                    (error) => isMissingContainerError(error) || isAlreadyStoppedContainerError(error),
+                    () => Effect.void
+                  )
                 ), { discard: true })
               yield* updateStatus(SandboxId.make(row.id), "stopped")
               yield* Effect.logInfo(`Reconciled regionless sandbox ${row.id}`)

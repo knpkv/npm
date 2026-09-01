@@ -899,6 +899,33 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running", error: null })
     }))
 
+  it.effect("treats an authenticated container exiting after inspection as stopped", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: { ...legacyRow, accessPassword: "protected" },
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: legacyRow.containerId ?? "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          }),
+        stopContainer: Effect.fail(
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: cannot stop container: legacy-container: container is not running"
+          })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "stopped", error: null })
+    }))
+
   it.effect("records a production sandbox worker defect as an error", () =>
     Effect.gen(function*() {
       const defect = new Error("sandbox worker defect")
