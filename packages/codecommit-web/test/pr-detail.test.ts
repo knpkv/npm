@@ -3,6 +3,7 @@ import { Domain } from "@knpkv/codecommit-core"
 
 import {
   commentNavigationIdentityForCoordinates,
+  hasFallbackSandboxCollision,
   isReusableSandbox,
   isStoppingSandbox,
   reviewApiAccountId,
@@ -127,6 +128,23 @@ describe("PR detail coordinates", () => {
     expect(isStoppingSandbox(stoppingSandbox, pullRequest)).toBe(true)
     expect(isReusableSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(true)
     expect(isStoppingSandbox({ ...stoppingSandbox, status: "running" }, pullRequest)).toBe(false)
+  })
+
+  it("blocks fallback-account sandbox creation beside a numeric sandbox", () => {
+    const fallbackPullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({ ...pullRequest.account, awsAccountId: "" })
+    })
+    const numericSandbox = {
+      awsAccountId: "111122223333",
+      pullRequestId: "42",
+      repositoryName: "payments",
+      region: "eu-west-1"
+    }
+
+    expect(hasFallbackSandboxCollision([numericSandbox], fallbackPullRequest)).toBe(true)
+    expect(hasFallbackSandboxCollision([], fallbackPullRequest)).toBe(false)
+    expect(hasFallbackSandboxCollision([numericSandbox], pullRequest)).toBe(false)
   })
 
   it("gives review APIs a validated account-coordinate token", () => {

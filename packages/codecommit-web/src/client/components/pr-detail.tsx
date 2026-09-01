@@ -137,6 +137,22 @@ export const isStoppingSandbox = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
 ): boolean => sandbox.status === "stopping" && sandboxMatchesPullRequest(sandbox, pullRequest)
 
+/** Block fallback-account creation when an active numeric sandbox cannot be attributed safely. */
+export const hasFallbackSandboxCollision = (
+  sandboxes: ReadonlyArray<Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status?: string }>,
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) &&
+  sandboxes.some(
+    (sandbox) =>
+      /^\d{12}$/u.test(sandbox.awsAccountId) &&
+      sandbox.status !== "stopped" &&
+      sandbox.status !== "error" &&
+      sandbox.pullRequestId === String(pullRequest.id) &&
+      sandbox.repositoryName === String(pullRequest.repositoryName) &&
+      sandbox.region === String(pullRequest.account.region)
+  )
+
 /** Keep review API requests bound to the exact PR shown by this page. */
 export const reviewApiAccountId = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
@@ -1172,6 +1188,10 @@ export function PRDetail() {
     () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isStoppingSandbox(sandbox, pr))),
     [pr, state.sandboxes]
   )
+  const fallbackSandboxCollision = useMemo(
+    () => (pr === null ? false : hasFallbackSandboxCollision(state.sandboxes ?? [], pr)),
+    [pr, state.sandboxes]
+  )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)
 
@@ -1211,6 +1231,10 @@ export function PRDetail() {
 
   const handleSandbox = useCallback(() => {
     if (pr === null) return
+    if (fallbackSandboxCollision) {
+      toast.info("AWS account discovery is unavailable. Refresh before creating a sandbox.")
+      return
+    }
     if (stoppingSandbox !== undefined) {
       toast.info("Sandbox is still stopping. Try again once it has stopped.")
       return
@@ -1222,7 +1246,7 @@ export function PRDetail() {
     if (!docker.show()) {
       proceedSandbox()
     }
-  }, [pr, stoppingSandbox, existingSandbox, docker, proceedSandbox, navigate])
+  }, [pr, fallbackSandboxCollision, stoppingSandbox, existingSandbox, docker, proceedSandbox, navigate])
 
   const handleDockerContinue = () => {
     docker.dismiss()

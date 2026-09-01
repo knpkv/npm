@@ -302,6 +302,22 @@ const makeSandboxService = Effect.gen(function*() {
         const exactCandidate = Option.isSome(existing) && existing.value.region === params.region
           ? existing.value
           : undefined
+        const fallbackCollision = !isDiscoveredAwsAccountId(params.awsAccountId)
+          ? (yield* repo.findAll()).find((row) =>
+            isDiscoveredAwsAccountId(row.awsAccountId) &&
+            row.status !== "stopped" &&
+            row.status !== "error" &&
+            row.pullRequestId === params.pullRequestId &&
+            row.repositoryName === params.repositoryName &&
+            row.region === params.region
+          )
+          : undefined
+        if (fallbackCollision !== undefined) {
+          return yield* new SandboxError({
+            sandboxId: SandboxId.make(fallbackCollision.id),
+            message: "AWS account identity is unavailable; retry after account discovery"
+          })
+        }
         const exactExisting = exactCandidate !== undefined &&
             !isCompletedLegacyRetirement(exactCandidate) &&
             !isPendingLegacyRetirement(exactCandidate)
@@ -654,7 +670,7 @@ const makeSandboxService = Effect.gen(function*() {
     listAll: () => repo.findAll(),
 
     stop: (id: SandboxId) =>
-      Effect.gen(function*() {
+      createAdmission.withPermits(1)(Effect.gen(function*() {
         const row = yield* repo.findById(id)
         yield* updateStatus(id, "stopping")
 
@@ -674,7 +690,7 @@ const makeSandboxService = Effect.gen(function*() {
 
         yield* updateStatus(id, "stopped")
         yield* Effect.logInfo(`Sandbox ${id} stopped`)
-      }).pipe(
+      })).pipe(
         Effect.mapError((cause) => new SandboxError({ sandboxId: id, message: "Failed to stop sandbox", cause }))
       ),
 

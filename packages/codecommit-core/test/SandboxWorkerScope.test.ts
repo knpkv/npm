@@ -101,6 +101,10 @@ interface FixtureOptions {
   readonly regionlessByPrAll?: ReadonlyArray<SandboxRow>
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
+  readonly stopGate?: {
+    readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
   readonly listContainersByLabel?: () => Effect.Effect<
     ReadonlyArray<{ readonly Id: string; readonly State: string; readonly Labels: Record<string, string> }>,
@@ -135,9 +139,9 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             ? options?.profileByPr
             : options?.existingByPr
           const row = configured ?? current
-          return row !== undefined && row.awsAccountId === _awsAccountId && row.region === region
-            ? Option.some(row)
-            : Option.none<SandboxRow>()
+          const matches = row !== undefined && row.status !== "stopped" && row.status !== "error" &&
+            row.awsAccountId === _awsAccountId && row.region === region
+          return matches ? Option.some(row) : Option.none<SandboxRow>()
         })
       ),
     findRegionlessByPr: () =>
@@ -238,7 +242,15 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
           Effect.flatMap((attempt) =>
-            options?.stopContainerByAttempt?.(attempt) ?? options?.stopContainer ?? Effect.void
+            (options?.stopGate === undefined
+              ? Effect.void
+              : Deferred.succeed(options.stopGate.reached, undefined).pipe(
+                Effect.andThen(Deferred.await(options.stopGate.release))
+              )).pipe(
+                Effect.andThen(
+                  options?.stopContainerByAttempt?.(attempt) ?? options?.stopContainer ?? Effect.void
+                )
+              )
           )
         ),
       inspectContainer: (containerId) =>
@@ -460,6 +472,79 @@ describe("SandboxWorkerScope", () => {
       }
       expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
+  it.effect("serializes stop before a concurrent create", () =>
+    Effect.gen(function*() {
+      const stopReached = yield* Deferred.make<void>()
+      const stopRelease = yield* Deferred.make<void>()
+      const running: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "running"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: running,
+        stopGate: { reached: stopReached, release: stopRelease }
+      })
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const stop = yield* sandboxes.stop(SandboxId.make(running.id)).pipe(Effect.forkChild)
+          yield* Deferred.await(stopReached)
+          const create = yield* sandboxes.create(createParams).pipe(Effect.forkChild)
+          yield* Deferred.succeed(stopRelease, undefined)
+          yield* Fiber.join(stop)
+          return yield* Fiber.join(create)
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(result.id).not.toBe(running.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+    }))
+
+  it.effect("rejects fallback creation beside a numeric account sandbox", () =>
+    Effect.gen(function*() {
+      const numeric: SandboxRow = {
+        ...legacyRow,
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "running"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, { initialRow: numeric })
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.result,
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(result.failure.message).toContain("identity is unavailable")
+      }
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+    }))
+
+  it.effect("creates a first fallback sandbox without a numeric collision", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never)
+      const fallbackParams = { ...createParams, awsAccountId: "production", profile: "production" }
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(fallbackParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.awsAccountId).toBe("production")
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
     }))
 
   it.effect("skips completed legacy retirement when reusing an exact row", () =>
