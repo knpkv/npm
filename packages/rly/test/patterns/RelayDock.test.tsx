@@ -769,6 +769,29 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("visits children of a light-DOM slot as ordinary content", async () => {
+    const footer = (
+      <slot data-rly-light-slot="">
+        <button data-rly-light-slot-action="" type="button">
+          Light slot action
+        </button>
+      </slot>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const action = portal.querySelector<HTMLButtonElement>("[data-rly-light-slot-action]")
+    if (dialog === null || close === null || action === null) {
+      throw new Error("RelayDock light-DOM slot fixture did not render")
+    }
+
+    action.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("does not treat a slot replaced by non-focusable assigned content as a tab stop", async () => {
     const footer = (
       <>
@@ -1060,6 +1083,38 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(close)
   })
 
+  it("preserves nested fallback slot scopes", async () => {
+    const footer = (
+      <div data-rly-nested-slot-host="">
+        <button data-rly-nested-slot-assigned="" slot="inner" type="button">
+          Assigned inner action
+        </button>
+      </div>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-nested-slot-host]")
+    const assigned = portal.querySelector<HTMLButtonElement>("[data-rly-nested-slot-assigned]")
+    if (dialog === null || close === null || host === null || assigned === null) {
+      throw new Error("RelayDock nested slot fixture did not render")
+    }
+    const shadow = host.attachShadow({ mode: "open" })
+    const outer = shadow.appendChild(document.createElement("slot"))
+    const fallback = outer.appendChild(document.createElement("div"))
+    const fallbackAction = fallback.appendChild(document.createElement("button"))
+    fallbackAction.tabIndex = 2
+    fallbackAction.textContent = "Outer fallback action"
+    const inner = fallback.appendChild(document.createElement("slot"))
+    inner.name = "inner"
+
+    assigned.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("uses the delegated shadow control as the modal focus endpoint", async () => {
     const footer = (
       <>
@@ -1095,6 +1150,72 @@ describe("RelayDock", () => {
     expect(document.activeElement).toBe(last)
   })
 
+  it("keeps a negative-tabindex delegated control as the modal endpoint", async () => {
+    const footer = (
+      <>
+        <div data-rly-negative-delegates-focus-host="" />
+        <button data-rly-negative-delegates-focus-last="" type="button">
+          Last footer action
+        </button>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-negative-delegates-focus-host]")
+    const last = portal.querySelector<HTMLButtonElement>("[data-rly-negative-delegates-focus-last]")
+    if (dialog === null || host === null || last === null) {
+      throw new Error("RelayDock negative delegatesFocus fixture did not render")
+    }
+    host.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.tabIndex = -1
+    action.textContent = "Programmatic delegated action"
+
+    action.focus()
+    const reverse = new KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      key: "Tab",
+      shiftKey: true
+    })
+    await act(async () => dialog.dispatchEvent(reverse))
+    expect(reverse.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(last)
+  })
+
+  it("excludes targetless delegated hosts from modal endpoints", async () => {
+    const footer = (
+      <>
+        <button data-rly-targetless-delegates-focus-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <div data-rly-targetless-delegates-focus-host="" />
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const host = portal.querySelector<HTMLElement>("[data-rly-targetless-delegates-focus-host]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-targetless-delegates-focus-preceding]")
+    if (dialog === null || close === null || host === null || preceding === null) {
+      throw new Error("RelayDock targetless delegatesFocus fixture did not render")
+    }
+    host.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    Object.defineProperty(shadow, "delegatesFocus", { configurable: true, value: true })
+    const disabled = shadow.appendChild(document.createElement("button"))
+    disabled.disabled = true
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
   it("excludes content-visibility-hidden shadow descendants from modal endpoints", async () => {
     const footer = (
       <>
@@ -1117,6 +1238,60 @@ describe("RelayDock", () => {
     hidden.style.contentVisibility = "hidden"
     const action = hidden.appendChild(document.createElement("button"))
     action.textContent = "Hidden action"
+
+    preceding.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("retains a focusable content-visibility container as an endpoint", async () => {
+    const footer = (
+      <button data-rly-content-visibility-own="" type="button">
+        Hidden-content container
+      </button>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const action = portal.querySelector<HTMLButtonElement>("[data-rly-content-visibility-own]")
+    if (dialog === null || close === null || action === null) {
+      throw new Error("RelayDock content visibility endpoint fixture did not render")
+    }
+    action.style.contentVisibility = "hidden"
+
+    action.focus()
+    const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })
+    await act(async () => dialog.dispatchEvent(forward))
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(close)
+  })
+
+  it("preserves SVG composed ancestry when checking rendered focusability", async () => {
+    const footer = (
+      <>
+        <button data-rly-svg-preceding="" type="button">
+          Preceding footer action
+        </button>
+        <svg data-rly-svg-hidden="">
+          <foreignObject>
+            <button data-rly-svg-hidden-action="" type="button">
+              Hidden SVG action
+            </button>
+          </foreignObject>
+        </svg>
+      </>
+    )
+    const { portal } = await mount(dock({ defaultOpen: true, footer }))
+    const dialog = portal.querySelector<HTMLElement>('[role="dialog"]')
+    const close = portal.querySelector<HTMLButtonElement>('[aria-label="Close Relay"]')
+    const svg = portal.querySelector<SVGElement>("[data-rly-svg-hidden]")
+    const preceding = portal.querySelector<HTMLButtonElement>("[data-rly-svg-preceding]")
+    if (dialog === null || close === null || svg === null || preceding === null) {
+      throw new Error("RelayDock SVG ancestry fixture did not render")
+    }
+    svg.style.display = "none"
 
     preceding.focus()
     const forward = new KeyboardEvent("keydown", { bubbles: true, cancelable: true, composed: true, key: "Tab" })

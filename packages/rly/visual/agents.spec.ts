@@ -374,6 +374,29 @@ test("modal Relay focus traversal contains controls assigned through an open sha
   await expect(slotted).toBeFocused()
 })
 
+test("modal Relay focus traversal visits children of a light-DOM slot", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const slot = document.createElement("slot")
+    slot.dataset.rlyLightSlot = ""
+    const action = document.createElement("button")
+    action.dataset.rlyLightSlotAction = ""
+    action.textContent = "Light slot action"
+    action.type = "button"
+    slot.append(action)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(slot)
+  })
+  const action = dock.locator("[data-rly-light-slot-action]")
+
+  await action.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal skips a slot replaced by non-focusable assigned content", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
@@ -610,6 +633,38 @@ test("modal Relay focus traversal keeps positive tabindex ordering local to assi
   await expect(close).toBeFocused()
 })
 
+test("modal Relay focus traversal preserves nested fallback slot scopes", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyNestedSlotHost = ""
+    const assigned = document.createElement("button")
+    assigned.dataset.rlyNestedSlotAssigned = ""
+    assigned.slot = "inner"
+    assigned.textContent = "Assigned inner action"
+    assigned.type = "button"
+    host.append(assigned)
+    const shadow = host.attachShadow({ mode: "open" })
+    const outer = shadow.appendChild(document.createElement("slot"))
+    const fallback = outer.appendChild(document.createElement("div"))
+    const fallbackAction = fallback.appendChild(document.createElement("button"))
+    fallbackAction.tabIndex = 2
+    fallbackAction.textContent = "Outer fallback action"
+    const inner = fallback.appendChild(document.createElement("slot"))
+    inner.name = "inner"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host)
+  })
+  const assigned = dock.locator("[data-rly-nested-slot-assigned]")
+
+  await assigned.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal excludes a delegating shadow host endpoint", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
@@ -637,6 +692,60 @@ test("modal Relay focus traversal excludes a delegating shadow host endpoint", a
   await expect(last).toBeFocused()
 })
 
+test("modal Relay focus traversal keeps a negative-tabindex delegated target", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const host = document.createElement("div")
+    host.dataset.rlyNegativeDelegatesFocusHost = ""
+    host.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    const action = shadow.appendChild(document.createElement("button"))
+    action.dataset.rlyNegativeDelegatedAction = ""
+    action.tabIndex = -1
+    action.textContent = "Programmatic delegated action"
+    const last = document.createElement("button")
+    last.dataset.rlyNegativeDelegatesFocusLast = ""
+    last.textContent = "Last footer action"
+    last.type = "button"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(host, last)
+  })
+  const action = dock.locator("[data-rly-negative-delegated-action]")
+  const last = dock.locator("[data-rly-negative-delegates-focus-last]")
+
+  await action.focus()
+  await page.keyboard.press("Shift+Tab")
+  await expect(last).toBeFocused()
+})
+
+test("modal Relay focus traversal excludes targetless delegated hosts", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlyTargetlessDelegatesFocusPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const host = document.createElement("div")
+    host.dataset.rlyTargetlessDelegatesFocusHost = ""
+    host.tabIndex = 1
+    const shadow = host.attachShadow({ mode: "open", delegatesFocus: true })
+    const disabled = shadow.appendChild(document.createElement("button"))
+    disabled.disabled = true
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
+  })
+  const preceding = dock.locator("[data-rly-targetless-delegates-focus-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
 test("modal Relay focus traversal excludes content-visibility-hidden shadow descendants", async ({ page }) => {
   await page.setViewportSize({ height: 600, width: 1_200 })
   await page.goto(story("patterns-relaydock--rich-text-composer"))
@@ -658,6 +767,57 @@ test("modal Relay focus traversal excludes content-visibility-hidden shadow desc
     element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, host)
   })
   const preceding = dock.locator("[data-rly-content-visibility-preceding]")
+
+  await preceding.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal retains a content-visibility container endpoint", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const action = document.createElement("button")
+    action.dataset.rlyContentVisibilityOwn = ""
+    action.textContent = "Hidden-content container"
+    action.type = "button"
+    action.style.contentVisibility = "hidden"
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(action)
+  })
+  const action = dock.locator("[data-rly-content-visibility-own]")
+
+  await action.focus()
+  await page.keyboard.press("Tab")
+  await expect(close).toBeFocused()
+})
+
+test("modal Relay focus traversal preserves SVG rendered ancestry", async ({ page }) => {
+  await page.setViewportSize({ height: 600, width: 1_200 })
+  await page.goto(story("patterns-relaydock--rich-text-composer"))
+  const dock = page.getByRole("dialog", { name: "Relay" })
+  const close = dock.getByRole("button", { name: "Close Relay" })
+  await dock.evaluate((element) => {
+    const document = element.ownerDocument
+    const preceding = document.createElement("button")
+    preceding.dataset.rlySvgPreceding = ""
+    preceding.textContent = "Preceding footer action"
+    preceding.type = "button"
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+    svg.dataset.rlySvgHidden = ""
+    svg.style.display = "none"
+    const foreignObject = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject")
+    const action = document.createElement("button")
+    action.dataset.rlySvgHiddenAction = ""
+    action.textContent = "Hidden SVG action"
+    action.type = "button"
+    foreignObject.append(action)
+    svg.append(foreignObject)
+    element.querySelector("[data-rly-relay-dock-scroll]")?.append(preceding, svg)
+  })
+  const preceding = dock.locator("[data-rly-svg-preceding]")
 
   await preceding.focus()
   await page.keyboard.press("Tab")

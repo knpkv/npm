@@ -80,10 +80,10 @@ const hasAssignedSlot = (node: Node): node is AssignedSlotNode => "assignedSlot"
 
 const isElementNode = (node: Node): node is Element => node.nodeType === 1
 
-const composedParentFor = (node: Node, composedParents?: ReadonlyMap<Node, Node | null>): HTMLElement | null => {
+const composedParentFor = (node: Node, composedParents?: ReadonlyMap<Node, Node | null>): Element | null => {
   if (composedParents !== undefined && composedParents.has(node)) {
     const parent = composedParents.get(node)
-    return parent !== null && parent !== undefined && isElementNode(parent) && isHTMLElement(parent) ? parent : null
+    return parent !== null && parent !== undefined && isElementNode(parent) ? parent : null
   }
   const assignedSlot = hasAssignedSlot(node) ? node.assignedSlot : null
   return assignedSlot ?? node.parentElement ?? shadowHostFor(node)
@@ -128,9 +128,9 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
   const visibility = view.getComputedStyle(element).visibility
   if (visibility === "hidden" || visibility === "collapse") return false
   const nativeRoot = element.getRootNode()
-  let current: HTMLElement | null = element
+  let current: Element | null = element
   while (current !== null) {
-    if (current.inert) return false
+    if (isHTMLElement(current) && current.inert) return false
     if (current.tagName === "DETAILS" && !current.hasAttribute("open")) {
       const firstSummary: HTMLElement | null = current.querySelector(":scope > summary:first-of-type")
       if (firstSummary === null || !isWithinComposedElement(firstSummary, element, composedParents)) return false
@@ -145,7 +145,13 @@ const isRenderedFocusable = (element: HTMLElement, composedParents?: ReadonlyMap
       if (firstLegend === null || !isWithinComposedElement(firstLegend, element, composedParents)) return false
     }
     const computed = view.getComputedStyle(current)
-    if (current.hidden !== false || computed.display === "none" || computed.contentVisibility === "hidden") return false
+    if (
+      (isHTMLElement(current) && current.hidden !== false) ||
+      computed.display === "none" ||
+      (current !== element && computed.contentVisibility === "hidden")
+    ) {
+      return false
+    }
     current = composedParentFor(current, composedParents)
   }
   return true
@@ -176,7 +182,7 @@ interface SlotElement extends Element {
 }
 
 const isSlotElement = (element: Element): element is SlotElement =>
-  element.tagName === "SLOT" && "assignedNodes" in element
+  element.tagName === "SLOT" && "assignedNodes" in element && hasShadowRootHost(element.getRootNode())
 
 const compareSequentialTabOrder = (left: Element, right: Element): number => {
   const leftTabIndex = isSlotElement(left) || !isHTMLElement(left) ? -1 : left.tabIndex
@@ -229,7 +235,8 @@ const composedElementsInScope = (root: ParentNode): Array<ComposedElement> => {
     const visitElement = (element: Element, parent: Node | null): void => {
       entries.push({ composedParent: parent, element, focusScope, nativeRoot: element.getRootNode() })
       if (isSlotElement(element)) {
-        const assignedElements = element.assignedNodes({ flatten: true }).filter(isElementNode)
+        const slotNodes = element.assignedNodes({ flatten: false })
+        const assignedElements = (slotNodes.length > 0 ? slotNodes : [...element.childNodes]).filter(isElementNode)
         nested.set(element, visitScopeElements(assignedElements, element, element))
         return
       }
@@ -580,27 +587,34 @@ const DockLayer = ({
     const composedParents = new Map<Node, Node | null>(
       composed.map(({ composedParent, element }) => [element, composedParent])
     )
-    const hasDelegatedFocusableDescendant = (host: Element): boolean =>
-      composed.some(({ element }) => {
-        if (element === host || !isHTMLElement(element) || !isWithinComposedElement(host, element, composedParents)) {
-          return false
-        }
-        return element.matches(focusableSelector) && isRenderedFocusable(element, composedParents)
-      })
+    const delegatingShadowHostFor = (element: Element): HTMLElement | null => {
+      const seen = new Set<Node>()
+      let current: Node = element
+      while (!seen.has(current)) {
+        seen.add(current)
+        const parent = composedParentFor(current, composedParents)
+        if (parent === null) return null
+        if (isHTMLElement(parent) && parent.shadowRoot?.delegatesFocus === true) return parent
+        current = parent
+      }
+      return null
+    }
     const focusable = composed
       .filter((entry): entry is ComposedHTMLElement => {
         const { element, nativeRoot } = entry
         if (isSlotElement(element)) return false
         if (!isHTMLElement(element) || !element.matches(focusableSelector)) return false
-        if (element.shadowRoot?.delegatesFocus === true && hasDelegatedFocusableDescendant(element)) return false
+        if (element.shadowRoot?.delegatesFocus === true) return false
         if (!isRenderedFocusable(element, composedParents)) return false
         if (isRadioInput(element) && !isSequentiallyFocusableRadio(element, nativeRoot, composed, composedParents)) {
           return false
         }
+        const delegatingHost = delegatingShadowHostFor(element)
         return (
           element.tabIndex >= 0 ||
           (element.isContentEditable && !element.hasAttribute("tabindex")) ||
-          element.matches("details > summary:first-of-type")
+          element.matches("details > summary:first-of-type") ||
+          delegatingHost !== null
         )
       })
       .map(({ element }) => element)
