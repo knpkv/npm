@@ -112,8 +112,10 @@ const compilerOptionsFromConfig = (configPath, configText, configFiles = new Map
   )
   const configHost = {
     ...TypeScript.sys,
-    fileExists: (fileName) => normalizedConfigFiles.has(fileName.replaceAll("\\", "/")),
-    readFile: (fileName) => normalizedConfigFiles.get(fileName.replaceAll("\\", "/"))
+    fileExists: (fileName) =>
+      normalizedConfigFiles.has(fileName.replaceAll("\\", "/")) || TypeScript.sys.fileExists(fileName),
+    readFile: (fileName) =>
+      normalizedConfigFiles.get(fileName.replaceAll("\\", "/")) ?? TypeScript.sys.readFile(fileName)
   }
   const parsed = TypeScript.parseJsonConfigFileContent(
     config.config,
@@ -136,7 +138,124 @@ const compilerOptionsFromConfig = (configPath, configText, configFiles = new Map
   }
 }
 
-const packageCompilerOptions = (sources, repositoryRoot, { configText, configFiles = new Map() } = {}) => {
+const normalizeRepositoryPath = (filePath) => {
+  const segments = []
+  for (const segment of filePath.replaceAll("\\", "/").split("/")) {
+    if (segment === "" || segment === ".") continue
+    if (segment === "..") {
+      segments.pop()
+    } else {
+      segments.push(segment)
+    }
+  }
+  return (filePath.startsWith("/") ? "/" : "") + segments.join("/")
+}
+
+const localCompilerConfigPath = (configPath, referencePath) => {
+  if (!referencePath.startsWith(".")) return undefined
+  const directory = configPath.slice(0, configPath.lastIndexOf("/"))
+  const resolved = normalizeRepositoryPath(`${directory}/${referencePath}`)
+  return /\.(?:json|jsonc)$/u.test(resolved) ? resolved : `${resolved}/tsconfig.json`
+}
+
+const compilerConfigurationReferences = (configPath, configText) => {
+  const config = TypeScript.parseConfigFileTextToJson(configPath, configText)
+  if (config.error !== undefined) {
+    throw new ChangesetCoverageError({
+      reason: `${configPath}: invalid compiler configuration: ${configDiagnosticsText([config.error])}`
+    })
+  }
+  const references = config.config.references
+  const extendsPath = config.config.extends
+  const paths = []
+  if (extendsPath !== undefined) {
+    if (!Predicate.isString(extendsPath)) {
+      throw new ChangesetCoverageError({ reason: `${configPath}: compiler configuration extends must be a string` })
+    }
+    const localPath = localCompilerConfigPath(configPath, extendsPath)
+    if (localPath !== undefined) paths.push(localPath)
+  }
+  if (references !== undefined) {
+    if (!Array.isArray(references)) {
+      throw new ChangesetCoverageError({ reason: `${configPath}: compiler configuration references must be an array` })
+    }
+    for (const reference of references) {
+      if (!Predicate.isObjectOrArray(reference) || Array.isArray(reference) || !Predicate.isString(reference.path)) {
+        throw new ChangesetCoverageError({ reason: `${configPath}: compiler configuration reference path is invalid` })
+      }
+      const localPath = localCompilerConfigPath(configPath, reference.path)
+      if (localPath === undefined) {
+        throw new ChangesetCoverageError({ reason: `${configPath}: compiler configuration reference must be local` })
+      }
+      paths.push(localPath)
+    }
+  }
+  return paths
+}
+
+const collectCompilerConfigurationFiles = Effect.fn("ChangesetCoverage.collectCompilerConfigurationFiles")(
+  function* (rootPath, rootText, readConfigText) {
+    const files = new Map([[rootPath, rootText]])
+    const visiting = new Set()
+    const visit = function* (configPath) {
+      if (visiting.has(configPath)) {
+        return yield* fail(`${configPath}: cyclic compiler configuration reference`)
+      }
+      if (files.has(configPath) && configPath !== rootPath) return
+      const configText = files.get(configPath) ?? (yield* readConfigText(configPath))
+      files.set(configPath, configText)
+      visiting.add(configPath)
+      for (const referencePath of compilerConfigurationReferences(configPath, configText)) {
+        yield* visit(referencePath)
+      }
+      visiting.delete(configPath)
+    }
+    visiting.add(rootPath)
+    for (const referencePath of compilerConfigurationReferences(rootPath, rootText)) {
+      yield* visit(referencePath)
+    }
+    visiting.delete(rootPath)
+    return files
+  }
+)
+
+const configFileNames = (configPath, configText, configFiles) => {
+  const config = TypeScript.parseConfigFileTextToJson(configPath, configText)
+  if (config.error !== undefined) {
+    throw new ChangesetCoverageError({
+      reason: `${configPath}: invalid compiler configuration: ${configDiagnosticsText([config.error])}`
+    })
+  }
+  const normalizedConfigFiles = new Map(
+    [...configFiles].map(([fileName, content]) => [fileName.replaceAll("\\", "/"), content])
+  )
+  const configHost = {
+    ...TypeScript.sys,
+    fileExists: (fileName) =>
+      normalizedConfigFiles.has(fileName.replaceAll("\\", "/")) || TypeScript.sys.fileExists(fileName),
+    readFile: (fileName) =>
+      normalizedConfigFiles.get(fileName.replaceAll("\\", "/")) ?? TypeScript.sys.readFile(fileName)
+  }
+  const parsed = TypeScript.parseJsonConfigFileContent(
+    config.config,
+    configHost,
+    TypeScript.getDirectoryPath(configPath),
+    undefined,
+    configPath
+  )
+  if (parsed.errors.length > 0) {
+    throw new ChangesetCoverageError({
+      reason: `${configPath}: invalid compiler configuration: ${configDiagnosticsText(parsed.errors)}`
+    })
+  }
+  return parsed.fileNames.map((fileName) => fileName.replaceAll("\\", "/"))
+}
+
+const packageCompilerOptions = (
+  sources,
+  repositoryRoot,
+  { configText, configFiles = new Map(), configurationPaths = [], entryPoints = [] } = {}
+) => {
   if (repositoryRoot === undefined) return defaultCompilerOptions
   const sourcePath = [...sources.keys()][0]
   if (sourcePath === undefined) return defaultCompilerOptions
@@ -153,7 +272,31 @@ const packageCompilerOptions = (sources, repositoryRoot, { configText, configFil
       reason: `${configPath}: compiler configuration is unavailable`
     })
   }
-  return compilerOptionsFromConfig(configPath, text, configFiles)
+  const normalizedConfigFiles = new Map(
+    [...configFiles].map(([fileName, content]) => [fileName.replaceAll("\\", "/"), content])
+  )
+  const candidatePaths = [configPath, ...configurationPaths, ...normalizedConfigFiles.keys()].filter(
+    (candidate, index, candidates) =>
+      candidate.startsWith(`${repositoryRoot}/${packageMatch[1]}/`) && candidates.indexOf(candidate) === index
+  )
+  const sourcePathsForConfig = [
+    ...new Set([...entryPoints.map(({ sourcePath: entrySourcePath }) => entrySourcePath), ...sources.keys()])
+  ].map((source) => `${repositoryRoot}/${source}`)
+  const configScore = (candidate) => {
+    const candidateText =
+      candidate === configPath ? text : (normalizedConfigFiles.get(candidate) ?? TypeScript.sys.readFile(candidate))
+    if (candidateText === undefined) return -1
+    const fileNames = configFileNames(candidate, candidateText, normalizedConfigFiles)
+    return sourcePathsForConfig.filter((source) => fileNames.includes(source)).length
+  }
+  const selectedConfigPath = candidatePaths.find((candidate) => configScore(candidate) > 0) ?? configPath
+  const selectedConfigText = selectedConfigPath === configPath ? text : normalizedConfigFiles.get(selectedConfigPath)
+  if (selectedConfigText === undefined) {
+    throw new ChangesetCoverageError({
+      reason: `${selectedConfigPath}: compiler configuration is unavailable`
+    })
+  }
+  return compilerOptionsFromConfig(selectedConfigPath, selectedConfigText, normalizedConfigFiles)
 }
 
 const analyzeSources = (
@@ -179,6 +322,7 @@ const analyzeSources = (
     const declarationsByScope = new Map()
     const declarationGroupsByScope = new Map()
     const exportedTypes = new Set()
+    const runtimeDeclarations = new Set()
     let defaultExportName
     const scopeByNode = new WeakMap()
     const scopeParents = new Map()
@@ -212,16 +356,20 @@ const analyzeSources = (
           exportedTypes.add(declarationName)
         }
       }
-      if ((TypeScript.isVariableStatement(node) || TypeScript.isFunctionDeclaration(node)) && hasExportModifier(node)) {
+      if ((TypeScript.isVariableStatement(node) || TypeScript.isFunctionDeclaration(node)) && scope === moduleScope) {
         if (TypeScript.isVariableStatement(node)) {
           for (const declaration of node.declarationList.declarations) {
-            if (TypeScript.isIdentifier(declaration.name)) local.add(declaration.name.text)
+            if (TypeScript.isIdentifier(declaration.name)) {
+              runtimeDeclarations.add(declaration.name.text)
+              if (hasExportModifier(node)) local.add(declaration.name.text)
+            }
           }
         } else if (node.name !== undefined) {
-          if (scope === moduleScope && !hasDefaultModifier(node)) local.add(node.name.text)
-          if (scope === moduleScope && hasDefaultModifier(node)) defaultExportName = node.name.text
-        } else if (hasDefaultModifier(node)) {
-          if (scope === moduleScope) defaultExportName = "default"
+          runtimeDeclarations.add(node.name.text)
+          if (hasExportModifier(node) && !hasDefaultModifier(node)) local.add(node.name.text)
+          if (hasExportModifier(node) && hasDefaultModifier(node)) defaultExportName = node.name.text
+        } else if (hasExportModifier(node) && hasDefaultModifier(node)) {
+          defaultExportName = "default"
         }
       }
       if (TypeScript.isImportDeclaration(node) && TypeScript.isStringLiteral(node.moduleSpecifier)) {
@@ -274,6 +422,7 @@ const analyzeSources = (
       imports,
       local,
       moduleScope,
+      runtimeDeclarations,
       scopeByNode,
       scopeParents,
       sourceFile,
@@ -537,6 +686,36 @@ const resolveNamespaceQualifiedTypeDeclaration = (analysis, filePath, typeName, 
   const declaration = resolveExportedType(analysis, target, typeName.right.text, seen)
   if (declaration === undefined) failCanonicalType(filePath, typeNode, "unresolved namespace-qualified type")
   return declaration
+}
+
+const hasNominalClassIdentity = (declaration, analysis, seen = new Set()) => {
+  if (!TypeScript.isClassDeclaration(declaration.node)) return false
+  const key = `${declaration.filePath}\u0000${declaration.node.name.text}`
+  if (seen.has(key)) return false
+  const nextSeen = new Set(seen).add(key)
+  if (
+    declaration.node.members.some(
+      (member) =>
+        hasNonPublicModifier(member) || (member.name !== undefined && TypeScript.isPrivateIdentifier(member.name))
+    )
+  ) {
+    return true
+  }
+  return instanceHeritageTypes(declaration.node).some((heritageType) => {
+    const base =
+      TypeScript.isExpressionWithTypeArguments(heritageType) && TypeScript.isIdentifier(heritageType.expression)
+        ? resolveTypeDeclaration(analysis, declaration.filePath, heritageType.expression.text, new Set(), heritageType)
+        : TypeScript.isExpressionWithTypeArguments(heritageType) && TypeScript.isQualifiedName(heritageType.expression)
+          ? resolveNamespaceQualifiedTypeDeclaration(
+              analysis,
+              declaration.filePath,
+              heritageType.expression,
+              new Set(),
+              heritageType
+            )
+          : undefined
+    return base === undefined ? false : hasNominalClassIdentity(base, analysis, nextSeen)
+  })
 }
 
 const resolvedTypeDeclarationNodes = (analysis, declaration) => {
@@ -3353,12 +3532,15 @@ function canonicalResolvedDeclarationText(declaration, analysis, filePath, subst
       }
     }
   }
-  return `object(${[
+  const structuralText = `object(${[
     ...[...members].map(([name, descriptor]) => `${name}:${descriptor}`),
     ...callSignatures.map((descriptor, index) => `call#${index}:${descriptor}`)
   ]
     .toSorted()
     .join(";")})`
+  return TypeScript.isClassDeclaration(declaration.node) && hasNominalClassIdentity(declaration, analysis)
+    ? `class(${declaration.node.name.text};${structuralText})`
+    : structuralText
 }
 
 const callableParameterTypesInSources = (
@@ -3465,7 +3647,14 @@ const callableParameterTypesInSources = (
     })
   }
   const visit = (node) => {
-    if (TypeScript.isVariableStatement(node) && hasExportModifier(node)) {
+    if (
+      TypeScript.isVariableStatement(node) &&
+      module.scopeByNode.get(node) === module.moduleScope &&
+      [...node.declarationList.declarations].some(
+        (declaration) =>
+          TypeScript.isIdentifier(declaration.name) && module.runtimeDeclarations.has(declaration.name.text)
+      )
+    ) {
       for (const declaration of node.declarationList.declarations) {
         const initializer =
           declaration.initializer === undefined ? undefined : unwrapParenthesizedExpression(declaration.initializer)
@@ -3491,7 +3680,11 @@ const callableParameterTypesInSources = (
         )
       }
     }
-    if (TypeScript.isFunctionDeclaration(node) && hasExportModifier(node)) {
+    if (
+      TypeScript.isFunctionDeclaration(node) &&
+      module.scopeByNode.get(node) === module.moduleScope &&
+      (node.name === undefined || module.runtimeDeclarations.has(node.name.text))
+    ) {
       const callableName = node.name?.text ?? (hasDefaultModifier(node) ? "default" : undefined)
       if (callableName !== undefined && (node.body === undefined || !exports.has(callableName))) {
         addCallable(callableName, node.parameters, node.type, undefined, node.typeParameters, undefined, node)
@@ -4317,6 +4510,14 @@ const runSelfTest = () => {
       properties: ["terminalViewportRef"]
     }
   ])
+  const exportListPrevious = new Map([["packages/public/src/index.ts", "const Added = (): void => {}\nexport {}"]])
+  const exportListCurrent = new Map([
+    ["packages/public/src/index.ts", "const Added = (): void => {}\nexport { Added }"]
+  ])
+  assert.deepEqual(publicCallableChanges(exportListPrevious, exportListCurrent, ["packages/public/src/index.ts"]), [
+    { kind: "callable-addition", filePath: "packages/public/src/index.ts", name: "Added", properties: [] }
+  ])
+  assert.deepEqual(publicCallableChanges(exportListPrevious, exportListPrevious, ["packages/public/src/index.ts"]), [])
 
   const incompatiblePrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
@@ -6340,6 +6541,45 @@ const runSelfTest = () => {
     publicCallableChanges(localInferredClassPrevious, localInferredClassBinderRename, ["packages/public/src/index.ts"]),
     []
   )
+  const brandedClassReturnPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class First { private brand = "first"; value = "" }\nexport function Public(): First { throw new Error("fixture") }'
+    ]
+  ])
+  const brandedClassReturnChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Second { private brand = "second"; value = "" }\nexport function Public(): Second { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(brandedClassReturnPrevious, brandedClassReturnChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const structuralClassReturnChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      'class Second { value = "" }\nexport function Public(): Second { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(
+      new Map([
+        ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+        [
+          "packages/public/src/view.tsx",
+          'class First { value = "" }\nexport function Public(): First { throw new Error("fixture") }'
+        ]
+      ]),
+      structuralClassReturnChanged,
+      ["packages/public/src/index.ts"]
+    ),
+    []
+  )
   const implementsPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -7957,6 +8197,35 @@ const runSelfTest = () => {
     ])
   )
   assert.equal(parsedFixtureCompilerOptions.noUncheckedIndexedAccess, false)
+  const referencedCompilerConfig = (noUncheckedIndexedAccess) =>
+    packageCompilerOptions(inferredIndexedReturn, "/fixture", {
+      configText: '{"files":[],"references":[{"path":"./tsconfig.build.json"}]}',
+      configFiles: new Map([
+        [
+          "/fixture/packages/public/tsconfig.build.json",
+          `{"files":["src/index.ts"],"compilerOptions":{"noUncheckedIndexedAccess":${noUncheckedIndexedAccess}}}`
+        ],
+        ["/fixture/packages/public/src/index.ts", ""],
+        ["/fixture/packages/public/src/view.tsx", ""]
+      ]),
+      configurationPaths: ["/fixture/packages/public/tsconfig.json", "/fixture/packages/public/tsconfig.build.json"],
+      entryPoints: [{ sourcePath: "packages/public/src/index.ts" }]
+    })
+  const referencedCompilerOptionsPrevious = referencedCompilerConfig(false)
+  const referencedCompilerOptionsCurrent = referencedCompilerConfig(true)
+  assert.equal(referencedCompilerOptionsPrevious.noUncheckedIndexedAccess, false)
+  assert.equal(referencedCompilerOptionsCurrent.noUncheckedIndexedAccess, true)
+  const referencedCompilerChanges = publicCallableChanges(
+    inferredIndexedReturn,
+    inferredIndexedReturn,
+    ["packages/public/src/index.ts"],
+    undefined,
+    {
+      previousCompilerOptions: referencedCompilerOptionsPrevious,
+      currentCompilerOptions: referencedCompilerOptionsCurrent
+    }
+  ).map((change) => ({ ...change, packageName: "@fixture/public" }))
+  assert.deepEqual(validatePublicCallableChangesets(referencedCompilerChanges, new Map()), ["@fixture/public"])
   assert.deepEqual(
     publicCallableChanges(inferredIndexedReturn, inferredIndexedReturn, ["packages/public/src/index.ts"], undefined, {
       previousCompilerOptions: { ...defaultCompilerOptions, noUncheckedIndexedAccess: false },
@@ -8374,8 +8643,39 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
       const changedSourceFiles = sourcePaths(paths).filter((changedPath) =>
         changedPath.startsWith(`${record.directory}/`)
       )
+      const packageConfigPath = `${record.directory}/tsconfig.json`
+      const packageConfigAbsolutePath = path.join(repositoryRoot, packageConfigPath)
+      const currentConfig = yield* fileSystem.readFileString(packageConfigAbsolutePath)
+      const currentConfigFiles = yield* collectCompilerConfigurationFiles(
+        packageConfigAbsolutePath,
+        currentConfig,
+        (configPath) => fileSystem.readFileString(configPath)
+      )
+      let previousConfigFiles = new Map()
+      const previousConfig = yield* gitOption(git, ["show", `${mergeBase}:${packageConfigPath}`])
+      if (previousConfig !== undefined) {
+        previousConfigFiles = yield* collectCompilerConfigurationFiles(
+          packageConfigAbsolutePath,
+          previousConfig,
+          (configPath) =>
+            git(["show", `${mergeBase}:${configPath.slice(repositoryRoot.length + 1)}`]).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ChangesetCoverageError({
+                    cause,
+                    reason: `${mergeBase}:${configPath.slice(repositoryRoot.length + 1)}: compiler configuration is unavailable`
+                  })
+              )
+            )
+        )
+      }
+      const relativeConfigurationPath = (configPath) =>
+        configPath.startsWith(`${repositoryRoot}/`) ? configPath.slice(repositoryRoot.length + 1) : configPath
       const changedCompilerConfiguration =
-        paths.has(record.directory + "/tsconfig.json") || paths.has("tsconfig.base.jsonc")
+        paths.has("tsconfig.base.jsonc") ||
+        [...currentConfigFiles.keys(), ...previousConfigFiles.keys()]
+          .map(relativeConfigurationPath)
+          .some((configPath) => paths.has(configPath))
       if (!shouldAnalyzePublicCallableChanges(record, changedSourceFiles, changedCompilerConfiguration)) continue
       const sourceRoot = path.join(repositoryRoot, record.directory, "src")
       const relativeSourceFiles = yield* collectSourceFiles(fileSystem, path, sourceRoot, `${record.directory}/src`)
@@ -8398,29 +8698,36 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         record.directory,
         previousRelativeSourceFiles
       )
-      const packageConfigPath = `${record.directory}/tsconfig.json`
-      const baseConfigPath = "tsconfig.base.jsonc"
-      const readConfig = (configText, baseText, sources) =>
+      const readConfig = (configText, configFiles, sources, entryPoints, configurationPaths) =>
         sources.size === 0
           ? defaultCompilerOptions
           : packageCompilerOptions(sources, repositoryRoot, {
               configText,
-              configFiles: new Map([[`${repositoryRoot}/${baseConfigPath}`, baseText]])
+              configFiles: new Map([
+                ...configFiles,
+                ...[...sources.keys()].map((sourcePath) => [path.join(repositoryRoot, sourcePath), ""])
+              ]),
+              configurationPaths,
+              entryPoints
             })
       let currentCompilerOptions = defaultCompilerOptions
       if (currentSources.size > 0) {
-        const currentConfig = yield* fileSystem.readFileString(path.join(repositoryRoot, packageConfigPath))
-        const currentBaseConfig = yield* fileSystem.readFileString(path.join(repositoryRoot, baseConfigPath))
-        currentCompilerOptions = readConfig(currentConfig, currentBaseConfig, currentSources)
+        currentCompilerOptions = readConfig(currentConfig, currentConfigFiles, currentSources, currentEntryPoints, [
+          ...currentConfigFiles.keys()
+        ])
       }
       let previousCompilerOptions = defaultCompilerOptions
       if (previousSources.size > 0) {
-        const previousConfig = yield* gitOption(git, ["show", `${mergeBase}:${packageConfigPath}`])
-        const previousBaseConfig = yield* gitOption(git, ["show", `${mergeBase}:${baseConfigPath}`])
-        if (previousConfig === undefined || previousBaseConfig === undefined) {
+        if (previousConfig === undefined) {
           return yield* fail(`${mergeBase}: compiler configuration for ${record.directory} is unavailable`)
         }
-        previousCompilerOptions = readConfig(previousConfig, previousBaseConfig, previousSources)
+        previousCompilerOptions = readConfig(
+          previousConfig,
+          previousConfigFiles,
+          previousSources,
+          previousEntryPoints,
+          [...previousConfigFiles.keys()]
+        )
       }
       const callableChanges = yield* Effect.try({
         try: () =>
