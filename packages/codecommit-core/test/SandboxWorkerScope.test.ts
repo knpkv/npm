@@ -102,6 +102,10 @@ interface FixtureOptions {
   readonly stopContainer?: Effect.Effect<void, DockerError>
   readonly stopContainerByAttempt?: (attempt: number) => Effect.Effect<void, DockerError>
   readonly inspectContainer?: (containerId: string) => Effect.Effect<ContainerInfo, DockerError>
+  readonly listContainersByLabel?: () => Effect.Effect<
+    ReadonlyArray<{ readonly Id: string; readonly State: string; readonly Labels: Record<string, string> }>,
+    DockerError
+  >
   readonly untrackedContainers?: ReadonlyArray<{
     readonly Id: string
     readonly State: string
@@ -249,7 +253,10 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
                 Effect.andThen(Deferred.await(options.retirementGate.release))
               )
           ),
-          Effect.as([...(options?.untrackedContainers ?? [])])
+          Effect.andThen(
+            options?.listContainersByLabel?.() ??
+              Effect.succeed([...(options?.untrackedContainers ?? [])])
+          )
         )
     }),
     Layer.mock(PluginService, {
@@ -407,9 +414,42 @@ describe("SandboxWorkerScope", () => {
         accessPassword: "protected",
         status: "running"
       }
+      const params = { ...createParams, profile: createParams.awsAccountId }
       const fixture = yield* makeFixture(() => Effect.never, {
         initialRow: exact,
         existingByPr: exact
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(params)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(exact.id)
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+    }))
+
+  it.effect("skips completed legacy retirement when reusing an exact row", () =>
+    Effect.gen(function*() {
+      const exact: SandboxRow = { ...legacyRow, region: createParams.region, status: "running" }
+      const completed: SandboxRow = {
+        ...legacyRow,
+        id: "completed-legacy",
+        awsAccountId: "",
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopped",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: exact,
+        existingByPr: exact,
+        emptyAccountByPr: completed,
+        listContainersByLabel: () =>
+          Effect.fail(new DockerError({ operation: "listContainersByLabel", cause: "daemon unavailable" }))
       })
 
       const result = yield* Effect.scoped(
@@ -420,8 +460,45 @@ describe("SandboxWorkerScope", () => {
       )
 
       expect(result.id).toBe(exact.id)
-      expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(0)
       expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(0)
+      expect(yield* Ref.get(fixture.rowRef)).toEqual(exact)
+    }))
+
+  it.effect("retries a marked legacy retirement while it is still stopping", () =>
+    Effect.gen(function*() {
+      const exact: SandboxRow = { ...legacyRow, region: createParams.region, status: "running" }
+      const stopping: SandboxRow = {
+        ...legacyRow,
+        id: "stopping-legacy",
+        awsAccountId: "",
+        region: createParams.region,
+        accessPassword: "protected",
+        status: "stopping",
+        legacyRetiredAt: "2026-08-31T00:00:00.000Z"
+      }
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: exact,
+        existingByPr: exact,
+        emptyAccountByPr: stopping,
+        inspectContainer: () =>
+          Effect.succeed({
+            Id: "legacy-container",
+            State: { Status: "running", Running: true },
+            NetworkSettings: { Ports: {} }
+          })
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(result.id).toBe(exact.id)
+      expect(yield* Ref.get(fixture.containerDiscoveryCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.stopContainerCalls)).toBe(1)
     }))
 
   it.effect("converges concurrent creates on one account-keyed row", () =>

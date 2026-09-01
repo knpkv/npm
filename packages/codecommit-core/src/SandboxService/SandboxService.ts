@@ -81,6 +81,10 @@ const isRegionlessSandbox = (row: Pick<SandboxRow, "region">): boolean =>
 const isPreContainerSandboxStatus = (status: string): boolean =>
   status === "creating" || status === "cloning" || status === "starting"
 
+const isCompletedLegacyRetirement = (
+  row: Pick<SandboxRow, "accessPassword" | "legacyRetiredAt" | "status">
+): boolean => row.accessPassword !== null && row.status === "stopped" && row.legacyRetiredAt !== null
+
 const isDiscoveredAwsAccountId = (value: string): boolean => /^\d{12}$/u.test(value)
 
 const homeDir = Config.string("HOME").pipe(
@@ -308,9 +312,11 @@ const makeSandboxService = Effect.gen(function*() {
             row.region === params.region
           )
           : []
-        const effectiveExisting = yield* Effect.forEach([...emptyAccountRows, ...profileRows], retireLegacySandbox, {
-          discard: true
-        }).pipe(
+        const effectiveExisting = yield* Effect.forEach(
+          [...emptyAccountRows, ...profileRows].filter((row) => !isCompletedLegacyRetirement(row)),
+          retireLegacySandbox,
+          { discard: true }
+        ).pipe(
           Effect.as(exactExisting)
         )
         const regionless = yield* repo.findRegionlessByPrAll(
