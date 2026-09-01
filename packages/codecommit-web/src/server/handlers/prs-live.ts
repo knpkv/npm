@@ -164,9 +164,12 @@ export const selectedPullRequest = (
       ? candidate.account.awsAccountId === routeAccountId
         || candidate.account.repoAccountId === routeAccountId
         || candidate.account.profile === routeAccountId
-      : candidate.account.awsAccountId !== undefined && candidate.account.awsAccountId !== ""
-      ? candidate.account.awsAccountId === routeAccountId
-      : candidate.account.repoAccountId === routeAccountId || candidate.account.profile === routeAccountId
+      : coordinates.accountIdSource === "coordinate-token"
+      ? candidate.account.awsAccountId !== undefined && candidate.account.awsAccountId !== ""
+        && candidate.account.awsAccountId === routeAccountId
+      : candidate.account.awsAccountId === routeAccountId
+        || candidate.account.repoAccountId === routeAccountId
+        || candidate.account.profile === routeAccountId
   const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&
@@ -197,6 +200,7 @@ interface PullRequestSelectionCoordinates {
   readonly accountId?: string
   readonly repositoryName: string
   readonly region: string
+  readonly accountIdSource?: "coordinate-token"
 }
 
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
@@ -220,7 +224,10 @@ export const cachedPullRequest = (
         ) {
           return Effect.fail(new ApiError({ message: "The pull-request coordinates do not match its route" }))
         }
-        return Effect.succeed(token)
+        return Effect.succeed(Option.some<PullRequestSelectionCoordinates>({
+          ...token.value,
+          accountIdSource: "coordinate-token"
+        }))
       }
       return directCoordinates === undefined
         ? Effect.succeed(Option.none<PullRequestCoordinates>())

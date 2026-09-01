@@ -182,7 +182,19 @@ const makeDockerService = Effect.gen(function*() {
       docker("start", containerId).pipe(Effect.asVoid, dockerError("startContainer")),
 
     stopContainer: (containerId: string, timeout = 10) =>
-      docker("stop", "-t", String(timeout), containerId).pipe(Effect.asVoid, dockerError("stopContainer")),
+      dockerWithResult("stop", "-t", String(timeout), containerId).pipe(
+        Effect.mapError((cause) => new DockerError({ operation: "stopContainer", cause })),
+        Effect.flatMap((result) =>
+          Number(result.exitCode) === 0
+            ? Effect.void
+            : Effect.fail(
+              new DockerError({
+                operation: "stopContainer",
+                cause: result.output.trim() || `docker stop exited with code ${String(result.exitCode)}`
+              })
+            )
+        )
+      ),
 
     removeContainer: (containerId: string) =>
       docker("rm", "-f", containerId).pipe(Effect.asVoid, dockerError("removeContainer")),

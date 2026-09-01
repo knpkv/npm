@@ -245,7 +245,19 @@ const makeSandboxService = Effect.gen(function*() {
             message: "Regionless legacy sandbox requires explicit cleanup before recreation"
           })
         }
-        if (exactExisting !== undefined) return exactExisting
+        if (exactExisting !== undefined) {
+          if (exactExisting.containerId === null && isPreContainerSandboxStatus(exactExisting.status)) {
+            const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
+              Effect.map((ids) => ids.has(exactExisting.id))
+            )
+            if (activeWorker) return exactExisting
+            yield* updateStatus(SandboxId.make(exactExisting.id), "error", {
+              error: "Orphaned (no container)"
+            })
+          } else {
+            return exactExisting
+          }
+        }
 
         const sandboxCfg = yield* loadSandboxConfig
         yield* validateSandboxConfig(sandboxCfg, homePath)
@@ -607,7 +619,12 @@ const makeSandboxService = Effect.gen(function*() {
               return
             }
             if (row.containerId === null) {
-              if (row.status === "creating" || row.status === "cloning" || row.status === "starting") return
+              if (isPreContainerSandboxStatus(row.status)) {
+                const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
+                  Effect.map((ids) => ids.has(row.id))
+                )
+                if (activeWorker) return
+              }
               yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
               return
             }

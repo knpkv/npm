@@ -79,10 +79,11 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
   const workerCause = yield* Deferred.make<Cause.Cause<unknown>>()
 
   const repositoryLayer = Layer.mock(SandboxRepo, {
-    findByPr: () =>
-      Effect.succeed(
-        options?.existingByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.existingByPr)
-      ),
+    findByPr: (_awsAccountId, _pullRequestId, _repositoryName, region) => {
+      const row = options?.existingByPr ??
+        (options?.initialRow?.region === region ? options.initialRow : undefined)
+      return Effect.succeed(row === undefined ? Option.none<SandboxRow>() : Option.some(row))
+    },
     findRegionlessByPr: () =>
       Effect.succeed(
         options?.regionlessByPr === undefined ? Option.none<SandboxRow>() : Option.some(options.regionlessByPr)
@@ -392,7 +393,7 @@ describe("SandboxWorkerScope", () => {
       expect(yield* Ref.get(fixture.insertCalls)).toBe(0)
     }))
 
-  it.effect("preserves in-progress rows that have not received a container id", () =>
+  it.effect("marks exact-region pre-container rows orphaned after worker loss", () =>
     Effect.gen(function*() {
       const statuses: ReadonlyArray<"creating" | "cloning" | "starting"> = ["creating", "cloning", "starting"]
       for (const status of statuses) {
@@ -411,8 +412,82 @@ describe("SandboxWorkerScope", () => {
             Effect.provide(fixture.layer)
           )
         )
-        expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status, containerId: null })
+        expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+          status: "error",
+          error: "Orphaned (no container)"
+        })
       }
+    }))
+
+  it.effect("preserves a pre-container row while its worker is active", () =>
+    Effect.gen(function*() {
+      const workerGate = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Deferred.await(workerGate))
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          yield* sandboxes.create(createParams)
+          yield* sandboxes.reconcile()
+        }).pipe(Effect.provide(fixture.layer))
+      )
+
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: expect.any(String),
+        containerId: null,
+        error: null
+      })
+    }))
+
+  it.effect("marks exact-region pre-container rows orphaned after worker loss", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.never, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected",
+          containerId: null,
+          status: "cloning"
+        }
+      })
+
+      const result = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.create(createParams)),
+          Effect.provide(fixture.layer),
+          Effect.result
+        )
+      )
+
+      expect(result._tag).toBe("Success")
+      expect(yield* Ref.get(fixture.insertCalls)).toBe(1)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "creating", containerId: null })
+    }))
+
+  it.effect("marks exact-region pre-container rows orphaned during reconciliation after worker loss", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          region: createParams.region,
+          accessPassword: "protected",
+          containerId: null,
+          status: "starting"
+        }
+      })
+
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Orphaned (no container)"
+      })
     }))
 
   it.effect("marks a regionless pre-container row orphaned after worker loss", () =>

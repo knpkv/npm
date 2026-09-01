@@ -476,6 +476,46 @@ describe("sandbox security boundary", () => {
       }
     }))
 
+  it.effect("reports a nonzero docker stop as a typed missing-container failure", () =>
+    Effect.gen(function*() {
+      const output = Stream.make("Error response from daemon: No such container: missing-container\n").pipe(
+        Stream.encodeText
+      )
+      const processLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            ChildProcessSpawner.makeHandle({
+              all: output,
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              pid: ChildProcessSpawner.ProcessId(46),
+              reref: Effect.void,
+              stderr: Stream.empty,
+              stdin: Sink.drain,
+              stdout: output,
+              unref: Effect.succeed(Effect.void)
+            })
+          )
+        )
+      )
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const docker = yield* DockerService
+          return yield* docker.stopContainer("missing-container").pipe(Effect.result)
+        }).pipe(Effect.provide(DockerService.Default.pipe(Layer.provide(processLayer))))
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(isMissingContainerError(result.failure)).toBe(true)
+      }
+    }))
+
   it("classifies Docker Engine stop absence without swallowing infrastructure failures", () => {
     expect(
       isMissingContainerError(

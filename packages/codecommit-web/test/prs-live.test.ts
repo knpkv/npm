@@ -182,6 +182,13 @@ describe("PR handler selection", () => {
       })
       expect(selected).toBe(pullRequest)
 
+      const selectedByProfile = yield* selectedPullRequest([pullRequest], "production", pullRequest.id, {
+        accountId: "production",
+        region: "eu-west-1",
+        repositoryName: "payments"
+      })
+      expect(selectedByProfile).toBe(pullRequest)
+
       const byAwsAccount = yield* selectedPullRequest(
         [awsAccountPullRequest],
         "444455556666",
@@ -286,6 +293,7 @@ describe("PR handler selection", () => {
         account: new Domain.Account({
           profile: pullRequest.account.profile,
           region: Domain.AwsRegion.make("us-east-1"),
+          awsAccountId: "111122223333",
           repoAccountId: pullRequest.account.repoAccountId
         }),
         repositoryName: Domain.RepositoryName.make("payments-us")
@@ -301,7 +309,7 @@ describe("PR handler selection", () => {
       const first = Schema.encodeSync(PRService.CachedPRToPullRequest)(pullRequest)
       const cache = { findAll: () => Effect.succeed([first, cached]) }
       const token = encodePullRequestCoordinates({
-        accountId: pullRequest.account.profile,
+        accountId: "111122223333",
         pullRequestId: regionalPullRequest.id,
         repositoryName: regionalPullRequest.repositoryName,
         region: regionalPullRequest.account.region
@@ -388,7 +396,14 @@ describe("PR handler selection", () => {
         accountId: "credential-account",
         pullRequestId: intended.id,
         repositoryName: intended.repositoryName,
-        region: intended.account.region
+        region: intended.account.region,
+        accountIdSource: "coordinate-token"
+      } satisfies {
+        readonly accountId: string
+        readonly pullRequestId: string
+        readonly repositoryName: string
+        readonly region: string
+        readonly accountIdSource: "coordinate-token"
       }
       const selected = yield* selectedPullRequest([intended, foreign], "credential-account", intended.id, coordinates)
       expect(selected).toBe(intended)
