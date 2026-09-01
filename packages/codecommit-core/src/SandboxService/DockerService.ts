@@ -64,7 +64,9 @@ export const isAlreadyStoppedContainerError = (error: DockerError): boolean => {
     ? cause.message
     : undefined
   return message !== undefined &&
-    /cannot stop container:[\s\S]*\b(?:is not running|not running)\b/iu.test(message.trim())
+    /(?:cannot stop container:[\s\S]*\b(?:is not running|not running)\b|container is already stopped\b)/iu.test(
+      message.trim()
+    )
 }
 
 const ContainerInfoSchema = Schema.Struct({

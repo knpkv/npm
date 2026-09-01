@@ -14,6 +14,7 @@ import {
   Option,
   Predicate,
   Ref,
+  Scope,
   Sink,
   Stream
 } from "effect"
@@ -22,6 +23,7 @@ import { ChildProcessSpawner } from "effect/unstable/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
 import * as ChildEnv from "../src/ChildEnv.js"
 import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
+import { SandboxId } from "../src/Domain.js"
 import { DockerError } from "../src/Errors.js"
 import { type ContainerInfo, DockerService } from "../src/SandboxService/DockerService.js"
 import { PluginService } from "../src/SandboxService/PluginService.js"
@@ -78,8 +80,13 @@ interface FixtureOptions {
     readonly forked: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
+  readonly closedFork?: boolean
   readonly readyGate?: {
     readonly reached: Deferred.Deferred<void>
+    readonly release: Deferred.Deferred<void>
+  }
+  readonly restartGate?: {
+    readonly started: Deferred.Deferred<void>
     readonly release: Deferred.Deferred<void>
   }
   readonly regionlessByPr?: SandboxRow
@@ -202,7 +209,12 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
     Layer.mock(DockerService, {
       pullImage: () => Effect.void,
       createContainer: () => Effect.succeed("worker-container"),
-      startContainer: () => Effect.void,
+      startContainer: () =>
+        options?.restartGate === undefined
+          ? Effect.void
+          : Deferred.succeed(options.restartGate.started, undefined).pipe(
+            Effect.andThen(Deferred.await(options.restartGate.release))
+          ),
       exec: () => Effect.succeed(""),
       stopContainer: () =>
         Ref.getAndUpdate(stopContainerCalls, (count) => count + 1).pipe(
@@ -284,21 +296,28 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
         SandboxWorkerScope.of({
           fork: (worker) =>
             Effect.gen(function*() {
+              const started = yield* Deferred.make<void>()
+              const forkScope = options?.closedFork === true ? yield* Scope.make() : scope
+              if (options?.closedFork === true) yield* Scope.close(forkScope, Exit.void)
               const fiber = yield* Effect.forkIn(
-                worker.pipe(
-                  Effect.onExit((exit) =>
-                    Exit.isFailure(exit)
-                      ? Deferred.succeed(workerCause, exit.cause)
-                      : Effect.void
+                Effect.uninterruptible(Deferred.succeed(started, undefined)).pipe(
+                  Effect.andThen(
+                    worker.pipe(
+                      Effect.onExit((exit) =>
+                        Exit.isFailure(exit)
+                          ? Deferred.succeed(workerCause, exit.cause)
+                          : Effect.void
+                      )
+                    )
                   )
                 ),
-                scope
+                forkScope
               )
               if (options?.forkGate !== undefined) {
                 yield* Deferred.succeed(options.forkGate.forked, undefined)
                 yield* Deferred.await(options.forkGate.release)
               }
-              return fiber
+              return { fiber, started: Deferred.await(started) }
             })
         }))
     ),
@@ -676,6 +695,55 @@ describe("SandboxWorkerScope", () => {
       )
     }))
 
+  it.effect("releases the reservation when the owner scope is already closed", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, { closedFork: true })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const result = yield* sandboxes.create(createParams).pipe(Effect.result)
+          expect(result._tag).toBe("Success")
+          yield* sandboxes.reconcile()
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+            status: "error",
+            error: "Orphaned (no container)"
+          })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
+  it.effect("blocks legacy retirement while a sandbox restart is active", () =>
+    Effect.gen(function*() {
+      const restartStarted = yield* Deferred.make<void>()
+      const restartRelease = yield* Deferred.make<void>()
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: {
+          ...legacyRow,
+          awsAccountId: "",
+          region: createParams.region,
+          accessPassword: "protected"
+        },
+        restartGate: { started: restartStarted, release: restartRelease }
+      })
+
+      yield* Effect.scoped(
+        Effect.gen(function*() {
+          const sandboxes = yield* SandboxService
+          const restartFiber = yield* sandboxes.restart(SandboxId.make(legacyRow.id)).pipe(Effect.forkChild())
+          yield* Deferred.await(restartStarted)
+
+          const creation = yield* sandboxes.create(createParams).pipe(Effect.result)
+          expect(creation._tag).toBe("Failure")
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "starting" })
+
+          yield* Deferred.succeed(restartRelease, undefined)
+          yield* Fiber.join(restartFiber)
+          expect(yield* Ref.get(fixture.rowRef)).toMatchObject({ status: "running" })
+        }).pipe(Effect.provide(fixture.layer))
+      )
+    }))
+
   it.effect("does not retire an empty-account worker after its container is persisted", () =>
     Effect.gen(function*() {
       const reached = yield* Deferred.make<void>()
@@ -866,6 +934,30 @@ describe("SandboxWorkerScope", () => {
           new DockerError({
             operation: "stopContainer",
             cause: "Error response from daemon: cannot stop container: legacy-container: container is not running"
+          })
+        )
+      })
+      const outcome = yield* Effect.scoped(
+        SandboxService.pipe(
+          Effect.flatMap((sandboxes) => sandboxes.reconcile()),
+          Effect.provide(fixture.layer)
+        )
+      )
+      expect(outcome).toBe(true)
+      expect(yield* Ref.get(fixture.rowRef)).toMatchObject({
+        status: "error",
+        error: "Legacy unauthenticated sandbox stopped; delete and recreate it"
+      })
+    }))
+
+  it.effect("treats the current already-stopped Docker wording as retired", () =>
+    Effect.gen(function*() {
+      const fixture = yield* makeFixture(() => Effect.void, {
+        initialRow: legacyRow,
+        stopContainer: Effect.fail(
+          new DockerError({
+            operation: "stopContainer",
+            cause: "Error response from daemon: container is already stopped"
           })
         )
       })

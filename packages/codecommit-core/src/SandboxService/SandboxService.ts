@@ -13,6 +13,7 @@ import {
   Crypto,
   Duration,
   Effect,
+  Fiber,
   Layer,
   Option,
   Predicate,
@@ -136,7 +137,23 @@ const makeSandboxService = Effect.gen(function*() {
   const cryptoService = yield* Crypto.Crypto
   const homePath = yield* homeDir.pipe(Effect.orDie)
   const basePath = yield* sandboxesDir.pipe(Effect.orDie)
-  const activeWorkerIds = yield* Ref.make<ReadonlySet<string>>(new Set())
+  const activeWorkerIds = yield* Ref.make<ReadonlyMap<string, number>>(new Map())
+  const markWorkerActive = (id: string) =>
+    Ref.update(activeWorkerIds, (workers) => {
+      const next = new Map(workers)
+      next.set(id, (next.get(id) ?? 0) + 1)
+      return next
+    })
+  const releaseWorker = (id: string) =>
+    Ref.update(activeWorkerIds, (workers) => {
+      const next = new Map(workers)
+      const count = next.get(id) ?? 0
+      if (count <= 1) next.delete(id)
+      else next.set(id, count - 1)
+      return next
+    })
+  const hasActiveWorker = (id: string) =>
+    Ref.get(activeWorkerIds).pipe(Effect.map((workers) => (workers.get(id) ?? 0) > 0))
 
   const loadSandboxConfig: Effect.Effect<SandboxConfig> = configService.load.pipe(
     Effect.map((config) => config.sandbox),
@@ -190,9 +207,7 @@ const makeSandboxService = Effect.gen(function*() {
 
   const retireLegacySandbox = (legacy: SandboxRow) =>
     Effect.gen(function*() {
-      const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
-        Effect.map((ids) => ids.has(legacy.id))
-      )
+      const activeWorker = yield* hasActiveWorker(legacy.id)
       if (activeWorker) {
         return yield* new SandboxError({
           sandboxId: SandboxId.make(legacy.id),
@@ -319,9 +334,7 @@ const makeSandboxService = Effect.gen(function*() {
         }
         if (effectiveExisting !== undefined) {
           if (effectiveExisting.containerId === null && isPreContainerSandboxStatus(effectiveExisting.status)) {
-            const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
-              Effect.map((ids) => ids.has(effectiveExisting.id))
-            )
+            const activeWorker = yield* hasActiveWorker(effectiveExisting.id)
             if (activeWorker) return effectiveExisting
             yield* updateStatus(SandboxId.make(effectiveExisting.id), "error", {
               error: "Orphaned (no container)"
@@ -343,13 +356,8 @@ const makeSandboxService = Effect.gen(function*() {
         const now = new Date(nowMs).toISOString()
 
         const workerTransferred = yield* Ref.make(false)
-        const releaseWorkerReservation = () =>
-          Ref.update(activeWorkerIds, (ids) => {
-            const next = new Set(ids)
-            next.delete(String(id))
-            return next
-          })
-        yield* Ref.update(activeWorkerIds, (ids) => new Set(ids).add(String(id)))
+        const releaseWorkerReservation = () => releaseWorker(String(id))
+        yield* markWorkerActive(String(id))
         const worker = Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
           const host = yield* ChildEnv.HostEnvironment
@@ -531,7 +539,13 @@ const makeSandboxService = Effect.gen(function*() {
           Effect.andThen(
             Effect.uninterruptible(
               ownerScope.fork(worker).pipe(
-                Effect.andThen(Ref.set(workerTransferred, true))
+                Effect.flatMap(({ fiber, started }) =>
+                  Effect.race(
+                    started.pipe(Effect.as(true)),
+                    Fiber.await(fiber).pipe(Effect.as(false))
+                  )
+                ),
+                Effect.flatMap((started) => started ? Ref.set(workerTransferred, true) : Effect.void)
               )
             )
           ),
@@ -589,25 +603,29 @@ const makeSandboxService = Effect.gen(function*() {
         if (row.containerId === null) {
           return yield* new SandboxError({ sandboxId: id, message: "No container to restart" })
         }
+        const containerId = row.containerId
 
-        yield* updateStatus(id, "starting")
-        yield* progress(id, "Restarting container")
-        yield* docker.startContainer(row.containerId)
-        yield* updateStatus(id, "starting", row.port !== null ? { port: row.port } : {})
-        yield* progress(id, "Waiting for code-server health check")
+        yield* markWorkerActive(String(id))
+        yield* Effect.gen(function*() {
+          yield* updateStatus(id, "starting")
+          yield* progress(id, "Restarting container")
+          yield* docker.startContainer(containerId)
+          yield* updateStatus(id, "starting", row.port !== null ? { port: row.port } : {})
+          yield* progress(id, "Waiting for code-server health check")
 
-        yield* docker.exec(row.containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
-          Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
-          Effect.tap(() => progress(id, "code-server ready")),
-          Effect.catchIf(() => true, () => Effect.void)
-        )
+          yield* docker.exec(containerId, ["curl", "-sf", "http://localhost:8080/healthz"]).pipe(
+            Effect.retry(Schedule.max([Schedule.recurs(30), Schedule.spaced(Duration.seconds(1))])),
+            Effect.tap(() => progress(id, "code-server ready")),
+            Effect.catchIf(() => true, () => Effect.void)
+          )
 
-        const ctx = makeSandboxContext(yield* repo.findById(id))
-        yield* plugins.executeHook("onSandboxReady", ctx)
+          const ctx = makeSandboxContext(yield* repo.findById(id))
+          yield* plugins.executeHook("onSandboxReady", ctx)
 
-        yield* updateStatus(id, "running")
-        yield* progress(id, "Sandbox restarted")
-        yield* Effect.logInfo(`Sandbox ${id} restarted`)
+          yield* updateStatus(id, "running")
+          yield* progress(id, "Sandbox restarted")
+          yield* Effect.logInfo(`Sandbox ${id} restarted`)
+        }).pipe(Effect.ensuring(releaseWorker(String(id))))
       }).pipe(
         Effect.mapError((cause) => new SandboxError({ sandboxId: id, message: "Failed to restart sandbox", cause }))
       ),
@@ -649,9 +667,7 @@ const makeSandboxService = Effect.gen(function*() {
                 containerIds.size === 0 &&
                 isPreContainerSandboxStatus(row.status)
               ) {
-                const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
-                  Effect.map((ids) => ids.has(row.id))
-                )
+                const activeWorker = yield* hasActiveWorker(row.id)
                 if (activeWorker) return
                 yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })
                 return
@@ -711,9 +727,7 @@ const makeSandboxService = Effect.gen(function*() {
             }
             if (row.containerId === null) {
               if (isPreContainerSandboxStatus(row.status)) {
-                const activeWorker = yield* Ref.get(activeWorkerIds).pipe(
-                  Effect.map((ids) => ids.has(row.id))
-                )
+                const activeWorker = yield* hasActiveWorker(row.id)
                 if (activeWorker) return
               }
               yield* updateStatus(SandboxId.make(row.id), "error", { error: "Orphaned (no container)" })

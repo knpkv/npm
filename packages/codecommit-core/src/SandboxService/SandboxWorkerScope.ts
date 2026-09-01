@@ -1,10 +1,16 @@
 import type { Effect as EffectType, Fiber } from "effect"
-import { Context, Effect, Layer } from "effect"
+import { Context, Deferred, Effect, Layer } from "effect"
+
+export interface SandboxWorkerHandle<A, E> {
+  readonly fiber: Fiber.Fiber<A, E>
+  /** Completes only after the forked effect has entered its lifecycle. */
+  readonly started: EffectType.Effect<void>
+}
 
 export interface SandboxWorkerScopeContract {
   readonly fork: <A, E, R>(
     worker: EffectType.Effect<A, E, R>
-  ) => EffectType.Effect<Fiber.Fiber<A, E>, never, R>
+  ) => EffectType.Effect<SandboxWorkerHandle<A, E>, never, R>
 }
 
 /**
@@ -20,7 +26,15 @@ export class SandboxWorkerScope extends Context.Service<SandboxWorkerScope, Sand
     SandboxWorkerScope,
     Effect.map(Effect.scope, (scope) =>
       SandboxWorkerScope.of({
-        fork: (worker) => Effect.forkIn(worker, scope)
+        fork: (worker) =>
+          Effect.gen(function*() {
+            const started = yield* Deferred.make<void>()
+            const fiber = yield* Effect.forkIn(
+              Effect.uninterruptible(Deferred.succeed(started, undefined)).pipe(Effect.andThen(worker)),
+              scope
+            )
+            return { fiber, started: Deferred.await(started) }
+          })
       }))
   )
 }

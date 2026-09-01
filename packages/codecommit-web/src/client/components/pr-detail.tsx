@@ -101,9 +101,11 @@ const PullRequestReviewWorkspace = lazy(() =>
   }))
 )
 
-/** Use the profile as the durable sandbox key while retaining numeric rows from older runs. */
+/** Use the discovered account as the durable sandbox key, with profile identity for undiscovered accounts. */
 export const sandboxAccountIdForPullRequest = (pullRequest: Pick<Domain.PullRequest, "account">): string =>
-  pullRequest.account.profile
+  pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
+    ? pullRequest.account.awsAccountId
+    : pullRequest.account.profile
 
 export const sandboxMatchesPullRequest = (
   sandbox: {
@@ -115,9 +117,7 @@ export const sandboxMatchesPullRequest = (
   pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
 ): boolean =>
   (sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) ||
-    (pullRequest.account.awsAccountId !== undefined &&
-      pullRequest.account.awsAccountId.length > 0 &&
-      sandbox.awsAccountId === pullRequest.account.awsAccountId)) &&
+    sandbox.awsAccountId === pullRequest.account.profile) &&
   sandbox.pullRequestId === String(pullRequest.id) &&
   sandbox.repositoryName === String(pullRequest.repositoryName) &&
   sandbox.region === String(pullRequest.account.region)

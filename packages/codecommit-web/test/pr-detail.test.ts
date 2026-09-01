@@ -62,12 +62,32 @@ describe("PR detail coordinates", () => {
     ).toBe(true)
   })
 
-  it("keeps the profile as the sandbox identity after account discovery", () => {
-    expect(sandboxAccountIdForPullRequest(pullRequest)).toBe("production")
+  it("uses the discovered account as the sandbox identity", () => {
+    expect(sandboxAccountIdForPullRequest(pullRequest)).toBe("111122223333")
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "111122223333", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        pullRequest
+      )
+    ).toBe(true)
+  })
+
+  it("does not reuse an account-keyed sandbox after the profile changes accounts", () => {
+    const changedAccountPullRequest = new Domain.PullRequest({
+      ...pullRequest,
+      account: new Domain.Account({ ...pullRequest.account, awsAccountId: "999988887777" })
+    })
+
+    expect(
+      sandboxMatchesPullRequest(
+        { awsAccountId: "111122223333", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
+        changedAccountPullRequest
+      )
+    ).toBe(false)
     expect(
       sandboxMatchesPullRequest(
         { awsAccountId: "production", pullRequestId: "42", repositoryName: "payments", region: "eu-west-1" },
-        pullRequest
+        changedAccountPullRequest
       )
     ).toBe(true)
   })
