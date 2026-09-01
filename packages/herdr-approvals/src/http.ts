@@ -60,6 +60,7 @@ import {
   Clock,
   Crypto,
   Effect,
+  Equal,
   Exit,
   Fiber,
   FileSystem,
@@ -407,6 +408,13 @@ export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkChe
       checkpoint.goal.approvalTarget,
       ...(checkpoint.goal.requests ?? []).map(({ approvalTarget }) => approvalTarget)
     ].filter((target): target is NonNullable<typeof target> => target !== undefined && target !== null)
+    if (targets.length > 0) {
+      const snapshots = yield* work.snapshots(checkpoint.occurredAt)
+      const exactReplay = snapshots.now.goals.some(
+        (goal) => goal.id === checkpoint.goal.id && Equal.equals(goal, checkpoint.goal)
+      )
+      if (exactReplay) return yield* work.record(checkpoint)
+    }
     if (approvalPage === undefined) {
       if (targets.length > 0) {
         return yield* new FleetValidationError({

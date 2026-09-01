@@ -256,10 +256,15 @@ describe("Work control app", () => {
       blockers: [{ since: workGoalInput.createdAt - 1, summary: "Pre-goal blocker" }],
       state: "blocked"
     })
+    const { blockers: _blockers, ...workGoalWithoutBlockers } = workGoalInput
     const preGoalLegacyBlocker = Schema.decodeUnknownResult(WorkGoal)({
-      ...workGoalInput,
+      ...workGoalWithoutBlockers,
       blocker: { since: workGoalInput.createdAt - 1, summary: "Pre-goal blocker" },
-      blockers: [],
+      state: "blocked"
+    })
+    const atCreationLegacyBlocker = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalWithoutBlockers,
+      blocker: { since: workGoalInput.createdAt, summary: "Creation-time blocker" },
       state: "blocked"
     })
     const atCreation = Schema.decodeUnknownResult(WorkGoal)({
@@ -278,6 +283,7 @@ describe("Work control app", () => {
     expect(preGoalBlockers._tag).toBe("Failure")
     expect(preGoalLegacyBlocker._tag).toBe("Failure")
     expect(atCreation._tag).toBe("Success")
+    expect(atCreationLegacyBlocker._tag).toBe("Success")
   })
 
   it("rejects duplicate activity and request identities", () => {

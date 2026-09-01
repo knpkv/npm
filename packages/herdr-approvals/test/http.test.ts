@@ -11,6 +11,7 @@ import {
 import { ChatHistory, chatHistoryMaxEntries, ChatStore, type StoredChatTurn } from "@knpkv/herdr-coordinator"
 import {
   FleetAuthorizationError,
+  FleetOperationError,
   fleetResponseBodyMaxBytes,
   type FleetService,
   FleetValidationError,
@@ -548,6 +549,60 @@ describe("host HTTP authority", () => {
       )
       expect(replay).toMatchObject({ _tag: "Success", success: workCheckpoint })
       expect((yield* work.snapshots(1_000)).now.goals).toEqual([workCheckpoint.goal])
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("replays approval checkpoints when the authoritative page is unavailable", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-work-replay-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(root, "approval-app.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const work = yield* makeWorkService(store)
+      const checkpoint = {
+        ...workCheckpoint,
+        goal: { ...workCheckpoint.goal, approvalTarget: ser8ApprovalTarget }
+      }
+      const unavailableApprovalPage = (_host: string) =>
+        Effect.fail(
+          new FleetOperationError({
+            cause: "offline",
+            detail: "approval host unavailable",
+            operation: "tailscale.status"
+          })
+        )
+
+      yield* recordWorkCheckpointRequest(
+        Effect.succeed("local"),
+        decodeWorkCheckpoint(checkpoint),
+        work,
+        approvalPage
+      )
+      const replay = yield* Effect.result(
+        recordWorkCheckpointRequest(
+          Effect.succeed("local"),
+          decodeWorkCheckpoint(checkpoint),
+          work,
+          unavailableApprovalPage
+        )
+      )
+      expect(replay).toMatchObject({ _tag: "Success", success: checkpoint })
+
+      const firstAttempt = yield* Effect.result(
+        recordWorkCheckpointRequest(
+          Effect.succeed("local"),
+          decodeWorkCheckpoint({
+            ...checkpoint,
+            eventId: "event-work-approval-new",
+            occurredAt: 2_000,
+            goal: { ...checkpoint.goal, updatedAt: 2_000 }
+          }),
+          work,
+          unavailableApprovalPage
+        )
+      )
+      expect(firstAttempt).toMatchObject({ failure: { _tag: "FleetOperationError" } })
+      expect((yield* work.snapshots(1_000)).now.goals).toEqual([checkpoint.goal])
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
