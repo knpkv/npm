@@ -161,8 +161,9 @@ const canonicalTypeMaxDepth = 128
 
 const typeSubstitutionTag = Symbol("type substitution")
 
-const makeTypeSubstitution = (typeNode, substitutions) => ({
+const makeTypeSubstitution = (typeNode, substitutions, filePath) => ({
   [typeSubstitutionTag]: true,
+  filePath,
   substitutions,
   typeNode
 })
@@ -171,12 +172,12 @@ const isTypeSubstitution = (value) => value?.[typeSubstitutionTag] === true
 
 const rawTypeSubstitutionBindings = new WeakMap()
 
-const typeSubstitutionBinding = (value, substitutions) => {
+const typeSubstitutionBinding = (value, substitutions, filePath) => {
   if (isTypeSubstitution(value)) return value
   const bindings = rawTypeSubstitutionBindings.get(substitutions) ?? new Map()
   const existing = bindings.get(value)
   if (existing !== undefined) return existing
-  const binding = makeTypeSubstitution(value, substitutions)
+  const binding = makeTypeSubstitution(value, substitutions, filePath)
   bindings.set(value, binding)
   rawTypeSubstitutionBindings.set(substitutions, bindings)
   return binding
@@ -193,7 +194,13 @@ const declarationEffectiveTypeArguments = (declaration, typeArguments) => {
       if (index !== undefined && !shadowed.has(node.typeName.text)) usedIndexes.add(index)
     }
     const nestedTypeParameters =
-      TypeScript.isFunctionTypeNode(node) || TypeScript.isMethodSignature(node) ? (node.typeParameters ?? []) : []
+      TypeScript.isFunctionTypeNode(node) ||
+      TypeScript.isMethodSignature(node) ||
+      TypeScript.isCallSignatureDeclaration(node) ||
+      TypeScript.isConstructSignatureDeclaration(node) ||
+      TypeScript.isConstructorTypeNode(node)
+        ? (node.typeParameters ?? [])
+        : []
     const nextShadowed =
       nestedTypeParameters.length === 0
         ? shadowed
@@ -235,7 +242,7 @@ const canonicalTypeText = (
     const substituted = substitutions.get(typeName)
     if (substituted !== undefined) {
       if (Predicate.isString(substituted)) return substituted
-      const binding = typeSubstitutionBinding(substituted, substitutions)
+      const binding = typeSubstitutionBinding(substituted, substitutions, filePath)
       if (context.substitutionPath.has(binding)) {
         failCanonicalType(filePath, typeNode, "recursive type substitution")
       }
@@ -243,7 +250,7 @@ const canonicalTypeText = (
       return canonicalTypeText(
         binding.typeNode,
         analysis,
-        filePath,
+        binding.filePath,
         binding.substitutions,
         seen,
         nextCanonicalTypeContext(context, substitutionPath)
@@ -259,7 +266,7 @@ const canonicalTypeText = (
       for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
         const argument = typeNode.typeArguments?.[index]
         if (argument !== undefined) {
-          nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions))
+          nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions, filePath))
         }
       }
       if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
@@ -311,15 +318,25 @@ const canonicalTypeText = (
       })
       .join(",")}]`
   }
-  if (TypeScript.isTypeOperatorNode(typeNode) && typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword) {
-    return `readonly ${canonicalTypeText(
-      typeNode.type,
-      analysis,
-      filePath,
-      substitutions,
-      seen,
-      nextCanonicalTypeContext(context)
-    )}`
+  if (TypeScript.isTypeOperatorNode(typeNode)) {
+    const operator =
+      typeNode.operator === TypeScript.SyntaxKind.KeyOfKeyword
+        ? "keyof"
+        : typeNode.operator === TypeScript.SyntaxKind.ReadonlyKeyword
+          ? "readonly"
+          : typeNode.operator === TypeScript.SyntaxKind.UniqueKeyword
+            ? "unique"
+            : undefined
+    if (operator !== undefined) {
+      return `${operator} ${canonicalTypeText(
+        typeNode.type,
+        analysis,
+        filePath,
+        substitutions,
+        seen,
+        nextCanonicalTypeContext(context)
+      )}`
+    }
   }
   if (TypeScript.isOptionalTypeNode(typeNode)) {
     return `${canonicalTypeText(
@@ -598,7 +615,7 @@ const canonicalMemoEnvironmentKey = (analysis, filePath, substitutions, typeArgu
               reason: `${filePath}: invalid type substitution while canonicalizing memo environment`
             })
           }
-          return [name, canonicalTypeText(value.typeNode, analysis, filePath, value.substitutions)]
+          return [name, canonicalTypeText(value.typeNode, analysis, value.filePath, value.substitutions)]
         })
     : []
   const canonicalArguments = typeArguments.map((argument) =>
@@ -830,12 +847,12 @@ const typeMembers = (
     const substituted = substitutions.get(typeNode.typeName.text)
     if (substituted !== undefined) {
       if (Predicate.isString(substituted)) return typeMembersResult()
-      const binding = typeSubstitutionBinding(substituted, substitutions)
+      const binding = typeSubstitutionBinding(substituted, substitutions, filePath)
       if (substitutionPath.has(binding)) failCanonicalType(filePath, typeNode, "recursive type substitution")
       const result = typeMembers(
         binding.typeNode,
         analysis,
-        filePath,
+        binding.filePath,
         seen,
         binding.substitutions,
         memo,
@@ -888,7 +905,7 @@ const typeMembers = (
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
       if (argument !== undefined) {
-        nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions))
+        nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions, filePath))
       }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
@@ -979,7 +996,7 @@ const typeMembers = (
     for (const [index, parameter] of (declaration.node.typeParameters ?? []).entries()) {
       const argument = typeNode.typeArguments?.[index]
       if (argument !== undefined) {
-        nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions))
+        nextSubstitutions.set(parameter.name.text, makeTypeSubstitution(argument, substitutions, filePath))
       }
     }
     if (TypeScript.isTypeAliasDeclaration(declaration.node)) {
@@ -3011,6 +3028,35 @@ const runSelfTest = () => {
     publicCallableChanges(recursivePhantomSources, recursivePhantomSources, ["packages/public/src/index.ts"]),
     []
   )
+  const callSignatureShadowedPhantomSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Loop<T> = readonly Loop<T[]>[]\ntype Phantom<T> = { <T>(value: T): string; fixed: string }\ntype Props = { left: Phantom<Loop<string>>; right: Phantom<Loop<string>> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(callSignatureShadowedPhantomSources, callSignatureShadowedPhantomSources, [
+      "packages/public/src/index.ts"
+    ]),
+    []
+  )
+  const callSignatureOuterPhantomSources = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Loop<T> = readonly Loop<T[]>[]\ntype Phantom<T> = { <U>(value: T): string; fixed: string }\ntype Props = { left: Phantom<Loop<string>>; right: Phantom<Loop<string>> }\nexport const Public = (props: Props) => props"
+    ]
+  ])
+  assert.throws(
+    () =>
+      publicCallableChanges(callSignatureOuterPhantomSources, callSignatureOuterPhantomSources, [
+        "packages/public/src/index.ts"
+      ]),
+    (cause) =>
+      cause instanceof ChangesetCoverageError &&
+      cause.reason === "packages/public/src/view.tsx: recursive type declaration while canonicalizing Loop<T[]>"
+  )
   const wrappedGenericChanged = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [
@@ -3050,6 +3096,69 @@ const runSelfTest = () => {
   assert.deepEqual(
     publicCallableChanges(qualifiedGenericPrevious, qualifiedGenericChanged, ["packages/public/src/index.ts"]),
     [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["cb"] }]
+  )
+  const operatorAliasPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { id: string }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  const operatorAliasRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Entity = { id: string }\nexport function Public<T extends keyof Entity>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(operatorAliasPrevious, operatorAliasRename, ["packages/public/src/index.ts"]),
+    []
+  )
+  const operatorAliasChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Model = { id: number }\nexport function Public<T extends keyof Model>(props: { value: T }): T { return props.value }"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(operatorAliasPrevious, operatorAliasChanged, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
+  const crossFileSubstitutionPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Box<T> = ReadonlyArray<T>"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Box } from "./types.js"\ntype Local = string\ntype Props = { value: Box<Local> }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  const crossFileSubstitutionChanged = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Box<T> = ReadonlyArray<T>"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Box } from "./types.js"\ntype Local = number\ntype Props = { value: Box<Local> }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(crossFileSubstitutionPrevious, crossFileSubstitutionChanged, [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+  const crossFileSubstitutionRename = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    ["packages/public/src/types.ts", "export type Box<T> = ReadonlyArray<T>"],
+    [
+      "packages/public/src/view.tsx",
+      'import type { Box } from "./types.js"\ntype Renamed = string\ntype Props = { value: Box<Renamed> }\nexport const Public = (props: Props) => props'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(crossFileSubstitutionPrevious, crossFileSubstitutionRename, ["packages/public/src/index.ts"]),
+    []
   )
 
   const methodPrevious = new Map([
