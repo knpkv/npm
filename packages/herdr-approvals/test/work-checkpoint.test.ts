@@ -91,12 +91,13 @@ describe("fleetctl work commands", () => {
     Effect.gen(function*() {
       const crossHostConfig = { ...config, crossHost: true }
       expect(workDefaultTarget(crossHostConfig)).toBe("SER8")
-      expect(workSnapshotTarget(crossHostConfig, undefined)).toBe("SER8")
+      const omittedSnapshotTarget = workSnapshotTarget(crossHostConfig, undefined)
+      expect(omittedSnapshotTarget).toBe("SER8")
       expect(workSnapshotTarget(crossHostConfig, "SER8")).toBe("SER8")
       expect(yield* workCheckpointUrl(crossHostConfig, "ser8")).toBe(
         "https://ser8.example.test:4779/v1/work/checkpoints"
       )
-      expect(yield* workSnapshotUrl(crossHostConfig, "SER8")).toBe(
+      expect(yield* workSnapshotUrl(crossHostConfig, omittedSnapshotTarget)).toBe(
         "https://ser8.example.test:4779/v1/work"
       )
       const nonHub = yield* Effect.result(workSnapshotUrl(crossHostConfig, "ALPHA"))
