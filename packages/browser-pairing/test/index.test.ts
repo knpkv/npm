@@ -105,7 +105,8 @@ describe("browser pairing primitives", () => {
       path: "/",
       httpOnly: true,
       sameSite: "strict",
-      secure: true
+      secure: true,
+      sourceOrigin: "https://example.test"
     }
     expect(() => serializeRuntimeCredentialCookie("ab;" + "ab".repeat(31), valid)).toThrow(CredentialCookieError)
     expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "/\r\nSet-Cookie: bad" })).toThrow(
@@ -239,6 +240,23 @@ describe("browser pairing primitives", () => {
     expect(serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: true })).toContain(
       "SameSite=None; Secure"
     )
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Secure-session",
+        sourceOrigin: "http://example.test"
+      })
+    ).toThrow(CredentialCookieError)
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+      ...valid,
+      name: "__Secure-session",
+      sourceOrigin: "https://example.test"
+    })).toContain("__Secure-session=")
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+      ...valid,
+      name: "__Secure-session",
+      sourceOrigin: "http://localhost"
+    })).toContain("__Secure-session=")
     const malformed = { ...valid, sameSite: "invalid" }
     expect(() => {
       // @ts-expect-error Exercise the runtime boundary with an untyped SameSite value.

@@ -82,6 +82,7 @@ export interface CredentialCookieOptions {
   readonly sameSite: "strict" | "lax" | "none"
   readonly secure: boolean
   readonly maxAge?: number
+  readonly sourceOrigin?: string
 }
 
 const CredentialCookieOptionsSchema = Schema.Struct({
@@ -90,7 +91,8 @@ const CredentialCookieOptionsSchema = Schema.Struct({
   httpOnly: Schema.Boolean,
   sameSite: Schema.Literals(["strict", "lax", "none"]),
   secure: Schema.Boolean,
-  maxAge: Schema.optionalKey(Schema.Number)
+  maxAge: Schema.optionalKey(Schema.Number),
+  sourceOrigin: Schema.optionalKey(Schema.String)
 })
 
 /** Serialize a validated credential cookie without allowing header injection or invalid lifetimes. */
@@ -110,16 +112,29 @@ export const serializeCredentialCookie: (
       return !((code >= 0x20 && code <= 0x3a) || (code >= 0x3c && code <= 0x7e))
     })
   const normalizedName = validatedOptions.name.toLowerCase()
+  const hasRecognizedPrefix = normalizedName.startsWith("__host-http-") ||
+    normalizedName.startsWith("__http-") ||
+    normalizedName.startsWith("__host-") ||
+    normalizedName.startsWith("__secure-")
+  const sourceUrl = validatedOptions.sourceOrigin !== undefined && URL.canParse(validatedOptions.sourceOrigin)
+    ? new URL(validatedOptions.sourceOrigin)
+    : undefined
+  const sourceOriginIsTrustworthy = sourceUrl !== undefined &&
+    (sourceUrl.protocol === "https:" ||
+      (sourceUrl.protocol === "http:" &&
+        (sourceUrl.hostname === "localhost" || sourceUrl.hostname === "127.0.0.1" || sourceUrl.hostname === "[::1]")))
   const invalidReservedPrefix = (normalizedName.startsWith("__host-http-") &&
     (!validatedOptions.secure || !validatedOptions.httpOnly || validatedOptions.path !== "/")) ||
     (normalizedName.startsWith("__http-") && (!validatedOptions.secure || !validatedOptions.httpOnly)) ||
     (normalizedName.startsWith("__host-") && (!validatedOptions.secure || validatedOptions.path !== "/")) ||
-    (normalizedName.startsWith("__secure-") && !validatedOptions.secure)
+    (normalizedName.startsWith("__secure-") && !validatedOptions.secure) ||
+    (hasRecognizedPrefix && !sourceOriginIsTrustworthy)
   if (
     !COOKIE_NAME_PATTERN.test(validatedOptions.name) ||
     invalidPath(validatedOptions.path) ||
     !validatedOptions.path.startsWith("/") ||
-    invalidReservedPrefix
+    invalidReservedPrefix ||
+    (validatedOptions.sourceOrigin !== undefined && sourceUrl === undefined)
   ) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
