@@ -317,7 +317,7 @@
     border: 0;
     border-radius: 0;
     display: grid;
-    grid-template-rows: auto minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
     min-block-size: 0;
     min-inline-size: 0;
     overflow: hidden;
@@ -342,6 +342,64 @@
 
   .terminal-bar small {
     color: var(--rly-color-text-3);
+  }
+
+  .terminal-key-rail {
+    align-items: center;
+    border-block-end: 1px solid var(--rly-color-border-1);
+    display: flex;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+    overflow-x: auto;
+    padding: var(--rly-space-8) var(--rly-space-12);
+    scrollbar-width: thin;
+  }
+
+  .terminal-key-group {
+    display: flex;
+    flex: 0 0 auto;
+    gap: var(--rly-space-4);
+  }
+
+  .terminal-key {
+    align-items: center;
+    background: var(--rly-color-surface-2);
+    border: 1px solid var(--rly-color-border-2);
+    border-radius: var(--rly-radius-control);
+    color: var(--rly-color-text-1);
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    justify-content: center;
+    min-block-size: 2.25rem;
+    min-inline-size: 2.25rem;
+    padding: var(--rly-space-6) var(--rly-space-10);
+    touch-action: manipulation;
+    white-space: nowrap;
+  }
+
+  .terminal-key:hover,
+  .terminal-key[aria-pressed="true"] {
+    background: var(--rly-color-surface-3);
+    border-color: var(--rly-color-agent);
+  }
+
+  .terminal-key:focus-visible {
+    border-color: var(--rly-color-focus);
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: 2px;
+  }
+
+  .terminal-key:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .terminal-key-error {
+    color: var(--rly-color-critical-ink);
+    display: inline-flex;
+    margin-inline-start: auto;
+    white-space: nowrap;
   }
 
   .terminal-bar strong,
@@ -516,6 +574,17 @@
 
     .ghostty-terminal {
       padding: var(--rly-space-8);
+    }
+
+    .terminal-key-rail {
+      gap: var(--rly-space-4);
+      padding: var(--rly-space-6) var(--rly-space-8);
+    }
+
+    .terminal-key {
+      min-block-size: 2rem;
+      min-inline-size: 2rem;
+      padding-inline: var(--rly-space-8);
     }
   }
 

@@ -2,6 +2,13 @@ import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
 import type { ReactNode, Ref } from "react"
 import type { ConnectAgent } from "./model.js"
+import {
+  serializeTerminalKey,
+  terminalKeyDescriptors,
+  terminalModifiers,
+  type TerminalModifier,
+  type TerminalRailKey
+} from "./terminal-keyboard.js"
 
 type AgentActivity = "working" | "ready" | "attention" | "finished"
 export type AgentActivityFilter = "all" | AgentActivity
@@ -373,5 +380,77 @@ export const ConnectWorkspace = ({ directory, mode, terminal, terminalViewportRe
     >
       {terminal}
     </div>
+  </div>
+)
+
+type TerminalKeyRailProps = {
+  readonly modifier: TerminalModifier | null
+  readonly onModifierChange: (modifier: TerminalModifier) => void
+  readonly onKey: (key: TerminalRailKey) => void
+  readonly error?: string | null
+  readonly disabled?: boolean
+}
+
+const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
+
+const modifierShortcut = (modifier: TerminalModifier | null, shortcut: string): string =>
+  modifier === null ? shortcut : `${modifier === "ctrl" ? "Control" : "Alt"}+${shortcut}`
+
+const requiresModifier = (key: TerminalRailKey): boolean => key === "c" || key === "d" || key === "l" || key === "z"
+
+/** A fixed, keyboard-accessible set of terminal controls for touch layouts. */
+export const TerminalKeyRail = ({
+  disabled = false,
+  error = null,
+  modifier,
+  onKey,
+  onModifierChange
+}: TerminalKeyRailProps) => (
+  <div aria-label="Terminal keyboard controls" className="terminal-key-rail" data-terminal-key-rail role="toolbar">
+    <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
+      {terminalModifiers.map((item) => (
+        <button
+          aria-keyshortcuts={item === "ctrl" ? "Control" : "Alt"}
+          aria-pressed={modifier === item}
+          className="terminal-key terminal-key-modifier"
+          data-terminal-key={item}
+          disabled={disabled}
+          key={item}
+          onClick={() => onModifierChange(item)}
+          onPointerDown={(event) => event.preventDefault()}
+          type="button"
+        >
+          {modifierLabel(item)}
+        </button>
+      ))}
+    </div>
+    <div aria-label="Terminal keys" className="terminal-key-group" role="group">
+      {terminalKeyDescriptors.map((descriptor) => {
+        const serialization = serializeTerminalKey(descriptor.key, modifier)
+        const unavailable =
+          serialization._tag === "unsupported" || (modifier === null && requiresModifier(descriptor.key))
+        return (
+          <button
+            aria-keyshortcuts={modifierShortcut(modifier, descriptor.shortcut)}
+            aria-label={modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`}
+            className="terminal-key"
+            data-terminal-key={descriptor.key}
+            disabled={disabled || unavailable}
+            key={descriptor.key}
+            onClick={() => onKey(descriptor.key)}
+            onPointerDown={(event) => event.preventDefault()}
+            title={unavailable ? "Choose a supported modifier combination" : undefined}
+            type="button"
+          >
+            {descriptor.label}
+          </button>
+        )
+      })}
+    </div>
+    {error === null ? null : (
+      <small aria-live="polite" className="terminal-key-error">
+        {error}
+      </small>
+    )}
   </div>
 )
