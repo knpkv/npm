@@ -29,10 +29,10 @@ import {
 } from "../Api.js"
 import type { RelayFindingPublisherService } from "./RelayFindingPublisher.js"
 import {
+  MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES,
   MAXIMUM_RELAY_PATCH_BYTES,
   MAXIMUM_RELAY_PROMPT_BYTES,
-  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
-  MAXIMUM_RELAY_REVIEW_RESULT_BYTES
+  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES
 } from "./ReviewPromptBudget.js"
 
 const MAXIMUM_DIFF_FILES = 1_000
@@ -710,8 +710,32 @@ const decodeCodexProgress = Schema.decodeUnknownOption(CodexProgressEvent)
 const decodeRelayResult = Schema.decodeUnknownOption(Schema.fromJsonString(RelayReviewResult))
 const decodeRelayExplainResult = Schema.decodeUnknownOption(Schema.fromJsonString(RelayExplainResult))
 
+const RelayReviewConversationResult = Schema.Struct({
+  reply: RelayReviewMessage,
+  review: RelayNativeReviewResult
+})
+
+const RelayExplainConversationResult = Schema.Struct({
+  reply: RelayReviewMessage,
+  review: RelayExplainResult
+})
+
+type RelayAgentOutputSchema =
+  | typeof RelayExplainResult
+  | typeof RelayNativeReviewResult
+  | typeof RelayReviewConversationResult
+  | typeof RelayExplainConversationResult
+
+type RelayAgentResult =
+  | Schema.Schema.Type<typeof RelayExplainResult>
+  | Schema.Schema.Type<typeof RelayNativeReviewResult>
+  | Schema.Schema.Type<typeof RelayReviewConversationResult>
+  | Schema.Schema.Type<typeof RelayExplainConversationResult>
+
 /** Exact native output contract selected before the provider process starts. */
-export const relayReviewOutputSchema = (kind: RelayReviewKind): Schema.Top =>
+export const relayReviewOutputSchema = (
+  kind: RelayReviewKind
+): typeof RelayExplainResult | typeof RelayNativeReviewResult =>
   kind === "explain" ? RelayExplainResult : RelayNativeReviewResult
 
 export const parseRelayReviewResult = (
@@ -730,14 +754,10 @@ interface RelayAgentRequest {
   readonly cwd: string
   readonly kind: RelayReviewKind
   readonly maxPromptBytes: number
-  readonly outputSchema: Schema.Top
+  readonly outputSchema: RelayAgentOutputSchema
   readonly prompt: string
   readonly timeout: "5 minutes"
 }
-
-type RelayAgentResult =
-  | Schema.Schema.Type<typeof RelayExplainResult>
-  | Schema.Schema.Type<typeof RelayNativeReviewResult>
 
 const encodeClaudeAgentMessage = (value: RelayAgentResult): Effect.Effect<string, PullRequestReviewError> =>
   Effect.try({
@@ -755,33 +775,31 @@ const claudeAgentMessage = (
   profile: RelayReviewProfile,
   request: RelayAgentRequest
 ): Effect.Effect<string, PullRequestReviewError, ChildProcessSpawner.ChildProcessSpawner> =>
-  (request.kind === "explain"
-    ? LanguageModel.generateObject({ objectName: "relay-review", prompt: request.prompt, schema: RelayExplainResult })
-    : LanguageModel.generateObject({
-      objectName: "relay-review",
-      prompt: request.prompt,
-      schema: RelayNativeReviewResult
-    })).pipe(
-      // Dynamic per-review model layer: the application supplies ChildProcessSpawner at its entry point.
-      // @effect-diagnostics-next-line strictEffectProvide:off
-      Effect.provide(
-        claudeModel({
-          access: "read-only",
-          cwd: request.cwd,
-          ...((profile.model !== "configured-default" && profile.model !== "default") && { model: profile.model }),
-          timeout: request.timeout,
-          maxOutputBytes: MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
-          maxStderrBytes: MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES
-        })
-      ),
-      Effect.map((response) => response.value),
-      Effect.flatMap(encodeClaudeAgentMessage),
-      Effect.mapError((cause) =>
-        Predicate.isTagged(cause, "PullRequestReviewError")
-          ? cause
-          : reviewError("relay-review", "Claude review execution failed", cause)
-      )
+  LanguageModel.generateObject({
+    objectName: "relay-review",
+    prompt: request.prompt,
+    schema: request.outputSchema
+  }).pipe(
+    // Dynamic per-review model layer: the application supplies ChildProcessSpawner at its entry point.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(
+      claudeModel({
+        access: "prompt-only",
+        cwd: request.cwd,
+        ...((profile.model !== "configured-default" && profile.model !== "default") && { model: profile.model }),
+        timeout: request.timeout,
+        maxOutputBytes: MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES,
+        maxStderrBytes: MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES
+      })
+    ),
+    Effect.map((response) => response.value),
+    Effect.flatMap(encodeClaudeAgentMessage),
+    Effect.mapError((cause) =>
+      Predicate.isTagged(cause, "PullRequestReviewError")
+        ? cause
+        : reviewError("relay-review", "Claude review execution failed", cause)
     )
+  )
 
 const streamRelayAgent = (
   profile: RelayReviewProfile,
@@ -908,17 +926,9 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
   )
 })
 
-const RelayReviewConversationResult = Schema.Struct({
-  reply: RelayReviewMessage,
-  review: RelayNativeReviewResult
-})
-
-const RelayExplainConversationResult = Schema.Struct({
-  reply: RelayReviewMessage,
-  review: RelayExplainResult
-})
-
-export const relayConversationOutputSchema = (kind: RelayReviewKind): Schema.Top =>
+export const relayConversationOutputSchema = (
+  kind: RelayReviewKind
+): typeof RelayExplainConversationResult | typeof RelayReviewConversationResult =>
   kind === "explain" ? RelayExplainConversationResult : RelayReviewConversationResult
 
 const decodeRelayReviewConversationResult = Schema.decodeUnknownOption(

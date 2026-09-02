@@ -48,8 +48,8 @@ export interface ClaudeModelOptions {
   readonly executable?: string
   /** Claude model identifier. Defaults to the CLI-configured model. */
   readonly model?: string
-  /** Workspace access granted to Claude. Defaults to `read-only`. */
-  readonly access?: "read-only" | "workspace-write"
+  /** Workspace access granted to Claude. Defaults to `read-only`; `prompt-only` disables all tools. */
+  readonly access?: "prompt-only" | "read-only" | "workspace-write"
   /** Maximum duration of one CLI invocation. Defaults to two minutes. */
   readonly timeout?: Duration.Input
   /** Maximum captured stdout bytes. Defaults to 4 MiB. */
@@ -101,7 +101,7 @@ const schemaArgument = (
 }
 
 interface NormalizedOptions {
-  readonly access: "read-only" | "workspace-write"
+  readonly access: "prompt-only" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
   readonly executable: string

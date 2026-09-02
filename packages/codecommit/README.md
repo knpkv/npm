@@ -310,10 +310,12 @@ remain server-private; the browser receives only the authenticated PR revision,
 numbered file inventory, safe paths and modes, and bounded text selected for
 rendering.
 
-**Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
-revision after the server rechecks its revision ID and immutable base/head
-commits. Full, security, tests, and explanation focuses are available. One
-Relay profile owns the complete execution choice: focus, prompt-only methods,
+**Run Relay** starts one ephemeral prompt-only Codex or Claude pass over the
+same exact revision after the server rechecks its revision ID and immutable
+base/head commits. Full, security, tests, and explanation focuses are
+available. Codex uses the local `codex` CLI and its configured authentication;
+Claude uses the local `claude` CLI and its configured authentication. One Relay
+profile owns the complete execution choice: focus, prompt-only methods,
 provider, harness, and model. The browser sends that exact saved profile and
 the server rejects stale, mixed, or unknown values before starting the agent.
 The Relay settings tab selects a default profile and prompt-only methods
@@ -326,13 +328,14 @@ Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
 later files as soon as the cumulative patch byte budget is exceeded. It marks
 repository text as untrusted evidence, rejects text pairs above its 5,000-line
 or 4,000,000-line-pair synchronous diff-complexity budgets, and gives the agent
-no host tools or repository access. Sanitized progress frames expose revision,
+no host tools or repository access; native Claude Relay additionally passes an
+empty tool set and `dontAsk` permission mode. Sanitized progress frames expose revision,
 file, patch, agent, and validation stages without returning hidden reasoning.
-Codex receives the focus-specific native JSON Schema before execution. Explain
-requires an empty findings array plus verdict and explanation; strict decoding
-still rejects malformed output. Completed sessions retain their exact profile
-metadata across reload. A failed rerun labels the retained deck as the previous
-result instead of presenting it as fresh output.
+Each provider receives the focus- and turn-specific native JSON Schema before
+execution. Explain requires an empty findings array plus verdict and
+explanation; strict decoding still rejects malformed output. Completed sessions
+retain their exact profile metadata across reload. A failed rerun labels the
+retained deck as the previous result instead of presenting it as fresh output.
 
 An authenticated, opt-in Explain check is available with
 `pnpm --filter @knpkv/codecommit-web test:relay-smoke:real`; ordinary test runs

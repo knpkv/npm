@@ -1,5 +1,5 @@
 ---
-"@knpkv/ai-claude": patch
+"@knpkv/ai-claude": minor
 "@knpkv/codecommit-core": minor
 "@knpkv/codecommit-web": minor
 ---
