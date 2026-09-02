@@ -879,6 +879,90 @@ esac
     )
   }, 15_000)
 
+  it.effect("does not evict active approval proof sessions at capacity", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-session-capacity-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    const headers = { "tailscale-user-login": "andrey@example.com" }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.put(pendingRecord("ALPHA", 0))
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          const origin = new URL(approvalUrl).origin
+          let firstCookie: string | undefined
+          let capacityResponse: Response | undefined
+          for (let attempt = 0; attempt < 300; attempt += 1) {
+            const response = yield* Effect.promise(
+              () => fetch(`${approvalUrl}/v1/dashboard`, { headers })
+            )
+            if (attempt === 0) firstCookie = response.headers.get("set-cookie")?.split(";", 1)[0]
+            if (response.status === 503) {
+              capacityResponse = response
+              break
+            }
+            expect(response.status).toBe(200)
+            yield* Effect.promise(() => response.text())
+          }
+          if (capacityResponse === undefined || firstCookie === undefined) {
+            return yield* new FleetValidationError({ detail: "approval proof capacity was not bounded" })
+          }
+          expect(yield* Effect.promise(() => capacityResponse.json())).toEqual({
+            error: "FleetOperationError",
+            detail: "approval proof session capacity reached"
+          })
+          const decision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: firstCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(decision.status).toBe(200)
+          yield* Effect.promise(() => decision.text())
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  }, 30_000)
+
   it.effect("marks notification counts incomplete when fleet discovery fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
     const unavailable = new TailscaleCommandError({

@@ -162,6 +162,7 @@ type ApprovalProofIssuer = (
 const approvalProofCookiePrefix = "fleet_approval_proof_"
 const approvalProofMaxAgeSeconds = 15 * 60
 const approvalProofSessionMaxCount = 256
+const approvalProofSessionMaxProofCount = 4_096
 const approvalProofPruneIntervalMs = 60 * 1_000
 
 const approvalProofCookieName = `${approvalProofCookiePrefix}session`
@@ -1666,15 +1667,34 @@ export const startHttpServer = async (
             proofsByJob: new Map<string, ApprovalProof>(),
             token
           }
-          while (approvalProofSessions.size >= approvalProofSessionMaxCount) {
-            const oldest = approvalProofSessions.keys().next().value
-            if (oldest === undefined) break
-            approvalProofSessions.delete(oldest)
+          if (approvalProofSessions.size >= approvalProofSessionMaxCount) {
+            const emptySession = [...approvalProofSessions].find(
+              ([, candidate]) => candidate.proofsByJob.size === 0
+            )
+            if (emptySession === undefined) {
+              return yield* new FleetOperationError({
+                cause: "approval proof session limit",
+                detail: "approval proof session capacity reached",
+                operation: "approval.proof.session-capacity"
+              })
+            }
+            approvalProofSessions.delete(emptySession[0])
           }
           approvalProofSessions.set(token, session)
         } else {
           yield* pruneApprovalProofSession(session, observedAt)
           renewApprovalProofSession(session, observedAt)
+        }
+        const missingProofCount = pendingRecords.reduce(
+          (count, record) => count + (session.proofsByJob.has(record.id) ? 0 : 1),
+          0
+        )
+        if (session.proofsByJob.size + missingProofCount > approvalProofSessionMaxProofCount) {
+          return yield* new FleetOperationError({
+            cause: "approval proof count limit",
+            detail: "approval proof count capacity reached",
+            operation: "approval.proof.count-capacity"
+          })
         }
         for (const record of pendingRecords) {
           if (record.approvalNonce === null) continue
