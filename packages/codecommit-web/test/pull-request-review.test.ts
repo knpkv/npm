@@ -30,6 +30,7 @@ import {
 import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
 import {
   MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES,
+  MAXIMUM_RELAY_CLAUDE_RESULT_BYTES,
   MAXIMUM_RELAY_PATCH_BYTES,
   MAXIMUM_RELAY_PROMPT_BYTES,
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
@@ -125,6 +126,7 @@ const makeReadClient = (
 
 const ClaudeResultFixture = Schema.Struct({
   is_error: Schema.Boolean,
+  result: Schema.optional(Schema.String),
   structured_output: Schema.Unknown,
   subtype: Schema.String,
   type: Schema.String
@@ -292,6 +294,7 @@ describe("CodeCommit web review boundary", () => {
       const structuredOutput = { reply: "\"".repeat(8_000), review }
       const encoded = JSON.stringify({
         is_error: false,
+        result: "r".repeat(MAXIMUM_RELAY_CLAUDE_RESULT_BYTES),
         structured_output: structuredOutput,
         subtype: "success",
         type: "result"
@@ -334,6 +337,7 @@ describe("CodeCommit web review boundary", () => {
                 ChildProcessSpawner.ChildProcessSpawner,
                 makeClaudeSpawner(calls, {
                   is_error: false,
+                  result: "r".repeat(MAXIMUM_RELAY_CLAUDE_RESULT_BYTES),
                   structured_output: structuredOutput,
                   subtype: "success",
                   type: "result"
