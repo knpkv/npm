@@ -180,6 +180,24 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("redacts punctuation-bearing credential values completely", () => {
+    const refs = ["password=first-secret,second-secret", "token=first-token;second-token"]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-")
+      expect(encoded).not.toContain("second-")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "ref=main,mirror=backup" }).fields[0]?.value).toBe(
+      "ref=main,mirror=backup"
+    )
+  })
+
   it("redacts credentials nested inside safe URL coordinates", () => {
     const refs = [
       {
