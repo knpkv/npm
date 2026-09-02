@@ -65,7 +65,9 @@ const collectVersions = Effect.fn("HerdrPack.collectVersions")(function* (fileSy
       .stat(candidateRoot)
       .pipe(Effect.mapError(mapPackError(`Could not inspect ${candidateRoot}`)))
     if (info.type !== "Directory") continue
-    const candidate = yield* readJson(fileSystem, path.join(candidateRoot, "package.json")).pipe(
+    const manifestPath = path.join(candidateRoot, "package.json")
+    if (!(yield* fileSystem.exists(manifestPath))) continue
+    const candidate = yield* readJson(fileSystem, manifestPath).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(PackageCandidate)),
       Effect.mapError(mapPackError(`Could not decode ${directory} package identity`))
     )

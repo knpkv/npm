@@ -247,6 +247,11 @@ const program = Effect.scoped(
     const invalidWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-invalid-" })
     const invalidPackage = path.join(invalidWorkspace, "packages", "sample")
     yield* fileSystem.makeDirectory(invalidPackage, { recursive: true })
+    for (const generatedDirectory of ["relay-product", "review"]) {
+      yield* fileSystem.makeDirectory(path.join(invalidWorkspace, "packages", generatedDirectory), {
+        recursive: true
+      })
+    }
     yield* fileSystem.writeFileString(
       path.join(invalidPackage, "package.json"),
       `${
