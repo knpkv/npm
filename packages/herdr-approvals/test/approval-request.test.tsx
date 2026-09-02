@@ -138,6 +138,26 @@ describe("sanitized approval requests", () => {
     ])
   })
 
+  it("redacts suffixes attached to an existing credential marker", () => {
+    const refs = [
+      "password=[redacted credential]actual-secret",
+      "Authorization: Bearer [redacted credential]actual-secret"
+    ]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("actual-secret")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "password=[redacted credential]" }).fields[0]?.value).toBe(
+      "password=[redacted credential]"
+    )
+  })
+
   it("redacts complete authorization credentials and signed URL parameters", () => {
     const refs = [
       "https://deploy-user:deploy-password@example.test/revision?ref=main&X-Amz-Signature=leaked&sig=also-leaked",

@@ -471,6 +471,8 @@ esac
       port: 0,
       tailscaleCommand
     }
+    let observedAt = 0
+    let pendingApprovalCalls = 0
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
@@ -486,9 +488,17 @@ esac
             operations,
             store
           })
+          const instrumentedFleet: FleetService = {
+            ...fleet,
+            pendingApprovals: () => {
+              pendingApprovalCalls += 1
+              return fleet.pendingApprovals()
+            }
+          }
           const server = yield* Effect.acquireRelease(
             Effect.promise(() =>
-              startHttpServer(hostConfig, fleet, assets, {
+              startHttpServer(hostConfig, instrumentedFleet, assets, {
+                now: () => observedAt,
                 terminalConnector: unusedTerminal
               })
             ),
@@ -518,6 +528,12 @@ esac
             return yield* new FleetValidationError({ detail: "approval proof sessions were not isolated" })
           }
           yield* Effect.promise(() => dashboardB.text())
+          const dashboardC = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieC = dashboardC.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieC === undefined || cookieC === cookieA || cookieC === cookieB) {
+            return yield* new FleetValidationError({ detail: "third approval proof session was not isolated" })
+          }
+          yield* Effect.promise(() => dashboardC.text())
           const parameters = new URLSearchParams({
             cursorCreatedAt: String(continuation.cursor.createdAt),
             cursorHost: continuation.host,
@@ -531,9 +547,26 @@ esac
           expect(continuationResponse.status).toBe(200)
           const continuationBody = yield* Effect.promise(() => continuationResponse.text())
           expect(continuationBody).toContain("alpha-job-00")
+          const secondSessionContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieB }
+            })
+          )
+          expect(secondSessionContinuation.status).toBe(200)
+          yield* Effect.promise(() => secondSessionContinuation.text())
+          expect(pendingApprovalCalls).toBe(1)
+          observedAt = 60 * 1_000
+          const refreshedSessionContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieB }
+            })
+          )
+          expect(refreshedSessionContinuation.status).toBe(200)
+          yield* Effect.promise(() => refreshedSessionContinuation.text())
+          expect(pendingApprovalCalls).toBe(2)
           const wrongSessionDecision = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
-              headers: { ...headers, cookie: cookieB, origin },
+              headers: { ...headers, cookie: cookieC, origin },
               method: "POST"
             })
           )

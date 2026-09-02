@@ -151,7 +151,6 @@ type ApprovalProofUse = {
   readonly sessionToken: string
 }
 type ApprovalProofSession = {
-  lastPrunedAt?: number
   expiresAt: number
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
@@ -1558,6 +1557,10 @@ export const startHttpServer = async (
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
     const now = options.now ?? (() => httpRuntime.runSync(Clock.currentTimeMillis))
     const approvalProofSessions = new Map<string, ApprovalProofSession>()
+    let pendingApprovalProofSnapshot: {
+      readonly observedAt: number
+      readonly pendingJobIds: ReadonlySet<string>
+    } | undefined
     const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
     const approvalProofSessionFor = (
       request: IncomingMessage,
@@ -1586,25 +1589,30 @@ export const startHttpServer = async (
     }
     const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
       function*(session: ApprovalProofSession, observedAt: number) {
+        const snapshot = pendingApprovalProofSnapshot
+        let pendingJobIds: ReadonlySet<string>
         if (
-          session.lastPrunedAt !== undefined &&
-          observedAt - session.lastPrunedAt < approvalProofPruneIntervalMs
-        ) return
-        const pendingRecords = yield* service.pendingApprovals().pipe(
-          Effect.mapError(
-            (cause) =>
-              new FleetOperationError({
-                cause,
-                detail: "could not refresh approval proof retention",
-                operation: "approval.proof.prune"
-              })
+          snapshot !== undefined &&
+          observedAt - snapshot.observedAt < approvalProofPruneIntervalMs
+        ) {
+          pendingJobIds = snapshot.pendingJobIds
+        } else {
+          const pendingRecords = yield* service.pendingApprovals().pipe(
+            Effect.mapError(
+              (cause) =>
+                new FleetOperationError({
+                  cause,
+                  detail: "could not refresh approval proof retention",
+                  operation: "approval.proof.prune"
+                })
+            )
           )
-        )
-        const pendingJobIds = new Set(pendingRecords.map((record) => record.id))
+          pendingJobIds = new Set(pendingRecords.map((record) => record.id))
+          pendingApprovalProofSnapshot = { observedAt, pendingJobIds }
+        }
         for (const jobId of session.proofsByJob.keys()) {
           if (!pendingJobIds.has(jobId)) session.proofsByJob.delete(jobId)
         }
-        session.lastPrunedAt = observedAt
       }
     )
     const issueApprovalProofs: ApprovalProofIssuer = Effect.fn("ApprovalHttp.issueApprovalProofs")(
