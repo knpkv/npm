@@ -146,9 +146,19 @@ type ApprovalProof = {
   readonly jobId: string
   readonly nonce: string
 }
-type ApprovalProofIssuer = (records: ReadonlyArray<JobRecord>) => Effect.Effect<void, FleetOperationError>
+type ApprovalProofSession = {
+  readonly expiresAt: number
+  readonly proofsByJob: Map<string, ApprovalProof>
+  readonly token: string
+}
+type ApprovalProofIssuer = (
+  records: ReadonlyArray<JobRecord>,
+  request: IncomingMessage
+) => Effect.Effect<void, FleetOperationError>
 const approvalProofCookiePrefix = "fleet_approval_proof_"
 const approvalProofMaxAgeSeconds = 15 * 60
+const approvalProofSessionMaxCount = 256
+const approvalProofsPerSessionMaxCount = 256
 
 const approvalProofCookieName = `${approvalProofCookiePrefix}session`
 
@@ -945,11 +955,12 @@ const dashboardPendingPage = Effect.fn("HostHttp.dashboardPendingPage")(
     config: HostConfiguration,
     service: FleetService,
     continuation: DashboardSnapshot["pendingApprovals"]["nextCursors"][number],
-    issueApprovalProofs: ApprovalProofIssuer
+    issueApprovalProofs: ApprovalProofIssuer,
+    request: IncomingMessage
   ) {
     if (continuation.host.toLowerCase() === config.host.toLowerCase()) {
       const page = yield* service.pendingApprovalPage(continuation.cursor)
-      yield* issueApprovalProofs(page.records)
+      yield* issueApprovalProofs(page.records, request)
       return {
         local: page.records.map(sanitizeJobRecord),
         remote: [],
@@ -1000,14 +1011,15 @@ const resolvePendingApprovalTarget = Effect.fn(
   config: HostConfiguration,
   service: FleetService,
   target: ApprovalNotificationCandidateType,
-  issueApprovalProofs: ApprovalProofIssuer
+  issueApprovalProofs: ApprovalProofIssuer,
+  request: IncomingMessage
 ) {
   if (target.host.toLowerCase() === config.host.toLowerCase()) {
     const record = yield* service.get(target.jobId)
     if (record.status !== "pending_approval") {
       return yield* new FleetJobNotFoundError({ jobId: target.jobId })
     }
-    yield* issueApprovalProofs([record])
+    yield* issueApprovalProofs([record], request)
     return { _tag: "local", record: sanitizeJobRecord(record) } satisfies PendingApprovalTarget
   }
   const peers = yield* fleetPeers(config)
@@ -1301,27 +1313,32 @@ const readApproval = Effect.fn("ApprovalHttp.readApproval")(function*(
 
 const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
   service: FleetService,
-  proofsByJob: Map<string, ApprovalProof>,
-  sessionToken: string | undefined,
+  sessions: Map<string, ApprovalProofSession>,
   request: IncomingMessage,
   jobId: string,
   currentTime: () => number
 ) {
   const token = cookieValue(request, approvalProofCookieName)
-  if (token === undefined || sessionToken === undefined || token !== sessionToken) {
+  const session = token === undefined ? undefined : sessions.get(token)
+  const proof = session?.proofsByJob.get(jobId)
+  if (token === undefined || session === undefined) {
     return yield* new FleetApprovalError({
       detail: "approval proof is required for a bodyless decision",
       jobId
     })
   }
-  const proof = proofsByJob.get(jobId)
-  if (proof === undefined || proof.expiresAt <= currentTime()) {
+  if (
+    session.expiresAt <= currentTime() ||
+    proof === undefined ||
+    proof.jobId !== jobId ||
+    proof.expiresAt <= currentTime()
+  ) {
     return yield* new FleetApprovalError({
       detail: "approval proof is invalid or expired",
       jobId
     })
   }
-  proofsByJob.delete(jobId)
+  session.proofsByJob.delete(jobId)
   const record = yield* service.get(jobId)
   if (
     record.status !== "pending_approval" ||
@@ -1528,24 +1545,36 @@ export const startHttpServer = async (
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
     const now = options.now ?? (() => httpRuntime.runSync(Clock.currentTimeMillis))
-    const approvalProofsByJob = new Map<string, ApprovalProof>()
-    let approvalProofSessionToken: string | undefined
-    let approvalProofSessionExpiresAt = 0
+    const approvalProofSessions = new Map<string, ApprovalProofSession>()
+    const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
+    const approvalProofSessionFor = (
+      request: IncomingMessage,
+      observedAt: number
+    ): ApprovalProofSession | undefined => {
+      const requestSession = approvalProofSessionsByRequest.get(request)
+      if (requestSession !== undefined) return requestSession
+      const token = cookieValue(request, approvalProofCookieName)
+      if (token === undefined) return undefined
+      const session = approvalProofSessions.get(token)
+      if (session === undefined || session.expiresAt <= observedAt) {
+        if (session !== undefined) approvalProofSessions.delete(token)
+        return undefined
+      }
+      return session
+    }
     const issueApprovalProofs: ApprovalProofIssuer = Effect.fn("ApprovalHttp.issueApprovalProofs")(
-      function*(records: ReadonlyArray<JobRecord>) {
+      function*(records: ReadonlyArray<JobRecord>, request: IncomingMessage) {
         const observedAt = now()
-        for (const [jobId, proof] of approvalProofsByJob) {
-          if (proof.expiresAt <= observedAt) approvalProofsByJob.delete(jobId)
+        for (const [token, session] of approvalProofSessions) {
+          if (session.expiresAt <= observedAt) approvalProofSessions.delete(token)
         }
         const pendingRecords = records.filter(
-          (record) => record.status === "pending_approval"
+          (record) => record.status === "pending_approval" && record.approvalNonce !== null
         )
         if (pendingRecords.length === 0) return
-        if (
-          approvalProofSessionToken === undefined ||
-          approvalProofSessionExpiresAt <= observedAt
-        ) {
-          approvalProofSessionToken = yield* cryptoService.randomUUIDv4.pipe(
+        let session = approvalProofSessionFor(request, observedAt)
+        if (session === undefined) {
+          const token = yield* cryptoService.randomUUIDv4.pipe(
             Effect.mapError(
               (cause) =>
                 new FleetOperationError({
@@ -1555,30 +1584,48 @@ export const startHttpServer = async (
                 })
             )
           )
-          approvalProofSessionExpiresAt = observedAt + approvalProofMaxAgeSeconds * 1_000
-          approvalProofsByJob.clear()
+          session = {
+            expiresAt: observedAt + approvalProofMaxAgeSeconds * 1_000,
+            proofsByJob: new Map<string, ApprovalProof>(),
+            token
+          }
+          while (approvalProofSessions.size >= approvalProofSessionMaxCount) {
+            const oldest = approvalProofSessions.keys().next().value
+            if (oldest === undefined) break
+            approvalProofSessions.delete(oldest)
+          }
+          approvalProofSessions.set(token, session)
         }
         for (const record of pendingRecords) {
           if (record.approvalNonce === null) continue
-          approvalProofsByJob.set(record.id, {
-            expiresAt: approvalProofSessionExpiresAt,
+          if (!session.proofsByJob.has(record.id)) {
+            while (session.proofsByJob.size >= approvalProofsPerSessionMaxCount) {
+              const oldest = session.proofsByJob.keys().next().value
+              if (oldest === undefined) break
+              session.proofsByJob.delete(oldest)
+            }
+          }
+          session.proofsByJob.set(record.id, {
+            expiresAt: session.expiresAt,
             hash: record.hash,
             jobId: record.id,
             nonce: record.approvalNonce
           })
         }
+        approvalProofSessionsByRequest.set(request, session)
       }
     )
     const approvalProofHeaders = (
+      request: IncomingMessage,
       records: ReadonlyArray<SanitizedJobRecord>
     ): Readonly<Record<string, ResponseHeaderValue>> => {
-      const sessionToken = approvalProofSessionToken
-      if (sessionToken === undefined) return {}
+      const session = approvalProofSessionFor(request, now())
+      if (session === undefined) return {}
       const shouldSetCookie = records.some((record) => {
-        const proof = approvalProofsByJob.get(record.id)
+        const proof = session.proofsByJob.get(record.id)
         return proof !== undefined && proof.expiresAt > now()
       })
-      return shouldSetCookie ? { "set-cookie": approvalProofCookie(sessionToken) } : {}
+      return shouldSetCookie ? { "set-cookie": approvalProofCookie(session.token) } : {}
     }
     if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
       throw new LanWorkConfigurationError({
@@ -2225,12 +2272,12 @@ export const startHttpServer = async (
           })
 
           const approvalSurface = mode === "approval" || mode === "serve"
-          const dashboard = Effect.gen(function*() {
+          const dashboard = Effect.fn("HostHttp.dashboard")(function*(request: IncomingMessage) {
             const observedAt = now()
             const resolvedLocalPage = approvalSurface
               ? yield* service.pendingApprovalPage(null)
               : { records: [], nextCursor: null }
-            if (approvalSurface) yield* issueApprovalProofs(resolvedLocalPage.records)
+            if (approvalSurface) yield* issueApprovalProofs(resolvedLocalPage.records, request)
             const state = yield* Effect.all({
               history: dashboardHistory(service, null),
               status: service.status()
@@ -2325,12 +2372,19 @@ export const startHttpServer = async (
           })
 
           if (request.method === "GET" && url.pathname === "/v1/dashboard") {
-            const result = await runRequest(Effect.result(Effect.andThen(authorized, dashboard)))
+            const result = await runRequest(
+              Effect.result(Effect.andThen(authorized, dashboard(request)))
+            )
             if (Result.isFailure(result)) {
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
-              json(response, 200, result.success, approvalProofHeaders(result.success.pendingApprovals.local))
+              json(
+                response,
+                200,
+                result.success,
+                approvalProofHeaders(request, result.success.pendingApprovals.local)
+              )
             }
             return
           }
@@ -2373,7 +2427,8 @@ export const startHttpServer = async (
                 config,
                 service,
                 target,
-                issueApprovalProofs
+                issueApprovalProofs,
+                request
               )
             })
             const result = await runRequest(Effect.result(effect))
@@ -2382,7 +2437,7 @@ export const startHttpServer = async (
               json(response, mapped.status, mapped.body)
             } else {
               const records = result.success._tag === "local" ? [result.success.record] : []
-              json(response, 200, result.success, approvalProofHeaders(records))
+              json(response, 200, result.success, approvalProofHeaders(request, records))
             }
             return
           }
@@ -2555,14 +2610,25 @@ export const startHttpServer = async (
             const effect = Effect.gen(function*() {
               yield* authorized
               const continuation = yield* decodePendingApprovalContinuation(url)
-              return yield* dashboardPendingPage(config, service, continuation, issueApprovalProofs)
+              return yield* dashboardPendingPage(
+                config,
+                service,
+                continuation,
+                issueApprovalProofs,
+                request
+              )
             })
             const result = await runRequest(Effect.result(effect))
             if (Result.isFailure(result)) {
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
-              json(response, 200, result.success, approvalProofHeaders(result.success.local))
+              json(
+                response,
+                200,
+                result.success,
+                approvalProofHeaders(request, result.success.local)
+              )
             }
             return
           }
@@ -2719,8 +2785,7 @@ export const startHttpServer = async (
               const approval = (yield* readApproval(request)) ??
                 (yield* approvalFromProof(
                   service,
-                  approvalProofsByJob,
-                  approvalProofSessionToken,
+                  approvalProofSessions,
                   request,
                   jobId,
                   now
@@ -2751,7 +2816,7 @@ export const startHttpServer = async (
           }
           if (request.method === "GET" && url.pathname === "/") {
             const result = await runRequest(
-              Effect.result(Effect.andThen(authorized, dashboard))
+              Effect.result(Effect.andThen(authorized, dashboard(request)))
             )
             if (Result.isFailure(result)) {
               const mapped = apiError(result.failure)
@@ -2763,7 +2828,7 @@ export const startHttpServer = async (
               "content-security-policy": "frame-ancestors 'none'",
               "content-type": "text/html; charset=utf-8",
               "x-frame-options": "DENY",
-              ...approvalProofHeaders(result.success.pendingApprovals.local)
+              ...approvalProofHeaders(request, result.success.pendingApprovals.local)
             })
             response.end(dashboardPage(result.success))
             return

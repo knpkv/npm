@@ -57,9 +57,10 @@ export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
 const credentialAssignment =
   /((?:password|passwd|secret|token|credential|api[_-]?key)\s*[:=]\s*)(\[redacted credential\]|[^\s,;]+)/giu
+const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\]|[^\s,;]+)/giu
-const credentialUri = /:\/\/[^/\s:@]+(?::[^/\s@]*)?@/gu
+const credentialUri = /:\/\/[^/\s]+@/gu
 const uriQueryParameter = /([?&])([^=#&\s]+)=(\[redacted credential\]|[^&#\s]*)/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 
@@ -72,6 +73,7 @@ const sanitizeRequestText = (value: string, maximumLength: number): string => {
       (match, separator: string, key: string) =>
         safeUriQueryKeys.has(key.toLowerCase()) ? match : `${separator}${key}=${redactedCredential}`
     )
+    .replace(credentialDigestAuthorization, "$1[redacted credential]")
     .replace(
       credentialAuthorization,
       (match, prefix: string, credential: string) =>

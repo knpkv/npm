@@ -143,14 +143,16 @@ describe("sanitized approval requests", () => {
       "https://deploy-user:deploy-password@example.test/revision?ref=main&X-Amz-Signature=leaked&sig=also-leaked",
       "Authorization: Bearer secret-value",
       "Authorization:Bearer secret-value",
-      "authorization=supersecret"
+      "authorization=supersecret",
+      'Authorization: Digest username="u", response="secret-digest"',
+      "https://user:secret-one@secret-two@example.test/repo"
     ]
     const requests = refs.map((ref) => approvalRequestFor({ kind: "nix.apply", ref }))
     expect(requests[0]?.fields[0]?.value).toBe(
       "https://[redacted credential]@example.test/revision?ref=main&X-Amz-Signature=[redacted credential]&sig=[redacted credential]"
     )
     for (const request of requests.slice(1)) {
-      expect(request.fields[0]?.value).not.toMatch(/secret|super/u)
+      expect(request.fields[0]?.value).not.toMatch(/secret|super|username|response/u)
       expect(request.fields[0]?.value).toContain("[redacted credential]")
     }
   })

@@ -420,6 +420,112 @@ esac
     ).pipe(provideNodeServices)
   })
 
+  it.effect("binds bodyless approval proofs to their browser session", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-session-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* Effect.forEach(
+            Array.from({ length: pendingApprovalPageMaxRecords + 1 }, (_, index) => pendingRecord("ALPHA", index)),
+            (record) => store.put(record),
+            { discard: true }
+          )
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          const headers = { "tailscale-user-login": "andrey@example.com" }
+          const origin = new URL(approvalUrl).origin
+          const dashboardA = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieA = dashboardA.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieA === undefined) {
+            return yield* new FleetValidationError({ detail: "first approval proof cookie missing" })
+          }
+          const dashboardAData = Schema.decodeUnknownSync(DashboardSnapshot)(
+            JSON.parse(yield* Effect.promise(() => dashboardA.text()))
+          )
+          const continuation = dashboardAData.pendingApprovals.nextCursors.at(0)
+          if (continuation === undefined) {
+            return yield* new FleetValidationError({ detail: "approval continuation missing" })
+          }
+          const dashboardB = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieB = dashboardB.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieB === undefined || cookieB === cookieA) {
+            return yield* new FleetValidationError({ detail: "approval proof sessions were not isolated" })
+          }
+          yield* Effect.promise(() => dashboardB.text())
+          const parameters = new URLSearchParams({
+            cursorCreatedAt: String(continuation.cursor.createdAt),
+            cursorHost: continuation.host,
+            cursorId: continuation.cursor.id
+          })
+          const continuationResponse = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieA }
+            })
+          )
+          expect(continuationResponse.status).toBe(200)
+          const continuationBody = yield* Effect.promise(() => continuationResponse.text())
+          expect(continuationBody).toContain("alpha-job-00")
+          const wrongSessionDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: cookieB, origin },
+              method: "POST"
+            })
+          )
+          expect(wrongSessionDecision.status).toBe(409)
+          yield* Effect.promise(() => wrongSessionDecision.text())
+          const matchingSessionDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: cookieA, origin },
+              method: "POST"
+            })
+          )
+          expect(matchingSessionDecision.status).toBe(200)
+          yield* Effect.promise(() => matchingSessionDecision.text())
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("marks notification counts incomplete when fleet discovery fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
     const unavailable = new TailscaleCommandError({
