@@ -381,6 +381,20 @@ describe("sanitized approval requests", () => {
     expect(html).not.toContain("aaaaaaaaaaaaaaaa")
   })
 
+  it("scopes disclosure region ids to each rendered instance", () => {
+    const html = renderToStaticMarkup(
+      <>
+        <ApprovalRequestDisclosure id="same-job" payload={approvalPayload} />
+        <ApprovalRequestDisclosure id="same-job" payload={approvalPayload} />
+      </>
+    )
+    const controls = [...html.matchAll(/aria-controls="([^"]+)"/gu)].map((match) => match[1])
+    const regions = [...html.matchAll(/<div class="approval-request-detail" id="([^"]+)"/gu)].map((match) => match[1])
+    expect(controls).toHaveLength(2)
+    expect(new Set(controls).size).toBe(2)
+    expect(regions).toEqual(controls)
+  })
+
   it.each(approvalDashboardStatuses)(
     "keeps the complete redacted request in the approval dashboard for %s",
     (status) => {

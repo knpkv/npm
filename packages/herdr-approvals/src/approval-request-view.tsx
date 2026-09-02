@@ -1,5 +1,5 @@
 import type { JobPayload } from "@knpkv/herdr-fleet/model"
-import type { ReactElement } from "react"
+import { useId, type ReactElement } from "react"
 import { approvalRequestFor, type ApprovalRequest } from "./approval-request.js"
 
 type ApprovalRequestDisclosureProps = {
@@ -8,7 +8,8 @@ type ApprovalRequestDisclosureProps = {
 
 export const ApprovalRequestDisclosure = (props: ApprovalRequestDisclosureProps): ReactElement => {
   const request = "request" in props ? props.request : approvalRequestFor(props.payload)
-  const detailId = `approval-request-${encodeURIComponent(props.id)}`
+  const instanceId = useId()
+  const detailId = `approval-request-${encodeURIComponent(props.id)}-${encodeURIComponent(instanceId)}`
   return (
     <details className="approval-request-disclosure">
       <summary aria-controls={detailId}>View full request</summary>
