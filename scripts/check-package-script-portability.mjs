@@ -16,7 +16,7 @@ const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"]
 const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
 const browserPairingBuild = /^pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build(?=\s|$)/u
-const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit(?=\s|$)/u
+const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit$/u
 const codeCommitWebLifecycleRequirements = [
   {
     script: "predev",
@@ -82,13 +82,12 @@ const hasDirectEnvironmentAssignment = (command) => {
   return boundaries.some((index) => environmentAssignment.test(command.slice(index)))
 }
 
-const shellCommandSegments = (command) => {
-  const segments = []
-  let segmentStart = 0
+const hereDocumentDelimiters = (line) => {
+  const delimiters = []
   let quote
   let escaped = false
-  for (let index = 0; index < command.length; index++) {
-    const character = command[index]
+  for (let index = 0; index < line.length - 1; index++) {
+    const character = line[index]
     if (escaped) {
       escaped = false
       continue
@@ -105,18 +104,109 @@ const shellCommandSegments = (command) => {
       quote = character
       continue
     }
-    if (character === ";" || character === "\n" || character === "|" || character === "&" || character === "(") {
-      segments.push(command.slice(segmentStart, index))
-      if ((character === "|" || character === "&") && command[index + 1] === character) index++
-      segmentStart = index + 1
+    if (character === "#" && (index === 0 || /\s/u.test(line[index - 1] ?? ""))) break
+    if (character !== "<" || line[index + 1] !== "<" || line[index + 2] === "<") continue
+    let delimiterIndex = index + 2
+    const stripTabs = line[delimiterIndex] === "-"
+    if (stripTabs) delimiterIndex++
+    while (/\s/u.test(line[delimiterIndex] ?? "")) delimiterIndex++
+    const delimiterQuote = line[delimiterIndex]
+    if (delimiterQuote === "'" || delimiterQuote === '"') {
+      const end = line.indexOf(delimiterQuote, delimiterIndex + 1)
+      if (end === -1) return undefined
+      const delimiter = line.slice(delimiterIndex + 1, end)
+      if (delimiter.length === 0) return undefined
+      delimiters.push({ delimiter, stripTabs })
+      index = end
+      continue
+    }
+    const end = line.slice(delimiterIndex).search(/[\s;|&(){}]/u)
+    const delimiter = line.slice(delimiterIndex, end === -1 ? line.length : delimiterIndex + end)
+    if (!/^[A-Za-z0-9_.-]+$/u.test(delimiter)) return undefined
+    delimiters.push({ delimiter, stripTabs })
+    index = delimiterIndex + delimiter.length - 1
+  }
+  return delimiters
+}
+
+const removeHereDocumentBodies = (command) => {
+  const lines = command.split("\n")
+  const retained = []
+  const pending = []
+  for (const line of lines) {
+    const active = pending[0]
+    if (active !== undefined) {
+      const candidate = active.stripTabs ? line.replace(/^\t+/u, "") : line
+      if (candidate === active.delimiter) pending.shift()
+      continue
+    }
+    retained.push(line)
+    const delimiters = hereDocumentDelimiters(line)
+    if (delimiters === undefined) return ""
+    pending.push(...delimiters)
+  }
+  return retained.join("\n")
+}
+
+const shellCommandSegments = (command) => {
+  const source = removeHereDocumentBodies(command)
+  const segments = []
+  let segmentStart = 0
+  let segmentOperator
+  let quote
+  let escaped = false
+  const pushSegment = (index, operator, width = 1) => {
+    segments.push({ text: source.slice(segmentStart, index), operator: segmentOperator, nextOperator: operator })
+    segmentStart = index + width
+    segmentOperator = operator
+  }
+  for (let index = 0; index < source.length; index++) {
+    const character = source[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (character === "#" && (index === 0 || /\s/u.test(source[index - 1] ?? ""))) {
+      const newline = source.indexOf("\n", index)
+      if (newline === -1) {
+        pushSegment(index, "#", source.length - index)
+        break
+      }
+      pushSegment(index, "#", newline - index + 1)
+      index = newline
+      continue
+    }
+    if (character === ";" || character === "\n" || character === "|" || character === "&") {
+      const doubled = (character === "|" || character === "&") && source[index + 1] === character
+      pushSegment(index, doubled ? character + character : character, doubled ? 2 : 1)
+      if (doubled) index++
+      continue
+    }
+    if (character === "(" || character === ")" || character === "{" || character === "}") {
+      pushSegment(index, character)
     }
   }
-  segments.push(command.slice(segmentStart))
+  if (segmentStart <= source.length) segments.push({ text: source.slice(segmentStart), operator: segmentOperator })
   return segments
 }
 
 const hasExecutableLifecycleCommand = (command, matcher) =>
-  shellCommandSegments(command).some((segment) => matcher.test(segment.trim()))
+  shellCommandSegments(command).some(
+    ({ text, operator, nextOperator }) =>
+      operator !== "||" && operator !== "&" && nextOperator !== "&" && matcher.test(text.trim())
+  )
 
 class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPortabilityError") {
   get message() {
@@ -259,6 +349,19 @@ for (const requirement of codeCommitWebLifecycleRequirements) {
     [`packages/codecommit-web/package.json: scripts.${requirement.script} must include ${requirement.description}`]
   )
 }
+for (const invalidRoleCheck of [
+  "tsc -p tsconfig.roles.json --noEmit --help",
+  "tsc -p tsconfig.roles.json --noEmit --showConfig"
+]) {
+  assert.deepEqual(
+    findCodeCommitWebLifecycleGaps(
+      "packages/codecommit-web/package.json",
+      { ...codeCommitWebScripts, check: invalidRoleCheck },
+      browserPairingDependency
+    ),
+    ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+  )
+}
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
@@ -266,6 +369,62 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.prestart must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "true || pnpm --filter @knpkv/browser-pairing build; vite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build & vite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && vite" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "cat <<'EOF'\npnpm --filter @knpkv/browser-pairing build\nEOF\nvite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "cat <<'EOF'\nbody\nEOF\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "echo ready # ; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "echo '#' ; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
 )
 assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/other/package.json", {}, browserPairingDependency), [])
 

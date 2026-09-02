@@ -30,7 +30,7 @@ export const CredentialDigest = Schema.String.check(
 
 export type CredentialDigest = typeof CredentialDigest.Type
 
-/** Public confirmation payload shared by unauthenticated pairing endpoints. */
+/** Credential-bearing confirmation payload containing the one-time pairing proof. */
 export const PairingConfirmationRequest = Schema.Struct({ pairingCode: PairingCode })
 export type PairingConfirmationRequest = typeof PairingConfirmationRequest.Type
 
