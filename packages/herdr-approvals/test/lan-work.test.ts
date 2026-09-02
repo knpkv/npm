@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { HostConfiguration, type HostOperations, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
-import type { WorkSnapshots } from "@knpkv/herdr-work"
+import type { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work"
 import { Effect, Redacted, Schema } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -9,7 +9,7 @@ import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
 import { startHttpServer, type UiAssets } from "../src/http.js"
 import { LanWorkPage, LanWorkPairPage } from "../src/lan-work-view.js"
-import { LanWorkPairingCode, lanWorkPairingLifetimeMs } from "../src/lan-work.js"
+import { LanWorkConfigurationError, LanWorkPairingCode, lanWorkPairingLifetimeMs } from "../src/lan-work.js"
 
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
@@ -63,6 +63,30 @@ const emptySnapshots = {
   month: { asOf: 0, observedAt: 0, window: "month", goals: [] }
 } satisfies WorkSnapshots
 
+const staticGoal = {
+  blocker: null,
+  connectTarget: null,
+  createdAt: 0,
+  delivery: "local",
+  detail: "Inspect the read-only LAN projection",
+  id: "goal-lan",
+  owner: { id: "owner-lan", name: "LAN owner" },
+  repository: { branch: "main", repository: "npm" },
+  spend: null,
+  state: "working",
+  summary: "Review LAN Work",
+  title: "LAN Work",
+  updatedAt: 0
+} satisfies WorkGoal
+
+const staticSnapshots = {
+  observedAt: 0,
+  now: { asOf: 0, observedAt: 0, window: "now", goals: [staticGoal] },
+  day: { asOf: 0, observedAt: 0, window: "day", goals: [staticGoal] },
+  week: { asOf: 0, observedAt: 0, window: "week", goals: [staticGoal] },
+  month: { asOf: 0, observedAt: 0, window: "month", goals: [staticGoal] }
+} satisfies WorkSnapshots
+
 const responseError = async (response: Response): Promise<string> => {
   const body = await response.json()
   const decoded = Schema.decodeUnknownSync(Schema.Struct({ error: Schema.String }))(body)
@@ -70,6 +94,35 @@ const responseError = async (response: Response): Promise<string> => {
 }
 
 const responseText = (response: Response): Promise<string> => response.text()
+
+const expectLanConfigurationFailure = (
+  configuration: HostConfiguration,
+  lanWork: NonNullable<Parameters<typeof startHttpServer>[3]>["lanWork"]
+) => {
+  if (lanWork === undefined) throw new Error("LAN configuration fixture is required")
+  const root = configuration.stateDirectory
+  return Effect.gen(function*() {
+    yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+    const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
+    yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
+    const fleet = yield* makeFleetService({
+      approvalEnabled: false,
+      host: configuration.host,
+      operations,
+      store: jobStore
+    })
+    const outcome = yield* Effect.promise(() =>
+      startHttpServer(configuration, fleet, assets, { lanWork }).then(
+        async (running) => {
+          await running.close()
+          return "resolved"
+        },
+        (error) => Schema.is(LanWorkConfigurationError)(error) ? "LanWorkConfigurationError" : "unexpected"
+      )
+    )
+    expect(outcome).toBe("LanWorkConfigurationError")
+  }).pipe(Effect.scoped, provideNodeServices)
+}
 
 describe("LAN Work pairing boundary", () => {
   it.effect("rejects unpaired and cross-origin access, then permits paired Work reads only", () => {
@@ -101,6 +154,10 @@ describe("LAN Work pairing boundary", () => {
       const unpairedPage = yield* Effect.promise(() => fetch(`${lanUrl}/`, { redirect: "manual" }))
       expect(unpairedPage.status).toBe(303)
       expect(unpairedPage.headers.get("location")).toBe("/pair")
+      const pairPage = yield* Effect.promise(() => fetch(`${lanUrl}/pair`, { headers: { accept: "text/html" } }))
+      expect(pairPage.status).toBe(200)
+      expect(pairPage.headers.get("content-security-policy")).toBe("frame-ancestors 'none'")
+      expect(pairPage.headers.get("x-frame-options")).toBe("DENY")
 
       const boundary = yield* Effect.promise(() => fetch(`${lanUrl}/v1/dashboard`))
       expect(boundary.status).toBe(404)
@@ -155,6 +212,8 @@ describe("LAN Work pairing boundary", () => {
         })
       )
       expect(malformed.status).toBe(400)
+      expect(malformed.headers.get("content-security-policy")).toBeNull()
+      expect(malformed.headers.get("x-frame-options")).toBeNull()
       expect(yield* Effect.promise(() => responseError(malformed))).toBe("LanWorkPairingMalformedError")
 
       const malformedPage = yield* Effect.promise(() =>
@@ -166,6 +225,8 @@ describe("LAN Work pairing boundary", () => {
       )
       const malformedPageBody = yield* Effect.promise(() => responseText(malformedPage))
       expect(malformedPage.status).toBe(400)
+      expect(malformedPage.headers.get("content-security-policy")).toBe("frame-ancestors 'none'")
+      expect(malformedPage.headers.get("x-frame-options")).toBe("DENY")
       expect(malformedPageBody).toContain("Enter the 64-character pairing code")
       expect(malformedPageBody).not.toContain("LanWorkPairingMalformedError")
 
@@ -201,6 +262,20 @@ describe("LAN Work pairing boundary", () => {
           workBody
         ).now.goals
       ).toEqual([])
+      const pairedPage = yield* Effect.promise(() => fetch(`${lanUrl}/`, { headers: { cookie, origin } }))
+      expect(pairedPage.status).toBe(200)
+      expect(pairedPage.headers.get("content-security-policy")).toBe("frame-ancestors 'none'")
+      expect(pairedPage.headers.get("x-frame-options")).toBe("DENY")
+      const historicalPage = yield* Effect.promise(() =>
+        fetch(`${lanUrl}/?window=week`, { headers: { cookie, origin } })
+      )
+      expect(historicalPage.status).toBe(200)
+      expect(yield* Effect.promise(() => historicalPage.text())).toContain("aria-current=\"page\"")
+      const malformedSelection = yield* Effect.promise(() =>
+        fetch(`${lanUrl}/?window=invalid`, { headers: { cookie, origin } })
+      )
+      expect(malformedSelection.status).toBe(400)
+      expect(yield* Effect.promise(() => responseError(malformedSelection))).toBe("LanWorkSelectionMalformedError")
       const missingOriginWork = yield* Effect.promise(() => fetch(`${lanUrl}/v1/work`, { headers: { cookie } }))
       expect(missingOriginWork.status).toBe(403)
       expect(yield* Effect.promise(() => responseError(missingOriginWork))).toBe("LanWorkOriginRejectedError")
@@ -302,9 +377,15 @@ describe("LAN Work pairing boundary", () => {
     expect(pairMarkup).not.toContain("?pairingCode=")
     const workMarkup = renderToStaticMarkup(LanWorkPage({ snapshots: emptySnapshots }))
     expect(workMarkup).toContain("Daily fleet Work")
-    expect(workMarkup).not.toContain("href=")
+    expect(workMarkup).toContain("href=\"/?window=week\"")
+    expect(workMarkup).not.toContain("href=\"https://")
     expect(workMarkup).not.toContain("approve")
     expect(workMarkup).not.toContain("connect")
+    const goalMarkup = renderToStaticMarkup(
+      LanWorkPage({ goalId: "goal-lan", snapshots: staticSnapshots, window: "week" })
+    )
+    expect(goalMarkup).toContain("href=\"/?window=week&amp;goal=goal-lan\"")
+    expect(goalMarkup).toContain("Inspect the read-only LAN projection")
   })
 
   it("validates the generated pairing code shape", () => {
@@ -328,4 +409,16 @@ describe("LAN Work pairing boundary", () => {
       })
     ).toBe(false)
   })
+
+  it.effect("rejects LAN Work without an allowed user", () =>
+    expectLanConfigurationFailure(
+      { ...config(mkdtempSync(join(tmpdir(), "herdr-lan-work-no-user-"))), allowedUsers: [] },
+      { address: "127.0.0.1", port: 0 }
+    ))
+
+  it.effect("rejects wildcard LAN Work without an explicit host", () =>
+    expectLanConfigurationFailure(
+      config(mkdtempSync(join(tmpdir(), "herdr-lan-work-wildcard-"))),
+      { address: "0.0.0.0", port: 0 }
+    ))
 })

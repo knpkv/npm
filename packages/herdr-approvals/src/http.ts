@@ -59,7 +59,7 @@ import type {
   WorkSnapshots,
   WorkStoreError
 } from "@knpkv/herdr-work"
-import { approvalTargetMatchesOrigin, makeWorkService, WorkStore } from "@knpkv/herdr-work"
+import { approvalTargetMatchesOrigin, makeWorkService, WorkSnapshotWindow, WorkStore } from "@knpkv/herdr-work"
 import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
 import {
   Cause,
@@ -116,6 +116,7 @@ import {
   type LanWorkPairingRejectedError,
   type LanWorkPairingReplayedError,
   LanWorkPairRequestInput,
+  LanWorkSelectionMalformedError,
   lanWorkSessionCookie,
   type LanWorkSessionRejectedError,
   type LanWorkSessionRequiredError,
@@ -182,6 +183,7 @@ type ApiError =
   | LanWorkPairingMalformedError
   | LanWorkPairingRejectedError
   | LanWorkPairingReplayedError
+  | LanWorkSelectionMalformedError
   | LanWorkSessionRejectedError
   | LanWorkSessionRequiredError
   | PushEndpointNotAllowedError
@@ -270,6 +272,8 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "FleetValidationError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "LanWorkPairingMalformedError":
+      return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkSelectionMalformedError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "LanWorkOriginRejectedError":
       return { status: 403, body: { error: error._tag } }
@@ -1124,6 +1128,11 @@ ${body}
 const lanPairPage = (error: string | undefined): string =>
   lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })))
 
+const lanHtmlSecurityHeaders = {
+  "content-security-policy": "frame-ancestors 'none'",
+  "x-frame-options": "DENY"
+}
+
 const lanPairErrorMessage = (error: LanPairError): string => {
   switch (error._tag) {
     case "LanWorkOriginRejectedError":
@@ -1145,8 +1154,20 @@ const lanPairErrorMessage = (error: LanPairError): string => {
   }
 }
 
-const lanWorkPage = (snapshots: WorkSnapshots): string =>
-  lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { snapshots })))
+const lanWorkPage = (
+  snapshots: WorkSnapshots,
+  selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }
+): string => lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { ...selection, snapshots })))
+
+const lanWorkSelectionFromUrl = Effect.fn("ApprovalHttp.decodeLanWorkSelection")(
+  function*(url: URL) {
+    const decoded = Schema.decodeUnknownResult(WorkSnapshotWindow)(url.searchParams.get("window") ?? "now")
+    if (Result.isFailure(decoded)) {
+      return yield* new LanWorkSelectionMalformedError({ detail: "LAN Work window selection is invalid" })
+    }
+    return { goalId: url.searchParams.get("goal"), window: decoded.success }
+  }
+)
 
 const rejectUpgrade = (
   socket: Duplex,
@@ -1933,7 +1954,8 @@ export const startHttpServer = async (
               if (acceptsHtml) {
                 response.writeHead(mapped.status, {
                   "cache-control": "no-store",
-                  "content-type": "text/html; charset=utf-8"
+                  "content-type": "text/html; charset=utf-8",
+                  ...lanHtmlSecurityHeaders
                 })
                 response.end(lanPairPage(lanPairErrorMessage(error)))
               } else {
@@ -1956,7 +1978,8 @@ export const startHttpServer = async (
               } else {
                 response.writeHead(200, {
                   "cache-control": "no-store",
-                  "content-type": "text/html; charset=utf-8"
+                  "content-type": "text/html; charset=utf-8",
+                  ...lanHtmlSecurityHeaders
                 })
                 response.end(lanPairPage(undefined))
               }
@@ -1990,6 +2013,12 @@ export const startHttpServer = async (
               return
             }
             if (request.method === "GET" && url.pathname === "/") {
+              const selection = await runRequest(Effect.result(lanWorkSelectionFromUrl(url)))
+              if (Result.isFailure(selection)) {
+                const mapped = apiError(selection.failure)
+                json(response, mapped.status, mapped.body)
+                return
+              }
               const result = await runRequest(
                 Effect.result(
                   requireLanOrigin(false).pipe(
@@ -2001,9 +2030,10 @@ export const startHttpServer = async (
               if (Result.isSuccess(result)) {
                 response.writeHead(200, {
                   "cache-control": "no-store",
-                  "content-type": "text/html; charset=utf-8"
+                  "content-type": "text/html; charset=utf-8",
+                  ...lanHtmlSecurityHeaders
                 })
-                response.end(lanWorkPage(result.success))
+                response.end(lanWorkPage(result.success, selection.success))
               } else if (
                 result.failure._tag === "LanWorkSessionRequiredError" ||
                 result.failure._tag === "LanWorkSessionRejectedError"

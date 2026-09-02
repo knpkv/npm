@@ -1,6 +1,6 @@
 import { Button, Field, Surface, Text } from "@knpkv/rly/primitives"
 import type { ReactElement } from "react"
-import { WorkBoard, type WorkSnapshots } from "@knpkv/herdr-work"
+import { WorkBoard, type WorkSnapshotWindow, type WorkSnapshots } from "@knpkv/herdr-work"
 
 /** The LAN boundary is a plain form so the pairing code never enters a URL or client storage. */
 export const LanWorkPairPage = ({ error }: { readonly error?: string }): ReactElement => (
@@ -40,8 +40,26 @@ export const LanWorkPairPage = ({ error }: { readonly error?: string }): ReactEl
   </section>
 )
 
-export const LanWorkPage = ({ snapshots }: { readonly snapshots: WorkSnapshots }): ReactElement => (
+export const LanWorkPage = ({
+  goalId,
+  snapshots,
+  window = "now"
+}: {
+  readonly goalId?: string | null
+  readonly snapshots: WorkSnapshots
+  readonly window?: WorkSnapshotWindow
+}): ReactElement => (
   <main className="lan-work-page">
-    <WorkBoard externalLinks="disabled" snapshots={snapshots} />
+    <WorkBoard
+      externalLinks="disabled"
+      {...(goalId === undefined ? {} : { initialGoalId: goalId })}
+      initialWindow={window}
+      navigation={({ goalId: selectedGoalId, window: selectedWindow }) => {
+        const params = new URLSearchParams({ window: selectedWindow })
+        if (selectedGoalId !== null) params.set("goal", selectedGoalId)
+        return `/?${params.toString()}`
+      }}
+      snapshots={snapshots}
+    />
   </main>
 )

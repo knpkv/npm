@@ -53,6 +53,11 @@ export class LanWorkOriginRejectedError extends Schema.TaggedError<LanWorkOrigin
   { detail: Schema.String }
 ) {}
 
+export class LanWorkSelectionMalformedError extends Schema.TaggedError<LanWorkSelectionMalformedError>()(
+  "LanWorkSelectionMalformedError",
+  { detail: Schema.String }
+) {}
+
 export class LanWorkConfigurationError extends Schema.TaggedError<LanWorkConfigurationError>()(
   "LanWorkConfigurationError",
   { detail: Schema.String }
