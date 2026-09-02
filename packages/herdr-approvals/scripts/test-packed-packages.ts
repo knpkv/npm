@@ -240,7 +240,7 @@ const program = Effect.scoped(
       })
     }
 
-    if (archiveNameFor("@knpkv/herdr-approvals", "0.2.0") !== "knpkv-herdr-approvals-0.2.0.tgz") {
+    if (archiveNameFor("@knpkv/herdr-work", "0.3.0") !== "knpkv-herdr-work-0.3.0.tgz") {
       return yield* new HerdrPackContractError({ reason: "Archive naming does not preserve package versions" })
     }
 
