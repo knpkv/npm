@@ -150,6 +150,7 @@ type ApprovalProof = {
 }
 type ApprovalProofUse = {
   readonly approval: Approval
+  readonly session: ApprovalProofSession
   readonly sessionToken: string
 }
 type ApprovalProofSession = {
@@ -1341,40 +1342,51 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
 ) {
   const token = cookieValue(request, approvalProofCookieName)
   const session = token === undefined ? undefined : sessions.get(token)
-  const proof = session?.proofsByJob.get(jobId)
   if (token === undefined || session === undefined) {
     return yield* new FleetApprovalError({
       detail: "approval proof is required for a bodyless decision",
       jobId
     })
   }
-  if (
-    session.expiresAt <= currentTime() ||
-    proof === undefined ||
-    proof.jobId !== jobId ||
-    proof.expiresAt <= currentTime()
-  ) {
-    return yield* new FleetApprovalError({
-      detail: "approval proof is invalid or expired",
-      jobId
+  yield* session.lock.take(1)
+  const checked = yield* Effect.exit(
+    Effect.gen(function*() {
+      const proof = session.proofsByJob.get(jobId)
+      if (
+        session.expiresAt <= currentTime() ||
+        proof === undefined ||
+        proof.jobId !== jobId ||
+        proof.expiresAt <= currentTime()
+      ) {
+        return yield* new FleetApprovalError({
+          detail: "approval proof is invalid or expired",
+          jobId
+        })
+      }
+      const record = yield* service.get(jobId)
+      if (
+        record.status !== "pending_approval" ||
+        record.approvalNonce === null ||
+        record.hash !== proof.hash ||
+        record.approvalNonce !== proof.nonce
+      ) {
+        return yield* new FleetApprovalError({
+          detail: "approval proof no longer matches the pending request",
+          jobId
+        })
+      }
+      return {
+        approval: { hash: proof.hash, nonce: proof.nonce },
+        session,
+        sessionToken: token
+      } satisfies ApprovalProofUse
     })
+  )
+  if (Exit.isFailure(checked)) {
+    yield* session.lock.release(1)
+    return yield* Effect.failCause(checked.cause)
   }
-  const record = yield* service.get(jobId)
-  if (
-    record.status !== "pending_approval" ||
-    record.approvalNonce === null ||
-    record.hash !== proof.hash ||
-    record.approvalNonce !== proof.nonce
-  ) {
-    return yield* new FleetApprovalError({
-      detail: "approval proof no longer matches the pending request",
-      jobId
-    })
-  }
-  return {
-    approval: { hash: proof.hash, nonce: proof.nonce },
-    sessionToken: token
-  } satisfies ApprovalProofUse
+  return checked.value
 })
 
 export const makeRunner = Effect.fn("HostRunner.make")(function*(
@@ -2989,6 +3001,7 @@ export const startHttpServer = async (
             approvalJobId !== undefined &&
             (decision === "approve" || decision === "reject")
           ) {
+            let proofSession: ApprovalProofSession | undefined
             const effect = Effect.gen(function*() {
               const who = yield* authorized
               yield* sameOrigin(request, expectedOrigin())
@@ -3005,6 +3018,7 @@ export const startHttpServer = async (
                   now
                 )
                 approval = proof.approval
+                proofSession = proof.session
                 proofSessionToken = proof.sessionToken
               } else {
                 approval = submittedApproval
@@ -3018,7 +3032,16 @@ export const startHttpServer = async (
               }
               if (record.status === "queued") yield* enqueueJob(record.id)
               return sanitizeJobRecord(record)
-            })
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (proofSession !== undefined) {
+                    httpRuntime.runSync(proofSession.lock.release(1))
+                    proofSession = undefined
+                  }
+                })
+              )
+            )
             if (
               header(request, "content-type")?.startsWith(
                 "application/x-www-form-urlencoded"

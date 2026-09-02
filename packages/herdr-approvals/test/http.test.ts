@@ -1002,7 +1002,11 @@ esac
           yield* store.put(pendingRecord("ALPHA", 0))
           const failingStatusStarted = yield* Deferred.make<void>()
           const releaseFailingStatus = yield* Deferred.make<void>()
+          const concurrentPendingPageStarted = yield* Deferred.make<void>()
+          const concurrentStatusStarted = yield* Deferred.make<void>()
           let failNextStatus = false
+          let signalConcurrentPendingPage = false
+          let signalConcurrentStatus = false
           const fleet = yield* makeFleetService({
             approvalEnabled: true,
             host: hostConfig.host,
@@ -1012,6 +1016,14 @@ esac
           let failStatus = false
           const instrumentedFleet: FleetService = {
             ...fleet,
+            pendingApprovalPage: (cursor) =>
+              fleet.pendingApprovalPage(cursor).pipe(
+                Effect.tap(() => {
+                  if (!signalConcurrentPendingPage) return Effect.void
+                  signalConcurrentPendingPage = false
+                  return Deferred.succeed(concurrentPendingPageStarted, undefined)
+                })
+              ),
             status: () => {
               if (failNextStatus) {
                 failNextStatus = false
@@ -1026,6 +1038,12 @@ esac
                       })
                     )
                   )
+                )
+              }
+              if (signalConcurrentStatus) {
+                signalConcurrentStatus = false
+                return Deferred.succeed(concurrentStatusStarted, undefined).pipe(
+                  Effect.andThen(fleet.status())
                 )
               }
               return failStatus
@@ -1120,22 +1138,22 @@ esac
             )
           )
           yield* Deferred.await(failingStatusStarted)
-          const succeedingDisclosureStarted = yield* Deferred.make<void>()
+          signalConcurrentPendingPage = true
+          signalConcurrentStatus = true
           const succeedingConcurrentDisclosure = yield* Effect.forkChild(
-            Effect.gen(function*() {
-              yield* Deferred.succeed(succeedingDisclosureStarted, undefined)
-              return yield* Effect.promise(() =>
-                fetch(`${approvalUrl}/v1/dashboard`, {
-                  headers: { ...headers, cookie: retainedCookie }
-                })
-              )
-            })
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard`, {
+                headers: { ...headers, cookie: retainedCookie }
+              })
+            )
           )
-          yield* Deferred.await(succeedingDisclosureStarted)
+          yield* Deferred.await(concurrentPendingPageStarted)
+          expect(yield* Deferred.isDone(concurrentStatusStarted)).toBe(false)
           yield* Deferred.succeed(releaseFailingStatus, undefined)
           const failedConcurrentResponse = yield* Fiber.join(failedConcurrentDisclosure)
           expect(failedConcurrentResponse.status).toBe(503)
           yield* Effect.promise(() => failedConcurrentResponse.text())
+          yield* Deferred.await(concurrentStatusStarted)
           const succeedingConcurrentResponse = yield* Fiber.join(succeedingConcurrentDisclosure)
           expect(succeedingConcurrentResponse.status).toBe(200)
           yield* Effect.promise(() => succeedingConcurrentResponse.text())
