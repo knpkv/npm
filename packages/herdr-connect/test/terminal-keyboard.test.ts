@@ -74,6 +74,11 @@ describe("terminal keyboard rail", () => {
       text: "\u0003",
       nextModifier: null
     })
+    expect(applyTerminalModifierToInput("ctrl", "C")).toEqual({
+      _tag: "supported",
+      text: "\u0003",
+      nextModifier: null
+    })
     expect(applyTerminalModifierToInput("ctrl", "\u001b[1;5A")).toEqual({
       _tag: "supported",
       text: "\u001b[1;5A",
@@ -94,9 +99,19 @@ describe("terminal keyboard rail", () => {
       text: "\u001bd",
       nextModifier: null
     })
+    expect(applyTerminalModifierToInput("alt", "D")).toEqual({
+      _tag: "supported",
+      text: "\u001bD",
+      nextModifier: null
+    })
     expect(applyTerminalModifierToInput("alt", "\u001bd")).toEqual({
       _tag: "supported",
       text: "\u001bd",
+      nextModifier: null
+    })
+    expect(applyTerminalModifierToInput("alt", "\u001bD")).toEqual({
+      _tag: "supported",
+      text: "\u001bD",
       nextModifier: null
     })
     expect(applyTerminalModifierToInput("alt", "\t")).toEqual({

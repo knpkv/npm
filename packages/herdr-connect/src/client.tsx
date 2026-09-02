@@ -215,8 +215,32 @@ type TerminalKeyboardCallbacks = {
   readonly getModifier: () => TerminalModifier | null
   readonly setModifier: (modifier: TerminalModifier | null) => void
   readonly reportError: (error: TerminalInputApplication) => void
-  readonly setInputSender: (sendInput: (command: TerminalInputCommand) => void) => void
-  readonly setCursorModeReader: (read: () => TerminalCursorMode) => void
+  readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
+  readonly setCursorModeReader: (read: () => TerminalCursorMode) => () => void
+}
+
+const renderTerminalOutput = (
+  terminal: Terminal,
+  data: Uint8Array,
+  setProcessing: (processing: boolean) => void,
+  onError: (error: ConnectProtocolError) => void
+): void => {
+  Effect.runFork(
+    Effect.try({
+      try: () => {
+        setProcessing(true)
+        terminal.write(data)
+      },
+      catch: (cause) =>
+        new ConnectProtocolError({
+          detail: "terminal output could not be rendered",
+          cause
+        })
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => setProcessing(false))),
+      Effect.catch((error) => Effect.sync(() => onError(error)))
+    )
+  )
 }
 
 const terminalWorker = (
@@ -281,40 +305,56 @@ const terminalWorker = (
         readonly rows: number
       } | null = null
       const pendingInput = makePendingTerminalInput()
-      const send = (command: TerminalClientCommand): void => {
+      const send = (command: TerminalClientCommand): boolean => {
         if (socket?.readyState === WebSocket.OPEN) {
           socket.send(JSON.stringify(command))
+          return true
         }
+        return false
       }
-      const sendInput = (text: string): void => send({ type: "terminal.input", text })
-      const writeTerminalOutput = (data: string | Uint8Array): void => {
-        processingTerminalOutput = true
-        try {
-          terminal.terminal.write(data)
-        } finally {
-          processingTerminalOutput = false
-        }
-      }
-      keyboard.setInputSender((command) => send(command))
-      yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setInputSender(() => {})))
-      keyboard.setCursorModeReader(() => (terminal.terminal.getMode(1) ? "application" : "normal"))
-      yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setCursorModeReader(() => "normal")))
-      const applyInput = (text: string): string | null => {
-        if (processingTerminalOutput) return text
+      const sendInput = (text: string): boolean => send({ type: "terminal.input", text })
+      const releaseInputSender = keyboard.setInputSender((command) => send(command))
+      yield* Effect.addFinalizer(() => Effect.sync(releaseInputSender))
+      const releaseCursorModeReader = keyboard.setCursorModeReader(() =>
+        terminal.terminal.getMode(1) ? "application" : "normal"
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(releaseCursorModeReader))
+      const applyInput = (text: string): Extract<TerminalInputApplication, { readonly _tag: "supported" }> | null => {
         const application = applyTerminalModifierToInput(keyboard.getModifier(), text)
         if (application._tag === "unsupported") {
           keyboard.reportError(application)
           return null
         }
-        keyboard.setModifier(application.nextModifier)
-        return application.text
+        return application
       }
       const input = terminal.terminal.onData((text) => {
+        if (processingTerminalOutput) {
+          if (ready) {
+            if (!sendInput(text)) {
+              update({ _tag: "failed", agent, detail: "terminal input could not be sent" })
+              socket?.close(4429, "terminal input unavailable")
+            }
+          } else if (pendingInput.push(text) === "overflow") {
+            inputOverflow = true
+            update({
+              _tag: "failed",
+              agent,
+              detail: "terminal input queue exceeded 64 KiB before ready"
+            })
+            socket?.close(4429, "terminal input queue limit reached")
+          }
+          return
+        }
         const appliedText = applyInput(text)
         if (appliedText === null) return
         if (ready) {
-          sendInput(appliedText)
-        } else if (pendingInput.push(appliedText) === "overflow") {
+          if (!sendInput(appliedText.text)) {
+            update({ _tag: "failed", agent, detail: "terminal input could not be sent" })
+            socket?.close(4429, "terminal input unavailable")
+            return
+          }
+          keyboard.setModifier(appliedText.nextModifier)
+        } else if (pendingInput.push(appliedText.text) === "overflow") {
           inputOverflow = true
           update({
             _tag: "failed",
@@ -322,6 +362,8 @@ const terminalWorker = (
             detail: "terminal input queue exceeded 64 KiB before ready"
           })
           socket?.close(4429, "terminal input queue limit reached")
+        } else {
+          keyboard.setModifier(appliedText.nextModifier)
         }
       })
       const resize = terminal.terminal.onResize(({ cols, rows }) => {
@@ -425,7 +467,17 @@ const terminalWorker = (
         const message = (event: MessageEvent<ArrayBuffer | string>): void => {
           const binary = Schema.decodeUnknownResult(Schema.instanceOf(ArrayBuffer))(event.data)
           if (Result.isSuccess(binary)) {
-            writeTerminalOutput(new Uint8Array(binary.success))
+            renderTerminalOutput(
+              terminal.terminal,
+              new Uint8Array(binary.success),
+              (processing) => {
+                processingTerminalOutput = processing
+              },
+              (error) => {
+                update({ _tag: "failed", agent, detail: error.detail })
+                connectedSocket.close(4400, "terminal output could not be rendered")
+              }
+            )
             return
           }
           const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(TerminalServerSignal))(event.data)
@@ -442,7 +494,11 @@ const terminalWorker = (
             ready = true
             const queued = pendingInput.drain()
             if (queued.length > 0) {
-              sendInput(queued)
+              if (!sendInput(queued)) {
+                update({ _tag: "failed", agent, detail: "terminal input could not be sent" })
+                connectedSocket.close(4429, "terminal input unavailable")
+                return
+              }
             }
             if (pendingResize !== null) {
               send({
@@ -504,8 +560,10 @@ export const ConnectSurface = ({
   const requestId = useRef(0)
   const terminalRef = useRef<HTMLDivElement>(null)
   const terminalViewportRef = useRef<HTMLDivElement>(null)
-  const terminalInputRef = useRef<(command: TerminalInputCommand) => void>(() => {})
+  const terminalInputRef = useRef<(command: TerminalInputCommand) => boolean>(() => false)
+  const terminalInputOwnerRef = useRef<symbol | null>(null)
   const terminalCursorModeReaderRef = useRef<() => TerminalCursorMode>(() => "normal")
+  const terminalCursorModeOwnerRef = useRef<symbol | null>(null)
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
@@ -519,10 +577,24 @@ export const ConnectSurface = ({
         getModifier: () => terminalModifierRef.current,
         reportError: () => setTerminalKeyError("That modifier combination is not supported."),
         setInputSender: (sendInput) => {
+          const owner = Symbol("terminal-input-sender")
+          terminalInputOwnerRef.current = owner
           terminalInputRef.current = sendInput
+          return () => {
+            if (terminalInputOwnerRef.current !== owner) return
+            terminalInputOwnerRef.current = null
+            terminalInputRef.current = () => false
+          }
         },
         setCursorModeReader: (read) => {
+          const owner = Symbol("terminal-cursor-mode-reader")
+          terminalCursorModeOwnerRef.current = owner
           terminalCursorModeReaderRef.current = read
+          return () => {
+            if (terminalCursorModeOwnerRef.current !== owner) return
+            terminalCursorModeOwnerRef.current = null
+            terminalCursorModeReaderRef.current = () => "normal"
+          }
         },
         setModifier: (modifier) => {
           terminalModifierRef.current = modifier
@@ -558,7 +630,9 @@ export const ConnectSurface = ({
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
-    terminalInputRef.current = () => {}
+    terminalInputOwnerRef.current = null
+    terminalInputRef.current = () => false
+    terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
     setTerminalModifier(null)
@@ -618,7 +692,9 @@ export const ConnectSurface = ({
   const disconnect = (): void => {
     setConnectionRequest(null)
     setConnection({ _tag: "idle" })
-    terminalInputRef.current = () => {}
+    terminalInputOwnerRef.current = null
+    terminalInputRef.current = () => false
+    terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
     setTerminalModifier(null)
@@ -638,7 +714,10 @@ export const ConnectSurface = ({
       setTerminalKeyError("That modifier combination is not supported.")
       return
     }
-    terminalInputRef.current(dispatch.command)
+    if (!terminalInputRef.current(dispatch.command)) {
+      setTerminalKeyError("Terminal connection is unavailable.")
+      return
+    }
     terminalModifierRef.current = dispatch.nextModifier
     setTerminalModifier(dispatch.nextModifier)
     setTerminalKeyError(null)

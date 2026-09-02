@@ -198,16 +198,26 @@ const terminalInputWithModifier = (
     if (text === "\u0003" || text === "\u0004" || text === "\u000c" || text === "\u001a") {
       return { _tag: "supported", text, nextModifier: null }
     }
-    if (text === "c" || text === "d" || text === "l" || text === "z") {
-      return { _tag: "supported", text: controlCharacter(text), nextModifier: null }
+    const controlKey = text.length === 1 ? text.toLowerCase() : text
+    if (controlKey === "c" || controlKey === "d" || controlKey === "l" || controlKey === "z") {
+      return { _tag: "supported", text: controlCharacter(controlKey), nextModifier: null }
     }
   }
   if (modifier === "alt") {
+    const normalized = text.length === 1
+      ? text.toLowerCase()
+      : text.length === 2 && text.startsWith("\u001b")
+      ? `\u001b${text.slice(1).toLowerCase()}`
+      : text
     const character = modifierCharacterInputs.find((candidate) =>
-      candidate.plain === text || candidate.encoded === text
+      candidate.plain === normalized || candidate.encoded === normalized
     )
     if (character !== undefined) {
-      return { _tag: "supported", text: character.encoded, nextModifier: null }
+      return {
+        _tag: "supported",
+        text: text.length === 1 ? `\u001b${text}` : text,
+        nextModifier: null
+      }
     }
     if (text === "\t" || text === "\u001b\t") {
       return { _tag: "supported", text: "\u001b\t", nextModifier: null }
