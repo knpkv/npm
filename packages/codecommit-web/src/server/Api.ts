@@ -32,6 +32,7 @@ import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 import {
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+  MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,
   MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
   MAXIMUM_RELAY_REVIEW_TURNS_BYTES
 } from "./review/ReviewPromptBudget.js"
@@ -273,7 +274,7 @@ export const RelayReviewMessage = Schema.String.check(
   Schema.makeFilter(
     (message) =>
       jsonByteEncoder.encode(JSON.stringify(message)).byteLength <=
-        Math.floor((MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128) / 2),
+        MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,
     { expected: "a Relay conversation message retainable as one half of a completed exchange" }
   )
 )

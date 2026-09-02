@@ -188,6 +188,63 @@ describe("ConfigService", () => {
       })
     ))
 
+  it("loads and persists a Claude review profile", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "claude",
+            profiles: [{
+              id: "claude",
+              name: "Claude review",
+              kind: "review",
+              provider: "claude",
+              harness: "native-claude",
+              model: "default",
+              skillIds: []
+            }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        const loaded = yield* service.load
+        expect(loaded.review.profiles[0]).toMatchObject({
+          harness: "native-claude",
+          model: "default",
+          provider: "claude"
+        })
+        yield* service.save(loaded)
+        expect((yield* service.load).review).toEqual(loaded.review)
+      })
+    ))
+
+  it("rejects a mismatched Claude provider and harness", () =>
+    run(
+      {
+        [configPath]: JSON.stringify({
+          accounts: [],
+          review: {
+            defaultProfileId: "claude",
+            profiles: [{
+              id: "claude",
+              name: "Claude review",
+              kind: "review",
+              provider: "claude",
+              harness: "native-codex",
+              model: "default",
+              skillIds: []
+            }]
+          }
+        })
+      },
+      Effect.gen(function*() {
+        const service = yield* ConfigService
+        expect((yield* service.validate).status).toBe("corrupted")
+      })
+    ))
+
   const unknownReviewConfigurationCases: ReadonlyArray<
     readonly [field: "provider" | "harness" | "model", value: string]
   > = [

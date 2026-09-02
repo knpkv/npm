@@ -1,12 +1,15 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Exit, Fiber, Option, Schema, Semaphore, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Semaphore, Sink, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { RelayReviewContinueStreamRequest, RelayReviewResult, RelayReviewStreamRequest } from "../src/server/Api.js"
 
 import {
   collectRelayPatch,
   collectRelayPatchEvidence,
+  continuePullRequestRelayReview,
   loadPullRequestDiff,
   loadPullRequestDiffContent,
   makePullRequestChangedFilesSource,
@@ -18,6 +21,7 @@ import {
   PullRequestReviewError,
   relayConversationOutputSchema,
   relayReviewOutputSchema,
+  runPullRequestRelayReview,
   streamRelayReviewEventsFrom,
   validateRelayReviewAnchors,
   withRelayReviewPermit,
@@ -25,6 +29,7 @@ import {
 } from "../src/server/review/PullRequestReview.js"
 import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
 import {
+  MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES,
   MAXIMUM_RELAY_PATCH_BYTES,
   MAXIMUM_RELAY_PROMPT_BYTES,
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
@@ -118,7 +123,239 @@ const makeReadClient = (
   streamPullRequests: () => Stream.empty
 })
 
+const ClaudeResultFixture = Schema.Struct({
+  is_error: Schema.Boolean,
+  result: Schema.optional(Schema.String),
+  structured_output: Schema.Unknown,
+  subtype: Schema.String,
+  type: Schema.String
+})
+type ClaudeResultFixture = Schema.Schema.Type<typeof ClaudeResultFixture>
+
+const makeClaudeSpawner = (
+  calls: Array<ChildProcess.Command>,
+  result: ClaudeResultFixture,
+  outputSuffix: string = ""
+) =>
+  ChildProcessSpawner.make((command) => {
+    calls.push(command)
+    const stdout = Stream.make(`${JSON.stringify(result)}${outputSuffix}`).pipe(Stream.encodeText)
+    const stderr = Stream.make("").pipe(Stream.encodeText)
+    return Effect.succeed(ChildProcessSpawner.makeHandle({
+      all: stdout,
+      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      isRunning: Effect.succeed(false),
+      kill: () => Effect.void,
+      pid: ChildProcessSpawner.ProcessId(42),
+      reref: Effect.void,
+      stderr,
+      stdin: Sink.drain,
+      stdout,
+      unref: Effect.succeed(Effect.void)
+    }))
+  })
+
 describe("CodeCommit web review boundary", () => {
+  it.effect("dispatches a Claude profile through its native structured-output contract", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const response = yield* runPullRequestRelayReview(
+        makeReadClient(),
+        pullRequest,
+        expectedRevision,
+        {
+          id: "claude-review",
+          name: "Claude review",
+          kind: "review",
+          provider: "claude",
+          harness: "native-claude",
+          model: "default",
+          skillIds: []
+        },
+        undefined,
+        ""
+      ).pipe(
+        // Test entry point: provide the real platform services and replace the process boundary with a fixture.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(
+          Layer.merge(
+            NodeServices.layer,
+            Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              makeClaudeSpawner(calls, {
+                is_error: false,
+                structured_output: { findings: [], verdict: "No issues." },
+                subtype: "success",
+                type: "result"
+              })
+            )
+          )
+        )
+      )
+
+      expect(response.profile.provider).toBe("claude")
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.command).toBe("claude")
+        expect(command.args).toContain("--json-schema")
+        expect(command.args).toContain("--safe-mode")
+        expect(command.args).toContain("--tools")
+        expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
+        expect(command.args[command.args.indexOf("--permission-mode") + 1]).toBe("dontAsk")
+        expect(command.args[command.args.indexOf("--model") + 1]).toBe("default")
+      }
+    }))
+
+  it.effect("dispatches Claude continuation with the caller-selected conversation schema and transport budget", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const response = yield* continuePullRequestRelayReview(
+        makeReadClient(),
+        pullRequest,
+        expectedRevision,
+        {
+          id: "claude-review",
+          name: "Claude review",
+          kind: "review",
+          provider: "claude",
+          harness: "native-claude",
+          model: "configured-default",
+          skillIds: []
+        },
+        { findings: [], verdict: "No findings." },
+        [],
+        "PR",
+        "Re-review this exact patch.",
+        undefined,
+        ""
+      ).pipe(
+        // Test entry point: provide the real platform services and replace the process boundary with a fixture.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(
+          Layer.merge(
+            NodeServices.layer,
+            Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              makeClaudeSpawner(calls, {
+                is_error: false,
+                structured_output: {
+                  reply: "No additional concerns.",
+                  review: { findings: [], verdict: "No findings." }
+                },
+                subtype: "success",
+                type: "result"
+              })
+            )
+          )
+        )
+      )
+
+      expect(response.reply).toBe("No additional concerns.")
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        const schemaIndex = command.args.indexOf("--json-schema")
+        const schema = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+          command.args[schemaIndex + 1] ?? "null"
+        )
+        expect(schema).toMatchObject({
+          properties: {
+            reply: { type: "string" },
+            review: { type: "object" }
+          },
+          required: ["reply", "review"],
+          type: "object"
+        })
+        expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
+        expect(command.args[command.args.indexOf("--permission-mode") + 1]).toBe("dontAsk")
+        expect(command.args).not.toContain("--model")
+      }
+    }))
+
+  it.effect("accepts a maximum-budget review plus conversation metadata but rejects an oversized envelope", () =>
+    Effect.gen(function*() {
+      const finding = (index: number): RelayReviewFinding => ({
+        id: `F${String(index)}`,
+        priority: "P2",
+        title: "Bounded finding",
+        summary: "x".repeat(400),
+        details: "x".repeat(4_000),
+        recommendation: "x".repeat(1_800),
+        verification: "x".repeat(900),
+        publicationTarget: "line-comment",
+        location: { scope: "line", filePath: "src/index.ts", line: 1, side: "after" }
+      })
+      const review = {
+        findings: Array.from({ length: 7 }, (_, index) => finding(index + 1)),
+        verdict: "v".repeat(8_000)
+      }
+      const structuredOutput = { reply: "\"".repeat(8_000), review }
+      const encoded = JSON.stringify({
+        is_error: false,
+        result: "r".repeat(128 * 1024),
+        structured_output: structuredOutput,
+        subtype: "success",
+        type: "result"
+      })
+      expect(new TextEncoder().encode(JSON.stringify(review)).byteLength).toBeLessThanOrEqual(
+        MAXIMUM_RELAY_REVIEW_RESULT_BYTES
+      )
+      expect(new TextEncoder().encode(encoded).byteLength).toBeLessThanOrEqual(
+        MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES
+      )
+
+      const run = (outputSuffix: string) => {
+        const calls: Array<ChildProcess.Command> = []
+        return continuePullRequestRelayReview(
+          makeReadClient(),
+          pullRequest,
+          expectedRevision,
+          {
+            id: "claude-review",
+            name: "Claude review",
+            kind: "review",
+            provider: "claude",
+            harness: "native-claude",
+            model: "default",
+            skillIds: []
+          },
+          { findings: [], verdict: "No findings." },
+          [],
+          "PR",
+          "Re-review this exact patch.",
+          undefined,
+          ""
+        ).pipe(
+          // Test entry point: provide the real platform services and replace the process boundary with a fixture.
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(
+            Layer.merge(
+              NodeServices.layer,
+              Layer.succeed(
+                ChildProcessSpawner.ChildProcessSpawner,
+                makeClaudeSpawner(calls, {
+                  is_error: false,
+                  result: "r".repeat(128 * 1024),
+                  structured_output: structuredOutput,
+                  subtype: "success",
+                  type: "result"
+                }, outputSuffix)
+              )
+            )
+          ),
+          Effect.exit
+        )
+      }
+
+      const valid = yield* run("")
+      expect(Exit.isSuccess(valid)).toBe(true)
+      const oversized = yield* run("x".repeat(MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES))
+      expect(Exit.isFailure(oversized)).toBe(true)
+    }))
+
   it("rejects unbounded skill and finding identifiers at the HTTP schema boundary", () => {
     const streamRequest = {
       revisionId: "revision-1",
