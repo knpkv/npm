@@ -555,6 +555,43 @@ esac
           expect(secondSessionContinuation.status).toBe(200)
           yield* Effect.promise(() => secondSessionContinuation.text())
           expect(pendingApprovalCalls).toBe(1)
+          const newlyPending = pendingRecord("ALPHA", 100)
+          yield* store.put(newlyPending)
+          const dashboardD = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieD = dashboardD.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieD === undefined) {
+            return yield* new FleetValidationError({ detail: "new approval proof session missing" })
+          }
+          const dashboardDData = Schema.decodeUnknownSync(DashboardSnapshot)(
+            JSON.parse(yield* Effect.promise(() => dashboardD.text()))
+          )
+          if (!dashboardDData.pendingApprovals.local.some(({ id }) => id === newlyPending.id)) {
+            return yield* new FleetValidationError({ detail: "new pending approval missing from first page" })
+          }
+          const newContinuation = dashboardDData.pendingApprovals.nextCursors.at(0)
+          if (newContinuation === undefined) {
+            return yield* new FleetValidationError({ detail: "new approval continuation missing" })
+          }
+          const newContinuationParameters = new URLSearchParams({
+            cursorCreatedAt: String(newContinuation.cursor.createdAt),
+            cursorHost: newContinuation.host,
+            cursorId: newContinuation.cursor.id
+          })
+          const newContinuationResponse = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+              headers: { ...headers, cookie: cookieD }
+            })
+          )
+          expect(newContinuationResponse.status).toBe(200)
+          yield* Effect.promise(() => newContinuationResponse.text())
+          const newDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${newlyPending.id}/approve`, {
+              headers: { ...headers, cookie: cookieD, origin },
+              method: "POST"
+            })
+          )
+          expect(newDecision.status).toBe(200)
+          yield* Effect.promise(() => newDecision.text())
           observedAt = 60 * 1_000
           const refreshedSessionContinuation = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {

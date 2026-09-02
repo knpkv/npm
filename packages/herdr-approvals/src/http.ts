@@ -1559,7 +1559,7 @@ export const startHttpServer = async (
     const approvalProofSessions = new Map<string, ApprovalProofSession>()
     let pendingApprovalProofSnapshot: {
       readonly observedAt: number
-      readonly pendingJobIds: ReadonlySet<string>
+      readonly pendingJobIds: Set<string>
     } | undefined
     const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
     const approvalProofSessionFor = (
@@ -1590,7 +1590,7 @@ export const startHttpServer = async (
     const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
       function*(session: ApprovalProofSession, observedAt: number) {
         const snapshot = pendingApprovalProofSnapshot
-        let pendingJobIds: ReadonlySet<string>
+        let pendingJobIds: Set<string>
         if (
           snapshot !== undefined &&
           observedAt - snapshot.observedAt < approvalProofPruneIntervalMs
@@ -1654,6 +1654,7 @@ export const startHttpServer = async (
         }
         for (const record of pendingRecords) {
           if (record.approvalNonce === null) continue
+          pendingApprovalProofSnapshot?.pendingJobIds.add(record.id)
           if (!session.proofsByJob.has(record.id)) {
             session.proofsByJob.set(record.id, {
               expiresAt: session.expiresAt,
