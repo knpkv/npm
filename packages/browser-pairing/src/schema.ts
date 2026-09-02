@@ -97,8 +97,12 @@ export const serializeCredentialCookie: (
       const code = character.charCodeAt(0)
       return !((code >= 0x20 && code <= 0x3a) || (code >= 0x3c && code <= 0x7e))
     })
-  const invalidReservedPrefix = (options.name.startsWith("__Host-") && (!options.secure || options.path !== "/")) ||
-    (options.name.startsWith("__Secure-") && !options.secure)
+  const normalizedName = options.name.toLowerCase()
+  const invalidReservedPrefix =
+    (normalizedName.startsWith("__host-http-") && (!options.secure || !options.httpOnly || options.path !== "/")) ||
+    (normalizedName.startsWith("__http-") && (!options.secure || !options.httpOnly)) ||
+    (normalizedName.startsWith("__host-") && (!options.secure || options.path !== "/")) ||
+    (normalizedName.startsWith("__secure-") && !options.secure)
   if (
     !COOKIE_NAME_PATTERN.test(options.name) ||
     invalidPath(options.path) ||

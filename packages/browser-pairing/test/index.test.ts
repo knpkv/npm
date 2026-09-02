@@ -157,10 +157,46 @@ describe("browser pairing primitives", () => {
         secure: false
       })
     ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Http-session",
+        httpOnly: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Host-Http-session",
+        httpOnly: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__HoSt-session",
+        path: "/api"
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__SeCuRe-session",
+        secure: false
+      })
+    ).toThrow(CredentialCookieError)
     expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
       ...valid,
       name: "__Host-session"
     })).toContain("__Host-session=")
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+      ...valid,
+      name: "__Http-session"
+    })).toContain("__Http-session=")
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+      ...valid,
+      name: "__Host-Http-session"
+    })).toContain("__Host-Http-session=")
     expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: false }))
       .toThrow(
         CredentialCookieError
