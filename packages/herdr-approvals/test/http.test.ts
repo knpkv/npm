@@ -728,18 +728,23 @@ esac
           )
           yield* Deferred.await(overlapRefreshStarted)
           yield* store.put(concurrentPending)
-          const concurrentDisclosure = yield* Effect.promise(() =>
-            fetch(
-              `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${concurrentPending.id}`,
-              { headers: { ...headers, cookie: cookieB } }
+          const concurrentDisclosureFiber = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(
+                `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${concurrentPending.id}`,
+                { headers: { ...headers, cookie: cookieB } }
+              )
             )
           )
+          yield* Effect.yieldNow
+          yield* Deferred.succeed(overlapReleaseRefresh, undefined)
+          const concurrentDisclosure = yield* Fiber.join(concurrentDisclosureFiber)
           expect(concurrentDisclosure.status).toBe(200)
           yield* Effect.promise(() => concurrentDisclosure.text())
-          yield* Deferred.succeed(overlapReleaseRefresh, undefined)
           const staleRefreshResponse = yield* Fiber.join(staleRefresh)
           expect(staleRefreshResponse.status).toBe(200)
           yield* Effect.promise(() => staleRefreshResponse.text())
+          expect(pendingApprovalCalls).toBe(3)
           const concurrentContinuation = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
               headers: { ...headers, cookie: cookieB }
@@ -1048,12 +1053,38 @@ esac
             yield* Effect.promise(() => response.text())
           }
           failStatus = false
-          const recovered = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const recoveredWithoutCookie = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          expect(recoveredWithoutCookie.status).toBe(200)
+          expect(recoveredWithoutCookie.headers.get("set-cookie")).toContain("fleet_approval_proof_session=")
+          yield* Effect.promise(() => recoveredWithoutCookie.text())
+          yield* store.put(pendingRecord("ALPHA", 1))
+          failStatus = true
+          const failedReusedDisclosure = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, {
+              headers: { ...headers, cookie: retainedCookie }
+            })
+          )
+          expect(failedReusedDisclosure.status).toBe(503)
+          yield* Effect.promise(() => failedReusedDisclosure.text())
+          const rolledBackDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-01/approve`, {
+              headers: { ...headers, cookie: retainedCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(rolledBackDecision.status).toBe(409)
+          yield* Effect.promise(() => rolledBackDecision.text())
+          failStatus = false
+          const recovered = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, {
+              headers: { ...headers, cookie: retainedCookie }
+            })
+          )
           expect(recovered.status).toBe(200)
           expect(recovered.headers.get("set-cookie")).toContain("fleet_approval_proof_session=")
           yield* Effect.promise(() => recovered.text())
           const decision = yield* Effect.promise(() =>
-            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-01/approve`, {
               headers: { ...headers, cookie: retainedCookie, origin },
               method: "POST"
             })

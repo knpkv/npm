@@ -142,6 +142,19 @@ describe("sanitized approval requests", () => {
     ])
   })
 
+  it("redacts whitespace-bearing URI user-info", () => {
+    const ref = "https://deploy-user:deploy password@example.test/revision"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("deploy-user")
+    expect(encoded).not.toContain("deploy password")
+    expect(encoded).toContain("[redacted credential]")
+  })
+
   it("redacts suffixes attached to an existing credential marker", () => {
     const refs = [
       "password=[redacted credential]actual-secret",
@@ -449,7 +462,8 @@ describe("sanitized approval requests", () => {
       expect(html).toContain("View full request")
       expect(html).toContain("Repository")
       expect(html).toContain("[redacted internal prompt]")
-      expect(html).not.toContain("raw terminal prompt")
+      expect(html).not.toContain("raw terminal result")
+      expect(html).not.toContain("raw terminal output")
       expect(html).not.toContain("secret-value")
       expect(html).not.toContain("approval-secret")
     }

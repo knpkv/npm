@@ -60,7 +60,7 @@ const credentialAssignment =
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\][^\s,;]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;]+)/giu
-const credentialUri = /(^|[^\w])\/\/[^/\s]+@/gu
+const credentialUri = /(^|[^\w])\/\/[^/\r\n]+@/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const encodedUriMaxDepth = 3

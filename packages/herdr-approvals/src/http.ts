@@ -156,6 +156,12 @@ type ApprovalProofSession = {
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
 }
+type ApprovalProofMutation = {
+  readonly created: boolean
+  readonly previousExpiresAt: number
+  readonly previousProofs: ReadonlyMap<string, ApprovalProof>
+  readonly session: ApprovalProofSession
+}
 type ApprovalProofIssuer = (
   records: ReadonlyArray<JobRecord>,
   request: IncomingMessage
@@ -1567,8 +1573,9 @@ export const startHttpServer = async (
     } | undefined
     let pendingApprovalProofDisclosureGeneration = 0
     const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
-    const uncommittedApprovalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
+    const approvalProofMutationsByRequest = new WeakMap<IncomingMessage, ApprovalProofMutation>()
     const approvalProofJobReferenceCounts = new Map<string, number>()
+    let pendingApprovalProofRefresh: Effect.Effect<ReadonlyArray<JobRecord>, FleetOperationError> | undefined
     const activeApprovalProofs = (): ReadonlyArray<ApprovalProof> =>
       [...approvalProofSessions.values()].flatMap(({ proofsByJob }) => [...proofsByJob.values()])
     const retainApprovalProofJob = (jobId: string): void => {
@@ -1605,13 +1612,23 @@ export const startHttpServer = async (
         }
       }
     }
-    const discardUncommittedApprovalProofSession = (request: IncomingMessage): void => {
-      const session = uncommittedApprovalProofSessionsByRequest.get(request)
-      if (session === undefined) return
-      uncommittedApprovalProofSessionsByRequest.delete(request)
+    const discardApprovalProofMutation = (request: IncomingMessage): void => {
+      const mutation = approvalProofMutationsByRequest.get(request)
+      if (mutation === undefined) return
+      approvalProofMutationsByRequest.delete(request)
       approvalProofSessionsByRequest.delete(request)
-      approvalProofSessions.delete(session.token)
-      releaseApprovalProofs(session)
+      const { session } = mutation
+      for (const jobId of session.proofsByJob.keys()) releaseApprovalProofJob(jobId)
+      session.proofsByJob.clear()
+      if (mutation.created) {
+        approvalProofSessions.delete(session.token)
+        return
+      }
+      session.expiresAt = mutation.previousExpiresAt
+      for (const [jobId, proof] of mutation.previousProofs) {
+        session.proofsByJob.set(jobId, proof)
+        retainApprovalProofJob(jobId)
+      }
     }
     const approvalProofSessionFor = (
       request: IncomingMessage,
@@ -1644,23 +1661,35 @@ export const startHttpServer = async (
     const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
       function*(session: ApprovalProofSession, observedAt: number) {
         const snapshot = pendingApprovalProofSnapshot
-        const disclosureGenerationAtStart = pendingApprovalProofDisclosureGeneration
+        let pendingJobIds: ReadonlySet<string>
         if (
           snapshot !== undefined &&
           observedAt - snapshot.observedAt < approvalProofPruneIntervalMs
         ) {
-          return
+          pendingJobIds = snapshot.pendingJobIds
         } else {
-          const pendingRecords = yield* service.pendingApprovals().pipe(
-            Effect.mapError(
-              (cause) =>
-                new FleetOperationError({
-                  cause,
-                  detail: "could not refresh approval proof retention",
-                  operation: "approval.proof.prune"
+          const disclosureGenerationAtStart = pendingApprovalProofDisclosureGeneration
+          let refresh = pendingApprovalProofRefresh
+          if (refresh === undefined) {
+            const refreshRequest = service.pendingApprovals().pipe(
+              Effect.mapError(
+                (cause) =>
+                  new FleetOperationError({
+                    cause,
+                    detail: "could not refresh approval proof retention",
+                    operation: "approval.proof.prune"
+                  })
+              ),
+              Effect.ensuring(
+                Effect.sync(() => {
+                  pendingApprovalProofRefresh = undefined
                 })
+              )
             )
-          )
+            refresh = yield* Effect.cached(refreshRequest)
+            pendingApprovalProofRefresh = refresh
+          }
+          const pendingRecords = yield* refresh
           const pendingRecordIds = new Set(pendingRecords.map((record) => record.id))
           const refreshedPendingJobIds = new Set(
             activeApprovalProofs().flatMap((proof) =>
@@ -1682,11 +1711,11 @@ export const startHttpServer = async (
               pendingJobIds: mergedPendingJobIds
             }
           }
-          const pendingJobIds = pendingApprovalProofSnapshot?.pendingJobIds ?? refreshedPendingJobIds
-          pruneApprovalProofSnapshot()
-          for (const jobId of session.proofsByJob.keys()) {
-            if (!pendingJobIds.has(jobId)) deleteApprovalProof(session, jobId)
-          }
+          pendingJobIds = pendingApprovalProofSnapshot?.pendingJobIds ?? refreshedPendingJobIds
+        }
+        pruneApprovalProofSnapshot()
+        for (const jobId of session.proofsByJob.keys()) {
+          if (!pendingJobIds.has(jobId)) deleteApprovalProof(session, jobId)
         }
       }
     )
@@ -1734,8 +1763,19 @@ export const startHttpServer = async (
             approvalProofSessions.delete(emptySession[0])
           }
           approvalProofSessions.set(token, session)
-          uncommittedApprovalProofSessionsByRequest.set(request, session)
+          approvalProofMutationsByRequest.set(request, {
+            created: true,
+            previousExpiresAt: session.expiresAt,
+            previousProofs: new Map(),
+            session
+          })
         } else {
+          approvalProofMutationsByRequest.set(request, {
+            created: false,
+            previousExpiresAt: session.expiresAt,
+            previousProofs: new Map(session.proofsByJob),
+            session
+          })
           yield* pruneApprovalProofSession(session, observedAt)
           renewApprovalProofSession(session, observedAt)
         }
@@ -1779,10 +1819,10 @@ export const startHttpServer = async (
         return proof !== undefined && proof.expiresAt > now()
       })
       if (!shouldSetCookie) {
-        discardUncommittedApprovalProofSession(request)
+        discardApprovalProofMutation(request)
         return {}
       }
-      uncommittedApprovalProofSessionsByRequest.delete(request)
+      approvalProofMutationsByRequest.delete(request)
       return { "set-cookie": approvalProofCookie(session.token, secure) }
     }
     if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
@@ -2534,7 +2574,7 @@ export const startHttpServer = async (
               Effect.result(Effect.andThen(authorized, dashboard(request)))
             )
             if (Result.isFailure(result)) {
-              discardUncommittedApprovalProofSession(request)
+              discardApprovalProofMutation(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
@@ -2592,7 +2632,7 @@ export const startHttpServer = async (
             })
             const result = await runRequest(Effect.result(effect))
             if (Result.isFailure(result)) {
-              discardUncommittedApprovalProofSession(request)
+              discardApprovalProofMutation(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
@@ -2780,7 +2820,7 @@ export const startHttpServer = async (
             })
             const result = await runRequest(Effect.result(effect))
             if (Result.isFailure(result)) {
-              discardUncommittedApprovalProofSession(request)
+              discardApprovalProofMutation(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
@@ -2992,7 +3032,7 @@ export const startHttpServer = async (
               Effect.result(Effect.andThen(authorized, dashboard(request)))
             )
             if (Result.isFailure(result)) {
-              discardUncommittedApprovalProofSession(request)
+              discardApprovalProofMutation(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
               return
