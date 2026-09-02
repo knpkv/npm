@@ -4061,6 +4061,56 @@ describe("Control Center API handlers", () => {
       )
     }))
 
+  it.effect("closes a live stream on server drain without a transport token", () =>
+    Effect.gen(function*() {
+      const activeSubscriptions = yield* Ref.make(0)
+      const closed = yield* Deferred.make<void>()
+      const lifecycle = yield* ServerLifecycle.make
+      const sessionWithoutToken = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, session)
+      })
+      const trackedHandler = liveEventHandlersLayer.pipe(
+        Layer.provide(sessionWithoutToken),
+        Layer.provide(Layer.succeed(Auth, streamAuthentication)),
+        Layer.provide(LiveStreamAdmission.layer),
+        Layer.provide(Layer.succeed(LiveEvents, {
+          open: () =>
+            Ref.update(activeSubscriptions, (count) => count + 1).pipe(
+              Effect.as(Stream.never.pipe(
+                Stream.ensuring(
+                  Ref.update(activeSubscriptions, (count) => count - 1).pipe(
+                    Effect.andThen(Deferred.succeed(closed, undefined))
+                  )
+                )
+              ))
+            )
+        })),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+      )
+
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["liveEvents"])
+        const eventStream = yield* client.liveEvents.stream({ headers: {}, query: {} })
+        const drained = yield* Stream.runDrain(eventStream).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 1)
+
+        yield* lifecycle.beginDrain
+        yield* Fiber.join(drained)
+        yield* Deferred.await(closed)
+
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 0)
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionWithoutToken,
+          trackedHandler
+        ]),
+        Effect.provideService(ServerLifecycle, lifecycle)
+      )
+    }))
+
   it.effect("contains periodic authentication defects at the raw SSE boundary", () =>
     Effect.gen(function*() {
       const secretCanary = "periodic-auth-defect-secret-canary"

@@ -1777,15 +1777,13 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
             > => Effect.succeed(Context.getOption(context, CurrentSessionToken))
           )
           const token = Option.isSome(providedToken) ? providedToken : currentSessionToken(request)
+          const reauthentication = Option.match(token, {
+            // Direct handler tests bypass cookie middleware and omit the transport cookie.
+            onNone: () => Effect.never,
+            onSome: (sessionToken) => awaitSessionEnd(auth, sessionToken, session)
+          })
           return eventStream.pipe(
-            Stream.interruptWhen(
-              Option.match(token, {
-                // Direct handler tests bypass cookie middleware and omit the transport cookie.
-                onNone: () => Effect.never,
-                onSome: (sessionToken) =>
-                  Effect.race(awaitSessionEnd(auth, sessionToken, session), lifecycle.awaitDrain)
-              })
-            )
+            Stream.interruptWhen(Effect.race(reauthentication, lifecycle.awaitDrain))
           )
         }))
     })
