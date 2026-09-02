@@ -13,6 +13,7 @@ describe("dashboard model", () => {
           createdAt: 1,
           id: "job-1",
           payload: { kind: "nix.check" },
+          approvalAvailable: true,
           status: "pending_approval",
           updatedAt: 1
         }

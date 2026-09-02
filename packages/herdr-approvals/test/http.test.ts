@@ -317,6 +317,20 @@ esac
             },
             "submitter@example.com"
           )
+          const prooflessPending: JobRecord = {
+            actor: "submitter@example.com",
+            approvalNonce: null,
+            approvedBy: null,
+            createdAt: 900,
+            error: null,
+            hash: "b".repeat(64),
+            id: "proofless-pending",
+            payload: pending.payload,
+            result: null,
+            status: "pending_approval",
+            updatedAt: 900
+          }
+          yield* store.put(prooflessPending)
           let failApproval = true
           const retryableFleet: FleetService = {
             ...fleet,
@@ -359,6 +373,13 @@ esac
           expect(dashboard).not.toContain("secret-value")
           expect(dashboard).not.toContain(pending.hash)
           expect(dashboard).not.toContain("nonce-disclosure")
+          const dashboardSnapshot = Schema.decodeUnknownSync(DashboardSnapshot)(JSON.parse(dashboard))
+          expect(
+            dashboardSnapshot.pendingApprovals.local.find(({ id }) => id === prooflessPending.id)
+          ).toMatchObject({ approvalAvailable: false, id: prooflessPending.id })
+          expect(
+            dashboardSnapshot.pendingApprovals.local.find(({ id }) => id === pending.id)
+          ).toMatchObject({ approvalAvailable: true, id: pending.id })
           const page = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())
           )
@@ -380,6 +401,19 @@ esac
           )
           expect(withoutProof.status).toBe(409)
           yield* Effect.promise(() => withoutProof.text())
+
+          const prooflessDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${prooflessPending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(prooflessDecision.status).toBe(409)
+          yield* Effect.promise(() => prooflessDecision.text())
 
           const transientFailure = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
@@ -1337,7 +1371,7 @@ esac
       const rawBaseBytes = Buffer.byteLength(JSON.stringify(base))
       const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)({
         ...base,
-        records: [record],
+        records: [{ ...record, approvalAvailable: false }],
         status: {
           ...base.status,
           revision: "x".repeat(

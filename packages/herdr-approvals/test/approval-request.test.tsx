@@ -62,11 +62,11 @@ const dashboardFor = (record: JobRecord): DashboardSnapshot => ({
   observedAt: 2_000,
   pendingApprovals: {
     failures: [],
-    local: record.status === "pending_approval" ? [record] : [],
+    local: record.status === "pending_approval" ? [sanitizeJobRecord(record)] : [],
     nextCursors: [],
     remote: []
   },
-  records: [record],
+  records: [sanitizeJobRecord(record)],
   status: {
     applyConfigured: false,
     branch: "main",
@@ -229,8 +229,10 @@ describe("sanitized approval requests", () => {
   it("redacts standalone encoded credential assignments", () => {
     const credential = "password%3Dleaked-canary"
     const encodedPath = "https://example.test/repo/password%253Dleaked-canary"
+    const colonPath = "https://example.test/repo/password%3Aleaked-canary"
+    const deeplyEncodedColonPath = "https://example.test/repo/password%253Aleaked-canary"
     const visible = "release%2Fcandidate"
-    for (const ref of [credential, encodedPath]) {
+    for (const ref of [credential, encodedPath, colonPath, deeplyEncodedColonPath]) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
       const projection = sanitizeJobRecord({
         ...recordFor("pending_approval"),
@@ -242,7 +244,16 @@ describe("sanitized approval requests", () => {
     expect(request.fields[0]?.value).toContain("%255Bredacted%2520credential%255D")
     const standaloneRequest = approvalRequestFor({ kind: "nix.apply", ref: credential })
     expect(standaloneRequest.fields[0]?.value).toContain("%5Bredacted%20credential%5D")
+    expect(approvalRequestFor({ kind: "nix.apply", ref: colonPath }).fields[0]?.value).toContain(
+      "%5Bredacted%20credential%5D"
+    )
+    expect(approvalRequestFor({ kind: "nix.apply", ref: deeplyEncodedColonPath }).fields[0]?.value).toContain(
+      "%255Bredacted%2520credential%255D"
+    )
     expect(approvalRequestFor({ kind: "nix.apply", ref: visible }).fields[0]?.value).toBe(visible)
+    expect(
+      approvalRequestFor({ kind: "nix.apply", ref: "https://example.test/repo/release%3Acandidate" }).fields[0]?.value
+    ).toBe("https://example.test/repo/release%3Acandidate")
     expect(approvalRequestFor({ kind: "nix.apply", ref: "release%252Fcandidate" }).fields[0]?.value).toBe(
       "release%252Fcandidate"
     )

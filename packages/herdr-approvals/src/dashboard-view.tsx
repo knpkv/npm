@@ -124,7 +124,7 @@ const ApprovalActions = ({
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
   readonly record: SanitizedJobRecord
 }) => {
-  if (onDecision === undefined || record.status !== "pending_approval") {
+  if (onDecision === undefined || record.status !== "pending_approval" || !record.approvalAvailable) {
     return null
   }
   const submit =
@@ -174,11 +174,11 @@ const AgendaItem = ({
       modified: event.ctrlKey || event.metaKey,
       shift: event.shiftKey
     })
-    if (decision === null || record.status !== "pending_approval") return
+    if (decision === null || record.status !== "pending_approval" || !record.approvalAvailable) return
     event.preventDefault()
     onDecision({ decision, jobId: record.id })
   }
-  const actionable = onDecision !== undefined && record.status === "pending_approval"
+  const actionable = onDecision !== undefined && record.status === "pending_approval" && record.approvalAvailable
   return (
     <Surface
       as="article"

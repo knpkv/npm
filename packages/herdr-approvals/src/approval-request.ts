@@ -49,6 +49,7 @@ export const SanitizedJobRecord = Schema.Struct({
   rejectedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   expiredAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
   status: JobStatus,
+  approvalAvailable: Schema.Boolean,
   payload: JobPayload,
   worker: Schema.optionalKey(AgentWorkerIdentity),
   connectTarget: Schema.optionalKey(AgentConnectTarget),
@@ -63,7 +64,7 @@ const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n]+))/giu
 const credentialUri = /(^|[^\w])\/\/[^/?#]*@/gu
 const encodedCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))%(?:25){0,2}3d)([^/?#\s&]*)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))%(?:25){0,2}(?:3d|3a))([^/?#\s&]*)/giu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
@@ -235,6 +236,7 @@ export const sanitizeJobRecord = (record: JobRecord): SanitizedJobRecord => {
       createdAt: record.createdAt,
       id: record.id,
       status: record.status,
+      approvalAvailable: record.status === "pending_approval" && record.approvalNonce !== null,
       payload: sanitizeJobPayload(record.payload),
       updatedAt: record.updatedAt
     },

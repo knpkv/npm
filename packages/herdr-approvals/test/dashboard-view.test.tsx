@@ -16,6 +16,7 @@ const snapshot = (approvalsEnabled: boolean): DashboardSnapshot => {
     hash: "hash-1",
     id: "job-1",
     payload: { kind: "nix.apply", ref: "main" },
+    approvalAvailable: true,
     rejectedAt: null,
     rejectedBy: null,
     result: null,
@@ -88,6 +89,7 @@ const renderApprovedFailure = (): string => {
     ...snapshot(true).records[0],
     approvalExpiresAt: null,
     approvalNonce: null,
+    approvalAvailable: false,
     approvedAt: 2_000,
     approvedBy: "owner@example.com",
     error: "hostd restarted while this job was running",
@@ -167,6 +169,32 @@ describe("dashboard approval capability", () => {
     expect(render(true)).toContain("/v1/jobs/job-1/reject")
   })
 
+  it("hides decisions when a pending record has no approval proof", () => {
+    const base = snapshot(true)
+    const pending = { ...base.records[0], approvalAvailable: false, approvalNonce: null }
+    const html = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={() => undefined}
+        onDisableNotifications={undefined}
+        onRefresh={undefined}
+        onEnableNotifications={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={{
+          ...base,
+          pendingApprovals: { ...base.pendingApprovals, local: [pending] },
+          records: [pending]
+        }}
+      />
+    )
+    expect(html).not.toContain("/v1/jobs/job-1/approve")
+    expect(html).not.toContain("/v1/jobs/job-1/reject")
+    expect(html).not.toContain("Approval keyboard shortcuts")
+  })
+
   it("encodes schema-valid job identifiers in approval form actions", () => {
     const base = snapshot(true)
     const pending = { ...base.records[0], id: "job/with-slash" }
@@ -203,6 +231,7 @@ describe("dashboard approval capability", () => {
       ...base.records[0],
       approvalExpiresAt: null,
       approvalNonce: null,
+      approvalAvailable: false,
       connectTarget: {
         agentId: "agent-worker",
         host: "PI",
