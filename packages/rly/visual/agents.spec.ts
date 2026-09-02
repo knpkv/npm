@@ -142,7 +142,7 @@ test("RD-12 and RD-13 keep one Relay control set usable as a desktop rail and iP
       }))
     ).toMatchObject({ overflowY: "auto" })
     expect(await scrollRegion.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
-    const landscapeThread = landscapeSheet.getByRole("region", { name: "Relay thread" })
+    const landscapeThread = landscapeSheet.getByRole("region", { name: /^Relay(?: \(.+\))? thread$/ })
     await landscapeThread.scrollIntoViewIfNeeded()
     expect((await landscapeThread.boundingBox())?.height).toBeGreaterThan(0)
     const landscapeDraft = landscapeSheet.getByRole("textbox", { name: "Message Relay" })
