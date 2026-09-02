@@ -969,6 +969,84 @@ esac
     ).pipe(provideNodeServices)
   }, 30_000)
 
+  it.effect("does not retain proof sessions when dashboard disclosure fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-session-failure-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    const headers = { "tailscale-user-login": "andrey@example.com" }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.put(pendingRecord("ALPHA", 0))
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          let failStatus = true
+          const instrumentedFleet: FleetService = {
+            ...fleet,
+            status: () =>
+              failStatus
+                ? Effect.fail(
+                  new FleetOperationError({
+                    cause: "test",
+                    detail: "dashboard status unavailable",
+                    operation: "fleet.status"
+                  })
+                )
+                : fleet.status()
+          }
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, instrumentedFleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          for (let attempt = 0; attempt < 256; attempt += 1) {
+            const response = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+            expect(response.status).toBe(503)
+            yield* Effect.promise(() => response.text())
+          }
+          failStatus = false
+          const recovered = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          expect(recovered.status).toBe(200)
+          expect(recovered.headers.get("set-cookie")).toContain("fleet_approval_proof_session=")
+          yield* Effect.promise(() => recovered.text())
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  }, 30_000)
+
   it.effect("marks notification counts incomplete when fleet discovery fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
     const unavailable = new TailscaleCommandError({

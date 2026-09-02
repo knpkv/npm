@@ -199,6 +199,10 @@ describe("sanitized approval requests", () => {
         ref: "https://mirror.test/?ref=https%3A%2F%2Fdeploy-user%3Aencoded-password%40example.test%2Frepo"
       },
       {
+        redacted: "%255Bredacted%2520credential%255D",
+        ref: "https://mirror.test/?ref=https%3A%2F%2Fdeploy-user%253Aencoded-password%2540example.test%2Frepo"
+      },
+      {
         redacted: "[redacted credential]",
         ref: "//deploy-user:protocol-canary@example.test/repo"
       }
@@ -228,6 +232,18 @@ describe("sanitized approval requests", () => {
         ref: "https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253Fsha%253Drelease"
       }).fields[0]?.value
     ).toBe("https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253Fsha%253Drelease")
+  })
+
+  it("redacts encoded credential assignments inside safe coordinates", () => {
+    const ref = "https://mirror.test/?ref=password%3Dleaked-canary"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("leaked-canary")
+    expect(encoded).toContain("%5Bredacted%20credential%5D")
   })
 
   it("redacts unsafe query values through raw whitespace", () => {

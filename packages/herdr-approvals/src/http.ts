@@ -1567,6 +1567,7 @@ export const startHttpServer = async (
     } | undefined
     let pendingApprovalProofDisclosureGeneration = 0
     const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
+    const uncommittedApprovalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
     const activeApprovalProofs = (): ReadonlyArray<ApprovalProof> =>
       [...approvalProofSessions.values()].flatMap(({ proofsByJob }) => [...proofsByJob.values()])
     const pruneApprovalProofSnapshot = (): void => {
@@ -1574,6 +1575,16 @@ export const startHttpServer = async (
       const activeJobIds = new Set(activeApprovalProofs().map(({ jobId }) => jobId))
       for (const jobId of pendingApprovalProofSnapshot.pendingJobIds) {
         if (!activeJobIds.has(jobId)) pendingApprovalProofSnapshot.pendingJobIds.delete(jobId)
+      }
+    }
+    const discardUncommittedApprovalProofSession = (request: IncomingMessage): void => {
+      const session = uncommittedApprovalProofSessionsByRequest.get(request)
+      if (session === undefined) return
+      uncommittedApprovalProofSessionsByRequest.delete(request)
+      approvalProofSessionsByRequest.delete(request)
+      approvalProofSessions.delete(session.token)
+      for (const jobId of session.proofsByJob.keys()) {
+        pendingApprovalProofSnapshot?.pendingJobIds.delete(jobId)
       }
     }
     const approvalProofSessionFor = (
@@ -1693,6 +1704,7 @@ export const startHttpServer = async (
             approvalProofSessions.delete(emptySession[0])
           }
           approvalProofSessions.set(token, session)
+          uncommittedApprovalProofSessionsByRequest.set(request, session)
         } else {
           yield* pruneApprovalProofSession(session, observedAt)
           renewApprovalProofSession(session, observedAt)
@@ -1729,14 +1741,19 @@ export const startHttpServer = async (
       request: IncomingMessage,
       records: ReadonlyArray<SanitizedJobRecord>,
       secure: boolean
-    ): Readonly<Record<string, ResponseHeaderValue>> => {
+    ) => {
       const session = approvalProofSessionFor(request, now())
       if (session === undefined) return {}
       const shouldSetCookie = records.some((record) => {
         const proof = session.proofsByJob.get(record.id)
         return proof !== undefined && proof.expiresAt > now()
       })
-      return shouldSetCookie ? { "set-cookie": approvalProofCookie(session.token, secure) } : {}
+      if (!shouldSetCookie) {
+        discardUncommittedApprovalProofSession(request)
+        return {}
+      }
+      uncommittedApprovalProofSessionsByRequest.delete(request)
+      return { "set-cookie": approvalProofCookie(session.token, secure) }
     }
     if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
       throw new LanWorkConfigurationError({
@@ -2487,6 +2504,7 @@ export const startHttpServer = async (
               Effect.result(Effect.andThen(authorized, dashboard(request)))
             )
             if (Result.isFailure(result)) {
+              discardUncommittedApprovalProofSession(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
@@ -2544,6 +2562,7 @@ export const startHttpServer = async (
             })
             const result = await runRequest(Effect.result(effect))
             if (Result.isFailure(result)) {
+              discardUncommittedApprovalProofSession(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
@@ -2731,6 +2750,7 @@ export const startHttpServer = async (
             })
             const result = await runRequest(Effect.result(effect))
             if (Result.isFailure(result)) {
+              discardUncommittedApprovalProofSession(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
             } else {
@@ -2942,6 +2962,7 @@ export const startHttpServer = async (
               Effect.result(Effect.andThen(authorized, dashboard(request)))
             )
             if (Result.isFailure(result)) {
+              discardUncommittedApprovalProofSession(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
               return

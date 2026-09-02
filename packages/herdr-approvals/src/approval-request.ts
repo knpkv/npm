@@ -65,59 +65,28 @@ const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const encodedUriMaxDepth = 3
 
-type EncodedUri =
+type EncodedText =
   | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
   | { readonly _tag: "malformed" | "overflow" }
 
-const encodedUri = (value: string): EncodedUri | undefined => {
+const encodedText = (value: string): EncodedText | undefined => {
+  if (!value.includes("%")) return undefined
   let candidate = value
-  for (let layers = 0; layers <= encodedUriMaxDepth; layers += 1) {
-    if (encodedUriPrefix.test(candidate)) return { _tag: "encoded", layers, value: candidate }
-    if (layers === encodedUriMaxDepth || !candidate.includes("%")) {
-      return layers > 0 && candidate.includes("%") ? { _tag: "overflow" } : undefined
-    }
+  for (let layers = 1; layers <= encodedUriMaxDepth; layers += 1) {
     try {
       const decoded = decodeURIComponent(candidate)
-      if (decoded === candidate) return undefined
+      if (decoded === candidate) return { _tag: "malformed" }
       candidate = decoded
     } catch {
       return { _tag: "malformed" }
     }
+    if (!candidate.includes("%")) return { _tag: "encoded", layers, value: candidate }
   }
   return { _tag: "overflow" }
 }
 
-const sanitizeUriQueryParameters = (value: string): string => {
-  const encoded = encodedUri(value)
-  if (encoded === undefined) {
-    const sanitizedUserInfo = value.replace(
-      credentialUri,
-      (_match, prefix: string) => `${prefix}//[redacted credential]@`
-    )
-    return sanitizedUserInfo.replace(
-      /([?&#])([^=#&\s]+)=([^&#]*)/gu,
-      (_match, separator: string, key: string, parameterValue: string) => {
-        const sanitizedValue = safeUriQueryKeys.has(key.toLowerCase())
-          ? sanitizeUriQueryParameters(parameterValue)
-          : redactedCredential
-        return `${separator}${key}=${sanitizedValue}`
-      }
-    )
-  }
-  if (encoded._tag !== "encoded") return redactedCredential
-  try {
-    let sanitized = sanitizeUriQueryParameters(decodeURIComponent(encoded.value))
-    for (let layer = 0; layer <= encoded.layers; layer += 1) {
-      sanitized = encodeURIComponent(sanitized)
-    }
-    return sanitized
-  } catch {
-    return redactedCredential
-  }
-}
-
-const sanitizeRequestText = (value: string, maximumLength: number): string => {
-  const sanitized = sanitizeUriQueryParameters(value)
+const sanitizeCredentialText = (value: string): string =>
+  value
     .replace(credentialDigestAuthorization, "$1[redacted credential]")
     .replace(
       credentialAuthorization,
@@ -129,6 +98,37 @@ const sanitizeRequestText = (value: string, maximumLength: number): string => {
       (match, prefix: string, credential: string) =>
         credential === redactedCredential ? match : `${prefix}${redactedCredential}`
     )
+
+const sanitizeEncodedUri = (value: string): string => {
+  const encoded = encodedText(value)
+  if (encoded === undefined) return sanitizeUriQueryParameters(value)
+  if (encoded._tag !== "encoded") return redactedCredential
+  let sanitized = sanitizeCredentialText(sanitizeUriQueryParameters(encoded.value))
+  for (let layer = 0; layer < encoded.layers; layer += 1) {
+    sanitized = encodeURIComponent(sanitized)
+  }
+  return sanitized
+}
+
+const sanitizeUriQueryParameters = (value: string): string => {
+  if (encodedUriPrefix.test(value)) return sanitizeEncodedUri(value)
+  const sanitizedUserInfo = value.replace(
+    credentialUri,
+    (_match, prefix: string) => `${prefix}//[redacted credential]@`
+  )
+  return sanitizedUserInfo.replace(
+    /([?&#])([^=#&\s]+)=([^&#]*)/gu,
+    (_match, separator: string, key: string, parameterValue: string) => {
+      const sanitizedValue = safeUriQueryKeys.has(key.toLowerCase())
+        ? sanitizeEncodedUri(parameterValue)
+        : redactedCredential
+      return `${separator}${key}=${sanitizedValue}`
+    }
+  )
+}
+
+const sanitizeRequestText = (value: string, maximumLength: number): string => {
+  const sanitized = sanitizeCredentialText(sanitizeUriQueryParameters(value))
   return sanitized.length <= maximumLength
     ? sanitized
     : `${sanitized.slice(0, maximumLength - redactedCredential.length)}${redactedCredential}`
