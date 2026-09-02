@@ -111,6 +111,7 @@ import {
   type LanWorkCryptoError,
   type LanWorkListenerOptions,
   LanWorkOriginRejectedError,
+  type LanWorkPairing,
   type LanWorkPairingExpiredError,
   LanWorkPairingMalformedError,
   type LanWorkPairingRejectedError,
@@ -244,10 +245,12 @@ type PeerPendingError =
 const json = <Value>(
   response: ServerResponse,
   status: number,
-  value: Value
+  value: Value,
+  headers: Readonly<Record<string, string>> = {}
 ): void => {
   response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8"
+    "content-type": "application/json; charset=utf-8",
+    ...headers
   })
   response.end(`${JSON.stringify(value)}\n`)
 }
@@ -292,6 +295,7 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       }
     case "FleetOperationError":
     case "TerminalTransportError":
+      return { status: 503, body: { error: error._tag, detail: error.detail } }
     case "LanWorkCryptoError":
       return { status: 503, body: { error: error._tag, detail: error.operation } }
     case "LanWorkConfigurationError":
@@ -347,7 +351,9 @@ const sameOrigin = (request: IncomingMessage, expected: string) => {
 }
 
 export const listenerAuthority = (address: string, port: number): string =>
-  new URL(`http://${address}:${port}/`).host.toLowerCase()
+  new URL(
+    `http://${address.includes(":") && !address.startsWith("[") ? `[${address}]` : address}:${port}/`
+  ).host.toLowerCase()
 
 const approvalIcon =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111418"/><path d="M146 264l72 72 148-160" fill="none" stroke="#a6e3a1" stroke-linecap="round" stroke-linejoin="round" stroke-width="52"/></svg>`
@@ -1396,15 +1402,16 @@ export const startHttpServer = async (
         ApiError,
         HttpClient.HttpClient | Tailscale
       >,
-      status = 200
+      status = 200,
+      headers: Readonly<Record<string, string>> = {}
     ): Promise<void> => {
       const result = await runRequest(Effect.result(effect))
       if (Result.isSuccess(result)) {
-        json(response, status, result.success)
+        json(response, status, result.success, headers)
         return
       }
       const mapped = apiError(result.failure)
-      json(response, mapped.status, mapped.body)
+      json(response, mapped.status, mapped.body, headers)
     }
     const statePath = `${config.stateDirectory}/approval-app.sqlite`
     const approvalStore = await httpRuntime.runPromise(
@@ -1441,9 +1448,7 @@ export const startHttpServer = async (
         detail: "LAN Work wildcard listeners require an explicit browser host"
       })
     }
-    const lanWorkPairing = options.lanWork === undefined
-      ? null
-      : await httpRuntime.runPromise(makeLanWorkPairing(now))
+    let lanWorkPairing: LanWorkPairing | null = null
     const chat = await httpRuntime.runPromise(makeCoordinatorChat({
       config,
       fleet: service,
@@ -1885,6 +1890,7 @@ export const startHttpServer = async (
             return
           }
           if (mode === "lan" && lanWorkPairing !== null) {
+            const pairing = lanWorkPairing
             const origin = header(request, "origin")
             const requireLanOrigin = (required: boolean): Effect.Effect<void, LanWorkOriginRejectedError> =>
               (origin === expectedOrigin() || (!required && origin === undefined))
@@ -1894,7 +1900,7 @@ export const startHttpServer = async (
                     detail: "LAN Work requires the exact browser origin"
                   })
                 )
-            const authorizeLanSession = lanWorkPairing.authorizeSession(
+            const authorizeLanSession = pairing.authorizeSession(
               readLanWorkSessionCookie(header(request, "cookie"))
             )
             const readPairRequest = Effect.fn("ApprovalHttp.readLanPairRequest")(function*() {
@@ -1996,7 +2002,7 @@ export const startHttpServer = async (
                       })
                     }
                     const requestBody = yield* readPairRequest()
-                    return yield* lanWorkPairing.consume(requestBody.pairingCode)
+                    return yield* pairing.consume(requestBody.pairingCode)
                   })
                 )
               )
@@ -2052,7 +2058,9 @@ export const startHttpServer = async (
                 requireLanOrigin(true).pipe(
                   Effect.andThen(authorizeLanSession),
                   Effect.andThen(work.snapshots(now()))
-                )
+                ),
+                200,
+                { "cache-control": "no-store" }
               )
               return
             }
@@ -2716,7 +2724,7 @@ export const startHttpServer = async (
       return {
         server,
         url: `${tls === null ? "http" : "https"}://${
-          mode === "lan" && options.lanWork?.host !== undefined
+          mode === "lan"
             ? expectedHost
             : `${bound.address}:${bound.port}`
         }`
@@ -2744,6 +2752,9 @@ export const startHttpServer = async (
     if (tailscaleIp === null) {
       const work = await listen(workBindAddress, config.port, "work")
       for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
+      lanWorkPairing = options.lanWork === undefined
+        ? null
+        : await httpRuntime.runPromise(makeLanWorkPairing(now))
       acceptingRequests = true
       return {
         url: local.url,
@@ -2781,6 +2792,9 @@ export const startHttpServer = async (
         )
       )
     }
+    lanWorkPairing = options.lanWork === undefined
+      ? null
+      : await httpRuntime.runPromise(makeLanWorkPairing(now))
     acceptingRequests = true
     return {
       url: local.url,

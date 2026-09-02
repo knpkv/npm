@@ -256,6 +256,7 @@ describe("LAN Work pairing boundary", () => {
 
       const work = yield* Effect.promise(() => fetch(`${lanUrl}/v1/work`, { headers: { cookie, origin } }))
       expect(work.status).toBe(200)
+      expect(work.headers.get("cache-control")).toBe("no-store")
       const workBody = yield* Effect.promise(() => work.json())
       expect(
         Schema.decodeUnknownSync(Schema.Struct({ now: Schema.Struct({ goals: Schema.Array(Schema.Unknown) }) }))(
