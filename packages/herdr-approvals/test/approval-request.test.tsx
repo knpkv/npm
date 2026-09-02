@@ -177,6 +177,22 @@ describe("sanitized approval requests", () => {
     )
   })
 
+  it("redacts signed URLs embedded in coordinate text", () => {
+    const refs = [
+      "mirror=https://example.test/repo?X-Amz-Signature=leaked-canary",
+      "mirror=https://example.test/repo?ref=main"
+    ]
+    const requests = refs.map((ref) => approvalRequestFor({ kind: "nix.apply", ref }))
+    const projections = refs.map((ref) =>
+      sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+    )
+    expect(JSON.stringify({ request: requests[0], projection: projections[0] })).not.toContain("leaked-canary")
+    expect(JSON.stringify({ request: requests[1], projection: projections[1] })).toContain("ref=main")
+  })
+
   it("keeps maximum-length sanitized payloads within their source schemas", () => {
     const ref = "token=x ".repeat(512)
     const sanitized = sanitizeJobPayload({ kind: "nix.apply", ref })

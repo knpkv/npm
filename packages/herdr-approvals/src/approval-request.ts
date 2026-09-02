@@ -65,11 +65,10 @@ const uriQueryParameter = /([?&])([^=#&\s]+)=(\[redacted credential\]|[^&#\s]*)/
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
-  const uriLike = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(value)
   const sanitized = value
     .replace(credentialUri, "://[redacted credential]@")
     .replace(
-      uriLike ? uriQueryParameter : /$^/gu,
+      uriQueryParameter,
       (match, separator: string, key: string) =>
         safeUriQueryKeys.has(key.toLowerCase()) ? match : `${separator}${key}=${redactedCredential}`
     )

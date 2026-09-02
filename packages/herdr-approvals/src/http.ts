@@ -147,7 +147,7 @@ type ApprovalProof = {
   readonly nonce: string
 }
 type ApprovalProofSession = {
-  readonly expiresAt: number
+  expiresAt: number
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
 }
@@ -158,9 +158,9 @@ type ApprovalProofIssuer = (
 const approvalProofCookiePrefix = "fleet_approval_proof_"
 const approvalProofMaxAgeSeconds = 15 * 60
 const approvalProofSessionMaxCount = 256
-const approvalProofsPerSessionMaxCount = 256
 
 const approvalProofCookieName = `${approvalProofCookiePrefix}session`
+const approvalProofLifetimeMs = approvalProofMaxAgeSeconds * 1_000
 
 const cookieValue = (request: IncomingMessage, name: string): string | undefined =>
   header(request, "cookie")
@@ -1566,6 +1566,16 @@ export const startHttpServer = async (
       }
       return session
     }
+    const renewApprovalProofSession = (
+      session: ApprovalProofSession,
+      observedAt: number
+    ): void => {
+      const expiresAt = observedAt + approvalProofLifetimeMs
+      session.expiresAt = expiresAt
+      for (const [jobId, proof] of session.proofsByJob) {
+        session.proofsByJob.set(jobId, { ...proof, expiresAt })
+      }
+    }
     const issueApprovalProofs: ApprovalProofIssuer = Effect.fn("ApprovalHttp.issueApprovalProofs")(
       function*(records: ReadonlyArray<JobRecord>, request: IncomingMessage) {
         const observedAt = now()
@@ -1599,22 +1609,19 @@ export const startHttpServer = async (
             approvalProofSessions.delete(oldest)
           }
           approvalProofSessions.set(token, session)
+        } else {
+          renewApprovalProofSession(session, observedAt)
         }
         for (const record of pendingRecords) {
           if (record.approvalNonce === null) continue
           if (!session.proofsByJob.has(record.id)) {
-            while (session.proofsByJob.size >= approvalProofsPerSessionMaxCount) {
-              const oldest = session.proofsByJob.keys().next().value
-              if (oldest === undefined) break
-              session.proofsByJob.delete(oldest)
-            }
+            session.proofsByJob.set(record.id, {
+              expiresAt: session.expiresAt,
+              hash: record.hash,
+              jobId: record.id,
+              nonce: record.approvalNonce
+            })
           }
-          session.proofsByJob.set(record.id, {
-            expiresAt: session.expiresAt,
-            hash: record.hash,
-            jobId: record.id,
-            nonce: record.approvalNonce
-          })
         }
         approvalProofSessionsByRequest.set(request, session)
       }
