@@ -40,7 +40,11 @@ import {
   requireSupportedPublicOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
-import { resolveCodeCommitBootstrapUrl, resolveCodeCommitPublicOrigin } from "../src/server/internal/PublicOrigin.js"
+import {
+  resolveCodeCommitBootstrapUrl,
+  resolveCodeCommitBootstrapUrlForBind,
+  resolveCodeCommitPublicOrigin
+} from "../src/server/internal/PublicOrigin.js"
 import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
 
 const ownerToken = "aa".repeat(32)
@@ -702,6 +706,12 @@ describe("CodeCommit web security boundary", () => {
       if (Result.isFailure(unsupported)) expect(unsupported.failure._tag).toBe("UnsafeServerHostnameError")
       expect(yield* resolveCodeCommitBootstrapUrl("http://localhost:5173", 3000, secrets)).toContain(
         "#bootstrap_token="
+      )
+      expect(yield* resolveCodeCommitBootstrapUrlForBind("http://localhost:5173", 3000, 3001, secrets)).toContain(
+        "http://127.0.0.1:3001/#bootstrap_token="
+      )
+      expect(yield* resolveCodeCommitBootstrapUrlForBind("http://localhost:5173", 3000, 3000, secrets)).toContain(
+        "http://localhost:5173/#bootstrap_token="
       )
     }))
 

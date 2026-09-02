@@ -20,3 +20,16 @@ export const resolveCodeCommitBootstrapUrl = Effect.fn("CodeCommitServer.resolve
     return ownerSessionUrlForOrigin(publicOrigin, secrets)
   }
 )
+
+/** Keep a retrying backend off the stale Vite proxy port; advertise it directly. */
+export const resolveCodeCommitBootstrapUrlForBind = Effect.fn("CodeCommitServer.resolveBootstrapUrlForBind")(
+  function*(
+    configuredOrigin: string | undefined,
+    requestedPort: number,
+    actualPort: number,
+    secrets: OwnerSessionSecretsContract
+  ) {
+    const originOverride = requestedPort === actualPort ? configuredOrigin : undefined
+    return yield* resolveCodeCommitBootstrapUrl(originOverride, actualPort, secrets)
+  }
+)

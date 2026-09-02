@@ -57,7 +57,7 @@ import {
   requireLoopbackHostname
 } from "./internal/OwnerSessionSecurity.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
-import { resolveCodeCommitBootstrapUrl } from "./internal/PublicOrigin.js"
+import { resolveCodeCommitBootstrapUrlForBind } from "./internal/PublicOrigin.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
 export {
@@ -411,7 +411,8 @@ const updatePortOnConflict = (
 
 export const CodeCommitServerLive = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
-  const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
+  const requestedPort = yield* Port.pipe(Effect.orDie)
+  const portRef = yield* Ref.make(requestedPort)
   const retriesRef = yield* Ref.make(10)
   const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
@@ -422,8 +423,9 @@ export const CodeCommitServerLive = Effect.gen(function*() {
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSessionSecrets(directOrigin)
-      const bootstrapUrl = yield* resolveCodeCommitBootstrapUrl(
+      const bootstrapUrl = yield* resolveCodeCommitBootstrapUrlForBind(
         Option.getOrUndefined(publicOriginOverride),
+        requestedPort,
         p,
         security
       )
