@@ -7,6 +7,7 @@ import { PermissionService, type PermissionState } from "@knpkv/codecommit-core/
 import { PermissionGate } from "@knpkv/codecommit-core/PermissionService/PermissionGate.js"
 import {
   Cause,
+  Clock,
   Crypto,
   Deferred,
   Duration,
@@ -618,6 +619,29 @@ describe("CodeCommit web security boundary", () => {
       expect(failures.filter((result) => result.failure.message === "Bootstrap confirmation temporarily unavailable"))
         .toHaveLength(1)
       expect((yield* Ref.get(secrets.bootstrapAttemptState)).failedAttempts).toBe(5)
+    }))
+
+  it.effect("releases an accepted bootstrap reservation when the request is interrupted", () =>
+    Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
+      const clockGate = yield* Deferred.make<number>()
+      const testClock = yield* TestClock.testClockWith((clock) => Effect.succeed(clock))
+      const blockedClock: Clock.Clock = {
+        ...testClock,
+        currentTimeMillis: Deferred.await(clockGate)
+      }
+      const request = authorizeBootstrapRequest({
+        authorization: `Bearer ${bootstrapToken}`,
+        host: "127.0.0.1:3000",
+        origin: authorityOrigin
+      }, secrets).pipe(Effect.provideService(Clock.Clock, blockedClock))
+      const fiber = yield* Effect.forkChild(request)
+
+      yield* Effect.yieldNow
+      expect((yield* Ref.get(secrets.bootstrapAttemptState)).inFlight).toBe(1)
+      yield* Fiber.interrupt(fiber)
+      expect((yield* Ref.get(secrets.bootstrapAttemptState)).inFlight).toBe(0)
+      expect(yield* Ref.get(secrets.bootstrapAvailable)).toBe(true)
     }))
 
   it.effect("starts bootstrap expiry only after server readiness", () =>

@@ -217,7 +217,7 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
     const suppliedToken = request.authorization !== undefined && request.authorization.startsWith("Bearer ")
       ? request.authorization.slice("Bearer ".length)
       : undefined
-    const admission = yield* Ref.modify(
+    const acquireAdmission = Ref.modify(
       secrets.bootstrapAttemptState,
       (state): readonly [BootstrapAdmission, BootstrapAttemptState] => {
         if (state.failedAttempts + state.inFlight >= MAX_BOOTSTRAP_FAILURES) {
@@ -233,40 +233,49 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
         }
         return ["accepted", { ...state, inFlight: state.inFlight + 1 }]
       }
-    )
-    if (admission === "unavailable") {
-      return yield* new UnauthorizedApiError({ message: "Bootstrap confirmation temporarily unavailable" })
-    }
-    if (admission === "invalid") {
-      return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
-    }
-    const releaseAdmission = Ref.update(secrets.bootstrapAttemptState, (state) => ({
-      ...state,
-      inFlight: Math.max(0, state.inFlight - 1)
-    }))
-    return yield* Effect.gen(function*() {
-      const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
-      if (expiresAt === undefined) {
-        return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
-      }
-      const now = yield* Clock.currentTimeMillis
-      const decision = yield* Ref.modify(secrets.bootstrapAvailable, (available) => {
-        const state = {
-          expiresAt,
-          consumedAt: available ? null : 0,
-          revokedAt: null
+    ).pipe(
+      Effect.flatMap((admission) => {
+        if (admission === "unavailable") {
+          return Effect.fail(new UnauthorizedApiError({ message: "Bootstrap confirmation temporarily unavailable" }))
         }
-        const next = decideOneTimeCredential(state, now)
-        return [next, next === "accepted" ? false : available]
+        if (admission === "invalid") {
+          return Effect.fail(new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" }))
+        }
+        return Effect.void
       })
-      if (decision === "expired") return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
-      if (decision === "consumed") {
-        return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
-      }
-      if (decision === "invalid") {
-        return yield* new UnauthorizedApiError({ message: "Bootstrap token state is invalid" })
-      }
-    }).pipe(Effect.ensuring(releaseAdmission))
+    )
+    return yield* Effect.acquireUseRelease(
+      acquireAdmission,
+      () =>
+        Effect.gen(function*() {
+          const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
+          if (expiresAt === undefined) {
+            return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
+          }
+          const now = yield* Clock.currentTimeMillis
+          const decision = yield* Ref.modify(secrets.bootstrapAvailable, (available) => {
+            const state = {
+              expiresAt,
+              consumedAt: available ? null : 0,
+              revokedAt: null
+            }
+            const next = decideOneTimeCredential(state, now)
+            return [next, next === "accepted" ? false : available]
+          })
+          if (decision === "expired") return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
+          if (decision === "consumed") {
+            return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
+          }
+          if (decision === "invalid") {
+            return yield* new UnauthorizedApiError({ message: "Bootstrap token state is invalid" })
+          }
+        }),
+      () =>
+        Ref.update(secrets.bootstrapAttemptState, (state) => ({
+          ...state,
+          inFlight: Math.max(0, state.inFlight - 1)
+        }))
+    )
   }
 )
 

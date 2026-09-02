@@ -15,9 +15,15 @@ const buildLifecycleNames = new Set(["build", "prebuild", "postbuild"])
 const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"])
 const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
-const browserPairingBuild = /pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build/u
+const browserPairingBuild = /pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build(?=\s|$|[;&|()])/u
+const codeCommitWebRoleCheck = /tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit(?=\s|$|[;&|()])/u
 const codeCommitWebLifecycleRequirements = [
   { script: "predev", description: "a browser-pairing build", matches: (command) => browserPairingBuild.test(command) },
+  {
+    script: "prestart",
+    description: "a browser-pairing build",
+    matches: (command) => browserPairingBuild.test(command)
+  },
   {
     script: "pretest",
     description: "a browser-pairing build",
@@ -31,7 +37,7 @@ const codeCommitWebLifecycleRequirements = [
   {
     script: "check",
     description: "the role-aware tsc check",
-    matches: (command) => command.includes("tsc -p tsconfig.roles.json --noEmit")
+    matches: (command) => codeCommitWebRoleCheck.test(command)
   }
 ]
 
@@ -161,6 +167,7 @@ assert.equal(classifyWorkspacePattern("!packages/legacy"), undefined)
 assert.equal(classifyWorkspacePattern("packages/**"), undefined)
 const codeCommitWebScripts = {
   predev: "pnpm --filter @knpkv/browser-pairing build",
+  prestart: "pnpm --filter @knpkv/browser-pairing build",
   pretest: "pnpm --filter @knpkv/browser-pairing build",
   "test:browser": 'pnpm --filter "@knpkv/browser-pairing" build',
   check: "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit"
@@ -175,14 +182,24 @@ assert.deepEqual(
   []
 )
 for (const requirement of codeCommitWebLifecycleRequirements) {
-  const omittedScripts = Object.fromEntries(
-    Object.entries(codeCommitWebScripts).filter(([name]) => name !== requirement.script)
-  )
+  const invalidCommand =
+    requirement.script === "check"
+      ? "tsc -p tsconfig.roles.json --noEmit-extra"
+      : "pnpm --filter @knpkv/browser-pairing build:docs"
+  const invalidScripts = { ...codeCommitWebScripts, [requirement.script]: invalidCommand }
   assert.deepEqual(
-    findCodeCommitWebLifecycleGaps("packages/codecommit-web/package.json", omittedScripts, browserPairingDependency),
+    findCodeCommitWebLifecycleGaps("packages/codecommit-web/package.json", invalidScripts, browserPairingDependency),
     [`packages/codecommit-web/package.json: scripts.${requirement.script} must include ${requirement.description}`]
   )
 }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, prestart: "pnpm --filter @knpkv/browser-pairing build:docs" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.prestart must include a browser-pairing build"]
+)
 assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/other/package.json", {}, browserPairingDependency), [])
 
 const workspaceManifestPaths = Effect.fn("PackageScriptPortability.workspaceManifestPaths")(
