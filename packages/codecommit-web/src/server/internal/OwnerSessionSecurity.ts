@@ -126,6 +126,21 @@ export const requireLoopbackOrigin = Effect.fn("OwnerSessionSecurity.requireLoop
   }
 )
 
+/** Validate the advertised origin against either the bound server or the supported Vite proxy. */
+export const requireSupportedPublicOrigin = Effect.fn("OwnerSessionSecurity.requireSupportedPublicOrigin")(
+  function*(origin: string, authorityOrigin: string) {
+    const validatedOrigin = yield* requireLoopbackOrigin(origin)
+    const validatedAuthority = yield* requireLoopbackOrigin(authorityOrigin)
+    if (validatedOrigin !== validatedAuthority && validatedOrigin !== "http://localhost:5173") {
+      return yield* new UnsafeServerHostnameError({
+        hostname: origin,
+        message: "CodeCommit public origin must be the bound server or the supported Vite proxy origin"
+      })
+    }
+    return validatedOrigin
+  }
+)
+
 export const ownerSessionCookie = (
   secrets: Pick<OwnerSessionSecretsContract, "ownerToken">
 ): string =>

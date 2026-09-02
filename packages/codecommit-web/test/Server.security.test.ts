@@ -36,7 +36,8 @@ import {
   ownerSessionUrl,
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
-  requireLoopbackOrigin
+  requireLoopbackOrigin,
+  requireSupportedPublicOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
 import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
@@ -641,6 +642,19 @@ describe("CodeCommit web security boundary", () => {
       expect(yield* requireLoopbackOrigin("http://localhost:5173")).toBe("http://localhost:5173")
       const result = yield* Effect.result(requireLoopbackHostname("0.0.0.0"))
       expect(Result.isFailure(result)).toBe(true)
+    }))
+
+  it.effect("only advertises the direct server or the supported Vite proxy origin", () =>
+    Effect.gen(function*() {
+      expect(yield* requireSupportedPublicOrigin("http://localhost:5173", authorityOrigin)).toBe(
+        "http://localhost:5173"
+      )
+      expect(yield* requireSupportedPublicOrigin(authorityOrigin, authorityOrigin)).toBe(authorityOrigin)
+      const unsupported = yield* Effect.result(
+        requireSupportedPublicOrigin("http://localhost:4173", authorityOrigin)
+      )
+      expect(Result.isFailure(unsupported)).toBe(true)
+      if (Result.isFailure(unsupported)) expect(unsupported.failure._tag).toBe("UnsafeServerHostnameError")
     }))
 
   it.effect("gates and audits decoded differences and blob reads before provider execution", () =>
