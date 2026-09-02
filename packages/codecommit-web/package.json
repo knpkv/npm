@@ -19,6 +19,7 @@
     "prepack": "tsc -b && vite build",
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json",
+    "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest",
     "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",
     "test:browser": "pnpm --filter \"@knpkv/browser-pairing\" build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build && playwright test --config playwright.config.ts",

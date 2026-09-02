@@ -57,6 +57,7 @@
     "lint:rly-css-tokens": "tsx scripts/validateRlyCssTokens.ts",
     "preview": "vite preview --outDir dist/client --host 127.0.0.1 --port 4173 --strictPort",
     "start": "node ./dist/server/server/cli.js",
+    "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest run",
     "test:browser": "pnpm test:e2e",
     "test:e2e": "pnpm build && rimraf test-results/control-center/runtime-benchmark.json && playwright test --config playwright.config.ts",
