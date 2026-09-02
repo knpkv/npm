@@ -15,29 +15,33 @@ const buildLifecycleNames = new Set(["build", "prebuild", "postbuild"])
 const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"])
 const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
-const browserPairingBuild = /pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build(?=\s|$|[;&|()])/u
-const codeCommitWebRoleCheck = /tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit(?=\s|$|[;&|()])/u
+const browserPairingBuild = /^pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build(?=\s|$)/u
+const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit(?=\s|$)/u
 const codeCommitWebLifecycleRequirements = [
-  { script: "predev", description: "a browser-pairing build", matches: (command) => browserPairingBuild.test(command) },
+  {
+    script: "predev",
+    description: "a browser-pairing build",
+    matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
+  },
   {
     script: "prestart",
     description: "a browser-pairing build",
-    matches: (command) => browserPairingBuild.test(command)
+    matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
   },
   {
     script: "pretest",
     description: "a browser-pairing build",
-    matches: (command) => browserPairingBuild.test(command)
+    matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
   },
   {
     script: "test:browser",
     description: "a browser-pairing build",
-    matches: (command) => browserPairingBuild.test(command)
+    matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
   },
   {
     script: "check",
     description: "the role-aware tsc check",
-    matches: (command) => codeCommitWebRoleCheck.test(command)
+    matches: (command) => hasExecutableLifecycleCommand(command, codeCommitWebRoleCheck)
   }
 ]
 
@@ -77,6 +81,42 @@ const hasDirectEnvironmentAssignment = (command) => {
   }
   return boundaries.some((index) => environmentAssignment.test(command.slice(index)))
 }
+
+const shellCommandSegments = (command) => {
+  const segments = []
+  let segmentStart = 0
+  let quote
+  let escaped = false
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (character === ";" || character === "\n" || character === "|" || character === "&" || character === "(") {
+      segments.push(command.slice(segmentStart, index))
+      if ((character === "|" || character === "&") && command[index + 1] === character) index++
+      segmentStart = index + 1
+    }
+  }
+  segments.push(command.slice(segmentStart))
+  return segments
+}
+
+const hasExecutableLifecycleCommand = (command, matcher) =>
+  shellCommandSegments(command).some((segment) => matcher.test(segment.trim()))
 
 class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPortabilityError") {
   get message() {
@@ -177,6 +217,33 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     codeCommitWebScripts,
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: 'echo "pnpm --filter @knpkv/browser-pairing build"',
+      check: 'echo "tsc -p tsconfig.roles.json --noEmit"'
+    },
+    browserPairingDependency
+  ),
+  [
+    "packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build",
+    "packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"
+  ]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: 'printf "pnpm --filter @knpkv/browser-pairing build"; pnpm --filter @knpkv/browser-pairing build',
+      check: 'printf "tsc -p tsconfig.roles.json --noEmit" && tsc -p tsconfig.roles.json --noEmit'
+    },
     browserPairingDependency
   ),
   []

@@ -34,7 +34,7 @@ export type CredentialDigest = typeof CredentialDigest.Type
 export const PairingConfirmationRequest = Schema.Struct({ pairingCode: PairingCode })
 export type PairingConfirmationRequest = typeof PairingConfirmationRequest.Type
 
-/** Secret-free part of a successful pairing response. */
+/** Credential-bearing response containing the CSRF mutation proof. */
 export const PairingConfirmationResponse = Schema.Struct({ csrfToken: CsrfToken })
 export type PairingConfirmationResponse = typeof PairingConfirmationResponse.Type
 
