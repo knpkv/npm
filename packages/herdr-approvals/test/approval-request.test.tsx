@@ -177,6 +177,29 @@ describe("sanitized approval requests", () => {
     )
   })
 
+  it("redacts escaped and multiline quoted credentials", () => {
+    const refs = [
+      'password="first-secret\\"second-secret"',
+      'Authorization: Bearer "first-token\\"second-token"',
+      'password="first-line-secret\nsecond-line-secret"',
+      'Authorization: Bearer "first-line-token\nsecond-line-token"'
+    ]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-")
+      expect(encoded).not.toContain("second-")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: 'ref="release\ncandidate"' }).fields[0]?.value).toBe(
+      'ref="release\ncandidate"'
+    )
+  })
+
   it("redacts signed URLs embedded in coordinate text", () => {
     const refs = [
       "mirror=https://example.test/repo?X-Amz-Signature=leaked-canary",

@@ -1719,6 +1719,7 @@ esac
             )
             expect(dashboardResponse.status).toBe(200)
             expect(dashboardResponse.body).not.toContain("peer-secret-canary")
+            expect(dashboardResponse.body).toContain("/srv/npm")
             const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
               JSON.parse(dashboardResponse.body)
             )
@@ -1743,6 +1744,7 @@ esac
             )
             expect(continuationResponse.status).toBe(200)
             expect(continuationResponse.body).not.toContain("peer-secret-canary")
+            expect(continuationResponse.body).toContain("/srv/npm")
             const targetResponse = yield* Effect.promise(() =>
               secureRequestBody(
                 `${server.serveUrl}/v1/pending-approval?host=SER8&jobId=legacy-peer-job`,
@@ -1751,6 +1753,7 @@ esac
             )
             expect(targetResponse.status).toBe(200)
             expect(targetResponse.body).not.toContain("peer-secret-canary")
+            expect(targetResponse.body).toContain("/srv/npm")
           })
         ),
       (store) => Effect.sync(() => store.close())
