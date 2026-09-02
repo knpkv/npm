@@ -52,7 +52,13 @@ import {
 } from "@knpkv/herdr-fleet"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
-import type { WorkCheckpointConflictError, WorkProjectionError, WorkService, WorkStoreError } from "@knpkv/herdr-work"
+import type {
+  WorkCheckpointConflictError,
+  WorkProjectionError,
+  WorkService,
+  WorkSnapshots,
+  WorkStoreError
+} from "@knpkv/herdr-work"
 import { approvalTargetMatchesOrigin, makeWorkService, WorkStore } from "@knpkv/herdr-work"
 import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
 import {
@@ -73,6 +79,7 @@ import {
   Semaphore,
   Stream
 } from "effect"
+import type { Redacted } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -97,6 +104,24 @@ import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
+import {
+  decodeLanWorkPairRequest,
+  LanWorkConfigurationError,
+  type LanWorkCryptoError,
+  type LanWorkListenerOptions,
+  LanWorkOriginRejectedError,
+  type LanWorkPairingExpiredError,
+  LanWorkPairingMalformedError,
+  type LanWorkPairingRejectedError,
+  type LanWorkPairingReplayedError,
+  LanWorkPairRequestInput,
+  lanWorkSessionCookie,
+  type LanWorkSessionRejectedError,
+  type LanWorkSessionRequiredError,
+  makeLanWorkPairing,
+  readLanWorkSessionCookie
+} from "./lan-work.js"
 import {
   ApprovalNotificationCandidate,
   type ApprovalNotificationCandidate as ApprovalNotificationCandidateType,
@@ -150,18 +175,38 @@ type ApiError =
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
+  | LanWorkConfigurationError
+  | LanWorkCryptoError
+  | LanWorkOriginRejectedError
+  | LanWorkPairingExpiredError
+  | LanWorkPairingMalformedError
+  | LanWorkPairingRejectedError
+  | LanWorkPairingReplayedError
+  | LanWorkSessionRejectedError
+  | LanWorkSessionRequiredError
   | PushEndpointNotAllowedError
   | TerminalTransportError
   | WorkCheckpointConflictError
   | WorkProjectionError
   | WorkStoreError
 
+type LanPairError =
+  | LanWorkConfigurationError
+  | LanWorkCryptoError
+  | LanWorkOriginRejectedError
+  | LanWorkPairingExpiredError
+  | LanWorkPairingMalformedError
+  | LanWorkPairingRejectedError
+  | LanWorkPairingReplayedError
+  | LanWorkSessionRejectedError
+  | LanWorkSessionRequiredError
+
 type Runner = {
   readonly close: () => Promise<void>
   readonly enqueue: (jobId: string) => Promise<boolean>
 }
 
-type ListenerMode = "local" | "tailnet" | "approval" | "serve" | "work"
+type ListenerMode = "local" | "tailnet" | "approval" | "serve" | "work" | "lan"
 
 type TlsCredentials = {
   readonly certificate: string
@@ -171,6 +216,7 @@ type TlsCredentials = {
 type PushSender = ReturnType<typeof makePushSender>
 
 export type HttpServerOptions = {
+  readonly lanWork?: LanWorkListenerOptions
   readonly now?: () => number
   readonly pushSender?: PushSender
   readonly terminalConnector?: TerminalConnector
@@ -223,6 +269,16 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 409, body: { error: error._tag, jobId: error.jobId } }
     case "FleetValidationError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkPairingMalformedError":
+      return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkOriginRejectedError":
+      return { status: 403, body: { error: error._tag } }
+    case "LanWorkPairingRejectedError":
+    case "LanWorkPairingExpiredError":
+    case "LanWorkPairingReplayedError":
+    case "LanWorkSessionRejectedError":
+    case "LanWorkSessionRequiredError":
+      return { status: 401, body: { error: error._tag } }
     case "PushEndpointNotAllowedError":
       return { status: 400, body: { error: error._tag, origin: error.origin } }
     case "ConnectPeerError":
@@ -232,7 +288,10 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       }
     case "FleetOperationError":
     case "TerminalTransportError":
-      return { status: 503, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkCryptoError":
+      return { status: 503, body: { error: error._tag, detail: error.operation } }
+    case "LanWorkConfigurationError":
+      return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "FleetStoreError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "ApprovalAppStoreError":
@@ -1046,6 +1105,49 @@ const connectPage = (): string =>
 </body>
 </html>`
 
+const lanWorkDocument = (body: string): string =>
+  `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#111418">
+<title>Fleet Work</title>
+<link rel="stylesheet" href="/assets/index.css">
+</head>
+<body data-rly-root data-rly-theme="dark">
+${body}
+</body>
+</html>`
+
+const lanPairPage = (error: string | undefined): string =>
+  lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })))
+
+const lanPairErrorMessage = (error: LanPairError): string => {
+  switch (error._tag) {
+    case "LanWorkOriginRejectedError":
+      return "Open this page from the trusted LAN Work address."
+    case "LanWorkPairingMalformedError":
+      return "Enter the 64-character pairing code printed by Work."
+    case "LanWorkPairingExpiredError":
+      return "That pairing code expired. Ask Work for a new code."
+    case "LanWorkPairingReplayedError":
+      return "That pairing code was already used. Ask Work for a new code."
+    case "LanWorkPairingRejectedError":
+      return "That pairing code was not accepted. Check it and try again."
+    case "LanWorkSessionRejectedError":
+    case "LanWorkSessionRequiredError":
+      return "Pair this browser before continuing."
+    case "LanWorkCryptoError":
+    case "LanWorkConfigurationError":
+      return "LAN Work pairing is unavailable. Try again later."
+  }
+}
+
+const lanWorkPage = (snapshots: WorkSnapshots): string =>
+  lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { snapshots })))
+
 const rejectUpgrade = (
   socket: Duplex,
   status: number
@@ -1157,6 +1259,8 @@ export const startHttpServer = async (
   readonly approvalUrl: string | null
   readonly serveUrl: string | null
   readonly workUrl: string | null
+  readonly lanWorkUrl: string | null
+  readonly lanWorkPairingCode: Redacted.Redacted<string> | null
 }> => {
   const isHub = config.crossHost &&
     config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
@@ -1191,7 +1295,7 @@ export const startHttpServer = async (
   let acceptingRequests = false
   let closed = false
   const runRequest = <A, E>(
-    effect: Effect.Effect<A, E, HttpClient.HttpClient | Tailscale>
+    effect: Effect.Effect<A, E, HttpClient.HttpClient | Tailscale | Crypto.Crypto>
   ): Promise<A> => {
     const controller = new AbortController()
     activeRequestControllers.add(controller)
@@ -1301,6 +1405,24 @@ export const startHttpServer = async (
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
     const now = options.now ?? (() => httpRuntime.runSync(Clock.currentTimeMillis))
+    if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
+      throw new LanWorkConfigurationError({
+        detail: "LAN Work requires at least one configured allowed user"
+      })
+    }
+    if (
+      options.lanWork !== undefined &&
+      (options.lanWork.address === "0.0.0.0" || options.lanWork.address === "::" ||
+        options.lanWork.address === "::0") &&
+      options.lanWork.host === undefined
+    ) {
+      throw new LanWorkConfigurationError({
+        detail: "LAN Work wildcard listeners require an explicit browser host"
+      })
+    }
+    const lanWorkPairing = options.lanWork === undefined
+      ? null
+      : await httpRuntime.runPromise(makeLanWorkPairing(now))
     const chat = await httpRuntime.runPromise(makeCoordinatorChat({
       config,
       fleet: service,
@@ -1634,6 +1756,8 @@ export const startHttpServer = async (
     ) => {
       let expectedHost = mode === "serve"
         ? new URL(config.approvalHub.url).host.toLowerCase()
+        : mode === "lan" && options.lanWork?.host !== undefined
+        ? options.lanWork.host.toLowerCase()
         : ""
       const expectedOrigin = (): string =>
         mode === "serve"
@@ -1671,6 +1795,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/assets/approval.js"
           ) {
@@ -1681,7 +1806,7 @@ export const startHttpServer = async (
             response.end(uiAssets.script)
             return
           }
-          if (request.method === "GET" && url.pathname === "/assets/connect.js") {
+          if (mode !== "lan" && request.method === "GET" && url.pathname === "/assets/connect.js") {
             response.writeHead(200, {
               "cache-control": "no-cache, must-revalidate",
               "content-type": "text/javascript; charset=utf-8"
@@ -1690,6 +1815,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/assets/approval-sw.js"
           ) {
@@ -1702,6 +1828,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/manifest.webmanifest"
           ) {
@@ -1713,6 +1840,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/assets/approval-icon.svg"
           ) {
@@ -1733,6 +1861,172 @@ export const startHttpServer = async (
               "content-type": "font/woff2"
             })
             response.end(font)
+            return
+          }
+          if (mode === "lan" && lanWorkPairing !== null) {
+            const origin = header(request, "origin")
+            const requireLanOrigin = (required: boolean): Effect.Effect<void, LanWorkOriginRejectedError> =>
+              (origin === expectedOrigin() || (!required && origin === undefined))
+                ? Effect.void
+                : Effect.fail(
+                  new LanWorkOriginRejectedError({
+                    detail: "LAN Work requires the exact browser origin"
+                  })
+                )
+            const authorizeLanSession = lanWorkPairing.authorizeSession(
+              readLanWorkSessionCookie(header(request, "cookie"))
+            )
+            const readPairRequest = Effect.fn("ApprovalHttp.readLanPairRequest")(function*() {
+              const mediaType = (header(request, "content-type") ?? "")
+                .split(";", 1)[0]
+                ?.trim()
+                .toLowerCase()
+              const body = yield* readBody(request).pipe(
+                Effect.mapError(
+                  (error) => new LanWorkPairingMalformedError({ detail: error.detail })
+                )
+              )
+              if (mediaType === "application/json") {
+                const unknown = yield* Effect.try({
+                  try: () => JSON.parse(body),
+                  catch: (cause) =>
+                    new LanWorkPairingMalformedError({
+                      detail: `invalid LAN Work pairing JSON: ${String(cause)}`
+                    })
+                })
+                const input = yield* Schema.decodeUnknownEffect(LanWorkPairRequestInput)(unknown).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new LanWorkPairingMalformedError({
+                        detail: `invalid LAN Work pairing object: ${String(cause)}`
+                      })
+                  )
+                )
+                return yield* decodeLanWorkPairRequest(input)
+              }
+              if (mediaType === "application/x-www-form-urlencoded") {
+                const form = new URLSearchParams(body)
+                const values = form.getAll("pairingCode")
+                if (values.length !== 1) {
+                  return yield* new LanWorkPairingMalformedError({
+                    detail: "LAN Work pairing request requires one pairingCode"
+                  })
+                }
+                const input = yield* Schema.decodeUnknownEffect(LanWorkPairRequestInput)({ pairingCode: values[0] })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new LanWorkPairingMalformedError({
+                          detail: `invalid LAN Work pairing object: ${String(cause)}`
+                        })
+                    )
+                  )
+                return yield* decodeLanWorkPairRequest(input)
+              }
+              return yield* new LanWorkPairingMalformedError({
+                detail: "LAN Work pairing content type is unsupported"
+              })
+            })
+            const pairFailure = (error: LanPairError): void => {
+              const mapped = apiError(error)
+              const acceptsHtml = (header(request, "accept") ?? "").includes("text/html")
+              if (acceptsHtml) {
+                response.writeHead(mapped.status, {
+                  "cache-control": "no-store",
+                  "content-type": "text/html; charset=utf-8"
+                })
+                response.end(lanPairPage(lanPairErrorMessage(error)))
+              } else {
+                json(response, mapped.status, mapped.body)
+              }
+            }
+            if (request.method === "GET" && url.pathname === "/pair") {
+              if (origin !== undefined && origin !== expectedOrigin()) {
+                pairFailure(new LanWorkOriginRejectedError({ detail: "LAN Work requires the exact browser origin" }))
+                return
+              }
+              if (url.search !== "") {
+                pairFailure(new LanWorkPairingMalformedError({ detail: "LAN Work pairing URL must be plain /pair" }))
+                return
+              }
+              const session = await runRequest(Effect.result(authorizeLanSession))
+              if (Result.isSuccess(session)) {
+                response.writeHead(303, { location: "/" })
+                response.end()
+              } else {
+                response.writeHead(200, {
+                  "cache-control": "no-store",
+                  "content-type": "text/html; charset=utf-8"
+                })
+                response.end(lanPairPage(undefined))
+              }
+              return
+            }
+            if (request.method === "POST" && url.pathname === "/pair") {
+              const result = await runRequest(
+                Effect.result(
+                  Effect.gen(function*() {
+                    yield* requireLanOrigin(true)
+                    if (url.search !== "") {
+                      return yield* new LanWorkPairingMalformedError({
+                        detail: "LAN Work pairing URL must be plain /pair"
+                      })
+                    }
+                    const requestBody = yield* readPairRequest()
+                    return yield* lanWorkPairing.consume(requestBody.pairingCode)
+                  })
+                )
+              )
+              if (Result.isFailure(result)) {
+                pairFailure(result.failure)
+              } else {
+                response.writeHead(303, {
+                  "cache-control": "no-store",
+                  location: "/",
+                  "set-cookie": lanWorkSessionCookie(result.success)
+                })
+                response.end()
+              }
+              return
+            }
+            if (request.method === "GET" && url.pathname === "/") {
+              const result = await runRequest(
+                Effect.result(
+                  requireLanOrigin(false).pipe(
+                    Effect.andThen(authorizeLanSession),
+                    Effect.andThen(work.snapshots(now()))
+                  )
+                )
+              )
+              if (Result.isSuccess(result)) {
+                response.writeHead(200, {
+                  "cache-control": "no-store",
+                  "content-type": "text/html; charset=utf-8"
+                })
+                response.end(lanWorkPage(result.success))
+              } else if (
+                result.failure._tag === "LanWorkSessionRequiredError" ||
+                result.failure._tag === "LanWorkSessionRejectedError"
+              ) {
+                response.writeHead(303, { location: "/pair" })
+                response.end()
+              } else {
+                const mapped = apiError(result.failure)
+                json(response, mapped.status, mapped.body)
+              }
+              return
+            }
+            if (request.method === "GET" && url.pathname === workSnapshotPath) {
+              await respond(
+                response,
+                requireLanOrigin(true).pipe(
+                  Effect.andThen(authorizeLanSession),
+                  Effect.andThen(work.snapshots(now()))
+                )
+              )
+              return
+            }
+            json(response, 404, { error: "not_found" })
             return
           }
           const authorized = mode === "approval"
@@ -2381,12 +2675,21 @@ export const startHttpServer = async (
       }
       const bound = decodedAddress.success
       if (mode !== "serve") {
-        expectedHost = listenerAuthority(bound.address, bound.port)
+        expectedHost = listenerAuthority(
+          mode === "lan" && options.lanWork?.host !== undefined
+            ? options.lanWork.host
+            : bound.address,
+          bound.port
+        )
       }
       activeServers.add(server)
       return {
         server,
-        url: `${tls === null ? "http" : "https"}://${bound.address}:${bound.port}`
+        url: `${tls === null ? "http" : "https"}://${
+          mode === "lan" && options.lanWork?.host !== undefined
+            ? expectedHost
+            : `${bound.address}:${bound.port}`
+        }`
       }
     }
 
@@ -2405,6 +2708,9 @@ export const startHttpServer = async (
 
     const recoveredJobIds = await Effect.runPromise(service.recover())
     const local = await listen("127.0.0.1", config.localPort, "local")
+    const lan = options.lanWork === undefined
+      ? null
+      : await listen(options.lanWork.address, options.lanWork.port, "lan")
     if (tailscaleIp === null) {
       const work = await listen(workBindAddress, config.port, "work")
       for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
@@ -2415,6 +2721,10 @@ export const startHttpServer = async (
         approvalUrl: null,
         serveUrl: null,
         workUrl: work.url,
+        lanWorkUrl: lan?.url ?? null,
+        lanWorkPairingCode: lan === null || lanWorkPairing === null
+          ? null
+          : lanWorkPairing.pairingCode,
         close: shutdown
       }
     }
@@ -2448,6 +2758,10 @@ export const startHttpServer = async (
       approvalUrl: approval?.url ?? serve?.url ?? null,
       serveUrl: serve?.url ?? null,
       workUrl: null,
+      lanWorkUrl: lan?.url ?? null,
+      lanWorkPairingCode: lan === null || lanWorkPairing === null
+        ? null
+        : lanWorkPairing.pairingCode,
       close: shutdown
     }
   } catch (error) {

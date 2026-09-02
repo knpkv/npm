@@ -137,7 +137,13 @@ const SummaryCell = ({ label, value }: { readonly label: string; readonly value:
 
 const snapshotFor = (snapshots: WorkSnapshots, window: WorkSnapshotWindow): WorkSnapshot => snapshots[window]
 
-export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }): ReactElement => {
+export const WorkBoard = ({
+  externalLinks = "enabled",
+  snapshots
+}: {
+  readonly snapshots: WorkSnapshots
+  readonly externalLinks?: "disabled" | "enabled"
+}): ReactElement => {
   const [window, setWindow] = useState<WorkSnapshotWindow>("now")
   const snapshot = snapshotFor(snapshots, window)
   const [selectedId, setSelectedId] = useState<string | null>(snapshot.goals[0]?.id ?? null)
@@ -391,6 +397,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                           <Text tone="secondary" variant="meta">
                             No approval link recorded.
                           </Text>
+                        ) : externalLinks === "disabled" ? (
+                          <Text tone="secondary" variant="meta">
+                            Approval target recorded.
+                          </Text>
                         ) : (
                           exactLink(request.approvalTarget, `Open ${request.approvalTarget.host} approval`)
                         )}
@@ -405,9 +415,14 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                 </Text>
                 <div className="work-review-heading">
                   {reviewLabel(selected.review)}
-                  {selected.review?.url === null || selected.review?.url === undefined
-                    ? null
-                    : reviewLink(selected.review.url)}
+                  {selected.review?.url === null || selected.review?.url === undefined ? null : externalLinks ===
+                    "disabled" ? (
+                    <Text tone="secondary" variant="meta">
+                      Review target recorded.
+                    </Text>
+                  ) : (
+                    reviewLink(selected.review.url)
+                  )}
                 </div>
                 {selected.review?.summary === null || selected.review?.summary === undefined ? null : (
                   <Text tone="secondary">{selected.review.summary}</Text>
@@ -415,6 +430,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
               </div>
               {selected.connectTarget === null ? (
                 <Text tone="secondary">No exact Connect target recorded.</Text>
+              ) : externalLinks === "disabled" ? (
+                <Text tone="secondary" variant="meta">
+                  Connect target recorded.
+                </Text>
               ) : (
                 <a className="work-connect-link" href={selected.connectTarget.url}>
                   Open exact agent in Connect →
@@ -422,6 +441,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
               )}
               {selected.approvalTarget === undefined || selected.approvalTarget === null ? (
                 <Text tone="secondary">No exact approval target recorded.</Text>
+              ) : externalLinks === "disabled" ? (
+                <Text tone="secondary" variant="meta">
+                  Approval target recorded.
+                </Text>
               ) : (
                 exactLink(selected.approvalTarget, `Open ${selected.approvalTarget.host} approval`)
               )}
