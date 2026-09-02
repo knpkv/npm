@@ -393,9 +393,6 @@ type TerminalKeyRailProps = {
 
 const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
 
-const modifierShortcut = (modifier: TerminalModifier | null, shortcut: string): string =>
-  modifier === null ? shortcut : `${modifier === "ctrl" ? "Control" : "Alt"}+${shortcut}`
-
 /** A fixed, keyboard-accessible set of terminal controls for touch layouts. */
 export const TerminalKeyRail = ({
   disabled = false,
@@ -408,7 +405,6 @@ export const TerminalKeyRail = ({
     <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
       {terminalModifiers.map((item) => (
         <button
-          aria-keyshortcuts={item === "ctrl" ? "Control" : "Alt"}
           aria-pressed={modifier === item}
           className="terminal-key terminal-key-modifier"
           data-terminal-key={item}
@@ -428,7 +424,6 @@ export const TerminalKeyRail = ({
         const unavailable = serialization._tag === "unsupported"
         return (
           <button
-            aria-keyshortcuts={modifierShortcut(modifier, descriptor.shortcut)}
             aria-label={modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`}
             className="terminal-key"
             data-terminal-key={descriptor.key}

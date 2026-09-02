@@ -34,6 +34,22 @@ describe("terminal keyboard rail", () => {
     }
   })
 
+  it("uses application-cursor SS3 sequences only when the live mode is enabled", () => {
+    expect(serializeTerminalKey("arrowUp", null, "normal")).toEqual({
+      _tag: "supported",
+      text: "\u001b[A"
+    })
+    expect(serializeTerminalKey("arrowUp", null, "application")).toEqual({
+      _tag: "supported",
+      text: "\u001bOA"
+    })
+    expect(dispatchTerminalKey("arrowLeft", null, "application")).toEqual({
+      _tag: "sent",
+      command: { type: "terminal.input", text: "\u001bOD" },
+      nextModifier: null
+    })
+  })
+
   it("keeps unsupported combinations rejected and modifiers deterministic", () => {
     expect(toggleTerminalModifier(null, "ctrl")).toBe("ctrl")
     expect(toggleTerminalModifier("ctrl", "ctrl")).toBeNull()
@@ -59,6 +75,11 @@ describe("terminal keyboard rail", () => {
       nextModifier: null
     })
     expect(applyTerminalModifierToInput("ctrl", "\u001b[1;5A")).toEqual({
+      _tag: "supported",
+      text: "\u001b[1;5A",
+      nextModifier: null
+    })
+    expect(applyTerminalModifierToInput("ctrl", "\u001bOA")).toEqual({
       _tag: "supported",
       text: "\u001b[1;5A",
       nextModifier: null

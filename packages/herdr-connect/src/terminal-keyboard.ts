@@ -4,6 +4,9 @@ import type { TerminalClientCommand } from "./model.js"
 export const TerminalModifier = Schema.Literals(["ctrl", "alt"])
 export type TerminalModifier = typeof TerminalModifier.Type
 
+export const TerminalCursorMode = Schema.Literals(["normal", "application"])
+export type TerminalCursorMode = typeof TerminalCursorMode.Type
+
 export const TerminalRailKey = Schema.Literals([
   "escape",
   "tab",
@@ -18,18 +21,17 @@ export type TerminalKeyDescriptor = {
   readonly key: TerminalRailKey
   readonly label: string
   readonly ariaLabel: string
-  readonly shortcut: string
 }
 
 export const terminalModifiers: ReadonlyArray<TerminalModifier> = ["ctrl", "alt"]
 
 export const terminalKeyDescriptors: ReadonlyArray<TerminalKeyDescriptor> = [
-  { key: "escape", label: "Esc", ariaLabel: "Escape", shortcut: "Escape" },
-  { key: "tab", label: "Tab", ariaLabel: "Tab", shortcut: "Tab" },
-  { key: "arrowLeft", label: "←", ariaLabel: "Arrow left", shortcut: "ArrowLeft" },
-  { key: "arrowUp", label: "↑", ariaLabel: "Arrow up", shortcut: "ArrowUp" },
-  { key: "arrowDown", label: "↓", ariaLabel: "Arrow down", shortcut: "ArrowDown" },
-  { key: "arrowRight", label: "→", ariaLabel: "Arrow right", shortcut: "ArrowRight" }
+  { key: "escape", label: "Esc", ariaLabel: "Escape" },
+  { key: "tab", label: "Tab", ariaLabel: "Tab" },
+  { key: "arrowLeft", label: "←", ariaLabel: "Arrow left" },
+  { key: "arrowUp", label: "↑", ariaLabel: "Arrow up" },
+  { key: "arrowDown", label: "↓", ariaLabel: "Arrow down" },
+  { key: "arrowRight", label: "→", ariaLabel: "Arrow right" }
 ]
 
 export type TerminalKeySerialization =
@@ -62,7 +64,7 @@ const controlCharacter = (key: TerminalControlKey): string => {
 
 const arrowCode = (
   key: Extract<TerminalRailKey, "arrowLeft" | "arrowUp" | "arrowDown" | "arrowRight">
-): string => {
+): "A" | "B" | "C" | "D" => {
   switch (key) {
     case "arrowLeft":
       return "D"
@@ -74,6 +76,9 @@ const arrowCode = (
       return "C"
   }
 }
+
+const arrowSequence = (code: "A" | "B" | "C" | "D", cursorMode: TerminalCursorMode): string =>
+  cursorMode === "application" ? `\u001bO${code}` : `\u001b[${code}`
 
 type ArrowDefinition = {
   readonly key: Extract<TerminalRailKey, "arrowLeft" | "arrowUp" | "arrowDown" | "arrowRight">
@@ -90,7 +95,8 @@ const arrowDefinitions: ReadonlyArray<ArrowDefinition> = [
 /** Serialize one fixed terminal key without accepting arbitrary command text. */
 export const serializeTerminalKey = (
   key: TerminalRailKey,
-  modifier: TerminalModifier | null
+  modifier: TerminalModifier | null,
+  cursorMode: TerminalCursorMode = "normal"
 ): TerminalKeySerialization => {
   switch (key) {
     case "escape":
@@ -104,7 +110,7 @@ export const serializeTerminalKey = (
       const code = arrowCode(key)
       return supported(
         modifier === null
-          ? `\u001b[${code}`
+          ? arrowSequence(code, cursorMode)
           : `\u001b[1;${modifier === "ctrl" ? "5" : "3"}${code}`
       )
     }
@@ -128,9 +134,10 @@ export type TerminalKeyDispatch =
 /** Apply a rail key and clear a successful one-shot modifier. */
 export const dispatchTerminalKey = (
   key: TerminalRailKey,
-  modifier: TerminalModifier | null
+  modifier: TerminalModifier | null,
+  cursorMode: TerminalCursorMode = "normal"
 ): TerminalKeyDispatch => {
-  const serialization = serializeTerminalKey(key, modifier)
+  const serialization = serializeTerminalKey(key, modifier, cursorMode)
   return serialization._tag === "supported"
     ? {
       _tag: "sent",
@@ -159,10 +166,12 @@ export type TerminalInputApplication =
 
 const arrowInputs: ReadonlyArray<{
   readonly plain: string
+  readonly application: string
   readonly ctrl: string
   readonly alt: string
 }> = arrowDefinitions.map(({ code }) => ({
   plain: `\u001b[${code}`,
+  application: `\u001bO${code}`,
   ctrl: `\u001b[1;5${code}`,
   alt: `\u001b[1;3${code}`
 }))
@@ -179,7 +188,9 @@ const terminalInputWithModifier = (
   modifier: TerminalModifier,
   text: string
 ): TerminalInputApplication => {
-  const arrow = arrowInputs.find((candidate) => candidate.plain === text || candidate[modifier] === text)
+  const arrow = arrowInputs.find(
+    (candidate) => candidate.plain === text || candidate.application === text || candidate[modifier] === text
+  )
   if (arrow !== undefined) {
     return { _tag: "supported", text: arrow[modifier], nextModifier: null }
   }

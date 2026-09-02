@@ -36,6 +36,7 @@ import {
   dispatchTerminalKey,
   toggleTerminalModifier,
   type TerminalInputApplication,
+  type TerminalCursorMode,
   type TerminalModifier,
   type TerminalRailKey
 } from "./terminal-keyboard.js"
@@ -215,6 +216,7 @@ type TerminalKeyboardCallbacks = {
   readonly setModifier: (modifier: TerminalModifier | null) => void
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => void) => void
+  readonly setCursorModeReader: (read: () => TerminalCursorMode) => void
 }
 
 const terminalWorker = (
@@ -286,6 +288,8 @@ const terminalWorker = (
       const sendInput = (text: string): void => send({ type: "terminal.input", text })
       keyboard.setInputSender((command) => send(command))
       yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setInputSender(() => {})))
+      keyboard.setCursorModeReader(() => (terminal.terminal.getMode(1) ? "application" : "normal"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setCursorModeReader(() => "normal")))
       const applyInput = (text: string): string | null => {
         const application = applyTerminalModifierToInput(keyboard.getModifier(), text)
         if (application._tag === "unsupported") {
@@ -491,6 +495,7 @@ export const ConnectSurface = ({
   const terminalRef = useRef<HTMLDivElement>(null)
   const terminalViewportRef = useRef<HTMLDivElement>(null)
   const terminalInputRef = useRef<(command: TerminalInputCommand) => void>(() => {})
+  const terminalCursorModeReaderRef = useRef<() => TerminalCursorMode>(() => "normal")
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
@@ -506,9 +511,13 @@ export const ConnectSurface = ({
         setInputSender: (sendInput) => {
           terminalInputRef.current = sendInput
         },
+        setCursorModeReader: (read) => {
+          terminalCursorModeReaderRef.current = read
+        },
         setModifier: (modifier) => {
           terminalModifierRef.current = modifier
           setTerminalModifier((current) => (current === modifier ? current : modifier))
+          setTerminalKeyError(null)
         }
       })
     )
@@ -540,6 +549,7 @@ export const ConnectSurface = ({
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
     terminalInputRef.current = () => {}
+    terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
     setTerminalModifier(null)
     setTerminalKeyError(null)
@@ -599,6 +609,7 @@ export const ConnectSurface = ({
     setConnectionRequest(null)
     setConnection({ _tag: "idle" })
     terminalInputRef.current = () => {}
+    terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
     setTerminalModifier(null)
     setTerminalKeyError(null)
@@ -612,7 +623,7 @@ export const ConnectSurface = ({
   }
 
   const sendTerminalRailKey = (key: TerminalRailKey): void => {
-    const dispatch = dispatchTerminalKey(key, terminalModifierRef.current)
+    const dispatch = dispatchTerminalKey(key, terminalModifierRef.current, terminalCursorModeReaderRef.current())
     if (dispatch._tag === "unsupported") {
       setTerminalKeyError("That modifier combination is not supported.")
       return
