@@ -51,7 +51,8 @@ export const SanitizedJobRecord = Schema.Struct({
   status: JobStatus,
   payload: JobPayload,
   worker: Schema.optionalKey(AgentWorkerIdentity),
-  connectTarget: Schema.optionalKey(AgentConnectTarget)
+  connectTarget: Schema.optionalKey(AgentConnectTarget),
+  workerTerminalObservedAt: Schema.optionalKey(Schema.NullOr(Schema.Number))
 })
 export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
@@ -63,6 +64,7 @@ const credentialAuthorization =
 const credentialUri = /(^|[^\w])\/\/[^/\r\n]+@/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
+const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
 const encodedUriMaxDepth = 3
 
 type EncodedText =
@@ -132,7 +134,11 @@ const sanitizeUriQueryParameters = (value: string): string => {
 }
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
-  const sanitized = sanitizeCredentialText(sanitizeUriQueryParameters(value))
+  const sanitized = uriPrefix.test(value) || encodedUriPrefix.test(value)
+    ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
+    : encodedText(value) === undefined
+    ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
+    : sanitizeEncodedUri(value)
   return sanitized.length <= maximumLength
     ? sanitized
     : `${sanitized.slice(0, maximumLength - redactedCredential.length)}${redactedCredential}`
@@ -223,6 +229,9 @@ export const sanitizeJobRecord = (record: JobRecord): SanitizedJobRecord => {
     record.expiredAt === undefined ? {} : { expiredAt: record.expiredAt },
     record.rejectedAt === undefined ? {} : { rejectedAt: record.rejectedAt },
     record.rejectedBy === undefined ? {} : { rejectedBy: record.rejectedBy },
-    record.worker === undefined ? {} : { worker: record.worker }
+    record.worker === undefined ? {} : { worker: record.worker },
+    record.workerTerminalObservedAt === undefined
+      ? {}
+      : { workerTerminalObservedAt: record.workerTerminalObservedAt }
   )
 }

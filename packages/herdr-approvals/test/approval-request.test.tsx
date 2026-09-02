@@ -127,6 +127,27 @@ describe("sanitized approval requests", () => {
     expect("result" in sanitizeJobRecord(recordFor("succeeded"))).toBe(false)
   })
 
+  it("preserves terminal observation evidence in the browser projection", () => {
+    const observed = sanitizeJobRecord({
+      ...recordFor("succeeded"),
+      connectTarget: {
+        agentId: "agent-worker",
+        host: "ALPHA",
+        url: "/connect/?agent=agent-worker&host=ALPHA"
+      },
+      worker: {
+        agentId: "agent-worker",
+        host: "ALPHA",
+        name: "package-worker",
+        paneId: "w1:p1"
+      },
+      workerTerminalObservedAt: 1_750
+    })
+    expect(observed.workerTerminalObservedAt).toBe(1_750)
+    expect(Schema.decodeUnknownSync(SanitizedJobRecord)(observed)).toEqual(observed)
+    expect("workerTerminalObservedAt" in sanitizeJobRecord(recordFor("pending_approval"))).toBe(false)
+  })
+
   it("redacts credentials embedded in safe request coordinates", () => {
     const request = approvalRequestFor({
       kind: "nix.apply",
@@ -153,6 +174,19 @@ describe("sanitized approval requests", () => {
     expect(encoded).not.toContain("deploy-user")
     expect(encoded).not.toContain("deploy password")
     expect(encoded).toContain("[redacted credential]")
+  })
+
+  it("redacts standalone encoded credential assignments", () => {
+    const credential = "password%3Dleaked-canary"
+    const visible = "release%2Fcandidate"
+    const request = approvalRequestFor({ kind: "nix.apply", ref: credential })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref: credential }
+    })
+    expect(JSON.stringify({ request, projection })).not.toContain("leaked-canary")
+    expect(request.fields[0]?.value).toContain("%5Bredacted%20credential%5D")
+    expect(approvalRequestFor({ kind: "nix.apply", ref: visible }).fields[0]?.value).toBe(visible)
   })
 
   it("redacts suffixes attached to an existing credential marker", () => {
