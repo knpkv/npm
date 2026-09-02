@@ -1,25 +1,27 @@
-import { Result, Schema } from "effect"
+import { Redacted, Result, Schema } from "effect"
 
 const CREDENTIAL_PATTERN = /^[0-9a-f]{64}$/u
+const COOKIE_DELIMITERS = new Set([",", ";", "="])
+const CredentialValue = Schema.String.check(
+  Schema.isPattern(CREDENTIAL_PATTERN, { expected: "a lowercase 256-bit browser credential" })
+)
 
 /** A 256-bit browser credential. Keep values redacted except at a transport boundary. */
-export const BrowserCredential = Schema.String.check(
-  Schema.isPattern(CREDENTIAL_PATTERN, { expected: "a lowercase 256-bit browser credential" })
-).pipe(Schema.brand("BrowserCredential"))
+export const BrowserCredential = CredentialValue.pipe(Schema.brand("BrowserCredential"))
 
 export type BrowserCredential = typeof BrowserCredential.Type
 
 /** Pairing code accepted by an unauthenticated confirmation route. */
-export const PairingCode = BrowserCredential
-export type PairingCode = BrowserCredential
+export const PairingCode = CredentialValue.pipe(Schema.brand("PairingCode"))
+export type PairingCode = typeof PairingCode.Type
 
 /** Opaque session credential normally delivered through an HttpOnly cookie. */
-export const SessionToken = BrowserCredential
-export type SessionToken = BrowserCredential
+export const SessionToken = CredentialValue.pipe(Schema.brand("SessionToken"))
+export type SessionToken = typeof SessionToken.Type
 
 /** Independent mutation proof sent in a request header. */
-export const CsrfToken = BrowserCredential
-export type CsrfToken = BrowserCredential
+export const CsrfToken = CredentialValue.pipe(Schema.brand("CsrfToken"))
+export type CsrfToken = typeof CsrfToken.Type
 
 /** SHA-256 digest persisted instead of a browser credential. */
 export const CredentialDigest = Schema.String.check(
@@ -37,28 +39,41 @@ export const PairingConfirmationResponse = Schema.Struct({ csrfToken: CsrfToken 
 export type PairingConfirmationResponse = typeof PairingConfirmationResponse.Type
 
 export const OneTimeCredentialState = Schema.Struct({
-  expiresAt: Schema.Number,
-  consumedAt: Schema.NullOr(Schema.Number),
-  revokedAt: Schema.NullOr(Schema.Number)
+  expiresAt: Schema.Number.check(Schema.isInt()),
+  consumedAt: Schema.NullOr(Schema.Number.check(Schema.isInt())),
+  revokedAt: Schema.NullOr(Schema.Number.check(Schema.isInt()))
 })
 
 export type OneTimeCredentialState = typeof OneTimeCredentialState.Type
 
-export type OneTimeCredentialDecision = "accepted" | "expired" | "consumed" | "revoked"
+export type OneTimeCredentialDecision = "accepted" | "expired" | "consumed" | "revoked" | "invalid"
 
 /** Expiry is inclusive: a credential at its deadline is no longer usable. */
-export const isExpired = (now: number, expiry: number): boolean => now >= expiry
+export const isExpired = (now: number, expiry: number): boolean =>
+  !Number.isSafeInteger(now) || !Number.isSafeInteger(expiry) || now >= expiry
 
 /** Pure state transition guard reusable by durable and in-memory stores. */
 export const decideOneTimeCredential = (
   state: OneTimeCredentialState,
   now: number
 ): OneTimeCredentialDecision => {
+  if (
+    !Number.isSafeInteger(now) ||
+    !Number.isSafeInteger(state.expiresAt) ||
+    (state.consumedAt !== null && !Number.isSafeInteger(state.consumedAt)) ||
+    (state.revokedAt !== null && !Number.isSafeInteger(state.revokedAt))
+  ) return "invalid"
   if (state.revokedAt !== null) return "revoked"
   if (state.consumedAt !== null) return "consumed"
   if (isExpired(now, state.expiresAt)) return "expired"
   return "accepted"
 }
+
+/** A cookie value or attribute contained a delimiter, control character, or invalid credential. */
+export class CredentialCookieError extends Schema.TaggedError<CredentialCookieError>()(
+  "CredentialCookieError",
+  { reason: Schema.Literals(["invalid-credential", "invalid-attribute", "invalid-max-age"]) }
+) {}
 
 export interface CredentialCookieOptions {
   readonly name: string
@@ -69,14 +84,30 @@ export interface CredentialCookieOptions {
   readonly maxAge?: number
 }
 
-/** Serialize a credential cookie; credential attributes remain application policy. */
+/** Serialize a validated credential cookie without allowing header injection or invalid lifetimes. */
 export const serializeCredentialCookie = (
   credential: string,
   options: CredentialCookieOptions
 ): string => {
+  const decoded = Schema.decodeUnknownResult(BrowserCredential)(credential)
+  if (Result.isFailure(decoded)) throw new CredentialCookieError({ reason: "invalid-credential" })
+  const invalidAttribute = (value: string): boolean =>
+    value.length === 0 || Array.from(value).some((character) => {
+      const code = character.charCodeAt(0)
+      return code <= 0x1f || code === 0x7f || COOKIE_DELIMITERS.has(character)
+    })
+  if (invalidAttribute(options.name) || invalidAttribute(options.path)) {
+    throw new CredentialCookieError({ reason: "invalid-attribute" })
+  }
+  if (
+    options.maxAge !== undefined &&
+    (!Number.isSafeInteger(options.maxAge) || options.maxAge < 0)
+  ) {
+    throw new CredentialCookieError({ reason: "invalid-max-age" })
+  }
   const sameSite = options.sameSite === "strict" ? "Strict" : options.sameSite === "lax" ? "Lax" : "None"
   const parts = [
-    `${options.name}=${credential}`,
+    `${options.name}=${decoded.success}`,
     ...(options.httpOnly ? ["HttpOnly"] : []),
     `Path=${options.path}`,
     `SameSite=${sameSite}`,
@@ -89,15 +120,15 @@ export const serializeCredentialCookie = (
 export type BootstrapTokenRead =
   | { readonly _tag: "missing" }
   | { readonly _tag: "malformed" }
-  | { readonly _tag: "present"; readonly token: BrowserCredential }
+  | { readonly _tag: "present"; readonly token: Redacted.Redacted<SessionToken> }
 
 /** Read a bootstrap token without silently accepting malformed URL fragments. */
 export const readBootstrapToken = (hash: string): BootstrapTokenRead => {
   const value = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash).get("bootstrap_token")
   if (value === null) return { _tag: "missing" }
-  const decoded = Schema.decodeUnknownResult(BrowserCredential)(value)
+  const decoded = Schema.decodeUnknownResult(SessionToken)(value)
   return Result.isSuccess(decoded)
-    ? { _tag: "present", token: decoded.success }
+    ? { _tag: "present", token: Redacted.make(decoded.success) }
     : { _tag: "malformed" }
 }
 

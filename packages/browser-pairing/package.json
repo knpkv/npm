@@ -30,8 +30,8 @@
     "access": "public"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b tsconfig.build.json --force",
-    "check": "tsc -b tsconfig.json",
+    "build": "tsc -b tsconfig.build.json --force",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "lint": "eslint src test",
     "test": "vitest run"
   },

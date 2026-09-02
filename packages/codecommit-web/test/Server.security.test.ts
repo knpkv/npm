@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { BrowserCredential } from "@knpkv/browser-pairing/schema"
 import { ConfigService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
@@ -15,6 +16,7 @@ import {
   Redacted,
   Ref,
   Result,
+  Schema,
   Stream,
   SubscriptionRef
 } from "effect"
@@ -42,14 +44,18 @@ import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPubl
 const ownerToken = "aa".repeat(32)
 const csrfToken = "bb".repeat(32)
 const bootstrapToken = "cc".repeat(32)
+const authorityOrigin = "http://127.0.0.1:3000"
+const browserCredential = (value: string): BrowserCredential => Schema.decodeSync(BrowserCredential)(value)
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
   function*(active: boolean = true): Effect.fn.Return<OwnerSessionSecretsContract> {
     return {
-      ownerToken: Redacted.make(ownerToken),
-      csrfToken: Redacted.make(csrfToken),
-      bootstrapToken: Redacted.make(bootstrapToken),
+      authorityOrigin,
+      ownerToken: Redacted.make(browserCredential(ownerToken)),
+      csrfToken: Redacted.make(browserCredential(csrfToken)),
+      bootstrapToken: Redacted.make(browserCredential(bootstrapToken)),
       bootstrapAvailable: yield* Ref.make(true),
+      bootstrapFailedAttempts: yield* Ref.make(0),
       bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(active ? Number.MAX_SAFE_INTEGER : undefined)
     }
   }
@@ -156,7 +162,9 @@ describe("CodeCommit web security boundary", () => {
         randomUUIDv7: Effect.succeed("01900000-0000-7000-8000-000000000000"),
         digest: (_algorithm, bytes) => Effect.succeed(new Uint8Array(32).fill(bytes[0] ?? 0))
       })
-      const secrets = yield* makeOwnerSessionSecrets().pipe(Effect.provideService(Crypto.Crypto, pairingCrypto))
+      const secrets = yield* makeOwnerSessionSecrets(authorityOrigin).pipe(
+        Effect.provideService(Crypto.Crypto, pairingCrypto)
+      )
       const values = [secrets.ownerToken, secrets.csrfToken, secrets.bootstrapToken]
         .map(Redacted.value)
       expect(values.every((value) => /^[0-9a-f]{64}$/u.test(value))).toBe(true)
@@ -524,6 +532,35 @@ describe("CodeCommit web security boundary", () => {
       expect(cookie).toContain("HttpOnly")
       expect(cookie).toContain("Path=/api")
       expect(cookie).not.toContain("Domain=")
+    }))
+
+  it.effect("uses configured authority for origin checks and bounds unauthenticated attempts", () =>
+    Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
+      yield* authorizeBootstrapRequest({
+        authorization: `Bearer ${bootstrapToken}`,
+        host: "attacker.example:3000",
+        origin: authorityOrigin
+      }, secrets)
+
+      const limited = yield* makeSecrets()
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const failed = yield* Effect.result(authorizeBootstrapRequest({
+          authorization: "Bearer invalid",
+          host: "127.0.0.1:3000",
+          origin: authorityOrigin
+        }, limited))
+        expect(Result.isFailure(failed)).toBe(true)
+      }
+      const blocked = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: `Bearer ${bootstrapToken}`,
+        host: "127.0.0.1:3000",
+        origin: authorityOrigin
+      }, limited))
+      expect(Result.isFailure(blocked)).toBe(true)
+      if (Result.isFailure(blocked)) {
+        expect(blocked.failure.message).toBe("Bootstrap confirmation temporarily unavailable")
+      }
     }))
 
   it.effect("starts bootstrap expiry only after server readiness", () =>

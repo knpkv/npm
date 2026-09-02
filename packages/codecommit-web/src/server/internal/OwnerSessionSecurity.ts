@@ -5,16 +5,20 @@ import {
   issueCredential,
   serializeCredentialCookie
 } from "@knpkv/browser-pairing"
+import type { BrowserCredential } from "@knpkv/browser-pairing/schema"
 import { Clock, Context, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
 
 export interface OwnerSessionSecretsContract {
+  /** Validated server authority used for origin checks; request Host is never authoritative. */
+  readonly authorityOrigin: string
   readonly bootstrapAvailable: Ref.Ref<boolean>
+  readonly bootstrapFailedAttempts: Ref.Ref<number>
   readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
-  readonly bootstrapToken: Redacted.Redacted<string>
-  readonly csrfToken: Redacted.Redacted<string>
-  readonly ownerToken: Redacted.Redacted<string>
+  readonly bootstrapToken: Redacted.Redacted<BrowserCredential>
+  readonly csrfToken: Redacted.Redacted<BrowserCredential>
+  readonly ownerToken: Redacted.Redacted<BrowserCredential>
 }
 
 export class OwnerSessionSecrets extends Context.Service<
@@ -28,6 +32,7 @@ export class UnsafeServerHostnameError extends Schema.TaggedError<UnsafeServerHo
 ) {}
 
 const safeMethods = new Set(["GET", "HEAD", "OPTIONS"])
+const MAX_BOOTSTRAP_FAILURES = 5
 
 export const isLoopbackHostname = (hostname: string): boolean =>
   hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]"
@@ -44,21 +49,27 @@ export const requireLoopbackHostname = Effect.fn("OwnerSessionSecurity.requireLo
   }
 )
 
-export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecrets")(function*() {
-  const [ownerToken, csrfToken, bootstrapToken] = yield* Effect.all([
-    issueCredential(),
-    issueCredential(),
-    issueCredential()
-  ])
-  const bootstrapAvailable = yield* Ref.make(true)
-  return OwnerSessionSecrets.of({
-    ownerToken,
-    csrfToken,
-    bootstrapToken,
-    bootstrapAvailable,
-    bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined)
-  })
-})
+export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecrets")(
+  function*(authorityOrigin: string) {
+    const validatedAuthorityOrigin = yield* requireLoopbackOrigin(authorityOrigin)
+    const [ownerToken, csrfToken, bootstrapToken] = yield* Effect.all([
+      issueCredential(),
+      issueCredential(),
+      issueCredential()
+    ])
+    const bootstrapAvailable = yield* Ref.make(true)
+    const bootstrapFailedAttempts = yield* Ref.make(0)
+    return OwnerSessionSecrets.of({
+      authorityOrigin: validatedAuthorityOrigin,
+      ownerToken,
+      csrfToken,
+      bootstrapToken,
+      bootstrapAvailable,
+      bootstrapFailedAttempts,
+      bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined)
+    })
+  }
+)
 
 export const activateOwnerSessionBootstrap = Effect.fn("OwnerSessionSecurity.activateBootstrap")(
   function*(secrets: OwnerSessionSecretsContract) {
@@ -137,7 +148,7 @@ export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRe
     if (!credentialValuesEqual(request.credential, Redacted.value(secrets.ownerToken))) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid owner session" })
     }
-    const sameOrigin = request.host !== undefined && request.origin === `http://${request.host}`
+    const sameOrigin = request.origin !== undefined && request.origin === secrets.authorityOrigin
     if (request.origin !== undefined && !sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Request origin does not match the CodeCommit server" })
     }
@@ -163,13 +174,18 @@ interface BootstrapAuthorization {
 
 export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authorizeBootstrap")(
   function*(request: BootstrapAuthorization, secrets: OwnerSessionSecretsContract) {
+    const failedAttempts = yield* Ref.get(secrets.bootstrapFailedAttempts)
+    if (failedAttempts >= MAX_BOOTSTRAP_FAILURES) {
+      return yield* new UnauthorizedApiError({ message: "Bootstrap confirmation temporarily unavailable" })
+    }
     const suppliedToken = request.authorization !== undefined && request.authorization.startsWith("Bearer ")
       ? request.authorization.slice("Bearer ".length)
       : undefined
     if (suppliedToken === undefined || !credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken))) {
+      yield* Ref.update(secrets.bootstrapFailedAttempts, (attempts) => Math.min(MAX_BOOTSTRAP_FAILURES, attempts + 1))
       return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
     }
-    if (request.host === undefined || request.origin !== `http://${request.host}`) {
+    if (request.origin !== secrets.authorityOrigin) {
       return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match the CodeCommit server" })
     }
     const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
@@ -189,6 +205,9 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
     if (decision === "expired") return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
     if (decision === "consumed") {
       return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
+    }
+    if (decision === "invalid") {
+      return yield* new UnauthorizedApiError({ message: "Bootstrap token state is invalid" })
     }
   }
 )

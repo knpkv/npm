@@ -3,6 +3,8 @@ import { Crypto, Effect, Encoding, Redacted, Result } from "effect"
 import {
   bootstrapRouteWithoutToken,
   BrowserPairingError,
+  CredentialCookieError,
+  type CredentialCookieOptions,
   CredentialDigest,
   credentialValuesEqual,
   decideOneTimeCredential,
@@ -58,15 +60,19 @@ describe("browser pairing primitives", () => {
     expect(decideOneTimeCredential({ ...active, expiresAt: 99 }, 99)).toBe("expired")
     expect(decideOneTimeCredential({ ...active, consumedAt: 1 }, 99)).toBe("consumed")
     expect(decideOneTimeCredential({ ...active, revokedAt: 1 }, 99)).toBe("revoked")
+    expect(decideOneTimeCredential({ ...active, expiresAt: Number.NaN }, 99)).toBe("invalid")
+    expect(decideOneTimeCredential(active, Number.POSITIVE_INFINITY)).toBe("invalid")
   })
 
   it("parses bootstrap fragments as missing, malformed, or present", () => {
     expect(readBootstrapToken("")).toEqual({ _tag: "missing" })
     expect(readBootstrapToken("#bootstrap_token=short")).toEqual({ _tag: "malformed" })
-    expect(readBootstrapToken(`#bootstrap_token=${"ab".repeat(32)}`)).toEqual({
-      _tag: "present",
-      token: "ab".repeat(32)
-    })
+    const parsed = readBootstrapToken(`#bootstrap_token=${"ab".repeat(32)}`)
+    expect(parsed._tag).toBe("present")
+    if (parsed._tag === "present") {
+      expect(Redacted.value(parsed.token)).toBe("ab".repeat(32))
+      expect(String(parsed.token)).not.toContain("ab".repeat(32))
+    }
     expect(bootstrapRouteWithoutToken("/pair", "?next=/home")).toBe("/pair?next=/home")
   })
 
@@ -84,5 +90,23 @@ describe("browser pairing primitives", () => {
       sameSite: "strict",
       secure: true
     })).toBe(`cc_session=${"ab".repeat(32)}; HttpOnly; Path=/; SameSite=Strict; Secure`)
+  })
+
+  it("rejects cookie delimiters, control characters, and invalid max ages", () => {
+    const valid: CredentialCookieOptions = {
+      name: "cc_session",
+      path: "/",
+      httpOnly: true,
+      sameSite: "strict",
+      secure: true
+    }
+    expect(() => serializeCredentialCookie("ab;" + "ab".repeat(31), valid)).toThrow(CredentialCookieError)
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/\r\nSet-Cookie: bad" })).toThrow(
+      CredentialCookieError
+    )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, maxAge: -1 })).toThrow(CredentialCookieError)
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, maxAge: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
+      CredentialCookieError
+    )
   })
 })

@@ -84,6 +84,27 @@ describe("owner session bootstrap", () => {
     expect(replaceState).toHaveBeenCalledWith(null, "", "/")
   })
 
+  it("reports history replacement failures as a failed bootstrap status", async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal("window", {
+      fetch,
+      history: {
+        replaceState: vi.fn(() => {
+          throw new Error("document is not active")
+        })
+      },
+      localStorage: makeStorage(),
+      location: { hash: `#bootstrap_token=${bootstrapToken}`, pathname: "/", search: "" }
+    })
+
+    const ownerSession = await import("../src/client/ownerSession.js")
+    await expect(ownerSession.ownerSessionReady).resolves.toEqual({
+      _tag: "Failed",
+      message: "document is not active"
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it("retains the CSRF proof in memory when local storage is unavailable", async () => {
     const replaceState = vi.fn()
     vi.stubGlobal("window", {

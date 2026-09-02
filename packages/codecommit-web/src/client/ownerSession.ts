@@ -1,11 +1,10 @@
 import {
   bootstrapRouteWithoutToken,
-  type BrowserCredential,
   CsrfToken,
   PairingConfirmationResponse,
   readBootstrapToken
 } from "@knpkv/browser-pairing/schema"
-import { Predicate, Result, Schema } from "effect"
+import { Predicate, Redacted, Result, Schema } from "effect"
 
 const csrfStorageKey = "codecommit_web_csrf"
 const BootstrapResponse = PairingConfirmationResponse
@@ -45,16 +44,16 @@ const bootstrapOwnerSession = async (): Promise<OwnerSessionBootstrapStatus> => 
   if (!browserAvailable()) return ready
   const bootstrap = readBootstrapToken(window.location.hash)
   if (bootstrap._tag === "missing") return ready
-  const route = bootstrapRouteWithoutToken(window.location.pathname, window.location.search)
-  window.history.replaceState(null, "", route)
-  if (bootstrap._tag === "malformed") return failed("Owner session bootstrap token is malformed")
-  const bootstrapToken: BrowserCredential = bootstrap.token
 
   try {
+    const route = bootstrapRouteWithoutToken(window.location.pathname, window.location.search)
+    window.history.replaceState(null, "", route)
+    if (bootstrap._tag === "malformed") return failed("Owner session bootstrap token is malformed")
+    const bootstrapToken = bootstrap.token
     const response = await window.fetch("/auth/bootstrap", {
       method: "POST",
       credentials: "same-origin",
-      headers: { Authorization: `Bearer ${bootstrapToken}` }
+      headers: { Authorization: `Bearer ${Redacted.value(bootstrapToken)}` }
     })
     if (!response.ok) return failed(`Owner session bootstrap failed with status ${response.status}`)
     const payload = await Schema.decodeUnknownPromise(BootstrapResponse)(await response.json())

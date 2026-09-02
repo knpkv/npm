@@ -10,7 +10,8 @@
     "types": "dist/dts/index.d.ts"
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md"
   ],
   "scripts": {
     "start": "bun run src/main.ts",

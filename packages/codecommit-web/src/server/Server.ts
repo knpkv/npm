@@ -419,14 +419,14 @@ export const CodeCommitServerLive = Effect.gen(function*() {
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      // Rotate every authority-bearing secret on each bind attempt so a URL
-      // emitted for an occupied port cannot authenticate to a later retry.
-      const security = yield* makeOwnerSessionSecrets()
-      const ready = yield* Deferred.make<void>()
       const directOrigin = ownerSessionOrigin("127.0.0.1", p)
       const publicOrigin = yield* requireLoopbackOrigin(
         Option.getOrElse(publicOriginOverride, () => directOrigin)
       )
+      // Rotate every authority-bearing secret on each bind attempt so a URL
+      // emitted for an occupied port cannot authenticate to a later retry.
+      const security = yield* makeOwnerSessionSecrets(publicOrigin)
+      const ready = yield* Deferred.make<void>()
       const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
         Effect.forkChild({ startImmediately: true })
       )

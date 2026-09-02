@@ -52,7 +52,7 @@ const web = Command.make("web", {
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
-    const security = yield* makeOwnerSessionSecrets()
+    const security = yield* makeOwnerSessionSecrets(ownerSessionOrigin(hostname, port))
     const ready = yield* Deferred.make<void>()
     const url = ownerSessionUrl(hostname, port, security)
     const stdio = yield* Stdio.Stdio
