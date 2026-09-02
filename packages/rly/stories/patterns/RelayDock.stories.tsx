@@ -266,7 +266,7 @@ export const Interaction: Story = {
 
 export const DesktopRail: Story = {
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole("complementary", { name: "Relay" })).toBeVisible()
+    await expect(canvas.getByRole("complementary", { name: /^Relay \(/ })).toBeVisible()
     await expect(canvas.getAllByRole("combobox")).toHaveLength(2)
   },
   render: () => <RelayDockFixture initiallyOpen presentation="rail" />
