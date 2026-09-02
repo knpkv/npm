@@ -71,10 +71,9 @@ describe("Claude Relay adapter boundary", () => {
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         const settingIndex = command.args.indexOf("--setting-sources")
-        const mcpIndex = command.args.indexOf("--mcp-config")
         expect(command.args[settingIndex + 1]).toBe("")
-        expect(command.args).toContain("--strict-mcp-config")
-        expect(command.args[mcpIndex + 1]).toBe("{\"mcpServers\":{}}")
+        expect(command.args).not.toContain("--strict-mcp-config")
+        expect(command.args).not.toContain("--mcp-config")
         const disallowedIndex = command.args.indexOf("--disallowed-tools")
         expect(command.args[disallowedIndex + 1]).toContain("mcp__*")
       }

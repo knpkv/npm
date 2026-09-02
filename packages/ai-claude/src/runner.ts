@@ -96,9 +96,6 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
     arguments_.push(
       "--setting-sources",
       "",
-      "--strict-mcp-config",
-      "--mcp-config",
-      "{\"mcpServers\":{}}",
       "--disallowed-tools",
       "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit,TodoRead,TodoWrite,ExitPlanMode,AskUserQuestion,Skill,EnterPlanMode,mcp__*"
     )
