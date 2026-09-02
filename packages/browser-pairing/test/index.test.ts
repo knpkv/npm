@@ -174,6 +174,13 @@ describe("browser pairing primitives", () => {
     expect(() =>
       serializeRuntimeCredentialCookie("ab".repeat(32), {
         ...valid,
+        name: "__HtTp-session",
+        secure: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
         name: "__Host-Http-session",
         httpOnly: false
       })
@@ -182,6 +189,13 @@ describe("browser pairing primitives", () => {
       serializeRuntimeCredentialCookie("ab".repeat(32), {
         ...valid,
         name: "__Host-Http-session",
+        path: "/api"
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__HoSt-HtTp-session",
         path: "/api"
       })
     ).toThrow(CredentialCookieError)
