@@ -35,6 +35,8 @@ export class UnsafeServerHostnameError extends Schema.TaggedError<UnsafeServerHo
 
 const safeMethods = new Set(["GET", "HEAD", "OPTIONS"])
 const MAX_BOOTSTRAP_FAILURES = 5
+const authenticatedDevBackendOrigin = "http://127.0.0.1:3000"
+const authenticatedDevPublicOrigin = "http://localhost:5173"
 
 export const isLoopbackHostname = (hostname: string): boolean =>
   hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]"
@@ -131,13 +133,23 @@ export const requireSupportedPublicOrigin = Effect.fn("OwnerSessionSecurity.requ
   function*(origin: string, authorityOrigin: string) {
     const validatedOrigin = yield* requireLoopbackOrigin(origin)
     const validatedAuthority = yield* requireLoopbackOrigin(authorityOrigin)
-    if (validatedOrigin !== validatedAuthority && validatedOrigin !== "http://localhost:5173") {
+    const isSupportedProxy = validatedOrigin === authenticatedDevPublicOrigin &&
+      validatedAuthority === authenticatedDevBackendOrigin
+    if (validatedOrigin !== validatedAuthority && !isSupportedProxy) {
       return yield* new UnsafeServerHostnameError({
         hostname: origin,
-        message: "CodeCommit public origin must be the bound server or the supported Vite proxy origin"
+        message: "CodeCommit public origin must be the bound server or its supported Vite proxy"
       })
     }
     return validatedOrigin
+  }
+)
+
+export const resolvePublicOrigin = Effect.fn("OwnerSessionSecurity.resolvePublicOrigin")(
+  function*(configuredOrigin: string | undefined, authorityOrigin: string) {
+    return configuredOrigin === undefined
+      ? yield* requireLoopbackOrigin(authorityOrigin)
+      : yield* requireSupportedPublicOrigin(configuredOrigin, authorityOrigin)
   }
 )
 

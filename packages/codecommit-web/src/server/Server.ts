@@ -56,7 +56,7 @@ import {
   type OwnerSessionSecretsContract,
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
-  requireSupportedPublicOrigin
+  resolvePublicOrigin
 } from "./internal/OwnerSessionSecurity.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
@@ -420,10 +420,7 @@ export const CodeCommitServerLive = Effect.gen(function*() {
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
       const directOrigin = ownerSessionOrigin("127.0.0.1", p)
-      const publicOrigin = yield* Option.match(publicOriginOverride, {
-        onNone: () => Effect.succeed(directOrigin.replace(/\/+$/u, "")),
-        onSome: (origin) => requireSupportedPublicOrigin(origin, directOrigin)
-      })
+      const publicOrigin = yield* resolvePublicOrigin(Option.getOrUndefined(publicOriginOverride), directOrigin)
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSessionSecrets(directOrigin)

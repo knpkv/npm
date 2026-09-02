@@ -37,7 +37,8 @@ import {
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
   requireLoopbackOrigin,
-  requireSupportedPublicOrigin
+  requireSupportedPublicOrigin,
+  resolvePublicOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
 import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
@@ -655,6 +656,11 @@ describe("CodeCommit web security boundary", () => {
       )
       expect(Result.isFailure(unsupported)).toBe(true)
       if (Result.isFailure(unsupported)) expect(unsupported.failure._tag).toBe("UnsafeServerHostnameError")
+      const retryAuthority = yield* Effect.result(
+        resolvePublicOrigin("http://localhost:5173", "http://127.0.0.1:3001")
+      )
+      expect(Result.isFailure(retryAuthority)).toBe(true)
+      expect(yield* resolvePublicOrigin(undefined, authorityOrigin)).toBe(authorityOrigin)
     }))
 
   it.effect("gates and audits decoded differences and blob reads before provider execution", () =>
