@@ -257,6 +257,19 @@ describe("browser pairing primitives", () => {
       name: "__Secure-session",
       sourceOrigin: "http://localhost"
     })).toContain("__Secure-session=")
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        sourceOrigin: "http://example.test"
+      })
+    ).toThrow(CredentialCookieError)
+    for (const sourceOrigin of ["http://127.0.0.2", "http://dev.localhost", "http://localhost."]) {
+      expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Secure-session",
+        sourceOrigin
+      })).toContain("__Secure-session=")
+    }
     const malformed = { ...valid, sameSite: "invalid" }
     expect(() => {
       // @ts-expect-error Exercise the runtime boundary with an untyped SameSite value.

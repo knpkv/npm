@@ -95,6 +95,23 @@ const CredentialCookieOptionsSchema = Schema.Struct({
   sourceOrigin: Schema.optionalKey(Schema.String)
 })
 
+const isLoopbackIpv4 = (hostname: string): boolean => {
+  const octets = hostname.split(".")
+  return octets.length === 4 &&
+    octets[0] === "127" &&
+    octets.slice(1).every((octet) => /^\d{1,3}$/u.test(octet) && Number(octet) <= 255)
+}
+
+const isChromiumLocalhost = (hostname: string): boolean => {
+  const normalized = hostname.toLowerCase()
+  return isLoopbackIpv4(normalized) ||
+    normalized === "[::1]" ||
+    normalized === "localhost" ||
+    normalized === "localhost." ||
+    normalized.endsWith(".localhost") ||
+    normalized.endsWith(".localhost.")
+}
+
 /** Serialize a validated credential cookie without allowing header injection or invalid lifetimes. */
 export const serializeCredentialCookie: (
   credential: Redacted.Redacted<SessionToken>,
@@ -121,8 +138,10 @@ export const serializeCredentialCookie: (
     : undefined
   const sourceOriginIsTrustworthy = sourceUrl !== undefined &&
     (sourceUrl.protocol === "https:" ||
-      (sourceUrl.protocol === "http:" &&
-        (sourceUrl.hostname === "localhost" || sourceUrl.hostname === "127.0.0.1" || sourceUrl.hostname === "[::1]")))
+      (sourceUrl.protocol === "http:" && isChromiumLocalhost(sourceUrl.hostname)))
+  const invalidSecureSource = validatedOptions.secure &&
+    validatedOptions.sourceOrigin !== undefined &&
+    !sourceOriginIsTrustworthy
   const invalidReservedPrefix = (normalizedName.startsWith("__host-http-") &&
     (!validatedOptions.secure || !validatedOptions.httpOnly || validatedOptions.path !== "/")) ||
     (normalizedName.startsWith("__http-") && (!validatedOptions.secure || !validatedOptions.httpOnly)) ||
@@ -134,6 +153,7 @@ export const serializeCredentialCookie: (
     invalidPath(validatedOptions.path) ||
     !validatedOptions.path.startsWith("/") ||
     invalidReservedPrefix ||
+    invalidSecureSource ||
     (validatedOptions.sourceOrigin !== undefined && sourceUrl === undefined)
   ) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
