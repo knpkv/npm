@@ -85,7 +85,7 @@ const schemaArgument = (
   options: LanguageModel.ProviderOptions,
   method: string
 ): Effect.Effect<string | undefined, AiError.AiError> => {
-  if (options.responseFormat.type === "text") return Effect.succeed(undefined)
+  if (options.responseFormat.type === "text") return Effect.map(Effect.succeed(true), () => undefined)
   const responseSchema = options.responseFormat.schema
   return Effect.try({
     try: () => Schema.toJsonSchemaDocument(responseSchema),
@@ -94,7 +94,6 @@ const schemaArgument = (
     Effect.flatMap((document) =>
       encodeJson({
         $defs: document.definitions,
-        $schema: "https://json-schema.org/draft/2020-12/schema",
         ...document.schema
       }, method)
     )

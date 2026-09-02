@@ -30,6 +30,7 @@ export {
   reviewKindOptions,
   ReviewModel,
   reviewModelOptions,
+  reviewModelOptionsForProvider,
   ReviewProfileConfig,
   reviewProfileSkillLimit,
   ReviewProvider,

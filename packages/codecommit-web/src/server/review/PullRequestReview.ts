@@ -1,4 +1,5 @@
 /** Immutable CodeCommit diff reads and prompt-only Relay execution for the web review workbench. @module */
+import { model as claudeModel } from "@knpkv/ai-claude"
 import { type CodexEventStreamOptions, streamEvents } from "@knpkv/ai-codex"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
@@ -8,6 +9,7 @@ import { Cache, Cause, Data, Effect, Exit, Option, Predicate, Queue, Schema, Str
 import * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
 import type * as Semaphore from "effect/Semaphore"
+import { LanguageModel } from "effect/unstable/ai"
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import {
@@ -26,7 +28,12 @@ import {
   type RelayReviewStreamEvent
 } from "../Api.js"
 import type { RelayFindingPublisherService } from "./RelayFindingPublisher.js"
-import { MAXIMUM_RELAY_PATCH_BYTES, MAXIMUM_RELAY_PROMPT_BYTES } from "./ReviewPromptBudget.js"
+import {
+  MAXIMUM_RELAY_PATCH_BYTES,
+  MAXIMUM_RELAY_PROMPT_BYTES,
+  MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+  MAXIMUM_RELAY_REVIEW_RESULT_BYTES
+} from "./ReviewPromptBudget.js"
 
 const MAXIMUM_DIFF_FILES = 1_000
 const MAXIMUM_RELAY_DIFF_INPUT_LINES = 5_000
@@ -38,7 +45,8 @@ const textEncoder = new TextEncoder()
 const withProfileModel = (
   profile: RelayReviewProfile,
   options: CodexEventStreamOptions
-): CodexEventStreamOptions => profile.model === "configured-default" ? options : { ...options, model: profile.model }
+): CodexEventStreamOptions =>
+  profile.model === "configured-default" || profile.model === "default" ? options : { ...options, model: profile.model }
 
 export class PullRequestReviewError extends Schema.TaggedError<PullRequestReviewError>()(
   "PullRequestReviewError",
@@ -718,6 +726,98 @@ export const parseRelayReviewResult = (
   )
 }
 
+interface RelayAgentRequest {
+  readonly cwd: string
+  readonly kind: RelayReviewKind
+  readonly maxPromptBytes: number
+  readonly outputSchema: Schema.Top
+  readonly prompt: string
+  readonly timeout: "5 minutes"
+}
+
+type RelayAgentResult =
+  | Schema.Schema.Type<typeof RelayExplainResult>
+  | Schema.Schema.Type<typeof RelayNativeReviewResult>
+
+const encodeClaudeAgentMessage = (value: RelayAgentResult): Effect.Effect<string, PullRequestReviewError> =>
+  Effect.try({
+    try: () => JSON.stringify(value),
+    catch: (cause) => reviewError("relay-review-encode", "Claude returned an unencodable structured result", cause)
+  }).pipe(
+    Effect.flatMap((encoded) =>
+      encoded === undefined
+        ? Effect.fail(reviewError("relay-review-encode", "Claude returned no structured review result"))
+        : Effect.succeed(encoded)
+    )
+  )
+
+const claudeAgentMessage = (
+  profile: RelayReviewProfile,
+  request: RelayAgentRequest
+): Effect.Effect<string, PullRequestReviewError, ChildProcessSpawner.ChildProcessSpawner> =>
+  (request.kind === "explain"
+    ? LanguageModel.generateObject({ objectName: "relay-review", prompt: request.prompt, schema: RelayExplainResult })
+    : LanguageModel.generateObject({
+      objectName: "relay-review",
+      prompt: request.prompt,
+      schema: RelayNativeReviewResult
+    })).pipe(
+      // Dynamic per-review model layer: the application supplies ChildProcessSpawner at its entry point.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(
+        claudeModel({
+          access: "read-only",
+          cwd: request.cwd,
+          ...((profile.model !== "configured-default" && profile.model !== "default") && { model: profile.model }),
+          timeout: request.timeout,
+          maxOutputBytes: MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+          maxStderrBytes: MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES
+        })
+      ),
+      Effect.map((response) => response.value),
+      Effect.flatMap(encodeClaudeAgentMessage),
+      Effect.mapError((cause) =>
+        Predicate.isTagged(cause, "PullRequestReviewError")
+          ? cause
+          : reviewError("relay-review", "Claude review execution failed", cause)
+      )
+    )
+
+const streamRelayAgent = (
+  profile: RelayReviewProfile,
+  request: RelayAgentRequest
+): Stream.Stream<string, PullRequestReviewError, FileSystem.FileSystem | ChildProcessSpawner.ChildProcessSpawner> => {
+  if (profile.provider === "codex" && profile.harness === "native-codex") {
+    return streamEvents(withProfileModel(profile, {
+      access: "read-only",
+      cwd: request.cwd,
+      maxPromptBytes: request.maxPromptBytes,
+      outputSchema: request.outputSchema,
+      prompt: request.prompt,
+      promptOnly: true,
+      timeout: request.timeout
+    })).pipe(
+      Stream.mapError((cause) => reviewError("relay-review", "Codex review execution failed", cause))
+    )
+  }
+  if (profile.provider === "claude" && profile.harness === "native-claude") {
+    return Stream.fromEffect(
+      claudeAgentMessage(profile, request).pipe(
+        Effect.map((message) =>
+          JSON.stringify({
+            type: "item.completed",
+            item: { type: "agent_message", text: message }
+          })
+        )
+      )
+    )
+  }
+  return Stream.fail(reviewError(
+    "relay-review-config",
+    `Unsupported Relay reviewer configuration: ${profile.provider}/${profile.harness}/${profile.model}`
+  ))
+}
+
 /** Execute one ephemeral, read-only Relay pass over the exact provider patch. */
 export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullRequestRelayReview")(function*(
   client: ReadClient.CodeCommitReadClientService,
@@ -752,15 +852,14 @@ export const runPullRequestRelayReview = Effect.fn("PullRequestReview.runPullReq
       const fileSystem = yield* FileSystem.FileSystem
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-web-relay-" })
       yield* reportProgress({ phase: "agent", message: "Relay is reviewing the exact patch" })
-      const message = yield* streamEvents(withProfileModel(profile, {
-        access: "read-only",
+      const message = yield* streamRelayAgent(profile, {
         cwd: workspace,
+        kind,
         maxPromptBytes: MAXIMUM_RELAY_PROMPT_BYTES,
         outputSchema: relayReviewOutputSchema(kind),
         prompt,
-        promptOnly: true,
         timeout: "5 minutes"
-      })).pipe(
+      }).pipe(
         Stream.tap((line) => {
           const event = decodeCodexProgress(line)
           if (Option.isNone(event)) return Effect.void
@@ -924,15 +1023,14 @@ export const continuePullRequestRelayReview = Effect.fn(
       const fileSystem = yield* FileSystem.FileSystem
       const workspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-web-relay-" })
       yield* reportProgress({ phase: "agent", message: "Relay is reconciling the finding deck" })
-      const response = yield* streamEvents(withProfileModel(profile, {
-        access: "read-only",
+      const response = yield* streamRelayAgent(profile, {
         cwd: workspace,
+        kind,
         maxPromptBytes: MAXIMUM_RELAY_PROMPT_BYTES,
         outputSchema: relayConversationOutputSchema(kind),
         prompt,
-        promptOnly: true,
         timeout: "5 minutes"
-      })).pipe(
+      }).pipe(
         Stream.tap((line) => {
           const event = decodeCodexProgress(line)
           return Option.isSome(event) && event.value.type === "item.completed" && event.value.item?.type === "reasoning"

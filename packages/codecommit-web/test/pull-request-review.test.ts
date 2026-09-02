@@ -1,7 +1,9 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Exit, Fiber, Option, Schema, Semaphore, Stream } from "effect"
+import { Deferred, Effect, Exit, Fiber, Layer, Option, Schema, Semaphore, Sink, Stream } from "effect"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { RelayReviewContinueStreamRequest, RelayReviewResult, RelayReviewStreamRequest } from "../src/server/Api.js"
 
 import {
@@ -18,6 +20,7 @@ import {
   PullRequestReviewError,
   relayConversationOutputSchema,
   relayReviewOutputSchema,
+  runPullRequestRelayReview,
   streamRelayReviewEventsFrom,
   validateRelayReviewAnchors,
   withRelayReviewPermit,
@@ -118,7 +121,86 @@ const makeReadClient = (
   streamPullRequests: () => Stream.empty
 })
 
+const ClaudeResultFixture = Schema.Struct({
+  is_error: Schema.Boolean,
+  structured_output: Schema.Struct({
+    findings: Schema.Array(Schema.Unknown),
+    verdict: Schema.String
+  }),
+  subtype: Schema.String,
+  type: Schema.String
+})
+type ClaudeResultFixture = Schema.Schema.Type<typeof ClaudeResultFixture>
+
+const makeClaudeSpawner = (calls: Array<ChildProcess.Command>, result: ClaudeResultFixture) =>
+  ChildProcessSpawner.make((command) => {
+    calls.push(command)
+    const stdout = Stream.make(JSON.stringify(result)).pipe(Stream.encodeText)
+    const stderr = Stream.make("").pipe(Stream.encodeText)
+    return Effect.succeed(ChildProcessSpawner.makeHandle({
+      all: stdout,
+      exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(0)),
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      isRunning: Effect.succeed(false),
+      kill: () => Effect.void,
+      pid: ChildProcessSpawner.ProcessId(42),
+      reref: Effect.void,
+      stderr,
+      stdin: Sink.drain,
+      stdout,
+      unref: Effect.succeed(Effect.void)
+    }))
+  })
+
 describe("CodeCommit web review boundary", () => {
+  it.effect("dispatches a Claude profile through its native structured-output contract", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const response = yield* runPullRequestRelayReview(
+        makeReadClient(),
+        pullRequest,
+        expectedRevision,
+        {
+          id: "claude-review",
+          name: "Claude review",
+          kind: "review",
+          provider: "claude",
+          harness: "native-claude",
+          model: "default",
+          skillIds: []
+        },
+        undefined,
+        ""
+      ).pipe(
+        // Test entry point: provide the real platform services and replace the process boundary with a fixture.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(
+          Layer.merge(
+            NodeServices.layer,
+            Layer.succeed(
+              ChildProcessSpawner.ChildProcessSpawner,
+              makeClaudeSpawner(calls, {
+                is_error: false,
+                structured_output: { findings: [], verdict: "No issues." },
+                subtype: "success",
+                type: "result"
+              })
+            )
+          )
+        )
+      )
+
+      expect(response.profile.provider).toBe("claude")
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.command).toBe("claude")
+        expect(command.args).toContain("--json-schema")
+        expect(command.args).toContain("--safe-mode")
+      }
+    }))
+
   it("rejects unbounded skill and finding identifiers at the HTTP schema boundary", () => {
     const streamRequest = {
       revisionId: "revision-1",
