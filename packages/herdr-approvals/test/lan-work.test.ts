@@ -1,6 +1,12 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { HostConfiguration, type HostOperations, JobStore, makeFleetService } from "@knpkv/herdr-fleet"
+import {
+  type FleetService,
+  HostConfiguration,
+  type HostOperations,
+  JobStore,
+  makeFleetService
+} from "@knpkv/herdr-fleet"
 import type { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work"
 import { Effect, Redacted, Schema } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -367,6 +373,55 @@ describe("LAN Work pairing boundary", () => {
       expect(expiredPage.status).toBe(401)
       expect(expiredPageBody).toContain("expired")
       expect(expiredPageBody).not.toContain("LanWorkPairingExpiredError")
+    }).pipe(Effect.scoped, provideNodeServices)
+  })
+
+  it.effect("starts the pairing lifetime after recovery and listener readiness", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-lan-work-startup-expiry-"))
+    let currentNow = 10_000
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
+      const fleet = yield* makeFleetService({
+        approvalEnabled: false,
+        host: "SER8",
+        operations,
+        store: jobStore
+      })
+      const recoveringFleet: FleetService = {
+        ...fleet,
+        recover: () =>
+          Effect.sync(() => {
+            currentNow += lanWorkPairingLifetimeMs
+            return []
+          })
+      }
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() =>
+          startHttpServer(config(root), recoveringFleet, assets, {
+            lanWork: { address: "127.0.0.1", port: 0 },
+            now: () => currentNow,
+            terminalConnector: { open: () => Effect.die("LAN test must not open a terminal") }
+          })
+        ),
+        (running) => Effect.promise(running.close)
+      )
+      const lanUrl = server.lanWorkUrl
+      const pairingCode = server.lanWorkPairingCode
+      expect(lanUrl).not.toBeNull()
+      expect(pairingCode).not.toBeNull()
+      if (lanUrl === null || pairingCode === null) return
+      currentNow += lanWorkPairingLifetimeMs - 1
+      const paired = yield* Effect.promise(() =>
+        fetch(`${lanUrl}/pair`, {
+          body: new URLSearchParams({ pairingCode: Redacted.value(pairingCode) }),
+          headers: { "content-type": "application/x-www-form-urlencoded", origin: lanUrl },
+          method: "POST",
+          redirect: "manual"
+        })
+      )
+      expect(paired.status).toBe(303)
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
