@@ -20,7 +20,10 @@ const approvalPayload: JobPayload = {
   repository: "/srv/npm"
 }
 
-const approvalStatuses = ["pending_approval", "succeeded", "rejected", "expired"] satisfies ReadonlyArray<
+const approvalStatuses = ["pending_approval", "succeeded", "rejected", "expired", "failed"] satisfies ReadonlyArray<
+  "pending_approval" | "succeeded" | "rejected" | "expired" | "failed"
+>
+const approvalDashboardStatuses = ["pending_approval", "succeeded", "rejected", "expired"] satisfies ReadonlyArray<
   "pending_approval" | "succeeded" | "rejected" | "expired"
 >
 
@@ -188,6 +191,14 @@ describe("sanitized approval requests", () => {
         ref: "https://mirror.test/?ref=https%3A%2F%2Forigin.test%2Frepo%3FX-Amz-Signature%3Dencoded-canary%26sha%3Drelease"
       },
       {
+        redacted: "%255Bredacted%2520credential%255D",
+        ref: "https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253FX-Amz-Signature%253Ddouble-canary%2526sha%253Drelease"
+      },
+      {
+        redacted: "%5Bredacted%20credential%5D",
+        ref: "https://mirror.test/?ref=https%3A%2F%2Fdeploy-user%3Aencoded-password%40example.test%2Frepo"
+      },
+      {
         redacted: "[redacted credential]",
         ref: "//deploy-user:protocol-canary@example.test/repo"
       }
@@ -211,6 +222,12 @@ describe("sanitized approval requests", () => {
         ref: "https://mirror.test/?ref=https%3A%2F%2Forigin.test%2Frepo%3Fsha%3Drelease"
       }).fields[0]?.value
     ).toBe("https://mirror.test/?ref=https%3A%2F%2Forigin.test%2Frepo%3Fsha%3Drelease")
+    expect(
+      approvalRequestFor({
+        kind: "nix.apply",
+        ref: "https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253Fsha%253Drelease"
+      }).fields[0]?.value
+    ).toBe("https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253Fsha%253Drelease")
   })
 
   it("redacts unsafe query values through raw whitespace", () => {
@@ -364,13 +381,16 @@ describe("sanitized approval requests", () => {
     expect(html).not.toContain("aaaaaaaaaaaaaaaa")
   })
 
-  it.each(approvalStatuses)("keeps the complete redacted request in the approval dashboard for %s", (status) => {
-    const html = renderDashboard(recordFor(status))
-    expect(html).toContain("View full request")
-    expect(html).toContain("Repository")
-    expect(html).toContain("[redacted internal prompt]")
-    expect(html).not.toContain("raw terminal prompt")
-    expect(html).not.toContain("secret-value")
-    expect(html).not.toContain("approval-secret")
-  })
+  it.each(approvalDashboardStatuses)(
+    "keeps the complete redacted request in the approval dashboard for %s",
+    (status) => {
+      const html = renderDashboard(recordFor(status))
+      expect(html).toContain("View full request")
+      expect(html).toContain("Repository")
+      expect(html).toContain("[redacted internal prompt]")
+      expect(html).not.toContain("raw terminal prompt")
+      expect(html).not.toContain("secret-value")
+      expect(html).not.toContain("approval-secret")
+    }
+  )
 })

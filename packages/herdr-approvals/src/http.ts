@@ -175,8 +175,10 @@ const cookieValue = (request: IncomingMessage, name: string): string | undefined
     .find((part) => part.startsWith(`${name}=`))
     ?.slice(name.length + 1)
 
-const approvalProofCookie = (token: string): string =>
-  `${approvalProofCookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${approvalProofMaxAgeSeconds}`
+const approvalProofCookie = (token: string, secure: boolean): string =>
+  `${approvalProofCookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${approvalProofMaxAgeSeconds}${
+    secure ? "; Secure" : ""
+  }`
 const TcpAddress = Schema.Struct({ address: Schema.String, port: Schema.Number })
 
 const decodeJobPathSegment = Effect.fn("ApprovalHttp.decodeJobPathSegment")((segment: string) =>
@@ -1718,7 +1720,8 @@ export const startHttpServer = async (
     )
     const approvalProofHeaders = (
       request: IncomingMessage,
-      records: ReadonlyArray<SanitizedJobRecord>
+      records: ReadonlyArray<SanitizedJobRecord>,
+      secure: boolean
     ): Readonly<Record<string, ResponseHeaderValue>> => {
       const session = approvalProofSessionFor(request, now())
       if (session === undefined) return {}
@@ -1726,7 +1729,7 @@ export const startHttpServer = async (
         const proof = session.proofsByJob.get(record.id)
         return proof !== undefined && proof.expiresAt > now()
       })
-      return shouldSetCookie ? { "set-cookie": approvalProofCookie(session.token) } : {}
+      return shouldSetCookie ? { "set-cookie": approvalProofCookie(session.token, secure) } : {}
     }
     if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
       throw new LanWorkConfigurationError({
@@ -2484,7 +2487,7 @@ export const startHttpServer = async (
                 response,
                 200,
                 result.success,
-                approvalProofHeaders(request, result.success.pendingApprovals.local)
+                approvalProofHeaders(request, result.success.pendingApprovals.local, mode === "serve")
               )
             }
             return
@@ -2538,7 +2541,7 @@ export const startHttpServer = async (
               json(response, mapped.status, mapped.body)
             } else {
               const records = result.success._tag === "local" ? [result.success.record] : []
-              json(response, 200, result.success, approvalProofHeaders(request, records))
+              json(response, 200, result.success, approvalProofHeaders(request, records, mode === "serve"))
             }
             return
           }
@@ -2728,7 +2731,7 @@ export const startHttpServer = async (
                 response,
                 200,
                 result.success,
-                approvalProofHeaders(request, result.success.local)
+                approvalProofHeaders(request, result.success.local, mode === "serve")
               )
             }
             return
@@ -2940,7 +2943,7 @@ export const startHttpServer = async (
               "content-security-policy": "frame-ancestors 'none'",
               "content-type": "text/html; charset=utf-8",
               "x-frame-options": "DENY",
-              ...approvalProofHeaders(request, result.success.pendingApprovals.local)
+              ...approvalProofHeaders(request, result.success.pendingApprovals.local, mode === "serve")
             })
             response.end(dashboardPage(result.success))
             return

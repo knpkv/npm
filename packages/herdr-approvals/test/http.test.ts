@@ -150,7 +150,7 @@ const directTls = {
 const secureRequestBody = (
   url: string,
   headers: Readonly<Record<string, string>>
-): Promise<{ readonly body: string; readonly status: number }> =>
+): Promise<{ readonly body: string; readonly setCookie: string | undefined; readonly status: number }> =>
   new Promise((resolve, reject) => {
     const request = httpsRequest(
       url,
@@ -161,7 +161,12 @@ const secureRequestBody = (
         response.on("data", (chunk: string) => {
           body += chunk
         })
-        response.once("end", () => resolve({ body, status: response.statusCode ?? 0 }))
+        response.once("end", () =>
+          resolve({
+            body,
+            setCookie: response.headers["set-cookie"]?.[0],
+            status: response.statusCode ?? 0
+          }))
       }
     )
     request.once("error", reject)
@@ -534,6 +539,7 @@ esac
           if (cookieA === undefined) {
             return yield* new FleetValidationError({ detail: "first approval proof cookie missing" })
           }
+          expect(dashboardA.headers.get("set-cookie")).not.toContain("Secure")
           const dashboardAData = Schema.decodeUnknownSync(DashboardSnapshot)(
             JSON.parse(yield* Effect.promise(() => dashboardA.text()))
           )
@@ -2327,6 +2333,7 @@ esac
             operations: directTlsOperations,
             store
           })
+          yield* store.put(pendingRecord("SER8", 0))
           const server = yield* Effect.acquireRelease(
             Effect.promise(() =>
               startHttpServer(hostConfig, fleet, assets, {
@@ -2406,6 +2413,7 @@ esac
             secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
           )
           expect(dashboardResponse.status).toBe(200)
+          expect(dashboardResponse.setCookie).toContain("Secure")
           expect(Buffer.byteLength(dashboardResponse.body)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )

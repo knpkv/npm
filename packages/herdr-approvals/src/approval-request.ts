@@ -63,30 +63,61 @@ const credentialAuthorization =
 const credentialUri = /(^|[^\w])\/\/[^/\s]+@/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
+const encodedUriMaxDepth = 3
 
-const sanitizeUriQueryParameters = (value: string): string => {
-  if (encodedUriPrefix.test(value)) {
+type EncodedUri =
+  | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
+  | { readonly _tag: "malformed" | "overflow" }
+
+const encodedUri = (value: string): EncodedUri | undefined => {
+  let candidate = value
+  for (let layers = 0; layers <= encodedUriMaxDepth; layers += 1) {
+    if (encodedUriPrefix.test(candidate)) return { _tag: "encoded", layers, value: candidate }
+    if (layers === encodedUriMaxDepth || !candidate.includes("%")) {
+      return layers > 0 && candidate.includes("%") ? { _tag: "overflow" } : undefined
+    }
     try {
-      return encodeURIComponent(sanitizeUriQueryParameters(decodeURIComponent(value)))
+      const decoded = decodeURIComponent(candidate)
+      if (decoded === candidate) return undefined
+      candidate = decoded
     } catch {
-      return redactedCredential
+      return { _tag: "malformed" }
     }
   }
-  return value.replace(
-    /([?&#])([^=#&\s]+)=([^&#]*)/gu,
-    (_match, separator: string, key: string, parameterValue: string) => {
-      const sanitizedValue = safeUriQueryKeys.has(key.toLowerCase())
-        ? sanitizeUriQueryParameters(parameterValue)
-        : redactedCredential
-      return `${separator}${key}=${sanitizedValue}`
+  return { _tag: "overflow" }
+}
+
+const sanitizeUriQueryParameters = (value: string): string => {
+  const encoded = encodedUri(value)
+  if (encoded === undefined) {
+    const sanitizedUserInfo = value.replace(
+      credentialUri,
+      (_match, prefix: string) => `${prefix}//[redacted credential]@`
+    )
+    return sanitizedUserInfo.replace(
+      /([?&#])([^=#&\s]+)=([^&#]*)/gu,
+      (_match, separator: string, key: string, parameterValue: string) => {
+        const sanitizedValue = safeUriQueryKeys.has(key.toLowerCase())
+          ? sanitizeUriQueryParameters(parameterValue)
+          : redactedCredential
+        return `${separator}${key}=${sanitizedValue}`
+      }
+    )
+  }
+  if (encoded._tag !== "encoded") return redactedCredential
+  try {
+    let sanitized = sanitizeUriQueryParameters(decodeURIComponent(encoded.value))
+    for (let layer = 0; layer <= encoded.layers; layer += 1) {
+      sanitized = encodeURIComponent(sanitized)
     }
-  )
+    return sanitized
+  } catch {
+    return redactedCredential
+  }
 }
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
-  const sanitized = sanitizeUriQueryParameters(
-    value.replace(credentialUri, (_match, prefix: string) => `${prefix}//[redacted credential]@`)
-  )
+  const sanitized = sanitizeUriQueryParameters(value)
     .replace(credentialDigestAuthorization, "$1[redacted credential]")
     .replace(
       credentialAuthorization,
