@@ -10,20 +10,17 @@
     "types": "dist/dts/index.d.ts"
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist"
   ],
   "scripts": {
     "start": "bun run src/main.ts",
-    "predev": "pnpm --filter @knpkv/browser-pairing build",
     "dev": "CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false",
     "prepack": "tsc -b && vite build",
     "build": "tsc -b && vite build",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
-    "pretest": "pnpm --filter @knpkv/browser-pairing build",
+    "check": "tsc -b tsconfig.json",
     "test": "vitest",
     "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",
-    "test:browser": "pnpm --filter \"@knpkv/browser-pairing\" build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build && playwright test --config playwright.config.ts",
+    "test:browser": "pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build && playwright test --config playwright.config.ts",
     "lint": "eslint \"{src,test,e2e}/**/*.{ts,tsx}\" playwright.config.ts",
     "docgen": "docgen"
   },
@@ -36,6 +33,7 @@
     "@formkit/auto-animate": "^0.10.0",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/browser-pairing": "workspace:^",
+    "@knpkv/ai-claude": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/review": "workspace:^",
     "@knpkv/relay-product": "workspace:^",

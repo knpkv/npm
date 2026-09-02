@@ -4,6 +4,7 @@ import {
   reviewHarnessOptions,
   reviewKindOptions,
   reviewModelOptions,
+  reviewModelOptionsForProvider,
   reviewProviderOptions,
   type ReviewConfig as ReviewSettings,
   type ReviewProfileConfig,
@@ -181,10 +182,14 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
       review
     }
     const payload = data.sandbox === undefined ? basePayload : { ...basePayload, sandbox: data.sandbox }
-    const exit = await saveConfig({ payload })
+    const exit = await saveConfig({ payload, reactivityKeys: ["config"] })
     if (Exit.isSuccess(exit)) {
       setSaved(review)
-      setSavedNow(true)
+      if (exit.value === "saved-refresh-failed") {
+        setSaveError("Relay profiles were saved, but pull-request refresh failed; reload before running Relay")
+      } else {
+        setSavedNow(true)
+      }
     } else {
       setSaveError(configSaveFailureMessage(exit))
     }
@@ -291,7 +296,20 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
                     disabled={saving}
                     onChange={(event) => {
                       const provider = reviewProviderOptions.find((candidate) => candidate === event.target.value)
-                      if (provider !== undefined) updateProfile(profile.id, { provider })
+                      if (provider !== undefined) {
+                        updateProfile(profile.id, {
+                          provider,
+                          harness: provider === "claude" ? "native-claude" : "native-codex",
+                          model:
+                            provider === "claude"
+                              ? profile.model === "default" || profile.model === "configured-default"
+                                ? profile.model
+                                : "configured-default"
+                              : profile.model === "default"
+                                ? "configured-default"
+                                : profile.model
+                        })
+                      }
                     }}
                     value={profile.provider}
                   >
@@ -311,9 +329,13 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
                     }}
                     value={profile.harness}
                   >
-                    {reviewHarnessOptions.map((harness) => (
-                      <option key={harness}>{harness}</option>
-                    ))}
+                    {reviewHarnessOptions
+                      .filter(
+                        (harness) => harness === (profile.provider === "claude" ? "native-claude" : "native-codex")
+                      )
+                      .map((harness) => (
+                        <option key={harness}>{harness}</option>
+                      ))}
                   </select>
                 </label>
                 <label className="grid gap-1 text-xs font-medium">
@@ -327,7 +349,7 @@ export function SettingsRelayView({ config, onReload = () => undefined, saveConf
                     }}
                     value={profile.model}
                   >
-                    {reviewModelOptions.map((model) => (
+                    {reviewModelOptionsForProvider(profile.provider).map((model) => (
                       <option key={model}>{model}</option>
                     ))}
                   </select>

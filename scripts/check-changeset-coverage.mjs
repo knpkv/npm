@@ -5959,6 +5959,25 @@ const runSelfTest = () => {
     `packages/public/src/view.tsx: type depth exceeded ${canonicalTypeMaxDepth} while canonicalizing number`
   )
 
+  const readonlyArrayGenericPrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<readonly T[]> }\nexport const Public = (props: Props<string>) => props.value"
+    ]
+  ])
+  const readonlyArrayGenericCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
+    [
+      "packages/public/src/view.tsx",
+      "type Identity<T> = T\ntype Props<T> = { value: Identity<readonly T[]> }\nexport const Public = (props: Props<number>) => props.value"
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(readonlyArrayGenericPrevious, readonlyArrayGenericCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: ["value"] }]
+  )
+
   const aliasPrevious = new Map([
     ["packages/public/src/index.ts", 'export { Public } from "./view.js"'],
     [

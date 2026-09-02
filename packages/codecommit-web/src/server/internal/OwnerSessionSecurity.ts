@@ -180,7 +180,9 @@ interface OwnerRequestAuthorization {
 
 export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRequest")(
   function*(request: OwnerRequestAuthorization, secrets: OwnerSessionSecretsContract) {
-    if (!credentialValuesEqual(request.credential, Redacted.value(secrets.ownerToken))) {
+    const ownerCredentialMatches =
+      credentialValuesEqual(request.credential, Redacted.value(secrets.ownerToken)) === true
+    if (!ownerCredentialMatches) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid owner session" })
     }
     const sameOrigin = request.origin !== undefined && request.origin === secrets.authorityOrigin
@@ -193,9 +195,9 @@ export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRe
     if (!sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Mutation origin does not match the CodeCommit server" })
     }
-    if (
-      request.csrfToken === undefined || !credentialValuesEqual(request.csrfToken, Redacted.value(secrets.csrfToken))
-    ) {
+    const csrfTokenMatches = request.csrfToken !== undefined &&
+      credentialValuesEqual(request.csrfToken, Redacted.value(secrets.csrfToken)) === true
+    if (!csrfTokenMatches) {
       return yield* new ForbiddenApiError({ message: "Missing or invalid CSRF token" })
     }
   }
@@ -221,9 +223,9 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
         if (state.failedAttempts + state.inFlight >= MAX_BOOTSTRAP_FAILURES) {
           return ["unavailable", state]
         }
-        if (
-          suppliedToken === undefined || !credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken))
-        ) {
+        const bootstrapTokenMatches = suppliedToken !== undefined &&
+          credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken)) === true
+        if (!bootstrapTokenMatches) {
           return ["invalid", {
             failedAttempts: Math.min(MAX_BOOTSTRAP_FAILURES, state.failedAttempts + 1),
             inFlight: state.inFlight

@@ -447,6 +447,9 @@ importers:
       '@formkit/auto-animate':
         specifier: ^0.10.0
         version: 0.10.0
+      '@knpkv/ai-claude':
+        specifier: workspace:^
+        version: link:../ai-claude
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
