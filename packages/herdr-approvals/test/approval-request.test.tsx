@@ -209,17 +209,43 @@ describe("sanitized approval requests", () => {
     }
   })
 
-  it("redacts standalone encoded credential assignments", () => {
-    const credential = "password%3Dleaked-canary"
-    const visible = "release%2Fcandidate"
+  it("redacts arbitrary authorization suffixes through the line terminator", () => {
+    const credential = "Authorization: Custom first-secret,second-secret;third-secret"
     const request = approvalRequestFor({ kind: "nix.apply", ref: credential })
     const projection = sanitizeJobRecord({
       ...recordFor("pending_approval"),
       payload: { kind: "nix.apply", ref: credential }
     })
-    expect(JSON.stringify({ request, projection })).not.toContain("leaked-canary")
-    expect(request.fields[0]?.value).toContain("%5Bredacted%20credential%5D")
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("first-secret")
+    expect(encoded).not.toContain("second-secret")
+    expect(encoded).not.toContain("third-secret")
+    expect(encoded).toContain("[redacted credential]")
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "ref=main,mirror=backup" }).fields[0]?.value).toBe(
+      "ref=main,mirror=backup"
+    )
+  })
+
+  it("redacts standalone encoded credential assignments", () => {
+    const credential = "password%3Dleaked-canary"
+    const encodedPath = "https://example.test/repo/password%253Dleaked-canary"
+    const visible = "release%2Fcandidate"
+    for (const ref of [credential, encodedPath]) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      expect(JSON.stringify({ request, projection })).not.toContain("leaked-canary")
+    }
+    const request = approvalRequestFor({ kind: "nix.apply", ref: encodedPath })
+    expect(request.fields[0]?.value).toContain("%255Bredacted%2520credential%255D")
+    const standaloneRequest = approvalRequestFor({ kind: "nix.apply", ref: credential })
+    expect(standaloneRequest.fields[0]?.value).toContain("%5Bredacted%20credential%5D")
     expect(approvalRequestFor({ kind: "nix.apply", ref: visible }).fields[0]?.value).toBe(visible)
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "release%252Fcandidate" }).fields[0]?.value).toBe(
+      "release%252Fcandidate"
+    )
   })
 
   it("redacts suffixes attached to an existing credential marker", () => {

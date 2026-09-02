@@ -60,10 +60,10 @@ const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
 const credentialAuthorization =
-  /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n,;]+))/giu
+  /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n]+))/giu
 const credentialUri = /(^|[^\w])\/\/[^/?#]*@/gu
 const encodedCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))%3d)([^/?#\s&]*)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))%(?:25){0,2}3d)([^/?#\s&]*)/giu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
@@ -105,11 +105,15 @@ const sanitizeCredentialText = (value: string): string =>
 
 const sanitizeEncodedCredentialAssignments = (value: string): string =>
   value.replace(encodedCredentialAssignment, (match) => {
-    try {
-      return encodeURIComponent(sanitizeCredentialText(decodeURIComponent(match)))
-    } catch {
+    const encoded = encodedText(match)
+    if (encoded?._tag !== "encoded") {
       return redactedCredential
     }
+    let sanitized = sanitizeCredentialText(encoded.value)
+    for (let layer = 0; layer < encoded.layers; layer += 1) {
+      sanitized = encodeURIComponent(sanitized)
+    }
+    return sanitized
   })
 
 const sanitizeEncodedUri = (value: string): string => {
