@@ -97,7 +97,14 @@ export const serializeCredentialCookie: (
       const code = character.charCodeAt(0)
       return !((code >= 0x20 && code <= 0x3a) || (code >= 0x3c && code <= 0x7e))
     })
-  if (!COOKIE_NAME_PATTERN.test(options.name) || invalidPath(options.path) || !options.path.startsWith("/")) {
+  const invalidReservedPrefix = (options.name.startsWith("__Host-") && (!options.secure || options.path !== "/")) ||
+    (options.name.startsWith("__Secure-") && !options.secure)
+  if (
+    !COOKIE_NAME_PATTERN.test(options.name) ||
+    invalidPath(options.path) ||
+    !options.path.startsWith("/") ||
+    invalidReservedPrefix
+  ) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
   if (

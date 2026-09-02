@@ -136,6 +136,31 @@ describe("browser pairing primitives", () => {
     expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "api" })).toThrow(
       CredentialCookieError
     )
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Host-session",
+        path: "/api"
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Host-session",
+        secure: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Secure-session",
+        secure: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+      ...valid,
+      name: "__Host-session"
+    })).toContain("__Host-session=")
     expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: false }))
       .toThrow(
         CredentialCookieError

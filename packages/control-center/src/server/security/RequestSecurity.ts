@@ -239,7 +239,10 @@ export const authorizeAuthenticatedMutation = Effect.fn("RequestSecurity.authori
   yield* authorizeMutationOrigin(authorization.config, request)
   if (request.csrfToken === null) return yield* new RequestSecurityError({ reason: "csrf-required" })
   yield* authorizeInsecureLanCapability(authorization.config, authorization.capability)
-  return yield* verifySessionCsrf(Redacted.make(BrowserCsrfToken.make(request.csrfToken)))
+  const csrfToken = yield* Schema.decodeUnknownEffect(BrowserCsrfToken)(request.csrfToken).pipe(
+    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
+  )
+  return yield* verifySessionCsrf(Redacted.make(csrfToken))
 })
 
 /** Cookie attributes for the opaque session token; the token itself is never represented here. */
