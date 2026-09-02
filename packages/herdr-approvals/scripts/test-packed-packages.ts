@@ -247,6 +247,11 @@ const program = Effect.scoped(
     const invalidWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-invalid-" })
     const invalidPackage = path.join(invalidWorkspace, "packages", "sample")
     yield* fileSystem.makeDirectory(invalidPackage, { recursive: true })
+    for (const generatedDirectory of ["relay-product", "review"]) {
+      yield* fileSystem.makeDirectory(path.join(invalidWorkspace, "packages", generatedDirectory), {
+        recursive: true
+      })
+    }
     yield* fileSystem.writeFileString(
       path.join(invalidPackage, "package.json"),
       `${
@@ -277,6 +282,44 @@ const program = Effect.scoped(
     ) {
       return yield* new HerdrPackContractError({
         reason: "Missing workspace dependencies do not fail through the named pack error channel"
+      })
+    }
+
+    const probeWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-probe-" })
+    const probePackage = path.join(probeWorkspace, "packages", "sample")
+    const brokenPackage = path.join(probeWorkspace, "packages", "broken")
+    yield* fileSystem.makeDirectory(probePackage, { recursive: true })
+    yield* fileSystem.makeDirectory(brokenPackage, { recursive: true })
+    yield* fileSystem.writeFileString(
+      path.join(probeWorkspace, "package.json"),
+      "{\"packageManager\":\"pnpm@11.21.0\"}\n"
+    )
+    yield* fileSystem.writeFileString(path.join(probeWorkspace, "LICENSE"), "license\n")
+    yield* fileSystem.writeFileString(
+      path.join(probePackage, "package.json"),
+      `${JSON.stringify({ files: ["README.md"], name: "@test/sample", version: "1.0.0" })}\n`
+    )
+    yield* fileSystem.writeFileString(path.join(probePackage, "README.md"), "fixture\n")
+    yield* fileSystem.symlink("package.json", path.join(brokenPackage, "package.json"))
+    const manifestProbe = yield* Effect.result(run(
+      spawner,
+      "node",
+      [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), probePackage],
+      probeWorkspace
+    ))
+    if (Result.isSuccess(manifestProbe)) {
+      return yield* new HerdrPackContractError({
+        reason: "Manifest probe failures do not fail through the named pack error channel"
+      })
+    }
+    const manifestProbeFailure = Schema.decodeUnknownResult(HerdrPackFailure)(manifestProbe.failure)
+    if (
+      Result.isFailure(manifestProbeFailure) ||
+      manifestProbeFailure.success.reason.includes("Could not inspect") === false ||
+      manifestProbeFailure.success.reason.includes("package.json") === false
+    ) {
+      return yield* new HerdrPackContractError({
+        reason: "Manifest probe failures do not retain contextual pack diagnostics"
       })
     }
 
