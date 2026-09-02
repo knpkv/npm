@@ -6,6 +6,7 @@
     "stripInternal": true
   },
   "references": [
+    { "path": "./packages/browser-pairing/tsconfig.build.json" },
     { "path": "./packages/rly/tsconfig.build.json" },
     { "path": "./packages/control-center-sql/tsconfig.build.json" },
     { "path": "./packages/control-center/tsconfig.build.json" }

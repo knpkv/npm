@@ -32,6 +32,7 @@
     "@fontsource-variable/geist-mono": "^5.3.0",
     "@formkit/auto-animate": "^0.10.0",
     "@knpkv/ai-codex": "workspace:^",
+    "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/review": "workspace:^",
     "@knpkv/relay-product": "workspace:^",

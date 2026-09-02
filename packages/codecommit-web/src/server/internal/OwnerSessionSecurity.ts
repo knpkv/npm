@@ -1,4 +1,11 @@
-import { Clock, Context, Crypto, Effect, Layer, Redacted, Ref, Schema } from "effect"
+import {
+  credentialValuesEqual,
+  decideOneTimeCredential,
+  expiresAt,
+  issueCredential,
+  serializeCredentialCookie
+} from "@knpkv/browser-pairing"
+import { Clock, Context, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
 
@@ -38,17 +45,16 @@ export const requireLoopbackHostname = Effect.fn("OwnerSessionSecurity.requireLo
 )
 
 export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecrets")(function*() {
-  const cryptoService = yield* Crypto.Crypto
   const [ownerToken, csrfToken, bootstrapToken] = yield* Effect.all([
-    cryptoService.randomUUIDv4,
-    cryptoService.randomUUIDv4,
-    cryptoService.randomUUIDv4
+    issueCredential(),
+    issueCredential(),
+    issueCredential()
   ])
   const bootstrapAvailable = yield* Ref.make(true)
   return OwnerSessionSecrets.of({
-    ownerToken: Redacted.make(ownerToken),
-    csrfToken: Redacted.make(csrfToken),
-    bootstrapToken: Redacted.make(bootstrapToken),
+    ownerToken,
+    csrfToken,
+    bootstrapToken,
     bootstrapAvailable,
     bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined)
   })
@@ -57,7 +63,8 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecre
 export const activateOwnerSessionBootstrap = Effect.fn("OwnerSessionSecurity.activateBootstrap")(
   function*(secrets: OwnerSessionSecretsContract) {
     const now = yield* Clock.currentTimeMillis
-    yield* Ref.set(secrets.bootstrapExpiresAtMillis, now + 60_000)
+    const expiry = yield* expiresAt(now, 60_000)
+    yield* Ref.set(secrets.bootstrapExpiresAtMillis, expiry)
   }
 )
 
@@ -91,7 +98,11 @@ export const requireLoopbackOrigin = Effect.fn("OwnerSessionSecurity.requireLoop
         })
     })
     if (
-      url.protocol !== "http:" || !isLoopbackHostname(url.hostname) || url.pathname !== "/" || url.search || url.hash
+      url.protocol !== "http:" ||
+      !isLoopbackHostname(url.hostname) ||
+      url.pathname !== "/" ||
+      url.search !== "" ||
+      url.hash !== ""
     ) {
       return yield* new UnsafeServerHostnameError({
         hostname: origin,
@@ -104,7 +115,14 @@ export const requireLoopbackOrigin = Effect.fn("OwnerSessionSecurity.requireLoop
 
 export const ownerSessionCookie = (
   secrets: Pick<OwnerSessionSecretsContract, "ownerToken">
-): string => `cc_owner=${Redacted.value(secrets.ownerToken)}; HttpOnly; Path=/api; SameSite=Strict`
+): string =>
+  serializeCredentialCookie(Redacted.value(secrets.ownerToken), {
+    name: "cc_owner",
+    httpOnly: true,
+    path: "/api",
+    sameSite: "strict",
+    secure: false
+  })
 
 interface OwnerRequestAuthorization {
   readonly credential: string
@@ -116,7 +134,7 @@ interface OwnerRequestAuthorization {
 
 export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRequest")(
   function*(request: OwnerRequestAuthorization, secrets: OwnerSessionSecretsContract) {
-    if (request.credential !== Redacted.value(secrets.ownerToken)) {
+    if (!credentialValuesEqual(request.credential, Redacted.value(secrets.ownerToken))) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid owner session" })
     }
     const sameOrigin = request.host !== undefined && request.origin === `http://${request.host}`
@@ -129,7 +147,9 @@ export const authorizeOwnerRequest = Effect.fn("OwnerSessionSecurity.authorizeRe
     if (!sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Mutation origin does not match the CodeCommit server" })
     }
-    if (request.csrfToken !== Redacted.value(secrets.csrfToken)) {
+    if (
+      request.csrfToken === undefined || !credentialValuesEqual(request.csrfToken, Redacted.value(secrets.csrfToken))
+    ) {
       return yield* new ForbiddenApiError({ message: "Missing or invalid CSRF token" })
     }
   }
@@ -143,7 +163,10 @@ interface BootstrapAuthorization {
 
 export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authorizeBootstrap")(
   function*(request: BootstrapAuthorization, secrets: OwnerSessionSecretsContract) {
-    if (request.authorization !== `Bearer ${Redacted.value(secrets.bootstrapToken)}`) {
+    const suppliedToken = request.authorization !== undefined && request.authorization.startsWith("Bearer ")
+      ? request.authorization.slice("Bearer ".length)
+      : undefined
+    if (suppliedToken === undefined || !credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken))) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
     }
     if (request.host === undefined || request.origin !== `http://${request.host}`) {
@@ -154,11 +177,17 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
       return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
     }
     const now = yield* Clock.currentTimeMillis
-    if (now >= expiresAt) {
-      return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
-    }
-    const available = yield* Ref.getAndSet(secrets.bootstrapAvailable, false)
-    if (!available) {
+    const decision = yield* Ref.modify(secrets.bootstrapAvailable, (available) => {
+      const state = {
+        expiresAt,
+        consumedAt: available ? null : 0,
+        revokedAt: null
+      }
+      const next = decideOneTimeCredential(state, now)
+      return [next, next === "accepted" ? false : available]
+    })
+    if (decision === "expired") return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
+    if (decision === "consumed") {
       return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
     }
   }

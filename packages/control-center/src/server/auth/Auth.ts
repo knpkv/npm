@@ -1,3 +1,10 @@
+import type { BrowserPairingError } from "@knpkv/browser-pairing"
+import {
+  CredentialDigest,
+  credentialDigestsEqual,
+  hashCredential as hashBrowserCredential,
+  issueCredential
+} from "@knpkv/browser-pairing"
 import type { FileSystem, Path } from "effect"
 import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 
@@ -53,15 +60,6 @@ const CSRF_RECOVERY_CONTEXT = Uint8Array.from([
   49
 ])
 
-const fixedTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
-  let difference = left.byteLength ^ right.byteLength
-  const length = Math.max(left.byteLength, right.byteLength)
-  for (let index = 0; index < length; index += 1) {
-    difference |= (left[index] ?? 0) ^ (right[index] ?? 0)
-  }
-  return difference === 0
-}
-
 const makeAuth = Effect.gen(function*() {
   const repository = yield* AuthRepository
   const cryptoService = yield* Crypto.Crypto
@@ -69,10 +67,12 @@ const makeAuth = Effect.gen(function*() {
   const now = Effect.map(Clock.currentTimeMillis, DateTime.makeUnsafe)
 
   const randomSecret = Effect.fn("Auth.randomSecret")(function*() {
-    const bytes = yield* cryptoService.randomBytes(TOKEN_BYTES).pipe(
-      Effect.mapError(() => new AuthCryptoError())
+    return yield* issueCredential().pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError((error: BrowserPairingError) =>
+        error.reason === "crypto-failed" ? new AuthCryptoError() : new CredentialRejectedError()
+      )
     )
-    return Redacted.make(Encoding.encodeHex(bytes))
   })
 
   const randomId = <SchemaType extends Schema.Top>(schema: SchemaType) =>
@@ -88,14 +88,12 @@ const makeAuth = Effect.gen(function*() {
   const hashCredential = Effect.fn("Auth.hashCredential")(function*(
     credential: Redacted.Redacted<string>
   ) {
-    const bytes = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(credential))).pipe(
-      Effect.mapError(() => new CredentialRejectedError())
+    return yield* hashBrowserCredential(credential).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError((error: BrowserPairingError) =>
+        error.reason === "crypto-failed" ? new AuthCryptoError() : new CredentialRejectedError()
+      )
     )
-    if (bytes.byteLength !== TOKEN_BYTES) return yield* new CredentialRejectedError()
-    const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-      Effect.mapError(() => new AuthCryptoError())
-    )
-    return Encoding.encodeHex(digest)
   })
 
   const deriveRecoveredCsrfToken = Effect.fn("Auth.deriveRecoveredCsrfToken")(function*(
@@ -236,20 +234,12 @@ const makeAuth = Effect.gen(function*() {
       const authenticated = yield* authenticateRecord(sessionToken)
       const actualHash = yield* hashCredential(csrfToken)
       const recoveredCsrfToken = yield* deriveRecoveredCsrfToken(sessionToken)
-      const actual = yield* Effect.fromResult(Encoding.decodeHex(actualHash)).pipe(
+      const expected = yield* Schema.decodeUnknownEffect(CredentialDigest)(authenticated.csrfHash).pipe(
         Effect.mapError(() => new CredentialRejectedError())
       )
-      const expected = yield* Effect.fromResult(Encoding.decodeHex(authenticated.csrfHash)).pipe(
-        Effect.mapError(() => new CredentialRejectedError())
-      )
-      const supplied = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(csrfToken))).pipe(
-        Effect.mapError(() => new CredentialRejectedError())
-      )
-      const recovered = yield* Effect.fromResult(Encoding.decodeHex(recoveredCsrfToken)).pipe(
-        Effect.mapError(() => new CredentialRejectedError())
-      )
-      const matchesIssuedToken = fixedTimeEqual(actual, expected)
-      const matchesRecoveredToken = fixedTimeEqual(supplied, recovered)
+      const recoveredHash = yield* hashCredential(Redacted.make(recoveredCsrfToken))
+      const matchesIssuedToken = credentialDigestsEqual(actualHash, expected)
+      const matchesRecoveredToken = credentialDigestsEqual(actualHash, recoveredHash)
       if (!matchesIssuedToken && !matchesRecoveredToken) return yield* new CredentialRejectedError()
       return authenticated.summary
     }),

@@ -61,6 +61,7 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     "@knpkv/ai-codex",
     "@knpkv/ai-runtime",
     "@knpkv/atlassian-common",
+    "@knpkv/browser-pairing",
     "@knpkv/codecommit-core",
     "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
@@ -98,6 +99,7 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     | "@knpkv/ai-codex"
     | "@knpkv/ai-runtime"
     | "@knpkv/atlassian-common"
+    | "@knpkv/browser-pairing"
     | "@knpkv/codecommit-core"
     | "@knpkv/clockify-api-client"
     | "@knpkv/confluence-api-client"
@@ -110,6 +112,7 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     "@knpkv/ai-codex",
     "@knpkv/ai-runtime",
     "@knpkv/atlassian-common",
+    "@knpkv/browser-pairing",
     "@knpkv/codecommit-core",
     "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
