@@ -555,7 +555,7 @@ esac
         Effect.gen(function*() {
           yield* Effect.forEach(
             Array.from(
-              { length: pendingApprovalPageMaxRecords * 6 },
+              { length: pendingApprovalPageMaxRecords * 40 },
               (_, index) => pendingRecord("ALPHA", index)
             ),
             (record) => store.put(record),
@@ -591,6 +591,10 @@ esac
           let snapshot = Schema.decodeUnknownSync(DashboardSnapshot)(
             JSON.parse(yield* Effect.promise(() => dashboard.text()))
           )
+          const retainedJobId = snapshot.pendingApprovals.local[0]?.id
+          if (retainedJobId === undefined) {
+            return yield* new FleetValidationError({ detail: "initial pending approval missing" })
+          }
           while (snapshot.pendingApprovals.nextCursors.length > 0) {
             const continuation = snapshot.pendingApprovals.nextCursors[0]
             if (continuation === undefined) break
@@ -612,6 +616,14 @@ esac
               )
             }
           }
+          const retainedDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${retainedJobId}/approve`, {
+              headers: { ...headers, cookie, origin },
+              method: "POST"
+            })
+          )
+          expect(retainedDecision.status).toBe(200)
+          yield* Effect.promise(() => retainedDecision.text())
           observedAt = 15 * 60 * 1_000 - 1_000
           yield* store.put(pendingRecord("ALPHA", 10_000))
           const refreshed = yield* Effect.promise(() =>

@@ -1576,6 +1576,24 @@ export const startHttpServer = async (
         session.proofsByJob.set(jobId, { ...proof, expiresAt })
       }
     }
+    const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
+      function*(session: ApprovalProofSession) {
+        const pendingRecords = yield* service.pendingApprovals().pipe(
+          Effect.mapError(
+            (cause) =>
+              new FleetOperationError({
+                cause,
+                detail: "could not refresh approval proof retention",
+                operation: "approval.proof.prune"
+              })
+          )
+        )
+        const pendingJobIds = new Set(pendingRecords.map((record) => record.id))
+        for (const jobId of session.proofsByJob.keys()) {
+          if (!pendingJobIds.has(jobId)) session.proofsByJob.delete(jobId)
+        }
+      }
+    )
     const issueApprovalProofs: ApprovalProofIssuer = Effect.fn("ApprovalHttp.issueApprovalProofs")(
       function*(records: ReadonlyArray<JobRecord>, request: IncomingMessage) {
         const observedAt = now()
@@ -1610,6 +1628,7 @@ export const startHttpServer = async (
           }
           approvalProofSessions.set(token, session)
         } else {
+          yield* pruneApprovalProofSession(session)
           renewApprovalProofSession(session, observedAt)
         }
         for (const record of pendingRecords) {

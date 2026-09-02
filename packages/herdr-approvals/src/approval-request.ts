@@ -61,7 +61,7 @@ const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\]|"(?:\\[\s\S]|[^"\\])*"|[^\s,;]+)/giu
 const credentialUri = /:\/\/[^/\s]+@/gu
-const uriQueryParameter = /([?&])([^=#&\s]+)=(\[redacted credential\]|[^&#\s]*)/gu
+const uriQueryParameter = /([?&#])([^=#&\s]+)=(\[redacted credential\]|[^&#\s]*)/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
