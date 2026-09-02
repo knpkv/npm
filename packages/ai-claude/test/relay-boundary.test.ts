@@ -83,6 +83,39 @@ describe("Claude Relay adapter boundary", () => {
       }
     }))
 
+  it.effect("preserves instance-valued schema annotations", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const runtime = Layer.provide(
+        model({ cwd: "/workspace" }),
+        fakeProcessLayer(calls, success({ value: "ok" }))
+      )
+      const schema = Schema.Struct({ value: Schema.String }).annotate({
+        default: { value: { allOf: "keep", uniqueItems: true } },
+        examples: [{ value: { allOf: "keep", uniqueItems: true } }]
+      })
+      yield* LanguageModel.generateObject({
+        prompt: "Preserve annotations",
+        schema
+      }).pipe(Effect.provide(runtime))
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        const schemaIndex = command.args.indexOf("--json-schema")
+        const schemaText = command.args[schemaIndex + 1] ?? ""
+        const normalized = Schema.decodeUnknownSync(
+          Schema.fromJsonString(
+            Schema.Struct({
+              default: Schema.optional(Schema.Json),
+              examples: Schema.optional(Schema.Array(Schema.Json))
+            })
+          )
+        )(schemaText)
+        expect(normalized.default).toEqual({ value: { allOf: "keep", uniqueItems: true } })
+        expect(normalized.examples).toEqual([{ value: { allOf: "keep", uniqueItems: true } }])
+      }
+    }))
+
   it.effect("isolates prompt-only execution from settings and MCP", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
