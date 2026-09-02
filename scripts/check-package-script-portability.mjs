@@ -104,7 +104,12 @@ const hereDocumentDelimiters = (line) => {
       quote = character
       continue
     }
-    if (character === "#" && (index === 0 || /\s/u.test(line[index - 1] ?? ""))) break
+    if (
+      character === "#" &&
+      (index === 0 || /\s/u.test(line[index - 1] ?? "") || ";|&(){}".includes(line[index - 1] ?? ""))
+    ) {
+      break
+    }
     if (character !== "<" || line[index + 1] !== "<" || line[index + 2] === "<") continue
     let delimiterIndex = index + 2
     const stripTabs = line[delimiterIndex] === "-"
@@ -208,8 +213,15 @@ const shellCommandSegments = (command, sanitized = false) => {
   let segmentOperator
   let quote
   let escaped = false
+  let groupDepth = 0
   const pushSegment = (index, operator, width = 1) => {
-    segments.push({ text: source.slice(segmentStart, index), operator: segmentOperator, nextOperator: operator })
+    segments.push({
+      text: source.slice(segmentStart, index),
+      operator: segmentOperator,
+      nextOperator: operator,
+      start: segmentStart,
+      end: index
+    })
     segmentStart = index + width
     segmentOperator = operator
   }
@@ -231,23 +243,36 @@ const shellCommandSegments = (command, sanitized = false) => {
       quote = character
       continue
     }
+    if (character === "(" || character === "{") {
+      groupDepth++
+      continue
+    }
+    if ((character === ")" || character === "}") && groupDepth > 0) {
+      groupDepth--
+      continue
+    }
+    if (groupDepth > 0) continue
     if (character === ";" || character === "\n" || character === "|" || character === "&") {
       const doubled = (character === "|" || character === "&") && source[index + 1] === character
       pushSegment(index, doubled ? character + character : character, doubled ? 2 : 1)
       if (doubled) index++
       continue
     }
-    if (character === "(" || character === ")" || character === "{" || character === "}") {
-      pushSegment(index, character)
-    }
   }
-  if (segmentStart <= source.length) segments.push({ text: source.slice(segmentStart), operator: segmentOperator })
+  if (segmentStart <= source.length) {
+    segments.push({
+      text: source.slice(segmentStart),
+      operator: segmentOperator,
+      start: segmentStart,
+      end: source.length
+    })
+  }
   return segments
 }
 
 const functionDefinitionPattern = /(?:^|[;\n])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
 
-const matchingFunctionBrace = (source, openIndex) => {
+const matchingBrace = (source, openIndex, opener, closer) => {
   let depth = 0
   let quote
   let escaped = false
@@ -269,8 +294,8 @@ const matchingFunctionBrace = (source, openIndex) => {
       quote = character
       continue
     }
-    if (character === "{") depth++
-    if (character === "}" && --depth === 0) return index
+    if (character === opener) depth++
+    if (character === closer && --depth === 0) return index
   }
   return undefined
 }
@@ -283,7 +308,7 @@ const extractFunctionDefinitions = (command) => {
     const name = match[1]
     const openIndex = source.indexOf("{", match.index)
     if (openIndex === -1) continue
-    const closeIndex = matchingFunctionBrace(source, openIndex)
+    const closeIndex = matchingBrace(source, openIndex, "{", "}")
     if (closeIndex === undefined) continue
     const nameIndex = source.indexOf(name, match.index)
     definitions.push({ name, start: nameIndex, end: closeIndex + 1, body: source.slice(openIndex + 1, closeIndex) })
@@ -314,23 +339,61 @@ const segmentReachability = (segments) => {
 
 const firstShellWord = (text) => text.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
 
+const unsupportedShellWords = new Set([
+  "case",
+  "do",
+  "done",
+  "esac",
+  "fi",
+  "for",
+  "if",
+  "select",
+  "then",
+  "until",
+  "while"
+])
+
+const hasUnsupportedShellControl = (source) => {
+  const segments = shellCommandSegments(source, true)
+  return (
+    segments.some(({ text }) => unsupportedShellWords.has(firstShellWord(text) ?? "")) ||
+    segments.some(({ nextOperator }) => nextOperator === "&")
+  )
+}
+
+const groupedCommandBody = (text) => {
+  const trimmed = text.trim()
+  const opener = trimmed[0]
+  const closer = opener === "{" ? "}" : opener === "(" ? ")" : undefined
+  if (closer === undefined || trimmed.at(-1) !== closer) return undefined
+  const closeIndex = matchingBrace(trimmed, 0, opener, closer)
+  return closeIndex === trimmed.length - 1 ? trimmed.slice(1, -1) : undefined
+}
+
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
+  if (hasUnsupportedShellControl(source)) return false
   const segments = shellCommandSegments(source, true)
   const reachability = segmentReachability(segments)
   if (
-    segments.some(
-      ({ text, nextOperator }, index) => reachability[index] && nextOperator !== "&" && matcher.test(text.trim())
-    )
+    segments.some(({ text, nextOperator }, index) => {
+      if (!reachability[index] || nextOperator === "&") return false
+      if (matcher.test(text.trim())) return true
+      const body = groupedCommandBody(text)
+      return body !== undefined && hasExecutableLifecycleCommand(body, matcher, visited)
+    })
   ) {
     return true
   }
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
-    const invoked = segments.some(
-      ({ text, nextOperator }, index) =>
-        reachability[index] && nextOperator !== "&" && firstShellWord(text) === definition.name
-    )
+    const invoked = segments.some(({ text, nextOperator, start }, index) => {
+      if (!reachability[index] || nextOperator === "&" || firstShellWord(text) !== definition.name) return false
+      const activeDefinition = definitions
+        .filter((candidate) => candidate.name === definition.name && candidate.end <= start)
+        .at(-1)
+      return activeDefinition === definition
+    })
     return invoked && hasExecutableLifecycleCommand(definition.body, matcher, new Set([...visited, definition.name]))
   })
 }
@@ -524,6 +587,38 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "false && { pnpm --filter @knpkv/browser-pairing build; }; vite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "true || (pnpm --filter @knpkv/browser-pairing build); vite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "{ pnpm --filter @knpkv/browser-pairing build; } && vite" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && echo complete &" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "build_pairing() { pnpm --filter @knpkv/browser-pairing build; }; vite" },
     browserPairingDependency
   ),
@@ -539,6 +634,17 @@ assert.deepEqual(
     browserPairingDependency
   ),
   []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "build_pairing; build_pairing() { pnpm --filter @knpkv/browser-pairing build; }; vite"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
@@ -586,7 +692,23 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "echo ready;# <<EOF\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "false && pnpm --filter @knpkv/browser-pairing build; vite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "if false; then\npnpm --filter @knpkv/browser-pairing build\nfi" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
