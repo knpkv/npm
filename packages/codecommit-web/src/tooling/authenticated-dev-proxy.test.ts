@@ -17,6 +17,7 @@ import {
   authenticatedDevProxyOriginDecision,
   authenticatedDevPublicOrigin,
   authenticatedDevPublicOriginEnvironment,
+  makeAuthenticatedDevProxyConfig,
   setAuthenticatedDevProxyOrigin
 } from "./authenticated-dev-proxy.js"
 
@@ -70,12 +71,35 @@ describe("authenticated development proxy", () => {
     expect(setHeader).toHaveBeenCalledWith("origin", authenticatedDevBackendOrigin)
   })
 
+  it("retargets both proxy routes when the server retries on another port", () => {
+    const retryOrigin = "http://127.0.0.1:3001"
+    const config = makeAuthenticatedDevProxyConfig(retryOrigin)
+    for (const options of Object.values(config)) {
+      expect(options.target).toBe(retryOrigin)
+      expect(options.configure).toBeTypeOf("function")
+    }
+    const listeners: Array<(request: { readonly setHeader: (name: string, value: string) => void }) => void> = []
+    const proxy = {
+      on: (
+        _event: "proxyReq",
+        listener: (request: { readonly setHeader: (name: string, value: string) => void }) => void
+      ) => {
+        listeners.push(listener)
+      }
+    }
+    for (const options of Object.values(config)) options.configure(proxy, options)
+    const setHeader = vi.fn()
+    for (const listener of listeners) listener({ setHeader })
+    expect(setHeader).toHaveBeenCalledTimes(2)
+    expect(setHeader).toHaveBeenCalledWith("origin", retryOrigin)
+  })
+
   it.effect("accepts a bootstrap request after the proxy origin rewrite", () =>
     Effect.gen(function*() {
       const secrets = {
         authorityOrigin: yield* requireLoopbackOrigin(ownerSessionOrigin("127.0.0.1", 3000)),
         bootstrapAvailable: yield* Ref.make(true),
-        bootstrapFailedAttempts: yield* Ref.make(0),
+        bootstrapAttemptState: yield* Ref.make({ failedAttempts: 0, inFlight: 0 }),
         bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(Number.MAX_SAFE_INTEGER),
         bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32))),
         csrfToken: Redacted.make(Schema.decodeSync(CsrfToken)("cd".repeat(32))),

@@ -95,11 +95,21 @@ describe("browser pairing primitives", () => {
       path: "/",
       httpOnly: true,
       sameSite: "strict",
-      secure: true
+      secure: true,
+      sourceOrigin: "https://example.test"
     })).toBe(`cc_session=${"ab".repeat(32)}; HttpOnly; Path=/; SameSite=Strict; Secure`)
   })
 
   it("rejects cookie delimiters, control characters, and invalid max ages", () => {
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        name: "cc_session",
+        path: "/",
+        httpOnly: true,
+        sameSite: "strict",
+        secure: true
+      })
+    ).toThrow(CredentialCookieError)
     const valid: CredentialCookieOptions = {
       name: "cc_session",
       path: "/",
@@ -137,6 +147,16 @@ describe("browser pairing primitives", () => {
     expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "api" })).toThrow(
       CredentialCookieError
     )
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        sourceOrigin: "http://example.test"
+      })
+    ).toThrow(CredentialCookieError)
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
+      ...valid,
+      sourceOrigin: "http://127.0.0.1"
+    })).toContain("cc_session=")
     expect(() =>
       serializeRuntimeCredentialCookie("ab".repeat(32), {
         ...valid,

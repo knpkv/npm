@@ -16,11 +16,16 @@ export interface OwnerSessionSecretsContract {
   /** Validated server authority used for origin checks; request Host is never authoritative. */
   readonly authorityOrigin: string
   readonly bootstrapAvailable: Ref.Ref<boolean>
-  readonly bootstrapFailedAttempts: Ref.Ref<number>
+  readonly bootstrapAttemptState: Ref.Ref<BootstrapAttemptState>
   readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
   readonly bootstrapToken: Redacted.Redacted<PairingCode>
   readonly csrfToken: Redacted.Redacted<CsrfToken>
   readonly ownerToken: Redacted.Redacted<SessionToken>
+}
+
+export interface BootstrapAttemptState {
+  readonly failedAttempts: number
+  readonly inFlight: number
 }
 
 export class OwnerSessionSecrets extends Context.Service<
@@ -35,8 +40,8 @@ export class UnsafeServerHostnameError extends Schema.TaggedError<UnsafeServerHo
 
 const safeMethods = new Set(["GET", "HEAD", "OPTIONS"])
 const MAX_BOOTSTRAP_FAILURES = 5
-const authenticatedDevBackendOrigin = "http://127.0.0.1:3000"
 const authenticatedDevPublicOrigin = "http://localhost:5173"
+type BootstrapAdmission = "unavailable" | "invalid" | "accepted"
 
 export const isLoopbackHostname = (hostname: string): boolean =>
   hostname === "127.0.0.1" || hostname === "localhost" || hostname === "::1" || hostname === "[::1]"
@@ -62,14 +67,14 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecre
       issuePairingCode()
     ])
     const bootstrapAvailable = yield* Ref.make(true)
-    const bootstrapFailedAttempts = yield* Ref.make(0)
+    const bootstrapAttemptState = yield* Ref.make<BootstrapAttemptState>({ failedAttempts: 0, inFlight: 0 })
     return OwnerSessionSecrets.of({
       authorityOrigin: validatedAuthorityOrigin,
       ownerToken,
       csrfToken,
       bootstrapToken,
       bootstrapAvailable,
-      bootstrapFailedAttempts,
+      bootstrapAttemptState,
       bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined)
     })
   }
@@ -133,8 +138,9 @@ export const requireSupportedPublicOrigin = Effect.fn("OwnerSessionSecurity.requ
   function*(origin: string, authorityOrigin: string) {
     const validatedOrigin = yield* requireLoopbackOrigin(origin)
     const validatedAuthority = yield* requireLoopbackOrigin(authorityOrigin)
+    const authorityUrl = new URL(validatedAuthority)
     const isSupportedProxy = validatedOrigin === authenticatedDevPublicOrigin &&
-      validatedAuthority === authenticatedDevBackendOrigin
+      authorityUrl.protocol === "http:" && authorityUrl.hostname === "127.0.0.1"
     if (validatedOrigin !== validatedAuthority && !isSupportedProxy) {
       return yield* new UnsafeServerHostnameError({
         hostname: origin,
@@ -206,38 +212,59 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
     if (request.origin !== secrets.authorityOrigin) {
       return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match the CodeCommit server" })
     }
-    const failedAttempts = yield* Ref.get(secrets.bootstrapFailedAttempts)
-    if (failedAttempts >= MAX_BOOTSTRAP_FAILURES) {
-      return yield* new UnauthorizedApiError({ message: "Bootstrap confirmation temporarily unavailable" })
-    }
     const suppliedToken = request.authorization !== undefined && request.authorization.startsWith("Bearer ")
       ? request.authorization.slice("Bearer ".length)
       : undefined
-    if (suppliedToken === undefined || !credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken))) {
-      yield* Ref.update(secrets.bootstrapFailedAttempts, (attempts) => Math.min(MAX_BOOTSTRAP_FAILURES, attempts + 1))
+    const admission = yield* Ref.modify(
+      secrets.bootstrapAttemptState,
+      (state): readonly [BootstrapAdmission, BootstrapAttemptState] => {
+        if (state.failedAttempts + state.inFlight >= MAX_BOOTSTRAP_FAILURES) {
+          return ["unavailable", state]
+        }
+        if (
+          suppliedToken === undefined || !credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken))
+        ) {
+          return ["invalid", {
+            failedAttempts: Math.min(MAX_BOOTSTRAP_FAILURES, state.failedAttempts + 1),
+            inFlight: state.inFlight
+          }]
+        }
+        return ["accepted", { ...state, inFlight: state.inFlight + 1 }]
+      }
+    )
+    if (admission === "unavailable") {
+      return yield* new UnauthorizedApiError({ message: "Bootstrap confirmation temporarily unavailable" })
+    }
+    if (admission === "invalid") {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
     }
-    const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
-    if (expiresAt === undefined) {
-      return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
-    }
-    const now = yield* Clock.currentTimeMillis
-    const decision = yield* Ref.modify(secrets.bootstrapAvailable, (available) => {
-      const state = {
-        expiresAt,
-        consumedAt: available ? null : 0,
-        revokedAt: null
+    const releaseAdmission = Ref.update(secrets.bootstrapAttemptState, (state) => ({
+      ...state,
+      inFlight: Math.max(0, state.inFlight - 1)
+    }))
+    return yield* Effect.gen(function*() {
+      const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
+      if (expiresAt === undefined) {
+        return yield* new UnauthorizedApiError({ message: "Bootstrap token is not active" })
       }
-      const next = decideOneTimeCredential(state, now)
-      return [next, next === "accepted" ? false : available]
-    })
-    if (decision === "expired") return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
-    if (decision === "consumed") {
-      return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
-    }
-    if (decision === "invalid") {
-      return yield* new UnauthorizedApiError({ message: "Bootstrap token state is invalid" })
-    }
+      const now = yield* Clock.currentTimeMillis
+      const decision = yield* Ref.modify(secrets.bootstrapAvailable, (available) => {
+        const state = {
+          expiresAt,
+          consumedAt: available ? null : 0,
+          revokedAt: null
+        }
+        const next = decideOneTimeCredential(state, now)
+        return [next, next === "accepted" ? false : available]
+      })
+      if (decision === "expired") return yield* new UnauthorizedApiError({ message: "Bootstrap token has expired" })
+      if (decision === "consumed") {
+        return yield* new UnauthorizedApiError({ message: "Bootstrap token has already been used" })
+      }
+      if (decision === "invalid") {
+        return yield* new UnauthorizedApiError({ message: "Bootstrap token state is invalid" })
+      }
+    }).pipe(Effect.ensuring(releaseAdmission))
   }
 )
 

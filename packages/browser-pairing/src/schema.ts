@@ -140,8 +140,7 @@ export const serializeCredentialCookie: (
     (sourceUrl.protocol === "https:" ||
       (sourceUrl.protocol === "http:" && isChromiumLocalhost(sourceUrl.hostname)))
   const invalidSecureSource = validatedOptions.secure &&
-    validatedOptions.sourceOrigin !== undefined &&
-    !sourceOriginIsTrustworthy
+    (validatedOptions.sourceOrigin === undefined || !sourceOriginIsTrustworthy)
   const invalidReservedPrefix = (normalizedName.startsWith("__host-http-") &&
     (!validatedOptions.secure || !validatedOptions.httpOnly || validatedOptions.path !== "/")) ||
     (normalizedName.startsWith("__http-") && (!validatedOptions.secure || !validatedOptions.httpOnly)) ||

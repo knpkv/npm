@@ -37,10 +37,10 @@ import {
   ownerSessionUrlForOrigin,
   requireLoopbackHostname,
   requireLoopbackOrigin,
-  requireSupportedPublicOrigin,
-  resolvePublicOrigin
+  requireSupportedPublicOrigin
 } from "../src/server/internal/OwnerSessionSecurity.js"
 import { makePermissionedReadClient } from "../src/server/internal/PermissionedReadClient.js"
+import { resolveCodeCommitBootstrapUrl, resolveCodeCommitPublicOrigin } from "../src/server/internal/PublicOrigin.js"
 import { makeRelayFindingPublisher } from "../src/server/review/RelayFindingPublisher.js"
 
 const ownerToken = "aa".repeat(32)
@@ -59,7 +59,7 @@ const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
       csrfToken: Redacted.make(csrfCredential(csrfToken)),
       bootstrapToken: Redacted.make(pairingCredential(bootstrapToken)),
       bootstrapAvailable: yield* Ref.make(true),
-      bootstrapFailedAttempts: yield* Ref.make(0),
+      bootstrapAttemptState: yield* Ref.make({ failedAttempts: 0, inFlight: 0 }),
       bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(active ? Number.MAX_SAFE_INTEGER : undefined)
     }
   }
@@ -557,7 +557,7 @@ describe("CodeCommit web security boundary", () => {
         expect(Result.isFailure(failed)).toBe(true)
         if (Result.isFailure(failed)) expect(failed.failure._tag).toBe("ForbiddenApiError")
       }
-      expect(yield* Ref.get(crossOrigin.bootstrapFailedAttempts)).toBe(0)
+      expect((yield* Ref.get(crossOrigin.bootstrapAttemptState)).failedAttempts).toBe(0)
       yield* authorizeBootstrapRequest({
         authorization: `Bearer ${bootstrapToken}`,
         host: "attacker.example:3000",
@@ -582,6 +582,38 @@ describe("CodeCommit web security boundary", () => {
       if (Result.isFailure(blocked)) {
         expect(blocked.failure.message).toBe("Bootstrap confirmation temporarily unavailable")
       }
+
+      const atCap = yield* makeSecrets()
+      yield* Ref.set(atCap.bootstrapAttemptState, { failedAttempts: 5, inFlight: 0 })
+      const validAtCap = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: `Bearer ${bootstrapToken}`,
+        host: "127.0.0.1:3000",
+        origin: authorityOrigin
+      }, atCap))
+      expect(Result.isFailure(validAtCap)).toBe(true)
+      expect(yield* Ref.get(atCap.bootstrapAvailable)).toBe(true)
+    }))
+
+  it.effect("atomically bounds concurrent invalid bootstrap attempts", () =>
+    Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
+      const results = yield* Effect.all(
+        Array.from({ length: 6 }, () =>
+          Effect.result(authorizeBootstrapRequest({
+            authorization: "Bearer invalid",
+            host: "127.0.0.1:3000",
+            origin: authorityOrigin
+          }, secrets))),
+        { concurrency: "unbounded" }
+      )
+      const failures = results.filter(Result.isFailure)
+      expect(failures).toHaveLength(6)
+      expect(failures.filter((result) => result.failure.message === "Missing or invalid bootstrap token")).toHaveLength(
+        5
+      )
+      expect(failures.filter((result) => result.failure.message === "Bootstrap confirmation temporarily unavailable"))
+        .toHaveLength(1)
+      expect((yield* Ref.get(secrets.bootstrapAttemptState)).failedAttempts).toBe(5)
     }))
 
   it.effect("starts bootstrap expiry only after server readiness", () =>
@@ -656,11 +688,21 @@ describe("CodeCommit web security boundary", () => {
       )
       expect(Result.isFailure(unsupported)).toBe(true)
       if (Result.isFailure(unsupported)) expect(unsupported.failure._tag).toBe("UnsafeServerHostnameError")
-      const retryAuthority = yield* Effect.result(
-        resolvePublicOrigin("http://localhost:5173", "http://127.0.0.1:3001")
+      expect(yield* resolveCodeCommitPublicOrigin("http://localhost:5173", 3001)).toBe("http://localhost:5173")
+      expect(yield* resolveCodeCommitPublicOrigin(undefined, 3000)).toBe(authorityOrigin)
+    }))
+
+  it.effect("rejects unsupported configured origins before bootstrap URL emission", () =>
+    Effect.gen(function*() {
+      const secrets = yield* makeSecrets()
+      const unsupported = yield* Effect.result(
+        resolveCodeCommitBootstrapUrl("http://localhost:4173", 3000, secrets)
       )
-      expect(Result.isFailure(retryAuthority)).toBe(true)
-      expect(yield* resolvePublicOrigin(undefined, authorityOrigin)).toBe(authorityOrigin)
+      expect(Result.isFailure(unsupported)).toBe(true)
+      if (Result.isFailure(unsupported)) expect(unsupported.failure._tag).toBe("UnsafeServerHostnameError")
+      expect(yield* resolveCodeCommitBootstrapUrl("http://localhost:5173", 3000, secrets)).toContain(
+        "#bootstrap_token="
+      )
     }))
 
   it.effect("gates and audits decoded differences and blob reads before provider execution", () =>

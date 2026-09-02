@@ -54,11 +54,10 @@ import {
   ownerSessionOrigin,
   OwnerSessionSecrets,
   type OwnerSessionSecretsContract,
-  ownerSessionUrlForOrigin,
-  requireLoopbackHostname,
-  resolvePublicOrigin
+  requireLoopbackHostname
 } from "./internal/OwnerSessionSecurity.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
+import { resolveCodeCommitBootstrapUrl } from "./internal/PublicOrigin.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
 export {
@@ -420,17 +419,21 @@ export const CodeCommitServerLive = Effect.gen(function*() {
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
       const directOrigin = ownerSessionOrigin("127.0.0.1", p)
-      const publicOrigin = yield* resolvePublicOrigin(Option.getOrUndefined(publicOriginOverride), directOrigin)
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
       const security = yield* makeOwnerSessionSecrets(directOrigin)
+      const bootstrapUrl = yield* resolveCodeCommitBootstrapUrl(
+        Option.getOrUndefined(publicOriginOverride),
+        p,
+        security
+      )
       const ready = yield* Deferred.make<void>()
       const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
         Effect.forkChild({ startImmediately: true })
       )
       yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
       yield* Effect.logInfo(`Authenticated server ready at ${ownerSessionOrigin("127.0.0.1", p)}`)
-      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrlForOrigin(publicOrigin, security)}\n`).pipe(
+      yield* Stream.make(`Authenticated bootstrap URL: ${bootstrapUrl}\n`).pipe(
         Stream.run(stdio.stdout())
       )
       return yield* Fiber.join(serverFiber)
