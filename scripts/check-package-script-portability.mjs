@@ -15,6 +15,25 @@ const buildLifecycleNames = new Set(["build", "prebuild", "postbuild"])
 const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"])
 const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
+const browserPairingBuild = /pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build/u
+const codeCommitWebLifecycleRequirements = [
+  { script: "predev", description: "a browser-pairing build", matches: (command) => browserPairingBuild.test(command) },
+  {
+    script: "pretest",
+    description: "a browser-pairing build",
+    matches: (command) => browserPairingBuild.test(command)
+  },
+  {
+    script: "test:browser",
+    description: "a browser-pairing build",
+    matches: (command) => browserPairingBuild.test(command)
+  },
+  {
+    script: "check",
+    description: "the role-aware tsc check",
+    matches: (command) => command.includes("tsc -p tsconfig.roles.json --noEmit")
+  }
+]
 
 const hasDirectEnvironmentAssignment = (command) => {
   let quote
@@ -60,7 +79,11 @@ class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPorta
 }
 
 const PackageManifest = Schema.fromJsonString(
-  Schema.Struct({ scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)) })
+  Schema.Struct({
+    scripts: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    dependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
+    devDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String))
+  })
 )
 const WorkspaceConfig = Schema.Struct({ packages: Schema.Array(Schema.String) })
 
@@ -87,6 +110,18 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
       ([name, command]) => isBuildScript(name) && Predicate.isString(command) && hasDirectEnvironmentAssignment(command)
     )
     .map(([name]) => `${manifestPath}: scripts.${name} uses a POSIX-only environment assignment`)
+
+export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {
+  if (
+    manifestPath !== "packages/codecommit-web/package.json" ||
+    !("@knpkv/browser-pairing" in { ...dependencies, ...devDependencies })
+  ) {
+    return []
+  }
+  return codeCommitWebLifecycleRequirements
+    .filter(({ script, matches }) => !matches(scripts?.[script] ?? ""))
+    .map(({ script, description }) => `${manifestPath}: scripts.${script} must include ${description}`)
+}
 
 assert.deepEqual(
   findNonPortableBuildScripts("scripts/package.json", {
@@ -124,6 +159,31 @@ assert.deepEqual(classifyWorkspacePattern("packages/*"), { directories: ["packag
 assert.deepEqual(classifyWorkspacePattern("scripts"), { directories: ["scripts"], wildcard: false })
 assert.equal(classifyWorkspacePattern("!packages/legacy"), undefined)
 assert.equal(classifyWorkspacePattern("packages/**"), undefined)
+const codeCommitWebScripts = {
+  predev: "pnpm --filter @knpkv/browser-pairing build",
+  pretest: "pnpm --filter @knpkv/browser-pairing build",
+  "test:browser": 'pnpm --filter "@knpkv/browser-pairing" build',
+  check: "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit"
+}
+const browserPairingDependency = { "@knpkv/browser-pairing": "workspace:^" }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    codeCommitWebScripts,
+    browserPairingDependency
+  ),
+  []
+)
+for (const requirement of codeCommitWebLifecycleRequirements) {
+  const omittedScripts = Object.fromEntries(
+    Object.entries(codeCommitWebScripts).filter(([name]) => name !== requirement.script)
+  )
+  assert.deepEqual(
+    findCodeCommitWebLifecycleGaps("packages/codecommit-web/package.json", omittedScripts, browserPairingDependency),
+    [`packages/codecommit-web/package.json: scripts.${requirement.script} must include ${requirement.description}`]
+  )
+}
+assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/other/package.json", {}, browserPairingDependency), [])
 
 const workspaceManifestPaths = Effect.fn("PackageScriptPortability.workspaceManifestPaths")(
   function* (fileSystem, path, repositoryRoot, patterns) {
@@ -183,7 +243,10 @@ const program = Effect.gen(function* () {
         (cause) => new PackageScriptPortabilityError({ cause, reason: `${location}: invalid package manifest` })
       )
     )
-    diagnostics.push(...findNonPortableBuildScripts(location, manifest.scripts))
+    diagnostics.push(
+      ...findNonPortableBuildScripts(location, manifest.scripts),
+      ...findCodeCommitWebLifecycleGaps(location, manifest.scripts, manifest.dependencies, manifest.devDependencies)
+    )
     checked += 1
   }
 
