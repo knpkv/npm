@@ -99,8 +99,17 @@ describe("Auth", () => {
         if (Result.isFailure(secondFirstRun)) {
           assert.instanceOf(secondFirstRun.failure, FirstRunPairingAlreadyIssuedError)
         }
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("allows exactly one concurrent consumer for a pairing code", () =>
     Effect.gen(function*() {
@@ -123,8 +132,17 @@ describe("Auth", () => {
         assert.strictEqual(failures.length, 1)
         const failure = failures[0]
         if (failure !== undefined) assert.instanceOf(failure.failure, CredentialRejectedError)
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("supports two sessions, CSRF checks, targeted revocation, and idempotent logout", () =>
     Effect.gen(function*() {
@@ -215,8 +233,17 @@ describe("Auth", () => {
         yield* auth.logout(first.sessionToken)
         const loggedOutResult = yield* auth.authenticate(first.sessionToken).pipe(Effect.result)
         assert.isTrue(Result.isFailure(loggedOutResult))
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("composes request security with the public Auth CSRF verifier", () =>
     Effect.gen(function*() {
@@ -255,8 +282,17 @@ describe("Auth", () => {
         if (Result.isFailure(rejected)) {
           assert.instanceOf(rejected.failure, CredentialRejectedError)
         }
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("enforces sliding idle and non-sliding absolute session expiry", () =>
     Effect.gen(function*() {
@@ -293,8 +329,17 @@ describe("Auth", () => {
         if (Result.isFailure(absoluteResult)) {
           assert.instanceOf(absoluteResult.failure, CredentialRejectedError)
         }
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("stores only hashes and terminal recovery can revoke existing owner sessions", () =>
     Effect.gen(function*() {
@@ -318,7 +363,11 @@ describe("Auth", () => {
           workspaceId: fixtureWorkspaceIds.alpha,
           actor: ownerActor,
           revokeExistingOwnerSessions: true
-        }).pipe(Effect.provide(inputLayer))
+        }).pipe(
+          // This test supplies a deterministic terminal input stream.
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(inputLayer)
+        )
 
         const oldOwnerResult = yield* auth.authenticate(first.sessionToken).pipe(Effect.result)
         const oldPairingResult = yield* auth.consumePairingCode(outstandingCode.pairingCode).pipe(Effect.result)
@@ -369,8 +418,17 @@ describe("Auth", () => {
         }])
         const serialized = JSON.stringify({ firstCode, first, recovered, recovery })
         for (const secret of rawSecrets) assert.notInclude(serialized, secret)
-      }).pipe(Effect.provide(recoveryTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence and recovery boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(recoveryTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("refuses terminal recovery before code creation for unsafe mode or confirmation", () =>
     Effect.gen(function*() {
@@ -392,11 +450,21 @@ describe("Auth", () => {
         yield* fileSystem.chmod(dataDirectory, 0o755)
         const wrongMode = yield* recovery.issueOwnerRecovery({
           ...request
-        }).pipe(Effect.provide(confirmedLayer), Effect.result)
+        }).pipe(
+          // This test swaps the terminal input layer to exercise each decision.
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(confirmedLayer),
+          Effect.result
+        )
         yield* fileSystem.chmod(dataDirectory, 0o700)
         const rejectedConfirmation = yield* recovery.issueOwnerRecovery({
           ...request
-        }).pipe(Effect.provide(rejectedLayer), Effect.result)
+        }).pipe(
+          // This test swaps the terminal input layer to exercise each decision.
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(rejectedLayer),
+          Effect.result
+        )
         const rows = yield* database.sql`SELECT pairing_code_id FROM pairing_codes`
         const directoryEntries = yield* fileSystem.readDirectory(dataDirectory)
 
@@ -404,8 +472,17 @@ describe("Auth", () => {
         assert.isTrue(Result.isFailure(rejectedConfirmation))
         assert.deepStrictEqual(rows, [])
         assert.isFalse(directoryEntries.some((entry) => entry.startsWith(".recovery-owner-")))
-      }).pipe(Effect.provide(recoveryTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence and recovery boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(recoveryTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("refuses a configured database directory reached through a symbolic alias", () =>
     Effect.gen(function*() {
@@ -422,9 +499,9 @@ describe("Auth", () => {
         maxConnections: 1
       }
 
-      const result = yield* Effect.gen(function*() {
-        return yield* TerminalRecovery
-      }).pipe(
+      const result = yield* TerminalRecovery.pipe(
+        // This isolated service construction is the test's resource boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(terminalRecoveryLayer(config)),
         Effect.result,
         Effect.scoped
@@ -432,12 +509,19 @@ describe("Auth", () => {
 
       assert.isTrue(Result.isFailure(result))
       assert.isFalse(yield* fileSystem.exists(`${canonicalDirectory}/control-center.db`))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("rejects a process-owner probe mismatch and removes the probe", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-auth-recovery-owner-")
       yield* createWorkspace(fixtureWorkspaceIds.alpha, "Alpha").pipe(
+        // This fixture owns its temporary database layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(databaseLayer(config)),
         Effect.scoped
       )
@@ -471,6 +555,8 @@ describe("Auth", () => {
           revokeExistingOwnerSessions: false
         })
       }).pipe(
+        // This test supplies terminal input and a filesystem probe override.
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(
           terminalRecoveryLayer(config).pipe(
             Layer.provideMerge(Layer.mergeAll(confirmedLayer, mismatchedFileSystem))
@@ -482,7 +568,12 @@ describe("Auth", () => {
       const entries = yield* fileSystem.readDirectory(dataDirectory)
       assert.isTrue(Result.isFailure(result))
       assert.isFalse(entries.some((entry) => entry.startsWith(".recovery-owner-")))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("releases its database directory with the enclosing scope", () =>
     Effect.gen(function*() {
@@ -503,12 +594,20 @@ describe("Auth", () => {
               workspaceId: fixtureWorkspaceIds.alpha,
               actor: ownerActor
             })
-          }).pipe(Effect.provide(authTestLayer(config)))
+          }).pipe(
+            // This nested scope owns its isolated persistence layer.
+            // @effect-diagnostics-next-line strictEffectProvide:off
+            Effect.provide(authTestLayer(config))
+          )
           return scopedRoot
         })
       )
       assert.isFalse(yield* fileSystem.exists(root))
-    }).pipe(Effect.provide(NodeServices.layer)))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("quarantines malformed auth rows without leaking payloads or poisoning admin lists", () =>
     Effect.gen(function*() {
@@ -568,8 +667,17 @@ describe("Auth", () => {
         )
         assert.notInclude(JSON.stringify(quarantined), canary)
         assert.isTrue(quarantined.every(({ payloadDigest }) => /^[0-9a-f]{64}$/u.test(payloadDigest)))
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("durably quarantines malformed rows reached only by singular credential operations", () =>
     Effect.gen(function*() {
@@ -627,8 +735,17 @@ describe("Auth", () => {
         )
         assert.isTrue(afterConsume.every(({ payloadDigest }) => /^[0-9a-f]{64}$/u.test(payloadDigest)))
         assert.notInclude(JSON.stringify(afterConsume), canary)
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("quarantines singular credentials whose stored identifiers are malformed", () =>
     Effect.gen(function*() {
@@ -676,8 +793,17 @@ describe("Auth", () => {
             { recordKey: fixtureWorkspaceIds.alpha, recordKind: "session" }
           ]
         )
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("serializes concurrent first-run issuance to one stable winner", () =>
     Effect.gen(function*() {
@@ -703,13 +829,24 @@ describe("Auth", () => {
         if (failure !== undefined) {
           assert.instanceOf(failure.failure, FirstRunPairingAlreadyIssuedError)
         }
-      }).pipe(Effect.provide(authTestLayer(config)))
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+      }).pipe(
+        // Each test owns its isolated persistence layer boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authTestLayer(config))
+      )
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("constructs the public standalone Auth layer without exposing its repository", () =>
     Effect.gen(function*() {
       const config = yield* makePersistenceTestConfig("control-center-auth-public-layer-")
       yield* createWorkspace(fixtureWorkspaceIds.alpha, "Alpha").pipe(
+        // This fixture owns its temporary database layer.
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(databaseLayer(config)),
         Effect.scoped
       )
@@ -719,7 +856,17 @@ describe("Auth", () => {
           workspaceId: fixtureWorkspaceIds.alpha,
           actor: ownerActor
         })
-      }).pipe(Effect.provide(authLayer(config)), Effect.scoped)
+      }).pipe(
+        // This test checks the standalone Auth layer at its test boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(authLayer(config)),
+        Effect.scoped
+      )
       assert.strictEqual(issued.summary.workspaceId, fixtureWorkspaceIds.alpha)
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 })

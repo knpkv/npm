@@ -6,6 +6,7 @@ import { ownerSessionOrigin, ownerSessionUrlForOrigin } from "../server/internal
 import {
   authenticatedDevBackendOrigin,
   authenticatedDevProxyConfig,
+  authenticatedDevProxyOriginDecision,
   authenticatedDevPublicOrigin,
   authenticatedDevPublicOriginEnvironment,
   setAuthenticatedDevProxyOrigin
@@ -22,6 +23,13 @@ describe("authenticated development proxy", () => {
     const setHeader = vi.fn()
     setAuthenticatedDevProxyOrigin({ setHeader })
     expect(setHeader).toHaveBeenCalledWith("origin", authenticatedDevBackendOrigin)
+  })
+
+  it("rejects foreign browser origins before the proxy rewrites them", () => {
+    expect(authenticatedDevProxyOriginDecision(authenticatedDevPublicOrigin)).toBe("forward")
+    expect(authenticatedDevProxyOriginDecision(undefined)).toBe("forward")
+    expect(authenticatedDevProxyOriginDecision("http://localhost:4000")).toBe("reject")
+    expect(Object.values(authenticatedDevProxyConfig).every((options) => options.bypass !== undefined)).toBe(true)
   })
 
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {

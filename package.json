@@ -6,6 +6,7 @@
     "clean": "node scripts/clean.mjs",
     "precommit": "tsx packages/control-center/scripts/run-precommit.ts",
     "pretest": "pnpm --filter @knpkv/browser-pairing build",
+    "precoverage": "pnpm --filter @knpkv/browser-pairing build",
     "verify:full": "pnpm format && pnpm lint && pnpm check && pnpm test",
     "skills:sync": "node scripts/sync-skills.mjs write",
     "skills:check": "node scripts/sync-skills.mjs check",
