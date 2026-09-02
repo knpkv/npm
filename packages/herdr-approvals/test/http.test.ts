@@ -866,6 +866,18 @@ describe("host HTTP authority", () => {
         workCheckpoint
       )
 
+      const replay = yield* Effect.promise(() =>
+        fetch(`${server.workUrl}/v1/work/checkpoints`, {
+          body: JSON.stringify(workCheckpoint),
+          headers: { "content-type": "application/json" },
+          method: "POST"
+        })
+      )
+      expect(replay.status).toBe(201)
+      expect(Schema.decodeUnknownSync(WorkGoalCheckpoint)(yield* Effect.promise(() => replay.json()))).toEqual(
+        workCheckpoint
+      )
+
       const conflict = yield* Effect.promise(() =>
         fetch(`${server.workUrl}/v1/work/checkpoints`, {
           body: JSON.stringify({
