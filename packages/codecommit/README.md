@@ -25,7 +25,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - [Granted](https://granted.dev) with the `assume` executable configured for
   opening a selected pull request, or a selected changed file, in the matching
   AWS account console
-- A locally authenticated `codex` executable for optional Relay actions in both TUI and web mode
+- Locally authenticated `codex` and `claude` executables for optional Relay actions in both TUI and web mode
 - Docker for optional web-mode review sandboxes. Sandbox IDE ports are
   loopback-only and require the per-sandbox password shown by the web UI.
 - `nvim` for the same-terminal Neovim shortcut and/or the VS Code `code` CLI
