@@ -178,14 +178,39 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts credentials nested inside safe URL coordinates", () => {
-    const request = approvalRequestFor({
-      kind: "nix.apply",
-      ref: "https://mirror.test/?ref=https://origin.test/repo?X-Amz-Signature=leaked-canary&sha=release"
-    })
-    expect(request.fields[0]?.value).toBe(
-      "https://mirror.test/?ref=https://origin.test/repo?X-Amz-Signature=[redacted credential]&sha=release"
+    const refs = [
+      {
+        redacted: "[redacted credential]",
+        ref: "https://mirror.test/?ref=https://origin.test/repo?X-Amz-Signature=leaked-canary&sha=release"
+      },
+      {
+        redacted: "%5Bredacted%20credential%5D",
+        ref: "https://mirror.test/?ref=https%3A%2F%2Forigin.test%2Frepo%3FX-Amz-Signature%3Dencoded-canary%26sha%3Drelease"
+      },
+      {
+        redacted: "[redacted credential]",
+        ref: "//deploy-user:protocol-canary@example.test/repo"
+      }
+    ]
+    for (const { redacted, ref } of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toMatch(/(?:leaked|encoded|protocol)-canary/u)
+      expect(encoded).toContain(redacted)
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "//example.test/repo" }).fields[0]?.value).toBe(
+      "//example.test/repo"
     )
-    expect(request.fields[0]?.value).not.toContain("leaked-canary")
+    expect(
+      approvalRequestFor({
+        kind: "nix.apply",
+        ref: "https://mirror.test/?ref=https%3A%2F%2Forigin.test%2Frepo%3Fsha%3Drelease"
+      }).fields[0]?.value
+    ).toBe("https://mirror.test/?ref=https%3A%2F%2Forigin.test%2Frepo%3Fsha%3Drelease")
   })
 
   it("redacts unsafe query values through raw whitespace", () => {
