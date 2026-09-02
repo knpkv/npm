@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Crypto, Effect, Result, Schema } from "effect"
+import packageManifest from "../../package.json" with { type: "json" }
 import { CsrfToken, PairingCode, PairSessionRequest } from "../../src/api/session.js"
 import { hashCsrfToken, verifyCsrfToken } from "../../src/server/security/RequestSecurity.js"
 
@@ -11,6 +12,10 @@ describe("Control Center browser pairing seam", () => {
     expect(Result.isFailure(Schema.decodeUnknownResult(PairingCode)("short"))).toBe(true)
     expect(Result.isSuccess(Schema.decodeUnknownResult(PairSessionRequest)({ pairingCode }))).toBe(true)
     expect(Result.isFailure(Schema.decodeUnknownResult(CsrfToken)("not-a-token"))).toBe(true)
+  })
+
+  it("builds browser-pairing before the development client starts", () => {
+    expect(packageManifest.scripts.predev).toContain("pnpm --filter @knpkv/browser-pairing build")
   })
 
   it.effect("uses the shared CSRF digest verifier while keeping request policy local", () =>

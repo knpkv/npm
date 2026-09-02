@@ -115,6 +115,7 @@ describe("authenticated development proxy", () => {
 
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
     expect(packageJson.scripts.dev).toContain(authenticatedDevPublicOriginEnvironment)
+    expect(packageJson.scripts.predev).toContain("pnpm build")
     const url = ownerSessionUrlForOrigin(authenticatedDevPublicOrigin, {
       bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32)))
     })
