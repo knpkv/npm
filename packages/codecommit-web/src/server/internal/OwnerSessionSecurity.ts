@@ -174,6 +174,9 @@ interface BootstrapAuthorization {
 
 export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authorizeBootstrap")(
   function*(request: BootstrapAuthorization, secrets: OwnerSessionSecretsContract) {
+    if (request.origin !== secrets.authorityOrigin) {
+      return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match the CodeCommit server" })
+    }
     const failedAttempts = yield* Ref.get(secrets.bootstrapFailedAttempts)
     if (failedAttempts >= MAX_BOOTSTRAP_FAILURES) {
       return yield* new UnauthorizedApiError({ message: "Bootstrap confirmation temporarily unavailable" })
@@ -184,9 +187,6 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSessionSecurity.authori
     if (suppliedToken === undefined || !credentialValuesEqual(suppliedToken, Redacted.value(secrets.bootstrapToken))) {
       yield* Ref.update(secrets.bootstrapFailedAttempts, (attempts) => Math.min(MAX_BOOTSTRAP_FAILURES, attempts + 1))
       return yield* new UnauthorizedApiError({ message: "Missing or invalid bootstrap token" })
-    }
-    if (request.origin !== secrets.authorityOrigin) {
-      return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match the CodeCommit server" })
     }
     const expiresAt = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
     if (expiresAt === undefined) {

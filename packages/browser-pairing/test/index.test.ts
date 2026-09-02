@@ -108,5 +108,23 @@ describe("browser pairing primitives", () => {
     expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, maxAge: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
       CredentialCookieError
     )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "owner session" })).toThrow(
+      CredentialCookieError
+    )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "cc/session" })).toThrow(
+      CredentialCookieError
+    )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "cc(session)" })).toThrow(
+      CredentialCookieError
+    )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "cc_é" })).toThrow(
+      CredentialCookieError
+    )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/é" })).toThrow(
+      CredentialCookieError
+    )
+    expect(serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/api,=v" })).toContain(
+      "Path=/api,=v"
+    )
   })
 })

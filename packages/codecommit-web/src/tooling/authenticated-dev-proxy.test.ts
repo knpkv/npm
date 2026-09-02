@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "@effect/vitest"
 import { BrowserCredential } from "@knpkv/browser-pairing/schema"
 import { Redacted, Schema } from "effect"
 import packageJson from "../../package.json" with { type: "json" }
-import { ownerSessionUrlForOrigin } from "../server/internal/OwnerSessionSecurity.js"
+import { ownerSessionOrigin, ownerSessionUrlForOrigin } from "../server/internal/OwnerSessionSecurity.js"
 import {
   authenticatedDevBackendOrigin,
   authenticatedDevProxyConfig,
@@ -31,5 +31,11 @@ describe("authenticated development proxy", () => {
     })
     expect(url).toBe(`http://localhost:5173/#bootstrap_token=${"ab".repeat(32)}`)
     expect(url).not.toContain(authenticatedDevBackendOrigin)
+  })
+
+  it("keeps the configured backend authority separate from the advertised Vite origin", () => {
+    expect(ownerSessionOrigin("127.0.0.1", 3000)).toBe(`${authenticatedDevBackendOrigin}/`)
+    expect(authenticatedDevPublicOrigin).not.toBe(authenticatedDevBackendOrigin)
+    expect(setAuthenticatedDevProxyOrigin).toBeTypeOf("function")
   })
 })

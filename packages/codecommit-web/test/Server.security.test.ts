@@ -543,6 +543,23 @@ describe("CodeCommit web security boundary", () => {
         origin: authorityOrigin
       }, secrets)
 
+      const crossOrigin = yield* makeSecrets()
+      for (let attempt = 0; attempt < 5; attempt += 1) {
+        const failed = yield* Effect.result(authorizeBootstrapRequest({
+          authorization: undefined,
+          host: "127.0.0.1:3000",
+          origin: "https://attacker.example"
+        }, crossOrigin))
+        expect(Result.isFailure(failed)).toBe(true)
+        if (Result.isFailure(failed)) expect(failed.failure._tag).toBe("ForbiddenApiError")
+      }
+      expect(yield* Ref.get(crossOrigin.bootstrapFailedAttempts)).toBe(0)
+      yield* authorizeBootstrapRequest({
+        authorization: `Bearer ${bootstrapToken}`,
+        host: "attacker.example:3000",
+        origin: authorityOrigin
+      }, crossOrigin)
+
       const limited = yield* makeSecrets()
       for (let attempt = 0; attempt < 5; attempt += 1) {
         const failed = yield* Effect.result(authorizeBootstrapRequest({

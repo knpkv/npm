@@ -425,7 +425,7 @@ export const CodeCommitServerLive = Effect.gen(function*() {
       )
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
-      const security = yield* makeOwnerSessionSecrets(publicOrigin)
+      const security = yield* makeOwnerSessionSecrets(directOrigin)
       const ready = yield* Deferred.make<void>()
       const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
         Effect.forkChild({ startImmediately: true })

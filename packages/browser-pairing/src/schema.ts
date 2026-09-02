@@ -1,7 +1,7 @@
 import { Redacted, Result, Schema } from "effect"
 
 const CREDENTIAL_PATTERN = /^[0-9a-f]{64}$/u
-const COOKIE_DELIMITERS = new Set([",", ";", "="])
+const COOKIE_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/u
 const CredentialValue = Schema.String.check(
   Schema.isPattern(CREDENTIAL_PATTERN, { expected: "a lowercase 256-bit browser credential" })
 )
@@ -91,12 +91,12 @@ export const serializeCredentialCookie = (
 ): string => {
   const decoded = Schema.decodeUnknownResult(BrowserCredential)(credential)
   if (Result.isFailure(decoded)) throw new CredentialCookieError({ reason: "invalid-credential" })
-  const invalidAttribute = (value: string): boolean =>
+  const invalidPath = (value: string): boolean =>
     value.length === 0 || Array.from(value).some((character) => {
       const code = character.charCodeAt(0)
-      return code <= 0x1f || code === 0x7f || COOKIE_DELIMITERS.has(character)
+      return !((code >= 0x20 && code <= 0x3a) || (code >= 0x3c && code <= 0x7e))
     })
-  if (invalidAttribute(options.name) || invalidAttribute(options.path)) {
+  if (!COOKIE_NAME_PATTERN.test(options.name) || invalidPath(options.path)) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
   if (
