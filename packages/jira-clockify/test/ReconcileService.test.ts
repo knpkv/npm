@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { deltaToApply, resolvePeriod } from "../src/cli/reconcile.js"
+import { deltaToApply, resolveAgentMode, resolvePeriod } from "../src/cli/reconcile.js"
 import {
   buildReconcileRows,
   combineDescriptions,
@@ -184,5 +184,82 @@ describe("resolvePeriod", () => {
   it("rejects a malformed date", () => {
     const period = resolvePeriod({ week: false, since: "june 1", until: undefined })
     expect("error" in period).toBe(true)
+  })
+
+  // The suite runs in America/New_York (see vitest.config.ts), so these two really are transition
+  // days. The endpoint used to be local midnight plus 24 elapsed hours, which is not the next
+  // midnight on either of them: `--day` reached into the following day in spring and stopped an hour
+  // short of its own in autumn.
+  const endpoints = [
+    { label: "spring forward", day: "2026-03-08" },
+    { label: "fall back", day: "2026-11-01" }
+  ]
+  for (const { day, label } of endpoints) {
+    it(`ends a ${label} day at the next local midnight`, () => {
+      const period = resolvePeriod({ week: false, since: day, until: day })
+      expect("error" in period).toBe(false)
+      if ("error" in period) return
+      // Both ends are a local midnight, and the span is the day the user asked for and no other.
+      expect(localDay(period.from)).toBe(day)
+      expect(period.from.getHours()).toBe(0)
+      expect(period.to.getHours()).toBe(0)
+      expect(localDay(new Date(period.to.getTime() - 1))).toBe(day)
+    })
+  }
+
+  // Same defect at the other end of `--week`: six times 24 hours from a midnight is 23:00 or 01:00
+  // across a transition, so the week began mid-day. `resolvePeriod` reads the wall clock itself, so
+  // this asserts the invariant that always holds rather than pinning a transition week — it would
+  // have caught the old arithmetic only during one, which is exactly when it mattered.
+  it("starts a week at a local midnight", () => {
+    const period = resolvePeriod({ week: true, since: undefined, until: undefined })
+    expect("error" in period).toBe(false)
+    if ("error" in period) return
+    expect(period.from.getHours()).toBe(0)
+    expect(period.from.getMinutes()).toBe(0)
+  })
+})
+
+describe("resolveAgentMode", () => {
+  it("stays in direction mode when --agent is absent", () => {
+    expect(resolveAgentMode({ agent: undefined, direction: undefined, json: false, calendar: false })).toEqual({
+      _tag: "Directions"
+    })
+    expect(resolveAgentMode({ agent: undefined, direction: "jira-to-clockify", json: false, calendar: false })).toEqual(
+      {
+        _tag: "Directions"
+      }
+    )
+  })
+
+  it("switches to agent mode for a supported agent", () => {
+    expect(resolveAgentMode({ agent: "claude", direction: undefined, json: false, calendar: false })).toEqual({
+      _tag: "Agent",
+      agent: "claude"
+    })
+  })
+
+  // --agent is a mode switch, not a direction. Honouring one of two contradictory arguments
+  // silently would leave the user unable to tell which took effect.
+  it("rejects --agent combined with a direction", () => {
+    const result = resolveAgentMode({ agent: "claude", direction: "clockify-to-jira", json: false, calendar: false })
+    expect(result._tag).toBe("UsageError")
+    if (result._tag === "UsageError") expect(result.message).toContain("clockify-to-jira")
+  })
+
+  it("rejects an unsupported agent and names the supported ones", () => {
+    const result = resolveAgentMode({ agent: "codex", direction: undefined, json: false, calendar: false })
+    expect(result._tag).toBe("UsageError")
+    if (result._tag === "UsageError") expect(result.message).toContain("claude")
+  })
+
+  it("rejects agent-only flags outside agent mode instead of silently ignoring them", () => {
+    expect(resolveAgentMode({ agent: undefined, direction: undefined, json: true, calendar: false })._tag)
+      .toBe("UsageError")
+    expect(resolveAgentMode({ agent: undefined, direction: undefined, json: false, calendar: true })._tag)
+      .toBe("UsageError")
+    const both = resolveAgentMode({ agent: undefined, direction: undefined, json: true, calendar: true })
+    expect(both._tag).toBe("UsageError")
+    if (both._tag === "UsageError") expect(both.message).toContain("--json and --calendar")
   })
 })

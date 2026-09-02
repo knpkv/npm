@@ -4,6 +4,27 @@
  * @module
  */
 
+/**
+ * Local calendar day (`YYYY-MM-DD`) of an instant — matches how a person reads their
+ * timesheet, and the single definition every day bucket in jcf is keyed by.
+ */
+export function localDay(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, "0")
+  const d = String(date.getDate()).padStart(2, "0")
+  return `${y}-${m}-${d}`
+}
+
+/**
+ * Local midnight following `atMs`, as epoch milliseconds — how every day-by-day walk in jcf
+ * advances. Built from local calendar fields rather than by adding 24 hours, so it lands on
+ * midnight across a daylight-saving change too.
+ */
+export function nextLocalMidnight(atMs: number): number {
+  const at = new Date(atMs)
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0).getTime()
+}
+
 /** Format a `Date` as local `HH:MM` — the canonical clock format for prompts and confirmations. */
 export function formatClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
@@ -34,7 +55,7 @@ export function formatDuration(seconds: number): string {
  */
 export function parseDuration(input: string): number | null {
   const match = input.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?$/)
-  if (!match || (!match[1] && !match[2])) return null
+  if (match === null || ((match[1] ?? "") === "" && (match[2] ?? "") === "")) return null
   const hours = parseInt(match[1] ?? "0", 10)
   const minutes = parseInt(match[2] ?? "0", 10)
   return hours * 3600 + minutes * 60
@@ -64,7 +85,7 @@ export function isFullIsoTimestamp(input: string): boolean {
 export function parseStartTime(input: string, now: Date = new Date()): Date | null {
   const trimmed = input.trim()
   const hm = trimmed.match(/^(\d{1,2}):(\d{2})$/)
-  if (hm) {
+  if (hm !== null) {
     const hours = parseInt(hm[1]!, 10)
     const minutes = parseInt(hm[2]!, 10)
     if (hours > 23 || minutes > 59) return null
@@ -123,21 +144,21 @@ export function resolveCorrectedEnd(params: {
   readonly now: Date
 }): CorrectedEnd {
   const trimmed = params.input.trim()
-  if (!trimmed) {
+  if (trimmed === "") {
     return { ok: false, error: "Enter an end time as HH:MM (today) or a full ISO timestamp." }
   }
 
   let end: Date
   if (HH_MM.test(trimmed)) {
     const parsed = parseStartTime(trimmed, params.now)
-    if (!parsed) return { ok: false, error: "Invalid time. Use HH:MM (24-hour), e.g. 17:30." }
+    if (parsed === null) return { ok: false, error: "Invalid time. Use HH:MM (24-hour), e.g. 17:30." }
     // Bare HH:MM lands on today by default; if that is still in the future the
     // user means the same clock time yesterday (they forgot overnight).
     if (parsed.getTime() > params.now.getTime()) parsed.setDate(parsed.getDate() - 1)
     end = parsed
   } else if (isFullIsoTimestamp(trimmed)) {
     const parsed = parseStartTime(trimmed, params.now)
-    if (!parsed) return { ok: false, error: "Invalid ISO timestamp." }
+    if (parsed === null) return { ok: false, error: "Invalid ISO timestamp." }
     end = parsed
   } else {
     return { ok: false, error: "Unrecognised time. Use HH:MM (today) or a full ISO timestamp." }

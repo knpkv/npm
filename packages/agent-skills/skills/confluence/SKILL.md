@@ -112,7 +112,7 @@ confluence sync push
 Folders are containers with no body, so the page commands do not address them: `/pages/{id}` 404s on a folder id and vice versa. `--folder-id` accepts a bare numeric id or a folder URL; a folder URL supplies its own site, so `--base-url` is only needed alongside a bare id.
 
 ```bash
-confluence folder get --url "https://example.atlassian.net/wiki/spaces/PROJ/folder/12345/OOB-100"
+confluence folder get --url "https://example.atlassian.net/wiki/spaces/PROJ/folder/12345/REL-100"
 confluence folder get --folder-id 12345 --base-url https://example.atlassian.net --json
 confluence folder children --folder-id 12345 --base-url https://example.atlassian.net --json
 ```
@@ -120,8 +120,8 @@ confluence folder children --folder-id 12345 --base-url https://example.atlassia
 Create a folder (remote write — confirm first, and `--space` takes the numeric space id, not the space key):
 
 ```bash
-confluence folder create --base-url https://example.atlassian.net --space 98765 --title "OOB 100" --dry-run
-confluence folder create --base-url https://example.atlassian.net --space 98765 --title "OOB 100" --parent 12345
+confluence folder create --base-url https://example.atlassian.net --space 98765 --title "REL 100" --dry-run
+confluence folder create --base-url https://example.atlassian.net --space 98765 --title "REL 100" --parent 12345
 ```
 
 `--parent` accepts a numeric id, a page URL, or a folder URL.
@@ -133,7 +133,7 @@ Content ids are per-site, so a site mismatch is refused rather than acted on: a 
 CQL is the only way to find content by title or by parent — there is no "children of X by title" endpoint, and folder ids appear in no page's front-matter. `search` returns one page of results and reports when Confluence has more.
 
 ```bash
-confluence search --base-url https://example.atlassian.net --cql 'title ~ "OOB 100" AND type = page'
+confluence search --base-url https://example.atlassian.net --cql 'title ~ "REL 100" AND type = page'
 confluence search --base-url https://example.atlassian.net --cql 'parent = 12345 AND type = page' --limit 50 --json
 ```
 

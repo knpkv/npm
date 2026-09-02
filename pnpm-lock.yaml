@@ -1104,6 +1104,9 @@ importers:
       '@knpkv/agent-skills':
         specifier: workspace:^
         version: link:../agent-skills
+      '@knpkv/ai-claude':
+        specifier: workspace:^
+        version: link:../ai-claude
       '@knpkv/atlassian-common':
         specifier: workspace:^
         version: link:../atlassian-common

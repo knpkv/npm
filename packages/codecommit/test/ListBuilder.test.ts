@@ -42,7 +42,7 @@ const pr2 = decodePR({ ...base, id: "2", title: "fix: typo", author: "bob", acco
 const pr3 = decodePR({
   ...base,
   id: "3",
-  title: "RPS-42: migration",
+  title: "PROJ-42: migration",
   account: acc2,
   repositoryName: "repo-b"
 })
@@ -82,7 +82,7 @@ describe("extractScope", () => {
   // Jira-style tickets use `ABC-123: message`.
   // extractScope must capture the full ticket key.
   it("parses Jira-style ticket", () => {
-    expect(extractScope("RPS-42: migration")).toBe("RPS-42")
+    expect(extractScope("PROJ-42: migration")).toBe("PROJ-42")
     expect(extractScope("ABC-1: short")).toBe("ABC-1")
   })
 

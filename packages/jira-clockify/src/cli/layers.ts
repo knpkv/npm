@@ -5,13 +5,16 @@
  */
 import { NodeHttpClient, NodeServices } from "@effect/platform-node"
 import { ClockifyApiClient, ClockifyApiConfig } from "@knpkv/clockify-api-client"
-import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import { JiraApiClient, JiraApiConfig, type JiraApiCredential } from "@knpkv/jira-api-client"
 import { JiraAuth, layer as JiraAuthLayer } from "@knpkv/jira-cli/JiraAuth"
 import { Effect, Layer, Redacted } from "effect"
+import * as Logger from "effect/Logger"
+import { layer as AgentSessionReaderLayer } from "../services/AgentSessionReader.js"
 import { ClockifyAuth, layer as ClockifyAuthLayer } from "../services/ClockifyAuth.js"
 import { layer as ConfigLayer } from "../services/ConfigService.js"
 import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
 import { layer as ReconcileServiceLayer } from "../services/ReconcileService.js"
+import { layer as SessionAttributorLayer } from "../services/SessionAttributor.js"
 import { layer as StateWriterLayer } from "../services/StateWriter.js"
 import { layer as TicketServiceLayer } from "../services/TicketService.js"
 import { layer as TimerServiceLayer } from "../services/TimerService.js"
@@ -19,6 +22,16 @@ import { layer as TimerServiceLayer } from "../services/TimerService.js"
 // ---------------------------------------------------------------------------
 // Platform
 // ---------------------------------------------------------------------------
+
+/**
+ * Diagnostics belong on stderr. The default logger writes to stdout, which corrupts every `--json`
+ * output: one warning turns "exactly one JSON value on stdout" into unparseable output for whatever
+ * is reading it. Warnings stay visible, just on the stream reserved for them.
+ *
+ * Part of the layer rather than the binary so the test seam inherits the same routing the real CLI
+ * runs with, instead of the two drifting apart.
+ */
+export const LogToStderrLive = Layer.succeed(Logger.LogToStderr, true)
 
 // HttpClient backs TimerService's raw Jira worklog POST. Use the fetch implementation, not
 // undici: the TUI runs under Bun (see main.tsx) where undici fails with a transport error,
@@ -71,29 +84,38 @@ export const ClockifyApiLive = ClockifyApiClient.layer.pipe(
 // `Effect.timeout` is a race, and racing an uninterruptible loser means waiting
 // for it anyway.
 //
-// Note what the `Effect.catch` below already costs. This layer is also the TUI's
-// memoized runtime (`tui/atoms/runtime.ts`), built once per session, so any
-// failure — including that 30s deadline — pins an empty credential for the rest
-// of the session and 401s every Jira call until the user restarts. Moving the
-// bound here would not change that; fixing it means making the TUI resolve the
-// credential per request instead of once at layer construction.
+// The credential is resolved per request, not once here. An access token lasts
+// about an hour, so a value captured at layer construction is a deadline on the
+// process: `jcf watch` runs all day, and the TUI's runtime
+// (`tui/atoms/runtime.ts`) is memoized for a whole session. Both used to 401
+// every Jira call from the first expiry onward, with the empty-credential
+// fallback below turning any transient failure at startup into the same thing
+// permanently. `resolveAuth` is re-read before each request, so a refresh — by
+// this process or another — reaches the next call.
+//
+// `getAccessToken` is cheap to call repeatedly: it reads the stored token and
+// returns it unless it has actually expired, and holds a lock so concurrent
+// callers share one refresh.
 //
 // `getCloudId` needs no bound; it only reads the stored token file.
 export const JiraApiConfigLive = Layer.effect(
   JiraApiConfig,
   Effect.gen(function*() {
     const auth = yield* JiraAuth
-    const accessToken = yield* auth.getAccessToken().pipe(
-      Effect.catch(() => Effect.succeed(Redacted.make("")))
-    )
-    const cloudId = yield* auth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
+    // Infallible by construction, because request preprocessing has nowhere to put an error. An
+    // empty token yields the same 401 as never having logged in, which is what the caller reports.
+    const resolveAuth: Effect.Effect<JiraApiCredential> = Effect.gen(function*() {
+      const accessToken = yield* auth.getAccessToken().pipe(
+        Effect.catch(() => Effect.succeed(Redacted.make("")))
+      )
+      const cloudId = yield* auth.getCloudId().pipe(Effect.catch(() => Effect.succeed("")))
+      return { type: "oauth2", accessToken, cloudId }
+    })
     return {
       baseUrl: "",
-      auth: { type: "oauth2", accessToken, cloudId } satisfies {
-        readonly type: "oauth2"
-        readonly accessToken: typeof accessToken
-        readonly cloudId: string
-      }
+      // Read once for the snapshot every non-refreshing consumer still reads, and again per request.
+      auth: yield* resolveAuth,
+      resolveAuth
     }
   })
 ).pipe(Layer.provide(JiraAuthLive))
@@ -122,27 +144,57 @@ export const TimerServiceLive = TimerServiceLayer.pipe(
   Layer.provide(PlatformLayer)
 )
 
+export const AgentSessionReaderLive = AgentSessionReaderLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
+  Layer.provide(ConfigLive),
+  Layer.provide(PlatformLayer)
+)
+
+// Constructing this spawns nothing — the Claude CLI is only invoked when a session no
+// deterministic Attribution Signal could place actually needs attributing.
+export const SessionAttributorLive = SessionAttributorLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
+  Layer.provide(PlatformLayer)
+)
+
 export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
   Layer.provide(ClockifyApiLive),
   Layer.provide(ClockifyAuthLive),
   Layer.provide(JiraApiLive),
   Layer.provide(JiraAuthLive),
   Layer.provide(ConfigLive),
-  Layer.provide(TimerServiceLive)
+  Layer.provide(TimerServiceLive),
+  Layer.provide(AgentSessionReaderLive),
+  Layer.provide(SessionAttributorLive)
 )
 
 // ---------------------------------------------------------------------------
 // Fully closed layer for headless CLI
 // ---------------------------------------------------------------------------
 
-export const HeadlessLayer = Layer.mergeAll(
-  TimerServiceLive,
-  ReconcileServiceLive,
-  TicketServiceLive,
+/**
+ * The services the application services are built *from*.
+ *
+ * Separated because `Layer.mergeAll` builds its members in parallel: a dependency listed alongside
+ * its dependent is not guaranteed to exist when the dependent is constructed. These go underneath
+ * via `provideMerge`, which both orders them first and keeps them in the result, so a command can
+ * still reach `ConfigService` directly.
+ */
+const FoundationLayer = Layer.mergeAll(
   ConfigLive,
   StateWriterLive,
   ClockifyAuthLive,
   ClockifyApiLive,
   JiraAuthLive,
-  JiraApiLive
+  JiraApiLive,
+  AgentSessionReaderLive,
+  SessionAttributorLive,
+  LogToStderrLive
 ).pipe(Layer.provideMerge(PlatformLayer))
+
+export const HeadlessLayer = Layer.mergeAll(
+  TimerServiceLive,
+  ReconcileServiceLive,
+  TicketServiceLive
+).pipe(Layer.provideMerge(FoundationLayer))

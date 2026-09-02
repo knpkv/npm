@@ -9,6 +9,7 @@ import { issue } from "./list.js"
 import { sync } from "./reconcile.js"
 import { launchTuiOrSetup } from "./setup.js"
 import { timer } from "./timer.js"
+import { watch } from "./watch.js"
 
 const processArgv = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
@@ -29,5 +30,5 @@ const skills = Command.make("skills", {}, () => Console.log("Usage: jcf skills i
 )
 
 export const root = Command.make("jcf", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))).pipe(
-  Command.withSubcommands([tui, auth, timer, issue, sync, config, skills])
+  Command.withSubcommands([tui, auth, timer, issue, sync, watch, config, skills])
 )

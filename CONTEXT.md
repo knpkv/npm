@@ -100,6 +100,54 @@ _Avoid_: Edit, adjust, stop-time fix
 A completed time interval logged after the fact when a Timer was never started, built from a ticket, duration, and start time rather than from a running Timer.
 _Avoid_: Correction interval, manual log, backfill
 
+**Coding Agent**:
+A local AI coding tool whose runs leave a durable transcript on the developer's machine, such as Claude Code or Codex. Distinct from an Agent Skill, which is instruction material a Coding Agent reads, and from a Release Agent Job, which runs on a server.
+_Avoid_: Agent, assistant, AI, bot
+
+**Agent Session**:
+One transcript of one Coding Agent run, carrying the Session Activity, the working directory, and the git branch the run happened against.
+_Avoid_: Chat log, prompt history, agent skill, conversation
+
+**Session Activity**:
+The timestamped messages a person typed within an Agent Session, treated as evidence that they were present at particular moments rather than as a record of how long anything lasted. A Coding Agent's own output and its tool results are not Session Activity: they evidence the agent being busy, not anyone working.
+_Avoid_: Session duration, session length, elapsed time, agent output
+
+**Attribution Signal**:
+The evidence that credits an Agent Session to an Issue Key — the git branch, the working directory path, a Standing Attribution, or a Coding Agent's reading of the transcript — recorded with the credit so a Proposed Worklog can be audited and disputed. Signals are ordered, and the first that yields an Issue Key wins.
+_Avoid_: Guess, heuristic, match, detection
+
+**Standing Attribution**:
+A user-declared mapping from a directory to the Issue Key that recurring work beneath it belongs to, for work that is real but belongs to no single ticket, such as writing release notes or conducting interviews. It only ever adds attribution where no stronger Attribution Signal applies.
+_Avoid_: Default ticket, catch-all, fallback project
+
+**Session Root**:
+A directory the user has declared as containing billable work, making any Agent Session that ran beneath it a candidate for a Proposed Worklog. Work that has not been opted in is omitted rather than misattributed: no session outside every Session Root reaches a Coding Agent or a Proposed Worklog. The read boundary is one step wider than that and deliberately so — the coding agent's project directories are named after a working directory with its separators flattened, which is lossy, so a directory whose name could have come from a Session Root is opened and then discarded once the working directory recorded inside it settles the question. A name that cannot have come from any root is never opened.
+_Avoid_: Excluded path, ignore list, workspace
+
+**Unattributed Session**:
+An Agent Session that no Attribution Signal could credit to an Issue Key, reported as such rather than silently dropped.
+_Avoid_: Ignored session, unmatched session, noise
+
+**Attributed Interval**:
+A span of wall-clock time an Issue Key was actively worked in, whose duration is divided equally between every Issue Key active during it, so that no instant is ever credited twice.
+_Avoid_: Session span, session duration, overlap
+
+**Idle Cap**:
+The longest gap between two consecutive pieces of Session Activity that still counts as continuous work, and so also the most time credited after a final prompt. Gaps beyond it are credited to no Issue Key, which is what keeps a resumed Agent Session from billing the night between its two halves and what keeps an unattended Coding Agent run from billing the hour it worked alone.
+_Avoid_: Timeout, session gap, inactivity threshold
+
+**Proposed Worklog**:
+Time derived from Session Activity, offered for review before any Clockify entry or Jira worklog exists, or written unattended when it is a Settled Block a person's own Attribution Signal placed. It carries its Attribution Signal and never claims authority over a duration, so Agent Sessions are evidence for reconciliation and never a side of it.
+_Avoid_: Derived worklog, automatic worklog, reconciled row, agent time
+
+**Settled Block**:
+An Attributed Interval far enough in the past that no later Session Activity can still extend it or change its share of parallel work — one Idle Cap after its last moment, since a longer gap is not presence at all. Only a Settled Block may be written without review, because a block still being worked in would otherwise be logged a minute at a time.
+_Avoid_: Closed block, finished session, flushed interval
+
+**Session Watch**:
+A long-running command that derives Proposed Worklogs from Session Activity as it happens and writes each Settled Block once, covering the time since it started together with any stretch a previous Session Watch reached but had not yet written. It writes nothing a Coding Agent had to guess at, leaving that for review, and keeps no record of what it has written — a proposal is always the gap the two sides still have — only of how far it has looked, so a restart resumes rather than losing the block it was holding. One writes at a time per machine, because two would derive the same gap before either wrote it.
+_Avoid_: Daemon, auto-logger, tracker, sync loop
+
 **Jira Custom Field**:
 A Jira issue field defined by a Jira site or project outside Jira's built-in issue fields, identified operationally by a site-specific field id and often shown to users by a display name.
 _Avoid_: Extra field, metadata field

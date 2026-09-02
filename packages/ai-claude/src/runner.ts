@@ -6,7 +6,7 @@ import type { ClaudeTransportError } from "./errors.js"
 import { type ClaudeResult, decodeClaudeOutput } from "./protocol.js"
 
 interface RunOptions {
-  readonly access: "read-only" | "workspace-write"
+  readonly access: "none" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
   readonly executable: string
@@ -69,7 +69,13 @@ const redactDiagnostic = (diagnostic: string, cwd: string): string => {
 }
 
 const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
-  const tools = options.access === "workspace-write" ? "Read,Glob,Grep,Edit,Write" : "Read,Glob,Grep"
+  // `none` passes an empty tool list, which is what stops the CLI exploring the filesystem to answer
+  // a prompt that already contains everything it needs.
+  const tools = options.access === "workspace-write"
+    ? "Read,Glob,Grep,Edit,Write"
+    : options.access === "none"
+    ? ""
+    : "Read,Glob,Grep"
   const permissionMode = options.access === "workspace-write" ? "acceptEdits" : "plan"
   const arguments_: Array<string> = [
     "--print",
