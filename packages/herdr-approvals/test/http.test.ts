@@ -557,7 +557,9 @@ esac
           expect(pendingApprovalCalls).toBe(1)
           const newlyPending = pendingRecord("ALPHA", 100)
           yield* store.put(newlyPending)
-          const dashboardD = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const dashboardD = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie: cookieB } })
+          )
           const cookieD = dashboardD.headers.get("set-cookie")?.split(";", 1)[0]
           if (cookieD === undefined) {
             return yield* new FleetValidationError({ detail: "new approval proof session missing" })

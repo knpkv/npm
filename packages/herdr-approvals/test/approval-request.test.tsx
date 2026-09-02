@@ -177,6 +177,27 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("redacts unsafe query values through raw whitespace", () => {
+    const refs = [
+      "https://example.test/repo?X-Amz-Signature=first-secret second-secret",
+      "https://example.test/repo?sig=first-secret\nsecond-secret"
+    ]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-secret")
+      expect(encoded).not.toContain("second-secret")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(
+      approvalRequestFor({ kind: "nix.apply", ref: "https://example.test/repo?ref=release candidate" }).fields[0]?.value
+    ).toBe("https://example.test/repo?ref=release candidate")
+  })
+
   it("redacts quoted credentials while preserving non-credential labels", () => {
     const refs = ['password="first-secret second-secret"', 'Authorization: Bearer "first-token second-token"']
     for (const ref of refs) {
