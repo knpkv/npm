@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
 import { FleetOperationError, JobStore, loadConfiguration, makeFleetService } from "@knpkv/herdr-fleet"
-import { Console, Effect, FileSystem, Path } from "effect"
+import { Console, Effect, FileSystem, Path, Redacted } from "effect"
 import { startHttpServer, type UiAssets } from "./http.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { makeHostOperations } from "./operations.js"
@@ -48,9 +48,10 @@ const program = Effect.gen(function*() {
   })
   const directory = paths.dirname(yield* paths.fromFileUrl(new URL(import.meta.url)))
   const assets = yield* loadUiAssets(directory)
+  const serverOptions = config.lanWork === undefined ? {} : { lanWork: config.lanWork }
   const server = yield* Effect.acquireRelease(
     Effect.tryPromise({
-      try: () => startHttpServer(config, service, assets),
+      try: () => startHttpServer(config, service, assets, serverOptions),
       catch: (cause) => new FleetOperationError({ cause, detail: String(cause), operation: "hostd.listen" })
     }),
     (running) => Effect.promise(running.close)
@@ -58,8 +59,13 @@ const program = Effect.gen(function*() {
   yield* Console.log(
     `hostd: ${config.host} local=${server.url} work=${server.workUrl ?? "canonical"} tailnet=${
       server.tailnetUrl ?? "disabled"
-    } approval=${server.approvalUrl ?? "disabled"} serve=${server.serveUrl ?? "disabled"}`
+    } approval=${server.approvalUrl ?? "disabled"} serve=${server.serveUrl ?? "disabled"} lan-work=${
+      server.lanWorkUrl ?? "disabled"
+    }`
   )
+  if (server.lanWorkPairingCode !== null) {
+    yield* Console.log(`LAN Work pairing code: ${Redacted.value(server.lanWorkPairingCode)}`)
+  }
   return yield* Effect.never
 })
 

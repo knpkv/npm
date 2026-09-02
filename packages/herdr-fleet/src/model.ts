@@ -324,6 +324,17 @@ const WorkBindAddress = Schema.String.check(
   )
 )
 
+export const LanWorkConfiguration = Schema.Struct({
+  address: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(253)),
+  host: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(253),
+    Schema.isPattern(/^[A-Za-z0-9.-]+$/u)
+  ),
+  port: TcpPort
+})
+export interface LanWorkConfiguration extends Schema.Schema.Type<typeof LanWorkConfiguration> {}
+
 export const HostConfiguration = Schema.Struct({
   host: FleetHostName,
   repository: Schema.String,
@@ -333,6 +344,7 @@ export const HostConfiguration = Schema.Struct({
   localPort: TcpPort,
   workBindAddress: Schema.optionalKey(WorkBindAddress),
   approvalPort: TcpPort,
+  lanWork: Schema.optionalKey(LanWorkConfiguration),
   allowedUsers: Schema.Array(Schema.String),
   approvalNodes: Schema.Array(Schema.String),
   machines: FleetMachines,
@@ -386,6 +398,10 @@ export const HostConfiguration = Schema.Struct({
       const approvalHubPort = approvalHubUrl === null || approvalHubUrl.port === ""
         ? 443
         : Number(approvalHubUrl.port)
+      const lanPortAvailable = configuration.lanWork === undefined ||
+        ![configuration.localPort, configuration.port, configuration.approvalPort].includes(
+          configuration.lanWork.port
+        )
       return new Set(applyHosts).size === applyHosts.length &&
         applyHosts.every((host) => configuredHosts.has(host)) &&
         localConfigured &&
@@ -398,11 +414,12 @@ export const HostConfiguration = Schema.Struct({
             approvalHubConfigured &&
             configuration.port !== configuration.approvalPort
           )
-        )
+        ) &&
+        lanPortAvailable
     },
     {
       expected:
-        "valid fleet targets, distinct cross-host listeners, and an approval hub URL whose effective port matches the TLS listener"
+        "valid fleet targets, distinct listeners, and an approval hub URL whose effective port matches the TLS listener"
     }
   )
 )

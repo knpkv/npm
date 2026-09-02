@@ -501,6 +501,53 @@ describe("host HTTP authority", () => {
   it("canonicalizes default HTTP listener authorities", () => {
     expect(listenerAuthority("100.64.0.1", 80)).toBe("100.64.0.1")
     expect(listenerAuthority("100.64.0.1", 4_779)).toBe("100.64.0.1:4779")
+    expect(listenerAuthority("::1", 4_779)).toBe("[::1]:4779")
+  })
+
+  it.effect("preserves operational failure details in JSON responses", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-error-detail-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: false,
+            host: "ALPHA",
+            operations,
+            store
+          })
+          const failingFleet: FleetService = {
+            ...fleet,
+            status: () =>
+              Effect.fail(
+                new FleetOperationError({
+                  cause: "offline",
+                  detail: "backend unavailable",
+                  operation: "fleet.status"
+                })
+              )
+          }
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(config(root), failingFleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const response = yield* Effect.promise(() => fetch(`${server.url}/v1/status`))
+          expect(response.status).toBe(503)
+          expect(yield* Effect.promise(() => response.json())).toEqual({
+            error: "FleetOperationError",
+            detail: "backend unavailable"
+          })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
   })
 
   it.effect("records only authorized valid Work checkpoints and projects them immediately", () => {

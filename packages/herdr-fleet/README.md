@@ -20,6 +20,8 @@ The package exports:
 
 `HostConfiguration.workBindAddress` is the explicit IPv4 address for the local-only Work listener. It defaults to loopback; wildcard addresses are invalid. The Work and local listeners must use distinct ports when `crossHost` is disabled.
 
+`HostConfiguration.lanWork` is an opt-in LAN Work listener configuration with an explicit bind `address`, browser `host`, and TCP `port`. Its port must not collide with the local, Work, or approval listeners. The approvals runtime exposes only the read-only Work pairing boundary on this listener; it prints a five-minute single-use code after startup, accepts pairing only from the exact configured origin, and keeps approvals, Connect, chat, secrets, agent control, and job submission unavailable. LAN Work uses plain HTTP and therefore requires a trusted LAN or an authenticated TLS boundary before credentials cross an untrusted link.
+
 Callers provide `HostOperations`. This keeps Nix, Git, and Herdr command execution out of the protocol package.
 
 When an `agent.delegate` worker starts, `JobRecord` persists its exact identity and matching `AgentConnectTarget` in the same transition. Records before start, including pending, rejected, expired, and failed-before-start jobs, contain neither field. Terminal observation time remains separate and appears only after that exact started job succeeds or fails.

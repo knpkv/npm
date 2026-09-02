@@ -137,10 +137,22 @@ const SummaryCell = ({ label, value }: { readonly label: string; readonly value:
 
 const snapshotFor = (snapshots: WorkSnapshots, window: WorkSnapshotWindow): WorkSnapshot => snapshots[window]
 
-export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }): ReactElement => {
-  const [window, setWindow] = useState<WorkSnapshotWindow>("now")
+export const WorkBoard = ({
+  externalLinks = "enabled",
+  initialGoalId,
+  initialWindow = "now",
+  navigation,
+  snapshots
+}: {
+  readonly snapshots: WorkSnapshots
+  readonly externalLinks?: "disabled" | "enabled"
+  readonly initialGoalId?: string | null
+  readonly initialWindow?: WorkSnapshotWindow
+  readonly navigation?: (selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }) => string
+}): ReactElement => {
+  const [window, setWindow] = useState<WorkSnapshotWindow>(initialWindow)
   const snapshot = snapshotFor(snapshots, window)
-  const [selectedId, setSelectedId] = useState<string | null>(snapshot.goals[0]?.id ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(initialGoalId ?? snapshot.goals[0]?.id ?? null)
   const selected = snapshot.goals.find(({ id }) => id === selectedId) ?? null
   const counts = {
     blocked: snapshot.goals.filter(({ state }) => state === "blocked").length,
@@ -186,16 +198,27 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
           />
         </div>
         <div aria-label="Choose work snapshot" className="work-time-controls" role="group">
-          {windows.map((option) => (
-            <Button
-              aria-pressed={window === option}
-              key={option}
-              onClick={() => setWindow(option)}
-              variant={window === option ? "primary" : "secondary"}
-            >
-              {windowLabel[option]}
-            </Button>
-          ))}
+          {windows.map((option) =>
+            navigation === undefined ? (
+              <Button
+                aria-pressed={window === option}
+                key={option}
+                onClick={() => setWindow(option)}
+                variant={window === option ? "primary" : "secondary"}
+              >
+                {windowLabel[option]}
+              </Button>
+            ) : (
+              <a
+                aria-current={window === option ? "page" : undefined}
+                className="work-time-link"
+                href={navigation({ goalId: null, window: option })}
+                key={option}
+              >
+                {windowLabel[option]}
+              </a>
+            )
+          )}
         </div>
       </Surface>
       <div className="work-summary-grid" aria-label="Work summary">
@@ -225,49 +248,65 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
               <span>Shipment</span>
               <span>Spend</span>
             </div>
-            {snapshot.goals.map((goal) => (
-              <button
-                aria-pressed={selected?.id === goal.id}
-                className="work-board-row"
-                key={goal.id}
-                onClick={() => setSelectedId(goal.id)}
-                type="button"
-              >
-                <StateLabel
-                  label={statePresentation[goal.state].label}
-                  size="compact"
-                  tone={statePresentation[goal.state].tone}
-                />
-                <span className="work-board-copy">
-                  <Text as="strong" variant="label">
-                    {goal.title}
-                  </Text>
-                  <Text tone="secondary" variant="meta">
-                    {goal.summary}
-                  </Text>
-                </span>
-                <Text data-label="Owner">{goal.owner.name}</Text>
-                <span className="work-board-copy" data-label="Agent / host">
-                  <Text>{hierarchyLabel(goal)}</Text>
-                  {goal.agentHierarchy?.agent.relationship === undefined ? null : (
-                    <Text tone="secondary" variant="meta">
-                      {goal.agentHierarchy.agent.relationship.relation} ·{" "}
-                      {goal.agentHierarchy.agent.relationship.parentAgentId}
+            {snapshot.goals.map((goal) => {
+              const row = (
+                <>
+                  <StateLabel
+                    label={statePresentation[goal.state].label}
+                    size="compact"
+                    tone={statePresentation[goal.state].tone}
+                  />
+                  <span className="work-board-copy">
+                    <Text as="strong" variant="label">
+                      {goal.title}
                     </Text>
-                  )}
-                </span>
-                <span className="work-board-copy" data-label="Repository">
-                  <Text variant="code">{goal.repository.repository}</Text>
-                  <Text tone="secondary" variant="meta">
-                    {goal.repository.branch}
+                    <Text tone="secondary" variant="meta">
+                      {goal.summary}
+                    </Text>
+                  </span>
+                  <Text data-label="Owner">{goal.owner.name}</Text>
+                  <span className="work-board-copy" data-label="Agent / host">
+                    <Text>{hierarchyLabel(goal)}</Text>
+                    {goal.agentHierarchy?.agent.relationship === undefined ? null : (
+                      <Text tone="secondary" variant="meta">
+                        {goal.agentHierarchy.agent.relationship.relation} ·{" "}
+                        {goal.agentHierarchy.agent.relationship.parentAgentId}
+                      </Text>
+                    )}
+                  </span>
+                  <span className="work-board-copy" data-label="Repository">
+                    <Text variant="code">{goal.repository.repository}</Text>
+                    <Text tone="secondary" variant="meta">
+                      {goal.repository.branch}
+                    </Text>
+                  </span>
+                  <Text data-label="Shipment">{deliveryLabel[goal.delivery]}</Text>
+                  <Text data-label="Spend" variant="code">
+                    {formatSpend(goal)}
                   </Text>
-                </span>
-                <Text data-label="Shipment">{deliveryLabel[goal.delivery]}</Text>
-                <Text data-label="Spend" variant="code">
-                  {formatSpend(goal)}
-                </Text>
-              </button>
-            ))}
+                </>
+              )
+              return navigation === undefined ? (
+                <button
+                  aria-pressed={selected?.id === goal.id}
+                  className="work-board-row"
+                  key={goal.id}
+                  onClick={() => setSelectedId(goal.id)}
+                  type="button"
+                >
+                  {row}
+                </button>
+              ) : (
+                <a
+                  aria-current={selected?.id === goal.id ? "true" : undefined}
+                  className="work-board-row"
+                  href={navigation({ goalId: goal.id, window })}
+                  key={goal.id}
+                >
+                  {row}
+                </a>
+              )
+            })}
           </Surface>
           {selected === null ? null : (
             <Surface as="aside" className="work-inspector" padding="spacious">
@@ -391,6 +430,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                           <Text tone="secondary" variant="meta">
                             No approval link recorded.
                           </Text>
+                        ) : externalLinks === "disabled" ? (
+                          <Text tone="secondary" variant="meta">
+                            Approval target recorded.
+                          </Text>
                         ) : (
                           exactLink(request.approvalTarget, `Open ${request.approvalTarget.host} approval`)
                         )}
@@ -405,9 +448,14 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
                 </Text>
                 <div className="work-review-heading">
                   {reviewLabel(selected.review)}
-                  {selected.review?.url === null || selected.review?.url === undefined
-                    ? null
-                    : reviewLink(selected.review.url)}
+                  {selected.review?.url === null || selected.review?.url === undefined ? null : externalLinks ===
+                    "disabled" ? (
+                    <Text tone="secondary" variant="meta">
+                      Review target recorded.
+                    </Text>
+                  ) : (
+                    reviewLink(selected.review.url)
+                  )}
                 </div>
                 {selected.review?.summary === null || selected.review?.summary === undefined ? null : (
                   <Text tone="secondary">{selected.review.summary}</Text>
@@ -415,6 +463,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
               </div>
               {selected.connectTarget === null ? (
                 <Text tone="secondary">No exact Connect target recorded.</Text>
+              ) : externalLinks === "disabled" ? (
+                <Text tone="secondary" variant="meta">
+                  Connect target recorded.
+                </Text>
               ) : (
                 <a className="work-connect-link" href={selected.connectTarget.url}>
                   Open exact agent in Connect →
@@ -422,6 +474,10 @@ export const WorkBoard = ({ snapshots }: { readonly snapshots: WorkSnapshots }):
               )}
               {selected.approvalTarget === undefined || selected.approvalTarget === null ? (
                 <Text tone="secondary">No exact approval target recorded.</Text>
+              ) : externalLinks === "disabled" ? (
+                <Text tone="secondary" variant="meta">
+                  Approval target recorded.
+                </Text>
               ) : (
                 exactLink(selected.approvalTarget, `Open ${selected.approvalTarget.host} approval`)
               )}
