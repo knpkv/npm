@@ -786,7 +786,7 @@ const claudeAgentMessage = (
       claudeModel({
         access: "prompt-only",
         cwd: request.cwd,
-        ...((profile.model !== "configured-default" && profile.model !== "default") && { model: profile.model }),
+        ...((profile.model !== "configured-default") && { model: profile.model }),
         timeout: request.timeout,
         maxOutputBytes: MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES,
         maxStderrBytes: MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES

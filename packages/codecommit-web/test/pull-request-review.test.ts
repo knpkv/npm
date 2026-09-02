@@ -30,7 +30,6 @@ import {
 import type { RelayFindingPublisherService } from "../src/server/review/RelayFindingPublisher.js"
 import {
   MAXIMUM_RELAY_CLAUDE_OUTPUT_BYTES,
-  MAXIMUM_RELAY_CLAUDE_RESULT_BYTES,
   MAXIMUM_RELAY_PATCH_BYTES,
   MAXIMUM_RELAY_PROMPT_BYTES,
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
@@ -206,6 +205,7 @@ describe("CodeCommit web review boundary", () => {
         expect(command.args).toContain("--tools")
         expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
         expect(command.args[command.args.indexOf("--permission-mode") + 1]).toBe("dontAsk")
+        expect(command.args[command.args.indexOf("--model") + 1]).toBe("default")
       }
     }))
 
@@ -222,7 +222,7 @@ describe("CodeCommit web review boundary", () => {
           kind: "review",
           provider: "claude",
           harness: "native-claude",
-          model: "default",
+          model: "configured-default",
           skillIds: []
         },
         { findings: [], verdict: "No findings." },
@@ -271,6 +271,7 @@ describe("CodeCommit web review boundary", () => {
         })
         expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
         expect(command.args[command.args.indexOf("--permission-mode") + 1]).toBe("dontAsk")
+        expect(command.args).not.toContain("--model")
       }
     }))
 
@@ -294,7 +295,7 @@ describe("CodeCommit web review boundary", () => {
       const structuredOutput = { reply: "\"".repeat(8_000), review }
       const encoded = JSON.stringify({
         is_error: false,
-        result: "r".repeat(MAXIMUM_RELAY_CLAUDE_RESULT_BYTES),
+        result: "r".repeat(128 * 1024),
         structured_output: structuredOutput,
         subtype: "success",
         type: "result"
@@ -337,7 +338,7 @@ describe("CodeCommit web review boundary", () => {
                 ChildProcessSpawner.ChildProcessSpawner,
                 makeClaudeSpawner(calls, {
                   is_error: false,
-                  result: "r".repeat(MAXIMUM_RELAY_CLAUDE_RESULT_BYTES),
+                  result: "r".repeat(128 * 1024),
                   structured_output: structuredOutput,
                   subtype: "success",
                   type: "result"
