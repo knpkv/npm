@@ -275,6 +275,7 @@ const terminalWorker = (
       let ready = false
       let socket: WebSocket | null = null
       let inputOverflow = false
+      let processingTerminalOutput = false
       let pendingResize: {
         readonly cols: number
         readonly rows: number
@@ -286,11 +287,20 @@ const terminalWorker = (
         }
       }
       const sendInput = (text: string): void => send({ type: "terminal.input", text })
+      const writeTerminalOutput = (data: string | Uint8Array): void => {
+        processingTerminalOutput = true
+        try {
+          terminal.terminal.write(data)
+        } finally {
+          processingTerminalOutput = false
+        }
+      }
       keyboard.setInputSender((command) => send(command))
       yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setInputSender(() => {})))
       keyboard.setCursorModeReader(() => (terminal.terminal.getMode(1) ? "application" : "normal"))
       yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setCursorModeReader(() => "normal")))
       const applyInput = (text: string): string | null => {
+        if (processingTerminalOutput) return text
         const application = applyTerminalModifierToInput(keyboard.getModifier(), text)
         if (application._tag === "unsupported") {
           keyboard.reportError(application)
@@ -415,7 +425,7 @@ const terminalWorker = (
         const message = (event: MessageEvent<ArrayBuffer | string>): void => {
           const binary = Schema.decodeUnknownResult(Schema.instanceOf(ArrayBuffer))(event.data)
           if (Result.isSuccess(binary)) {
-            terminal.terminal.write(new Uint8Array(binary.success))
+            writeTerminalOutput(new Uint8Array(binary.success))
             return
           }
           const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(TerminalServerSignal))(event.data)
