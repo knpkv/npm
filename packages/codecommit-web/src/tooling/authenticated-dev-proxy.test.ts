@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "@effect/vitest"
 import { PairingCode } from "@knpkv/browser-pairing/schema"
 import { Redacted, Schema } from "effect"
+import { IncomingMessage, ServerResponse } from "node:http"
+import { Socket } from "node:net"
 import packageJson from "../../package.json" with { type: "json" }
 import { ownerSessionOrigin, ownerSessionUrlForOrigin } from "../server/internal/OwnerSessionSecurity.js"
 import {
@@ -29,7 +31,19 @@ describe("authenticated development proxy", () => {
     expect(authenticatedDevProxyOriginDecision(authenticatedDevPublicOrigin)).toBe("forward")
     expect(authenticatedDevProxyOriginDecision(undefined)).toBe("forward")
     expect(authenticatedDevProxyOriginDecision("http://localhost:4000")).toBe("reject")
-    expect(Object.values(authenticatedDevProxyConfig).every((options) => options.bypass !== undefined)).toBe(true)
+    for (const options of Object.values(authenticatedDevProxyConfig)) {
+      expect(options.bypass).toBeTypeOf("function")
+      if (options.bypass === undefined) continue
+      const request = new IncomingMessage(new Socket())
+      request.headers.origin = "http://localhost:4000"
+      const response = new ServerResponse(request)
+      const writeHead = vi.spyOn(response, "writeHead").mockReturnValue(response)
+      const end = vi.spyOn(response, "end").mockReturnValue(response)
+      const result = options.bypass(request, response, options)
+      expect(result).toBe(false)
+      expect(writeHead).toHaveBeenCalledWith(403)
+      expect(end).toHaveBeenCalledOnce()
+    }
   })
 
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
