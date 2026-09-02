@@ -1,5 +1,5 @@
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
-import { Effect, FileSystem, Path, Schema } from "effect"
+import { Effect, Equal, FileSystem, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { WorkCheckpointConflictError, WorkProjectionError, WorkStoreError } from "./errors.js"
 import {
@@ -60,9 +60,6 @@ const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
       })
     )
   )
-
-const encodeEvent = (event: WorkGoalCheckpointType): string =>
-  JSON.stringify(Schema.encodeSync(WorkGoalCheckpoint)(event))
 
 export interface WorkStoreService {
   readonly append: (
@@ -125,7 +122,7 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
     )
-    const inserted = yield* Effect.try({
+    const decision = yield* Effect.try({
       try: () => {
         let transaction = false
         try {
@@ -136,20 +133,19 @@ export class WorkStore implements WorkStoreService {
             transaction = false
             return { _tag: "rejected", error }
           }
-          const existingRows = this.#database.prepare(
-            `SELECT record FROM work_goal_events
-             WHERE event_id = ? OR (goal_id = ? AND occurred_at = ?)`
-          ).all(decoded.eventId, decoded.goal.id, decoded.occurredAt)
-          if (existingRows.length > 0) {
-            const encoded = encodeEvent(decoded)
-            const existingEvents = Schema.decodeUnknownSync(StoredEventRows)(existingRows).map(
-              ({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record))
-            )
-            const existingEvent = existingEvents[0]
-            if (existingEvents.length === 1 && existingEvent !== undefined && encodeEvent(existingEvent) === encoded) {
+          const collisions = Schema.decodeUnknownSync(StoredEventRows)(
+            this.#database
+              .prepare(
+                `SELECT record FROM work_goal_events
+                 WHERE event_id = ? OR (goal_id = ? AND occurred_at = ?)`
+              )
+              .all(decoded.eventId, decoded.goal.id, decoded.occurredAt)
+          ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+          if (collisions.length > 0) {
+            if (collisions.every((existing) => Equal.equals(existing, decoded))) {
               this.#database.exec("ROLLBACK")
               transaction = false
-              return { _tag: "replayed", event: existingEvent } satisfies AppendDecision
+              return { _tag: "replayed", event: decoded } satisfies AppendDecision
             }
             return reject(
               new WorkCheckpointConflictError({
@@ -224,7 +220,7 @@ export class WorkStore implements WorkStoreService {
           }
           const result = this.#database.prepare(
             "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-          ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, encodeEvent(decoded))
+          ).run(decoded.eventId, decoded.goal.id, decoded.occurredAt, JSON.stringify(decoded))
           this.#database.exec("COMMIT")
           transaction = false
           return { _tag: "inserted", changes: result.changes } satisfies AppendDecision
@@ -235,10 +231,10 @@ export class WorkStore implements WorkStoreService {
       },
       catch: storeError("append.insert")
     })
-    if (inserted._tag === "rejected") return yield* inserted.error
-    if (inserted._tag === "replayed") return inserted.event
-    if (inserted.changes !== 1 && inserted.changes !== 1n) {
-      return yield* storeError("append.insert.count")(inserted.changes)
+    if (decision._tag === "rejected") return yield* decision.error
+    if (decision._tag === "replayed") return decision.event
+    if (decision.changes !== 1 && decision.changes !== 1n) {
+      return yield* storeError("append.insert.count")(decision.changes)
     }
     yield* this.secureFiles()
     return decoded

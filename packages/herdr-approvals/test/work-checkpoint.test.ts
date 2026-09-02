@@ -1,11 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import type { WorkGoalCheckpoint } from "@knpkv/herdr-work/model"
+import type { WorkGoalCheckpoint, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Effect, Result } from "effect"
 import {
   workCheckpointFromJson,
   workCheckpointUrl,
   workDefaultTarget,
+  workSnapshotFromJson,
   workSnapshotTarget,
   workSnapshotUrl
 } from "../src/work-checkpoint.js"
@@ -29,6 +30,14 @@ const checkpoint: WorkGoalCheckpoint = {
   },
   occurredAt: 1_000,
   version: "herdr.work.event.v1"
+}
+
+const snapshot: WorkSnapshots = {
+  observedAt: 1_000,
+  now: { asOf: 1_000, goals: [checkpoint.goal], observedAt: 1_000, window: "now" },
+  day: { asOf: 1_000, goals: [checkpoint.goal], observedAt: 1_000, window: "day" },
+  week: { asOf: 1_000, goals: [checkpoint.goal], observedAt: 1_000, window: "week" },
+  month: { asOf: 1_000, goals: [checkpoint.goal], observedAt: 1_000, window: "month" }
 }
 
 const config: HostConfiguration = {
@@ -114,6 +123,18 @@ describe("fleetctl work commands", () => {
       const malformed = yield* Effect.result(workCheckpointFromJson("{"))
       const widened = yield* Effect.result(
         workCheckpointFromJson(JSON.stringify({ ...checkpoint, command: ["sh", "-c", "id"] }))
+      )
+      expect(Result.isFailure(malformed)).toBe(true)
+      expect(widened).toMatchObject({ failure: { _tag: "FleetValidationError" } })
+    }))
+
+  it.effect("decodes typed Work snapshots before rendering or returning them", () =>
+    Effect.gen(function*() {
+      expect(yield* workSnapshotFromJson(JSON.stringify(snapshot))).toEqual(snapshot)
+
+      const malformed = yield* Effect.result(workSnapshotFromJson("{"))
+      const widened = yield* Effect.result(
+        workSnapshotFromJson(JSON.stringify({ ...snapshot, command: ["sh", "-c", "id"] }))
       )
       expect(Result.isFailure(malformed)).toBe(true)
       expect(widened).toMatchObject({ failure: { _tag: "FleetValidationError" } })

@@ -27,7 +27,13 @@ import { submitToHost } from "./fleetctl-submission.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
-import { workCheckpointFromJson, workCheckpointUrl, workSnapshotTarget, workSnapshotUrl } from "./work-checkpoint.js"
+import {
+  workCheckpointFromJson,
+  workCheckpointUrl,
+  workSnapshotFromJson,
+  workSnapshotTarget,
+  workSnapshotUrl
+} from "./work-checkpoint.js"
 
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
@@ -60,10 +66,23 @@ const endpoint = Effect.fn("Fleetctl.endpoint")(function*(
   return `http://${address}:${config.port}`
 })
 
+type ResponseDecoder<A> = (
+  text: string
+) => Effect.Effect<A, FleetValidationError | FleetOperationError>
+
+const schemaResponseDecoder = <A>(
+  schema: Schema.Codec<A, unknown, never, never>
+): ResponseDecoder<A> =>
+(text) =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(text).pipe(
+    Effect.mapError(operationError("fleet.response.decode"))
+  )
+
 const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
   url: string,
   schema: Schema.Codec<A, unknown, never, never>,
-  body?: JobRequestType | WorkGoalCheckpointType
+  body?: JobRequestType | WorkGoalCheckpointType,
+  decode: ResponseDecoder<A> = schemaResponseDecoder(schema)
 ) {
   const client = yield* HttpClient.HttpClient
   const httpRequest = body === undefined
@@ -87,11 +106,7 @@ const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
           operation: "fleet.response"
         })
       }
-      return yield* Schema.decodeUnknownEffect(
-        Schema.fromJsonString(schema)
-      )(text).pipe(
-        Effect.mapError(operationError("fleet.response.decode"))
-      )
+      return yield* decode(text)
     })
   )
 })
@@ -163,11 +178,13 @@ const recordWorkCheckpoint = (
     (url) => requestAt(url, WorkGoalCheckpoint, checkpoint)
   )
 
-const snapshotWork = (config: HostConfiguration, host: string) =>
-  Effect.flatMap(
-    workSnapshotUrl(config, host),
-    (url) => requestAt(url, WorkSnapshots)
-  )
+const snapshotWork = Effect.fn("Fleetctl.snapshotWork")(function*(
+  config: HostConfiguration,
+  host: string
+) {
+  const url = yield* workSnapshotUrl(config, host)
+  return yield* requestAt(url, WorkSnapshots, undefined, workSnapshotFromJson)
+})
 
 export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: ReadonlyArray<string>) {
   const kind = args[0]
