@@ -263,6 +263,119 @@ const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string
 })
 
 describe("host HTTP authority", () => {
+  it.effect("serves a sanitized request and keeps it after a bodyless approval", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-approval-request-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            id: Effect.succeed("job-disclosure"),
+            nonce: Effect.succeed("nonce-disclosure"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          const pending = yield* fleet.submit(
+            {
+              payload: {
+                kind: "agent.delegate",
+                mode: "work",
+                prompt: "raw terminal prompt token=secret-value",
+                repository: "/srv/npm"
+              }
+            },
+            "submitter@example.com"
+          )
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) return yield* Effect.die("approval listener missing")
+          const headers = {
+            "tailscale-user-login": "andrey@example.com"
+          }
+          const dashboard = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers }).then((response) => response.text())
+          )
+          expect(dashboard).toContain("[redacted internal prompt]")
+          expect(dashboard).not.toContain("raw terminal prompt")
+          expect(dashboard).not.toContain("secret-value")
+          expect(dashboard).not.toContain(pending.hash)
+          expect(dashboard).not.toContain("nonce-disclosure")
+          const page = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())
+          )
+          expect(page).toContain("View full request")
+          expect(page).toContain("[redacted internal prompt]")
+          expect(page).not.toContain("raw terminal prompt")
+          expect(page).not.toContain("secret-value")
+          expect(page).not.toContain(pending.hash)
+          expect(page).not.toContain("nonce-disclosure")
+
+          const decided = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(decided.status).toBe(200)
+          const decidedBody = yield* Effect.promise(() => decided.text())
+          const decidedRecord = Schema.decodeUnknownSync(JobRecord)(JSON.parse(decidedBody))
+          expect(decidedRecord.approvalNonce).toBeNull()
+          expect(decidedRecord.hash).toBe("0".repeat(64))
+          expect(decidedBody).not.toContain("secret-value")
+          expect(decidedBody).not.toContain("nonce-disclosure")
+          expect(decidedBody).not.toContain(pending.hash)
+
+          const history = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())
+          )
+          expect(history).toContain("Completed")
+          expect(history).not.toContain("secret-value")
+          const retainedDashboard = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers }).then((response) => response.text())
+          )
+          expect(retainedDashboard).toContain("[redacted internal prompt]")
+          expect(retainedDashboard).not.toContain("secret-value")
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("marks notification counts incomplete when fleet discovery fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
     const unavailable = new TailscaleCommandError({
@@ -1313,7 +1426,7 @@ esac
           const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
             JSON.parse(dashboardBody)
           )
-          expect(dashboard.historyNextCursor).not.toBeNull()
+          expect(dashboard.historyNextCursor).toBeNull()
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(

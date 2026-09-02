@@ -24,7 +24,6 @@ import {
 import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
 import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
 import type {
-  FleetApprovalError,
   FleetJobConflictError,
   FleetService,
   FleetStoreError,
@@ -34,6 +33,7 @@ import type {
 } from "@knpkv/herdr-fleet"
 import {
   decodeBoundedResponseJson,
+  FleetApprovalError,
   FleetAuthorizationError,
   FleetJobNotFoundError,
   FleetOperationError,
@@ -87,6 +87,7 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
+import { sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback } from "./auth.js"
 import {
@@ -580,14 +581,17 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
   })
 })
 
-const pendingApproval = (record: JobRecord): PendingApproval => ({
-  id: record.id,
-  createdAt: record.createdAt,
-  actor: record.actor,
-  approvalExpiresAt: record.approvalExpiresAt ?? null,
-  status: "pending_approval",
-  payload: record.payload
-})
+const pendingApproval = (record: JobRecord): PendingApproval => {
+  const sanitized = sanitizeJobRecord(record)
+  return {
+    id: sanitized.id,
+    createdAt: sanitized.createdAt,
+    actor: sanitized.actor,
+    approvalExpiresAt: sanitized.approvalExpiresAt ?? null,
+    status: "pending_approval",
+    payload: sanitized.payload
+  }
+}
 
 const dashboardHistoryMaxBytes = 512 * 1024
 export const dashboardSnapshotBytes = (snapshot: DashboardSnapshot): number =>
@@ -643,7 +647,7 @@ const dashboardHistory = Effect.fn("HostHttp.dashboardHistory")(function*(
   const candidates = yield* service.historyAfter(cursor, 51)
   const records: Array<JobRecord> = []
   for (const candidate of candidates.slice(0, 50)) {
-    const projected: JobRecord = { ...candidate, error: null, result: null }
+    const projected = sanitizeJobRecord(candidate)
     const bytes = new TextEncoder().encode(
       JSON.stringify([...records, projected])
     ).byteLength
@@ -913,7 +917,7 @@ const dashboardPendingPage = Effect.fn("HostHttp.dashboardPendingPage")(
     if (continuation.host.toLowerCase() === config.host.toLowerCase()) {
       const page = yield* service.pendingApprovalPage(continuation.cursor)
       return {
-        local: page.records,
+        local: page.records.map(sanitizeJobRecord),
         remote: [],
         failures: [],
         nextCursors: page.nextCursor === null
@@ -968,7 +972,7 @@ const resolvePendingApprovalTarget = Effect.fn(
     if (record.status !== "pending_approval") {
       return yield* new FleetJobNotFoundError({ jobId: target.jobId })
     }
-    return { _tag: "local", record } satisfies PendingApprovalTarget
+    return { _tag: "local", record: sanitizeJobRecord(record) } satisfies PendingApprovalTarget
   }
   const peers = yield* fleetPeers(config)
   const peer = peers.find(
@@ -1225,9 +1229,26 @@ const readApproval = Effect.fn("ApprovalHttp.readApproval")(function*(
 ) {
   const contentType = header(request, "content-type") ?? ""
   if (contentType.startsWith("application/json")) {
-    return yield* readJson(request, Approval)
+    const body = yield* readBody(request)
+    if (body.trim() === "") return null
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(body),
+      catch: (cause) =>
+        new FleetValidationError({
+          detail: `invalid approval JSON: ${String(cause)}`
+        })
+    })
+    return yield* Schema.decodeUnknownEffect(Approval)(parsed).pipe(
+      Effect.mapError(
+        (error) =>
+          new FleetValidationError({
+            detail: `invalid approval: ${String(error)}`
+          })
+      )
+    )
   }
   const body = yield* readBody(request)
+  if (body.trim() === "") return null
   const form = new URLSearchParams(body)
   return yield* Schema.decodeUnknownEffect(Approval)({
     hash: form.get("hash"),
@@ -1240,6 +1261,20 @@ const readApproval = Effect.fn("ApprovalHttp.readApproval")(function*(
         })
     )
   )
+})
+
+const currentApproval = Effect.fn("ApprovalHttp.currentApproval")(function*(
+  service: FleetService,
+  jobId: string
+) {
+  const record = yield* service.get(jobId)
+  if (record.status !== "pending_approval" || record.approvalNonce === null) {
+    return yield* new FleetApprovalError({
+      detail: `job is ${record.status}, not pending approval`,
+      jobId
+    })
+  }
+  return { hash: record.hash, nonce: record.approvalNonce } satisfies Approval
 })
 
 export const makeRunner = Effect.fn("HostRunner.make")(function*(
@@ -2090,7 +2125,7 @@ export const startHttpServer = async (
             let directory: ApprovalDirectory | null = null
             let pendingApprovals: DashboardSnapshot["pendingApprovals"] = {
               local: approvalSurface
-                ? resolvedLocalPage.records
+                ? resolvedLocalPage.records.map(sanitizeJobRecord)
                 : state.history.records.filter(
                   (record) => record.status === "pending_approval"
                 ),
@@ -2125,7 +2160,7 @@ export const startHttpServer = async (
                   peersResult.success
                 )
                 pendingApprovals = {
-                  local: resolvedLocalPage.records,
+                  local: resolvedLocalPage.records.map(sanitizeJobRecord),
                   ...aggregated,
                   nextCursors: resolvedLocalPage.nextCursor === null
                     ? aggregated.nextCursors
@@ -2136,7 +2171,7 @@ export const startHttpServer = async (
                 }
               } else {
                 pendingApprovals = {
-                  local: resolvedLocalPage.records,
+                  local: resolvedLocalPage.records.map(sanitizeJobRecord),
                   remote: [],
                   nextCursors: resolvedLocalPage.nextCursor === null
                     ? []
@@ -2548,12 +2583,12 @@ export const startHttpServer = async (
               const who = yield* authorized
               yield* sameOrigin(request, expectedOrigin())
               const jobId = yield* decodeJobPathSegment(approvalJobId)
-              const approval = yield* readApproval(request)
+              const approval = (yield* readApproval(request)) ?? (yield* currentApproval(service, jobId))
               const record = decision === "approve"
                 ? yield* service.approve(jobId, approval, who)
                 : yield* service.reject(jobId, approval, who)
               if (record.status === "queued") yield* enqueueJob(record.id)
-              return record
+              return sanitizeJobRecord(record)
             })
             if (
               header(request, "content-type")?.startsWith(

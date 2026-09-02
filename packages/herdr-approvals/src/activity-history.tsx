@@ -2,11 +2,14 @@ import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
 import { requiresApproval, type JobRecord, type JobStatus } from "@knpkv/herdr-fleet/model"
 import { Predicate } from "effect"
 import { useMemo, useState, type KeyboardEvent, type ReactElement } from "react"
+import { approvalRequestFor, type ApprovalRequest } from "./approval-request.js"
+import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 
 export type ActivityFilter = "all" | "exceptions" | "work" | "approvals" | "deployments" | "human" | "agent"
 
 export type ActivityItem = {
   readonly actor: string
+  readonly approvalRequest: ApprovalRequest | null
   readonly categories: ReadonlyArray<Exclude<ActivityFilter, "all">>
   readonly connectHref: string | null
   readonly connectLabel: string | null
@@ -174,6 +177,7 @@ export const activityItemsFor = (records: ReadonlyArray<JobRecord>): ReadonlyArr
         .toLocaleLowerCase()
       return {
         actor: record.actor,
+        approvalRequest: requiresApproval(record.payload) ? approvalRequestFor(record.payload) : null,
         categories,
         connectHref: record.connectTarget?.url ?? null,
         connectLabel: record.worker === undefined ? null : `Open ${record.worker.name} in Connect`,
@@ -267,6 +271,9 @@ const ActivityRow = ({
               <li key={detail}>{detail}</li>
             ))}
           </ul>
+          {item.approvalRequest === null ? null : (
+            <ApprovalRequestDisclosure id={item.id} request={item.approvalRequest} />
+          )}
           {item.connectHref === null || item.connectLabel === null ? null : (
             <a href={item.connectHref}>{item.connectLabel} →</a>
           )}

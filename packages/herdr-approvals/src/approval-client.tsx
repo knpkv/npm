@@ -70,7 +70,7 @@ type PullState = {
   readonly refreshing: boolean
 }
 
-type BrowserRequest = { readonly method?: "GET" } | { readonly body: string; readonly method: "DELETE" | "POST" }
+type BrowserRequest = { readonly method?: "GET" } | { readonly body?: string; readonly method: "DELETE" | "POST" }
 
 const initialPull: PullState = {
   distance: 0,
@@ -86,7 +86,7 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
   const client = yield* HttpClient.HttpClient
   const baseRequest = HttpClientRequest.make(init?.method ?? "GET")(url)
   const request =
-    init !== undefined && "body" in init
+    init !== undefined && "body" in init && init.body !== undefined
       ? baseRequest.pipe(HttpClientRequest.bodyText(init.body, "application/json"))
       : baseRequest
   const response = yield* client
@@ -135,7 +135,6 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
   yield* fetchJson(JobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
-    body: JSON.stringify({ hash: decision.hash, nonce: decision.nonce }),
     method: "POST"
   })
 })
