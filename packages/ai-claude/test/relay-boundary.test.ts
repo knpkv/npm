@@ -59,6 +59,30 @@ describe("Claude Relay adapter boundary", () => {
       }
     }))
 
+  it.effect("preserves property names that match schema keywords", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      const runtime = Layer.provide(
+        model({ cwd: "/workspace" }),
+        fakeProcessLayer(calls, success({ allOf: "value", uniqueItems: "value" }))
+      )
+      yield* LanguageModel.generateObject({
+        prompt: "Preserve names",
+        schema: Schema.Struct({ allOf: Schema.String, uniqueItems: Schema.String })
+      }).pipe(Effect.provide(runtime))
+      const command = calls[0]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        const schemaIndex = command.args.indexOf("--json-schema")
+        const schemaText = command.args[schemaIndex + 1] ?? ""
+        const schema = Schema.decodeUnknownSync(
+          Schema.fromJsonString(Schema.Struct({ properties: Schema.Record(Schema.String, Schema.Json) }))
+        )(schemaText)
+        expect(schema.properties.allOf).toBeDefined()
+        expect(schema.properties.uniqueItems).toBeDefined()
+      }
+    }))
+
   it.effect("isolates prompt-only execution from settings and MCP", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []

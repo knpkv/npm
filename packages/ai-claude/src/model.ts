@@ -88,6 +88,8 @@ interface JsonSchemaObject {
 const isJsonSchemaObject = (value: Schema.Json): value is JsonSchemaObject =>
   Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
 
+const schemaMapKeys = new Set(["$defs", "definitions", "dependentSchemas", "patternProperties", "properties"])
+
 /** Claude Code accepts the JSON Schema subset produced after flattening checks. */
 const flattenJsonSchemaAllOf = (value: Schema.Json): Schema.Json => {
   if (Array.isArray(value)) return value.map(flattenJsonSchemaAllOf)
@@ -96,7 +98,15 @@ const flattenJsonSchemaAllOf = (value: Schema.Json): Schema.Json => {
   const flattened: Record<string, Schema.Json> = {}
   for (const [key, child] of Object.entries(value)) {
     if (key !== "allOf" && key !== "uniqueItems") {
-      flattened[key] = flattenJsonSchemaAllOf(child)
+      if (schemaMapKeys.has(key) && isJsonSchemaObject(child)) {
+        const schemas: Record<string, Schema.Json> = {}
+        for (const [name, schema] of Object.entries(child)) {
+          schemas[name] = flattenJsonSchemaAllOf(schema)
+        }
+        flattened[key] = schemas
+      } else {
+        flattened[key] = flattenJsonSchemaAllOf(child)
+      }
     }
   }
   if (value.allOf === undefined) return flattened
