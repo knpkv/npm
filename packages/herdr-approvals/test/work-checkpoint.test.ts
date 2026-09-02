@@ -136,7 +136,7 @@ describe("fleetctl work commands", () => {
       const widened = yield* Effect.result(
         workSnapshotFromJson(JSON.stringify({ ...snapshot, command: ["sh", "-c", "id"] }))
       )
-      expect(Result.isFailure(malformed)).toBe(true)
+      expect(malformed).toMatchObject({ failure: { _tag: "FleetValidationError" } })
       expect(widened).toMatchObject({ failure: { _tag: "FleetValidationError" } })
     }))
 
