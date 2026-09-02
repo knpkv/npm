@@ -167,8 +167,29 @@ describe("browser pairing primitives", () => {
     expect(() =>
       serializeRuntimeCredentialCookie("ab".repeat(32), {
         ...valid,
+        name: "__Http-session",
+        secure: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
         name: "__Host-Http-session",
         httpOnly: false
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Host-Http-session",
+        path: "/api"
+      })
+    ).toThrow(CredentialCookieError)
+    expect(() =>
+      serializeRuntimeCredentialCookie("ab".repeat(32), {
+        ...valid,
+        name: "__Host-Http-session",
+        secure: false
       })
     ).toThrow(CredentialCookieError)
     expect(() =>
@@ -188,15 +209,15 @@ describe("browser pairing primitives", () => {
     expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
       ...valid,
       name: "__Host-session"
-    })).toContain("__Host-session=")
+    })).toContain(`__Host-session=${"ab".repeat(32)}; HttpOnly; Path=/; SameSite=Strict; Secure`)
     expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
       ...valid,
       name: "__Http-session"
-    })).toContain("__Http-session=")
+    })).toContain(`__Http-session=${"ab".repeat(32)}; HttpOnly; Path=/; SameSite=Strict; Secure`)
     expect(serializeRuntimeCredentialCookie("ab".repeat(32), {
       ...valid,
       name: "__Host-Http-session"
-    })).toContain("__Host-Http-session=")
+    })).toContain(`__Host-Http-session=${"ab".repeat(32)}; HttpOnly; Path=/; SameSite=Strict; Secure`)
     expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: false }))
       .toThrow(
         CredentialCookieError
@@ -212,5 +233,21 @@ describe("browser pairing primitives", () => {
     expect(serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "/api,=v" })).toContain(
       "Path=/api,=v"
     )
+    expect(() => {
+      // @ts-expect-error Exercise the runtime boundary with a malformed cookie name.
+      serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, name: null })
+    }).toThrow(CredentialCookieError)
+    expect(() => {
+      // @ts-expect-error Exercise the runtime boundary with a malformed cookie path.
+      serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: null })
+    }).toThrow(CredentialCookieError)
+    expect(() => {
+      // @ts-expect-error Exercise the runtime boundary with a non-boolean secure flag.
+      serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, secure: "false" })
+    }).toThrow(CredentialCookieError)
+    expect(() => {
+      // @ts-expect-error Exercise the runtime boundary with a non-boolean HttpOnly flag.
+      serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, httpOnly: "false" })
+    }).toThrow(CredentialCookieError)
   })
 })

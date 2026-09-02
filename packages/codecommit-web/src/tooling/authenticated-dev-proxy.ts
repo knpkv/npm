@@ -13,11 +13,29 @@ interface OriginHeaderRequest {
   readonly setHeader: (name: string, value: string) => void
 }
 
+export interface AuthenticatedDevProxyEventRegistrar {
+  readonly on: (
+    event: "proxyReq",
+    listener: (request: OriginHeaderRequest) => void
+  ) => void
+}
+
 export const setAuthenticatedDevProxyOrigin = (request: OriginHeaderRequest): void => {
   request.setHeader("origin", authenticatedDevBackendOrigin)
 }
 
-const authenticatedProxy = (): ProxyOptions => ({
+export const registerAuthenticatedDevProxyOrigin = (proxy: AuthenticatedDevProxyEventRegistrar): void => {
+  proxy.on("proxyReq", setAuthenticatedDevProxyOrigin)
+}
+
+type AuthenticatedProxyOptions = Omit<ProxyOptions, "configure"> & {
+  readonly configure: (
+    proxy: AuthenticatedDevProxyEventRegistrar,
+    options: ProxyOptions
+  ) => void
+}
+
+const authenticatedProxy = (): AuthenticatedProxyOptions => ({
   target: authenticatedDevBackendOrigin,
   changeOrigin: true,
   bypass(request, response) {
@@ -28,7 +46,7 @@ const authenticatedProxy = (): ProxyOptions => ({
     return undefined
   },
   configure(proxy) {
-    proxy.on("proxyReq", setAuthenticatedDevProxyOrigin)
+    registerAuthenticatedDevProxyOrigin(proxy)
   }
 })
 

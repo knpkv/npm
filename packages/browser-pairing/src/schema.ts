@@ -84,6 +84,15 @@ export interface CredentialCookieOptions {
   readonly maxAge?: number
 }
 
+const CredentialCookieOptionsSchema = Schema.Struct({
+  name: Schema.String,
+  path: Schema.String,
+  httpOnly: Schema.Boolean,
+  sameSite: Schema.Literals(["strict", "lax", "none"]),
+  secure: Schema.Boolean,
+  maxAge: Schema.optionalKey(Schema.Number)
+})
+
 /** Serialize a validated credential cookie without allowing header injection or invalid lifetimes. */
 export const serializeCredentialCookie: (
   credential: Redacted.Redacted<SessionToken>,
@@ -92,49 +101,52 @@ export const serializeCredentialCookie: (
   const value = Redacted.isRedacted(credential) ? Redacted.value(credential) : String(credential)
   const decoded = Schema.decodeUnknownResult(BrowserCredential)(value)
   if (Result.isFailure(decoded)) throw new CredentialCookieError({ reason: "invalid-credential" })
+  const decodedOptions = Schema.decodeUnknownResult(CredentialCookieOptionsSchema)(options)
+  if (Result.isFailure(decodedOptions)) throw new CredentialCookieError({ reason: "invalid-attribute" })
+  const validatedOptions = decodedOptions.success
   const invalidPath = (value: string): boolean =>
     value.length === 0 || Array.from(value).some((character) => {
       const code = character.charCodeAt(0)
       return !((code >= 0x20 && code <= 0x3a) || (code >= 0x3c && code <= 0x7e))
     })
-  const normalizedName = options.name.toLowerCase()
-  const invalidReservedPrefix =
-    (normalizedName.startsWith("__host-http-") && (!options.secure || !options.httpOnly || options.path !== "/")) ||
-    (normalizedName.startsWith("__http-") && (!options.secure || !options.httpOnly)) ||
-    (normalizedName.startsWith("__host-") && (!options.secure || options.path !== "/")) ||
-    (normalizedName.startsWith("__secure-") && !options.secure)
+  const normalizedName = validatedOptions.name.toLowerCase()
+  const invalidReservedPrefix = (normalizedName.startsWith("__host-http-") &&
+    (!validatedOptions.secure || !validatedOptions.httpOnly || validatedOptions.path !== "/")) ||
+    (normalizedName.startsWith("__http-") && (!validatedOptions.secure || !validatedOptions.httpOnly)) ||
+    (normalizedName.startsWith("__host-") && (!validatedOptions.secure || validatedOptions.path !== "/")) ||
+    (normalizedName.startsWith("__secure-") && !validatedOptions.secure)
   if (
-    !COOKIE_NAME_PATTERN.test(options.name) ||
-    invalidPath(options.path) ||
-    !options.path.startsWith("/") ||
+    !COOKIE_NAME_PATTERN.test(validatedOptions.name) ||
+    invalidPath(validatedOptions.path) ||
+    !validatedOptions.path.startsWith("/") ||
     invalidReservedPrefix
   ) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
   if (
-    options.maxAge !== undefined &&
-    (!Number.isSafeInteger(options.maxAge) || options.maxAge < 0)
+    validatedOptions.maxAge !== undefined &&
+    (!Number.isSafeInteger(validatedOptions.maxAge) || validatedOptions.maxAge < 0)
   ) {
     throw new CredentialCookieError({ reason: "invalid-max-age" })
   }
-  if (options.sameSite === "none" && !options.secure) {
+  if (validatedOptions.sameSite === "none" && !validatedOptions.secure) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
-  const sameSite = options.sameSite === "strict"
+  const sameSite = validatedOptions.sameSite === "strict"
     ? "Strict"
-    : options.sameSite === "lax"
+    : validatedOptions.sameSite === "lax"
     ? "Lax"
-    : options.sameSite === "none"
+    : validatedOptions.sameSite === "none"
     ? "None"
     : undefined
   if (sameSite === undefined) throw new CredentialCookieError({ reason: "invalid-attribute" })
   const parts = [
-    `${options.name}=${decoded.success}`,
-    ...(options.httpOnly ? ["HttpOnly"] : []),
-    `Path=${options.path}`,
+    `${validatedOptions.name}=${decoded.success}`,
+    ...(validatedOptions.httpOnly ? ["HttpOnly"] : []),
+    `Path=${validatedOptions.path}`,
     `SameSite=${sameSite}`,
-    ...(options.secure ? ["Secure"] : []),
-    ...(options.maxAge === undefined ? [] : [`Max-Age=${String(options.maxAge)}`])
+    ...(validatedOptions.secure ? ["Secure"] : []),
+    ...(validatedOptions.maxAge === undefined ? [] : [`Max-Age=${String(validatedOptions.maxAge)}`])
   ]
   return parts.join("; ")
 }

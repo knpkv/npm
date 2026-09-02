@@ -1,10 +1,16 @@
 import { describe, expect, it, vi } from "@effect/vitest"
-import { PairingCode } from "@knpkv/browser-pairing/schema"
-import { Redacted, Schema } from "effect"
+import { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
+import { Effect, Redacted, Ref, Result, Schema } from "effect"
 import { IncomingMessage, ServerResponse } from "node:http"
 import { Socket } from "node:net"
 import packageJson from "../../package.json" with { type: "json" }
-import { ownerSessionOrigin, ownerSessionUrlForOrigin } from "../server/internal/OwnerSessionSecurity.js"
+import {
+  authorizeBootstrapRequest,
+  ownerSessionOrigin,
+  type OwnerSessionSecretsContract,
+  ownerSessionUrlForOrigin,
+  requireLoopbackOrigin
+} from "../server/internal/OwnerSessionSecurity.js"
 import {
   authenticatedDevBackendOrigin,
   authenticatedDevProxyConfig,
@@ -45,6 +51,43 @@ describe("authenticated development proxy", () => {
       expect(end).toHaveBeenCalledOnce()
     }
   })
+
+  it("registers the origin rewrite on the proxy request event", () => {
+    const listeners: Array<(request: { readonly setHeader: (name: string, value: string) => void }) => void> = []
+    const proxy = {
+      on: (
+        _event: "proxyReq",
+        listener: (request: { readonly setHeader: (name: string, value: string) => void }) => void
+      ) => {
+        listeners.push(listener)
+      }
+    }
+    for (const options of Object.values(authenticatedDevProxyConfig)) options.configure(proxy, options)
+    expect(listeners).toHaveLength(2)
+    const setHeader = vi.fn()
+    for (const listener of listeners) listener({ setHeader })
+    expect(setHeader).toHaveBeenCalledTimes(2)
+    expect(setHeader).toHaveBeenCalledWith("origin", authenticatedDevBackendOrigin)
+  })
+
+  it.effect("accepts a bootstrap request after the proxy origin rewrite", () =>
+    Effect.gen(function*() {
+      const secrets = {
+        authorityOrigin: yield* requireLoopbackOrigin(ownerSessionOrigin("127.0.0.1", 3000)),
+        bootstrapAvailable: yield* Ref.make(true),
+        bootstrapFailedAttempts: yield* Ref.make(0),
+        bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(Number.MAX_SAFE_INTEGER),
+        bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32))),
+        csrfToken: Redacted.make(Schema.decodeSync(CsrfToken)("cd".repeat(32))),
+        ownerToken: Redacted.make(Schema.decodeSync(SessionToken)("ef".repeat(32)))
+      } satisfies OwnerSessionSecretsContract
+      const result = yield* Effect.result(authorizeBootstrapRequest({
+        authorization: `Bearer ${Redacted.value(secrets.bootstrapToken)}`,
+        host: "127.0.0.1:3000",
+        origin: authenticatedDevBackendOrigin
+      }, secrets))
+      expect(Result.isSuccess(result)).toBe(true)
+    }))
 
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
     expect(packageJson.scripts.dev).toContain(authenticatedDevPublicOriginEnvironment)
