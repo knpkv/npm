@@ -129,7 +129,7 @@ export const requireLoopbackOrigin = Effect.fn("OwnerSessionSecurity.requireLoop
 export const ownerSessionCookie = (
   secrets: Pick<OwnerSessionSecretsContract, "ownerToken">
 ): string =>
-  serializeCredentialCookie(Redacted.value(secrets.ownerToken), {
+  serializeCredentialCookie(secrets.ownerToken, {
     name: "cc_owner",
     httpOnly: true,
     path: "/api",

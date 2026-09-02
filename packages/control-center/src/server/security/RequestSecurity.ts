@@ -233,13 +233,13 @@ export const authorizeAuthenticatedMutation = Effect.fn("RequestSecurity.authori
   R
 >(
   authorization: AuthenticatedMutationAuthorization,
-  verifySessionCsrf: (csrfToken: Redacted.Redacted<string>) => Effect.Effect<A, E, R>
+  verifySessionCsrf: (csrfToken: Redacted.Redacted<CsrfToken>) => Effect.Effect<A, E, R>
 ) {
   const request = yield* authorizeRequestAuthority(authorization.config, authorization.request)
   yield* authorizeMutationOrigin(authorization.config, request)
   if (request.csrfToken === null) return yield* new RequestSecurityError({ reason: "csrf-required" })
   yield* authorizeInsecureLanCapability(authorization.config, authorization.capability)
-  return yield* verifySessionCsrf(Redacted.make(request.csrfToken))
+  return yield* verifySessionCsrf(Redacted.make(BrowserCsrfToken.make(request.csrfToken)))
 })
 
 /** Cookie attributes for the opaque session token; the token itself is never represented here. */

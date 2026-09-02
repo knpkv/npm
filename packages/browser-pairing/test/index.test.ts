@@ -15,6 +15,7 @@ import {
   OneTimeCredentialState,
   readBootstrapToken,
   serializeCredentialCookie,
+  SessionToken,
   verifyCredentialDigest
 } from "../src/index.js"
 
@@ -26,6 +27,12 @@ const pairingCrypto = Crypto.Crypto.of({
 })
 
 const credential = Redacted.make("ab".repeat(32))
+const sessionCredential = Redacted.make(SessionToken.make("ab".repeat(32)))
+
+const serializeRuntimeCredentialCookie = (credentialValue: string, options: CredentialCookieOptions): string => {
+  // @ts-expect-error Exercise the JavaScript runtime boundary with an untyped credential value.
+  return serializeCredentialCookie(credentialValue, options)
+}
 
 describe("browser pairing primitives", () => {
   it.effect("issues and hashes a redacted 256-bit credential", () =>
@@ -83,7 +90,7 @@ describe("browser pairing primitives", () => {
   })
 
   it("serializes application-selected cookie policy without exposing options to callers", () => {
-    expect(serializeCredentialCookie(Redacted.value(credential), {
+    expect(serializeCredentialCookie(sessionCredential, {
       name: "cc_session",
       path: "/",
       httpOnly: true,
@@ -100,41 +107,48 @@ describe("browser pairing primitives", () => {
       sameSite: "strict",
       secure: true
     }
-    expect(() => serializeCredentialCookie("ab;" + "ab".repeat(31), valid)).toThrow(CredentialCookieError)
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/\r\nSet-Cookie: bad" })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab;" + "ab".repeat(31), valid)).toThrow(CredentialCookieError)
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "/\r\nSet-Cookie: bad" })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, maxAge: -1 })).toThrow(CredentialCookieError)
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, maxAge: Number.MAX_SAFE_INTEGER + 1 })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, maxAge: -1 })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "owner session" })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, maxAge: Number.MAX_SAFE_INTEGER + 1 }))
+      .toThrow(
+        CredentialCookieError
+      )
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, name: "owner session" })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "cc/session" })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, name: "cc/session" })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "cc(session)" })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, name: "cc(session)" })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, name: "cc_é" })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, name: "cc_é" })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/é" })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "/é" })).toThrow(
       CredentialCookieError
     )
-    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: false })).toThrow(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "api" })).toThrow(
       CredentialCookieError
     )
-    expect(serializeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: true })).toContain(
+    expect(() => serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: false }))
+      .toThrow(
+        CredentialCookieError
+      )
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: true })).toContain(
       "SameSite=None; Secure"
     )
     const malformed = { ...valid, sameSite: "invalid" }
     expect(() => {
       // @ts-expect-error Exercise the runtime boundary with an untyped SameSite value.
-      serializeCredentialCookie("ab".repeat(32), malformed)
+      serializeRuntimeCredentialCookie("ab".repeat(32), malformed)
     }).toThrow(CredentialCookieError)
-    expect(serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/api,=v" })).toContain(
+    expect(serializeRuntimeCredentialCookie("ab".repeat(32), { ...valid, path: "/api,=v" })).toContain(
       "Path=/api,=v"
     )
   })

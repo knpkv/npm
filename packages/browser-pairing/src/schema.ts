@@ -85,18 +85,19 @@ export interface CredentialCookieOptions {
 }
 
 /** Serialize a validated credential cookie without allowing header injection or invalid lifetimes. */
-export const serializeCredentialCookie = (
-  credential: string,
+export const serializeCredentialCookie: (
+  credential: Redacted.Redacted<SessionToken>,
   options: CredentialCookieOptions
-): string => {
-  const decoded = Schema.decodeUnknownResult(BrowserCredential)(credential)
+) => string = (credential: Redacted.Redacted<SessionToken>, options: CredentialCookieOptions): string => {
+  const value = Redacted.isRedacted(credential) ? Redacted.value(credential) : String(credential)
+  const decoded = Schema.decodeUnknownResult(BrowserCredential)(value)
   if (Result.isFailure(decoded)) throw new CredentialCookieError({ reason: "invalid-credential" })
   const invalidPath = (value: string): boolean =>
     value.length === 0 || Array.from(value).some((character) => {
       const code = character.charCodeAt(0)
       return !((code >= 0x20 && code <= 0x3a) || (code >= 0x3c && code <= 0x7e))
     })
-  if (!COOKIE_NAME_PATTERN.test(options.name) || invalidPath(options.path)) {
+  if (!COOKIE_NAME_PATTERN.test(options.name) || invalidPath(options.path) || !options.path.startsWith("/")) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
   if (

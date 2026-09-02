@@ -1,6 +1,7 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { CsrfToken, SessionToken } from "@knpkv/browser-pairing/schema"
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Redacted, Ref, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
@@ -43,6 +44,7 @@ import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 import {
   CurrentSession,
   CurrentSessionResponse,
+  CurrentSessionToken,
   SessionCookieAuth,
   SessionMutationAuth,
   SessionSummary
@@ -328,7 +330,12 @@ const approverSession = Schema.decodeSync(SessionSummary)({
 })
 
 const sessionMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
-  sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, session)
+  sessionCookie: (effect) =>
+    Effect.provideService(
+      Effect.provideService(effect, CurrentSession, session),
+      CurrentSessionToken,
+      Redacted.make(SessionToken.make("ab".repeat(32)))
+    )
 })
 
 const mutationMiddlewareLayer = Layer.succeed(SessionMutationAuth, {
@@ -4167,7 +4174,7 @@ describe("Control Center API handlers", () => {
       logout: () => Effect.die("not used"),
       recoverCsrfToken: () =>
         Effect.succeed({
-          csrfToken: Redacted.make(recoveredCsrf),
+          csrfToken: Redacted.make(CsrfToken.make(recoveredCsrf)),
           session
         }),
       revokePairingCode: () => Effect.die("not used"),
@@ -4371,7 +4378,7 @@ describe("Control Center API handlers", () => {
       logout: () => Effect.die("blocked insecure-LAN logout reached its handler"),
       recoverCsrfToken: () =>
         Effect.succeed({
-          csrfToken: Redacted.make(recoveredCsrf),
+          csrfToken: Redacted.make(CsrfToken.make(recoveredCsrf)),
           session
         }),
       revokePairingCode: () => Effect.die("not used"),

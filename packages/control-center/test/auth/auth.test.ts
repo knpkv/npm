@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { CsrfToken, PairingCode } from "@knpkv/browser-pairing/schema"
 import { Effect, Encoding, FileSystem, Layer, Option, Redacted, Result, Schema, Stdio, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 
@@ -165,7 +166,7 @@ describe("Auth", () => {
           otherRecovered.csrfToken
         ).pipe(Effect.result)
         assert.isTrue(Result.isFailure(crossSessionCsrf))
-        const wrongCsrf = Redacted.make("00".repeat(32))
+        const wrongCsrf = Redacted.make(CsrfToken.make("00".repeat(32)))
         const csrfResult = yield* auth.authorizeMutation(first.sessionToken, wrongCsrf).pipe(Effect.result)
         assert.isTrue(Result.isFailure(csrfResult))
 
@@ -326,7 +327,9 @@ describe("Auth", () => {
         if (Result.isFailure(oldPairingResult)) {
           assert.instanceOf(oldPairingResult.failure, CredentialRejectedError)
         }
-        const recovered = yield* auth.consumePairingCode(recovery.pairingCode)
+        const recovered = yield* auth.consumePairingCode(
+          Redacted.make(PairingCode.make(Redacted.value(recovery.pairingCode)))
+        )
         assert.strictEqual(recovered.session.permission, "workspace-owner")
 
         const pairingRows = yield* database.sql<{ readonly codeHash: string }>`SELECT code_hash AS codeHash

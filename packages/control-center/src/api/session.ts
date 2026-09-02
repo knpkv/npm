@@ -1,5 +1,10 @@
-import { CsrfToken as BrowserCsrfToken, PairingCode as BrowserPairingCode } from "@knpkv/browser-pairing/schema"
+import {
+  CsrfToken as BrowserCsrfToken,
+  PairingCode as BrowserPairingCode,
+  SessionToken as BrowserSessionToken
+} from "@knpkv/browser-pairing/schema"
 import * as Context from "effect/Context"
+import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import {
   HttpApiEndpoint,
@@ -40,6 +45,11 @@ export const CsrfToken = BrowserCsrfToken
 
 /** Decoded CSRF credential. */
 export type CsrfToken = typeof CsrfToken.Type
+
+/** Decoded opaque session credential; it is never returned in an API body. */
+export const SessionToken = BrowserSessionToken
+
+export type SessionToken = typeof SessionToken.Type
 
 /** Secret-free metadata describing an authenticated browser session. */
 export const SessionSummary = Schema.Struct({
@@ -109,6 +119,11 @@ export type SessionListResponse = typeof SessionListResponse.Type
 /** Authenticated session attached to endpoint handlers by cookie middleware. */
 export class CurrentSession extends Context.Service<CurrentSession, SessionSummary>()(
   "@knpkv/control-center/api/CurrentSession"
+) {}
+
+/** Server-only session credential retained for bounded stream revalidation. */
+export class CurrentSessionToken extends Context.Service<CurrentSessionToken, Redacted.Redacted<SessionToken>>()(
+  "@knpkv/control-center/api/CurrentSessionToken"
 ) {}
 
 /** Public middleware identity for the opaque `cc_session` cookie. */

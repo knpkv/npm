@@ -50,7 +50,7 @@
     "benchmark:runtime:prepared": "rimraf test-results/control-center/runtime-benchmark.json && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json playwright test e2e/real-runtime.spec.ts --grep \"measures warmed\" --config playwright.config.ts && pnpm benchmark:validate-runtime",
     "benchmark:validate-runtime": "CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json tsx scripts/validateRuntimeBenchmarkReport.ts",
     "build": "tsx scripts/run-build.ts",
-    "check": "pnpm validate:boundaries && pnpm lint:rly-css-tokens && tsc -b tsconfig.json",
+    "check": "pnpm validate:boundaries && pnpm lint:rly-css-tokens && tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo node_modules/.cache",
     "dev": "vite --host 127.0.0.1 --port 5173 --strictPort",
     "lint": "eslint \"{src,test,e2e,scripts}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts vitest.live.config.ts vitest.live-aws.config.ts playwright.config.ts playwright.atlassian-oauth.config.ts && pnpm lint:rly-css-tokens",

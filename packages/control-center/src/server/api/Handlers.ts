@@ -1,4 +1,5 @@
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
+import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -26,7 +27,7 @@ import type {
   UnauthorizedApiError
 } from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
-import { CsrfToken, CurrentSession, PairingCode } from "../../api/session.js"
+import { CsrfToken, CurrentSession, CurrentSessionToken, PairingCode, SessionToken } from "../../api/session.js"
 import { WorkspacePresentationReadModel } from "../../api/workspaceSettings.js"
 import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
@@ -86,8 +87,18 @@ import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
 const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "cc_session" })
 
-const currentSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) =>
-  Redacted.make(request.cookies.cc_session ?? "")
+const currentSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) => {
+  const raw = request.cookies.cc_session
+  return raw === undefined
+    ? Option.none<Redacted.Redacted<SessionToken>>()
+    : Schema.decodeUnknownOption(SessionToken)(raw).pipe(Option.map(Redacted.make))
+}
+
+const requiredSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) =>
+  Option.match(currentSessionToken(request), {
+    onNone: () => Effect.flatMap(unauthorizedApiError, Effect.fail),
+    onSome: Effect.succeed
+  })
 
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
 const INITIAL_AGENT_THREAD_CURSOR = ReleaseAgentThreadCursor.make(0)
@@ -174,7 +185,7 @@ const appendTimelineExportHeaders = (
 
 const revalidateSession = (
   auth: Auth["Service"],
-  token: Redacted.Redacted<string>,
+  token: Redacted.Redacted<SessionToken>,
   expected: CurrentSession["Service"]
 ): Effect.Effect<boolean> =>
   auth.authenticate(token).pipe(
@@ -195,7 +206,7 @@ const revalidateSession = (
 
 const awaitSessionEnd = (
   auth: Auth["Service"],
-  token: Redacted.Redacted<string>,
+  token: Redacted.Redacted<SessionToken>,
   expected: CurrentSession["Service"]
 ): Effect.Effect<void> =>
   Effect.sleep(SESSION_REAUTHENTICATION_INTERVAL).pipe(
@@ -237,8 +248,9 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
           ))
         .handle("current", ({ request }) =>
           Effect.gen(function*() {
+            const token = yield* requiredSessionToken(request)
             const recovered = yield* mapAuthenticationFailures(
-              auth.recoverCsrfToken(currentSessionToken(request))
+              auth.recoverCsrfToken(token)
             )
             return {
               csrfToken: CsrfToken.make(Redacted.value(recovered.csrfToken)),
@@ -246,15 +258,17 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
             }
           }))
         .handle("list", ({ request }) =>
-          mapAuthenticationFailures(
-            auth.listSessions(currentSessionToken(request))
-          ))
+          Effect.gen(function*() {
+            const token = yield* requiredSessionToken(request)
+            return yield* mapAuthenticationFailures(auth.listSessions(token))
+          }))
         .handle("issueBrowserPairingCode", ({ payload, request }) =>
           lifecycle.runMutation(
             Effect.gen(function*() {
               const session = yield* CurrentSession
+              const token = yield* requiredSessionToken(request)
               const issued = yield* mapAuthenticationFailures(
-                auth.issuePairingCode(currentSessionToken(request), {
+                auth.issuePairingCode(token, {
                   actor: session.actor,
                   permission: payload.permission
                 })
@@ -274,12 +288,14 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
             )
           ))
         .handle("revoke", ({ params, request }) =>
-          mapAuthenticationFailures(
-            auth.revokeSession(currentSessionToken(request), params.sessionId)
-          ))
+          Effect.gen(function*() {
+            const token = yield* requiredSessionToken(request)
+            return yield* mapAuthenticationFailures(auth.revokeSession(token, params.sessionId))
+          }))
         .handle("logout", ({ request }) =>
           Effect.gen(function*() {
-            yield* mapAuthenticationFailures(auth.logout(currentSessionToken(request)))
+            const token = yield* requiredSessionToken(request)
+            yield* mapAuthenticationFailures(auth.logout(token))
             yield* HttpApiBuilder.securitySetCookie(sessionCookie, "", {
               ...cookie,
               maxAge: 0
@@ -1753,9 +1769,23 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
               "x-accel-buffering": "no"
             }))
           )
-          const token = currentSessionToken(request)
+          const providedToken = yield* Effect.contextWith(
+            (context: Context.Context<never>): Effect.Effect<
+              Option.Option<Redacted.Redacted<SessionToken>>,
+              never,
+              never
+            > => Effect.succeed(Context.getOption(context, CurrentSessionToken))
+          )
+          const token = Option.isSome(providedToken) ? providedToken : currentSessionToken(request)
           return eventStream.pipe(
-            Stream.interruptWhen(Effect.race(awaitSessionEnd(auth, token, session), lifecycle.awaitDrain))
+            Stream.interruptWhen(
+              Option.match(token, {
+                // Direct handler tests bypass cookie middleware and omit the transport cookie.
+                onNone: () => Effect.never,
+                onSome: (sessionToken) =>
+                  Effect.race(awaitSessionEnd(auth, sessionToken, session), lifecycle.awaitDrain)
+              })
+            )
           )
         }))
     })
