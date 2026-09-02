@@ -92,6 +92,15 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
     "--no-session-persistence",
     "--safe-mode"
   ]
+  if (options.access === "prompt-only") {
+    arguments_.push(
+      "--setting-sources",
+      "",
+      "--strict-mcp-config",
+      "--mcp-config",
+      "{\"mcpServers\":{}}"
+    )
+  }
   if (options.model !== undefined) arguments_.push("--model", options.model)
   if (options.jsonSchema !== undefined) arguments_.push("--json-schema", options.jsonSchema)
   return arguments_
