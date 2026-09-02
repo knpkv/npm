@@ -477,6 +477,9 @@ esac
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
         Effect.gen(function*() {
+          const refreshStarted = yield* Deferred.make<void>()
+          const releaseRefresh = yield* Deferred.make<void>()
+          let pausePendingRefresh = false
           yield* Effect.forEach(
             Array.from({ length: pendingApprovalPageMaxRecords + 1 }, (_, index) => pendingRecord("ALPHA", index)),
             (record) => store.put(record),
@@ -492,7 +495,17 @@ esac
             ...fleet,
             pendingApprovals: () => {
               pendingApprovalCalls += 1
-              return fleet.pendingApprovals()
+              const pending = fleet.pendingApprovals()
+              if (!pausePendingRefresh) return pending
+              pausePendingRefresh = false
+              return pending.pipe(
+                Effect.flatMap((records) =>
+                  Deferred.succeed(refreshStarted, undefined).pipe(
+                    Effect.andThen(Deferred.await(releaseRefresh)),
+                    Effect.as(records)
+                  )
+                )
+              )
             }
           }
           const server = yield* Effect.acquireRelease(
@@ -619,6 +632,46 @@ esac
           )
           expect(matchingSessionDecision.status).toBe(200)
           yield* Effect.promise(() => matchingSessionDecision.text())
+
+          const concurrentPending = pendingRecord("ALPHA", 101)
+          observedAt = 120 * 1_000
+          pausePendingRefresh = true
+          const staleRefresh = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+                headers: { ...headers, cookie: cookieA }
+              })
+            )
+          )
+          yield* Deferred.await(refreshStarted)
+          yield* store.put(concurrentPending)
+          const concurrentDisclosure = yield* Effect.promise(() =>
+            fetch(
+              `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${concurrentPending.id}`,
+              { headers: { ...headers, cookie: cookieB } }
+            )
+          )
+          expect(concurrentDisclosure.status).toBe(200)
+          yield* Effect.promise(() => concurrentDisclosure.text())
+          yield* Deferred.succeed(releaseRefresh, undefined)
+          const staleRefreshResponse = yield* Fiber.join(staleRefresh)
+          expect(staleRefreshResponse.status).toBe(200)
+          yield* Effect.promise(() => staleRefreshResponse.text())
+          const concurrentContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+              headers: { ...headers, cookie: cookieB }
+            })
+          )
+          expect(concurrentContinuation.status).toBe(200)
+          yield* Effect.promise(() => concurrentContinuation.text())
+          const concurrentDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${concurrentPending.id}/approve`, {
+              headers: { ...headers, cookie: cookieB, origin },
+              method: "POST"
+            })
+          )
+          expect(concurrentDecision.status).toBe(200)
+          yield* Effect.promise(() => concurrentDecision.text())
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
@@ -626,7 +679,7 @@ esac
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
-  })
+  }, 15_000)
 
   it.effect("retains paginated proofs and renews their shared lifetime", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-retention-test-"))

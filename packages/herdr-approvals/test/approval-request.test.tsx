@@ -198,6 +198,23 @@ describe("sanitized approval requests", () => {
     ).toBe("https://example.test/repo?ref=release candidate")
   })
 
+  it("redacts credential environment assignments while preserving regions", () => {
+    const refs = ["AWS_SECRET_ACCESS_KEY=first-secret", "PRIVATE_KEY=second-secret"]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-secret")
+      expect(encoded).not.toContain("second-secret")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    const region = approvalRequestFor({ kind: "nix.apply", ref: "AWS_REGION=us-east-1" })
+    expect(region.fields[0]?.value).toBe("AWS_REGION=us-east-1")
+  })
+
   it("redacts quoted credentials while preserving non-credential labels", () => {
     const refs = ['password="first-secret second-secret"', 'Authorization: Bearer "first-token second-token"']
     for (const ref of refs) {

@@ -56,7 +56,7 @@ export const SanitizedJobRecord = Schema.Struct({
 export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
 const credentialAssignment =
-  /((?:password|passwd|secret|token|credential|api[_-]?key)\s*[:=]\s*)(\[redacted credential\][^\s,;]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;]+)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(\[redacted credential\][^\s,;]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;]+)/giu
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\][^\s,;]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;]+)/giu

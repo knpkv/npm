@@ -1590,6 +1590,7 @@ export const startHttpServer = async (
     const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
       function*(session: ApprovalProofSession, observedAt: number) {
         const snapshot = pendingApprovalProofSnapshot
+        const snapshotPendingJobIds = new Set(snapshot?.pendingJobIds ?? [])
         let pendingJobIds: Set<string>
         if (
           snapshot !== undefined &&
@@ -1607,8 +1608,17 @@ export const startHttpServer = async (
                 })
             )
           )
-          pendingJobIds = new Set(pendingRecords.map((record) => record.id))
-          pendingApprovalProofSnapshot = { observedAt, pendingJobIds }
+          const refreshedPendingJobIds = new Set(pendingRecords.map((record) => record.id))
+          if (pendingApprovalProofSnapshot === snapshot) {
+            for (const jobId of pendingApprovalProofSnapshot?.pendingJobIds ?? []) {
+              if (!snapshotPendingJobIds.has(jobId)) refreshedPendingJobIds.add(jobId)
+            }
+            pendingApprovalProofSnapshot = {
+              observedAt,
+              pendingJobIds: refreshedPendingJobIds
+            }
+          }
+          pendingJobIds = pendingApprovalProofSnapshot?.pendingJobIds ?? refreshedPendingJobIds
         }
         for (const jobId of session.proofsByJob.keys()) {
           if (!pendingJobIds.has(jobId)) session.proofsByJob.delete(jobId)
