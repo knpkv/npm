@@ -80,6 +80,7 @@ import {
   Stream
 } from "effect"
 import type { Redacted } from "effect"
+import type * as SemaphoreModule from "effect/Semaphore"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -153,6 +154,7 @@ type ApprovalProofUse = {
 }
 type ApprovalProofSession = {
   expiresAt: number
+  readonly lock: SemaphoreModule.Semaphore
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
 }
@@ -1622,13 +1624,14 @@ export const startHttpServer = async (
       session.proofsByJob.clear()
       if (mutation.created) {
         approvalProofSessions.delete(session.token)
-        return
+      } else {
+        session.expiresAt = mutation.previousExpiresAt
+        for (const [jobId, proof] of mutation.previousProofs) {
+          session.proofsByJob.set(jobId, proof)
+          retainApprovalProofJob(jobId)
+        }
       }
-      session.expiresAt = mutation.previousExpiresAt
-      for (const [jobId, proof] of mutation.previousProofs) {
-        session.proofsByJob.set(jobId, proof)
-        retainApprovalProofJob(jobId)
-      }
+      httpRuntime.runSync(session.lock.release(1))
     }
     const approvalProofSessionFor = (
       request: IncomingMessage,
@@ -1732,7 +1735,8 @@ export const startHttpServer = async (
           (record) => record.status === "pending_approval" && record.approvalNonce !== null
         )
         if (pendingRecords.length === 0) return
-        let session = approvalProofSessionFor(request, observedAt)
+        const existingMutation = approvalProofMutationsByRequest.get(request)
+        let session = existingMutation?.session ?? approvalProofSessionFor(request, observedAt)
         if (session === undefined) {
           const token = yield* cryptoService.randomUUIDv4.pipe(
             Effect.mapError(
@@ -1744,8 +1748,11 @@ export const startHttpServer = async (
                 })
             )
           )
+          const lock = Semaphore.makeUnsafe(1)
+          yield* lock.take(1)
           session = {
             expiresAt: observedAt + approvalProofMaxAgeSeconds * 1_000,
+            lock,
             proofsByJob: new Map<string, ApprovalProof>(),
             token
           }
@@ -1754,6 +1761,7 @@ export const startHttpServer = async (
               ([, candidate]) => candidate.proofsByJob.size === 0
             )
             if (emptySession === undefined) {
+              yield* lock.release(1)
               return yield* new FleetOperationError({
                 cause: "approval proof session limit",
                 detail: "approval proof session capacity reached",
@@ -1769,7 +1777,8 @@ export const startHttpServer = async (
             previousProofs: new Map(),
             session
           })
-        } else {
+        } else if (existingMutation === undefined) {
+          yield* session.lock.take(1)
           approvalProofMutationsByRequest.set(request, {
             created: false,
             previousExpiresAt: session.expiresAt,
@@ -1823,6 +1832,7 @@ export const startHttpServer = async (
         return {}
       }
       approvalProofMutationsByRequest.delete(request)
+      httpRuntime.runSync(session.lock.release(1))
       return { "set-cookie": approvalProofCookie(session.token, secure) }
     }
     if (options.lanWork !== undefined && config.allowedUsers.length === 0) {

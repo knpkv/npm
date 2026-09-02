@@ -176,6 +176,21 @@ describe("sanitized approval requests", () => {
     expect(encoded).toContain("[redacted credential]")
   })
 
+  it("redacts line breaks in URI user-info", () => {
+    for (const lineBreak of ["\r", "\n"]) {
+      const ref = `https://deploy-user:deploy${lineBreak}password@example.test/revision`
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("deploy-user")
+      expect(encoded).not.toContain(`deploy${lineBreak}password`)
+      expect(encoded).toContain("[redacted credential]")
+    }
+  })
+
   it("redacts standalone encoded credential assignments", () => {
     const credential = "password%3Dleaked-canary"
     const visible = "release%2Fcandidate"

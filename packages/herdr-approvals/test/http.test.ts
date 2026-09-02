@@ -719,14 +719,6 @@ esac
             started: overlapRefreshStarted
           }
           pausePendingRefresh = true
-          const staleRefresh = yield* Effect.forkChild(
-            Effect.promise(() =>
-              fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
-                headers: { ...headers, cookie: cookieA }
-              })
-            )
-          )
-          yield* Deferred.await(overlapRefreshStarted)
           yield* store.put(concurrentPending)
           const concurrentDisclosureFiber = yield* Effect.forkChild(
             Effect.promise(() =>
@@ -736,7 +728,14 @@ esac
               )
             )
           )
-          yield* Effect.yieldNow
+          yield* Deferred.await(overlapRefreshStarted)
+          const staleRefresh = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+                headers: { ...headers, cookie: cookieA }
+              })
+            )
+          )
           yield* Deferred.succeed(overlapReleaseRefresh, undefined)
           const concurrentDisclosure = yield* Fiber.join(concurrentDisclosureFiber)
           expect(concurrentDisclosure.status).toBe(200)
@@ -1001,6 +1000,9 @@ esac
       (store) =>
         Effect.gen(function*() {
           yield* store.put(pendingRecord("ALPHA", 0))
+          const failingStatusStarted = yield* Deferred.make<void>()
+          const releaseFailingStatus = yield* Deferred.make<void>()
+          let failNextStatus = false
           const fleet = yield* makeFleetService({
             approvalEnabled: true,
             host: hostConfig.host,
@@ -1010,8 +1012,23 @@ esac
           let failStatus = false
           const instrumentedFleet: FleetService = {
             ...fleet,
-            status: () =>
-              failStatus
+            status: () => {
+              if (failNextStatus) {
+                failNextStatus = false
+                return Deferred.succeed(failingStatusStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseFailingStatus)),
+                  Effect.andThen(
+                    Effect.fail(
+                      new FleetOperationError({
+                        cause: "test",
+                        detail: "dashboard status unavailable",
+                        operation: "fleet.status"
+                      })
+                    )
+                  )
+                )
+              }
+              return failStatus
                 ? Effect.fail(
                   new FleetOperationError({
                     cause: "test",
@@ -1020,6 +1037,7 @@ esac
                   })
                 )
                 : fleet.status()
+            }
           }
           const server = yield* Effect.acquireRelease(
             Effect.promise(() =>
@@ -1091,6 +1109,44 @@ esac
           )
           expect(decision.status).toBe(200)
           yield* Effect.promise(() => decision.text())
+
+          yield* store.put(pendingRecord("ALPHA", 2))
+          failNextStatus = true
+          const failedConcurrentDisclosure = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard`, {
+                headers: { ...headers, cookie: retainedCookie }
+              })
+            )
+          )
+          yield* Deferred.await(failingStatusStarted)
+          const succeedingDisclosureStarted = yield* Deferred.make<void>()
+          const succeedingConcurrentDisclosure = yield* Effect.forkChild(
+            Effect.gen(function*() {
+              yield* Deferred.succeed(succeedingDisclosureStarted, undefined)
+              return yield* Effect.promise(() =>
+                fetch(`${approvalUrl}/v1/dashboard`, {
+                  headers: { ...headers, cookie: retainedCookie }
+                })
+              )
+            })
+          )
+          yield* Deferred.await(succeedingDisclosureStarted)
+          yield* Deferred.succeed(releaseFailingStatus, undefined)
+          const failedConcurrentResponse = yield* Fiber.join(failedConcurrentDisclosure)
+          expect(failedConcurrentResponse.status).toBe(503)
+          yield* Effect.promise(() => failedConcurrentResponse.text())
+          const succeedingConcurrentResponse = yield* Fiber.join(succeedingConcurrentDisclosure)
+          expect(succeedingConcurrentResponse.status).toBe(200)
+          yield* Effect.promise(() => succeedingConcurrentResponse.text())
+          const concurrentDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-02/approve`, {
+              headers: { ...headers, cookie: retainedCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(concurrentDecision.status).toBe(200)
+          yield* Effect.promise(() => concurrentDecision.text())
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {
