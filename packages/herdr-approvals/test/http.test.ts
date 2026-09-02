@@ -1401,6 +1401,150 @@ esac
     )
   })
 
+  it.effect("re-sanitizes legacy peer approval payloads at browser boundaries", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-legacy-peer-test-"))
+    const tailscale = join(root, "tailscale-main")
+    writeFileSync(
+      tailscale,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{"ser8":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.scoped(
+          Effect.gen(function*() {
+            const pendingPort = yield* Effect.promise(availablePort)
+            const peerServer = createServer((request, response) => {
+              const requestUrl = new URL(request.url ?? "/", "http://peer.local")
+              const hasCursor = requestUrl.searchParams.has("cursorCreatedAt")
+              response.writeHead(200, { "content-type": "application/json" })
+              response.end(JSON.stringify({
+                host: "SER8",
+                approvals: [
+                  {
+                    id: "legacy-peer-job",
+                    createdAt: 1,
+                    actor: "andrey@example.com",
+                    approvalExpiresAt: 10_000,
+                    status: "pending_approval",
+                    payload: {
+                      kind: "agent.delegate",
+                      mode: "work",
+                      prompt: "peer-secret-canary",
+                      repository: "/srv/npm"
+                    }
+                  }
+                ],
+                nextCursor: hasCursor ? null : { createdAt: 1, id: "legacy-peer-job" }
+              }))
+            })
+            yield* Effect.promise(
+              () =>
+                new Promise<void>((resolve, reject) => {
+                  peerServer.once("error", reject)
+                  peerServer.listen(pendingPort, "127.0.0.2", resolve)
+                })
+            )
+            yield* Effect.addFinalizer(() =>
+              Effect.promise(
+                () =>
+                  new Promise<void>((resolve, reject) => {
+                    peerServer.close((error) => error === undefined ? resolve() : reject(error))
+                  })
+              )
+            )
+            const approvalPort = yield* Effect.promise(availablePort)
+            const hostConfig: HostConfiguration = {
+              ...config(root),
+              approvalHub: {
+                host: "ALPHA",
+                nodeId: "node-alpha",
+                url: `https://alpha.example.test:${approvalPort}/`
+              },
+              approvalNodes: ["node-alpha"],
+              approvalPort,
+              approvalTls: directTls,
+              crossHost: true,
+              host: "ALPHA",
+              port: pendingPort,
+              tailscaleCommand: tailscale
+            }
+            const fleet = yield* makeFleetService({
+              approvalEnabled: true,
+              host: hostConfig.host,
+              operations,
+              store
+            })
+            const server = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                startHttpServer(hostConfig, fleet, assets, {
+                  terminalConnector: unusedTerminal
+                })
+              ),
+              (running) => Effect.promise(running.close)
+            )
+            if (server.serveUrl === null) {
+              return yield* new FleetValidationError({
+                detail: "legacy peer disclosure test requires the approval hub listener"
+              })
+            }
+            const requestHeaders = {
+              host: `alpha.example.test:${approvalPort}`,
+              "tailscale-user-login": "andrey@example.com"
+            }
+            const dashboardResponse = yield* Effect.promise(() =>
+              secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
+            )
+            expect(dashboardResponse.status).toBe(200)
+            expect(dashboardResponse.body).not.toContain("peer-secret-canary")
+            const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
+              JSON.parse(dashboardResponse.body)
+            )
+            const continuation = dashboard.pendingApprovals.nextCursors.find(
+              ({ host }) => host === "SER8"
+            )
+            if (continuation === undefined) {
+              return yield* new FleetValidationError({
+                detail: "legacy peer disclosure test requires a remote continuation"
+              })
+            }
+            const continuationParameters = new URLSearchParams({
+              cursorCreatedAt: String(continuation.cursor.createdAt),
+              cursorHost: continuation.host,
+              cursorId: continuation.cursor.id
+            })
+            const continuationResponse = yield* Effect.promise(() =>
+              secureRequestBody(
+                `${server.serveUrl}/v1/dashboard-pending?${continuationParameters.toString()}`,
+                requestHeaders
+              )
+            )
+            expect(continuationResponse.status).toBe(200)
+            expect(continuationResponse.body).not.toContain("peer-secret-canary")
+            const targetResponse = yield* Effect.promise(() =>
+              secureRequestBody(
+                `${server.serveUrl}/v1/pending-approval?host=SER8&jobId=legacy-peer-job`,
+                requestHeaders
+              )
+            )
+            expect(targetResponse.status).toBe(200)
+            expect(targetResponse.body).not.toContain("peer-secret-canary")
+          })
+        ),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("pages worst-case history without exceeding the response limit", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-history-page-test-"))
     const hostConfig = config(root)

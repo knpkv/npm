@@ -15,6 +15,12 @@ Fleet-wide submission preserves partial results. One unreachable host does not e
 
 Approval mutations require the exact active listener origin, including HTML form submissions. Originless fleet submission remains a separate authenticated CLI path. Existing browser push subscriptions are reconciled with the server on page load, so server-side expiry or revocation cannot leave a false enabled state.
 
+## Approval request disclosure
+
+The authenticated approval browser receives a sanitized projection of each request from the persisted `JobRecord`. Pending, approved, rejected, and expired records retain the same typed request fields in browser-visible history. Safe fields include the request kind and title, operation mode and channel, normalized repository or revision coordinates, agent session, actor and worker identities, and lifecycle timestamps. Repository and revision values are redacted for credentials and unsafe URI query parameters before they cross the HTTP boundary; internal prompts and messages are represented by `[redacted internal prompt]`.
+
+Approval nonces, job hashes, command results and errors, credentials, subscription details, raw terminal or internal prompts, and unrelated jobs are server-private and never appear in the authenticated browser projection or any unauthenticated/public response. The projection is not a substitute for the persisted `JobRecord`; approval decisions still require the authenticated listener and server-side nonce/hash proof.
+
 `pushAllowedOrigins` is the exact HTTPS-origin allowlist for browser push services. Subscription endpoints are checked before persistence and again before delivery; credentials, IP literals, localhost, and origins outside that list are rejected. Add self-hosted push services explicitly by their public origin.
 
 The approval hub renders one masthead and three tabs. Approvals contains only local decisions and remote approval handoffs. Connect embeds the package terminal and authoritative relationship tree, with coordinator chat below it. Work renders the durable `@knpkv/herdr-work` projection. The built PWA assets keep offline installation, push subscription management, notification click routing, and the same authenticated browser routes.

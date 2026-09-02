@@ -87,7 +87,8 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
-import { type SanitizedJobRecord, sanitizeJobRecord } from "./approval-request.js"
+import type { SanitizedJobRecord } from "./approval-request.js"
+import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
 import { resolveApprovalPage } from "./approval-url.js"
 import { authorize, authorizeLoopback } from "./auth.js"
 import {
@@ -616,6 +617,11 @@ const pendingApproval = (record: JobRecord): PendingApproval => {
   }
 }
 
+const sanitizePendingApproval = (approval: PendingApproval): PendingApproval => ({
+  ...approval,
+  payload: sanitizeJobPayload(approval.payload)
+})
+
 const dashboardHistoryMaxBytes = 512 * 1024
 export const dashboardSnapshotBytes = (snapshot: DashboardSnapshot): number =>
   new TextEncoder().encode(JSON.stringify(snapshot)).byteLength + 1
@@ -819,7 +825,10 @@ const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
         receivedHost: summary.host
       })
     }
-    return summary
+    return {
+      ...summary,
+      approvals: summary.approvals.map(sanitizePendingApproval)
+    }
   },
   (effect, peer) =>
     effect.pipe(
