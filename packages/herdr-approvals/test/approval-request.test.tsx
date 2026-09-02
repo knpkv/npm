@@ -191,6 +191,24 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("redacts complete arbitrary authorization values", () => {
+    const refs = ["Authorization: Custom scheme-secret trailing-value", "https://example.test/password%3Dleaked-canary"]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("scheme-secret")
+      expect(encoded).not.toContain("trailing-value")
+      expect(encoded).not.toContain("leaked-canary")
+      expect(request.fields[0]?.value).toContain(
+        ref.startsWith("https://") ? "%5Bredacted%20credential%5D" : "[redacted credential]"
+      )
+    }
+  })
+
   it("redacts standalone encoded credential assignments", () => {
     const credential = "password%3Dleaked-canary"
     const visible = "release%2Fcandidate"

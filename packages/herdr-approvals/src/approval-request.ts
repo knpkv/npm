@@ -60,8 +60,10 @@ const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
 const credentialAuthorization =
-  /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\][^\s,;]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;]+)/giu
-const credentialUri = /(^|[^\w])\/\/[^/]+@/gu
+  /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n,;]+))/giu
+const credentialUri = /(^|[^\w])\/\/[^/?#]*@/gu
+const encodedCredentialAssignment =
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))%3d)([^/?#\s&]*)/giu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
@@ -93,13 +95,22 @@ const sanitizeCredentialText = (value: string): string =>
     .replace(
       credentialAuthorization,
       (match, prefix: string, credential: string) =>
-        credential === redactedCredential ? match : `${prefix}${redactedCredential}`
+        credential.trim() === redactedCredential ? match : `${prefix}${redactedCredential}`
     )
     .replace(
       credentialAssignment,
       (match, prefix: string, credential: string) =>
         credential === redactedCredential ? match : `${prefix}${redactedCredential}`
     )
+
+const sanitizeEncodedCredentialAssignments = (value: string): string =>
+  value.replace(encodedCredentialAssignment, (match) => {
+    try {
+      return encodeURIComponent(sanitizeCredentialText(decodeURIComponent(match)))
+    } catch {
+      return redactedCredential
+    }
+  })
 
 const sanitizeEncodedUri = (value: string): string => {
   const encoded = encodedText(value)
@@ -135,7 +146,7 @@ const sanitizeUriQueryParameters = (value: string): string => {
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
   const sanitized = uriPrefix.test(value) || encodedUriPrefix.test(value)
-    ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
+    ? sanitizeEncodedCredentialAssignments(sanitizeCredentialText(sanitizeUriQueryParameters(value)))
     : encodedText(value) === undefined
     ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
     : sanitizeEncodedUri(value)
