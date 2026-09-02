@@ -477,8 +477,14 @@ esac
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
         Effect.gen(function*() {
-          const refreshStarted = yield* Deferred.make<void>()
-          const releaseRefresh = yield* Deferred.make<void>()
+          const initialRefreshStarted = yield* Deferred.make<void>()
+          const initialReleaseRefresh = yield* Deferred.make<void>()
+          const overlapRefreshStarted = yield* Deferred.make<void>()
+          const overlapReleaseRefresh = yield* Deferred.make<void>()
+          let refreshGate = {
+            release: initialReleaseRefresh,
+            started: initialRefreshStarted
+          }
           let pausePendingRefresh = false
           yield* Effect.forEach(
             Array.from({ length: pendingApprovalPageMaxRecords + 1 }, (_, index) => pendingRecord("ALPHA", index)),
@@ -500,8 +506,8 @@ esac
               pausePendingRefresh = false
               return pending.pipe(
                 Effect.flatMap((records) =>
-                  Deferred.succeed(refreshStarted, undefined).pipe(
-                    Effect.andThen(Deferred.await(releaseRefresh)),
+                  Deferred.succeed(refreshGate.started, undefined).pipe(
+                    Effect.andThen(Deferred.await(refreshGate.release)),
                     Effect.as(records)
                   )
                 )
@@ -552,6 +558,48 @@ esac
             cursorHost: continuation.host,
             cursorId: continuation.cursor.id
           })
+          const firstConcurrentPending = pendingRecord("ALPHA", 200)
+          pausePendingRefresh = true
+          const firstRefresh = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+                headers: { ...headers, cookie: cookieA }
+              })
+            )
+          )
+          yield* Deferred.await(initialRefreshStarted)
+          yield* store.put(firstConcurrentPending)
+          const firstDisclosure = yield* Effect.promise(() =>
+            fetch(
+              `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${firstConcurrentPending.id}`,
+              { headers }
+            )
+          )
+          expect(firstDisclosure.status).toBe(200)
+          const firstCookie = firstDisclosure.headers.get("set-cookie")?.split(";", 1)[0]
+          if (firstCookie === undefined) {
+            return yield* new FleetValidationError({ detail: "initial concurrent proof cookie missing" })
+          }
+          yield* Effect.promise(() => firstDisclosure.text())
+          yield* Deferred.succeed(initialReleaseRefresh, undefined)
+          const firstRefreshResponse = yield* Fiber.join(firstRefresh)
+          expect(firstRefreshResponse.status).toBe(200)
+          yield* Effect.promise(() => firstRefreshResponse.text())
+          const firstContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: firstCookie }
+            })
+          )
+          expect(firstContinuation.status).toBe(200)
+          yield* Effect.promise(() => firstContinuation.text())
+          const firstDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${firstConcurrentPending.id}/approve`, {
+              headers: { ...headers, cookie: firstCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(firstDecision.status).toBe(200)
+          yield* Effect.promise(() => firstDecision.text())
           const continuationResponse = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
               headers: { ...headers, cookie: cookieA }
@@ -635,6 +683,10 @@ esac
 
           const concurrentPending = pendingRecord("ALPHA", 101)
           observedAt = 120 * 1_000
+          refreshGate = {
+            release: overlapReleaseRefresh,
+            started: overlapRefreshStarted
+          }
           pausePendingRefresh = true
           const staleRefresh = yield* Effect.forkChild(
             Effect.promise(() =>
@@ -643,7 +695,7 @@ esac
               })
             )
           )
-          yield* Deferred.await(refreshStarted)
+          yield* Deferred.await(overlapRefreshStarted)
           yield* store.put(concurrentPending)
           const concurrentDisclosure = yield* Effect.promise(() =>
             fetch(
@@ -653,7 +705,7 @@ esac
           )
           expect(concurrentDisclosure.status).toBe(200)
           yield* Effect.promise(() => concurrentDisclosure.text())
-          yield* Deferred.succeed(releaseRefresh, undefined)
+          yield* Deferred.succeed(overlapReleaseRefresh, undefined)
           const staleRefreshResponse = yield* Fiber.join(staleRefresh)
           expect(staleRefreshResponse.status).toBe(200)
           yield* Effect.promise(() => staleRefreshResponse.text())

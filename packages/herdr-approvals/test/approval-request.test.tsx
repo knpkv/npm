@@ -177,6 +177,17 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("redacts credentials nested inside safe URL coordinates", () => {
+    const request = approvalRequestFor({
+      kind: "nix.apply",
+      ref: "https://mirror.test/?ref=https://origin.test/repo?X-Amz-Signature=leaked-canary&sha=release"
+    })
+    expect(request.fields[0]?.value).toBe(
+      "https://mirror.test/?ref=https://origin.test/repo?X-Amz-Signature=[redacted credential]&sha=release"
+    )
+    expect(request.fields[0]?.value).not.toContain("leaked-canary")
+  })
+
   it("redacts unsafe query values through raw whitespace", () => {
     const refs = [
       "https://example.test/repo?X-Amz-Signature=first-secret second-secret",

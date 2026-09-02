@@ -61,17 +61,21 @@ const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\][^\s,;]*|"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|[^\s,;]+)/giu
 const credentialUri = /:\/\/[^/\s]+@/gu
-const uriQueryParameter = /([?&#])([^=#&\s]+)=([^&#]*)/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 
+const sanitizeUriQueryParameters = (value: string): string =>
+  value.replace(
+    /([?&#])([^=#&\s]+)=([^&#]*)/gu,
+    (match, separator: string, key: string, parameterValue: string) => {
+      const sanitizedValue = safeUriQueryKeys.has(key.toLowerCase())
+        ? sanitizeUriQueryParameters(parameterValue)
+        : redactedCredential
+      return `${separator}${key}=${sanitizedValue}`
+    }
+  )
+
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
-  const sanitized = value
-    .replace(credentialUri, "://[redacted credential]@")
-    .replace(
-      uriQueryParameter,
-      (match, separator: string, key: string) =>
-        safeUriQueryKeys.has(key.toLowerCase()) ? match : `${separator}${key}=${redactedCredential}`
-    )
+  const sanitized = sanitizeUriQueryParameters(value.replace(credentialUri, "://[redacted credential]@"))
     .replace(credentialDigestAuthorization, "$1[redacted credential]")
     .replace(
       credentialAuthorization,
