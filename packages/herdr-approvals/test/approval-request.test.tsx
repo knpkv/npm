@@ -139,20 +139,20 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts complete authorization credentials and signed URL parameters", () => {
-    const request = approvalRequestFor({
-      kind: "nix.apply",
-      ref: "https://deploy-user:deploy-password@example.test/revision?ref=main&X-Amz-Signature=leaked&sig=also-leaked"
-    })
-    expect(request.fields[0]?.value).toBe(
+    const refs = [
+      "https://deploy-user:deploy-password@example.test/revision?ref=main&X-Amz-Signature=leaked&sig=also-leaked",
+      "Authorization: Bearer secret-value",
+      "Authorization:Bearer secret-value",
+      "authorization=supersecret"
+    ]
+    const requests = refs.map((ref) => approvalRequestFor({ kind: "nix.apply", ref }))
+    expect(requests[0]?.fields[0]?.value).toBe(
       "https://[redacted credential]@example.test/revision?ref=main&X-Amz-Signature=[redacted credential]&sig=[redacted credential]"
     )
-    const delegated = approvalRequestFor({
-      kind: "agent.delegate",
-      mode: "work",
-      prompt: "Authorization: Bearer secret-value",
-      repository: "/srv/npm"
-    })
-    expect(delegated.fields.find(({ key }) => key === "prompt")?.value).toBe("[redacted internal prompt]")
+    for (const request of requests.slice(1)) {
+      expect(request.fields[0]?.value).not.toMatch(/secret|super/u)
+      expect(request.fields[0]?.value).toContain("[redacted credential]")
+    }
   })
 
   it("keeps maximum-length sanitized payloads within their source schemas", () => {

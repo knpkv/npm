@@ -139,6 +139,9 @@ const assets = {
   worker: ""
 }
 
+const approvalProofCookieCount = (response: Response): number =>
+  response.headers.get("set-cookie")?.match(/fleet_approval_proof_/gu)?.length ?? 0
+
 const directTls = {
   certificatePath: join(import.meta.dirname, "fixtures/ser8.example.test.crt"),
   privateKeyPath: join(import.meta.dirname, "fixtures/ser8.example.test.key")
@@ -1173,6 +1176,7 @@ esac
           const dashboardResponse = yield* Effect.promise(() => fetch(`${server.approvalUrl}/v1/dashboard`))
           const dashboardBody = yield* Effect.promise(() => dashboardResponse.text())
           expect(dashboardResponse.status).toBe(200)
+          expect(approvalProofCookieCount(dashboardResponse)).toBe(1)
           expect(Buffer.byteLength(dashboardBody)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )
@@ -1197,6 +1201,7 @@ esac
             continuationUrl.searchParams.set("cursorId", continuation.cursor.id)
             const continuationResponse = yield* Effect.promise(() => fetch(continuationUrl))
             expect(continuationResponse.status).toBe(200)
+            expect(approvalProofCookieCount(continuationResponse)).toBe(1)
             const continuationBody = yield* Effect.promise(() => continuationResponse.text())
             expect(Buffer.byteLength(continuationBody)).toBeLessThanOrEqual(
               fleetResponseBodyMaxBytes
@@ -1220,6 +1225,7 @@ esac
           targetUrl.searchParams.set("jobId", hiddenJobId)
           const targetResponse = yield* Effect.promise(() => fetch(targetUrl))
           expect(targetResponse.status).toBe(200)
+          expect(approvalProofCookieCount(targetResponse)).toBe(1)
           expect(
             Schema.decodeUnknownSync(PendingApprovalTarget)(
               yield* Effect.promise(() => targetResponse.json())

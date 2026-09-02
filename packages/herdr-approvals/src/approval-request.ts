@@ -58,7 +58,7 @@ export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 const credentialAssignment =
   /((?:password|passwd|secret|token|credential|api[_-]?key)\s*[:=]\s*)(\[redacted credential\]|[^\s,;]+)/giu
 const credentialAuthorization =
-  /((?:authorization)\s*[:=]\s+(?:bearer|basic|digest|token)\s+)(\[redacted credential\]|[^\s,;]+)/giu
+  /((?:authorization)\s*[:=]\s*)(?:(?:bearer|basic|digest|token)\s+)?(\[redacted credential\]|[^\s,;]+)/giu
 const credentialUri = /:\/\/[^/\s:@]+(?::[^/\s@]*)?@/gu
 const uriQueryParameter = /([?&])([^=#&\s]+)=(\[redacted credential\]|[^&#\s]*)/gu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
