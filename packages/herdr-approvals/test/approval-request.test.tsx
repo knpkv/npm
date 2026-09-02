@@ -181,6 +181,8 @@ describe("sanitized approval requests", () => {
     const refs = [
       'password="first-secret\\"second-secret"',
       'Authorization: Bearer "first-token\\"second-token"',
+      "password='first-secret\\'second-secret'",
+      "Authorization: Bearer 'first-token\\'second-token'",
       'password="first-line-secret\nsecond-line-secret"',
       'Authorization: Bearer "first-line-token\nsecond-line-token"'
     ]
@@ -197,6 +199,9 @@ describe("sanitized approval requests", () => {
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: 'ref="release\ncandidate"' }).fields[0]?.value).toBe(
       'ref="release\ncandidate"'
+    )
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "ref='release candidate'" }).fields[0]?.value).toBe(
+      "ref='release candidate'"
     )
   })
 

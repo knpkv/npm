@@ -146,7 +146,12 @@ type ApprovalProof = {
   readonly jobId: string
   readonly nonce: string
 }
+type ApprovalProofUse = {
+  readonly approval: Approval
+  readonly sessionToken: string
+}
 type ApprovalProofSession = {
+  lastPrunedAt?: number
   expiresAt: number
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
@@ -158,6 +163,7 @@ type ApprovalProofIssuer = (
 const approvalProofCookiePrefix = "fleet_approval_proof_"
 const approvalProofMaxAgeSeconds = 15 * 60
 const approvalProofSessionMaxCount = 256
+const approvalProofPruneIntervalMs = 60 * 1_000
 
 const approvalProofCookieName = `${approvalProofCookiePrefix}session`
 const approvalProofLifetimeMs = approvalProofMaxAgeSeconds * 1_000
@@ -1342,7 +1348,6 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
       jobId
     })
   }
-  session.proofsByJob.delete(jobId)
   const record = yield* service.get(jobId)
   if (
     record.status !== "pending_approval" ||
@@ -1355,7 +1360,10 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
       jobId
     })
   }
-  return { hash: proof.hash, nonce: proof.nonce } satisfies Approval
+  return {
+    approval: { hash: proof.hash, nonce: proof.nonce },
+    sessionToken: token
+  } satisfies ApprovalProofUse
 })
 
 export const makeRunner = Effect.fn("HostRunner.make")(function*(
@@ -1577,7 +1585,11 @@ export const startHttpServer = async (
       }
     }
     const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
-      function*(session: ApprovalProofSession) {
+      function*(session: ApprovalProofSession, observedAt: number) {
+        if (
+          session.lastPrunedAt !== undefined &&
+          observedAt - session.lastPrunedAt < approvalProofPruneIntervalMs
+        ) return
         const pendingRecords = yield* service.pendingApprovals().pipe(
           Effect.mapError(
             (cause) =>
@@ -1592,6 +1604,7 @@ export const startHttpServer = async (
         for (const jobId of session.proofsByJob.keys()) {
           if (!pendingJobIds.has(jobId)) session.proofsByJob.delete(jobId)
         }
+        session.lastPrunedAt = observedAt
       }
     )
     const issueApprovalProofs: ApprovalProofIssuer = Effect.fn("ApprovalHttp.issueApprovalProofs")(
@@ -1628,7 +1641,7 @@ export const startHttpServer = async (
           }
           approvalProofSessions.set(token, session)
         } else {
-          yield* pruneApprovalProofSession(session)
+          yield* pruneApprovalProofSession(session, observedAt)
           renewApprovalProofSession(session, observedAt)
         }
         for (const record of pendingRecords) {
@@ -2812,17 +2825,28 @@ export const startHttpServer = async (
               const who = yield* authorized
               yield* sameOrigin(request, expectedOrigin())
               const jobId = yield* decodeJobPathSegment(approvalJobId)
-              const approval = (yield* readApproval(request)) ??
-                (yield* approvalFromProof(
+              const submittedApproval = yield* readApproval(request)
+              let approval: Approval
+              let proofSessionToken: string | undefined
+              if (submittedApproval === null) {
+                const proof = yield* approvalFromProof(
                   service,
                   approvalProofSessions,
                   request,
                   jobId,
                   now
-                ))
+                )
+                approval = proof.approval
+                proofSessionToken = proof.sessionToken
+              } else {
+                approval = submittedApproval
+              }
               const record = decision === "approve"
                 ? yield* service.approve(jobId, approval, who)
                 : yield* service.reject(jobId, approval, who)
+              if (proofSessionToken !== undefined) {
+                approvalProofSessions.get(proofSessionToken)?.proofsByJob.delete(jobId)
+              }
               if (record.status === "queued") yield* enqueueJob(record.id)
               return sanitizeJobRecord(record)
             })

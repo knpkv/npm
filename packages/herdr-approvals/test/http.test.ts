@@ -312,9 +312,26 @@ esac
             },
             "submitter@example.com"
           )
+          let failApproval = true
+          const retryableFleet: FleetService = {
+            ...fleet,
+            approve: (jobId, approval, actor) => {
+              if (failApproval) {
+                failApproval = false
+                return Effect.fail(
+                  new FleetOperationError({
+                    cause: "transient test failure",
+                    detail: "approval backend temporarily unavailable",
+                    operation: "test.approve"
+                  })
+                )
+              }
+              return fleet.approve(jobId, approval, actor)
+            }
+          }
           const server = yield* Effect.acquireRelease(
             Effect.promise(() =>
-              startHttpServer(hostConfig, fleet, assets, {
+              startHttpServer(hostConfig, retryableFleet, assets, {
                 terminalConnector: unusedTerminal
               })
             ),
@@ -358,6 +375,19 @@ esac
           )
           expect(withoutProof.status).toBe(409)
           yield* Effect.promise(() => withoutProof.text())
+
+          const transientFailure = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(transientFailure.status).toBe(503)
+          yield* Effect.promise(() => transientFailure.text())
 
           const decided = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
@@ -645,7 +675,7 @@ esac
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
       provideNodeServices
     )
-  })
+  }, 15_000)
 
   it.effect("marks notification counts incomplete when fleet discovery fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
