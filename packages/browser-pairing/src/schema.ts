@@ -108,7 +108,14 @@ export const serializeCredentialCookie = (
   if (options.sameSite === "none" && !options.secure) {
     throw new CredentialCookieError({ reason: "invalid-attribute" })
   }
-  const sameSite = options.sameSite === "strict" ? "Strict" : options.sameSite === "lax" ? "Lax" : "None"
+  const sameSite = options.sameSite === "strict"
+    ? "Strict"
+    : options.sameSite === "lax"
+    ? "Lax"
+    : options.sameSite === "none"
+    ? "None"
+    : undefined
+  if (sameSite === undefined) throw new CredentialCookieError({ reason: "invalid-attribute" })
   const parts = [
     `${options.name}=${decoded.success}`,
     ...(options.httpOnly ? ["HttpOnly"] : []),

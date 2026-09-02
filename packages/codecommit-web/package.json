@@ -18,7 +18,7 @@
     "dev": "CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false",
     "prepack": "tsc -b && vite build",
     "build": "tsc -b && vite build",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "test": "vitest",
     "test:relay-smoke:real": "vitest run --config vitest.real-smoke.config.ts",

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { BrowserCredential } from "@knpkv/browser-pairing/schema"
+import { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
 import { ConfigService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { AwsApiError, PermissionDeniedError } from "@knpkv/codecommit-core/Errors.js"
 import { AuditLogRepo, type NewAuditLogEntry } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
@@ -45,15 +45,17 @@ const ownerToken = "aa".repeat(32)
 const csrfToken = "bb".repeat(32)
 const bootstrapToken = "cc".repeat(32)
 const authorityOrigin = "http://127.0.0.1:3000"
-const browserCredential = (value: string): BrowserCredential => Schema.decodeSync(BrowserCredential)(value)
+const sessionCredential = (value: string): SessionToken => Schema.decodeSync(SessionToken)(value)
+const csrfCredential = (value: string): CsrfToken => Schema.decodeSync(CsrfToken)(value)
+const pairingCredential = (value: string): PairingCode => Schema.decodeSync(PairingCode)(value)
 
 const makeSecrets = Effect.fn("ServerSecurityTest.makeSecrets")(
   function*(active: boolean = true): Effect.fn.Return<OwnerSessionSecretsContract> {
     return {
       authorityOrigin,
-      ownerToken: Redacted.make(browserCredential(ownerToken)),
-      csrfToken: Redacted.make(browserCredential(csrfToken)),
-      bootstrapToken: Redacted.make(browserCredential(bootstrapToken)),
+      ownerToken: Redacted.make(sessionCredential(ownerToken)),
+      csrfToken: Redacted.make(csrfCredential(csrfToken)),
+      bootstrapToken: Redacted.make(pairingCredential(bootstrapToken)),
       bootstrapAvailable: yield* Ref.make(true),
       bootstrapFailedAttempts: yield* Ref.make(0),
       bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(active ? Number.MAX_SAFE_INTEGER : undefined)

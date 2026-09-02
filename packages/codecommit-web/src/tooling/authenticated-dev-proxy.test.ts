@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "@effect/vitest"
-import { BrowserCredential } from "@knpkv/browser-pairing/schema"
+import { PairingCode } from "@knpkv/browser-pairing/schema"
 import { Redacted, Schema } from "effect"
 import packageJson from "../../package.json" with { type: "json" }
 import { ownerSessionOrigin, ownerSessionUrlForOrigin } from "../server/internal/OwnerSessionSecurity.js"
@@ -27,7 +27,7 @@ describe("authenticated development proxy", () => {
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
     expect(packageJson.scripts.dev).toContain(authenticatedDevPublicOriginEnvironment)
     const url = ownerSessionUrlForOrigin(authenticatedDevPublicOrigin, {
-      bootstrapToken: Redacted.make(Schema.decodeSync(BrowserCredential)("ab".repeat(32)))
+      bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32)))
     })
     expect(url).toBe(`http://localhost:5173/#bootstrap_token=${"ab".repeat(32)}`)
     expect(url).not.toContain(authenticatedDevBackendOrigin)

@@ -129,6 +129,11 @@ describe("browser pairing primitives", () => {
     expect(serializeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: true })).toContain(
       "SameSite=None; Secure"
     )
+    const malformed = { ...valid, sameSite: "invalid" }
+    expect(() => {
+      // @ts-expect-error Exercise the runtime boundary with an untyped SameSite value.
+      serializeCredentialCookie("ab".repeat(32), malformed)
+    }).toThrow(CredentialCookieError)
     expect(serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/api,=v" })).toContain(
       "Path=/api,=v"
     )

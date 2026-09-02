@@ -1,5 +1,5 @@
 import { Crypto, Effect, Encoding, Redacted, Result, Schema } from "effect"
-import { BrowserCredential, CredentialDigest } from "./schema.js"
+import { BrowserCredential, CredentialDigest, CsrfToken, PairingCode, SessionToken } from "./schema.js"
 
 const CREDENTIAL_BYTES = 32
 
@@ -8,16 +8,38 @@ export class BrowserPairingError extends Schema.TaggedError<BrowserPairingError>
   reason: Schema.Literals(["credential-rejected", "crypto-failed", "invalid-lifetime"])
 }) {}
 
-/** Produce a fresh 256-bit credential using the caller's platform crypto service. */
+const issueCredentialFor = <Credential>(
+  decode: (value: string) => Effect.Effect<Credential, Schema.SchemaError, never>
+) =>
+  Effect.gen(function*() {
+    const cryptoService = yield* Crypto.Crypto
+    const bytes = yield* cryptoService.randomBytes(CREDENTIAL_BYTES).pipe(
+      Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
+    )
+    const decoded = yield* decode(Encoding.encodeHex(bytes)).pipe(
+      Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
+    )
+    return Redacted.make(decoded)
+  })
+
+/** Produce a fresh generic browser credential using the caller's platform crypto service. */
 export const issueCredential = Effect.fn("BrowserPairing.issueCredential")(function*() {
-  const cryptoService = yield* Crypto.Crypto
-  const bytes = yield* cryptoService.randomBytes(CREDENTIAL_BYTES).pipe(
-    Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
-  )
-  const decoded = yield* Schema.decodeUnknownEffect(BrowserCredential)(Encoding.encodeHex(bytes)).pipe(
-    Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
-  )
-  return Redacted.make(decoded)
+  return yield* issueCredentialFor(Schema.decodeUnknownEffect(BrowserCredential))
+})
+
+/** Produce a pairing credential while preserving its role brand. */
+export const issuePairingCode = Effect.fn("BrowserPairing.issuePairingCode")(function*() {
+  return yield* issueCredentialFor(Schema.decodeUnknownEffect(PairingCode))
+})
+
+/** Produce a session credential while preserving its role brand. */
+export const issueSessionToken = Effect.fn("BrowserPairing.issueSessionToken")(function*() {
+  return yield* issueCredentialFor(Schema.decodeUnknownEffect(SessionToken))
+})
+
+/** Produce a CSRF credential while preserving its role brand. */
+export const issueCsrfToken = Effect.fn("BrowserPairing.issueCsrfToken")(function*() {
+  return yield* issueCredentialFor(Schema.decodeUnknownEffect(CsrfToken))
 })
 
 /** Hash a credential for durable persistence without retaining its plaintext. */

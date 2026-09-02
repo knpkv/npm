@@ -2,10 +2,12 @@ import {
   credentialValuesEqual,
   decideOneTimeCredential,
   expiresAt,
-  issueCredential,
+  issueCsrfToken,
+  issuePairingCode,
+  issueSessionToken,
   serializeCredentialCookie
 } from "@knpkv/browser-pairing"
-import type { BrowserCredential } from "@knpkv/browser-pairing/schema"
+import type { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
 import { Clock, Context, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
@@ -16,9 +18,9 @@ export interface OwnerSessionSecretsContract {
   readonly bootstrapAvailable: Ref.Ref<boolean>
   readonly bootstrapFailedAttempts: Ref.Ref<number>
   readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
-  readonly bootstrapToken: Redacted.Redacted<BrowserCredential>
-  readonly csrfToken: Redacted.Redacted<BrowserCredential>
-  readonly ownerToken: Redacted.Redacted<BrowserCredential>
+  readonly bootstrapToken: Redacted.Redacted<PairingCode>
+  readonly csrfToken: Redacted.Redacted<CsrfToken>
+  readonly ownerToken: Redacted.Redacted<SessionToken>
 }
 
 export class OwnerSessionSecrets extends Context.Service<
@@ -53,9 +55,9 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSessionSecurity.makeSecre
   function*(authorityOrigin: string) {
     const validatedAuthorityOrigin = yield* requireLoopbackOrigin(authorityOrigin)
     const [ownerToken, csrfToken, bootstrapToken] = yield* Effect.all([
-      issueCredential(),
-      issueCredential(),
-      issueCredential()
+      issueSessionToken(),
+      issueCsrfToken(),
+      issuePairingCode()
     ])
     const bootstrapAvailable = yield* Ref.make(true)
     const bootstrapFailedAttempts = yield* Ref.make(0)
