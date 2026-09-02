@@ -1,10 +1,16 @@
 import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import type { JobPayload, JobRecord } from "@knpkv/herdr-fleet/model"
+import { Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
 import { DashboardView } from "../src/dashboard-view.js"
-import { approvalRequestFor, redactedJobHash, sanitizeJobRecord } from "../src/approval-request.js"
+import {
+  approvalRequestFor,
+  SanitizedJobRecord,
+  sanitizeJobRecord,
+  sanitizeJobPayload
+} from "../src/approval-request.js"
 
 const approvalPayload: JobPayload = {
   channel: "coordinator_chat",
@@ -102,8 +108,10 @@ describe("sanitized approval requests", () => {
 
   it("removes approval secrets and terminal output from the browser projection", () => {
     const sanitized = sanitizeJobRecord(recordFor("pending_approval"))
-    expect(sanitized.hash).toBe(redactedJobHash)
-    expect(sanitized.approvalNonce).toBeNull()
+    expect("hash" in sanitized).toBe(false)
+    expect("approvalNonce" in sanitized).toBe(false)
+    expect("result" in sanitized).toBe(false)
+    expect("error" in sanitized).toBe(false)
     expect(sanitized.payload).toEqual({
       channel: "coordinator_chat",
       kind: "agent.delegate",
@@ -111,10 +119,8 @@ describe("sanitized approval requests", () => {
       prompt: "[redacted internal prompt]",
       repository: "/srv/npm"
     })
-    expect(sanitizeJobRecord(recordFor("succeeded"))).toMatchObject({
-      error: null,
-      result: null
-    })
+    expect("error" in sanitizeJobRecord(recordFor("succeeded"))).toBe(false)
+    expect("result" in sanitizeJobRecord(recordFor("succeeded"))).toBe(false)
   })
 
   it("redacts credentials embedded in safe request coordinates", () => {
@@ -130,6 +136,42 @@ describe("sanitized approval requests", () => {
         value: "https://[redacted credential]@example.test/revision?token=[redacted credential]"
       }
     ])
+  })
+
+  it("redacts complete authorization credentials and signed URL parameters", () => {
+    const request = approvalRequestFor({
+      kind: "nix.apply",
+      ref: "https://deploy-user:deploy-password@example.test/revision?ref=main&X-Amz-Signature=leaked&sig=also-leaked"
+    })
+    expect(request.fields[0]?.value).toBe(
+      "https://[redacted credential]@example.test/revision?ref=main&X-Amz-Signature=[redacted credential]&sig=[redacted credential]"
+    )
+    const delegated = approvalRequestFor({
+      kind: "agent.delegate",
+      mode: "work",
+      prompt: "Authorization: Bearer secret-value",
+      repository: "/srv/npm"
+    })
+    expect(delegated.fields.find(({ key }) => key === "prompt")?.value).toBe("[redacted internal prompt]")
+  })
+
+  it("keeps maximum-length sanitized payloads within their source schemas", () => {
+    const ref = "token=x ".repeat(512)
+    const sanitized = sanitizeJobPayload({ kind: "nix.apply", ref })
+    expect(sanitized.kind).toBe("nix.apply")
+    expect(sanitized.kind === "nix.apply" ? sanitized.ref.length : 0).toBeLessThanOrEqual(4 * 1_024)
+    const projection = sanitizeJobRecord({ ...recordFor("pending_approval"), payload: sanitized })
+    expect(() => Schema.decodeUnknownSync(SanitizedJobRecord)(projection)).not.toThrow()
+  })
+
+  it("is idempotent for already-sanitized coordinates", () => {
+    const payload: JobPayload = {
+      kind: "nix.apply",
+      ref: "https://example.test/revision?token=secret"
+    }
+    const once = sanitizeJobPayload(payload)
+    const twice = sanitizeJobPayload(once)
+    expect(twice).toEqual(once)
   })
 
   it.each(approvalStatuses)("renders an explicit request disclosure for %s approval state", (status) => {

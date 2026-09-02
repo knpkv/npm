@@ -4,9 +4,10 @@ import type { FormEvent, KeyboardEvent, ReactElement } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
 import type { ChatMode } from "@knpkv/herdr-coordinator/model"
 import { CoordinatorChatPanel, NotificationPanel, type NotificationState } from "./approval-app-view.js"
-import { requiresApproval, type JobRecord } from "@knpkv/herdr-fleet/model"
+import { requiresApproval } from "@knpkv/herdr-fleet/model"
 import { ActivityHistory, jobTitle, statusLabel, statusTone } from "./activity-history.js"
 import { ApprovalRequestDisclosure } from "./approval-request-view.js"
+import type { SanitizedJobRecord } from "./approval-request.js"
 
 export type ApprovalDecision = {
   readonly decision: "approve" | "reject"
@@ -54,7 +55,7 @@ type DashboardViewProps = {
 type PendingAgendaItem =
   | {
       readonly _tag: "local"
-      readonly record: JobRecord
+      readonly record: SanitizedJobRecord
     }
   | {
       readonly _tag: "remote"
@@ -64,7 +65,7 @@ type PendingAgendaItem =
 const pendingCreatedAt = (item: PendingAgendaItem): number =>
   item._tag === "local" ? item.record.createdAt : item.remote.approval.createdAt
 
-const jobSummary = (record: Pick<JobRecord, "payload">): string => {
+const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
   switch (record.payload.kind) {
     case "browser.mcp.recover":
       return "Local browser MCP recovery"
@@ -99,7 +100,7 @@ const lifecycleTime = (label: string, timestamp: number | null | undefined, acto
   </li>
 )
 
-const JobTimeline = ({ record }: { readonly record: JobRecord }) => (
+const JobTimeline = ({ record }: { readonly record: SanitizedJobRecord }) => (
   <ol className="job-lifecycle" aria-label="Job lifecycle">
     {lifecycleTime("Arrived", record.createdAt, record.actor)}
     {record.approvedBy === null ? null : lifecycleTime("Approved", record.approvedAt, record.approvedBy)}
@@ -121,7 +122,7 @@ const ApprovalActions = ({
 }: {
   readonly busy: boolean
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
-  readonly record: JobRecord
+  readonly record: SanitizedJobRecord
 }) => {
   if (onDecision === undefined || record.status !== "pending_approval") {
     return null
@@ -164,7 +165,7 @@ const AgendaItem = ({
   readonly connectBaseUrl: string
   readonly host: string
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
-  readonly record: JobRecord
+  readonly record: SanitizedJobRecord
 }) => {
   const handleShortcut = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.target !== event.currentTarget || busy || onDecision === undefined) return
@@ -404,14 +405,14 @@ export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapsh
   </Surface>
 )
 
-const ApprovalDecisionHistory = ({ records }: { readonly records: ReadonlyArray<JobRecord> }) => {
+const ApprovalDecisionHistory = ({ records }: { readonly records: ReadonlyArray<SanitizedJobRecord> }) => {
   type DecisionPresentation = {
     readonly actor: string
     readonly label: "Approved" | "Expired" | "Rejected"
     readonly timestamp: number
     readonly tone: "caution" | "critical" | "positive"
   }
-  const decisionFor = (record: JobRecord): DecisionPresentation | null => {
+  const decisionFor = (record: SanitizedJobRecord): DecisionPresentation | null => {
     if (record.rejectedBy != null) {
       return {
         actor: record.rejectedBy,

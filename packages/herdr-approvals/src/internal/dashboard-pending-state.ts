@@ -1,5 +1,6 @@
-import type { JobRecord, PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
+import type { PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
 import { type Cause, Exit } from "effect"
+import type { SanitizedJobRecord } from "../approval-request.js"
 import type {
   DashboardHistoryPage,
   DashboardSnapshot,
@@ -30,7 +31,7 @@ export type PendingApprovalTargetRevalidation =
 export interface DashboardHistoryState {
   readonly generation: number
   readonly nextCursor: PendingApprovalCursor | null
-  readonly records: ReadonlyArray<JobRecord>
+  readonly records: ReadonlyArray<SanitizedJobRecord>
 }
 
 export interface DashboardHistoryRequest {
@@ -67,7 +68,7 @@ export const dashboardPendingState = (
 
 export const dashboardHistoryState = (
   generation: number,
-  records: ReadonlyArray<JobRecord>,
+  records: ReadonlyArray<SanitizedJobRecord>,
   nextCursor: PendingApprovalCursor | null
 ): DashboardHistoryState => ({ generation, nextCursor, records })
 

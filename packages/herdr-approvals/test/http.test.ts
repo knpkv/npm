@@ -41,6 +41,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
+import { SanitizedJobRecord } from "../src/approval-request.js"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
 import {
@@ -321,9 +322,13 @@ esac
           const headers = {
             "tailscale-user-login": "andrey@example.com"
           }
-          const dashboard = yield* Effect.promise(() =>
-            fetch(`${approvalUrl}/v1/dashboard`, { headers }).then((response) => response.text())
-          )
+          const dashboardResponse = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const dashboard = yield* Effect.promise(() => dashboardResponse.text())
+          const proofCookie = dashboardResponse.headers.get("set-cookie")
+          if (proofCookie === null) {
+            return yield* new FleetValidationError({ detail: "approval proof cookie missing from dashboard" })
+          }
+          const proofCookieHeader = proofCookie.split(";", 1)[0]
           expect(dashboard).toContain("[redacted internal prompt]")
           expect(dashboard).not.toContain("raw terminal prompt")
           expect(dashboard).not.toContain("secret-value")
@@ -339,7 +344,7 @@ esac
           expect(page).not.toContain(pending.hash)
           expect(page).not.toContain("nonce-disclosure")
 
-          const decided = yield* Effect.promise(() =>
+          const withoutProof = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
               headers: {
                 ...headers,
@@ -348,15 +353,51 @@ esac
               method: "POST"
             })
           )
+          expect(withoutProof.status).toBe(409)
+          yield* Effect.promise(() => withoutProof.text())
+
+          const decided = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
           expect(decided.status).toBe(200)
           const decidedBody = yield* Effect.promise(() => decided.text())
-          const decidedRecord = Schema.decodeUnknownSync(JobRecord)(JSON.parse(decidedBody))
-          expect(decidedRecord.approvalNonce).toBeNull()
-          expect(decidedRecord.hash).toBe("0".repeat(64))
+          const decidedRecord = Schema.decodeUnknownSync(SanitizedJobRecord)(JSON.parse(decidedBody))
+          expect("approvalNonce" in decidedRecord).toBe(false)
+          expect("hash" in decidedRecord).toBe(false)
           expect(decidedBody).not.toContain("secret-value")
           expect(decidedBody).not.toContain("nonce-disclosure")
           expect(decidedBody).not.toContain(pending.hash)
 
+          const replay = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(replay.status).toBe(409)
+          yield* Effect.promise(() => replay.text())
+
+          let terminal = yield* fleet.get(pending.id)
+          for (
+            let attempt = 0;
+            attempt < 100 && (terminal.status === "queued" || terminal.status === "running");
+            attempt += 1
+          ) {
+            yield* Effect.yieldNow
+            terminal = yield* fleet.get(pending.id)
+          }
+          expect(terminal.status).toBe("succeeded")
           const history = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())
           )

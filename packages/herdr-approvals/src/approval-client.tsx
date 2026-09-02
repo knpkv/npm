@@ -11,7 +11,6 @@ import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { JobRecord } from "@knpkv/herdr-fleet/model"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
@@ -44,6 +43,7 @@ import {
 } from "./internal/dashboard-pending-state.js"
 import { FleetShell } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
+import { SanitizedJobRecord } from "./approval-request.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -134,7 +134,7 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
 })
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
-  yield* fetchJson(JobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
+  yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
     method: "POST"
   })
 })

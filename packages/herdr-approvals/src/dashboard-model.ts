@@ -1,7 +1,8 @@
 import { ChatHistory } from "@knpkv/herdr-coordinator/model"
-import { HostStatus, JobPayload, JobRecord, PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
+import { HostStatus, JobPayload, PendingApprovalCursor } from "@knpkv/herdr-fleet/model"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Schema } from "effect"
+import { SanitizedJobRecord } from "./approval-request.js"
 
 export const ApprovalLink = Schema.Struct({
   host: Schema.String,
@@ -38,7 +39,7 @@ export const RemotePendingApproval = Schema.Struct({
 
 export const PendingApprovalTarget = Schema.Union([
   Schema.TaggedStruct("local", {
-    record: JobRecord
+    record: SanitizedJobRecord
   }),
   Schema.TaggedStruct("remote", {
     remote: RemotePendingApproval
@@ -66,14 +67,14 @@ export const PendingApprovalContinuation = Schema.Struct({
 })
 
 export const FleetPendingApprovals = Schema.Struct({
-  local: Schema.Array(JobRecord),
+  local: Schema.Array(SanitizedJobRecord),
   remote: Schema.Array(RemotePendingApproval),
   failures: Schema.Array(PendingApprovalFailure),
   nextCursors: Schema.Array(PendingApprovalContinuation)
 })
 
 export const DashboardHistoryPage = Schema.Struct({
-  records: Schema.Array(JobRecord),
+  records: Schema.Array(SanitizedJobRecord),
   nextCursor: Schema.NullOr(PendingApprovalCursor)
 })
 
@@ -90,7 +91,7 @@ export const DashboardSnapshot = Schema.Struct({
   chat: Schema.NullOr(ChatHistory),
   work: Schema.NullOr(WorkSnapshots),
   status: HostStatus,
-  records: Schema.Array(JobRecord),
+  records: Schema.Array(SanitizedJobRecord),
   historyNextCursor: Schema.NullOr(PendingApprovalCursor),
   directory: Schema.NullOr(ApprovalDirectory),
   pendingApprovals: FleetPendingApprovals

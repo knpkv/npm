@@ -1,11 +1,17 @@
-import type { JobPayload, JobRecord } from "@knpkv/herdr-fleet/model"
+import {
+  AgentConnectTarget,
+  AgentWorkerIdentity,
+  JobActor,
+  JobIdentifier,
+  JobPayload,
+  JobStatus
+} from "@knpkv/herdr-fleet/model"
+import type { JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const requestTextMaxLength = 16 * 1_024
 const redactedInternalPrompt = "[redacted internal prompt]"
 const redactedCredential = "[redacted credential]"
-
-export const redactedJobHash = "0".repeat(64)
 
 const requestText = Schema.String.check(
   Schema.isNonEmpty(),
@@ -27,14 +33,60 @@ export const ApprovalRequest = Schema.Struct({
 })
 export type ApprovalRequest = typeof ApprovalRequest.Type
 
-const credentialAssignment =
-  /((?:password|passwd|secret|token|credential|authorization|api[_-]?key)\s*[:=]\s*)[^\s,;]+/giu
-const credentialUri = /:\/\/[^/\s:@]+(?::[^/\s@]*)?@/gu
+/**
+ * Browser-facing job data deliberately omits canonical approval credentials,
+ * integrity hashes, and terminal output. It is not a `JobRecord` substitute.
+ */
+export const SanitizedJobRecord = Schema.Struct({
+  id: JobIdentifier,
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
+  actor: JobActor,
+  approvalExpiresAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  approvedBy: Schema.NullOr(JobActor),
+  approvedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  rejectedBy: Schema.optionalKey(Schema.NullOr(JobActor)),
+  rejectedAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  expiredAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
+  status: JobStatus,
+  payload: JobPayload,
+  worker: Schema.optionalKey(AgentWorkerIdentity),
+  connectTarget: Schema.optionalKey(AgentConnectTarget)
+})
+export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
-const sanitizeRequestText = (value: string): string =>
-  value
+const credentialAssignment =
+  /((?:password|passwd|secret|token|credential|api[_-]?key)\s*[:=]\s*)(\[redacted credential\]|[^\s,;]+)/giu
+const credentialAuthorization =
+  /((?:authorization)\s*[:=]\s+(?:bearer|basic|digest|token)\s+)(\[redacted credential\]|[^\s,;]+)/giu
+const credentialUri = /:\/\/[^/\s:@]+(?::[^/\s@]*)?@/gu
+const uriQueryParameter = /([?&])([^=#&\s]+)=(\[redacted credential\]|[^&#\s]*)/gu
+const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
+
+const sanitizeRequestText = (value: string, maximumLength: number): string => {
+  const uriLike = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//u.test(value)
+  const sanitized = value
     .replace(credentialUri, "://[redacted credential]@")
-    .replace(credentialAssignment, `$1${redactedCredential}`)
+    .replace(
+      uriLike ? uriQueryParameter : /$^/gu,
+      (match, separator: string, key: string) =>
+        safeUriQueryKeys.has(key.toLowerCase()) ? match : `${separator}${key}=${redactedCredential}`
+    )
+    .replace(
+      credentialAuthorization,
+      (match, prefix: string, credential: string) =>
+        credential === redactedCredential ? match : `${prefix}${redactedCredential}`
+    )
+    .replace(
+      credentialAssignment,
+      (match, prefix: string, credential: string) =>
+        credential === redactedCredential ? match : `${prefix}${redactedCredential}`
+    )
+  const codePoints = Array.from(sanitized)
+  return codePoints.length <= maximumLength
+    ? sanitized
+    : `${codePoints.slice(0, maximumLength - redactedCredential.length).join("")}${redactedCredential}`
+}
 
 const field = (key: string, label: string, value: string, redacted = false): ApprovalRequestField => ({
   key,
@@ -43,7 +95,7 @@ const field = (key: string, label: string, value: string, redacted = false): App
   value
 })
 
-export const approvalRequestFor = (payload: JobPayload): ApprovalRequest => {
+export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => {
   switch (payload.kind) {
     case "browser.mcp.recover":
       return {
@@ -59,7 +111,7 @@ export const approvalRequestFor = (payload: JobPayload): ApprovalRequest => {
       }
     case "nix.apply":
       return {
-        fields: [field("ref", "Revision", sanitizeRequestText(payload.ref))],
+        fields: [field("ref", "Revision", sanitizeRequestText(payload.ref, 4 * 1_024))],
         kind: payload.kind,
         title: "Apply Nix configuration"
       }
@@ -67,7 +119,7 @@ export const approvalRequestFor = (payload: JobPayload): ApprovalRequest => {
       return {
         fields: [
           field("mode", "Mode", payload.mode),
-          field("repository", "Repository", sanitizeRequestText(payload.repository)),
+          field("repository", "Repository", sanitizeRequestText(payload.repository, 2 * 1_024)),
           ...(payload.channel === undefined ? [] : [field("channel", "Channel", payload.channel)]),
           field("prompt", "Prompt", redactedInternalPrompt, true)
         ],
@@ -86,29 +138,41 @@ export const approvalRequestFor = (payload: JobPayload): ApprovalRequest => {
   }
 }
 
-export const sanitizeJobPayload = (payload: JobPayload): JobPayload => {
+export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
   switch (payload.kind) {
     case "browser.mcp.recover":
     case "nix.check":
       return payload
     case "nix.apply":
-      return { ...payload, ref: sanitizeRequestText(payload.ref) }
+      return { ...payload, ref: sanitizeRequestText(payload.ref, 4 * 1_024) }
     case "agent.delegate":
       return {
         ...payload,
         prompt: redactedInternalPrompt,
-        repository: sanitizeRequestText(payload.repository)
+        repository: sanitizeRequestText(payload.repository, 2 * 1_024)
       }
     case "agent.message":
       return { ...payload, message: redactedInternalPrompt }
   }
 }
 
-export const sanitizeJobRecord = (record: JobRecord): JobRecord => ({
-  ...record,
-  approvalNonce: null,
-  error: null,
-  hash: redactedJobHash,
-  payload: sanitizeJobPayload(record.payload),
-  result: null
-})
+export const sanitizeJobRecord = (record: JobRecord): SanitizedJobRecord => {
+  return Object.assign(
+    {
+      actor: record.actor,
+      approvedBy: record.approvedBy,
+      createdAt: record.createdAt,
+      id: record.id,
+      status: record.status,
+      payload: sanitizeJobPayload(record.payload),
+      updatedAt: record.updatedAt
+    },
+    record.approvalExpiresAt === undefined ? {} : { approvalExpiresAt: record.approvalExpiresAt },
+    record.approvedAt === undefined ? {} : { approvedAt: record.approvedAt },
+    record.connectTarget === undefined ? {} : { connectTarget: record.connectTarget },
+    record.expiredAt === undefined ? {} : { expiredAt: record.expiredAt },
+    record.rejectedAt === undefined ? {} : { rejectedAt: record.rejectedAt },
+    record.rejectedBy === undefined ? {} : { rejectedBy: record.rejectedBy },
+    record.worker === undefined ? {} : { worker: record.worker }
+  )
+}
