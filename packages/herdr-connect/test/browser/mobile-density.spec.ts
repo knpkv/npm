@@ -125,10 +125,6 @@ const terminalRail = `
       <button aria-keyshortcuts="ArrowUp" aria-label="Arrow up" class="terminal-key" data-terminal-key="arrowUp" type="button">↑</button>
       <button aria-keyshortcuts="ArrowDown" aria-label="Arrow down" class="terminal-key" data-terminal-key="arrowDown" type="button">↓</button>
       <button aria-keyshortcuts="ArrowRight" aria-label="Arrow right" class="terminal-key" data-terminal-key="arrowRight" type="button">→</button>
-      <button aria-keyshortcuts="C" aria-label="C" class="terminal-key" data-terminal-key="c" disabled type="button">C</button>
-      <button aria-keyshortcuts="D" aria-label="D" class="terminal-key" data-terminal-key="d" disabled type="button">D</button>
-      <button aria-keyshortcuts="L" aria-label="L" class="terminal-key" data-terminal-key="l" disabled type="button">L</button>
-      <button aria-keyshortcuts="Z" aria-label="Z" class="terminal-key" data-terminal-key="z" disabled type="button">Z</button>
     </div>
   </div>`
 
@@ -218,7 +214,7 @@ test("desktop keeps its spacious hierarchy and scroll ownership", async ({ page 
   )
 })
 
-test("390x844 keeps the terminal rail reachable and disables unsafe combinations", async ({ page }) => {
+test("390x844 keeps the terminal rail reachable and exposes modifier shortcuts", async ({ page }) => {
   await setTerminal(page)
 
   const rail = page.locator("[data-terminal-key-rail]")
@@ -226,7 +222,8 @@ test("390x844 keeps the terminal rail reachable and disables unsafe combinations
   await expect(rail).toBeVisible()
   await expect(rail).toHaveAttribute("role", "toolbar")
   await expect(ctrl).toHaveAttribute("aria-pressed", "false")
-  await expect(page.locator("[data-terminal-key=\"c\"]")).toBeDisabled()
+  await expect(ctrl).toHaveAttribute("aria-keyshortcuts", "Control")
+  await expect(page.locator("[data-terminal-key=\"tab\"]")).toBeEnabled()
   expect(await rail.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto")
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await ctrl.focus()
@@ -244,6 +241,6 @@ test("desktop terminal rail preserves the three-row stage and accessible key lab
       getComputedStyle(element).gridTemplateRows.split(" ").length
     )
   ).toBe(3)
-  expect(await page.locator(".terminal-key").count()).toBe(12)
+  expect(await page.locator(".terminal-key").count()).toBe(8)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
 })

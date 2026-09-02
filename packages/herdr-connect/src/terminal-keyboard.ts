@@ -10,11 +10,7 @@ export const TerminalRailKey = Schema.Literals([
   "arrowLeft",
   "arrowUp",
   "arrowDown",
-  "arrowRight",
-  "c",
-  "d",
-  "l",
-  "z"
+  "arrowRight"
 ])
 export type TerminalRailKey = typeof TerminalRailKey.Type
 
@@ -33,14 +29,10 @@ export const terminalKeyDescriptors: ReadonlyArray<TerminalKeyDescriptor> = [
   { key: "arrowLeft", label: "←", ariaLabel: "Arrow left", shortcut: "ArrowLeft" },
   { key: "arrowUp", label: "↑", ariaLabel: "Arrow up", shortcut: "ArrowUp" },
   { key: "arrowDown", label: "↓", ariaLabel: "Arrow down", shortcut: "ArrowDown" },
-  { key: "arrowRight", label: "→", ariaLabel: "Arrow right", shortcut: "ArrowRight" },
-  { key: "c", label: "C", ariaLabel: "C", shortcut: "C" },
-  { key: "d", label: "D", ariaLabel: "D", shortcut: "D" },
-  { key: "l", label: "L", ariaLabel: "L", shortcut: "L" },
-  { key: "z", label: "Z", ariaLabel: "Z", shortcut: "Z" }
+  { key: "arrowRight", label: "→", ariaLabel: "Arrow right", shortcut: "ArrowRight" }
 ]
 
-type TerminalKeySerialization =
+export type TerminalKeySerialization =
   | { readonly _tag: "supported"; readonly text: string }
   | { readonly _tag: "unsupported"; readonly reason: "modifier_combination_not_supported" }
 
@@ -53,7 +45,9 @@ const unsupported = (): TerminalKeySerialization => ({
 
 const supported = (text: string): TerminalKeySerialization => ({ _tag: "supported", text })
 
-const controlCharacter = (key: Extract<TerminalRailKey, "c" | "d" | "l" | "z">): string => {
+type TerminalControlKey = "c" | "d" | "l" | "z"
+
+const controlCharacter = (key: TerminalControlKey): string => {
   switch (key) {
     case "c":
       return "\u0003"
@@ -81,6 +75,18 @@ const arrowCode = (
   }
 }
 
+type ArrowDefinition = {
+  readonly key: Extract<TerminalRailKey, "arrowLeft" | "arrowUp" | "arrowDown" | "arrowRight">
+  readonly code: "A" | "B" | "C" | "D"
+}
+
+const arrowDefinitions: ReadonlyArray<ArrowDefinition> = [
+  { key: "arrowUp", code: "A" },
+  { key: "arrowDown", code: "B" },
+  { key: "arrowRight", code: "C" },
+  { key: "arrowLeft", code: "D" }
+]
+
 /** Serialize one fixed terminal key without accepting arbitrary command text. */
 export const serializeTerminalKey = (
   key: TerminalRailKey,
@@ -102,15 +108,8 @@ export const serializeTerminalKey = (
           : `\u001b[1;${modifier === "ctrl" ? "5" : "3"}${code}`
       )
     }
-    case "c":
-    case "d":
-    case "l":
-    case "z":
-      return modifier === "ctrl"
-        ? supported(controlCharacter(key))
-        : modifier === "alt"
-        ? supported(`\u001b${key}`)
-        : unsupported()
+    default:
+      return unsupported()
   }
 }
 
@@ -158,47 +157,52 @@ export type TerminalInputApplication =
     readonly nextModifier: TerminalModifier
   }
 
-const arrowInputs: ReadonlyArray<readonly [string, string, string]> = [
-  ["\u001b[A", "\u001b[1;5A", "\u001b[1;3A"],
-  ["\u001b[B", "\u001b[1;5B", "\u001b[1;3B"],
-  ["\u001b[C", "\u001b[1;5C", "\u001b[1;3C"],
-  ["\u001b[D", "\u001b[1;5D", "\u001b[1;3D"]
-]
+const arrowInputs: ReadonlyArray<{
+  readonly plain: string
+  readonly ctrl: string
+  readonly alt: string
+}> = arrowDefinitions.map(({ code }) => ({
+  plain: `\u001b[${code}`,
+  ctrl: `\u001b[1;5${code}`,
+  alt: `\u001b[1;3${code}`
+}))
+
+const modifierCharacterInputs: ReadonlyArray<{
+  readonly plain: string
+  readonly encoded: string
+}> = ["c", "d", "l", "z"].map((key) => ({
+  plain: key,
+  encoded: `\u001b${key}`
+}))
 
 const terminalInputWithModifier = (
   modifier: TerminalModifier,
   text: string
 ): TerminalInputApplication => {
-  if (text.length !== 1 && text !== "\u001b[A" && text !== "\u001b[B" && text !== "\u001b[C" && text !== "\u001b[D") {
-    return { _tag: "unsupported", reason: "modifier_combination_not_supported", nextModifier: modifier }
-  }
-  if (text === "\u0003" || text === "\u0004" || text === "\u000c" || text === "\u001a") {
-    return modifier === "ctrl"
-      ? { _tag: "supported", text, nextModifier: null }
-      : { _tag: "unsupported", reason: "modifier_combination_not_supported", nextModifier: modifier }
-  }
-  if (text === "\t") {
-    return modifier === "alt"
-      ? { _tag: "supported", text: "\u001b\t", nextModifier: null }
-      : { _tag: "unsupported", reason: "modifier_combination_not_supported", nextModifier: modifier }
-  }
-  const arrow = arrowInputs.find(([plain]) => plain === text)
+  const arrow = arrowInputs.find((candidate) => candidate.plain === text || candidate[modifier] === text)
   if (arrow !== undefined) {
-    return { _tag: "supported", text: modifier === "ctrl" ? arrow[1] : arrow[2], nextModifier: null }
+    return { _tag: "supported", text: arrow[modifier], nextModifier: null }
   }
-  switch (text) {
-    case "c":
-    case "d":
-    case "l":
-    case "z":
-      return {
-        _tag: "supported",
-        text: modifier === "ctrl" ? controlCharacter(text) : `\u001b${text}`,
-        nextModifier: null
-      }
-    default:
-      return { _tag: "unsupported", reason: "modifier_combination_not_supported", nextModifier: modifier }
+  if (modifier === "ctrl") {
+    if (text === "\u0003" || text === "\u0004" || text === "\u000c" || text === "\u001a") {
+      return { _tag: "supported", text, nextModifier: null }
+    }
+    if (text === "c" || text === "d" || text === "l" || text === "z") {
+      return { _tag: "supported", text: controlCharacter(text), nextModifier: null }
+    }
   }
+  if (modifier === "alt") {
+    const character = modifierCharacterInputs.find((candidate) =>
+      candidate.plain === text || candidate.encoded === text
+    )
+    if (character !== undefined) {
+      return { _tag: "supported", text: character.encoded, nextModifier: null }
+    }
+    if (text === "\t" || text === "\u001b\t") {
+      return { _tag: "supported", text: "\u001b\t", nextModifier: null }
+    }
+  }
+  return { _tag: "unsupported", reason: "modifier_combination_not_supported", nextModifier: modifier }
 }
 
 /** Apply a latched modifier to one Ghostty input chunk using only known encodings. */

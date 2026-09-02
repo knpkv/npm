@@ -18,9 +18,7 @@ describe("terminal keyboard rail", () => {
       ["tab", "alt", "\u001b\t"],
       ["arrowUp", null, "\u001b[A"],
       ["arrowLeft", "ctrl", "\u001b[1;5D"],
-      ["arrowRight", "alt", "\u001b[1;3C"],
-      ["c", "ctrl", "\u0003"],
-      ["z", "alt", "\u001bz"]
+      ["arrowRight", "alt", "\u001b[1;3C"]
     ]
 
     for (const [key, modifier, text] of cases) {
@@ -47,7 +45,6 @@ describe("terminal keyboard rail", () => {
       nextModifier: "ctrl"
     })
     expect(serializeTerminalKey("escape", "alt")._tag).toBe("unsupported")
-    expect(serializeTerminalKey("c", null)._tag).toBe("unsupported")
   })
 
   it("applies a latched modifier to one compatible terminal input and then resets", () => {
@@ -61,6 +58,11 @@ describe("terminal keyboard rail", () => {
       text: "\u0003",
       nextModifier: null
     })
+    expect(applyTerminalModifierToInput("ctrl", "\u001b[1;5A")).toEqual({
+      _tag: "supported",
+      text: "\u001b[1;5A",
+      nextModifier: null
+    })
     expect(applyTerminalModifierToInput("ctrl", "\u001b[A")).toEqual({
       _tag: "supported",
       text: "\u001b[1;5A",
@@ -71,7 +73,17 @@ describe("terminal keyboard rail", () => {
       text: "\u001bd",
       nextModifier: null
     })
+    expect(applyTerminalModifierToInput("alt", "\u001bd")).toEqual({
+      _tag: "supported",
+      text: "\u001bd",
+      nextModifier: null
+    })
     expect(applyTerminalModifierToInput("alt", "\t")).toEqual({
+      _tag: "supported",
+      text: "\u001b\t",
+      nextModifier: null
+    })
+    expect(applyTerminalModifierToInput("alt", "\u001b\t")).toEqual({
       _tag: "supported",
       text: "\u001b\t",
       nextModifier: null
@@ -88,6 +100,11 @@ describe("terminal keyboard rail", () => {
       _tag: "unsupported",
       reason: "modifier_combination_not_supported",
       nextModifier: "alt"
+    })
+    expect(applyTerminalModifierToInput("ctrl", "\u001b[1;3A")).toEqual({
+      _tag: "unsupported",
+      reason: "modifier_combination_not_supported",
+      nextModifier: "ctrl"
     })
   })
 })
