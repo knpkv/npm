@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
-import type { JobPayload, JobRecord } from "@knpkv/herdr-fleet/model"
+import { JobPayload } from "@knpkv/herdr-fleet/model"
+import type { JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
@@ -12,7 +13,7 @@ import {
   sanitizeJobPayload
 } from "../src/approval-request.js"
 
-const approvalPayload: JobPayload = {
+const approvalPayload: JobPayloadType = {
   channel: "coordinator_chat",
   kind: "agent.delegate",
   mode: "work",
@@ -393,8 +394,20 @@ describe("sanitized approval requests", () => {
     expect(() => Schema.decodeUnknownSync(SanitizedJobRecord)(projection)).not.toThrow()
   })
 
+  it("redacts malformed Unicode in encoded safe coordinates", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "nix.apply",
+      ref: `https://example.test/repo?ref=release%2F${"\uD800"}`
+    })
+    const request = approvalRequestFor(payload)
+    const projection = sanitizeJobRecord({ ...recordFor("pending_approval"), payload })
+    expect(request.fields[0]?.value).toBe("https://example.test/repo?ref=[redacted credential]")
+    expect(() => Schema.decodeUnknownSync(SanitizedJobRecord)(projection)).not.toThrow()
+    expect(JSON.stringify({ request, projection })).not.toContain("\\ud800")
+  })
+
   it("is idempotent for already-sanitized coordinates", () => {
-    const payload: JobPayload = {
+    const payload: JobPayloadType = {
       kind: "nix.apply",
       ref: "https://example.test/revision?token=secret"
     }

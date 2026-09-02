@@ -1568,18 +1568,41 @@ export const startHttpServer = async (
     let pendingApprovalProofDisclosureGeneration = 0
     const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
     const uncommittedApprovalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
+    const approvalProofJobReferenceCounts = new Map<string, number>()
     const activeApprovalProofs = (): ReadonlyArray<ApprovalProof> =>
       [...approvalProofSessions.values()].flatMap(({ proofsByJob }) => [...proofsByJob.values()])
-    const removeApprovalProofsFromSnapshot = (session: ApprovalProofSession): void => {
-      for (const jobId of session.proofsByJob.keys()) {
+    const retainApprovalProofJob = (jobId: string): void => {
+      approvalProofJobReferenceCounts.set(
+        jobId,
+        (approvalProofJobReferenceCounts.get(jobId) ?? 0) + 1
+      )
+      pendingApprovalProofSnapshot?.pendingJobIds.add(jobId)
+    }
+    const releaseApprovalProofJob = (jobId: string): void => {
+      const referenceCount = approvalProofJobReferenceCounts.get(jobId)
+      if (referenceCount === undefined) return
+      if (referenceCount === 1) {
+        approvalProofJobReferenceCounts.delete(jobId)
         pendingApprovalProofSnapshot?.pendingJobIds.delete(jobId)
+        return
+      }
+      approvalProofJobReferenceCounts.set(jobId, referenceCount - 1)
+    }
+    const deleteApprovalProof = (session: ApprovalProofSession, jobId: string): void => {
+      if (!session.proofsByJob.delete(jobId)) return
+      releaseApprovalProofJob(jobId)
+    }
+    const releaseApprovalProofs = (session: ApprovalProofSession): void => {
+      for (const jobId of session.proofsByJob.keys()) {
+        releaseApprovalProofJob(jobId)
       }
     }
     const pruneApprovalProofSnapshot = (): void => {
       if (pendingApprovalProofSnapshot === undefined) return
-      const activeJobIds = new Set(activeApprovalProofs().map(({ jobId }) => jobId))
       for (const jobId of pendingApprovalProofSnapshot.pendingJobIds) {
-        if (!activeJobIds.has(jobId)) pendingApprovalProofSnapshot.pendingJobIds.delete(jobId)
+        if (!approvalProofJobReferenceCounts.has(jobId)) {
+          pendingApprovalProofSnapshot.pendingJobIds.delete(jobId)
+        }
       }
     }
     const discardUncommittedApprovalProofSession = (request: IncomingMessage): void => {
@@ -1588,9 +1611,7 @@ export const startHttpServer = async (
       uncommittedApprovalProofSessionsByRequest.delete(request)
       approvalProofSessionsByRequest.delete(request)
       approvalProofSessions.delete(session.token)
-      for (const jobId of session.proofsByJob.keys()) {
-        pendingApprovalProofSnapshot?.pendingJobIds.delete(jobId)
-      }
+      releaseApprovalProofs(session)
     }
     const approvalProofSessionFor = (
       request: IncomingMessage,
@@ -1603,7 +1624,7 @@ export const startHttpServer = async (
       const session = approvalProofSessions.get(token)
       if (session === undefined || session.expiresAt <= observedAt) {
         if (session !== undefined) {
-          removeApprovalProofsFromSnapshot(session)
+          releaseApprovalProofs(session)
           approvalProofSessions.delete(token)
         }
         return undefined
@@ -1664,7 +1685,7 @@ export const startHttpServer = async (
           const pendingJobIds = pendingApprovalProofSnapshot?.pendingJobIds ?? refreshedPendingJobIds
           pruneApprovalProofSnapshot()
           for (const jobId of session.proofsByJob.keys()) {
-            if (!pendingJobIds.has(jobId)) session.proofsByJob.delete(jobId)
+            if (!pendingJobIds.has(jobId)) deleteApprovalProof(session, jobId)
           }
         }
       }
@@ -1674,7 +1695,7 @@ export const startHttpServer = async (
         const observedAt = now()
         for (const [token, session] of approvalProofSessions) {
           if (session.expiresAt <= observedAt) {
-            removeApprovalProofsFromSnapshot(session)
+            releaseApprovalProofs(session)
             approvalProofSessions.delete(token)
           }
         }
@@ -1731,9 +1752,9 @@ export const startHttpServer = async (
         }
         for (const record of pendingRecords) {
           if (record.approvalNonce === null) continue
-          pendingApprovalProofSnapshot?.pendingJobIds.add(record.id)
           if (!session.proofsByJob.has(record.id)) {
             pendingApprovalProofDisclosureGeneration += 1
+            retainApprovalProofJob(record.id)
             session.proofsByJob.set(record.id, {
               expiresAt: session.expiresAt,
               generation: pendingApprovalProofDisclosureGeneration,
@@ -2942,8 +2963,8 @@ export const startHttpServer = async (
                 ? yield* service.approve(jobId, approval, who)
                 : yield* service.reject(jobId, approval, who)
               if (proofSessionToken !== undefined) {
-                approvalProofSessions.get(proofSessionToken)?.proofsByJob.delete(jobId)
-                pendingApprovalProofSnapshot?.pendingJobIds.delete(jobId)
+                const proofSession = approvalProofSessions.get(proofSessionToken)
+                if (proofSession !== undefined) deleteApprovalProof(proofSession, jobId)
               }
               if (record.status === "queued") yield* enqueueJob(record.id)
               return sanitizeJobRecord(record)

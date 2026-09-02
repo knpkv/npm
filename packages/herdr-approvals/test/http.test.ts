@@ -1002,7 +1002,7 @@ esac
             operations,
             store
           })
-          let failStatus = true
+          let failStatus = false
           const instrumentedFleet: FleetService = {
             ...fleet,
             status: () =>
@@ -1028,6 +1028,20 @@ esac
           if (approvalUrl === null) {
             return yield* new FleetValidationError({ detail: "approval listener missing" })
           }
+          const origin = new URL(approvalUrl).origin
+          const initial = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          expect(initial.status).toBe(200)
+          const retainedCookie = initial.headers.get("set-cookie")?.split(";", 1)[0]
+          if (retainedCookie === undefined) {
+            return yield* new FleetValidationError({ detail: "retained approval proof cookie missing" })
+          }
+          yield* Effect.promise(() => initial.text())
+          const initializedSnapshot = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie: retainedCookie } })
+          )
+          expect(initializedSnapshot.status).toBe(200)
+          yield* Effect.promise(() => initializedSnapshot.text())
+          failStatus = true
           for (let attempt = 0; attempt < 256; attempt += 1) {
             const response = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
             expect(response.status).toBe(503)
@@ -1038,6 +1052,14 @@ esac
           expect(recovered.status).toBe(200)
           expect(recovered.headers.get("set-cookie")).toContain("fleet_approval_proof_session=")
           yield* Effect.promise(() => recovered.text())
+          const decision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: retainedCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(decision.status).toBe(200)
+          yield* Effect.promise(() => decision.text())
         }).pipe(Effect.scoped),
       (store) =>
         Effect.sync(() => {

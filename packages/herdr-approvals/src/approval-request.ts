@@ -103,11 +103,15 @@ const sanitizeEncodedUri = (value: string): string => {
   const encoded = encodedText(value)
   if (encoded === undefined) return sanitizeUriQueryParameters(value)
   if (encoded._tag !== "encoded") return redactedCredential
-  let sanitized = sanitizeCredentialText(sanitizeUriQueryParameters(encoded.value))
-  for (let layer = 0; layer < encoded.layers; layer += 1) {
-    sanitized = encodeURIComponent(sanitized)
+  try {
+    let sanitized = sanitizeCredentialText(sanitizeUriQueryParameters(encoded.value))
+    for (let layer = 0; layer < encoded.layers; layer += 1) {
+      sanitized = encodeURIComponent(sanitized)
+    }
+    return sanitized
+  } catch {
+    return redactedCredential
   }
-  return sanitized
 }
 
 const sanitizeUriQueryParameters = (value: string): string => {
