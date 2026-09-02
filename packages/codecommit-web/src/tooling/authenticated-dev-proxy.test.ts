@@ -115,7 +115,13 @@ describe("authenticated development proxy", () => {
 
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
     expect(packageJson.scripts.dev).toContain(authenticatedDevPublicOriginEnvironment)
-    expect(packageJson.scripts.predev).toContain("pnpm build")
+    const predev = packageJson.scripts.predev
+    expect(predev).toContain("@knpkv/browser-pairing")
+    expect(predev).toContain("@knpkv/relay-product...")
+    expect(predev).toContain("@knpkv/review...")
+    expect(predev.endsWith("pnpm build")).toBe(true)
+    expect(predev.indexOf("@knpkv/browser-pairing")).toBeLessThan(predev.indexOf("@knpkv/relay-product..."))
+    expect(predev.indexOf("@knpkv/relay-product...")).toBeLessThan(predev.indexOf("@knpkv/review..."))
     const url = ownerSessionUrlForOrigin(authenticatedDevPublicOrigin, {
       bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32)))
     })
