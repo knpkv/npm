@@ -105,6 +105,9 @@ export const serializeCredentialCookie = (
   ) {
     throw new CredentialCookieError({ reason: "invalid-max-age" })
   }
+  if (options.sameSite === "none" && !options.secure) {
+    throw new CredentialCookieError({ reason: "invalid-attribute" })
+  }
   const sameSite = options.sameSite === "strict" ? "Strict" : options.sameSite === "lax" ? "Lax" : "None"
   const parts = [
     `${options.name}=${decoded.success}`,
@@ -120,13 +123,13 @@ export const serializeCredentialCookie = (
 export type BootstrapTokenRead =
   | { readonly _tag: "missing" }
   | { readonly _tag: "malformed" }
-  | { readonly _tag: "present"; readonly token: Redacted.Redacted<SessionToken> }
+  | { readonly _tag: "present"; readonly token: Redacted.Redacted<PairingCode> }
 
 /** Read a bootstrap token without silently accepting malformed URL fragments. */
 export const readBootstrapToken = (hash: string): BootstrapTokenRead => {
   const value = new URLSearchParams(hash.startsWith("#") ? hash.slice(1) : hash).get("bootstrap_token")
   if (value === null) return { _tag: "missing" }
-  const decoded = Schema.decodeUnknownResult(SessionToken)(value)
+  const decoded = Schema.decodeUnknownResult(PairingCode)(value)
   return Result.isSuccess(decoded)
     ? { _tag: "present", token: Redacted.make(decoded.success) }
     : { _tag: "malformed" }

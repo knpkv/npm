@@ -1,4 +1,5 @@
-import { CsrfToken, PairingCode, SessionToken } from "../src/schema.js"
+import type { Redacted } from "effect"
+import { CsrfToken, PairingCode, readBootstrapToken, SessionToken } from "../src/schema.js"
 
 const pairingCode = PairingCode.make("ab".repeat(32))
 const sessionToken = SessionToken.make("cd".repeat(32))
@@ -11,6 +12,15 @@ const acceptsCsrfToken = (value: CsrfToken): CsrfToken => value
 acceptsPairingCode(pairingCode)
 acceptsSessionToken(sessionToken)
 acceptsCsrfToken(csrfToken)
+
+const bootstrap = readBootstrapToken(`#bootstrap_token=${"ab".repeat(32)}`)
+if (bootstrap._tag === "present") {
+  const pairingCredential: Redacted.Redacted<PairingCode> = bootstrap.token
+  void pairingCredential
+  // @ts-expect-error Bootstrap URL credentials must not become session-cookie credentials.
+  const sessionCredential: Redacted.Redacted<SessionToken> = bootstrap.token
+  void sessionCredential
+}
 
 // @ts-expect-error Role brands must not be interchangeable.
 acceptsCsrfToken(pairingCode)

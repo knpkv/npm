@@ -123,6 +123,12 @@ describe("browser pairing primitives", () => {
     expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/é" })).toThrow(
       CredentialCookieError
     )
+    expect(() => serializeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: false })).toThrow(
+      CredentialCookieError
+    )
+    expect(serializeCredentialCookie("ab".repeat(32), { ...valid, sameSite: "none", secure: true })).toContain(
+      "SameSite=None; Secure"
+    )
     expect(serializeCredentialCookie("ab".repeat(32), { ...valid, path: "/api,=v" })).toContain(
       "Path=/api,=v"
     )
