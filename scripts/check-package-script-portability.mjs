@@ -116,14 +116,14 @@ const hereDocumentDelimiters = (line) => {
       if (end === -1) return undefined
       const delimiter = line.slice(delimiterIndex + 1, end)
       if (delimiter.length === 0) return undefined
-      delimiters.push({ delimiter, stripTabs })
+      delimiters.push({ delimiter, stripTabs, expandable: false })
       index = end
       continue
     }
     const end = line.slice(delimiterIndex).search(/[\s;|&(){}]/u)
     const delimiter = line.slice(delimiterIndex, end === -1 ? line.length : delimiterIndex + end)
     if (!/^[A-Za-z0-9_.-]+$/u.test(delimiter)) return undefined
-    delimiters.push({ delimiter, stripTabs })
+    delimiters.push({ delimiter, stripTabs, expandable: true })
     index = delimiterIndex + delimiter.length - 1
   }
   return delimiters
@@ -137,7 +137,15 @@ const removeHereDocumentBodies = (command) => {
     const active = pending[0]
     if (active !== undefined) {
       const candidate = active.stripTabs ? line.replace(/^\t+/u, "") : line
-      if (candidate === active.delimiter) pending.shift()
+      if (active.expandable && active.continued) {
+        active.continued = hasUnescapedTrailingBackslash(candidate)
+        continue
+      }
+      if (candidate === active.delimiter) {
+        pending.shift()
+        continue
+      }
+      active.continued = active.expandable && hasUnescapedTrailingBackslash(candidate)
       continue
     }
     retained.push(line)
@@ -148,8 +156,53 @@ const removeHereDocumentBodies = (command) => {
   return retained.join("\n")
 }
 
-const shellCommandSegments = (command) => {
-  const source = removeHereDocumentBodies(command)
+const hasUnescapedTrailingBackslash = (line) => {
+  const trailing = line.match(/(\\+)$/u)?.[1]
+  return trailing !== undefined && trailing.length % 2 === 1
+}
+
+const removeShellComments = (command) => {
+  let quote
+  let escaped = false
+  let result = ""
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]
+    if (escaped) {
+      escaped = false
+      result += character
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      result += character
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      result += character
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      result += character
+      continue
+    }
+    const previous = command[index - 1]
+    if (character === "#" && (previous === undefined || /\s/u.test(previous) || ";|&(){}".includes(previous))) {
+      while (index < command.length && command[index] !== "\n") {
+        result += " "
+        index++
+      }
+      if (index < command.length) result += "\n"
+      continue
+    }
+    result += character
+  }
+  return result
+}
+
+const shellCommandSegments = (command, sanitized = false) => {
+  const source = sanitized ? command : removeShellComments(removeHereDocumentBodies(command))
   const segments = []
   let segmentStart = 0
   let segmentOperator
@@ -178,16 +231,6 @@ const shellCommandSegments = (command) => {
       quote = character
       continue
     }
-    if (character === "#" && (index === 0 || /\s/u.test(source[index - 1] ?? ""))) {
-      const newline = source.indexOf("\n", index)
-      if (newline === -1) {
-        pushSegment(index, "#", source.length - index)
-        break
-      }
-      pushSegment(index, "#", newline - index + 1)
-      index = newline
-      continue
-    }
     if (character === ";" || character === "\n" || character === "|" || character === "&") {
       const doubled = (character === "|" || character === "&") && source[index + 1] === character
       pushSegment(index, doubled ? character + character : character, doubled ? 2 : 1)
@@ -202,11 +245,95 @@ const shellCommandSegments = (command) => {
   return segments
 }
 
-const hasExecutableLifecycleCommand = (command, matcher) =>
-  shellCommandSegments(command).some(
-    ({ text, operator, nextOperator }) =>
-      operator !== "||" && operator !== "&" && nextOperator !== "&" && matcher.test(text.trim())
-  )
+const functionDefinitionPattern = /(?:^|[;\n])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
+
+const matchingFunctionBrace = (source, openIndex) => {
+  let depth = 0
+  let quote
+  let escaped = false
+  for (let index = openIndex; index < source.length; index++) {
+    const character = source[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (character === "{") depth++
+    if (character === "}" && --depth === 0) return index
+  }
+  return undefined
+}
+
+const extractFunctionDefinitions = (command) => {
+  const source = removeShellComments(removeHereDocumentBodies(command))
+  const definitions = []
+  functionDefinitionPattern.lastIndex = 0
+  for (const match of source.matchAll(functionDefinitionPattern)) {
+    const name = match[1]
+    const openIndex = source.indexOf("{", match.index)
+    if (openIndex === -1) continue
+    const closeIndex = matchingFunctionBrace(source, openIndex)
+    if (closeIndex === undefined) continue
+    const nameIndex = source.indexOf(name, match.index)
+    definitions.push({ name, start: nameIndex, end: closeIndex + 1, body: source.slice(openIndex + 1, closeIndex) })
+    functionDefinitionPattern.lastIndex = closeIndex + 1
+  }
+  let withoutDefinitions = source
+  for (const definition of definitions.toReversed()) {
+    withoutDefinitions = `${withoutDefinitions.slice(0, definition.start)}${" ".repeat(definition.end - definition.start)}${withoutDefinitions.slice(definition.end)}`
+  }
+  return { definitions, source: withoutDefinitions }
+}
+
+const segmentReachability = (segments) => {
+  const reachability = []
+  let previousResult = "unknown"
+  for (const [index, segment] of segments.entries()) {
+    const reachable =
+      index === 0 ||
+      (segment.operator === "&&" && previousResult !== "failure") ||
+      (segment.operator === "||" && previousResult !== "success") ||
+      (segment.operator !== "&&" && segment.operator !== "||")
+    reachability.push(reachable)
+    const text = segment.text.trim()
+    if (reachable) previousResult = text === "true" ? "success" : text === "false" ? "failure" : "unknown"
+  }
+  return reachability
+}
+
+const firstShellWord = (text) => text.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
+
+const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
+  const { definitions, source } = extractFunctionDefinitions(command)
+  const segments = shellCommandSegments(source, true)
+  const reachability = segmentReachability(segments)
+  if (
+    segments.some(
+      ({ text, nextOperator }, index) => reachability[index] && nextOperator !== "&" && matcher.test(text.trim())
+    )
+  ) {
+    return true
+  }
+  return definitions.some((definition) => {
+    if (visited.has(definition.name)) return false
+    const invoked = segments.some(
+      ({ text, nextOperator }, index) =>
+        reachability[index] && nextOperator !== "&" && firstShellWord(text) === definition.name
+    )
+    return invoked && hasExecutableLifecycleCommand(definition.body, matcher, new Set([...visited, definition.name]))
+  })
+}
 
 class PackageScriptPortabilityError extends Data.TaggedError("PackageScriptPortabilityError") {
   get message() {
@@ -397,6 +524,25 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "build_pairing() { pnpm --filter @knpkv/browser-pairing build; }; vite" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "build_pairing() { pnpm --filter @knpkv/browser-pairing build; }; build_pairing; vite"
+    },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "cat <<'EOF'\npnpm --filter @knpkv/browser-pairing build\nEOF\nvite" },
     browserPairingDependency
   ),
@@ -413,7 +559,34 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "cat <<EOF\npayload\\\nEOF\npnpm --filter @knpkv/browser-pairing build\nEOF\nvite"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "echo ready # ; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "echo ready;# ; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "false && pnpm --filter @knpkv/browser-pairing build; vite" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
