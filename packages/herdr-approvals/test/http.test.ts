@@ -600,6 +600,31 @@ esac
           )
           expect(firstDecision.status).toBe(200)
           yield* Effect.promise(() => firstDecision.text())
+          const staleSnapshotPending = pendingRecord("ALPHA", 102)
+          yield* store.put(staleSnapshotPending)
+          const staleSnapshotDisclosure = yield* Effect.promise(() =>
+            fetch(
+              `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${staleSnapshotPending.id}`,
+              { headers: { ...headers, cookie: cookieA } }
+            )
+          )
+          expect(staleSnapshotDisclosure.status).toBe(200)
+          yield* Effect.promise(() => staleSnapshotDisclosure.text())
+          const staleSnapshotContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieA }
+            })
+          )
+          expect(staleSnapshotContinuation.status).toBe(200)
+          yield* Effect.promise(() => staleSnapshotContinuation.text())
+          const staleSnapshotDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${staleSnapshotPending.id}/approve`, {
+              headers: { ...headers, cookie: cookieA, origin },
+              method: "POST"
+            })
+          )
+          expect(staleSnapshotDecision.status).toBe(200)
+          yield* Effect.promise(() => staleSnapshotDecision.text())
           const continuationResponse = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
               headers: { ...headers, cookie: cookieA }
