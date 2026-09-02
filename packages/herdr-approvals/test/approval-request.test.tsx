@@ -164,6 +164,19 @@ describe("sanitized approval requests", () => {
     expect(() => Schema.decodeUnknownSync(SanitizedJobRecord)(projection)).not.toThrow()
   })
 
+  it("bounds astral coordinates by the UTF-16 length used by their schema", () => {
+    const sanitized = sanitizeJobPayload({
+      kind: "nix.apply",
+      ref: `${"😀".repeat(2_040)}?token=secret`
+    })
+    expect(sanitized.kind).toBe("nix.apply")
+    if (sanitized.kind !== "nix.apply") return
+    expect(sanitized.ref).not.toContain("secret")
+    expect(sanitized.ref.length).toBeLessThanOrEqual(4 * 1_024)
+    const projection = sanitizeJobRecord({ ...recordFor("pending_approval"), payload: sanitized })
+    expect(() => Schema.decodeUnknownSync(SanitizedJobRecord)(projection)).not.toThrow()
+  })
+
   it("is idempotent for already-sanitized coordinates", () => {
     const payload: JobPayload = {
       kind: "nix.apply",

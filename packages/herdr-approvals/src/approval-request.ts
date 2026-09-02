@@ -82,10 +82,9 @@ const sanitizeRequestText = (value: string, maximumLength: number): string => {
       (match, prefix: string, credential: string) =>
         credential === redactedCredential ? match : `${prefix}${redactedCredential}`
     )
-  const codePoints = Array.from(sanitized)
-  return codePoints.length <= maximumLength
+  return sanitized.length <= maximumLength
     ? sanitized
-    : `${codePoints.slice(0, maximumLength - redactedCredential.length).join("")}${redactedCredential}`
+    : `${sanitized.slice(0, maximumLength - redactedCredential.length)}${redactedCredential}`
 }
 
 const field = (key: string, label: string, value: string, redacted = false): ApprovalRequestField => ({
