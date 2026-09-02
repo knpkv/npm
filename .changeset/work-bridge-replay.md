@@ -1,5 +1,5 @@
 ---
-"@knpkv/herdr-approvals": patch
+"@knpkv/herdr-approvals": minor
 "@knpkv/herdr-work": patch
 ---
 
