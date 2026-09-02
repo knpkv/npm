@@ -289,7 +289,7 @@ describe("CodeCommit web review boundary", () => {
         findings: Array.from({ length: 7 }, (_, index) => finding(index + 1)),
         verdict: "v".repeat(8_000)
       }
-      const structuredOutput = { reply: "r".repeat(8_000), review }
+      const structuredOutput = { reply: "\"".repeat(8_000), review }
       const encoded = JSON.stringify({
         is_error: false,
         structured_output: structuredOutput,
