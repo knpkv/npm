@@ -157,6 +157,26 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("redacts quoted credentials while preserving non-credential labels", () => {
+    const refs = ['password="first-secret second-secret"', 'Authorization: Bearer "first-token second-token"']
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-secret")
+      expect(encoded).not.toContain("second-secret")
+      expect(encoded).not.toContain("first-token")
+      expect(encoded).not.toContain("second-token")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: 'ref="release candidate"' }).fields[0]?.value).toBe(
+      'ref="release candidate"'
+    )
+  })
+
   it("keeps maximum-length sanitized payloads within their source schemas", () => {
     const ref = "token=x ".repeat(512)
     const sanitized = sanitizeJobPayload({ kind: "nix.apply", ref })

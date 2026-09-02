@@ -939,7 +939,7 @@ const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
         remote.push({
           host: peer.host,
           approvalUrl: peer.approvalUrl,
-          approval
+          approval: sanitizePendingApproval(approval)
         })
       }
       if (result.success.nextCursor !== null) {
@@ -993,7 +993,7 @@ const dashboardPendingPage = Effect.fn("HostHttp.dashboardPendingPage")(
     return {
       local: [],
       remote: page.approvals.map((approval) => ({
-        approval,
+        approval: sanitizePendingApproval(approval),
         approvalUrl,
         host: peer.host
       })),
@@ -1046,7 +1046,11 @@ const resolvePendingApprovalTarget = Effect.fn(
     if (approval !== undefined) {
       return {
         _tag: "remote",
-        remote: { approval, approvalUrl: peer.approvalUrl, host: peer.host }
+        remote: {
+          approval: sanitizePendingApproval(approval),
+          approvalUrl: peer.approvalUrl,
+          host: peer.host
+        }
       } satisfies PendingApprovalTarget
     }
     cursor = page.nextCursor
