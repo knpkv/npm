@@ -59,8 +59,10 @@ export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
 const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
+const quotedCredentialAssignment =
+  /((?:"(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))"|'(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
 const whitespaceCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(?!\[redacted credential\])([^\r\n]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const privateKeyMaterial =
   /-----BEGIN (?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END (?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY(?: BLOCK)?-----|$)/giu
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
@@ -79,6 +81,20 @@ type EncodedText =
   | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
   | { readonly _tag: "malformed" | "overflow" }
 
+const decodeEncodedRuns = (value: string): string | undefined => {
+  let changed = false
+  const decoded = value.replace(/(?:%[0-9a-f]{2})+/giu, (escaped) => {
+    try {
+      const decodedRun = decodeURIComponent(escaped)
+      if (decodedRun !== escaped) changed = true
+      return decodedRun
+    } catch {
+      return escaped
+    }
+  })
+  return changed ? decoded : undefined
+}
+
 const encodedText = (value: string): EncodedText | undefined => {
   if (!value.includes("%")) return undefined
   let candidate = value
@@ -88,6 +104,11 @@ const encodedText = (value: string): EncodedText | undefined => {
       if (decoded === candidate) return { _tag: "malformed" }
       candidate = decoded
     } catch {
+      const partiallyDecoded = decodeEncodedRuns(candidate)
+      if (partiallyDecoded !== undefined) {
+        candidate = partiallyDecoded
+        continue
+      }
       if (layers > 1 && /%(?![0-9a-f]{2})/iu.test(candidate)) {
         return { _tag: "encoded", layers: layers - 1, value: candidate }
       }
@@ -98,6 +119,18 @@ const encodedText = (value: string): EncodedText | undefined => {
   return { _tag: "overflow" }
 }
 
+const reencodeText = (value: string, layers: number): string | undefined => {
+  let encoded = value
+  try {
+    for (let layer = 0; layer < layers; layer += 1) {
+      encoded = encodeURIComponent(encoded)
+    }
+    return encoded
+  } catch {
+    return undefined
+  }
+}
+
 const sanitizeCredentialText = (value: string): string =>
   value
     .replace(privateKeyMaterial, redactedCredential)
@@ -106,6 +139,13 @@ const sanitizeCredentialText = (value: string): string =>
       credentialAuthorization,
       (match, prefix: string, credential: string) =>
         credential.trim() === redactedCredential ? match : `${prefix}${redactedCredential}`
+    )
+    .replace(
+      quotedCredentialAssignment,
+      (_match, prefix: string, credential: string) => {
+        const quote = credential.startsWith("'") ? "'" : "\""
+        return `${prefix}${quote}${redactedCredential}${quote}`
+      }
     )
     .replace(
       whitespaceCredentialAssignment,
@@ -155,11 +195,14 @@ const sanitizeUriAuthority = (value: string): string => {
   if (encoded === undefined) return `${prefix}${sanitizeDecodedAuthority(authority)}${suffix}`
   if (encoded._tag !== "encoded") return `${prefix}${redactedCredential}${suffix}`
 
-  let sanitized = sanitizeDecodedAuthority(encoded.value)
-  for (let layer = 0; layer < encoded.layers; layer += 1) {
-    sanitized = encodeURIComponent(sanitized)
+  const sanitized = sanitizeDecodedAuthority(encoded.value)
+  if (sanitized === encoded.value) {
+    return reencodeText(encoded.value, encoded.layers) === undefined
+      ? `${prefix}${redactedCredential}${suffix}`
+      : `${prefix}${authority}${suffix}`
   }
-  return `${prefix}${sanitized}${suffix}`
+  if (/%(?![0-9a-f]{2})/iu.test(encoded.value)) return `${prefix}${redactedCredential}${suffix}`
+  return `${prefix}${reencodeText(sanitized, encoded.layers) ?? redactedCredential}${suffix}`
 }
 
 const uriAuthorityAndPath = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*)(\/[^?#\s]*)?/iu
@@ -168,11 +211,12 @@ const sanitizeEncodedPathSegment = (value: string): string => {
   const encoded = encodedText(value)
   if (encoded === undefined) return sanitizeCredentialText(value)
   if (encoded._tag !== "encoded") return redactedCredential
-  let sanitized = sanitizeDecodedUri(encoded.value)
-  for (let layer = 0; layer < encoded.layers; layer += 1) {
-    sanitized = encodeURIComponent(sanitized)
+  const sanitized = sanitizeDecodedUri(encoded.value)
+  if (sanitized === encoded.value) {
+    return reencodeText(encoded.value, encoded.layers) === undefined ? redactedCredential : value
   }
-  return sanitized
+  if (/%(?![0-9a-f]{2})/iu.test(encoded.value)) return redactedCredential
+  return reencodeText(sanitized, encoded.layers) ?? redactedCredential
 }
 
 const sanitizeEncodedUriPath = (value: string): string =>
@@ -184,16 +228,21 @@ const sanitizeEncodedUriPath = (value: string): string =>
 
 const sanitizeEncodedUri = (value: string): string => {
   const normalized = normalizeHttpSchemeSeparators(value)
-  if (uriPrefix.test(normalized) && !encodedUriAuthorityBoundary.test(normalized)) return sanitizeDecodedUri(normalized)
-  const encoded = encodedText(normalized)
+  const encodedUri = uriPrefix.test(normalized)
+  if (encodedUri && !encodedUriAuthorityBoundary.test(normalized)) return sanitizeDecodedUri(normalized)
+  const authoritySanitized = encodedUri ? sanitizeUriAuthority(normalized) : normalized
+  const encoded = encodedText(authoritySanitized)
   if (encoded === undefined) return sanitizeDecodedUri(value)
   if (encoded._tag !== "encoded") return redactedCredential
   try {
-    let sanitized = sanitizeDecodedUri(encoded.value)
-    for (let layer = 0; layer < encoded.layers; layer += 1) {
-      sanitized = encodeURIComponent(sanitized)
+    const sanitized = sanitizeDecodedUri(encoded.value)
+    if (sanitized === encoded.value) {
+      return reencodeText(encoded.value, encoded.layers) === undefined
+        ? redactedCredential
+        : authoritySanitized
     }
-    return sanitized
+    if (/%(?![0-9a-f]{2})/iu.test(encoded.value)) return redactedCredential
+    return reencodeText(sanitized, encoded.layers) ?? redactedCredential
   } catch {
     return redactedCredential
   }

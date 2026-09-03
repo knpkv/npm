@@ -317,18 +317,47 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts whitespace-bearing unquoted credential values completely", () => {
-    const ref = "password=first-secret second-secret"
-    const request = approvalRequestFor({ kind: "nix.apply", ref })
-    const projection = sanitizeJobRecord({
-      ...recordFor("pending_approval"),
-      payload: { kind: "nix.apply", ref }
-    })
-    const encoded = JSON.stringify({ request, projection })
-    expect(encoded).not.toContain("first-secret")
-    expect(encoded).not.toContain("second-secret")
-    expect(encoded).toContain("[redacted credential]")
+    for (const ref of [
+      "password=first-secret second-secret",
+      "password=first-secret\nsecond-secret",
+      "password=first-secret\r\nsecond-secret"
+    ]) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-secret")
+      expect(encoded).not.toContain("second-secret")
+      expect(encoded).toContain("[redacted credential]")
+    }
     expect(approvalRequestFor({ kind: "nix.apply", ref: "ref=release candidate" }).fields[0]?.value).toBe(
       "ref=release candidate"
+    )
+  })
+
+  it("redacts quoted credential keys in structured coordinates", () => {
+    const refs = [
+      { ref: '{"password":"json-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"database-password":"prefixed-json-leaked-canary"}', redacted: "[redacted credential]" },
+      {
+        ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
+        redacted: "%5Bredacted%20credential%5D"
+      }
+    ]
+    for (const { redacted, ref } of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toMatch(/(?:json|prefixed-json|nested-json)-leaked-canary/u)
+      expect(encoded).toContain(redacted)
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: '{"revision":"release"}' }).fields[0]?.value).toBe(
+      '{"revision":"release"}'
     )
   })
 
@@ -357,6 +386,14 @@ describe("sanitized approval requests", () => {
       {
         redacted: "[redacted credential]",
         ref: "//deploy-user:protocol-canary@example.test/repo"
+      },
+      {
+        redacted: "%5Bredacted%20credential%5D",
+        ref: "https://user:leaked%2Fcanary@example.test/repo"
+      },
+      {
+        redacted: "[redacted credential]",
+        ref: "https://example.test/foo%25release-pass%2577ord%253Dleaked-canary"
       }
     ]
     for (const { redacted, ref } of refs) {
@@ -396,6 +433,18 @@ describe("sanitized approval requests", () => {
     const encoded = JSON.stringify({ request, projection })
     expect(encoded).not.toContain("leaked-canary")
     expect(encoded).toContain("%5Bredacted%20credential%5D")
+  })
+
+  it("redacts queries hidden behind encoded URI authorities", () => {
+    const ref = "https://host%2Fpath%3Fref%3Dhttps%253A%252F%252Forigin.test%252Frepo%253Fsig%253Dsecret-canary"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("secret-canary")
+    expect(encoded).toContain("redacted")
   })
 
   it("redacts encoded query credentials inside URI path segments", () => {

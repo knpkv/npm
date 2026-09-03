@@ -1784,7 +1784,7 @@ export const startHttpServer = async (
           }
           if (approvalProofSessions.size >= approvalProofSessionMaxCount) {
             const emptySession = [...approvalProofSessions].find(
-              ([, candidate]) => !candidate.locked && candidate.proofsByJob.size === 0
+              ([, candidate]) => !candidate.locked && candidate.waiters === 0 && candidate.proofsByJob.size === 0
             )
             if (emptySession === undefined) {
               yield* lock.release(1)
@@ -1853,15 +1853,16 @@ export const startHttpServer = async (
     const approvalProofHeaders = (
       request: IncomingMessage,
       records: ReadonlyArray<SanitizedJobRecord>,
-      secure: boolean
+      secure: boolean,
+      completedAt: number
     ) => {
       const mutation = approvalProofMutationsByRequest.get(request)
-      const session = mutation?.session ?? approvalProofSessionFor(request, now())
+      const session = mutation?.session ?? approvalProofSessionFor(request, completedAt)
       if (session === undefined) return {}
-      if (mutation !== undefined) renewApprovalProofSession(session, now())
+      if (mutation !== undefined) renewApprovalProofSession(session, completedAt)
       const shouldSetCookie = records.some((record) => {
         const proof = session.proofsByJob.get(record.id)
-        return proof !== undefined && proof.expiresAt > now()
+        return proof !== undefined && proof.expiresAt > completedAt
       })
       if (!shouldSetCookie) {
         discardApprovalProofMutation(request)
@@ -2632,7 +2633,12 @@ export const startHttpServer = async (
                 response,
                 200,
                 result.success,
-                approvalProofHeaders(request, result.success.pendingApprovals.local, mode === "serve")
+                approvalProofHeaders(
+                  request,
+                  result.success.pendingApprovals.local,
+                  mode === "serve",
+                  now()
+                )
               )
             }
             return
@@ -2687,7 +2693,12 @@ export const startHttpServer = async (
               json(response, mapped.status, mapped.body)
             } else {
               const records = result.success._tag === "local" ? [result.success.record] : []
-              json(response, 200, result.success, approvalProofHeaders(request, records, mode === "serve"))
+              json(
+                response,
+                200,
+                result.success,
+                approvalProofHeaders(request, records, mode === "serve", now())
+              )
             }
             return
           }
@@ -2878,7 +2889,7 @@ export const startHttpServer = async (
                 response,
                 200,
                 result.success,
-                approvalProofHeaders(request, result.success.local, mode === "serve")
+                approvalProofHeaders(request, result.success.local, mode === "serve", now())
               )
             }
             return
@@ -3104,7 +3115,12 @@ export const startHttpServer = async (
               "content-security-policy": "frame-ancestors 'none'",
               "content-type": "text/html; charset=utf-8",
               "x-frame-options": "DENY",
-              ...approvalProofHeaders(request, result.success.pendingApprovals.local, mode === "serve")
+              ...approvalProofHeaders(
+                request,
+                result.success.pendingApprovals.local,
+                mode === "serve",
+                now()
+              )
             })
             response.end(dashboardPage(result.success))
             return

@@ -930,16 +930,18 @@ esac
           )
           expect(retainedDecision.status).toBe(200)
           yield* Effect.promise(() => retainedDecision.text())
-          observedAt = 15 * 60 * 1_000 - 1_000
+          observedAt = 10 * 60 * 1_000
           const overlapPending = pendingRecord("ALPHA", 10_000)
+          const expiredPending = pendingRecord("ALPHA", 10_001)
           yield* store.put(overlapPending)
+          yield* store.put(expiredPending)
           delayStatus = true
           const refreshedFiber = yield* Effect.forkChild(
             Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
           )
           yield* Deferred.await(delayedStatusStarted)
           signalOverlapPendingPage = true
-          observedAt = 15 * 60 * 1_000 + 1_000
+          observedAt = 20 * 60 * 1_000
           const overlappingFiber = yield* Effect.forkChild(
             Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
           )
@@ -952,6 +954,7 @@ esac
           expect(overlapping.status).toBe(200)
           yield* Effect.promise(() => overlapping.text())
           delayStatus = false
+          observedAt = 26 * 60 * 1_000
           const decision = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/${overlapPending.id}/approve`, {
               headers: { ...headers, cookie, origin },
@@ -959,6 +962,14 @@ esac
             })
           )
           expect(decision.status).toBe(200)
+          observedAt = 36 * 60 * 1_000
+          const expiredDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${expiredPending.id}/approve`, {
+              headers: { ...headers, cookie, origin },
+              method: "POST"
+            })
+          )
+          expect(expiredDecision.status).toBe(409)
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(
