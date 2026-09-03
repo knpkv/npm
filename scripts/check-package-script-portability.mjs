@@ -376,6 +376,7 @@ const isKnownSuccessfulShellCommand = (text, start, definitions) =>
 
 const unsupportedShellWords = new Set([
   "case",
+  "command",
   "do",
   "done",
   "esac",
@@ -1063,6 +1064,25 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "stop() { exit 0; }; eval stop; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "stop() { exit 0; }; command eval stop; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "stop() { exit 0; }; command eval stop; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
