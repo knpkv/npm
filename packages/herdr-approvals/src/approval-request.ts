@@ -197,7 +197,7 @@ const sanitizeUriAuthority = (value: string): string => {
 
   const sanitized = sanitizeDecodedAuthority(encoded.value)
   if (sanitized === encoded.value) {
-    return reencodeText(encoded.value, encoded.layers) === undefined
+    return /%(?![0-9a-f]{2})/iu.test(encoded.value) || reencodeText(encoded.value, encoded.layers) === undefined
       ? `${prefix}${redactedCredential}${suffix}`
       : `${prefix}${authority}${suffix}`
   }

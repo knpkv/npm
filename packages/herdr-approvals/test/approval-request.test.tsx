@@ -436,15 +436,20 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts queries hidden behind encoded URI authorities", () => {
-    const ref = "https://host%2Fpath%3Fref%3Dhttps%253A%252F%252Forigin.test%252Frepo%253Fsig%253Dsecret-canary"
-    const request = approvalRequestFor({ kind: "nix.apply", ref })
-    const projection = sanitizeJobRecord({
-      ...recordFor("pending_approval"),
-      payload: { kind: "nix.apply", ref }
-    })
-    const encoded = JSON.stringify({ request, projection })
-    expect(encoded).not.toContain("secret-canary")
-    expect(encoded).toContain("redacted")
+    const refs = [
+      "https://host%2Fpath%3Fref%3Dhttps%253A%252F%252Forigin.test%252Frepo%253Fsig%253Dsecret-canary",
+      "https://host%3Fref%3Dsig%253Dsecret-canary%ZZ"
+    ]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("secret-canary")
+      expect(encoded).toContain("redacted")
+    }
   })
 
   it("redacts encoded query credentials inside URI path segments", () => {
