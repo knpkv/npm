@@ -9,11 +9,13 @@ import { DatabaseSync } from "node:sqlite"
 import {
   makeWorkService,
   projectWorkSnapshots,
+  type WorkDecisionHandoff,
   type WorkGoal,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
   type WorkGoalFamily,
   workHistoryMaxEvents,
+  type WorkLaneClaim,
   workSnapshotMaxGoals,
   WorkStore
 } from "../src/index.js"
@@ -380,6 +382,60 @@ describe("durable Work projection", () => {
         failure: { _tag: "WorkCheckpointConflictError", eventId: "event-created-replayed" }
       })
       expect(yield* store.list()).toEqual([history[0]])
+    }).pipe(provideNodeServices))
+
+  it.effect("atomically replays checkpoint batches and rejects transaction conflicts", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
+      expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
+      const changed = { ...history[1], goal: { ...history[1].goal, summary: "changed transaction" } }
+      expect(yield* Effect.result(service.recordMany("transaction-1", [history[0], changed]))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-1" }
+      })
+      expect(yield* store.list()).toEqual(history.slice(0, 2))
+    }).pipe(provideNodeServices))
+
+  it.effect("compare-and-set claims and retains compact decision handoffs", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-lane-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      const claim: WorkLaneClaim = {
+        branch: "feat/durable-work",
+        expectedRevision: 0,
+        head: "0123456789012345678901234567890123456789",
+        laneId: "goal-packages",
+        owner: { id: "owner-packages", name: "Package owner" },
+        parent: null,
+        phase: "implementation",
+        worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat-durable-work"
+      }
+      expect(yield* service.claim(claim)).toMatchObject({ revision: 1, head: claim.head })
+      expect(yield* Effect.result(service.claim(claim))).toMatchObject({
+        failure: { _tag: "WorkLaneClaimConflictError", actualRevision: 1 }
+      })
+      const next = yield* service.claim({ ...claim, expectedRevision: 1, phase: "validation" })
+      expect(next.revision).toBe(2)
+      const handoff: WorkDecisionHandoff = {
+        decision: "handoff",
+        goalId: "goal-packages",
+        id: "handoff-1",
+        laneId: "goal-packages",
+        occurredAt: 1,
+        owner: claim.owner,
+        summary: "Coordinator owns release verification",
+        version: "herdr.work.decision.v1"
+      }
+      expect(yield* service.handoff(handoff)).toEqual(handoff)
+      expect(yield* service.handoff(handoff)).toEqual(handoff)
+      expect(yield* service.decisions("goal-packages")).toEqual([handoff])
     }).pipe(provideNodeServices))
 
   it.effect("rejects cross-history inconsistencies before durable mutation", () =>

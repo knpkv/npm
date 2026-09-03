@@ -1,6 +1,13 @@
 import { Clock, Effect } from "effect"
-import type { WorkCheckpointConflictError, WorkProjectionError, WorkStoreError } from "./errors.js"
-import type { WorkGoalCheckpoint, WorkSnapshots } from "./model.js"
+import type {
+  WorkCheckpointConflictError,
+  WorkDecisionHandoffConflictError,
+  WorkLaneClaimConflictError,
+  WorkProjectionError,
+  WorkStoreError,
+  WorkTransactionConflictError
+} from "./errors.js"
+import type { WorkDecisionHandoff, WorkGoalCheckpoint, WorkLaneClaim, WorkLaneClaimed, WorkSnapshots } from "./model.js"
 import { projectWorkSnapshots } from "./projection.js"
 import type { WorkStoreService } from "./store.js"
 
@@ -12,6 +19,22 @@ export interface WorkService {
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
   readonly snapshots: (observedAt?: number) => Effect.Effect<WorkSnapshots, WorkStoreError | WorkProjectionError>
+  readonly recordMany: (
+    transactionId: string,
+    events: ReadonlyArray<WorkGoalCheckpoint>
+  ) => Effect.Effect<
+    ReadonlyArray<WorkGoalCheckpoint>,
+    WorkCheckpointConflictError | WorkProjectionError | WorkTransactionConflictError | WorkStoreError
+  >
+  readonly claim: (
+    claim: WorkLaneClaim
+  ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkStoreError>
+  readonly handoff: (
+    handoff: WorkDecisionHandoff
+  ) => Effect.Effect<WorkDecisionHandoff, WorkDecisionHandoffConflictError | WorkStoreError>
+  readonly decisions: (
+    laneId: string
+  ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>
 }
 
 export const makeWorkService = Effect.fn("HerdrWork.makeService")(function*(store: WorkStoreService) {
@@ -20,5 +43,12 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function*(stor
     const timestamp = observedAt ?? (yield* Clock.currentTimeMillis)
     return yield* store.list().pipe(Effect.flatMap((events) => projectWorkSnapshots(events, timestamp)))
   })
-  return { record, snapshots } satisfies WorkService
+  const recordMany = Effect.fn("HerdrWork.recordMany")((
+    transactionId: string,
+    events: ReadonlyArray<WorkGoalCheckpoint>
+  ) => store.appendMany(transactionId, events))
+  const claim = Effect.fn("HerdrWork.claim")((lane: WorkLaneClaim) => store.claim(lane))
+  const handoff = Effect.fn("HerdrWork.handoff")((decision: WorkDecisionHandoff) => store.decision(decision))
+  const decisions = Effect.fn("HerdrWork.decisions")((laneId: string) => store.decisions(laneId))
+  return { claim, decisions, handoff, record, recordMany, snapshots } satisfies WorkService
 })

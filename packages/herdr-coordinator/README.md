@@ -7,3 +7,12 @@ Ask mode submits an `agent.delegate` consult job. Work mode submits a locally au
 Coordinator output is newline-delimited `herdr.coordinator.child.v1` lifecycle events. Both events carry the exact fleet job ID and request ID. A `started` event with the exact sanitized worker identity must arrive before the matching `completed` event. Root coordinator identities omit `relationship` and are valid only for coordinator-handled consult or chat jobs. Delegated child identities carry their exact `parentAgentId` and `relation`; ordinary work without that relationship is rejected. Missing, malformed, duplicate, reordered, job-mismatched, or request-mismatched events fail with named lifecycle errors. Terminal transcripts are never accepted as chat replies. Chat history exposes the same persisted worker and canonical Connect target after restart.
 
 Browser-safe schemas are exported from `@knpkv/herdr-coordinator/model`.
+
+`Orchestrator` accepts only the typed `fleet.job` command union and returns an
+immediate idempotent receipt. Its durable event stream records `accepted`,
+`queued`, `running`, `settled`, `delivery_failed`, and `task_failed`; activity
+idempotency keys are persisted with every event. `recover` marks work that was
+running at restart as `delivery_failed` and never retries it implicitly. The
+exported `singleRunnerLayer` composes Effect's SingleRunner with SQL-backed
+MessageStorage; provide an Effect SQL client and Crypto implementation at the
+application boundary.

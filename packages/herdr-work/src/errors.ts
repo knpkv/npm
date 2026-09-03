@@ -28,3 +28,22 @@ export class WorkCheckpointConflictError extends Schema.TaggedError<WorkCheckpoi
     occurredAt: Schema.Number
   }
 ) {}
+
+export class WorkTransactionConflictError extends Schema.TaggedError<WorkTransactionConflictError>()(
+  "WorkTransactionConflictError",
+  { transactionId: Schema.String }
+) {}
+
+export class WorkLaneClaimConflictError extends Schema.TaggedError<WorkLaneClaimConflictError>()(
+  "WorkLaneClaimConflictError",
+  {
+    laneId: Schema.String,
+    expectedRevision: Schema.Number,
+    actualRevision: Schema.Number
+  }
+) {}
+
+export class WorkDecisionHandoffConflictError extends Schema.TaggedError<WorkDecisionHandoffConflictError>()(
+  "WorkDecisionHandoffConflictError",
+  { handoffId: Schema.String }
+) {}

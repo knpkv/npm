@@ -8,6 +8,13 @@ Each `WorkGoalCheckpoint` stores a complete, Schema-decoded goal state at its ex
 
 `WorkStore` persists events in SQLite. Recording the exact same checkpoint again is an idempotent replay; reusing an event ID or goal timestamp with changed content returns `WorkCheckpointConflictError`. `makeWorkService` is the small runtime interface for recording checkpoints and reading all four snapshots.
 
+`WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
+transaction. Reusing its transaction ID with the same batch replays it; a
+different batch returns `WorkTransactionConflictError`. `claim` is a durable
+compare-and-set lane claim containing the canonical worktree, branch, exact
+head, owner, parent, phase, and expected revision. `handoff` stores a compact,
+credential-free decision record for later recovery.
+
 `WorkBoard` renders these persisted outbound-link forms:
 
 - `AgentConnectTarget.url` — local terminal handoff.

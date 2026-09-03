@@ -241,6 +241,76 @@ export const WorkGoalCheckpoint = Schema.Struct({
 )
 export interface WorkGoalCheckpoint extends Schema.Schema.Type<typeof WorkGoalCheckpoint> {}
 
+const CanonicalWorktree = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_048),
+  Schema.makeFilter(
+    (value) =>
+      value.startsWith("/") &&
+      !value.includes("\u0000") &&
+      !value.includes("/./") &&
+      !value.includes("/../") &&
+      !value.endsWith("/"),
+    { expected: "an absolute canonical worktree path" }
+  )
+)
+
+const Branch = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[A-Za-z0-9._/-]+$/)
+)
+
+const ExactHead = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{40,64}$/),
+  Schema.isMaxLength(64)
+)
+
+const Revision = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
+)
+
+export const WorkLanePhase = Schema.Literals([
+  "claim",
+  "implementation",
+  "validation",
+  "review",
+  "shipped"
+])
+export type WorkLanePhase = typeof WorkLanePhase.Type
+
+/** Compare-and-set authority for one package-owned Work lane. */
+export const WorkLaneClaim = Schema.Struct({
+  laneId: WorkGoalId,
+  worktree: CanonicalWorktree,
+  branch: Branch,
+  head: ExactHead,
+  owner: WorkOwner,
+  parent: Schema.NullOr(Identifier),
+  phase: WorkLanePhase,
+  expectedRevision: Revision
+})
+export interface WorkLaneClaim extends Schema.Schema.Type<typeof WorkLaneClaim> {}
+
+export const WorkLaneClaimed = Schema.Struct({
+  ...WorkLaneClaim.fields,
+  revision: Revision
+})
+export interface WorkLaneClaimed extends Schema.Schema.Type<typeof WorkLaneClaimed> {}
+
+export const WorkDecisionHandoff = Schema.Struct({
+  version: Schema.Literal("herdr.work.decision.v1"),
+  id: Identifier,
+  laneId: WorkGoalId,
+  goalId: WorkGoalId,
+  decision: Schema.Literals(["continue", "blocked", "handoff", "complete"]),
+  summary: Text,
+  owner: WorkOwner,
+  occurredAt: Timestamp
+})
+export interface WorkDecisionHandoff extends Schema.Schema.Type<typeof WorkDecisionHandoff> {}
+
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type
 

@@ -910,6 +910,12 @@ importers:
 
   packages/herdr-coordinator:
     dependencies:
+      '@effect/platform-node':
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
+      '@effect/sql-sqlite-node':
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)
       '@knpkv/herdr-fleet':
         specifier: workspace:^
         version: link:../herdr-fleet
@@ -917,9 +923,6 @@ importers:
         specifier: 4.0.0-rc.109
         version: 4.0.0-rc.109
     devDependencies:
-      '@effect/platform-node':
-        specifier: 4.0.0-rc.109
-        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
       '@effect/vitest':
         specifier: 4.0.0-rc.109
         version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
@@ -1934,6 +1937,11 @@ packages:
 
   '@effect/sql-libsql@4.0.0-rc.109':
     resolution: {integrity: sha512-qRtiT37LW53TOjF2BHBpvj3I0L1oKZuUCB7+9H9GBdkwRALEDM8kJX89qT2izTNDFnbszagsD2yajb1CxVmKkA==}
+    peerDependencies:
+      effect: 4.0.0-rc.109
+
+  '@effect/sql-sqlite-node@4.0.0-rc.109':
+    resolution: {integrity: sha512-3oXteYQ5B5UgIFbOm241HZftA2e1jBhbeMtbWhhs6nV6TkDCXvT6ctwZcRHPjGPY8hF8qAIEwWcT7BlUk9ZY2A==}
     peerDependencies:
       effect: 4.0.0-rc.109
 
@@ -8801,6 +8809,10 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
+
+  '@effect/sql-sqlite-node@4.0.0-rc.109(effect@4.0.0-rc.109)':
+    dependencies:
+      effect: 4.0.0-rc.109
 
   '@effect/tsgo-darwin-arm64@0.36.4':
     optional: true
