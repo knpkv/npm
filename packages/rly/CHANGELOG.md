@@ -1,5 +1,15 @@
 # @knpkv/rly
 
+## 0.6.0
+
+### Minor Changes
+
+- [#385](https://github.com/knpkv/npm/pull/385) [`e4fb297`](https://github.com/knpkv/npm/commit/e4fb2975fa5a23f679fda0e0921d6837c4b684aa) Thanks [@konopkov](https://github.com/konopkov)! - Add the shared responsive Relay Dock presentation pattern.
+
+### Patch Changes
+
+- [#400](https://github.com/knpkv/npm/pull/400) [`1dcc473`](https://github.com/knpkv/npm/commit/1dcc473ebd14c2a4ac00d7fd67bf9a8d80201f66) Thanks [@konopkov](https://github.com/konopkov)! - Keep modal Relay focus trapping correct for controls inside nested open ShadowRoots.
+
 ## 0.5.0
 
 ### Minor Changes
