@@ -275,7 +275,7 @@ const shellCommandSegments = (command, sanitized = false) => {
   return segments
 }
 
-const functionDefinitionPattern = /(?:^|[;\n])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
+const functionDefinitionPattern = /(?:^|[;\n]|&&|\|\||[|&])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
 
 const matchingBrace = (source, openIndex, opener, closer) => {
   let depth = 0
@@ -717,7 +717,34 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "true && pnpm() { true; }; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "true || tsc() { true; }; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "build_pairing() { true; }; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "true && build_pairing() { true; }; pnpm --filter @knpkv/browser-pairing build"
+    },
     browserPairingDependency
   ),
   []
