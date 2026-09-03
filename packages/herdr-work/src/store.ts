@@ -2,6 +2,7 @@ import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Effect, Equal, FileSystem, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { WorkCheckpointConflictError, WorkProjectionError, WorkStoreError } from "./errors.js"
+import { validateGoalFamilyHistory } from "./goal-family.js"
 import {
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
@@ -170,6 +171,8 @@ export class WorkStore implements WorkStoreService {
           const history = Schema.decodeUnknownSync(StoredEventRows)(
             this.#database.prepare("SELECT record FROM work_goal_events").all()
           ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+          const familyError = validateGoalFamilyHistory([...history, decoded])
+          if (familyError !== undefined) return reject(familyError)
           if (maximumSnapshotBytes(history, decoded) > fleetResponseBodyMaxBytes) {
             return reject(
               new WorkProjectionError({

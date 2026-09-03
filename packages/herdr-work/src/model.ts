@@ -143,6 +143,12 @@ export const WorkReview = Schema.Struct({
 })
 export interface WorkReview extends Schema.Schema.Type<typeof WorkReview> {}
 
+export const WorkGoalFamily = Schema.Struct({
+  canonicalGoalId: WorkGoalId,
+  role: Schema.Literals(["canonical", "superseded"])
+})
+export interface WorkGoalFamily extends Schema.Schema.Type<typeof WorkGoalFamily> {}
+
 export const WorkGoal = Schema.Struct({
   id: WorkGoalId,
   title: Text,
@@ -155,6 +161,7 @@ export const WorkGoal = Schema.Struct({
   delivery: DeliveryStage,
   blocker: Schema.NullOr(WorkBlocker),
   connectTarget: Schema.NullOr(AgentConnectTarget),
+  goalFamily: Schema.optionalKey(WorkGoalFamily),
   agentHierarchy: Schema.optionalKey(Schema.NullOr(WorkAgentHierarchy)),
   activity: Schema.optionalKey(
     Schema.Array(WorkActivity)
@@ -197,6 +204,7 @@ export const WorkGoal = Schema.Struct({
       const hasBlocker = goal.blocker !== null ||
         (goal.blockers !== undefined && goal.blockers.length > 0)
       const agent = goal.agentHierarchy?.agent
+      const family = goal.goalFamily
       const isDetailTimestamp = (timestamp: number): boolean =>
         timestamp >= goal.createdAt && timestamp <= goal.updatedAt
       return goal.updatedAt >= goal.createdAt &&
@@ -207,6 +215,7 @@ export const WorkGoal = Schema.Struct({
         (goal.activity === undefined || goal.activity.every(({ occurredAt }) => isDetailTimestamp(occurredAt))) &&
         (goal.requests === undefined || goal.requests.every(({ requestedAt }) => isDetailTimestamp(requestedAt))) &&
         (goal.review === undefined || goal.review === null || isDetailTimestamp(goal.review.updatedAt)) &&
+        (family === undefined || ((family.role === "canonical") === (family.canonicalGoalId === goal.id))) &&
         (agent === undefined || agent === null || (
           (agent.relationship === undefined || agent.relationship.parentAgentId !== agent.agentId) &&
           goal.connectTarget !== null &&

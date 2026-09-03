@@ -48,6 +48,10 @@ const workGoalInput = {
   createdAt: 1_000,
   delivery: "pull_request",
   detail: "Keep the daily fleet handoff visible in one place",
+  goalFamily: {
+    canonicalGoalId: "goal-work-control-app",
+    role: "canonical"
+  },
   id: "goal-work-control-app",
   owner: { id: "owner-coordinator", name: "Coordinator" },
   repository: { branch: "feat/herdr-work-control-app", repository: "npm" },
@@ -214,6 +218,27 @@ describe("Work control app", () => {
     })
 
     expect(selfParent._tag).toBe("Failure")
+    expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
+  })
+
+  it("binds a goal-family role to the canonical goal identity", () => {
+    const canonicalOther = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      goalFamily: {
+        canonicalGoalId: "goal-other",
+        role: "canonical"
+      }
+    })
+    const supersededSelf = Schema.decodeUnknownResult(WorkGoal)({
+      ...workGoalInput,
+      goalFamily: {
+        canonicalGoalId: workGoalInput.id,
+        role: "superseded"
+      }
+    })
+
+    expect(canonicalOther._tag).toBe("Failure")
+    expect(supersededSelf._tag).toBe("Failure")
     expect(Schema.decodeUnknownResult(WorkGoal)(workGoalInput)._tag).toBe("Success")
   })
 

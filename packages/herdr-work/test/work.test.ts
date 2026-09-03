@@ -12,6 +12,7 @@ import {
   type WorkGoal,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  type WorkGoalFamily,
   workHistoryMaxEvents,
   workSnapshotMaxGoals,
   WorkStore
@@ -71,6 +72,23 @@ const checkpointForGoal = (
     createdAt,
     id: goalId,
     title: goalId
+  },
+  occurredAt,
+  version: "herdr.work.event.v1"
+})
+
+const familyCheckpoint = (
+  checkpoint: WorkGoalCheckpointType,
+  eventId: string,
+  occurredAt: number,
+  canonicalGoalId: string,
+  role: WorkGoalFamily["role"]
+): WorkGoalCheckpointType => ({
+  eventId,
+  goal: {
+    ...checkpoint.goal,
+    goalFamily: { canonicalGoalId, role },
+    updatedAt: occurredAt
   },
   occurredAt,
   version: "herdr.work.event.v1"
@@ -183,6 +201,120 @@ describe("durable Work projection", () => {
       expect(snapshots.week.goals.map(({ id }) => id)).toContain("goal-later")
       expect(snapshots.month.goals.map(({ id }) => id)).not.toContain("goal-later")
     }))
+
+  it.effect("projects only the canonical goal after durable supersession", () =>
+    Effect.gen(function*() {
+      const original = checkpointForGoal("goal-connect-original", "original-created", 0, 0)
+      const versionTwo: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-connect-v2", "v2-created", 0, 0),
+        goal: {
+          ...checkpointForGoal("goal-connect-v2", "v2-created", 0, 0).goal,
+          blocker: { since: 0, summary: "Audit gate failed" },
+          state: "blocked"
+        }
+      }
+      const versionThree = checkpointForGoal("goal-connect-v3", "v3-created", 0, 0)
+      const relationAt = 2 * day
+      const canonical = familyCheckpoint(
+        versionThree,
+        "v3-canonical",
+        relationAt,
+        "goal-connect-v3",
+        "canonical"
+      )
+      const supersededV2 = familyCheckpoint(
+        versionTwo,
+        "v2-superseded",
+        relationAt,
+        "goal-connect-v3",
+        "superseded"
+      )
+      const supersededOriginal = familyCheckpoint(
+        original,
+        "original-superseded",
+        relationAt,
+        "goal-connect-v3",
+        "superseded"
+      )
+
+      const snapshots = yield* projectWorkSnapshots(
+        [original, versionTwo, versionThree, supersededV2, supersededOriginal, canonical],
+        relationAt + 1
+      )
+      expect(snapshots.now.goals.map(({ id }) => id)).toEqual(["goal-connect-v3"])
+      expect(snapshots.day.goals.map(({ id }) => id).toSorted()).toEqual([
+        "goal-connect-original",
+        "goal-connect-v2",
+        "goal-connect-v3"
+      ])
+      expect(supersededV2.goal).toMatchObject({
+        blocker: { since: 0, summary: "Audit gate failed" },
+        state: "blocked"
+      })
+    }))
+
+  it.effect("rejects dangling, changed, and removed goal-family relations", () =>
+    Effect.gen(function*() {
+      const dangling = familyCheckpoint(
+        checkpointForGoal("goal-v2", "v2-created", 0, 0),
+        "v2-superseded",
+        0,
+        "goal-v3",
+        "superseded"
+      )
+      expect(yield* Effect.result(projectWorkSnapshots([dangling], 0))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "inconsistent_history" }
+      })
+
+      const canonical = familyCheckpoint(
+        checkpointForGoal("goal-v3", "v3-created", 0, 0),
+        "v3-canonical",
+        0,
+        "goal-v3",
+        "canonical"
+      )
+      const removed = {
+        ...checkpointForGoal("goal-v3", "v3-removed", 1, 0),
+        goal: { ...checkpointForGoal("goal-v3", "v3-removed", 1, 0).goal }
+      }
+      expect(yield* Effect.result(projectWorkSnapshots([canonical, removed], 1))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "inconsistent_history" }
+      })
+
+      const retargeted = familyCheckpoint(
+        removed,
+        "v3-retargeted",
+        1,
+        "goal-v4",
+        "superseded"
+      )
+      expect(yield* Effect.result(projectWorkSnapshots([canonical, retargeted], 1))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "inconsistent_history" }
+      })
+    }))
+
+  it.effect("rejects invalid goal-family checkpoints before committing them", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-family-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const versionTwo = checkpointForGoal("goal-v2", "v2-created", 0, 0)
+      const versionThree = checkpointForGoal("goal-v3", "v3-created", 0, 0)
+      yield* store.append(versionTwo)
+      yield* store.append(versionThree)
+
+      const superseded = familyCheckpoint(versionTwo, "v2-superseded", 1, "goal-v3", "superseded")
+      expect(yield* Effect.result(store.append(superseded))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "inconsistent_history" }
+      })
+      expect(yield* store.list()).toEqual([versionTwo, versionThree])
+
+      const canonical = familyCheckpoint(versionThree, "v3-canonical", 1, "goal-v3", "canonical")
+      yield* store.append(canonical)
+      yield* store.append(superseded)
+      expect(yield* store.list()).toEqual([versionTwo, versionThree, superseded, canonical])
+    }).pipe(provideNodeServices))
 
   it.effect("rejects malformed and ambiguous durable history", () =>
     Effect.gen(function*() {

@@ -1,5 +1,6 @@
 import { Effect, Schema } from "effect"
 import { WorkProjectionError } from "./errors.js"
+import { validateGoalFamilyHistory } from "./goal-family.js"
 import {
   type WorkGoal,
   WorkGoalCheckpoint,
@@ -33,7 +34,8 @@ const validateHistory = Effect.fn("HerdrWork.validateHistory")(function*(
   const eventIds = new Set<string>()
   const goalTimes = new Set<string>()
   const createdAt = new Map<string, number>()
-  for (const event of events) {
+  const ordered = events.toSorted((left, right) => left.occurredAt - right.occurredAt)
+  for (const event of ordered) {
     if (eventIds.has(event.eventId)) {
       return yield* projectionError("duplicate_event", `work event ${event.eventId} occurs more than once`, event)
     }
@@ -66,6 +68,8 @@ const validateHistory = Effect.fn("HerdrWork.validateHistory")(function*(
       )
     }
   }
+  const familyError = validateGoalFamilyHistory(events)
+  if (familyError !== undefined) return yield* familyError
   return events
 })
 
@@ -83,7 +87,7 @@ const snapshotAt = (
     window,
     observedAt,
     asOf,
-    goals: [...latest.values()].toSorted(
+    goals: [...latest.values()].filter((goal) => goal.goalFamily?.role !== "superseded").toSorted(
       (left, right) => right.updatedAt - left.updatedAt || left.title.localeCompare(right.title)
     )
   }
