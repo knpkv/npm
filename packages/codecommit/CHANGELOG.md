@@ -1,5 +1,17 @@
 # @knpkv/codecommit
 
+## 0.12.0
+
+### Minor Changes
+
+- [#410](https://github.com/knpkv/npm/pull/410) [`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866) Thanks [@konopkov](https://github.com/konopkov)! - Add Claude-native Relay review profiles and persist Relay settings immediately after save.
+
+### Patch Changes
+
+- Updated dependencies [[`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866), [`316eff1`](https://github.com/knpkv/npm/commit/316eff159bc44fa46d5d1ec68d4515990fb3d9a1)]:
+  - @knpkv/codecommit-core@0.16.0
+  - @knpkv/codecommit-web@0.16.0
+
 ## 0.11.1
 
 ### Patch Changes

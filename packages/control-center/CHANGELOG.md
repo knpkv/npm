@@ -1,5 +1,14 @@
 # @knpkv/control-center
 
+## 0.8.1
+
+### Patch Changes
+
+- Updated dependencies [[`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866), [`1dcc473`](https://github.com/knpkv/npm/commit/1dcc473ebd14c2a4ac00d7fd67bf9a8d80201f66), [`316eff1`](https://github.com/knpkv/npm/commit/316eff159bc44fa46d5d1ec68d4515990fb3d9a1)]:
+  - @knpkv/ai-claude@0.3.0
+  - @knpkv/codecommit-core@0.16.0
+  - @knpkv/rly@0.5.1
+
 ## 0.8.0
 
 ### Minor Changes

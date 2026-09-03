@@ -1,5 +1,13 @@
 # @knpkv/herdr-connect
 
+## 0.3.1
+
+### Patch Changes
+
+- Updated dependencies [[`beed20b`](https://github.com/knpkv/npm/commit/beed20b1255616223d74e244065b560c7407eec2), [`43f1174`](https://github.com/knpkv/npm/commit/43f1174633ebba9d6244156fffa23514c89b4c74), [`1dcc473`](https://github.com/knpkv/npm/commit/1dcc473ebd14c2a4ac00d7fd67bf9a8d80201f66), [`be9feff`](https://github.com/knpkv/npm/commit/be9feff762ab43b39c887b39815a2959714d7364)]:
+  - @knpkv/herdr-fleet@0.3.0
+  - @knpkv/rly@0.5.1
+
 ## 0.3.0
 
 ### Minor Changes

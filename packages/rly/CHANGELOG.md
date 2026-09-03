@@ -1,5 +1,11 @@
 # @knpkv/rly
 
+## 0.5.1
+
+### Patch Changes
+
+- [#400](https://github.com/knpkv/npm/pull/400) [`1dcc473`](https://github.com/knpkv/npm/commit/1dcc473ebd14c2a4ac00d7fd67bf9a8d80201f66) Thanks [@konopkov](https://github.com/konopkov)! - Keep modal Relay focus trapping correct for controls inside nested open ShadowRoots.
+
 ## 0.5.0
 
 ### Minor Changes
