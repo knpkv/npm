@@ -406,6 +406,14 @@ export const TerminalKeyRail = ({
 }: TerminalKeyRailProps) => {
   const [activeIndex, setActiveIndex] = useState(0)
   const modifierCount = terminalModifiers.length
+  const terminalKeyAvailability = terminalKeyDescriptors.map(
+    (descriptor) => serializeTerminalKey(descriptor.key, modifier)._tag === "supported"
+  )
+  const enabledRail = [
+    ...terminalModifiers.map(() => !disabled),
+    ...terminalKeyAvailability.map((available) => !disabled && available)
+  ]
+  const tabStopIndex = enabledRail[activeIndex] === true ? activeIndex : enabledRail.findIndex((enabled) => enabled)
   return (
     <div
       aria-label="Terminal keyboard controls"
@@ -441,12 +449,13 @@ export const TerminalKeyRail = ({
               disabled={disabled}
               key={item}
               onClick={(event) => {
+                setActiveIndex(index)
                 onModifierChange(item)
                 if (event.detail === 0) onFocusTerminal()
               }}
               onFocus={() => setActiveIndex(index)}
               onPointerDown={(event) => event.preventDefault()}
-              tabIndex={activeIndex === index ? 0 : -1}
+              tabIndex={tabStopIndex === index ? 0 : -1}
               type="button"
             >
               {modifierLabel(item)}
@@ -470,7 +479,7 @@ export const TerminalKeyRail = ({
                 onClick={() => onKey(descriptor.key)}
                 onFocus={() => setActiveIndex(railIndex)}
                 onPointerDown={(event) => event.preventDefault()}
-                tabIndex={activeIndex === railIndex ? 0 : -1}
+                tabIndex={tabStopIndex === railIndex ? 0 : -1}
                 title={unavailable ? "Choose a supported modifier combination" : undefined}
                 type="button"
               >

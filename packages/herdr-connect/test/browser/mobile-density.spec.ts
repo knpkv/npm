@@ -279,6 +279,7 @@ test("terminal toolbar arrow navigation skips disabled controls", async ({ page 
     buttons[nextIndex]?.focus()
     return document.activeElement?.getAttribute("data-terminal-key")
   })
+  await expect(rail.locator("button[tabindex=\"0\"]")).toHaveCount(1)
   expect(focusedKey).toBe("alt")
 })
 
