@@ -48,11 +48,22 @@ const maximumSnapshotBytes = (
     0
   )
   const separators = Math.max(0, maximumGoalBytes.size - 1)
-  const familyGroupsOverhead = 64
+  const maximumEncodedCanonicalGoalIdBytes = Math.max(
+    0,
+    ...Array.from(maximumGoalBytes.keys(), (id) => encodedBytes(id))
+  )
+  // Structural bytes for {"canonicalGoalId":"","canonical":<goal>,"superseded":[]} beyond the
+  // encoded goal and id values is 49 (measured via JSON.stringify), 64 reserves it safely.
+  const familyGroupStructuralOverhead = 64
+  const familyGroupsOverhead = maximumEncodedCanonicalGoalIdBytes + familyGroupStructuralOverhead
   const familiesPerWindowBytes = 2 * encodedGoals + separators +
     familyGroupsOverhead * Math.max(1, maximumGoalBytes.size)
   return workSnapshotEnvelopeMaxBytes + 4 * Math.max(encodedGoals + separators, familiesPerWindowBytes)
 }
+
+export const __herdrWorkMaximumSnapshotBytesForTest = maximumSnapshotBytes
+export const __herdrWorkEncodedBytesForTest = encodedBytes
+export const __herdrWorkSnapshotEnvelopeMaxBytesForTest = workSnapshotEnvelopeMaxBytes
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
   Schema.decodeUnknownEffect(StoredEventRow)(row).pipe(

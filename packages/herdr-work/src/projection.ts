@@ -18,6 +18,8 @@ const windowOffset = {
   month: 30 * 24 * 60 * 60 * 1_000
 } satisfies Readonly<Record<WorkSnapshotWindow, number>>
 
+const compareString = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+
 const projectionError = (
   reason: WorkProjectionError["reason"],
   detail: string,
@@ -90,8 +92,8 @@ const familiesFor = (latest: ReadonlyMap<string, WorkGoal>): ReadonlyArray<WorkG
       .toSorted(
         (left, right) =>
           right.updatedAt - left.updatedAt ||
-          left.title.localeCompare(right.title) ||
-          left.id.localeCompare(right.id)
+          compareString(left.title, right.title) ||
+          compareString(left.id, right.id)
       )
     if (superseded.length === 0) continue
     groups.push({
@@ -103,8 +105,8 @@ const familiesFor = (latest: ReadonlyMap<string, WorkGoal>): ReadonlyArray<WorkG
   return groups.toSorted(
     (left, right) =>
       right.canonical.updatedAt - left.canonical.updatedAt ||
-      left.canonical.title.localeCompare(right.canonical.title) ||
-      left.canonicalGoalId.localeCompare(right.canonicalGoalId)
+      compareString(left.canonical.title, right.canonical.title) ||
+      compareString(left.canonicalGoalId, right.canonicalGoalId)
   )
 }
 
@@ -125,8 +127,8 @@ const snapshotAt = (
     goals: [...latest.values()].filter((goal) => goal.goalFamily?.role !== "superseded").toSorted(
       (left, right) =>
         right.updatedAt - left.updatedAt ||
-        left.title.localeCompare(right.title) ||
-        left.id.localeCompare(right.id)
+        compareString(left.title, right.title) ||
+        compareString(left.id, right.id)
     ),
     families: familiesFor(latest)
   }
