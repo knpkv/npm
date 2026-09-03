@@ -437,7 +437,7 @@ const hasStatusRecoveryOperator = (command) => {
 }
 
 const hasStatusReplacement = (segments, index) =>
-  segments.slice(index + 1).some(({ operator, text }) => operator === ";" && text.trim() !== "")
+  segments.slice(index + 1).some(({ operator, text }) => (operator === ";" || operator === "\n") && text.trim() !== "")
 
 const hasStatusSafeContinuation = (segments, index, nextOperator) =>
   nextOperator === undefined ||
@@ -986,6 +986,22 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && vite\ntrue" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "tsc -p tsconfig.roles.json --noEmit && vite\ntrue" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
