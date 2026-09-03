@@ -409,8 +409,24 @@ describe("sanitized approval requests", () => {
         visible: "origin.test"
       },
       {
+        ref: "https://mirror.test/?ref=https%3A%2F%2Fuser%3Aleaked-canary%40origin.test%2Frepo",
+        visible: "origin.test"
+      },
+      {
         ref: "https://mirror.test/cache/https%3A%2F%2Forigin.test%2Frepo",
         visible: "origin.test%2Frepo"
+      },
+      {
+        ref: "https://user%3Aleaked-canary%40origin.test/repo",
+        visible: "origin.test"
+      },
+      {
+        ref: "https://user%253Aleaked-canary%2540origin.test/repo",
+        visible: "origin.test"
+      },
+      {
+        ref: "https://user%25253Aleaked-canary%252540origin.test/repo",
+        visible: "origin.test"
       }
     ]
     for (const { ref, visible } of refs) {
@@ -423,6 +439,28 @@ describe("sanitized approval requests", () => {
       expect(encoded).not.toContain("leaked-canary")
       expect(request.fields[0]?.value).toContain(visible)
     }
+  })
+
+  it("redacts credentials from backslash-delimited HTTP authorities", () => {
+    const refs = [
+      String.raw`https:\user:leaked-canary@example.test\repo`,
+      String.raw`https:\\user:leaked-canary@example.test\\repo`
+    ]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("leaked-canary")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    const visible = approvalRequestFor({
+      kind: "nix.apply",
+      ref: String.raw`https:\example.test\repo`
+    })
+    expect(visible.fields[0]?.value).not.toContain("[redacted credential]")
   })
 
   it("redacts unsafe query values through raw whitespace", () => {
