@@ -331,7 +331,11 @@ const extractFunctionDefinitions = (command) => {
   return { definitions, source: withoutDefinitions }
 }
 
-const firstShellWord = (text) => text.trim().match(/^\\?([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
+const firstShellWord = (text) => {
+  const raw = text.trim().match(/^(?:(?:\\.)|[A-Za-z0-9_])+/u)?.[0]
+  const normalized = raw?.replaceAll("\\", "")
+  return normalized !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
+}
 
 const hasActiveFunctionDefinition = (text, start, definitions) => {
   const commandName = firstShellWord(text)
@@ -1117,6 +1121,22 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "\\. ./stop.sh; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "stop() { exit 0; }; e\\val stop; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "sour\\ce ./stop.sh; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
