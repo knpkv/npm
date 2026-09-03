@@ -829,6 +829,9 @@ esac
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
         Effect.gen(function*() {
+          const delayedStatusStarted = yield* Deferred.make<void>()
+          const releaseDelayedStatus = yield* Deferred.make<void>()
+          let delayStatus = false
           yield* Effect.forEach(
             Array.from(
               { length: pendingApprovalPageMaxRecords * 40 },
@@ -843,9 +846,19 @@ esac
             operations,
             store
           })
+          const instrumentedFleet: FleetService = {
+            ...fleet,
+            status: () =>
+              delayStatus
+                ? Deferred.succeed(delayedStatusStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseDelayedStatus)),
+                  Effect.andThen(fleet.status())
+                )
+                : fleet.status()
+          }
           const server = yield* Effect.acquireRelease(
             Effect.promise(() =>
-              startHttpServer(hostConfig, fleet, assets, {
+              startHttpServer(hostConfig, instrumentedFleet, assets, {
                 now: () => observedAt,
                 terminalConnector: unusedTerminal
               })
@@ -902,12 +915,18 @@ esac
           yield* Effect.promise(() => retainedDecision.text())
           observedAt = 15 * 60 * 1_000 - 1_000
           yield* store.put(pendingRecord("ALPHA", 10_000))
-          const refreshed = yield* Effect.promise(() =>
-            fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } })
+          delayStatus = true
+          const refreshedFiber = yield* Effect.forkChild(
+            Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
           )
+          yield* Deferred.await(delayedStatusStarted)
+          observedAt = 25 * 60 * 1_000 - 1_000
+          yield* Deferred.succeed(releaseDelayedStatus, undefined)
+          const refreshed = yield* Fiber.join(refreshedFiber)
           expect(refreshed.status).toBe(200)
           yield* Effect.promise(() => refreshed.text())
-          observedAt = 15 * 60 * 1_000 + 1_000
+          delayStatus = false
+          observedAt = 30 * 60 * 1_000
           const decision = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/alpha-job-10000/approve`, {
               headers: { ...headers, cookie, origin },

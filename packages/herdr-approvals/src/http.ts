@@ -1798,7 +1798,6 @@ export const startHttpServer = async (
             session
           })
           yield* pruneApprovalProofSession(session, observedAt)
-          renewApprovalProofSession(session, observedAt)
         }
         const missingProofCount = pendingRecords.reduce(
           (count, record) => count + (session.proofsByJob.has(record.id) ? 0 : 1),
@@ -1833,8 +1832,10 @@ export const startHttpServer = async (
       records: ReadonlyArray<SanitizedJobRecord>,
       secure: boolean
     ) => {
-      const session = approvalProofSessionFor(request, now())
+      const mutation = approvalProofMutationsByRequest.get(request)
+      const session = mutation?.session ?? approvalProofSessionFor(request, now())
       if (session === undefined) return {}
+      if (mutation !== undefined) renewApprovalProofSession(session, now())
       const shouldSetCookie = records.some((record) => {
         const proof = session.proofsByJob.get(record.id)
         return proof !== undefined && proof.expiresAt > now()
