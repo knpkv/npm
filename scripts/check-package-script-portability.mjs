@@ -315,7 +315,13 @@ const extractFunctionDefinitions = (command) => {
     const closeIndex = matchingBrace(source, openIndex, "{", "}")
     if (closeIndex === undefined) continue
     const nameIndex = source.indexOf(name, match.index)
-    definitions.push({ name, start: nameIndex, end: closeIndex + 1, body: source.slice(openIndex + 1, closeIndex) })
+    definitions.push({
+      name,
+      start: nameIndex,
+      end: closeIndex + 1,
+      body: source.slice(openIndex + 1, closeIndex),
+      grouped: ["{", "("].includes(match[0][0] ?? "")
+    })
     functionDefinitionPattern.lastIndex = closeIndex + 1
   }
   let withoutDefinitions = source
@@ -372,11 +378,26 @@ const hasUnsupportedShellControl = (source) => {
   )
 }
 
-const hasUnsupportedFunctionControl = (definitions) =>
-  definitions.some(({ body }) => {
-    const nestedDefinitions = extractFunctionDefinitions(body).definitions
-    return hasUnsupportedShellControl(body) || hasUnsupportedFunctionControl(nestedDefinitions)
+const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
+  const { definitions, source } = extractFunctionDefinitions(command)
+  if (hasUnsupportedShellControl(source)) return true
+  const segments = shellCommandSegments(source, true)
+  const reachability = segmentReachability(segments)
+  return definitions.some((definition) => {
+    if (visited.has(definition.name)) return false
+    const invoked = segments.some(({ text, start }, index) => {
+      if (!reachability[index] || firstShellWord(text) !== definition.name) return false
+      const activeDefinition = definitions
+        .filter((candidate) => candidate.name === definition.name && candidate.end <= start)
+        .at(-1)
+      return activeDefinition === definition
+    })
+    return (
+      (definition.grouped || invoked) &&
+      hasUnsafeInvokedFunction(definition.body, new Set([...visited, definition.name]))
+    )
   })
+}
 
 const hasActiveFunctionDefinition = (text, start, definitions) => {
   const commandName = firstShellWord(text)
@@ -417,7 +438,7 @@ const hasStatusSafeContinuation = (segments, index, nextOperator) =>
 
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
-  if (hasUnsupportedShellControl(source) || hasUnsupportedFunctionControl(definitions)) return false
+  if (hasUnsupportedShellControl(source) || hasUnsafeInvokedFunction(command, visited)) return false
   const segments = shellCommandSegments(source, true)
   const reachability = segmentReachability(segments)
   if (
@@ -697,6 +718,17 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "setup() { cleanup() { trap 'exit 0' 0; }; true; }; setup; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  []
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
