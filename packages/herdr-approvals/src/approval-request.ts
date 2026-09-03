@@ -263,7 +263,7 @@ const sanitizeEncodedCredentialAssignments = (value: string): string =>
     .replace(encodedCookieAssignment, (_match, prefix: string, key: string, credential: string) =>
       `${prefix}${sanitizeEncodedCredential(`${key}${credential}`)}`)
 
-const specialSchemePrefix = /^(?:https?|ftp):[\\/]{1,}/iu
+const specialSchemePrefix = /^(?:https?|ftp|wss?):[\\/]{1,}/iu
 const uriAuthority = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/))([^/?#\s]*)([\s\S]*)$/iu
 
 const normalizeSpecialSchemeSeparators = (value: string): string => {

@@ -192,7 +192,12 @@ describe("sanitized approval requests", () => {
   })
 
   it("normalizes special-scheme authorities without rewriting query data", () => {
-    const refs = ["https:\\\\user:backslash-secret@example.test\\repo", "ftp:\\\\user:ftp-secret@example.test\\repo"]
+    const refs = [
+      "https:\\\\user:backslash-secret@example.test\\repo",
+      "ftp:\\\\user:ftp-secret@example.test\\repo",
+      "ws:\\\\user:ws-secret@example.test\\repo",
+      "wss:\\\\user:wss-secret@example.test\\repo"
+    ]
     for (const ref of refs) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
       const projection = sanitizeJobRecord({
@@ -200,7 +205,7 @@ describe("sanitized approval requests", () => {
         payload: { kind: "nix.apply", ref }
       })
       const encoded = JSON.stringify({ request, projection })
-      expect(encoded).not.toMatch(/(?:backslash|ftp)-secret/u)
+      expect(encoded).not.toMatch(/(?:backslash|ftp|ws|wss)-secret/u)
       expect(encoded).toContain("[redacted credential]")
     }
     const query = "https://example.test/repo?ref=feature\\candidate"
