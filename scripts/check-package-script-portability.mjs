@@ -275,7 +275,7 @@ const shellCommandSegments = (command, sanitized = false) => {
   return segments
 }
 
-const functionDefinitionPattern = /(?:^|[;\n]|&&|\|\||[|&])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
+const functionDefinitionPattern = /(?:^|[;\n]|&&|\|\||[|&({])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
 
 const matchingBrace = (source, openIndex, opener, closer) => {
   let depth = 0
@@ -311,8 +311,7 @@ const extractFunctionDefinitions = (command) => {
   functionDefinitionPattern.lastIndex = 0
   for (const match of source.matchAll(functionDefinitionPattern)) {
     const name = match[1]
-    const openIndex = source.indexOf("{", match.index)
-    if (openIndex === -1) continue
+    const openIndex = match.index + match[0].length - 1
     const closeIndex = matchingBrace(source, openIndex, "{", "}")
     if (closeIndex === undefined) continue
     const nameIndex = source.indexOf(name, match.index)
@@ -402,9 +401,13 @@ const hasStatusRecoveryOperator = (command) => {
   })
 }
 
+const hasStatusReplacement = (segments, index) =>
+  segments.slice(index + 1).some(({ operator, text }) => operator === ";" && text.trim() !== "")
+
 const hasStatusSafeContinuation = (segments, index, nextOperator) =>
   nextOperator === undefined ||
   (nextOperator === "&&" &&
+    !hasStatusReplacement(segments, index) &&
     !segments.slice(index).some(({ text, nextOperator: followingOperator }) => {
       if (followingOperator === "||") return true
       const body = groupedCommandBody(text)
@@ -833,6 +836,39 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "{ cleanup() { trap 'exit 0' 0; }; cleanup; }; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      check: "(cleanup() { trap 'exit 0' 0; }; cleanup); tsc -p tsconfig.roles.json --noEmit"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "{ prepare() { true; }; prepare; }; pnpm --filter @knpkv/browser-pairing build && vite"
+    },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "exit 0; pnpm --filter @knpkv/browser-pairing build" },
     browserPairingDependency
   ),
@@ -888,6 +924,22 @@ assert.deepEqual(
     browserPairingDependency
   ),
   []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && vite; true" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "tsc -p tsconfig.roles.json --noEmit && vite; true" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
