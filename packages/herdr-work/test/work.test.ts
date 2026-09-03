@@ -944,8 +944,7 @@ describe("durable Work projection", () => {
       const valid = yield* projectWorkSnapshots([base, old, canonical, superseded], 11)
       expect(Schema.decodeUnknownResult(WorkSnapshots)(valid)._tag).toBe("Success")
       // Legacy snapshot without families remains valid
-      const legacyNow = { ...valid.now }
-      delete (legacyNow as { families?: unknown }).families
+      const { families: _legacyFamilies, ...legacyNow } = valid.now
       expect(Schema.decodeUnknownResult(WorkSnapshot)(legacyNow)._tag).toBe("Success")
       // Invalid: same id but different canonical payload (title) must be rejected
       const divergentCanonical = { ...valid.now.families![0]!.canonical, title: "stale title" }

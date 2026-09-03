@@ -275,7 +275,8 @@ export const WorkSnapshot = Schema.Struct({
   Schema.makeFilter(
     (snapshot) => {
       const families = snapshot.families ?? []
-      const goalById = new Map(snapshot.goals.map((goal) => [goal.id, goal] as const))
+      const goalById = new Map<string, WorkGoal>()
+      for (const goal of snapshot.goals) goalById.set(goal.id, goal)
       const seenCanonical = new Set<string>()
       const seenMember = new Set<string>()
       for (const group of families) {

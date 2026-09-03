@@ -136,17 +136,28 @@ const snapshotAt = (
     if (event.occurredAt <= asOf) latest.set(event.goal.id, event.goal)
   }
   const families = familiesFor(latest)
-  return {
-    window,
-    observedAt,
-    asOf,
-    goals: [...latest.values()].filter((goal) => goal.goalFamily?.role !== "superseded").toSorted(
+  const goals = [...latest.values()]
+    .filter((goal) => goal.goalFamily?.role !== "superseded")
+    .toSorted(
       (left, right) =>
         right.updatedAt - left.updatedAt ||
         compareString(left.title, right.title) ||
         compareString(left.id, right.id)
-    ),
-    ...(families.length > 0 ? { families } : {})
+    )
+  if (families.length > 0) {
+    return {
+      window,
+      observedAt,
+      asOf,
+      goals,
+      families
+    }
+  }
+  return {
+    window,
+    observedAt,
+    asOf,
+    goals
   }
 }
 
