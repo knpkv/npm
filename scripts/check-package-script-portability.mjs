@@ -992,22 +992,50 @@ const hasInvokedCommand = (source, name, definitions = [], aliases = [], offset 
   })
 }
 
-const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
-  const { definitions, source } = extractFunctionDefinitions(command)
-  if (hasUnsupportedShellControl(source)) return true
-  const aliases = resolveAliasMutations(shellCommandSegments(source, true), definitions)
-  if (aliases === undefined) return true
+const hasUnsafeInvokedFunction = (
+  command,
+  visited = new Set(),
+  inheritedAliases = [],
+  inheritedDefinitions = [],
+  offset = 0
+) => {
+  const { definitions: localDefinitions, source } = extractFunctionDefinitions(command)
+  const definitions = [
+    ...inheritedDefinitions,
+    ...localDefinitions.map((definition) => ({
+      ...definition,
+      start: definition.start + offset,
+      end: definition.end + offset
+    }))
+  ].filter(
+    (definition, index, all) =>
+      all.findIndex(
+        (candidate) =>
+          candidate.name === definition.name && candidate.start === definition.start && candidate.end === definition.end
+      ) === index
+  )
+  const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
+  const localAliases = resolveAliasMutations(segments, definitions)
+  if (localAliases === undefined) return true
+  const aliases = [...inheritedAliases, ...localAliases]
+  if (hasUnsupportedShellControl(source, aliases, offset)) return true
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
-    const invoked = hasInvokedCommand(source, definition.name, definitions, aliases)
+    const invoked = hasInvokedCommand(source, definition.name, definitions, aliases, offset)
     const activeDefinition = definitions
       .filter((candidate) => candidate.name === definition.name && candidate.end <= definition.end)
       .at(-1)
     if (activeDefinition !== definition && !definition.grouped) return false
     return (
       (definition.grouped || invoked) &&
-      (hasShellTermination(definition.body) ||
-        hasUnsafeInvokedFunction(definition.body, new Set([...visited, definition.name])))
+      (hasShellTermination(definition.body, aliases, definition.start) ||
+        hasUnsafeInvokedFunction(
+          definition.body,
+          new Set([...visited, definition.name]),
+          aliases,
+          definitions,
+          definition.start
+        ))
     )
   })
 }
@@ -1038,17 +1066,21 @@ const isSimpleAliasValue = (value) => {
   )
 }
 
-const hasShellTermination = (command) => {
+const hasShellTermination = (command, aliases = [], offset = 0) => {
   const { definitions, source } = extractFunctionDefinitions(command)
-  const segments = shellCommandSegments(source, true)
-  const reachability = segmentReachability(segments, definitions)
+  const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
+  const reachability = segmentReachability(segments, definitions, aliases)
   return segments.some((segment, index) => {
     const { text } = segment
     if (!reachability[index]) return false
     const trimmed = text.trim()
-    if (isShellTerminatingCommand(trimmed, segment.start, false)) return true
+    if (isShellTerminatingCommand(trimmed, segment.start, false, aliases)) return true
     const body = groupedCommandBody(trimmed)
-    return body !== undefined && trimmed.startsWith("{") && hasShellTermination(body)
+    return (
+      body !== undefined &&
+      trimmed.startsWith("{") &&
+      hasShellTermination(body, aliases, segment.start + text.indexOf(body))
+    )
   })
 }
 
@@ -2486,6 +2518,7 @@ for (const command of [
   "{ exit 0; }; pnpm --filter @knpkv/browser-pairing build",
   "alias stop=exit\n{ stop 0; }; pnpm --filter @knpkv/browser-pairing build",
   "stop() { exit 0; }\nalias invoke=stop\n{ invoke; }\npnpm --filter @knpkv/browser-pairing build",
+  "alias invoke=stop\nstop() { exit 0; }\nwrapper() { { invoke; }; }\nwrapper\npnpm --filter @knpkv/browser-pairing build",
   "set -e; { false; pnpm --filter @knpkv/browser-pairing build; }",
   "set -e; fail() { false; }; fail; pnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
