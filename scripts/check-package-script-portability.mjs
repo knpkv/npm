@@ -701,6 +701,7 @@ const unsupportedShellWords = new Set([
   "command",
   "do",
   "done",
+  "enable",
   "esac",
   "eval",
   "fi",
@@ -2146,6 +2147,7 @@ for (const command of [
   'set -o "$opts"; pnpm --filter @knpkv/browser-pairing build',
   "hash -p /usr/bin/true pnpm; pnpm --filter @knpkv/browser-pairing build",
   "stop() { exit 0; }; builtin eval stop; pnpm --filter @knpkv/browser-pairing build",
+  "enable -f ./fake-pnpm.so pnpm; pnpm --filter @knpkv/browser-pairing build",
   "alias gate=true\n{ gate && alias pnpm=:; }\npnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "> /dev/null local PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build",
@@ -2287,6 +2289,7 @@ for (const invalidRoleCheck of [
   "setup() { tsc() { :; }; }; setup; tsc -p tsconfig.roles.json --noEmit",
   "hash -p /usr/bin/true tsc; tsc -p tsconfig.roles.json --noEmit",
   "stop() { exit 0; }; builtin eval stop; tsc -p tsconfig.roles.json --noEmit",
+  "enable -f ./fake-tsc.so tsc; tsc -p tsconfig.roles.json --noEmit",
   "test -e package.json && exit 0; tsc -p tsconfig.roles.json --noEmit"
 ]) {
   assert.deepEqual(
@@ -2303,8 +2306,7 @@ assert.deepEqual(
     "packages/codecommit-web/package.json",
     {
       ...codeCommitWebScripts,
-      prepack:
-        "stop() { exit 0; }; builtin eval stop; pnpm --filter @knpkv/browser-pairing build && tsc -b && vite build"
+      prepack: "enable -f ./fake-pnpm.so pnpm; pnpm --filter @knpkv/browser-pairing build && tsc -b && vite build"
     },
     browserPairingDependency
   ),
