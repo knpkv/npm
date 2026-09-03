@@ -15,8 +15,8 @@ allowBuilds:
 overrides:
   # GHSA-8r6m-32jq-jx6q: fast-xml-parser <5.10.1 DOCTYPE entity-expansion reset; keep scoped to 5.x
   "@distilled.cloud/aws>fast-xml-parser": ^5.10.1
-  # GHSA-v2hh-gcrm-f6hx and GHSA-7p8r-x3mc-p8w7: fast-uri <3.1.6 host confusion; keep in 3.x for ajv
-  fast-uri@>=3.0.0 <3.1.6: 3.1.6
+  # GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7, and the 2026-09 host-confusion advisories: keep patched 3.x for ajv
+  fast-uri@>=3.0.0 <3.1.7: 3.1.7
   vitest: "catalog:"
   "@effect/vitest": 4.0.0-rc.109
   "@effect/platform-bun": 4.0.0-rc.109
@@ -54,7 +54,7 @@ minimumReleaseAgeExclude:
   - nanoid@3.3.18
   - postcss@8.5.23
   - brace-expansion@5.0.9
-  - fast-uri@3.1.6
+  - fast-uri@3.1.7
   - undici@8.9.0
 
 patchedDependencies:
