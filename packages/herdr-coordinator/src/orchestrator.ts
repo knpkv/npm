@@ -18,7 +18,8 @@ import {
   type OrchestratorCommand as OrchestratorCommandType,
   OrchestratorEvent,
   type OrchestratorEvent as OrchestratorEventType,
-  type OrchestratorReceipt as OrchestratorReceiptType
+  type OrchestratorReceipt as OrchestratorReceiptType,
+  OrchestratorResult
 } from "./orchestrator-model.js"
 
 const Row = Schema.Struct({
@@ -229,7 +230,7 @@ const makeOrchestrator: Effect.Effect<
     const decodedDetail = yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(detail).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "invalid transition detail" }))
     )
-    const decodedResult = yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(result).pipe(
+    const decodedResult = yield* Schema.decodeUnknownEffect(Schema.NullOr(OrchestratorResult))(result).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "invalid transition result" }))
     )
     const event = yield* sql.withTransaction(
@@ -439,12 +440,25 @@ export const sqliteLayer = (filename: string) =>
       const fileSystem = yield* FileSystem.FileSystem
       const paths = yield* Path.Path
       const directory = paths.dirname(filename)
-      yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory" }))
+      const directoryExists = yield* fileSystem.exists(directory).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.exists" }))
       )
-      yield* fileSystem.chmod(directory, 0o700).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory-mode" }))
+      if (!directoryExists) {
+        yield* fileSystem.makeDirectory(directory, { mode: 0o700 }).pipe(
+          Effect.mapError((cause) =>
+            new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.create" })
+          )
+        )
+      }
+      const directoryInfo = yield* fileSystem.stat(directory).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.stat" }))
       )
+      if (directoryInfo.type !== "Directory" || (directoryInfo.mode & 0o777) !== 0o700) {
+        return yield* new OrchestratorStorageError({
+          cause: { directory, mode: directoryInfo.mode, type: directoryInfo.type },
+          operation: "sqlite.secure.directory.private"
+        })
+      }
       const security = secureSqliteFiles(filename, fileSystem)
       return Layer.mergeAll(
         SqliteClient.layer({ filename }),

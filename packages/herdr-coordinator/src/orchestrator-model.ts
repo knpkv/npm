@@ -1,8 +1,19 @@
 import { JobActor, JobIdentifier, JobPayload } from "@knpkv/herdr-fleet/model"
+import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet/response"
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
 const Detail = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096))
+const utf8 = new TextEncoder()
+const utf8MaxBytes = (maximumBytes: number) =>
+  Schema.makeFilter(
+    (value: string) => utf8.encode(value).byteLength <= maximumBytes,
+    { expected: `UTF-8 text no larger than ${maximumBytes} bytes` }
+  )
+export const OrchestratorResult = Schema.String.check(
+  Schema.isMaxLength(fleetResponseBodyMaxBytes),
+  utf8MaxBytes(fleetResponseBodyMaxBytes)
+)
 const Timestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
@@ -40,7 +51,7 @@ export const OrchestratorEvent = Schema.Struct({
   activityIdempotencyKey: ActivityIdempotencyKey,
   occurredAt: Timestamp,
   detail: Schema.NullOr(Detail),
-  result: Schema.NullOr(Detail)
+  result: Schema.NullOr(OrchestratorResult)
 })
 export interface OrchestratorEvent extends Schema.Schema.Type<typeof OrchestratorEvent> {}
 

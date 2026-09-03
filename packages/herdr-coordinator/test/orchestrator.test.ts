@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { ClusterSchema, Entity, MessageStorage, RunnerAddress, SingleRunner } from "effect/unstable/cluster"
 import { Rpc } from "effect/unstable/rpc"
-import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import {
@@ -90,6 +90,28 @@ describe("durable coordinator orchestrator", () => {
       ))
   })
 
+  it.effect("settles empty and fleet-sized results", () =>
+    withTemporaryRoot("herdr-orchestrator-results-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          const results = ["", "r".repeat(4_097)]
+          for (const [index, result] of results.entries()) {
+            const receipt = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: `activity:settle:${index}` },
+              `dispatch:settle:${index}`
+            )
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            yield* orchestrator.run(receipt.dispatchRequestId)
+            expect(yield* orchestrator.settle(receipt.dispatchRequestId, result)).toMatchObject({
+              result,
+              type: "settled"
+            })
+          }
+        })
+      )))
+
   it.effect("fails closed on idempotency conflicts and recovers running work without retry", () => {
     return withTemporaryRoot("herdr-orchestrator-recovery-", (root) =>
       withDatabase(
@@ -163,6 +185,34 @@ describe("durable coordinator orchestrator", () => {
           }
         })
       )))
+
+  it.effect("creates only a private SQLite state directory and never rewrites a caller directory", () =>
+    withTemporaryRoot("herdr-orchestrator-directory-security-", (root) =>
+      Effect.gen(function*() {
+        const createdDirectory = join(root, "created-state")
+        const created = yield* Effect.result(
+          withDatabase(
+            join(createdDirectory, "orchestrator.sqlite"),
+            Effect.void
+          )
+        )
+        expect(created).toMatchObject({ _tag: "Success" })
+        expect(statSync(createdDirectory).mode & 0o777).toBe(0o700)
+
+        const callerDirectory = join(root, "caller-state")
+        mkdirSync(callerDirectory, { mode: 0o755 })
+        const rejected = yield* Effect.result(
+          withDatabase(
+            join(callerDirectory, "orchestrator.sqlite"),
+            Effect.void
+          )
+        )
+        expect(rejected).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.directory.private" }
+        })
+        expect(statSync(callerDirectory).mode & 0o777).toBe(0o755)
+      })))
 
   it.effect("runs a durable entity through SingleRunner with SQL storage", () =>
     withTemporaryRoot("herdr-single-runner-", (root) => {

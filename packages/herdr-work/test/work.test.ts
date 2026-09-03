@@ -398,10 +398,36 @@ describe("durable Work projection", () => {
       expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[0], changed]))).toMatchObject({
         failure: { _tag: "WorkCheckpointConflictError" }
       })
+      expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[0]]))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-replay-only" }
+      })
       expect(yield* Effect.result(service.recordMany("transaction-1", [history[0], changed]))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-1" }
       })
       expect(yield* store.list()).toEqual(history.slice(0, 2))
+    }).pipe(provideNodeServices))
+
+  it.effect("rejects oversized batches before reading their elements", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-oversized-batch-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      let elementRead = false
+      const oversized = Array.from({ length: workHistoryMaxEvents + 1 }, () => history[0])
+      Object.defineProperty(oversized, 0, {
+        configurable: true,
+        get: () => {
+          elementRead = true
+          return history[0]
+        }
+      })
+      expect(yield* Effect.result(service.recordMany("transaction-oversized", oversized))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+      })
+      expect(elementRead).toBe(false)
+      expect(yield* store.list()).toEqual([])
     }).pipe(provideNodeServices))
 
   it.effect("compare-and-set claims and retains compact decision handoffs", () =>

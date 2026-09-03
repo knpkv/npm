@@ -35,6 +35,15 @@ const StoredEventWithTransactionRow = Schema.Struct({
 })
 const StoredEventWithTransactionRows = Schema.Array(StoredEventWithTransactionRow)
 const TransactionRow = Schema.Struct({ record: Schema.String })
+const TransactionEventIdentity = Schema.Struct({
+  eventId: Schema.String,
+  goalId: Schema.String,
+  occurredAt: Schema.Number
+})
+const CompactTransactionRecord = Schema.Struct({
+  events: Schema.Array(TransactionEventIdentity),
+  version: Schema.Literal("herdr.work.transaction.v1")
+})
 const LaneRow = Schema.Struct({ record: Schema.String, revision: Schema.Number })
 const DecisionRow = Schema.Struct({ record: Schema.String })
 const CountRow = Schema.Struct({ count: Schema.Number })
@@ -65,6 +74,7 @@ type HandoffDecision =
 const utf8 = new TextEncoder()
 const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSON.stringify(value)).byteLength
 const maximumTimestamp = 8_640_000_000_000_000
+const workTransactionMaxRecords = 16_384
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
   observedAt: maximumTimestamp,
   now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
@@ -333,6 +343,13 @@ export class WorkStore implements WorkStoreService {
     transactionId: string,
     events: ReadonlyArray<WorkGoalCheckpointType>
   ) {
+    if (events.length > workHistoryMaxEvents) {
+      return yield* new WorkProjectionError({
+        cause: events.length,
+        detail: `work history cannot exceed ${workHistoryMaxEvents} checkpoints`,
+        reason: "capacity_exceeded"
+      })
+    }
     const transaction = yield* Schema.decodeUnknownEffect(
       Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
     )(transactionId).pipe(Effect.mapError(storeError("appendMany.decode.transaction")))
@@ -356,17 +373,24 @@ export class WorkStore implements WorkStoreService {
           const storedTransaction = this.#database.prepare(
             "SELECT record FROM work_goal_transactions WHERE transaction_id = ?"
           ).get(transaction)
+          let compactTransaction: typeof CompactTransactionRecord.Type | undefined
           if (storedTransaction !== undefined) {
             const stored = Schema.decodeUnknownSync(TransactionRow)(storedTransaction)
-            const previous = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(JSON.parse(stored.record))
-            this.#database.exec("ROLLBACK")
-            inTransaction = false
-            return Equal.equals(previous, decoded)
-              ? { _tag: "replayed", events: decoded } satisfies AppendManyDecision
-              : {
-                _tag: "rejected",
-                error: new WorkTransactionConflictError({ transactionId: transaction })
-              } satisfies AppendManyDecision
+            const previous = JSON.parse(stored.record)
+            const compact = Schema.decodeUnknownResult(CompactTransactionRecord)(previous)
+            if (compact._tag === "Success") {
+              compactTransaction = compact.success
+            } else {
+              const legacy = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return Equal.equals(legacy, decoded)
+                ? { _tag: "replayed", events: decoded } satisfies AppendManyDecision
+                : {
+                  _tag: "rejected",
+                  error: new WorkTransactionConflictError({ transactionId: transaction })
+                } satisfies AppendManyDecision
+            }
           }
 
           const duplicateEventIds = new Set<string>()
@@ -456,9 +480,64 @@ export class WorkStore implements WorkStoreService {
             } satisfies AppendManyDecision
           }
           if (newEvents.length === 0) {
-            this.#database.exec("ROLLBACK")
+            if (compactTransaction !== undefined) {
+              const expected = compactTransaction.events
+              const actual = decoded.map(({ eventId, goal, occurredAt }) => ({
+                eventId,
+                goalId: goal.id,
+                occurredAt
+              }))
+              if (!Equal.equals(expected, actual)) {
+                this.#database.exec("ROLLBACK")
+                inTransaction = false
+                return {
+                  _tag: "rejected",
+                  error: new WorkTransactionConflictError({ transactionId: transaction })
+                } satisfies AppendManyDecision
+              }
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
+            }
+            const transactionCount = Schema.decodeUnknownSync(CountRow)(
+              this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_transactions").get()
+            ).count
+            if (transactionCount >= workTransactionMaxRecords) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkProjectionError({
+                  cause: decoded,
+                  detail: `work transaction history cannot exceed ${workTransactionMaxRecords} transaction IDs`,
+                  reason: "capacity_exceeded"
+                })
+              } satisfies AppendManyDecision
+            }
+            this.#database.prepare(
+              "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
+            ).run(
+              transaction,
+              JSON.stringify({
+                events: decoded.map(({ eventId, goal, occurredAt }) => ({
+                  eventId,
+                  goalId: goal.id,
+                  occurredAt
+                })),
+                version: "herdr.work.transaction.v1"
+              })
+            )
+            this.#database.exec("COMMIT")
             inTransaction = false
             return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
+          }
+          if (compactTransaction !== undefined) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkTransactionConflictError({ transactionId: transaction })
+            } satisfies AppendManyDecision
           }
 
           const eventCount = Schema.decodeUnknownSync(CountRow)(
@@ -555,6 +634,21 @@ export class WorkStore implements WorkStoreService {
           )
           for (const event of newEvents) {
             insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event), transaction)
+          }
+          const transactionCount = Schema.decodeUnknownSync(CountRow)(
+            this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_transactions").get()
+          ).count
+          if (transactionCount >= workTransactionMaxRecords) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work transaction history cannot exceed ${workTransactionMaxRecords} transaction IDs`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies AppendManyDecision
           }
           this.#database.prepare(
             "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
