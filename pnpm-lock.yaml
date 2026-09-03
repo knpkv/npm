@@ -888,6 +888,9 @@ importers:
       '@knpkv/herdr-fleet':
         specifier: workspace:^
         version: link:../herdr-fleet
+      '@knpkv/herdr-work':
+        specifier: workspace:^
+        version: link:../herdr-work
       '@knpkv/rly':
         specifier: workspace:^
         version: link:../rly
