@@ -385,6 +385,7 @@ const unsupportedShellWords = new Set([
   "for",
   "if",
   "select",
+  "source",
   "then",
   "trap",
   "until",
@@ -395,6 +396,7 @@ const hasUnsupportedShellControl = (source) => {
   const segments = shellCommandSegments(source, true)
   return (
     segments.some(({ text }) => unsupportedShellWords.has(firstShellWord(text) ?? "")) ||
+    segments.some(({ text }) => /^(?:\.|source)(?:\s|$)/u.test(text.trim())) ||
     segments.some(({ text }) => text.trim().startsWith("!")) ||
     segments.some(({ nextOperator }) => nextOperator === "&")
   )
@@ -1083,6 +1085,22 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "stop() { exit 0; }; command eval stop; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: ". ./stop.sh; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "source ./stop.sh; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
