@@ -54,6 +54,122 @@ const config = (
 })
 
 describe("host command output", () => {
+  it.effect("accepts root coordinator lifecycle only for coordinator-handled delegates", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-root-coordinator-test-"))
+    const coordinatorCommand = join(root, "host-coordinator")
+    writeFileSync(
+      coordinatorCommand,
+      `#!/bin/sh
+job_id="$2"
+printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.child.v1\\",\\"requestId\\":\\"request-1\\",\\"type\\":\\"started\\",\\"worker\\":{\\"agentId\\":\\"agent-host-coordinator\\",\\"host\\":\\"SER8\\",\\"name\\":\\"host-coordinator\\",\\"paneId\\":\\"w8:p1\\"}}"
+printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.child.v1\\",\\"reply\\":\\"fleet healthy\\",\\"requestId\\":\\"request-1\\",\\"type\\":\\"completed\\"}"
+`,
+      { mode: 0o700 }
+    )
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const hostOperations = yield* makeHostOperations({
+            ...config(root, ["true"]),
+            coordinatorCommand: [coordinatorCommand]
+          })
+          const consult = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-consult"),
+            now: Effect.succeed(1_000),
+            operations: hostOperations,
+            store
+          })
+          const consultJob = yield* consult.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "consult",
+              prompt: "inspect fleet",
+              repository: root
+            }
+          }, "owner")
+          expect(yield* consult.run(consultJob.id)).toMatchObject({
+            error: null,
+            result: "fleet healthy",
+            status: "succeeded",
+            worker: {
+              agentId: "agent-host-coordinator",
+              host: "SER8",
+              name: "host-coordinator",
+              paneId: "w8:p1"
+            }
+          })
+
+          const chat = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-chat"),
+            nonce: Effect.succeed("nonce-chat"),
+            now: Effect.succeed(1_001),
+            operations: hostOperations,
+            store
+          })
+          const chatJob = yield* chat.submit({
+            payload: {
+              channel: "coordinator_chat",
+              kind: "agent.delegate",
+              mode: "work",
+              prompt: "coordinate fleet",
+              repository: root
+            }
+          }, "owner")
+          yield* chat.approve(chatJob.id, {
+            hash: chatJob.hash,
+            nonce: "nonce-chat"
+          }, "owner")
+          expect(yield* chat.runCoordinatorChat(chatJob.id)).toMatchObject({
+            error: null,
+            result: "fleet healthy",
+            status: "succeeded",
+            worker: {
+              agentId: "agent-host-coordinator"
+            }
+          })
+
+          const delegatedWork = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-work"),
+            nonce: Effect.succeed("nonce-work"),
+            now: Effect.succeed(1_002),
+            operations: hostOperations,
+            store
+          })
+          const workJob = yield* delegatedWork.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "work",
+              prompt: "change fleet",
+              repository: root
+            }
+          }, "owner")
+          yield* delegatedWork.approve(workJob.id, {
+            hash: workJob.hash,
+            nonce: "nonce-work"
+          }, "owner")
+          const completedWork = yield* delegatedWork.run(workJob.id)
+          expect(completedWork).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
+          })
+          expect(completedWork.worker).toBeUndefined()
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("preserves bounded output and rejects the first byte over the cap", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-command-output-test-"))
     return Effect.gen(function*() {
