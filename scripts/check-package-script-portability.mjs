@@ -337,12 +337,38 @@ const firstShellWord = (text) => {
   return normalized !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
 }
 
+const extractAliasMutations = (command) => {
+  const mutations = []
+  for (const segment of shellCommandSegments(command, true)) {
+    const words = segment.text.trim().split(/\s+/u)
+    const commandName = words[0]
+    if (commandName !== "alias" && commandName !== "unalias") continue
+    for (const word of words.slice(1)) {
+      const name = word.replace(/=.*$/u, "")
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) continue
+      if (commandName === "alias" && word.includes("=")) mutations.push({ kind: "define", name, start: segment.start })
+      if (commandName === "unalias") mutations.push({ kind: "remove", name, start: segment.start })
+    }
+  }
+  return mutations
+}
+
+const hasActiveAliasDefinition = (text, start, aliases) => {
+  const commandName = firstShellWord(text)
+  if (commandName === undefined) return false
+  const active = aliases
+    .filter((alias) => alias.name === commandName && alias.start <= start)
+    .toSorted((left, right) => left.start - right.start)
+    .at(-1)
+  return active?.kind === "define"
+}
+
 const hasActiveFunctionDefinition = (text, start, definitions) => {
   const commandName = firstShellWord(text)
   return commandName !== undefined && definitions.some(({ name, end }) => name === commandName && end <= start)
 }
 
-const segmentReachability = (segments, definitions = []) => {
+const segmentReachability = (segments, definitions = [], aliases = []) => {
   const reachability = []
   let previousResult = "unknown"
   let terminated = false
@@ -361,7 +387,7 @@ const segmentReachability = (segments, definitions = []) => {
           ? "success"
           : text === "false"
             ? "failure"
-            : isKnownSuccessfulShellCommand(text, segment.start, definitions)
+            : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
               ? "success"
               : "unknown"
       if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
@@ -371,8 +397,9 @@ const segmentReachability = (segments, definitions = []) => {
 }
 
 // A command whose failure already fails the lifecycle may continue on its success path.
-const isKnownSuccessfulShellCommand = (text, start, definitions) =>
+const isKnownSuccessfulShellCommand = (text, start, definitions, aliases = []) =>
   !hasActiveFunctionDefinition(text, start, definitions) &&
+  !hasActiveAliasDefinition(text, start, aliases) &&
   (/^(?:printf|echo|:)(?:\s|$)/u.test(text.trim()) ||
     browserPairingBuild.test(text.trim()) ||
     codeCommitWebRoleCheck.test(text.trim()) ||
@@ -476,14 +503,20 @@ const hasStatusSafeContinuation = (segments, index, nextOperator) =>
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source) || hasUnsafeInvokedFunction(command, visited)) return false
+  const aliases = extractAliasMutations(source)
   const segments = shellCommandSegments(source, true)
-  const reachability = segmentReachability(segments, definitions)
+  const reachability = segmentReachability(segments, definitions, aliases)
   if (
     segments.some(({ text, nextOperator, start }, index) => {
       if (!reachability[index] || !hasStatusSafeContinuation(segments, index, nextOperator)) {
         return false
       }
-      if (!hasActiveFunctionDefinition(text, start, definitions) && matcher.test(text.trim())) return true
+      if (
+        !hasActiveFunctionDefinition(text, start, definitions) &&
+        !hasActiveAliasDefinition(text, start, aliases) &&
+        matcher.test(text.trim())
+      )
+        return true
       const body = groupedCommandBody(text)
       return body !== undefined && hasExecutableLifecycleCommand(body, matcher, visited)
     })
@@ -668,6 +701,30 @@ for (const invalidRoleCheck of [
     ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
   )
 }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "alias pnpm=true\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "alias tsc=true\ntsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "alias helper=true\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
