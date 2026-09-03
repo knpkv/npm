@@ -414,7 +414,8 @@ const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
     })
     return (
       (definition.grouped || invoked) &&
-      hasUnsafeInvokedFunction(definition.body, new Set([...visited, definition.name]))
+      (hasShellTermination(definition.body) ||
+        hasUnsafeInvokedFunction(definition.body, new Set([...visited, definition.name])))
     )
   })
 }
@@ -426,6 +427,19 @@ const groupedCommandBody = (text) => {
   if (closer === undefined || trimmed.at(-1) !== closer) return undefined
   const closeIndex = matchingBrace(trimmed, 0, opener, closer)
   return closeIndex === trimmed.length - 1 ? trimmed.slice(1, -1) : undefined
+}
+
+const hasShellTermination = (command) => {
+  const { definitions, source } = extractFunctionDefinitions(command)
+  const segments = shellCommandSegments(source, true)
+  const reachability = segmentReachability(segments, definitions)
+  return segments.some(({ text }, index) => {
+    if (!reachability[index]) return false
+    const trimmed = text.trim()
+    if (/^(?:exec|exit)(?:\s|$)/u.test(trimmed)) return true
+    const body = groupedCommandBody(trimmed)
+    return body !== undefined && hasShellTermination(body)
+  })
 }
 
 const hasStatusRecoveryOperator = (command) => {
@@ -1016,6 +1030,22 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "printf() { false; }; printf ready && tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "stop() { exec true; }; stop; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "stop() { exit 0; }; stop; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
