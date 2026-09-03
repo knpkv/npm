@@ -578,7 +578,6 @@ export const ConnectSurface = ({
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   useAtomMount(atoms.agentsPoll)
-  useAtomMount(atoms.workPoll)
 
   useEffect(() => {
     const container = terminalRef.current

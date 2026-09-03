@@ -408,6 +408,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   const [pendingState, setPendingState] = useState(dashboardPendingState(0, initial.pendingApprovals))
   const start = useRef<number | null>(null)
   useAtomMount(atoms.chatPoll)
+  useAtomMount(atoms.connect.workPoll)
 
   const resetPull = (): void => {
     start.current = null
