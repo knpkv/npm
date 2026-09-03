@@ -301,6 +301,11 @@ const shellCommandSegments = (command, sanitized = false) => {
   return segments
 }
 
+const rebaseShellSegments = (segments, offset) =>
+  offset === 0
+    ? segments
+    : segments.map((segment) => ({ ...segment, start: segment.start + offset, end: segment.end + offset }))
+
 const functionDefinitionPattern =
   /(?:^|[;\n]|&&|\|\||[|&({])\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(\{|\()/gu
 
@@ -426,6 +431,42 @@ const shellWords = (text) => {
   return words
 }
 
+const hasUnquotedShellExpansion = (text) => {
+  let quote
+  let escaped = false
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      else if (
+        quote === '"' &&
+        character === "$" &&
+        /(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*?#$!-]|\(|\{)/u.test(text.slice(index + 1))
+      ) {
+        return true
+      }
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (character === "$" && /(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*?#$!-]|\(|\{)/u.test(text.slice(index + 1))) {
+      return true
+    }
+    if (character === "`") return true
+  }
+  return false
+}
+
 const firstShellWord = (text) => {
   const word = shellWords(text)?.[0]
   return word !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(word) ? word : undefined
@@ -434,6 +475,28 @@ const firstShellWord = (text) => {
 const redirectionWord = /^(?:\d+)?(?:>>?|<<<?|<>|>&|<&|>\|)/u
 const separatedRedirectionWord = /^(?:\d+)?(?:>>?|<<<?|<>|>&|<&|>\|)$/u
 const assignmentWord = /^[A-Za-z_][A-Za-z0-9_]*=/u
+
+const hasPotentiallyFailingRedirection = (text) => {
+  const words = shellWords(text)
+  if (words === undefined) return true
+  for (let index = 0; index < words.length; index++) {
+    const word = words[index]
+    if (!redirectionWord.test(word)) continue
+    const operator = word.match(/^(?:\d+)?(>>?|<<<?|<>|>&|<&|>\|)/u)?.[1]
+    if (operator === undefined) return true
+    const operand = word.slice(word.indexOf(operator) + operator.length) || words[index + 1]
+    if (operand === undefined) return true
+    if (operator.startsWith("<<")) continue
+    if (operator.includes("&")) {
+      if (/^[0-9-]+$/u.test(operand)) continue
+      if (word.slice(word.indexOf(operator) + operator.length)) continue
+      return true
+    }
+    if (operand === "/dev/null") continue
+    return true
+  }
+  return false
+}
 
 const firstExecutableWordInfo = (text) => {
   const words = shellWords(text)
@@ -464,10 +527,9 @@ const hasDynamicExecutableIdentity = (text) => {
   const commandInfo = firstExecutableWordInfo(text)
   if (words === undefined || commandInfo === undefined) return words === undefined
   const commandName = commandInfo.word
-  const dynamicWord = /(?:\$(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*?#$!-])|\$\(|\$\{|`)/u
-  if (dynamicWord.test(commandName)) return true
+  if (hasUnquotedShellExpansion(text.slice(0, text.indexOf(commandName) + commandName.length))) return true
   if (commandName === "alias" || commandName === "unalias") {
-    return words.slice(commandInfo.index + 1).some((word) => dynamicWord.test(word))
+    return hasUnquotedShellExpansion(text.slice(text.indexOf(commandName) + commandName.length))
   }
   return false
 }
@@ -666,29 +728,50 @@ const segmentRequiredReachability = (segments, definitions = [], aliases = []) =
 const isKnownSuccessfulShellCommand = (text, start, definitions, aliases = []) =>
   !hasActiveFunctionDefinition(text, start, definitions) &&
   !hasActiveAliasDefinition(text, start, aliases) &&
+  !hasPotentiallyFailingRedirection(text) &&
   (/^(?:true|printf|echo|:)(?:\s|$)/u.test(text.trim()) ||
     browserPairingBuild.test(text.trim()) ||
     codeCommitWebRoleCheck.test(text.trim()) ||
     /^tsc\s+-b(?:\s|$)/u.test(text.trim()))
 
-const scanErrexitLifecycle = (segments, definitions, aliases, matcher, inheritedErrexit = false) => {
-  const mayReachability = segmentMayReachability(segments, definitions, aliases)
+const scanErrexitLifecycle = (segments, definitions, aliases, matcher, inheritedErrexit = false, offset = 0) => {
+  const scopedSegments = rebaseShellSegments(segments, offset)
+  const mayReachability = segmentMayReachability(scopedSegments, definitions, aliases)
   let errexit = inheritedErrexit
   let risky = false
-  for (const [index, segment] of segments.entries()) {
+  let result = "success"
+  for (const [index, segment] of scopedSegments.entries()) {
     if (!mayReachability[index]) continue
     const text = segment.text.trim()
+    if (text === "") continue
     const transition = setErrexitTransition(text, segment.start, aliases)
     if (transition !== undefined) {
       errexit = transition
       risky = false
+      result = "success"
       continue
     }
-    if (errexit && risky && matcher.test(text)) return { risk: true, risky, errexit }
+    if (errexit && risky && matcher.test(text)) return { risk: true, risky, errexit, result }
+    let segmentResult = aliasCommandResult(text, segment.start, aliases)
+    if (segmentResult === undefined) {
+      segmentResult = isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
+        ? "success"
+        : text === "false"
+          ? "failure"
+          : "unknown"
+    }
     const body = groupedCommandBody(text)
     if (body !== undefined) {
-      const nested = scanErrexitLifecycle(shellCommandSegments(body, true), definitions, aliases, matcher, errexit)
+      const nested = scanErrexitLifecycle(
+        shellCommandSegments(body, true),
+        definitions,
+        aliases,
+        matcher,
+        errexit,
+        segment.start + segment.text.indexOf(body)
+      )
       if (nested.risk) return nested
+      segmentResult = nested.result
       if (text.startsWith("{")) {
         risky = nested.risky
         errexit = nested.errexit
@@ -708,21 +791,26 @@ const scanErrexitLifecycle = (segments, definitions, aliases, matcher, inherited
         definitions,
         aliases,
         matcher,
-        errexit
+        errexit,
+        invokedDefinition.start
       )
       if (nested.risk) return nested
+      segmentResult = nested.result
       risky = nested.risky
       errexit = nested.errexit
     }
+    const compoundSucceeded = body !== undefined && segmentResult === "success"
     if (
       errexit &&
       (segment.nextOperator === ";" || segment.nextOperator === "\n") &&
+      !compoundSucceeded &&
       !isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
     ) {
       risky = true
     }
+    result = segmentResult
   }
-  return { risk: false, risky, errexit }
+  return { risk: false, risky, errexit, result }
 }
 
 const hasErrexitLifecycleRisk = (segments, definitions, aliases, matcher) =>
@@ -749,8 +837,8 @@ const unsupportedShellWords = new Set([
   "while"
 ])
 
-const hasUnsupportedShellControl = (source, aliases = undefined) => {
-  const segments = shellCommandSegments(source, true)
+const hasUnsupportedShellControl = (source, aliases = undefined, offset = 0) => {
+  const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
   const resolvedAliases = aliases ?? resolveAliasMutations(segments, [])
   if (resolvedAliases === undefined) return true
   return segments.some(({ text, nextOperator, start }) => {
@@ -759,7 +847,7 @@ const hasUnsupportedShellControl = (source, aliases = undefined) => {
     if (/^\\?(?:\.|source)(?:\s|$)/u.test(text.trim()) || text.trim().startsWith("!")) return true
     if (nextOperator === "&") return true
     const body = groupedCommandBody(text)
-    return body !== undefined && hasUnsupportedShellControl(body, resolvedAliases)
+    return body !== undefined && hasUnsupportedShellControl(body, resolvedAliases, start + text.indexOf(body))
   })
 }
 
@@ -801,9 +889,9 @@ const setOptionTransition = (text, optionName, start = 0, aliases = []) => {
   return transition
 }
 
-const hasNoExecShellOptionInCommand = (command, aliases = undefined) => {
+const hasNoExecShellOptionInCommand = (command, aliases = undefined, offset = 0) => {
   const { source } = extractFunctionDefinitions(command)
-  const segments = shellCommandSegments(source, true)
+  const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
   const resolvedAliases = aliases ?? resolveAliasMutations(segments, [])
   if (resolvedAliases === undefined) return true
   const reachability = segmentMayReachability(segments, [], resolvedAliases)
@@ -821,7 +909,7 @@ const hasNoExecShellOptionInCommand = (command, aliases = undefined) => {
     if (
       body !== undefined &&
       segment.text.trim().startsWith("{") &&
-      hasNoExecShellOptionInCommand(body, resolvedAliases)
+      hasNoExecShellOptionInCommand(body, resolvedAliases, segment.start + segment.text.indexOf(body))
     )
       return true
   }
@@ -840,9 +928,9 @@ const hasCommandCacheMutation = (text, start = 0, aliases = []) => {
   return words.slice(commandInfo.index + 1).some((word) => /^-p(?:$|[^-])/u.test(word))
 }
 
-const hasReachableCommandCacheMutation = (command, aliases = undefined) => {
+const hasReachableCommandCacheMutation = (command, aliases = undefined, offset = 0) => {
   const { definitions, source } = extractFunctionDefinitions(command)
-  const segments = shellCommandSegments(source, true)
+  const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
   const resolvedAliases = aliases ?? resolveAliasMutations(segments, definitions)
   if (resolvedAliases === undefined) return true
   const reachability = segmentMayReachability(segments, definitions, resolvedAliases)
@@ -850,7 +938,11 @@ const hasReachableCommandCacheMutation = (command, aliases = undefined) => {
     if (!reachability[index]) return false
     if (hasCommandCacheMutation(text, start, resolvedAliases)) return true
     const body = groupedCommandBody(text)
-    return body !== undefined && text.trim().startsWith("{") && hasReachableCommandCacheMutation(body, resolvedAliases)
+    return (
+      body !== undefined &&
+      text.trim().startsWith("{") &&
+      hasReachableCommandCacheMutation(body, resolvedAliases, start + text.indexOf(body))
+    )
   })
 }
 
@@ -972,6 +1064,7 @@ const hasStatusReplacement = (segments, index) =>
 const hasStatusSafeContinuation = (segments, index, nextOperator) =>
   nextOperator === undefined ||
   (nextOperator === "&&" &&
+    !hasPotentiallyFailingRedirection(segments[index]?.text ?? "") &&
     !hasStatusReplacement(segments, index) &&
     !segments.slice(index).some(({ text, nextOperator: followingOperator }) => {
       if (followingOperator === "||") return true
@@ -980,10 +1073,11 @@ const hasStatusSafeContinuation = (segments, index, nextOperator) =>
     })) ||
   (nextOperator === ";" && segments.slice(index + 1).every(({ text }) => text.trim() === ""))
 
-const hasMayReachableTerminationBeforeMatcher = (segments, definitions, aliases, matcher) => {
-  const mayReachability = segmentMayReachability(segments, definitions, aliases)
+const hasMayReachableTerminationBeforeMatcher = (segments, definitions, aliases, matcher, offset = 0) => {
+  const scopedSegments = rebaseShellSegments(segments, offset)
+  const mayReachability = segmentMayReachability(scopedSegments, definitions, aliases)
   let terminated = false
-  for (const [index, segment] of segments.entries()) {
+  for (const [index, segment] of scopedSegments.entries()) {
     if (!mayReachability[index] && !terminated) continue
     const text = segment.text.trim()
     if (terminated && matcher.test(text)) return true
@@ -991,7 +1085,12 @@ const hasMayReachableTerminationBeforeMatcher = (segments, definitions, aliases,
     if (
       body !== undefined &&
       text.startsWith("{") &&
-      hasReachableShellTermination(shellCommandSegments(body, true), definitions, aliases)
+      hasReachableShellTermination(
+        shellCommandSegments(body, true),
+        definitions,
+        aliases,
+        segment.start + segment.text.indexOf(body)
+      )
     ) {
       terminated = true
     }
@@ -1000,16 +1099,17 @@ const hasMayReachableTerminationBeforeMatcher = (segments, definitions, aliases,
   return false
 }
 
-const hasReachableShellTermination = (segments, definitions, aliases) => {
-  const reachability = segmentMayReachability(segments, definitions, aliases)
-  return segments.some(({ text, start }, index) => {
+const hasReachableShellTermination = (segments, definitions, aliases, offset = 0) => {
+  const scopedSegments = rebaseShellSegments(segments, offset)
+  const reachability = segmentMayReachability(scopedSegments, definitions, aliases)
+  return scopedSegments.some(({ text, start }, index) => {
     if (!reachability[index]) return false
     if (isShellTerminatingCommand(text.trim(), start, true, aliases)) return true
     const body = groupedCommandBody(text)
     return (
       body !== undefined &&
       text.trim().startsWith("{") &&
-      hasReachableShellTermination(shellCommandSegments(body, true), definitions, aliases)
+      hasReachableShellTermination(shellCommandSegments(body, true), definitions, aliases, start + text.indexOf(body))
     )
   })
 }
@@ -1081,6 +1181,7 @@ const hasReachableLifecycleCommand = (command, matcher, visited = new Set()) => 
   const aliases = resolveAliasMutations(segments, definitions)
   if (aliases === undefined) return false
   const reachability = segmentRequiredReachability(segments, definitions, aliases)
+  if (segments.some(({ text }, index) => reachability[index] && hasPotentiallyFailingRedirection(text))) return false
   if (hasErrexitLifecycleRisk(segments, definitions, aliases, matcher)) return false
   if (hasMayReachableTerminationBeforeMatcher(segments, definitions, aliases, matcher)) return false
   if (segments.some(({ text, start }, index) => reachability[index] && hasPersistentPathMutation(text, start, aliases)))
@@ -1134,6 +1235,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const aliases = resolveAliasMutations(segments, definitions)
   if (aliases === undefined) return false
   const reachability = segmentReachability(segments, definitions, aliases)
+  if (segments.some(({ text }, index) => reachability[index] && hasPotentiallyFailingRedirection(text))) return false
   if (hasErrexitLifecycleRisk(segments, definitions, aliases, matcher)) return false
   if (hasMayReachableTerminationBeforeMatcher(segments, definitions, aliases, matcher)) return false
   if (segments.some(({ text, start }, index) => reachability[index] && hasPersistentPathMutation(text, start, aliases)))
@@ -1174,12 +1276,24 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   })
 }
 
+const resolvedShellCommandWords = (text, start, aliases) => {
+  const words = shellWords(text)
+  const commandInfo = firstExecutableWordInfo(text)
+  if (words === undefined || commandInfo === undefined) return undefined
+  const active = aliases
+    .filter((alias) => alias.name === commandInfo.word && alias.start <= start)
+    .toSorted((left, right) => left.start - right.start)
+    .at(-1)
+  const commandWords =
+    active?.kind === "define" ? shellWords(active.value) : [resolvedShellCommandName(text, start, aliases)]
+  if (commandWords === undefined || commandWords[0] === undefined) return undefined
+  return [...commandWords, ...words.slice(commandInfo.index + 1)]
+}
+
 const isPrepackCompilationCommand = (text, start, aliases) => {
-  const commandName = resolvedShellCommandName(text, start, aliases)
-  return (
-    (commandName === "tsc" && /^tsc\s+-b(?:\s|$)/u.test(text.trim())) ||
-    (commandName === "vite" && /^vite\s+build(?:\s|$)/u.test(text.trim()))
-  )
+  const words = resolvedShellCommandWords(text, start, aliases)
+  const commandName = words?.[0]
+  return (commandName === "tsc" && words?.[1] === "-b") || (commandName === "vite" && words?.[1] === "build")
 }
 
 const hasOrderedPrepackLifecycleCommand = (command) => {
@@ -1189,6 +1303,7 @@ const hasOrderedPrepackLifecycleCommand = (command) => {
   const aliases = resolveAliasMutations(segments, definitions)
   if (aliases === undefined) return false
   const visited = new Set()
+  const definitionKey = (definition) => `${definition.name}:${definition.start}:${definition.end}`
   const scan = (nestedSegments, inheritedBuild) => {
     const reachability = segmentRequiredReachability(nestedSegments, definitions, aliases)
     let buildSeen = inheritedBuild
@@ -1219,8 +1334,8 @@ const hasOrderedPrepackLifecycleCommand = (command) => {
             candidate.reachable !== false
         )
         .at(-1)
-      if (definition !== undefined && !visited.has(definition.name)) {
-        visited.add(definition.name)
+      if (definition !== undefined && !visited.has(definitionKey(definition))) {
+        visited.add(definitionKey(definition))
         const nestedBuild = scan(shellCommandSegments(definition.body, true), buildSeen)
         if (!nestedBuild.valid) return nestedBuild
         buildSeen = nestedBuild.buildSeen
@@ -1342,6 +1457,14 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     codeCommitWebScripts,
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "alias stop=printf\n{ stop 0; }; pnpm --filter @knpkv/browser-pairing build" },
     browserPairingDependency
   ),
   []
@@ -2292,9 +2415,11 @@ for (const command of [
   "alias options=set\noptions -n\npnpm --filter @knpkv/browser-pairing build",
   "alias decl=export\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build",
   "{ exit 0; }; pnpm --filter @knpkv/browser-pairing build",
+  "alias stop=exit\n{ stop 0; }; pnpm --filter @knpkv/browser-pairing build",
   "set -e; { false; pnpm --filter @knpkv/browser-pairing build; }",
   "set -e; fail() { false; }; fail; pnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
+  "alias helper=$1\nhelper pnpm\npnpm --filter @knpkv/browser-pairing build",
   "> /dev/null local PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build",
   "test -e package.json && exit 0; pnpm --filter @knpkv/browser-pairing build"
 ]) {
@@ -2305,6 +2430,17 @@ for (const command of [
   )
   assert.deepEqual(result, [lifecycleGap("predev")])
 }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "true > /definitely/not/present/output && pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  [lifecycleGap("predev")]
+)
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
@@ -2356,6 +2492,28 @@ assert.deepEqual(
   ),
   [lifecycleGap("prepack")]
 )
+for (const command of [
+  "X=1 tsc -b; pnpm --filter @knpkv/browser-pairing build && vite build",
+  "alias compile=tsc\ncompile -b\npnpm --filter @knpkv/browser-pairing build && vite build",
+  "f() { :; }; f; f() { tsc -b; }; f; pnpm --filter @knpkv/browser-pairing build && vite build"
+]) {
+  assert.deepEqual(
+    findCodeCommitWebLifecycleGaps(
+      "packages/codecommit-web/package.json",
+      { ...codeCommitWebScripts, prepack: command },
+      browserPairingDependency
+    ),
+    [lifecycleGap("prepack")]
+  )
+}
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, prepack: "pnpm --filter @knpkv/browser-pairing build && X=1 tsc -b && vite build" },
+    browserPairingDependency
+  ),
+  []
+)
 for (const [command, expected] of [
   ["set -e; pnpm --filter @knpkv/browser-pairing build", []],
   ["(set -n); pnpm --filter @knpkv/browser-pairing build", []],
@@ -2363,9 +2521,11 @@ for (const [command, expected] of [
   ["set -e; set +e; false; pnpm --filter @knpkv/browser-pairing build", []],
   ["set -e; echo ready; pnpm --filter @knpkv/browser-pairing build", []],
   ["set -e; { true; pnpm --filter @knpkv/browser-pairing build; }", []],
+  ["set -e; { true; }; pnpm --filter @knpkv/browser-pairing build", []],
   ["(exit 0); pnpm --filter @knpkv/browser-pairing build", []],
   ["printf '$builtin'; pnpm --filter @knpkv/browser-pairing build", []],
   ["printf '$1'; pnpm --filter @knpkv/browser-pairing build", []],
+  ["alias helper='$1'\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias disable=printf\ndisable -n\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias options=printf\noptions -n\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias decl=printf\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build", []],
@@ -2377,7 +2537,8 @@ for (const [command, expected] of [
     []
   ],
   ["alias gate=false\n{ gate && alias pnpm=:; }\npnpm --filter @knpkv/browser-pairing build", []],
-  ["> /dev/null local FOO=1; pnpm --filter @knpkv/browser-pairing build", []]
+  ["> /dev/null local FOO=1; pnpm --filter @knpkv/browser-pairing build", []],
+  ["true >/dev/null && pnpm --filter @knpkv/browser-pairing build", []]
 ]) {
   assert.deepEqual(
     findCodeCommitWebLifecycleGaps(
