@@ -46,6 +46,9 @@ import {
   type TerminalModifier,
   type TerminalRailKey
 } from "./terminal-keyboard.js"
+import { WorkSnapshots } from "@knpkv/herdr-work/model"
+import { ConnectAgentIdentity } from "./work-goal-link-view.js"
+import { resolveConnectWorkGoal, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
   detail: Schema.String
@@ -185,10 +188,30 @@ const loadAgents = Effect.gen(function* () {
   return directory
 })
 
+const loadWork = Effect.gen(function* () {
+  const client = yield* HttpClient.HttpClient
+  const response = yield* client
+    .get("/v1/work")
+    .pipe(Effect.mapError((cause) => new ConnectNetworkError({ detail: String(cause) })))
+  if (response.status < 200 || response.status >= 300) {
+    return yield* new ConnectStatusError({ status: response.status })
+  }
+  return yield* decodeBoundedResponseJson(response, WorkSnapshots).pipe(
+    Effect.mapError(
+      (cause) =>
+        new ConnectProtocolError({
+          detail: "invalid Work snapshot",
+          cause
+        })
+    )
+  )
+})
+
 const browserRuntime = Atom.runtime(BrowserHttpClient.layerFetch)
 
 export const makeConnectAtoms = () => {
   const agents = browserRuntime.atom(loadAgents)
+  const work = browserRuntime.atom(loadWork)
   return {
     activityFilter: Atom.make<AgentActivityFilter>("all"),
     agents,
@@ -199,7 +222,9 @@ export const makeConnectAtoms = () => {
     preference: Atom.make(loadRememberedAgent),
     preferenceError: Atom.make<string | null>(null),
     query: Atom.make(""),
-    selectedKey: Atom.make<string | null>(null)
+    selectedKey: Atom.make<string | null>(null),
+    work,
+    workPoll: browserRuntime.atom(Atom.refresh(work).pipe(Effect.repeat(Schedule.spaced("5 seconds"))))
   }
 }
 
@@ -539,6 +564,7 @@ export const ConnectSurface = ({
   const [preferenceError, setPreferenceError] = useAtom(atoms.preferenceError)
   const [query, setQuery] = useAtom(atoms.query)
   const [selectedKey, setSelectedKey] = useAtom(atoms.selectedKey)
+  const work = useAtomValue(atoms.work)
   const preferenceApplied = useRef(false)
   const requestId = useRef(0)
   const terminalRef = useRef<HTMLDivElement>(null)
@@ -552,6 +578,7 @@ export const ConnectSurface = ({
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   useAtomMount(atoms.agentsPoll)
+  useAtomMount(atoms.workPoll)
 
   useEffect(() => {
     const container = terminalRef.current
@@ -617,6 +644,12 @@ export const ConnectSurface = ({
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
       ? connectionRequest.agent
       : null)
+  const workGoalResolution: ConnectWorkGoalResolution =
+    selected === null
+      ? { _tag: "unavailable", reason: "snapshot_unavailable" }
+      : AsyncResult.isSuccess(work)
+        ? resolveConnectWorkGoal(selected, work.value)
+        : { _tag: "unavailable", reason: "snapshot_unavailable" }
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
@@ -834,7 +867,11 @@ export const ConnectSurface = ({
           Agents
         </button>
         <div>
-          <strong>{selected?.name ?? "Agent"}</strong>
+          {selected === null ? (
+            <strong>Agent</strong>
+          ) : (
+            <ConnectAgentIdentity agent={selected} resolution={workGoalResolution} />
+          )}
           <small>{selected === null ? "Herdr terminal" : `${selected.host} · ${selected.kind}`}</small>
         </div>
         <StateLabel label="connected" tone="positive" size="compact" />

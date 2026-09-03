@@ -340,6 +340,31 @@
     min-inline-size: 0;
   }
 
+  .connect-agent-identity {
+    display: grid;
+    min-inline-size: 0;
+  }
+
+  .connect-agent-work-link {
+    color: inherit;
+    min-inline-size: 0;
+    text-decoration: none;
+  }
+
+  .connect-agent-work-link:hover,
+  .connect-agent-work-link:focus-visible {
+    color: var(--rly-color-agent);
+    text-decoration: underline;
+    text-decoration-thickness: 0.12em;
+    text-underline-offset: 0.16em;
+  }
+
+  .connect-agent-identity[data-work-goal-state="missing"] small,
+  .connect-agent-identity[data-work-goal-state="ambiguous"] small,
+  .connect-agent-identity[data-work-goal-state="unavailable"] small {
+    color: var(--rly-color-text-3);
+  }
+
   .terminal-bar small {
     color: var(--rly-color-text-3);
   }

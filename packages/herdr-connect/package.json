@@ -60,6 +60,7 @@
     "@effect/atom-react": "4.0.0-rc.109",
     "@effect/platform-browser": "4.0.0-rc.109",
     "@knpkv/herdr-fleet": "workspace:^",
+    "@knpkv/herdr-work": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0-rc.109",
     "ghostty-web": "0.4.0"

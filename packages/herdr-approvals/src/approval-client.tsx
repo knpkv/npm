@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { WorkSnapshots } from "@knpkv/herdr-work/model"
+import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
 import {
@@ -140,8 +140,6 @@ const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecisi
 })
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
-const loadWork = fetchJson(WorkSnapshots, "/v1/work")
-
 const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
   return yield* fetchJson(ChatEntry, "/v1/chat", {
     body: JSON.stringify(request),
@@ -343,7 +341,8 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
   const chat = browserRuntime.atom(loadChat, {
     initialValue: initial.chat ?? { entries: [] }
   })
-  const work = browserRuntime.atom(loadWork)
+  const connect = makeConnectAtoms()
+  const work = connect.work
   const chatPoll = browserRuntime.atom(
     initial.approvalApp.chatEnabled
       ? Atom.refresh(chat).pipe(Effect.repeat(Schedule.spaced("3 seconds")))
@@ -356,7 +355,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     chat,
     chatPoll,
     chatSend: browserRuntime.fn(sendChat),
-    connect: makeConnectAtoms(),
+    connect,
     dashboard: browserRuntime.atom(loadDashboard, { initialValue: initial }),
     decision: browserRuntime.fn(decide),
     notification: browserRuntime.atom<NotificationState, NotificationLoadError>(loadNotificationState, {
@@ -608,6 +607,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     )
   }
   const current = currentSnapshot
+  const workSelection = decodeWorkNavigationSelection(window.location.search)
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
@@ -660,7 +660,12 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
                   tone="neutral"
                 />
               ) : (
-                <WorkBoard snapshots={current.work} />
+                <WorkBoard
+                  {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
+                  initialWindow={workSelection.window}
+                  navigation={workNavigationHref}
+                  snapshots={current.work}
+                />
               )}
               <AgentActivity snapshot={current} />
               <ActivityHistory
