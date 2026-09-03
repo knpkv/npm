@@ -337,9 +337,10 @@ const firstShellWord = (text) => {
   return normalized !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
 }
 
-const extractAliasMutations = (command) => {
+const extractAliasMutations = (segments, reachability) => {
   const mutations = []
-  for (const segment of shellCommandSegments(command, true)) {
+  for (const [index, segment] of segments.entries()) {
+    if (!reachability[index]) continue
     const words = segment.text.trim().split(/\s+/u)
     const commandName = words[0]
     if (commandName !== "alias" && commandName !== "unalias") continue
@@ -503,8 +504,8 @@ const hasStatusSafeContinuation = (segments, index, nextOperator) =>
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source) || hasUnsafeInvokedFunction(command, visited)) return false
-  const aliases = extractAliasMutations(source)
   const segments = shellCommandSegments(source, true)
+  const aliases = extractAliasMutations(segments, segmentReachability(segments, definitions))
   const reachability = segmentReachability(segments, definitions, aliases)
   if (
     segments.some(({ text, nextOperator, start }, index) => {
@@ -708,6 +709,25 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "alias pnpm=true\nfalse && unalias pnpm\npnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "alias pnpm=true\nunalias pnpm\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
