@@ -18,6 +18,8 @@ import {
   type OrchestratorCommand as OrchestratorCommandType,
   OrchestratorEvent,
   type OrchestratorEvent as OrchestratorEventType,
+  OrchestratorPendingDispatch,
+  OrchestratorPendingDispatchStatus,
   type OrchestratorReceipt as OrchestratorReceiptType,
   OrchestratorResult
 } from "./orchestrator-model.js"
@@ -89,6 +91,8 @@ export interface OrchestratorService {
   readonly events: (
     dispatchRequestId: string
   ) => Stream.Stream<OrchestratorEventType, OrchestratorError>
+  /** Lists accepted and queued commands so a restarted worker can resume them explicitly. */
+  readonly pending: () => Effect.Effect<ReadonlyArray<typeof OrchestratorPendingDispatch.Type>, OrchestratorError>
   readonly queue: (dispatchRequestId: string) => Effect.Effect<OrchestratorEventType, OrchestratorError>
   readonly run: (dispatchRequestId: string) => Effect.Effect<OrchestratorEventType, OrchestratorError>
   readonly settle: (
@@ -218,6 +222,30 @@ const makeOrchestrator: Effect.Effect<
     return yield* Effect.forEach(decodedRows, decodeEvent)
   })
 
+  const listPending = Effect.fn("Orchestrator.listPending")(function*() {
+    const rows = yield* sql`
+      SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
+        activity_idempotency_key AS "activityIdempotencyKey", command,
+        accepted_at AS "acceptedAt", status
+      FROM orchestrator_dispatches
+      WHERE status IN ('accepted', 'queued')
+      ORDER BY accepted_at ASC, dispatch_request_id ASC
+    `.pipe(Effect.mapError(storageError("pending.list")))
+    const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
+      Effect.mapError(storageError("pending.decode-row"))
+    )
+    return yield* Effect.forEach(decodedRows, (row) =>
+      Effect.gen(function*() {
+        const status = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatchStatus)(row.status).pipe(
+          Effect.mapError(() => new OrchestratorStorageError({ cause: row.status, operation: "pending.decode-status" }))
+        )
+        const command = yield* decodeCommand(row.command)
+        return yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({ ...row, command, status }).pipe(
+          Effect.mapError(storageError("pending.decode"))
+        )
+      }))
+  })
+
   const appendTransition = Effect.fn("Orchestrator.transition")(function*(
     dispatchRequestId: string,
     target: TransitionTarget,
@@ -254,12 +282,15 @@ const makeOrchestrator: Effect.Effect<
         const timestamp = yield* now
         const event = yield* Schema.decodeUnknownEffect(OrchestratorEvent)({
           activityIdempotencyKey: last.activityIdempotencyKey,
-          detail: decodedDetail,
           dispatchRequestId,
           occurredAt: timestamp,
-          result: decodedResult,
           sequence: last.sequence + 1,
-          type: decodedTarget
+          type: decodedTarget,
+          ...(decodedTarget === "settled"
+            ? { detail: null, result: decodedResult }
+            : decodedTarget === "delivery_failed" || decodedTarget === "task_failed"
+            ? { detail: decodedDetail, result: null }
+            : { detail: null, result: null })
         }).pipe(Effect.mapError(() => new OrchestratorValidationError({ detail: "transition exceeds event bounds" })))
         yield* sql`
           INSERT INTO orchestrator_events
@@ -391,6 +422,7 @@ const makeOrchestrator: Effect.Effect<
       ),
     failDelivery: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "delivery_failed", detail, null),
     failTask: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "task_failed", detail, null),
+    pending: listPending,
     queue: (dispatchRequestId) => appendTransition(dispatchRequestId, "queued", null, null),
     recover: Effect.fn("Orchestrator.recover")(function*() {
       const rows = yield* sql`

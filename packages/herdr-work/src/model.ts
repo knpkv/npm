@@ -262,7 +262,20 @@ const CanonicalWorktree = Schema.String.check(
 const Branch = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(256),
-  Schema.isPattern(/^[A-Za-z0-9._/-]+$/)
+  Schema.isPattern(/^[A-Za-z0-9._/-]+$/),
+  Schema.makeFilter(
+    (value) =>
+      value !== "@" &&
+      !value.startsWith("-") &&
+      !value.startsWith("/") &&
+      !value.endsWith("/") &&
+      !value.endsWith(".") &&
+      !value.includes("//") &&
+      !value.includes("..") &&
+      !value.includes("@{") &&
+      value.split("/").every((part) => !part.startsWith(".") && !part.endsWith(".lock")),
+    { expected: "a valid Git branch ref" }
+  )
 )
 
 const ExactHead = Schema.String.check(

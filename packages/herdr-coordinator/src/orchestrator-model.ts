@@ -44,16 +44,69 @@ export const OrchestratorEventType = Schema.Literals([
 ])
 export type OrchestratorEventType = typeof OrchestratorEventType.Type
 
-export const OrchestratorEvent = Schema.Struct({
+const orchestratorEventFields = {
   dispatchRequestId: DispatchRequestId,
   sequence: Schema.Number.check(Schema.isInt(), Schema.isBetween({ minimum: 0, maximum: 1_000_000 })),
-  type: OrchestratorEventType,
   activityIdempotencyKey: ActivityIdempotencyKey,
-  occurredAt: Timestamp,
-  detail: Schema.NullOr(Detail),
-  result: Schema.NullOr(OrchestratorResult)
+  occurredAt: Timestamp
+}
+
+const OrchestratorAcceptedEvent = Schema.Struct({
+  ...orchestratorEventFields,
+  type: Schema.Literal("accepted"),
+  detail: Schema.Null,
+  result: Schema.Null
 })
-export interface OrchestratorEvent extends Schema.Schema.Type<typeof OrchestratorEvent> {}
+
+const OrchestratorQueuedEvent = Schema.Struct({
+  ...orchestratorEventFields,
+  type: Schema.Literal("queued"),
+  detail: Schema.Null,
+  result: Schema.Null
+})
+
+const OrchestratorRunningEvent = Schema.Struct({
+  ...orchestratorEventFields,
+  type: Schema.Literal("running"),
+  detail: Schema.Null,
+  result: Schema.Null
+})
+
+const OrchestratorSettledEvent = Schema.Struct({
+  ...orchestratorEventFields,
+  type: Schema.Literal("settled"),
+  detail: Schema.Null,
+  result: OrchestratorResult
+})
+
+const OrchestratorFailureEvent = Schema.Struct({
+  ...orchestratorEventFields,
+  type: Schema.Literals(["delivery_failed", "task_failed"]),
+  detail: Detail,
+  result: Schema.Null
+})
+
+export const OrchestratorEvent = Schema.Union([
+  OrchestratorAcceptedEvent,
+  OrchestratorQueuedEvent,
+  OrchestratorRunningEvent,
+  OrchestratorSettledEvent,
+  OrchestratorFailureEvent
+])
+export type OrchestratorEvent = typeof OrchestratorEvent.Type
+
+export const OrchestratorPendingDispatchStatus = Schema.Literals(["accepted", "queued"])
+export type OrchestratorPendingDispatchStatus = typeof OrchestratorPendingDispatchStatus.Type
+
+export const OrchestratorPendingDispatch = Schema.Struct({
+  dispatchRequestId: DispatchRequestId,
+  idempotencyKey: Identifier,
+  activityIdempotencyKey: ActivityIdempotencyKey,
+  command: OrchestratorCommand,
+  acceptedAt: Timestamp,
+  status: OrchestratorPendingDispatchStatus
+})
+export type OrchestratorPendingDispatch = typeof OrchestratorPendingDispatch.Type
 
 export const OrchestratorReceipt = Schema.Struct({
   dispatchRequestId: DispatchRequestId,

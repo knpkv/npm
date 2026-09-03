@@ -1,5 +1,5 @@
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
-import { Effect, Equal, FileSystem, Option, Path, Schema } from "effect"
+import { Crypto, Effect, Encoding, Equal, FileSystem, Option, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import {
   WorkCheckpointConflictError,
@@ -40,13 +40,18 @@ const TransactionEventIdentity = Schema.Struct({
   goalId: Schema.String,
   occurredAt: Schema.Number
 })
-const CompactTransactionRecord = Schema.Struct({
+const LegacyCompactTransactionRecord = Schema.Struct({
   events: Schema.Array(TransactionEventIdentity),
   version: Schema.Literal("herdr.work.transaction.v1")
+})
+const CompactTransactionRecord = Schema.Struct({
+  digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  version: Schema.Literal("herdr.work.transaction.v2")
 })
 const LaneRow = Schema.Struct({ record: Schema.String, revision: Schema.Number })
 const DecisionRow = Schema.Struct({ record: Schema.String })
 const CountRow = Schema.Struct({ count: Schema.Number })
+const LedgerBytesRow = Schema.Struct({ bytes: Schema.Number })
 const storeError = (operation: string) => (cause: unknown) => new WorkStoreError({ cause, operation })
 type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
 type AppendDecision =
@@ -75,6 +80,7 @@ const utf8 = new TextEncoder()
 const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSON.stringify(value)).byteLength
 const maximumTimestamp = 8_640_000_000_000_000
 const workTransactionMaxRecords = 16_384
+const workTransactionMaxBytes = 2 * 1024 * 1024
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
   observedAt: maximumTimestamp,
   now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
@@ -102,6 +108,9 @@ const maximumSnapshotBytes = (
   const separators = Math.max(0, maximumGoalBytes.size - 1)
   return workSnapshotEnvelopeMaxBytes + 4 * (encodedGoals + separators)
 }
+
+const transactionIdentity = (events: ReadonlyArray<WorkGoalCheckpointType>) =>
+  events.map(({ eventId, goal, occurredAt }) => ({ eventId, goalId: goal.id, occurredAt }))
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
   Schema.decodeUnknownEffect(StoredEventRow)(row).pipe(
@@ -148,12 +157,14 @@ export interface WorkStoreService {
 
 export class WorkStore implements WorkStoreService {
   readonly #database: DatabaseSync
+  readonly #cryptoService: Crypto.Crypto
   readonly #fileSystem: FileSystem.FileSystem
   readonly path: string
 
-  private constructor(path: string, fileSystem: FileSystem.FileSystem) {
+  private constructor(path: string, fileSystem: FileSystem.FileSystem, cryptoService: Crypto.Crypto) {
     this.path = path
     this.#fileSystem = fileSystem
+    this.#cryptoService = cryptoService
     this.#database = new DatabaseSync(path)
     try {
       this.#database.exec(`
@@ -194,6 +205,7 @@ export class WorkStore implements WorkStoreService {
   }
 
   static readonly open = Effect.fn("WorkStore.open")(function*(path: string) {
+    const cryptoService = yield* Crypto.Crypto
     const fileSystem = yield* FileSystem.FileSystem
     const paths = yield* Path.Path
     const directory = paths.dirname(path)
@@ -204,7 +216,7 @@ export class WorkStore implements WorkStoreService {
       Effect.mapError(storeError("open.secureDirectory"))
     )
     const store = yield* Effect.try({
-      try: () => new WorkStore(path, fileSystem),
+      try: () => new WorkStore(path, fileSystem, cryptoService),
       catch: storeError("open.database")
     })
     yield* store.secureFiles()
@@ -364,6 +376,15 @@ export class WorkStore implements WorkStoreService {
         reason: "malformed"
       })
     }
+    const digest = yield* this.#cryptoService.digest(
+      "SHA-256",
+      new TextEncoder().encode(JSON.stringify(transactionIdentity(decoded)))
+    ).pipe(
+      Effect.mapError(storeError("appendMany.digest")),
+      Effect.map(Encoding.encodeHex)
+    )
+    const transactionRecord = JSON.stringify({ digest, version: "herdr.work.transaction.v2" })
+    const transactionEntryBytes = utf8.encode(transaction).byteLength + utf8.encode(transactionRecord).byteLength
     const decision = yield* Effect.try({
       try: () => {
         let inTransaction = false
@@ -374,6 +395,7 @@ export class WorkStore implements WorkStoreService {
             "SELECT record FROM work_goal_transactions WHERE transaction_id = ?"
           ).get(transaction)
           let compactTransaction: typeof CompactTransactionRecord.Type | undefined
+          let legacyCompactTransaction: typeof LegacyCompactTransactionRecord.Type | undefined
           if (storedTransaction !== undefined) {
             const stored = Schema.decodeUnknownSync(TransactionRow)(storedTransaction)
             const previous = JSON.parse(stored.record)
@@ -381,15 +403,20 @@ export class WorkStore implements WorkStoreService {
             if (compact._tag === "Success") {
               compactTransaction = compact.success
             } else {
-              const legacy = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
-              this.#database.exec("ROLLBACK")
-              inTransaction = false
-              return Equal.equals(legacy, decoded)
-                ? { _tag: "replayed", events: decoded } satisfies AppendManyDecision
-                : {
-                  _tag: "rejected",
-                  error: new WorkTransactionConflictError({ transactionId: transaction })
-                } satisfies AppendManyDecision
+              const legacyCompact = Schema.decodeUnknownResult(LegacyCompactTransactionRecord)(previous)
+              if (legacyCompact._tag === "Success") {
+                legacyCompactTransaction = legacyCompact.success
+              } else {
+                const legacy = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
+                this.#database.exec("ROLLBACK")
+                inTransaction = false
+                return Equal.equals(legacy, decoded)
+                  ? { _tag: "replayed", events: decoded } satisfies AppendManyDecision
+                  : {
+                    _tag: "rejected",
+                    error: new WorkTransactionConflictError({ transactionId: transaction })
+                  } satisfies AppendManyDecision
+              }
             }
           }
 
@@ -481,12 +508,21 @@ export class WorkStore implements WorkStoreService {
           }
           if (newEvents.length === 0) {
             if (compactTransaction !== undefined) {
-              const expected = compactTransaction.events
-              const actual = decoded.map(({ eventId, goal, occurredAt }) => ({
-                eventId,
-                goalId: goal.id,
-                occurredAt
-              }))
+              if (compactTransaction.digest !== digest) {
+                this.#database.exec("ROLLBACK")
+                inTransaction = false
+                return {
+                  _tag: "rejected",
+                  error: new WorkTransactionConflictError({ transactionId: transaction })
+                } satisfies AppendManyDecision
+              }
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
+            }
+            if (legacyCompactTransaction !== undefined) {
+              const expected = legacyCompactTransaction.events
+              const actual = transactionIdentity(decoded)
               if (!Equal.equals(expected, actual)) {
                 this.#database.exec("ROLLBACK")
                 inTransaction = false
@@ -514,24 +550,35 @@ export class WorkStore implements WorkStoreService {
                 })
               } satisfies AppendManyDecision
             }
+            const ledgerBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+              this.#database.prepare(
+                `SELECT COALESCE(SUM(length(CAST(transaction_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+                 FROM work_goal_transactions`
+              ).get()
+            ).bytes
+            if (ledgerBytes + transactionEntryBytes > workTransactionMaxBytes) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkProjectionError({
+                  cause: decoded,
+                  detail: `work transaction history cannot exceed ${workTransactionMaxBytes} encoded bytes`,
+                  reason: "capacity_exceeded"
+                })
+              } satisfies AppendManyDecision
+            }
             this.#database.prepare(
               "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
             ).run(
               transaction,
-              JSON.stringify({
-                events: decoded.map(({ eventId, goal, occurredAt }) => ({
-                  eventId,
-                  goalId: goal.id,
-                  occurredAt
-                })),
-                version: "herdr.work.transaction.v1"
-              })
+              transactionRecord
             )
             this.#database.exec("COMMIT")
             inTransaction = false
             return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
           }
-          if (compactTransaction !== undefined) {
+          if (compactTransaction !== undefined || legacyCompactTransaction !== undefined) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return {
@@ -627,14 +674,6 @@ export class WorkStore implements WorkStoreService {
               } satisfies AppendManyDecision
             }
           }
-          const insert = this.#database.prepare(
-            `INSERT INTO work_goal_events
-              (event_id, goal_id, occurred_at, record, transaction_id)
-             VALUES (?, ?, ?, ?, ?)`
-          )
-          for (const event of newEvents) {
-            insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event), transaction)
-          }
           const transactionCount = Schema.decodeUnknownSync(CountRow)(
             this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_transactions").get()
           ).count
@@ -650,9 +689,35 @@ export class WorkStore implements WorkStoreService {
               })
             } satisfies AppendManyDecision
           }
+          const ledgerBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+            this.#database.prepare(
+              `SELECT COALESCE(SUM(length(CAST(transaction_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+               FROM work_goal_transactions`
+            ).get()
+          ).bytes
+          if (ledgerBytes + transactionEntryBytes > workTransactionMaxBytes) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work transaction history cannot exceed ${workTransactionMaxBytes} encoded bytes`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies AppendManyDecision
+          }
+          const insert = this.#database.prepare(
+            `INSERT INTO work_goal_events
+              (event_id, goal_id, occurred_at, record, transaction_id)
+             VALUES (?, ?, ?, ?, ?)`
+          )
+          for (const event of newEvents) {
+            insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event), transaction)
+          }
           this.#database.prepare(
             "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
-          ).run(transaction, JSON.stringify(decoded))
+          ).run(transaction, transactionRecord)
           this.#database.exec("COMMIT")
           inTransaction = false
           return { _tag: "inserted", events: decoded } satisfies AppendManyDecision

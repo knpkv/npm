@@ -14,7 +14,9 @@ the Node runtime.
 immediate idempotent receipt. Its durable event stream records `accepted`,
 `queued`, `running`, `settled`, `delivery_failed`, and `task_failed`; activity
 idempotency keys are persisted with every event. `recover` marks work that was
-running at restart as `delivery_failed` and never retries it implicitly. The
+running at restart as `delivery_failed` and never retries it implicitly.
+`pending` returns the exact typed command records for accepted and queued work
+after restart; callers resume those records explicitly. The
 exported `singleRunnerLayer` composes Effect's SingleRunner with SQL-backed
 MessageStorage and a local runner identity; provide an Effect SQL client and
 Crypto implementation at the application boundary. Its SQLite layer creates a

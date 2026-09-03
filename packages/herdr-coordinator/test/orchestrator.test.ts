@@ -168,6 +168,68 @@ describe("durable coordinator orchestrator", () => {
     })
   })
 
+  it.effect("discovers accepted and queued dispatches for explicit restart resumption", () =>
+    withTemporaryRoot("herdr-orchestrator-pending-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const created = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:pending:accepted" },
+              "dispatch:pending:accepted"
+            )
+            const queued = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:pending:queued" },
+              "dispatch:pending:queued"
+            )
+            yield* orchestrator.queue(queued.dispatchRequestId)
+            return { accepted, queued }
+          })
+        )
+        const pending = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.pending()
+          })
+        )
+        expect(pending).toHaveLength(2)
+        expect(pending.find(({ status }) => status === "accepted")).toEqual({
+          ...created.accepted,
+          activityIdempotencyKey: "activity:pending:accepted",
+          command: { ...command, activityIdempotencyKey: "activity:pending:accepted" },
+          status: "accepted"
+        })
+        expect(pending.find(({ status }) => status === "queued")).toEqual({
+          ...created.queued,
+          activityIdempotencyKey: "activity:pending:queued",
+          command: { ...command, activityIdempotencyKey: "activity:pending:queued" },
+          status: "queued"
+        })
+        const resumed = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            yield* orchestrator.queue(created.accepted.dispatchRequestId)
+            const acceptedRunning = yield* orchestrator.run(created.accepted.dispatchRequestId)
+            const queuedRunning = yield* orchestrator.run(created.queued.dispatchRequestId)
+            return [acceptedRunning.type, queuedRunning.type]
+          })
+        )
+        expect(resumed).toEqual(["running", "running"])
+        const noPending = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.pending()
+          })
+        )
+        expect(noPending).toEqual([])
+      })
+    }))
+
   it.effect("secures SQLite database and journal files", () =>
     withTemporaryRoot("herdr-orchestrator-permissions-", (root) =>
       withDatabase(

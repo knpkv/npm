@@ -13,7 +13,9 @@ transaction. Reusing its transaction ID with the same batch replays it; a
 different batch returns `WorkTransactionConflictError`. `claim` is a durable
 compare-and-set lane claim containing the canonical worktree, branch, exact
 head, owner, parent, phase, and expected revision. `handoff` stores a compact,
-credential-free decision record for later recovery.
+credential-free decision record for later recovery. Replay aliases retain
+fixed-size canonical SHA-256 identities under a bounded ledger, and lane
+claims validate Git branch refs before persisting their authority.
 
 `WorkBoard` renders these persisted outbound-link forms:
 

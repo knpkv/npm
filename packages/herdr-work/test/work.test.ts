@@ -405,7 +405,7 @@ describe("durable Work projection", () => {
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-replay-only" }
       })
       expect(yield* Effect.result(service.recordMany("transaction-1", [history[0], changed]))).toMatchObject({
-        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-1" }
+        failure: { _tag: "WorkCheckpointConflictError" }
       })
       expect(yield* store.list()).toEqual(history.slice(0, 2))
     }).pipe(provideNodeServices))
@@ -433,6 +433,37 @@ describe("durable Work projection", () => {
       expect(yield* store.list()).toEqual([])
       expect(yield* service.recordMany("transaction-small", [history[0]])).toEqual([history[0]])
       expect(yield* store.list()).toEqual([history[0]])
+    }).pipe(provideNodeServices))
+
+  it.effect("bounds replay transaction storage separately from transaction row count", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-bytes-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const store = yield* WorkStore.open(path)
+      const service = yield* makeWorkService(store)
+      const event = checkpoint("event-byte-cap", 0, "working", "local")
+      yield* service.record(event)
+      store.close()
+
+      const database = new DatabaseSync(path)
+      database.exec("BEGIN IMMEDIATE")
+      const insert = database.prepare(
+        "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
+      )
+      const record = JSON.stringify({ digest: "a".repeat(64), version: "herdr.work.transaction.v2" })
+      for (let index = 0; index < 16_383; index++) {
+        insert.run(`seed-${String(index).padStart(5, "0")}-${"x".repeat(240)}`, record)
+      }
+      database.exec("COMMIT")
+      database.close()
+
+      const reopened = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => reopened.close()))
+      expect(yield* Effect.result(reopened.appendMany("transaction-byte-cap", [event]))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+      })
+      expect(yield* reopened.list()).toEqual([event])
     }).pipe(provideNodeServices))
 
   it.effect("compare-and-set claims and retains compact decision handoffs", () =>
@@ -487,6 +518,14 @@ describe("durable Work projection", () => {
         expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
           failure: {}
         })
+      }
+      for (const branch of ["/main", "main/", "foo..bar", "foo.lock", ".hidden"]) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, branch }))).toMatchObject({
+          failure: {}
+        })
+      }
+      for (const branch of ["main", "feat/durable-work"]) {
+        expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, branch })).toMatchObject({ branch })
       }
     }).pipe(provideNodeServices))
 
