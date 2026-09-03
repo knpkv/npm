@@ -261,6 +261,7 @@ const sanitizeEncodedUri = (value: string): string => {
   const encodedUri = uriPrefix.test(normalized)
   if (encodedUri && !encodedUriAuthorityBoundary.test(normalized)) return sanitizeDecodedUri(normalized)
   const authoritySanitized = encodedUri ? sanitizeUriAuthority(normalized) : normalized
+  if (authoritySanitized !== normalized && /\s/u.test(normalized)) return redactedCredential
   const encoded = encodedText(authoritySanitized)
   if (encoded === undefined) {
     return authoritySanitized === normalized ? sanitizeDecodedUri(authoritySanitized) : redactedCredential
