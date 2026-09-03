@@ -44,6 +44,14 @@ const EventRow = Schema.Struct({
   result: Schema.NullOr(Schema.String)
 })
 type EventRow = typeof EventRow.Type
+const RecoveryRow = Schema.Struct({
+  dispatchRequestId: DispatchRequestId,
+  acceptedAt: Schema.Number
+})
+type RecoveryRow = typeof RecoveryRow.Type
+type RecoveryCursor = Pick<RecoveryRow, "acceptedAt" | "dispatchRequestId">
+type RecoveryState = { readonly after: Option.Option<RecoveryCursor> }
+const recoveryPageSize = 256
 
 const storageError = (operation: string) => (cause: unknown) => new OrchestratorStorageError({ cause, operation })
 
@@ -112,7 +120,7 @@ export interface OrchestratorService {
     detail: string
   ) => Effect.Effect<OrchestratorEventType, OrchestratorError>
   /** Marks in-flight work as delivery-failed after a restart; it never retries implicitly. */
-  readonly recover: () => Effect.Effect<ReadonlyArray<OrchestratorEventType>, OrchestratorError>
+  readonly recover: () => Stream.Stream<OrchestratorEventType, OrchestratorError>
 }
 
 export class Orchestrator extends Context.Service<Orchestrator, OrchestratorService>()(
@@ -186,6 +194,16 @@ const makeOrchestrator: Effect.Effect<
       FOREIGN KEY (dispatch_request_id) REFERENCES orchestrator_dispatches(dispatch_request_id)
     )
   `.pipe(Effect.mapError(storageError("initialize.events")))
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS orchestrator_pending_dispatches_order
+    ON orchestrator_dispatches (accepted_at ASC, dispatch_request_id ASC)
+    WHERE status IN ('accepted', 'queued')
+  `.pipe(Effect.mapError(storageError("initialize.pending-index")))
+  yield* sql`
+    CREATE INDEX IF NOT EXISTS orchestrator_running_dispatches_order
+    ON orchestrator_dispatches (accepted_at ASC, dispatch_request_id ASC)
+    WHERE status = 'running'
+  `.pipe(Effect.mapError(storageError("initialize.running-index")))
   yield* secureFiles
 
   const load = Effect.fn("Orchestrator.load")(function*(dispatchRequestId: string) {
@@ -450,25 +468,48 @@ const makeOrchestrator: Effect.Effect<
     failTask: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "task_failed", detail, null),
     pending: listPending,
     queue: (dispatchRequestId) => appendTransition(dispatchRequestId, "queued", null, null),
-    recover: Effect.fn("Orchestrator.recover")(function*() {
-      const rows = yield* sql`
-        SELECT dispatch_request_id AS "dispatchRequestId"
-        FROM orchestrator_dispatches WHERE status = 'running'
-        ORDER BY accepted_at ASC
-      `.pipe(Effect.mapError(storageError("recover.lookup")))
-      const ids = yield* Schema.decodeUnknownEffect(
-        Schema.Array(Schema.Struct({ dispatchRequestId: DispatchRequestId }))
-      )(rows).pipe(
-        Effect.mapError(storageError("recover.decode"))
-      )
-      return yield* Effect.forEach(ids, ({ dispatchRequestId }) =>
-        appendTransition(
-          dispatchRequestId,
-          "delivery_failed",
-          "orchestrator restarted while the activity was running",
-          null
-        ))
-    }),
+    recover: () =>
+      Stream.paginate<RecoveryState, OrchestratorEventType, OrchestratorError>(
+        { after: Option.none() },
+        Effect.fn("Orchestrator.recoverPage")(function*(state) {
+          const rows = state.after._tag === "None"
+            ? yield* sql`
+              SELECT dispatch_request_id AS "dispatchRequestId", accepted_at AS "acceptedAt"
+              FROM orchestrator_dispatches
+              WHERE status = 'running'
+              ORDER BY accepted_at ASC, dispatch_request_id ASC
+              LIMIT ${recoveryPageSize}
+            `.pipe(Effect.mapError(storageError("recover.lookup")))
+            : yield* sql`
+              SELECT dispatch_request_id AS "dispatchRequestId", accepted_at AS "acceptedAt"
+              FROM orchestrator_dispatches
+              WHERE status = 'running'
+                AND (accepted_at > ${state.after.value.acceptedAt}
+                  OR (accepted_at = ${state.after.value.acceptedAt}
+                    AND dispatch_request_id > ${state.after.value.dispatchRequestId}))
+              ORDER BY accepted_at ASC, dispatch_request_id ASC
+              LIMIT ${recoveryPageSize}
+            `.pipe(Effect.mapError(storageError("recover.lookup")))
+          const ids = yield* Schema.decodeUnknownEffect(Schema.Array(RecoveryRow))(rows).pipe(
+            Effect.mapError(storageError("recover.decode"))
+          )
+          const events = yield* Effect.forEach(ids, ({ dispatchRequestId }) =>
+            appendTransition(
+              dispatchRequestId,
+              "delivery_failed",
+              "orchestrator restarted while the activity was running",
+              null
+            ))
+          const last = ids.at(-1)
+          const next = ids.length < recoveryPageSize || last === undefined
+            ? Option.none<RecoveryState>()
+            : Option.some<RecoveryState>({
+              after: Option.some({ acceptedAt: last.acceptedAt, dispatchRequestId: last.dispatchRequestId })
+            })
+          const page: readonly [ReadonlyArray<OrchestratorEventType>, Option.Option<RecoveryState>] = [events, next]
+          return page
+        })
+      ),
     run: (dispatchRequestId) => appendTransition(dispatchRequestId, "running", null, null),
     settle: (dispatchRequestId, result) => appendTransition(dispatchRequestId, "settled", null, result),
     submit

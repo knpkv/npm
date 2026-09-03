@@ -528,6 +528,33 @@ describe("durable Work projection", () => {
       expect(yield* service.decisions(handoff.laneId)).toHaveLength(500)
     }).pipe(provideNodeServices))
 
+  it.effect("validates decision lookup identifiers before SQLite binding", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-decision-identity-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      const handoff: WorkDecisionHandoff = {
+        decision: "handoff",
+        goalId: "lane-\uFFFD",
+        id: "handoff-replacement-lane",
+        laneId: "lane-\uFFFD",
+        occurredAt: 0,
+        owner: { id: "owner-packages", name: "Package owner" },
+        summary: "Replacement character remains a valid distinct lane",
+        version: "herdr.work.decision.v1"
+      }
+      yield* service.handoff(handoff)
+      for (const malformedLaneId of ["lane-\uD800", "lane-\uDC00"]) {
+        expect(yield* Effect.result(service.decisions(malformedLaneId))).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "decisions.list.decode-lane-id" }
+        })
+      }
+      expect(yield* service.decisions("lane-\uFFFD")).toEqual([handoff])
+      expect(yield* service.decisions("lane-normal")).toEqual([])
+    }).pipe(provideNodeServices))
+
   it.effect("compare-and-set claims and retains compact decision handoffs", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-lane-"))

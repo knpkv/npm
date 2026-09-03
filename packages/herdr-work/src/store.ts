@@ -942,11 +942,14 @@ export class WorkStore implements WorkStoreService {
   })
 
   readonly decisions = Effect.fn("WorkStore.decisions")(function*(this: WorkStore, laneId: string) {
+    const decodedLaneId = yield* Schema.decodeUnknownEffect(WorkGoalId)(laneId).pipe(
+      Effect.mapError(storeError("decisions.list.decode-lane-id"))
+    )
     const rows = yield* Effect.try({
       try: () =>
         this.#database.prepare(
           "SELECT record FROM work_decision_handoffs WHERE lane_id = ? ORDER BY occurred_at ASC, handoff_id ASC"
-        ).all(laneId),
+        ).all(decodedLaneId),
       catch: storeError("decisions.list")
     })
     return yield* Effect.forEach(rows, (row) =>

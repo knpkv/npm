@@ -5,6 +5,7 @@ import { Rpc } from "effect/unstable/rpc"
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DatabaseSync } from "node:sqlite"
 import {
   layer as orchestratorLayer,
   Orchestrator,
@@ -128,7 +129,7 @@ describe("durable coordinator orchestrator", () => {
           })
           yield* orchestrator.queue(first.dispatchRequestId)
           yield* orchestrator.run(first.dispatchRequestId)
-          const recovered = yield* orchestrator.recover()
+          const recovered = yield* Stream.runCollect(orchestrator.recover())
           expect(recovered.map(({ type }) => type)).toEqual(["delivery_failed"])
           expect((yield* Stream.runCollect(orchestrator.events(first.dispatchRequestId))).at(-1)?.type).toBe(
             "delivery_failed"
@@ -179,7 +180,7 @@ describe("durable coordinator orchestrator", () => {
           path,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
-            return yield* orchestrator.recover()
+            return yield* Stream.runCollect(orchestrator.recover())
           })
         )
         expect(recovered).toHaveLength(1)
@@ -251,6 +252,61 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("recovers running dispatches page by page", () =>
+    withTemporaryRoot("herdr-orchestrator-recovery-pages-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const total = 257
+      return Effect.gen(function*() {
+        yield* withDatabase(path, Effect.void)
+        const database = new DatabaseSync(path)
+        database.exec("BEGIN IMMEDIATE")
+        const insertDispatch = database.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+           VALUES (?, ?, ?, ?, ?, 'running')`
+        )
+        const insertEvent = database.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           VALUES (?, ?, ?, ?, ?, NULL, NULL)`
+        )
+        for (let index = 0; index < total; index += 1) {
+          const dispatchRequestId = `dispatch:recovery-page:${index}`
+          const activityIdempotencyKey = `activity:recovery-page:${index}`
+          const encodedCommand = JSON.stringify({ ...command, activityIdempotencyKey })
+          insertDispatch.run(
+            dispatchRequestId,
+            `idempotency:recovery-page:${index}`,
+            activityIdempotencyKey,
+            encodedCommand,
+            index
+          )
+          insertEvent.run(dispatchRequestId, 0, "accepted", activityIdempotencyKey, index)
+          insertEvent.run(dispatchRequestId, 1, "queued", activityIdempotencyKey, index)
+          insertEvent.run(dispatchRequestId, 2, "running", activityIdempotencyKey, index)
+        }
+        database.exec("COMMIT")
+        database.close()
+
+        const recovered = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Stream.runCollect(orchestrator.recover())
+          })
+        )
+        expect(recovered).toHaveLength(total)
+        expect(recovered.every(({ type }) => type === "delivery_failed")).toBe(true)
+        const remaining = new DatabaseSync(path)
+        const runningRow = remaining.prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_dispatches WHERE status = 'running'"
+        ).get()
+        remaining.close()
+        const running = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(runningRow)
+        expect(running.count).toBe(0)
+      })
+    }))
+
   it.effect("pages pending restart work with a bounded typed query", () =>
     withTemporaryRoot("herdr-orchestrator-pending-page-", (root) =>
       withDatabase(
@@ -281,6 +337,28 @@ describe("durable coordinator orchestrator", () => {
               )
               .map(({ dispatchRequestId }) => dispatchRequestId)
           )
+          const database = new DatabaseSync(join(root, "orchestrator.sqlite"))
+          const pendingPlans = [
+            database.prepare(
+              `EXPLAIN QUERY PLAN
+               SELECT dispatch_request_id FROM orchestrator_dispatches
+               WHERE status IN ('accepted', 'queued')
+               ORDER BY accepted_at ASC, dispatch_request_id ASC
+               LIMIT 2`
+            ).all(),
+            database.prepare(
+              `EXPLAIN QUERY PLAN
+               SELECT dispatch_request_id FROM orchestrator_dispatches
+               WHERE status IN ('accepted', 'queued')
+                 AND (accepted_at > ? OR (accepted_at = ? AND dispatch_request_id > ?))
+               ORDER BY accepted_at ASC, dispatch_request_id ASC
+               LIMIT 2`
+            ).all(0, 0, "dispatch:pending-page:0")
+          ]
+          database.close()
+          expect(pendingPlans.every((plan) =>
+            plan.some((row) => String(row.detail).includes("orchestrator_pending_dispatches_order"))
+          )).toBe(true)
         })
       )))
 
