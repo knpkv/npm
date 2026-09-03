@@ -2285,11 +2285,15 @@ for (const command of [
   "stop() { exit 0; }; builtin eval stop; pnpm --filter @knpkv/browser-pairing build",
   "enable -f ./fake-pnpm.so pnpm; pnpm --filter @knpkv/browser-pairing build",
   "alias invoke=builtin\ninvoke eval stop\npnpm --filter @knpkv/browser-pairing build",
+  "alias invoke=wrapper\nalias wrapper=builtin\ninvoke eval stop\npnpm --filter @knpkv/browser-pairing build",
+  "alias loader=enable\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build",
+  "alias loader=wrapper\nalias wrapper=enable\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build",
   "alias gate=true\n{ gate && alias pnpm=:; }\npnpm --filter @knpkv/browser-pairing build",
   "alias options=set\noptions -n\npnpm --filter @knpkv/browser-pairing build",
   "alias decl=export\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build",
   "{ exit 0; }; pnpm --filter @knpkv/browser-pairing build",
   "set -e; { false; pnpm --filter @knpkv/browser-pairing build; }",
+  "set -e; fail() { false; }; fail; pnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "> /dev/null local PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build",
   "test -e package.json && exit 0; pnpm --filter @knpkv/browser-pairing build"
@@ -2367,6 +2371,11 @@ for (const [command, expected] of [
   ["alias decl=printf\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias cache=printf\ncache -p /usr/bin/true pnpm\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias invoke=printf\ninvoke eval stop\npnpm --filter @knpkv/browser-pairing build", []],
+  ["alias loader=printf\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build", []],
+  [
+    "alias loader=wrapper\nalias wrapper=printf\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build",
+    []
+  ],
   ["alias gate=false\n{ gate && alias pnpm=:; }\npnpm --filter @knpkv/browser-pairing build", []],
   ["> /dev/null local FOO=1; pnpm --filter @knpkv/browser-pairing build", []]
 ]) {
@@ -2451,6 +2460,9 @@ for (const invalidRoleCheck of [
   "stop() { exit 0; }; builtin eval stop; tsc -p tsconfig.roles.json --noEmit",
   "enable -f ./fake-tsc.so tsc; tsc -p tsconfig.roles.json --noEmit",
   "alias invoke=builtin\ninvoke eval stop\ntsc -p tsconfig.roles.json --noEmit",
+  "alias invoke=wrapper\nalias wrapper=builtin\ninvoke eval stop\ntsc -p tsconfig.roles.json --noEmit",
+  "alias loader=enable\nloader -f ./fake-tsc.so tsc\ntsc -p tsconfig.roles.json --noEmit",
+  "alias loader=wrapper\nalias wrapper=enable\nloader -f ./fake-tsc.so tsc\ntsc -p tsconfig.roles.json --noEmit",
   "alias options=set\noptions -n\ntsc -p tsconfig.roles.json --noEmit",
   "alias decl=export\ndecl PATH=/tmp/fake\ntsc -p tsconfig.roles.json --noEmit",
   "{ exit 0; }; tsc -p tsconfig.roles.json --noEmit",
