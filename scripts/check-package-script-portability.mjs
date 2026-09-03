@@ -980,15 +980,15 @@ const hasReachableCommandCacheMutation = (command, aliases = undefined, offset =
   })
 }
 
-const hasInvokedCommand = (source, name, definitions = [], aliases = []) => {
-  const segments = shellCommandSegments(source, true)
+const hasInvokedCommand = (source, name, definitions = [], aliases = [], offset = 0) => {
+  const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
   const reachability = segmentReachability(segments, definitions, aliases)
   return segments.some((segment, index) => {
     const { start, text } = segment
     if (!reachability[index]) return false
     if (resolvedShellCommandName(text, start, aliases) === name) return true
     const body = groupedCommandBody(text)
-    return body !== undefined && hasInvokedCommand(body, name, definitions, aliases)
+    return body !== undefined && hasInvokedCommand(body, name, definitions, aliases, start + text.indexOf(body))
   })
 }
 
@@ -2485,6 +2485,7 @@ for (const command of [
   "alias decl=export\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build",
   "{ exit 0; }; pnpm --filter @knpkv/browser-pairing build",
   "alias stop=exit\n{ stop 0; }; pnpm --filter @knpkv/browser-pairing build",
+  "stop() { exit 0; }\nalias invoke=stop\n{ invoke; }\npnpm --filter @knpkv/browser-pairing build",
   "set -e; { false; pnpm --filter @knpkv/browser-pairing build; }",
   "set -e; fail() { false; }; fail; pnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
