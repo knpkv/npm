@@ -228,6 +228,27 @@ export const WorkGoal = Schema.Struct({
 )
 export interface WorkGoal extends Schema.Schema.Type<typeof WorkGoal> {}
 
+export const WorkGoalFamilyGroup = Schema.Struct({
+  canonicalGoalId: WorkGoalId,
+  canonical: WorkGoal,
+  superseded: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals))
+}).check(
+  Schema.makeFilter(
+    (group) =>
+      group.canonical.goalFamily?.role === "canonical" &&
+      group.canonical.goalFamily.canonicalGoalId === group.canonicalGoalId &&
+      group.superseded.every(
+        (goal) =>
+          goal.goalFamily?.role === "superseded" &&
+          goal.goalFamily.canonicalGoalId === group.canonicalGoalId
+      ) &&
+      new Set(group.superseded.map(({ id }) => id)).size === group.superseded.length &&
+      !group.superseded.some(({ id }) => id === group.canonicalGoalId),
+    { expected: "consistent goal-family history group" }
+  )
+)
+export interface WorkGoalFamilyGroup extends Schema.Schema.Type<typeof WorkGoalFamilyGroup> {}
+
 export const WorkGoalCheckpoint = Schema.Struct({
   version: Schema.Literal("herdr.work.event.v1"),
   eventId: Identifier,
@@ -248,7 +269,8 @@ export const WorkSnapshot = Schema.Struct({
   window: WorkSnapshotWindow,
   observedAt: Timestamp,
   asOf: Timestamp,
-  goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals))
+  goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
+  families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals)))
 })
 export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
 

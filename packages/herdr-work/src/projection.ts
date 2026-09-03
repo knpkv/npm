@@ -4,6 +4,7 @@ import { validateGoalFamilyHistory } from "./goal-family.js"
 import {
   type WorkGoal,
   WorkGoalCheckpoint,
+  type WorkGoalFamilyGroup,
   workHistoryMaxEvents,
   type WorkSnapshot,
   WorkSnapshots,
@@ -73,6 +74,40 @@ const validateHistory = Effect.fn("HerdrWork.validateHistory")(function*(
   return events
 })
 
+const familiesFor = (latest: ReadonlyMap<string, WorkGoal>): ReadonlyArray<WorkGoalFamilyGroup> => {
+  const canonicalById = new Map<string, WorkGoal>()
+  for (const goal of latest.values()) {
+    if (goal.goalFamily?.role === "canonical") canonicalById.set(goal.id, goal)
+  }
+  const groups: Array<WorkGoalFamilyGroup> = []
+  for (const canonical of canonicalById.values()) {
+    const superseded = [...latest.values()]
+      .filter(
+        (goal): goal is WorkGoal =>
+          goal.goalFamily?.role === "superseded" &&
+          goal.goalFamily.canonicalGoalId === canonical.id
+      )
+      .toSorted(
+        (left, right) =>
+          right.updatedAt - left.updatedAt ||
+          left.title.localeCompare(right.title) ||
+          left.id.localeCompare(right.id)
+      )
+    if (superseded.length === 0) continue
+    groups.push({
+      canonicalGoalId: canonical.id,
+      canonical,
+      superseded
+    })
+  }
+  return groups.toSorted(
+    (left, right) =>
+      right.canonical.updatedAt - left.canonical.updatedAt ||
+      left.canonical.title.localeCompare(right.canonical.title) ||
+      left.canonicalGoalId.localeCompare(right.canonicalGoalId)
+  )
+}
+
 const snapshotAt = (
   events: ReadonlyArray<WorkGoalCheckpoint>,
   observedAt: number,
@@ -88,8 +123,12 @@ const snapshotAt = (
     observedAt,
     asOf,
     goals: [...latest.values()].filter((goal) => goal.goalFamily?.role !== "superseded").toSorted(
-      (left, right) => right.updatedAt - left.updatedAt || left.title.localeCompare(right.title)
-    )
+      (left, right) =>
+        right.updatedAt - left.updatedAt ||
+        left.title.localeCompare(right.title) ||
+        left.id.localeCompare(right.id)
+    ),
+    families: familiesFor(latest)
   }
 }
 

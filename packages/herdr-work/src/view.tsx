@@ -6,6 +6,7 @@ import type {
   WorkActivity,
   WorkApprovalTarget,
   WorkGoal,
+  WorkGoalFamilyGroup,
   WorkRequest,
   WorkReview,
   WorkSnapshot,
@@ -137,6 +138,16 @@ const SummaryCell = ({ label, value }: { readonly label: string; readonly value:
 
 const snapshotFor = (snapshots: WorkSnapshots, window: WorkSnapshotWindow): WorkSnapshot => snapshots[window]
 
+const familyForGoal = (snapshot: WorkSnapshot, goalId: string): WorkGoalFamilyGroup | null =>
+  (snapshot.families ?? []).find((group) => group.canonicalGoalId === goalId) ?? null
+
+const familyLabelForGoal = (snapshot: WorkSnapshot, goal: WorkGoal): string | null => {
+  const group = familyForGoal(snapshot, goal.id)
+  if (group === null) return null
+  const count = group.superseded.length
+  return `${count} superseded`
+}
+
 export const WorkBoard = ({
   externalLinks = "enabled",
   initialGoalId,
@@ -263,6 +274,11 @@ export const WorkBoard = ({
                     <Text tone="secondary" variant="meta">
                       {goal.summary}
                     </Text>
+                    {familyLabelForGoal(snapshot, goal) === null ? null : (
+                      <Text tone="secondary" variant="meta">
+                        {familyLabelForGoal(snapshot, goal)}
+                      </Text>
+                    )}
                   </span>
                   <Text data-label="Owner">{goal.owner.name}</Text>
                   <span className="work-board-copy" data-label="Agent / host">
@@ -461,6 +477,57 @@ export const WorkBoard = ({
                   <Text tone="secondary">{selected.review.summary}</Text>
                 )}
               </div>
+              {(() => {
+                const group = familyForGoal(snapshot, selected.id)
+                if (group === null) return null
+                return (
+                  <div className="work-inspector-section">
+                    <Text as="h3" variant="label">
+                      Superseded history
+                    </Text>
+                    <Text tone="secondary" variant="meta">
+                      Canonical {group.canonicalGoalId} · {group.superseded.length} superseded preserved
+                    </Text>
+                    <details className="work-family-history">
+                      <summary>Show {group.superseded.length} superseded</summary>
+                      <ul className="work-detail-list">
+                        {group.superseded.map((entry) => (
+                          <li key={entry.id}>
+                            <div className="work-request-heading">
+                              <Text>{entry.title}</Text>
+                              <StateLabel
+                                label={statePresentation[entry.state].label}
+                                size="compact"
+                                tone={statePresentation[entry.state].tone}
+                              />
+                            </div>
+                            <Text tone="secondary" variant="meta">
+                              {entry.summary} · {formatTimestamp(entry.updatedAt)}
+                            </Text>
+                            {blockersFor(entry).length === 0 ? null : (
+                              <Text tone="secondary" variant="meta">
+                                Blocker: {blockersFor(entry)[0]?.summary}
+                              </Text>
+                            )}
+                            {entry.review === undefined || entry.review === null ? null : (
+                              <Text tone="secondary" variant="meta">
+                                Review {reviewPresentation[entry.review.state].label}
+                                {entry.review.summary === null ? "" : ` · ${entry.review.summary}`}
+                              </Text>
+                            )}
+                            {entry.activity === undefined || entry.activity.length === 0 ? null : (
+                              <Text tone="secondary" variant="meta">
+                                Activity {entry.activity.length} checkpoint
+                                {entry.activity.length === 1 ? "" : "s"}
+                              </Text>
+                            )}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  </div>
+                )
+              })()}
               {selected.connectTarget === null ? (
                 <Text tone="secondary">No exact Connect target recorded.</Text>
               ) : externalLinks === "disabled" ? (

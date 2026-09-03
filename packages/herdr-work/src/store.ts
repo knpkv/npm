@@ -25,10 +25,10 @@ const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSO
 const maximumTimestamp = 8_640_000_000_000_000
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
   observedAt: maximumTimestamp,
-  now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
-  day: { window: "day", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
-  week: { window: "week", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
-  month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] }
+  now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] },
+  day: { window: "day", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] },
+  week: { window: "week", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] },
+  month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] }
 })
 
 const maximumSnapshotBytes = (
@@ -48,7 +48,10 @@ const maximumSnapshotBytes = (
     0
   )
   const separators = Math.max(0, maximumGoalBytes.size - 1)
-  return workSnapshotEnvelopeMaxBytes + 4 * (encodedGoals + separators)
+  const familyGroupsOverhead = 64
+  const familiesPerWindowBytes = 2 * encodedGoals + separators +
+    familyGroupsOverhead * Math.max(1, maximumGoalBytes.size)
+  return workSnapshotEnvelopeMaxBytes + 4 * Math.max(encodedGoals + separators, familiesPerWindowBytes)
 }
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>

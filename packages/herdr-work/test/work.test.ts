@@ -503,4 +503,178 @@ describe("durable Work projection", () => {
         })
     ).pipe(provideNodeServices)
   })
+
+  it.effect("groups superseded goals under their canonical while preserving blockers, review, and activity", () =>
+    Effect.gen(function*() {
+      const original: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-connect-v1", "event-v1-created", 0, 0),
+        goal: {
+          ...checkpointForGoal("goal-connect-v1", "event-v1-created", 0, 0).goal,
+          blocker: { since: 0, summary: "Original blocker" },
+          review: { state: "changes_requested", summary: "Original review", updatedAt: 0, url: null },
+          activity: [{ id: "activity-original", kind: "note", occurredAt: 0, summary: "Original activity" }],
+          state: "blocked",
+          title: "Connect terminal special keys v1"
+        }
+      }
+      const v2: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-connect-v2", "event-v2-created", 0, 0),
+        goal: {
+          ...checkpointForGoal("goal-connect-v2", "event-v2-created", 0, 0).goal,
+          blocker: { since: 0, summary: "V2 blocker" },
+          review: { state: "requested", summary: "V2 review", updatedAt: 0, url: null },
+          state: "blocked",
+          title: "Connect terminal special keys v2"
+        }
+      }
+      const v3 = checkpointForGoal("goal-connect-v3", "event-v3-created", 0, 0)
+      const relationAt = 5 * day
+      const canonicalV3 = familyCheckpoint(v3, "event-v3-canonical", relationAt, "goal-connect-v3", "canonical")
+      const supersededV1 = familyCheckpoint(
+        original,
+        "event-v1-superseded",
+        relationAt,
+        "goal-connect-v3",
+        "superseded"
+      )
+      const supersededV2 = familyCheckpoint(v2, "event-v2-superseded", relationAt, "goal-connect-v3", "superseded")
+      const events = [original, v2, v3, canonicalV3, supersededV1, supersededV2]
+      const snapshots = yield* projectWorkSnapshots(events, relationAt + 1)
+      expect(snapshots.now.goals.map(({ id }) => id)).toEqual(["goal-connect-v3"])
+      expect(snapshots.now.families).toHaveLength(1)
+      const group = snapshots.now.families?.[0]
+      expect(group?.canonicalGoalId).toBe("goal-connect-v3")
+      expect(group?.canonical.id).toBe("goal-connect-v3")
+      expect(group?.superseded.map(({ id }) => id).toSorted()).toEqual([
+        "goal-connect-v1",
+        "goal-connect-v2"
+      ])
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v1")?.blocker?.summary).toBe(
+        "Original blocker"
+      )
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v1")?.review?.summary).toBe(
+        "Original review"
+      )
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v1")?.activity).toEqual(
+        [{ id: "activity-original", kind: "note", occurredAt: 0, summary: "Original activity" }]
+      )
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v2")?.blocker?.summary).toBe(
+        "V2 blocker"
+      )
+      expect(snapshots.now.goals.some(({ id }) => id === "goal-connect-v1")).toBe(false)
+      expect(snapshots.day.goals.map(({ id }) => id).toSorted()).toEqual([
+        "goal-connect-v1",
+        "goal-connect-v2",
+        "goal-connect-v3"
+      ])
+      expect(snapshots.now.goals[0]?.id).toBe("goal-connect-v3")
+    }))
+
+  it.effect("orders superseded and canonical ties deterministically", () =>
+    Effect.gen(function*() {
+      const canonical = familyCheckpoint(
+        checkpointForGoal("goal-canonical", "event-canonical-created", 0, 0),
+        "event-canonical",
+        10,
+        "goal-canonical",
+        "canonical"
+      )
+      const a = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-alpha", "event-alpha-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-alpha", "event-alpha-created", 0, 0).goal, title: "Alpha" }
+        },
+        "event-alpha-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const b = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-beta", "event-beta-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-beta", "event-beta-created", 0, 0).goal, title: "Beta" }
+        },
+        "event-beta-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const c = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-alpha-2", "event-alpha-2-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-alpha-2", "event-alpha-2-created", 0, 0).goal, title: "Alpha" }
+        },
+        "event-alpha-2-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const reversed = [canonical, c, b, a]
+      const snapshots = yield* projectWorkSnapshots(
+        [
+          checkpointForGoal("goal-canonical", "event-canonical-created", 0, 0),
+          checkpointForGoal("goal-alpha", "event-alpha-created", 0, 0),
+          checkpointForGoal("goal-beta", "event-beta-created", 0, 0),
+          checkpointForGoal("goal-alpha-2", "event-alpha-2-created", 0, 0),
+          ...reversed
+        ],
+        11
+      )
+      const supersededIds = snapshots.now.families?.[0]?.superseded.map(({ id }) => id)
+      expect(supersededIds).toEqual(["goal-alpha", "goal-alpha-2", "goal-beta"])
+
+      const unrelatedA: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-unrelated-b", "event-unrelated-b", 5, 5),
+        goal: {
+          ...checkpointForGoal("goal-unrelated-b", "event-unrelated-b", 5, 5).goal,
+          title: "Unrelated B",
+          updatedAt: 5
+        }
+      }
+      const unrelatedB: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-unrelated-a", "event-unrelated-a", 5, 5),
+        goal: {
+          ...checkpointForGoal("goal-unrelated-a", "event-unrelated-a", 5, 5).goal,
+          title: "Unrelated A",
+          updatedAt: 5
+        }
+      }
+      const snapshotsTie = yield* projectWorkSnapshots([unrelatedA, unrelatedB], 6)
+      expect(snapshotsTie.now.goals.map(({ id }) => id)).toEqual(["goal-unrelated-a", "goal-unrelated-b"])
+    }))
+
+  it.effect("leaves unrelated goals unchanged when family grouping applies elsewhere", () =>
+    Effect.gen(function*() {
+      const unrelated = checkpointForGoal("goal-unrelated", "event-unrelated", 1, 1)
+      const canonical = familyCheckpoint(
+        checkpointForGoal("goal-canonical-2", "event-canonical-2-created", 0, 0),
+        "event-canonical-2",
+        2,
+        "goal-canonical-2",
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        checkpointForGoal("goal-old", "event-old-created", 0, 0),
+        "event-old-superseded",
+        2,
+        "goal-canonical-2",
+        "superseded"
+      )
+      const events = [
+        checkpointForGoal("goal-canonical-2", "event-canonical-2-created", 0, 0),
+        checkpointForGoal("goal-old", "event-old-created", 0, 0),
+        unrelated,
+        canonical,
+        superseded
+      ]
+      const snapshots = yield* projectWorkSnapshots(events, 3)
+      expect(snapshots.now.goals.map(({ id }) => id).toSorted()).toEqual(
+        ["goal-canonical-2", "goal-unrelated"]
+      )
+      expect(snapshots.now.families).toHaveLength(1)
+      expect(snapshots.now.families?.[0]?.canonicalGoalId).toBe("goal-canonical-2")
+      expect(snapshots.now.goals.some(({ id }) => id === "goal-old")).toBe(false)
+      expect(snapshots.now.goals.some(({ id }) => id === "goal-unrelated")).toBe(true)
+      expect(snapshots.now.goals.find(({ id }) => id === "goal-unrelated")?.title).toBe("goal-unrelated")
+    }))
 })
