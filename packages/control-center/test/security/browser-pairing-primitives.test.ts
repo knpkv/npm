@@ -15,7 +15,7 @@ describe("Control Center browser pairing seam", () => {
   })
 
   it("builds browser-pairing before the development client starts", () => {
-    expect(packageManifest.scripts.predev).toContain("pnpm --filter @knpkv/browser-pairing build")
+    expect(packageManifest.scripts.predev).toBe("pnpm --filter @knpkv/browser-pairing build")
   })
 
   it("builds browser-pairing before standalone build and check", () => {
