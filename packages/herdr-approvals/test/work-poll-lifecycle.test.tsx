@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { RegistryProvider, useAtomValue } from "@effect/atom-react"
+import { RegistryProvider } from "@effect/atom-react"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
@@ -62,11 +62,6 @@ afterEach(async () => {
   responseForPath = null
 })
 
-const WorkSnapshotObserver = ({ atom }: { readonly atom: ReturnType<typeof makeConnectAtoms>["work"] }) => {
-  useAtomValue(atom)
-  return null
-}
-
 describe("dashboard Work polling ownership", () => {
   it("keeps the production owner polling while Connect unmounts on tab change", async () => {
     vi.useFakeTimers()
@@ -85,8 +80,7 @@ describe("dashboard Work polling ownership", () => {
     await act(async () => {
       root.render(
         <RegistryProvider>
-          <DashboardWorkPollOwner atom={atoms.workPoll} />
-          <WorkSnapshotObserver atom={atoms.work} />
+          <DashboardWorkPollOwner atom={atoms.work} poll={atoms.workPoll} />
           <FleetShell
             approvals={<div data-testid="approvals" />}
             connect={<ConnectSurface atoms={atoms} embedded />}

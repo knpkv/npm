@@ -42,6 +42,55 @@ const emptyWork = JSON.stringify({
   observedAt: 1_000,
   week: emptyWindow("week")
 })
+const linkedAgents = JSON.stringify({
+  agents: [
+    {
+      host: "SER8",
+      id: "agent-reviewer",
+      kind: "codex",
+      lastActivityAt: 1_000,
+      name: "Review worker",
+      state: "working",
+      work: "npm"
+    }
+  ],
+  failures: [],
+  nextCursor: null
+})
+const linkedGoal = {
+  agentHierarchy: {
+    agent: {
+      agentId: "agent-reviewer",
+      host: "SER8",
+      name: "Review worker",
+      paneId: "wE:p3"
+    }
+  },
+  blocker: null,
+  connectTarget: {
+    agentId: "agent-reviewer",
+    host: "SER8",
+    url: "/connect/?agent=agent-reviewer&host=SER8"
+  },
+  createdAt: 1_000,
+  delivery: "review",
+  detail: "Review the current change",
+  id: "goal-review",
+  owner: { id: "owner-reviewer", name: "Reviewer" },
+  repository: { branch: "feat/review", repository: "npm" },
+  spend: null,
+  state: "review",
+  summary: "Review work",
+  title: "Review browser pairing",
+  updatedAt: 1_000
+}
+const linkedWork = JSON.stringify({
+  day: emptyWindow("day"),
+  month: emptyWindow("month"),
+  now: { ...emptyWindow("now"), goals: [linkedGoal] },
+  observedAt: 1_000,
+  week: emptyWindow("week")
+})
 
 const requestPath = (input: RequestInfo | URL): string => {
   const url = "href" in input ? input.href : "url" in input ? input.url : input
@@ -96,5 +145,51 @@ describe("Connect Work polling ownership", () => {
       await vi.advanceTimersByTimeAsync(5_000)
     })
     expect(paths.filter((path) => path === "/v1/work")).toHaveLength(3)
+  })
+
+  it("keeps the rendered Work goal link after a transient refresh failure", async () => {
+    vi.useFakeTimers()
+    const paths: Array<string> = []
+    let workRequests = 0
+    observedPaths = paths
+    responseForPath = (path) => {
+      if (path === "/v1/connect/agents") {
+        return new Response(linkedAgents, { headers: { "content-type": "application/json" } })
+      }
+      workRequests += 1
+      if (workRequests === 3) return new Response(null, { status: 503 })
+      return new Response(linkedWork, { headers: { "content-type": "application/json" } })
+    }
+
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+
+    await act(async () => {
+      root.render(
+        <RegistryProvider>
+          <ConnectSurface atoms={atoms} />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+      await vi.runOnlyPendingTimersAsync()
+    })
+    expect(workRequests).toBe(2)
+
+    const agentButton = host.querySelector('[data-agent-key="SER8:agent-reviewer"]')
+    expect(agentButton).not.toBeNull()
+    agentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    await act(async () => {
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+    expect(host.querySelector('[data-work-goal-state="available"]')).not.toBeNull()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    expect(workRequests).toBe(3)
+    expect(host.querySelector('[data-work-goal-state="available"]')).not.toBeNull()
   })
 })

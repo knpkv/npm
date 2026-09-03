@@ -602,7 +602,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   if (currentSnapshot === null) {
     return (
       <>
-        <DashboardWorkPollOwner atom={atoms.connect.workPoll} />
+        <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
         <main className="app app-error">
           <h1>Host activity unavailable</h1>
           <pre>{result._tag === "Failure" ? Cause.pretty(result.cause) : "Loading host activity"}</pre>
@@ -634,7 +634,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   )
   return (
     <>
-      <DashboardWorkPollOwner atom={atoms.connect.workPoll} />
+      <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
       <div
         className="dashboard-gesture"
         onTouchStart={onTouchStart}
