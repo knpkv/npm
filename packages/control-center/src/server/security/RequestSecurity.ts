@@ -1,4 +1,11 @@
-import { Crypto, Effect, Encoding, Redacted, Schema } from "effect"
+import type { BrowserPairingError } from "@knpkv/browser-pairing"
+import {
+  CredentialDigest,
+  CsrfToken as BrowserCsrfToken,
+  hashCredential as hashBrowserCredential,
+  verifyCredentialDigest
+} from "@knpkv/browser-pairing"
+import { Effect, Redacted, Schema } from "effect"
 
 import type { BindConfig } from "./BindConfig.js"
 
@@ -22,15 +29,11 @@ export const InsecureLanCapability = Schema.Literals([
 
 export type InsecureLanCapability = typeof InsecureLanCapability.Type
 
-export const CsrfDigest = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
-).pipe(Schema.brand("CsrfDigest"))
+export const CsrfDigest = CredentialDigest
 
 export type CsrfDigest = typeof CsrfDigest.Type
 
-export const CsrfToken = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase 256-bit token" })
-).pipe(Schema.brand("CsrfToken"))
+export const CsrfToken = BrowserCsrfToken
 
 export type CsrfToken = typeof CsrfToken.Type
 
@@ -162,28 +165,11 @@ export const authorizeRequest = Effect.fn("RequestSecurity.authorize")(function*
   return undefined
 })
 
-const fixedTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
-  let difference = left.byteLength ^ right.byteLength
-  const length = Math.max(left.byteLength, right.byteLength)
-  for (let index = 0; index < length; index += 1) {
-    difference |= (left[index] ?? 0) ^ (right[index] ?? 0)
-  }
-  return difference === 0
-}
-
 /** Hash a CSRF token for storage beside its session without retaining the token. */
 export const hashCsrfToken = Effect.fn("RequestSecurity.hashCsrf")(function*(token: string) {
-  const cryptoService = yield* Crypto.Crypto
-  const decodedToken = yield* Schema.decodeUnknownEffect(CsrfToken)(token).pipe(
-    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
+  return yield* hashBrowserCredential(Redacted.make(token)).pipe(
+    Effect.mapError((_error: BrowserPairingError) => new RequestSecurityError({ reason: "csrf-rejected" }))
   )
-  const bytes = yield* Effect.fromResult(Encoding.decodeHex(decodedToken)).pipe(
-    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
-  )
-  const digest = yield* cryptoService
-    .digest("SHA-256", bytes)
-    .pipe(Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" })))
-  return CsrfDigest.make(Encoding.encodeHex(digest))
 })
 
 /** Verify a supplied CSRF token against the fixed-size stored digest. */
@@ -192,19 +178,9 @@ export const verifyCsrfToken = Effect.fn("RequestSecurity.verifyCsrf")(function*
   expectedDigest: string
 ) {
   if (token === null) return yield* new RequestSecurityError({ reason: "csrf-required" })
-  const decodedExpected = yield* Schema.decodeUnknownEffect(CsrfDigest)(expectedDigest).pipe(
-    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
+  yield* verifyCredentialDigest(Redacted.make(token), expectedDigest).pipe(
+    Effect.mapError((_error: BrowserPairingError) => new RequestSecurityError({ reason: "csrf-rejected" }))
   )
-  const actualDigest = yield* hashCsrfToken(token)
-  const actual = yield* Effect.fromResult(Encoding.decodeHex(actualDigest)).pipe(
-    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
-  )
-  const expected = yield* Effect.fromResult(Encoding.decodeHex(decodedExpected)).pipe(
-    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
-  )
-  if (!fixedTimeEqual(actual, expected)) {
-    return yield* new RequestSecurityError({ reason: "csrf-rejected" })
-  }
 })
 
 /** Insecure HTTP LAN clients cannot perform administration or inspect secrets. */
@@ -257,13 +233,16 @@ export const authorizeAuthenticatedMutation = Effect.fn("RequestSecurity.authori
   R
 >(
   authorization: AuthenticatedMutationAuthorization,
-  verifySessionCsrf: (csrfToken: Redacted.Redacted<string>) => Effect.Effect<A, E, R>
+  verifySessionCsrf: (csrfToken: Redacted.Redacted<CsrfToken>) => Effect.Effect<A, E, R>
 ) {
   const request = yield* authorizeRequestAuthority(authorization.config, authorization.request)
   yield* authorizeMutationOrigin(authorization.config, request)
   if (request.csrfToken === null) return yield* new RequestSecurityError({ reason: "csrf-required" })
   yield* authorizeInsecureLanCapability(authorization.config, authorization.capability)
-  return yield* verifySessionCsrf(Redacted.make(request.csrfToken))
+  const csrfToken = yield* Schema.decodeUnknownEffect(BrowserCsrfToken)(request.csrfToken).pipe(
+    Effect.mapError(() => new RequestSecurityError({ reason: "csrf-rejected" }))
+  )
+  return yield* verifySessionCsrf(Redacted.make(csrfToken))
 })
 
 /** Cookie attributes for the opaque session token; the token itself is never represented here. */

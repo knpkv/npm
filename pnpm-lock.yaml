@@ -256,6 +256,27 @@ importers:
         specifier: ^4.1.10
         version: 4.1.10(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.4.0)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(happy-dom@20.11.2)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.12)(yaml@2.9.0))
 
+  packages/browser-pairing:
+    devDependencies:
+      '@effect/vitest':
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)
+      '@types/node':
+        specifier: ^26.2.0
+        version: 26.4.0
+      effect:
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109
+      rimraf:
+        specifier: ^6.1.3
+        version: 6.1.3
+      typescript:
+        specifier: npm:@typescript/typescript6@^6.0.2
+        version: '@typescript/typescript6@6.0.2'
+      vitest:
+        specifier: ^4.1.10
+        version: 4.1.10(@edge-runtime/vm@5.0.0)(@opentelemetry/api@1.9.1)(@types/node@26.4.0)(@vitest/browser-playwright@4.1.10)(@vitest/coverage-v8@4.1.10)(happy-dom@20.11.2)(vite@8.2.1(@types/node@26.4.0)(esbuild@0.28.2)(jiti@2.7.0)(terser@5.44.0)(tsx@4.23.12)(yaml@2.9.0))
+
   packages/clockify-api-client:
     devDependencies:
       '@effect/openapi-generator':
@@ -432,6 +453,9 @@ importers:
       '@knpkv/ai-codex':
         specifier: workspace:^
         version: link:../ai-codex
+      '@knpkv/browser-pairing':
+        specifier: workspace:^
+        version: link:../browser-pairing
       '@knpkv/codecommit-core':
         specifier: workspace:^
         version: link:../codecommit-core
@@ -647,6 +671,9 @@ importers:
       '@knpkv/atlassian-common':
         specifier: workspace:^
         version: link:../atlassian-common
+      '@knpkv/browser-pairing':
+        specifier: workspace:^
+        version: link:../browser-pairing
       '@knpkv/clockify-api-client':
         specifier: workspace:^
         version: link:../clockify-api-client
@@ -10987,13 +11014,13 @@ snapshots:
 
   '@types/web-push@3.6.4':
     dependencies:
-      '@types/node': 26.2.0
+      '@types/node': 26.4.0
 
   '@types/whatwg-mimetype@3.0.2': {}
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 26.2.0
+      '@types/node': 26.4.0
 
   '@typescript-eslint/eslint-plugin@8.67.0(@typescript-eslint/parser@8.67.0(@typescript/typescript6@6.0.2)(eslint@10.8.1(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0))(@typescript/typescript6@6.0.2)(eslint@10.8.1(jiti@2.7.0)(supports-color@7.2.0))(supports-color@7.2.0)':
     dependencies:

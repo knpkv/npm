@@ -8,6 +8,9 @@ const makeStorage = () => {
   }
 }
 
+const bootstrapToken = "ab".repeat(32)
+const csrfToken = "cd".repeat(32)
+
 afterEach(() => {
   vi.unstubAllGlobals()
   vi.resetModules()
@@ -19,7 +22,7 @@ describe("owner session bootstrap", () => {
     const replaceState = vi.fn()
     const fetch = vi.fn(async () =>
       new Response(
-        JSON.stringify({ csrfToken: "csrf-proof" }),
+        JSON.stringify({ csrfToken }),
         { status: 200, headers: { "content-type": "application/json" } }
       )
     )
@@ -28,7 +31,7 @@ describe("owner session bootstrap", () => {
       history: { replaceState },
       localStorage,
       location: {
-        hash: "#bootstrap_token=single-use-token",
+        hash: `#bootstrap_token=${bootstrapToken}`,
         pathname: "/sandboxes/sbx-1",
         search: "?view=editor"
       }
@@ -39,11 +42,11 @@ describe("owner session bootstrap", () => {
     expect(fetch).toHaveBeenCalledWith("/auth/bootstrap", {
       method: "POST",
       credentials: "same-origin",
-      headers: { Authorization: "Bearer single-use-token" }
+      headers: { Authorization: `Bearer ${bootstrapToken}` }
     })
-    expect(ownerSession.readOwnerCsrfToken()).toBe("csrf-proof")
-    localStorage.setItem("codecommit_web_csrf", "rotated-proof")
-    expect(ownerSession.readOwnerCsrfToken()).toBe("rotated-proof")
+    expect(ownerSession.readOwnerCsrfToken()).toBe(csrfToken)
+    localStorage.setItem("codecommit_web_csrf", "ef".repeat(32))
+    expect(ownerSession.readOwnerCsrfToken()).toBe("ef".repeat(32))
     expect(replaceState).toHaveBeenCalledWith(null, "", "/sandboxes/sbx-1?view=editor")
   })
 
@@ -52,7 +55,7 @@ describe("owner session bootstrap", () => {
       fetch: vi.fn(async () => new Response("unauthorized", { status: 401 })),
       history: { replaceState: vi.fn() },
       localStorage: makeStorage(),
-      location: { hash: "#bootstrap_token=expired", pathname: "/", search: "" }
+      location: { hash: `#bootstrap_token=${"dd".repeat(32)}`, pathname: "/", search: "" }
     })
 
     const ownerSession = await import("../src/client/ownerSession.js")
@@ -62,11 +65,51 @@ describe("owner session bootstrap", () => {
     })
   })
 
+  it("rejects a malformed bootstrap fragment before making an unauthenticated request", async () => {
+    const fetch = vi.fn()
+    const replaceState = vi.fn()
+    vi.stubGlobal("window", {
+      fetch,
+      history: { replaceState },
+      localStorage: makeStorage(),
+      location: { hash: "#bootstrap_token=not-a-credential", pathname: "/", search: "" }
+    })
+
+    const ownerSession = await import("../src/client/ownerSession.js")
+    await expect(ownerSession.ownerSessionReady).resolves.toEqual({
+      _tag: "Failed",
+      message: "Owner session bootstrap token is malformed"
+    })
+    expect(fetch).not.toHaveBeenCalled()
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/")
+  })
+
+  it("reports history replacement failures as a failed bootstrap status", async () => {
+    const fetch = vi.fn()
+    vi.stubGlobal("window", {
+      fetch,
+      history: {
+        replaceState: vi.fn(() => {
+          throw new Error("document is not active")
+        })
+      },
+      localStorage: makeStorage(),
+      location: { hash: `#bootstrap_token=${bootstrapToken}`, pathname: "/", search: "" }
+    })
+
+    const ownerSession = await import("../src/client/ownerSession.js")
+    await expect(ownerSession.ownerSessionReady).resolves.toEqual({
+      _tag: "Failed",
+      message: "document is not active"
+    })
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it("retains the CSRF proof in memory when local storage is unavailable", async () => {
     const replaceState = vi.fn()
     vi.stubGlobal("window", {
       fetch: vi.fn(async () =>
-        new Response(JSON.stringify({ csrfToken: "csrf-proof" }), {
+        new Response(JSON.stringify({ csrfToken }), {
           status: 200,
           headers: { "content-type": "application/json" }
         })
@@ -79,7 +122,7 @@ describe("owner session bootstrap", () => {
         }
       },
       location: {
-        hash: "#bootstrap_token=single-use-token",
+        hash: `#bootstrap_token=${bootstrapToken}`,
         pathname: "/sandboxes/sbx-1",
         search: "?view=editor"
       }
@@ -87,7 +130,7 @@ describe("owner session bootstrap", () => {
 
     const ownerSession = await import("../src/client/ownerSession.js")
     await expect(ownerSession.ownerSessionReady).resolves.toEqual({ _tag: "Ready" })
-    expect(ownerSession.readOwnerCsrfToken()).toBe("csrf-proof")
+    expect(ownerSession.readOwnerCsrfToken()).toBe(csrfToken)
     expect(replaceState).toHaveBeenCalledWith(null, "", "/sandboxes/sbx-1?view=editor")
   })
 })
