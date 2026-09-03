@@ -50,8 +50,6 @@ const RecoveryRow = Schema.Struct({
   acceptedAt: Schema.Number
 })
 type RecoveryRow = typeof RecoveryRow.Type
-type RecoveryCursor = Pick<RecoveryRow, "acceptedAt" | "dispatchRequestId">
-type RecoveryState = { readonly after: Option.Option<RecoveryCursor> }
 const recoveryPageSize = 256
 
 const storageError = (operation: string) => (cause: unknown) => new OrchestratorStorageError({ cause, operation })
@@ -470,44 +468,41 @@ const makeOrchestrator: Effect.Effect<
     pending: listPending,
     queue: (dispatchRequestId) => appendTransition(dispatchRequestId, "queued", null, null),
     recover: () =>
-      Stream.paginate<RecoveryState, OrchestratorEventType, OrchestratorError>(
-        { after: Option.none() },
+      Stream.paginate<void, OrchestratorEventType, OrchestratorError>(
+        undefined,
         Effect.fn("Orchestrator.recoverPage")(function*(state) {
-          const rows = state.after._tag === "None"
-            ? yield* sql`
+          void state
+          const rows = yield* sql`
               SELECT dispatch_request_id AS "dispatchRequestId", accepted_at AS "acceptedAt"
               FROM orchestrator_dispatches
               WHERE status = 'running'
-              ORDER BY accepted_at ASC, dispatch_request_id ASC
-              LIMIT ${recoveryPageSize}
-            `.pipe(Effect.mapError(storageError("recover.lookup")))
-            : yield* sql`
-              SELECT dispatch_request_id AS "dispatchRequestId", accepted_at AS "acceptedAt"
-              FROM orchestrator_dispatches
-              WHERE status = 'running'
-                AND (accepted_at > ${state.after.value.acceptedAt}
-                  OR (accepted_at = ${state.after.value.acceptedAt}
-                    AND dispatch_request_id > ${state.after.value.dispatchRequestId}))
               ORDER BY accepted_at ASC, dispatch_request_id ASC
               LIMIT ${recoveryPageSize}
             `.pipe(Effect.mapError(storageError("recover.lookup")))
           const ids = yield* Schema.decodeUnknownEffect(Schema.Array(RecoveryRow))(rows).pipe(
             Effect.mapError(storageError("recover.decode"))
           )
-          const events = yield* Effect.forEach(ids, ({ dispatchRequestId }) =>
+          const recovered = yield* Effect.forEach(ids, ({ dispatchRequestId }) =>
             appendTransition(
               dispatchRequestId,
               "delivery_failed",
               "orchestrator restarted while the activity was running",
               null
+            ).pipe(
+              Effect.map(Option.some),
+              Effect.catchTag("OrchestratorTransitionError", (error) =>
+                error.from === "settled" || error.from === "delivery_failed" || error.from === "task_failed"
+                  ? Effect.succeed(Option.none<OrchestratorEventType>())
+                  : Effect.fail(error))
             ))
-          const last = ids.at(-1)
-          const next = ids.length < recoveryPageSize || last === undefined
-            ? Option.none<RecoveryState>()
-            : Option.some<RecoveryState>({
-              after: Option.some({ acceptedAt: last.acceptedAt, dispatchRequestId: last.dispatchRequestId })
+          const events = recovered.flatMap((event) =>
+            Option.match(event, {
+              onNone: () => [],
+              onSome: (value) => [value]
             })
-          const page: readonly [ReadonlyArray<OrchestratorEventType>, Option.Option<RecoveryState>] = [events, next]
+          )
+          const next = ids.length === 0 ? Option.none<void>() : Option.some(undefined)
+          const page: readonly [ReadonlyArray<OrchestratorEventType>, Option.Option<void>] = [events, next]
           return page
         })
       ),

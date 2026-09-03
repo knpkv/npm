@@ -330,6 +330,49 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("drains concurrent recovery races without overwriting terminal dispatches", () =>
+    withTemporaryRoot("herdr-orchestrator-recovery-race-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            for (const index of [0, 1]) {
+              const receipt = yield* orchestrator.submit(
+                { ...command, activityIdempotencyKey: `activity:recovery-race:${index}` },
+                `dispatch:recovery-race:${index}`
+              )
+              yield* orchestrator.queue(receipt.dispatchRequestId)
+              yield* orchestrator.run(receipt.dispatchRequestId)
+            }
+          })
+        )
+
+        const recovered = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.all(
+              [Stream.runCollect(orchestrator.recover()), Stream.runCollect(orchestrator.recover())],
+              { concurrency: 2 }
+            )
+          })
+        )
+        const recoveryEvents = recovered.flatMap((events) => [...events])
+        expect(recoveryEvents).toHaveLength(2)
+        expect(recoveryEvents.every(({ type }) => type === "delivery_failed")).toBe(true)
+
+        const remaining = new DatabaseSync(path)
+        const runningRow = remaining.prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_dispatches WHERE status = 'running'"
+        ).get()
+        remaining.close()
+        const running = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(runningRow)
+        expect(running.count).toBe(0)
+      })
+    }))
+
   it.effect("pages pending restart work with a bounded typed query", () =>
     withTemporaryRoot("herdr-orchestrator-pending-page-", (root) =>
       withDatabase(
