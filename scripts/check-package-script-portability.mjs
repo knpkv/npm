@@ -339,18 +339,32 @@ const segmentReachability = (segments) => {
     const reachable =
       !terminated &&
       (index === 0 ||
-        (segment.operator === "&&" && previousResult !== "failure") ||
-        (segment.operator === "||" && previousResult !== "success") ||
+        (segment.operator === "&&" && previousResult === "success") ||
+        (segment.operator === "||" && previousResult === "failure") ||
         (segment.operator !== "&&" && segment.operator !== "||"))
     reachability.push(reachable)
     const text = segment.text.trim()
     if (reachable) {
-      previousResult = text === "true" ? "success" : text === "false" ? "failure" : "unknown"
+      previousResult =
+        text === "true"
+          ? "success"
+          : text === "false"
+            ? "failure"
+            : isKnownSuccessfulShellCommand(text)
+              ? "success"
+              : "unknown"
       if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
     }
   }
   return reachability
 }
+
+// A command whose failure already fails the lifecycle may continue on its success path.
+const isKnownSuccessfulShellCommand = (text) =>
+  /^(?:printf|echo|:)(?:\s|$)/u.test(text.trim()) ||
+  browserPairingBuild.test(text.trim()) ||
+  codeCommitWebRoleCheck.test(text.trim()) ||
+  /^tsc\s+-b(?:\s|$)/u.test(text.trim())
 
 const firstShellWord = (text) => text.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
 
@@ -693,7 +707,15 @@ assert.deepEqual(
     { ...codeCommitWebScripts, predev: "test -f present && pnpm --filter @knpkv/browser-pairing build" },
     browserPairingDependency
   ),
-  []
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "test -f present && tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
