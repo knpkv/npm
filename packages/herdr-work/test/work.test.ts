@@ -395,6 +395,9 @@ describe("durable Work projection", () => {
       expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
       const changed = { ...history[1], goal: { ...history[1].goal, summary: "changed transaction" } }
       expect(yield* service.recordMany("transaction-replay-only", history.slice(0, 2))).toEqual(history.slice(0, 2))
+      expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[2]]))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-replay-only" }
+      })
       expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[0], changed]))).toMatchObject({
         failure: { _tag: "WorkCheckpointConflictError" }
       })
@@ -428,6 +431,8 @@ describe("durable Work projection", () => {
       })
       expect(elementRead).toBe(false)
       expect(yield* store.list()).toEqual([])
+      expect(yield* service.recordMany("transaction-small", [history[0]])).toEqual([history[0]])
+      expect(yield* store.list()).toEqual([history[0]])
     }).pipe(provideNodeServices))
 
   it.effect("compare-and-set claims and retains compact decision handoffs", () =>
