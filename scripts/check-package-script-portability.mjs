@@ -639,6 +639,7 @@ const resolvedShellCommandName = (text, start, aliases, visited = new Set()) => 
     .filter((alias) => alias.name === commandName && alias.start <= start)
     .toSorted((left, right) => left.start - right.start)
     .at(-1)
+  if (active?.kind === "define" && !isSimpleAliasValue(active.value)) return undefined
   if (active?.kind !== "define") return commandName
   if (visited.has(active.name)) return undefined
   return resolvedShellCommandName(active.value, start, aliases, new Set([...visited, active.name]))
@@ -1020,6 +1021,23 @@ const groupedCommandBody = (text) => {
   return closeIndex === trimmed.length - 1 ? trimmed.slice(1, -1) : undefined
 }
 
+const isSimpleAliasValue = (value) => {
+  const trimmed = value.trim()
+  const segments = shellCommandSegments(trimmed, true)
+  const segment = segments[0]
+  const commandName = firstExecutableWordInfo(trimmed)?.word
+  return (
+    segments.length === 1 &&
+    segment !== undefined &&
+    segment.operator === undefined &&
+    segment.nextOperator === undefined &&
+    groupedCommandBody(trimmed) === undefined &&
+    commandName !== undefined &&
+    !unsupportedShellWords.has(commandName) &&
+    !trimmed.startsWith("!")
+  )
+}
+
 const hasShellTermination = (command) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   const segments = shellCommandSegments(source, true)
@@ -1048,6 +1066,7 @@ const sameAliasMutations = (left, right) =>
 const resolveAliasMutations = (segments, definitions) => {
   let aliases = []
   for (let iteration = 0; iteration <= segments.length; iteration += 1) {
+    if (aliases.some((alias) => alias.kind === "define" && !isSimpleAliasValue(alias.value))) return undefined
     const mustReachability = segmentReachability(segments, definitions, aliases)
     const next = extractAliasMutations(segments, mustReachability, aliases)
     if (next === undefined) return undefined
@@ -1325,7 +1344,7 @@ const resolvedShellCommandWords = (text, start, aliases, visited = new Set()) =>
     .filter((alias) => alias.name === commandInfo.word && alias.start <= start)
     .toSorted((left, right) => left.start - right.start)
     .at(-1)
-  if (active?.kind === "define" && visited.has(active.name)) return undefined
+  if (active?.kind === "define" && (!isSimpleAliasValue(active.value) || visited.has(active.name))) return undefined
   const commandWords =
     active?.kind === "define"
       ? resolvedShellCommandWords(active.value, start, aliases, new Set([...visited, active.name]))
@@ -2472,6 +2491,7 @@ for (const command of [
   "alias helper=$1\nhelper pnpm\npnpm --filter @knpkv/browser-pairing build",
   "alias define=alias\ndefine pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "alias define='alias pnpm=:'\ndefine\npnpm --filter @knpkv/browser-pairing build",
+  "alias define=': && alias pnpm=:'\ndefine\npnpm --filter @knpkv/browser-pairing build",
   "alias define=alias\ntest -e package.json && define pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "f() { alias pnpm=:; }; alias invoke=f\ninvoke\npnpm --filter @knpkv/browser-pairing build",
   "true x>/definitely/not/present/output && pnpm --filter @knpkv/browser-pairing build",
