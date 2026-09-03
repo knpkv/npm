@@ -25,7 +25,7 @@ import {
   pageScrollCommand,
   wheelScrollCommand
 } from "./terminal-input.js"
-import { makeTerminalOutputBoundary, type TerminalOutputBoundary } from "./terminal-output.js"
+import { makeTerminalInputHandler, makeTerminalOutputBoundary, type TerminalOutputBoundary } from "./terminal-output.js"
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
@@ -327,45 +327,30 @@ const terminalWorker = (
         }
         return application
       }
-      const input = terminal.terminal.onData((text) => {
-        if (outputBoundary.isActive()) {
-          if (ready) {
-            if (!sendInput(text)) {
-              update({ _tag: "failed", agent, detail: "terminal input could not be sent" })
-              socket?.close(4429, "terminal input unavailable")
+      const input = terminal.terminal.onData(
+        makeTerminalInputHandler({
+          applyInput,
+          isReady: () => ready,
+          onFailure: (failure) => {
+            if (failure === "input_queue_overflow") {
+              inputOverflow = true
+              update({
+                _tag: "failed",
+                agent,
+                detail: "terminal input queue exceeded 64 KiB before ready"
+              })
+              socket?.close(4429, "terminal input queue limit reached")
+              return
             }
-          } else if (pendingInput.push(text) === "overflow") {
-            inputOverflow = true
-            update({
-              _tag: "failed",
-              agent,
-              detail: "terminal input queue exceeded 64 KiB before ready"
-            })
-            socket?.close(4429, "terminal input queue limit reached")
-          }
-          return
-        }
-        const appliedText = applyInput(text)
-        if (appliedText === null) return
-        if (ready) {
-          if (!sendInput(appliedText.text)) {
             update({ _tag: "failed", agent, detail: "terminal input could not be sent" })
             socket?.close(4429, "terminal input unavailable")
-            return
-          }
-          keyboard.setModifier(appliedText.nextModifier)
-        } else if (pendingInput.push(appliedText.text) === "overflow") {
-          inputOverflow = true
-          update({
-            _tag: "failed",
-            agent,
-            detail: "terminal input queue exceeded 64 KiB before ready"
-          })
-          socket?.close(4429, "terminal input queue limit reached")
-        } else {
-          keyboard.setModifier(appliedText.nextModifier)
-        }
-      })
+          },
+          outputBoundary,
+          pendingInput,
+          sendInput,
+          setModifier: keyboard.setModifier
+        })
+      )
       const resize = terminal.terminal.onResize(({ cols, rows }) => {
         if (!ready) {
           pendingResize = { cols, rows }

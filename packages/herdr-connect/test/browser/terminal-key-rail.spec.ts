@@ -24,9 +24,30 @@ type TerminalOutputBoundary = {
   readonly run: (write: () => void) => void
 }
 
+type PendingTerminalInput = {
+  readonly push: (text: string) => "overflow" | "queued"
+}
+
+type TerminalInputApplication =
+  | { readonly _tag: "supported"; readonly text: string; readonly nextModifier: null }
+  | { readonly _tag: "unsupported"; readonly nextModifier: "ctrl" }
+
+type TerminalInputHandlerOptions = {
+  readonly applyInput: (text: string) => TerminalInputApplication | null
+  readonly isReady: () => boolean
+  readonly onFailure: (failure: "connection_unavailable" | "input_queue_overflow") => void
+  readonly outputBoundary: TerminalOutputBoundary
+  readonly pendingInput: PendingTerminalInput
+  readonly sendInput: (text: string) => boolean
+  readonly setModifier: (modifier: "ctrl" | null) => void
+}
+
 declare global {
   interface Window {
     readonly GhosttyWeb: GhosttyWeb
+    makeTerminalInputHandler?: (
+      options: TerminalInputHandlerOptions
+    ) => (text: string) => void
     terminalOutputBoundary?: TerminalOutputBoundary
   }
 }
@@ -50,7 +71,8 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
   await page.setContent("<div id=\"terminal\" style=\"block-size: 240px; inline-size: 640px\"></div>")
   await page.addScriptTag({ path: ghosttyScript })
   await page.addScriptTag({
-    content: `${terminalOutputSource}\nwindow.terminalOutputBoundary = makeTerminalOutputBoundary()`,
+    content:
+      `${terminalOutputSource}\nwindow.terminalOutputBoundary = makeTerminalOutputBoundary()\nwindow.makeTerminalInputHandler = makeTerminalInputHandler`,
     type: "module"
   })
 
@@ -61,29 +83,42 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
     const terminal = new window.GhosttyWeb.Terminal({ cols: 40, rows: 10 })
     terminal.open(container)
     const sent: Array<string> = []
+    const failures: Array<string> = []
     let modifier: "ctrl" | null = "ctrl"
     const outputBoundary = window.terminalOutputBoundary
     if (outputBoundary === undefined) throw new Error("terminal output boundary missing")
-    const subscription = terminal.onData((value) => {
-      if (outputBoundary.isActive()) {
+    const makeTerminalInputHandler = window.makeTerminalInputHandler
+    if (makeTerminalInputHandler === undefined) throw new Error("terminal input handler missing")
+    const pendingInput: PendingTerminalInput = { push: () => "queued" }
+    const input = makeTerminalInputHandler({
+      applyInput: (value) => {
+        if (modifier === "ctrl" && value === "c") {
+          return { _tag: "supported", text: "\u0003", nextModifier: null }
+        }
+        if (modifier === "ctrl") return { _tag: "unsupported", nextModifier: "ctrl" }
+        return { _tag: "supported", text: value, nextModifier: null }
+      },
+      isReady: () => true,
+      onFailure: (failure) => failures.push(failure),
+      outputBoundary,
+      pendingInput,
+      sendInput: (value) => {
         sent.push(value)
-        return
+        return true
+      },
+      setModifier: (next) => {
+        modifier = next
       }
-      if (modifier === "ctrl" && value === "c") {
-        sent.push("\u0003")
-        modifier = null
-        return
-      }
-      sent.push(value)
     })
+    const subscription = terminal.onData(input)
 
     outputBoundary.run(() => terminal.write("\u001b[6n"))
     await new Promise((resolve) => setTimeout(resolve, 100))
     terminal.input("c", true)
     subscription.dispose()
     terminal.dispose()
-    return { modifier, sent }
+    return { failures, modifier, sent }
   })
 
-  expect(result).toEqual({ modifier: null, sent: ["\u001b[1;1R", "\u0003"] })
+  expect(result).toEqual({ failures: [], modifier: null, sent: ["\u001b[1;1R", "\u0003"] })
 })

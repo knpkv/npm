@@ -9,6 +9,7 @@ import {
   type TerminalModifier,
   type TerminalRailKey
 } from "./terminal-keyboard.js"
+import { nextTerminalRailIndex } from "./terminal-rail-navigation.js"
 
 type AgentActivity = "working" | "ready" | "attention" | "finished"
 export type AgentActivityFilter = "all" | AgentActivity
@@ -403,7 +404,29 @@ export const TerminalKeyRail = ({
   onKey,
   onModifierChange
 }: TerminalKeyRailProps) => (
-  <div aria-label="Terminal keyboard controls" className="terminal-key-rail" data-terminal-key-rail role="toolbar">
+  <div
+    aria-label="Terminal keyboard controls"
+    aria-orientation="horizontal"
+    className="terminal-key-rail"
+    data-terminal-key-rail
+    onKeyDown={(event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-terminal-key]")]
+      const currentIndex = buttons.findIndex((button) => button === event.target)
+      if (currentIndex < 0) return
+      const nextIndex = nextTerminalRailIndex(
+        event.key,
+        currentIndex,
+        buttons.map(({ disabled }) => !disabled)
+      )
+      if (nextIndex === null) return
+      const next = buttons.at(nextIndex)
+      if (next === undefined) return
+      event.preventDefault()
+      next.focus()
+    }}
+    role="toolbar"
+  >
     <div className="terminal-key-scroll">
       <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
         {terminalModifiers.map((item) => (

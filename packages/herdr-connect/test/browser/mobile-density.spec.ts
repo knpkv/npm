@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
 
 const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const workspaceRoot = resolve(packageRoot, "../..")
@@ -10,6 +11,21 @@ const connectorCss = readCss(resolve(packageRoot, "src/styles.css")).replace(
   "@import \"@knpkv/rly/styles.css\";",
   ""
 )
+const terminalRailNavigationSource = transpileModule(
+  readFileSync(resolve(packageRoot, "src/terminal-rail-navigation.ts"), "utf8"),
+  {
+    compilerOptions: {
+      module: ModuleKind.ESNext,
+      target: ScriptTarget.ES2022
+    }
+  }
+).outputText
+
+declare global {
+  interface Window {
+    nextTerminalRailIndex?: (key: string, currentIndex: number, enabled: ReadonlyArray<boolean>) => number | null
+  }
+}
 const fixtureCss = [
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/generated-tokens.css")),
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/base.css")),
@@ -234,6 +250,33 @@ test("390x844 keeps the terminal rail reachable with truthful button semantics",
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await ctrl.focus()
   expect(await ctrl.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid")
+})
+
+test("terminal toolbar arrow navigation skips disabled controls", async ({ page }) => {
+  await setTerminal(page)
+  await page.addScriptTag({
+    content: `${terminalRailNavigationSource}\nwindow.nextTerminalRailIndex = nextTerminalRailIndex`,
+    type: "module"
+  })
+  const focusedKey = await page.evaluate(() => {
+    const rail = document.querySelector<HTMLElement>("[data-terminal-key-rail]")
+    const helper = window.nextTerminalRailIndex
+    if (rail === null || helper === undefined) throw new Error("terminal rail fixture missing")
+    const buttons = [...rail.querySelectorAll<HTMLButtonElement>("button[data-terminal-key]")]
+    const current = buttons.find((button) => button.dataset.terminalKey === "ctrl")
+    const disabled = buttons.find((button) => button.dataset.terminalKey === "escape")
+    if (current === undefined || disabled === undefined) throw new Error("terminal button fixture missing")
+    disabled.disabled = true
+    const nextIndex = helper(
+      "ArrowRight",
+      buttons.indexOf(current),
+      buttons.map(({ disabled: isDisabled }) => !isDisabled)
+    )
+    if (nextIndex === null) throw new Error("terminal toolbar navigation unavailable")
+    buttons[nextIndex]?.focus()
+    return document.activeElement?.getAttribute("data-terminal-key")
+  })
+  expect(focusedKey).toBe("alt")
 })
 
 test("desktop terminal rail preserves the three-row stage and accessible key labels", async ({ page }) => {
