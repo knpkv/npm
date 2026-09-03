@@ -1,10 +1,12 @@
 // @vitest-environment happy-dom
 
-import { RegistryProvider } from "@effect/atom-react"
+import { RegistryProvider, useAtomValue } from "@effect/atom-react"
 import { act } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest"
-import { ConnectSurface, makeConnectAtoms } from "../src/client.js"
+import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
+import { DashboardWorkPollOwner } from "../src/work-poll-owner.js"
+import { FleetShell } from "../src/shell-view.js"
 
 declare global {
   interface Window {
@@ -29,18 +31,18 @@ afterAll(() => {
 })
 
 const emptyAgents = JSON.stringify({ agents: [], failures: [], nextCursor: null })
-const emptyWindow = (window: "day" | "month" | "now" | "week") => ({
+const emptyWorkWindow = (window: "day" | "month" | "now" | "week") => ({
   asOf: 1_000,
   goals: [],
   observedAt: 1_000,
   window
 })
 const emptyWork = JSON.stringify({
-  day: emptyWindow("day"),
-  month: emptyWindow("month"),
-  now: emptyWindow("now"),
+  day: emptyWorkWindow("day"),
+  month: emptyWorkWindow("month"),
+  now: emptyWorkWindow("now"),
   observedAt: 1_000,
-  week: emptyWindow("week")
+  week: emptyWorkWindow("week")
 })
 
 const requestPath = (input: RequestInfo | URL): string => {
@@ -54,13 +56,19 @@ afterEach(async () => {
   })
   roots.length = 0
   document.body.replaceChildren()
+  window.history.replaceState(null, "", "/")
   vi.useRealTimers()
   observedPaths = null
   responseForPath = null
 })
 
-describe("Connect Work polling ownership", () => {
-  it("refreshes standalone Connect and stops after unmount without duplicate requests", async () => {
+const WorkSnapshotObserver = ({ atom }: { readonly atom: ReturnType<typeof makeConnectAtoms>["work"] }) => {
+  useAtomValue(atom)
+  return null
+}
+
+describe("dashboard Work polling ownership", () => {
+  it("keeps the production owner polling while Connect unmounts on tab change", async () => {
     vi.useFakeTimers()
     const paths: Array<string> = []
     observedPaths = paths
@@ -68,7 +76,6 @@ describe("Connect Work polling ownership", () => {
       const body = path === "/v1/connect/agents" ? emptyAgents : emptyWork
       return new Response(body, { headers: { "content-type": "application/json" } })
     }
-
     const host = document.createElement("div")
     document.body.append(host)
     const root = createRoot(host)
@@ -78,7 +85,14 @@ describe("Connect Work polling ownership", () => {
     await act(async () => {
       root.render(
         <RegistryProvider>
-          <ConnectSurface atoms={atoms} />
+          <DashboardWorkPollOwner atom={atoms.workPoll} />
+          <WorkSnapshotObserver atom={atoms.work} />
+          <FleetShell
+            approvals={<div data-testid="approvals" />}
+            connect={<ConnectSurface atoms={atoms} embedded />}
+            hostCount={1}
+            work={<div data-testid="work" />}
+          />
         </RegistryProvider>
       )
       for (let index = 0; index < 8; index += 1) await Promise.resolve()
@@ -91,10 +105,28 @@ describe("Connect Work polling ownership", () => {
     })
     expect(paths.filter((path) => path === "/v1/work")).toHaveLength(3)
 
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "2" }))
+      for (let index = 0; index < 8; index += 1) await Promise.resolve()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    expect(paths.filter((path) => path === "/v1/work")).toHaveLength(4)
+
+    await act(async () => {
+      window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "3" }))
+      for (let index = 0; index < 8; index += 1) await Promise.resolve()
+    })
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(5_000)
+    })
+    expect(paths.filter((path) => path === "/v1/work")).toHaveLength(5)
+
     await act(async () => root.unmount())
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5_000)
     })
-    expect(paths.filter((path) => path === "/v1/work")).toHaveLength(3)
+    expect(paths.filter((path) => path === "/v1/work")).toHaveLength(5)
   })
 })
