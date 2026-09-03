@@ -382,6 +382,22 @@ describe("sanitized approval requests", () => {
     expect(encoded).toContain("%5Bredacted%20credential%5D")
   })
 
+  it("decodes credential keys before matching URI path assignments", () => {
+    const credentialPath = "https://example.test/repo/pass%77ord%3Dleaked-canary"
+    const visiblePath = "https://example.test/repo/pass%77age%3Dvisible-value"
+    const request = approvalRequestFor({ kind: "nix.apply", ref: credentialPath })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref: credentialPath }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("leaked-canary")
+    expect(request.fields[0]?.value).toContain("%5Bredacted%20credential%5D")
+
+    const visible = approvalRequestFor({ kind: "nix.apply", ref: visiblePath })
+    expect(visible.fields[0]?.value).toContain("visible-value")
+  })
+
   it("redacts unsafe query values through raw whitespace", () => {
     const refs = [
       "https://example.test/repo?X-Amz-Signature=first-secret second-secret",

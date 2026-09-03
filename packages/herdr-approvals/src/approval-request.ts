@@ -117,6 +117,26 @@ const sanitizeEncodedCredentialAssignments = (value: string): string =>
     return sanitized
   })
 
+const uriAuthorityAndPath = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*)(\/[^?#\s]*)?/iu
+
+const sanitizeEncodedPathSegment = (value: string): string => {
+  const encoded = encodedText(value)
+  if (encoded === undefined) return sanitizeCredentialText(value)
+  if (encoded._tag !== "encoded") return redactedCredential
+  let sanitized = sanitizeCredentialText(encoded.value)
+  for (let layer = 0; layer < encoded.layers; layer += 1) {
+    sanitized = encodeURIComponent(sanitized)
+  }
+  return sanitized
+}
+
+const sanitizeEncodedUriPath = (value: string): string =>
+  value.replace(
+    uriAuthorityAndPath,
+    (match, authority: string, path: string | undefined) =>
+      path === undefined ? match : `${authority}${path.split("/").map(sanitizeEncodedPathSegment).join("/")}`
+  )
+
 const sanitizeEncodedUri = (value: string): string => {
   const encoded = encodedText(value)
   if (encoded === undefined) return sanitizeUriQueryParameters(value)
@@ -151,7 +171,9 @@ const sanitizeUriQueryParameters = (value: string): string => {
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
   const sanitized = uriPrefix.test(value) || encodedUriPrefix.test(value)
-    ? sanitizeEncodedCredentialAssignments(sanitizeCredentialText(sanitizeUriQueryParameters(value)))
+    ? sanitizeEncodedCredentialAssignments(
+      sanitizeEncodedUriPath(sanitizeCredentialText(sanitizeUriQueryParameters(value)))
+    )
     : encodedText(value) === undefined
     ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
     : sanitizeEncodedUri(value)
