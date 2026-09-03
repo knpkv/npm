@@ -1,7 +1,7 @@
-import { NodeCrypto } from "@effect/platform-node"
+import { NodeCrypto, NodeFileSystem, NodePath } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Clock, Context, Crypto, Effect, Equal, Layer, Option, Schema, Stream } from "effect"
-import { SingleRunner } from "effect/unstable/cluster"
+import { Clock, Context, Crypto, Effect, Equal, FileSystem, Layer, Option, Path, Schema, Stream } from "effect"
+import { RunnerAddress, SingleRunner } from "effect/unstable/cluster"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import {
@@ -110,6 +110,36 @@ export class Orchestrator extends Context.Service<Orchestrator, OrchestratorServ
   "herdr/Orchestrator"
 ) {}
 
+interface SqliteFileSecurityService {
+  readonly secure: Effect.Effect<void, OrchestratorStorageError>
+}
+
+class SqliteFileSecurity extends Context.Service<SqliteFileSecurity, SqliteFileSecurityService>()(
+  "herdr/SqliteFileSecurity"
+) {}
+
+const secureSqliteFiles = (
+  filename: string,
+  fileSystem: FileSystem.FileSystem
+) => {
+  const files = [filename, `${filename}-wal`, `${filename}-shm`]
+  return Effect.forEach(
+    files,
+    (path) =>
+      fileSystem.exists(path).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.exists" })),
+        Effect.flatMap((exists) =>
+          exists
+            ? fileSystem.chmod(path, 0o600).pipe(
+              Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.chmod" }))
+            )
+            : Effect.void
+        )
+      ),
+    { discard: true }
+  )
+}
+
 const makeOrchestrator: Effect.Effect<
   OrchestratorService,
   OrchestratorError,
@@ -117,6 +147,11 @@ const makeOrchestrator: Effect.Effect<
 > = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   const cryptoService = yield* Crypto.Crypto
+  const fileSecurity = yield* Effect.serviceOption(SqliteFileSecurity)
+  const secureFiles = Option.match(fileSecurity, {
+    onNone: () => Effect.void,
+    onSome: ({ secure }) => secure
+  })
   const now = Clock.currentTimeMillis
 
   yield* sql`
@@ -142,6 +177,7 @@ const makeOrchestrator: Effect.Effect<
       FOREIGN KEY (dispatch_request_id) REFERENCES orchestrator_dispatches(dispatch_request_id)
     )
   `.pipe(Effect.mapError(storageError("initialize.events")))
+  yield* secureFiles
 
   const load = Effect.fn("Orchestrator.load")(function*(dispatchRequestId: string) {
     const rows = yield* sql`
@@ -196,7 +232,7 @@ const makeOrchestrator: Effect.Effect<
     const decodedResult = yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(result).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "invalid transition result" }))
     )
-    return yield* sql.withTransaction(
+    const event = yield* sql.withTransaction(
       Effect.gen(function*() {
         const dispatch = yield* load(dispatchRequestId)
         if (!validTransition(dispatch.status, decodedTarget)) {
@@ -239,6 +275,8 @@ const makeOrchestrator: Effect.Effect<
     ).pipe(
       Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("transition.transaction")(cause)))
     )
+    yield* secureFiles
+    return event
   })
 
   const submit: OrchestratorService["submit"] = Effect.fn("Orchestrator.submit")(function*(
@@ -254,7 +292,7 @@ const makeOrchestrator: Effect.Effect<
       Effect.mapError(() => new OrchestratorValidationError({ detail: "idempotency key is invalid" }))
     )
     const encodedCommand = JSON.stringify(decodedCommand)
-    return yield* sql.withTransaction(
+    const receipt = yield* sql.withTransaction(
       Effect.gen(function*() {
         const existingRows = yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
@@ -341,6 +379,8 @@ const makeOrchestrator: Effect.Effect<
     ).pipe(
       Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("submit.transaction")(cause)))
     )
+    yield* secureFiles
+    return receipt
   })
 
   const service: OrchestratorService = {
@@ -387,13 +427,32 @@ export const layer: Layer.Layer<Orchestrator, OrchestratorError, SqlClientServic
 export const singleRunnerLayer = SingleRunner.layer({
   runnerStorage: "sql",
   shardingConfig: {
-    runnerAddress: Option.none(),
+    runnerAddress: Option.some(RunnerAddress.make("localhost", 34_431)),
     runnerListenAddress: Option.none()
   }
 })
 
 /** Node SQLite and Crypto services used by the durable coordinator layers. */
-export const sqliteLayer = (filename: string) => Layer.mergeAll(SqliteClient.layer({ filename }), NodeCrypto.layer)
+export const sqliteLayer = (filename: string) =>
+  Layer.unwrap(
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const paths = yield* Path.Path
+      const directory = paths.dirname(filename)
+      yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory" }))
+      )
+      yield* fileSystem.chmod(directory, 0o700).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory-mode" }))
+      )
+      const security = secureSqliteFiles(filename, fileSystem)
+      return Layer.mergeAll(
+        SqliteClient.layer({ filename }),
+        NodeCrypto.layer,
+        Layer.succeed(SqliteFileSecurity, { secure: security })
+      ).pipe(Layer.tap(() => security))
+    })
+  ).pipe(Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)))
 
 export const make = Effect.fn("Orchestrator.make")(function*() {
   return yield* makeOrchestrator

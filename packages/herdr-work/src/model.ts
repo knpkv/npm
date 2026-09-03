@@ -248,8 +248,12 @@ const CanonicalWorktree = Schema.String.check(
     (value) =>
       value.startsWith("/") &&
       !value.includes("\u0000") &&
+      !value.includes("//") &&
       !value.includes("/./") &&
       !value.includes("/../") &&
+      value !== "/.." &&
+      !value.endsWith("/.") &&
+      !value.endsWith("/..") &&
       !value.endsWith("/"),
     { expected: "an absolute canonical worktree path" }
   )
@@ -262,7 +266,7 @@ const Branch = Schema.String.check(
 )
 
 const ExactHead = Schema.String.check(
-  Schema.isPattern(/^[0-9a-f]{40,64}$/),
+  Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
   Schema.isMaxLength(64)
 )
 

@@ -6,7 +6,7 @@ Each `WorkGoalCheckpoint` stores a complete, Schema-decoded goal state at its ex
 
 `WorkGoal.goalFamily` records a goal as either the canonical member of a family or a superseded member pointing to that canonical goal. Superseded goals leave the active projection only after their durable relation checkpoint. Earlier snapshots still show their previous state, blockers, reviews, and activity. A relation cannot be removed or retargeted, and a superseded goal cannot precede its canonical member.
 
-`WorkStore` persists events in SQLite. Recording the exact same checkpoint again is an idempotent replay; reusing an event ID or goal timestamp with changed content returns `WorkCheckpointConflictError`. `makeWorkService` is the small runtime interface for recording checkpoints and reading all four snapshots.
+`WorkStore` persists events in SQLite. Recording the exact same checkpoint again is an idempotent replay; reusing an event ID or goal timestamp with changed content returns `WorkCheckpointConflictError`. `makeWorkService` is the small runtime interface for recording checkpoints, reading the current durable lane claim, and reading all four snapshots. An unknown lane returns `Option.none()`; a stored claim is Schema-decoded and its revision is checked against the durable row.
 
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it; a

@@ -1,4 +1,5 @@
 import { Clock, Effect } from "effect"
+import type { Option } from "effect"
 import type {
   WorkCheckpointConflictError,
   WorkDecisionHandoffConflictError,
@@ -29,6 +30,9 @@ export interface WorkService {
   readonly claim: (
     claim: WorkLaneClaim
   ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkStoreError>
+  readonly currentClaim: (
+    laneId: string
+  ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
   readonly handoff: (
     handoff: WorkDecisionHandoff
   ) => Effect.Effect<WorkDecisionHandoff, WorkDecisionHandoffConflictError | WorkStoreError>
@@ -48,7 +52,8 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function*(stor
     events: ReadonlyArray<WorkGoalCheckpoint>
   ) => store.appendMany(transactionId, events))
   const claim = Effect.fn("HerdrWork.claim")((lane: WorkLaneClaim) => store.claim(lane))
+  const currentClaim = Effect.fn("HerdrWork.currentClaim")((laneId: string) => store.currentClaim(laneId))
   const handoff = Effect.fn("HerdrWork.handoff")((decision: WorkDecisionHandoff) => store.decision(decision))
   const decisions = Effect.fn("HerdrWork.decisions")((laneId: string) => store.decisions(laneId))
-  return { claim, decisions, handoff, record, recordMany, snapshots } satisfies WorkService
+  return { claim, currentClaim, decisions, handoff, record, recordMany, snapshots } satisfies WorkService
 })

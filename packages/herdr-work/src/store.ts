@@ -1,5 +1,5 @@
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
-import { Effect, Equal, FileSystem, Path, Schema } from "effect"
+import { Effect, Equal, FileSystem, Option, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import {
   WorkCheckpointConflictError,
@@ -13,14 +13,15 @@ import { validateGoalFamilyHistory } from "./goal-family.js"
 import {
   WorkDecisionHandoff,
   WorkGoalCheckpoint,
+  WorkGoalId,
   workHistoryMaxEvents,
   WorkLaneClaim,
+  WorkLaneClaimed,
   workSnapshotMaxGoals
 } from "./model.js"
 import type {
   WorkDecisionHandoff as WorkDecisionHandoffType,
-  WorkGoalCheckpoint as WorkGoalCheckpointType,
-  WorkLaneClaimed
+  WorkGoalCheckpoint as WorkGoalCheckpointType
 } from "./model.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
@@ -123,6 +124,9 @@ export interface WorkStoreService {
   readonly claim: (
     claim: WorkLaneClaim
   ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkStoreError>
+  readonly currentClaim: (
+    laneId: string
+  ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
   readonly decision: (
     handoff: WorkDecisionHandoff
   ) => Effect.Effect<WorkDecisionHandoff, WorkDecisionHandoffConflictError | WorkStoreError>
@@ -452,10 +456,7 @@ export class WorkStore implements WorkStoreService {
             } satisfies AppendManyDecision
           }
           if (newEvents.length === 0) {
-            this.#database.prepare(
-              "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
-            ).run(transaction, JSON.stringify(decoded))
-            this.#database.exec("COMMIT")
+            this.#database.exec("ROLLBACK")
             inTransaction = false
             return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
           }
@@ -683,6 +684,40 @@ export class WorkStore implements WorkStoreService {
     if (result._tag === "conflict") return yield* result.error
     if (result._tag === "inserted") yield* this.secureFiles()
     return result.value
+  })
+
+  readonly currentClaim = Effect.fn("WorkStore.currentClaim")(function*(
+    this: WorkStore,
+    laneId: string
+  ) {
+    const decodedLaneId = yield* Schema.decodeUnknownEffect(WorkGoalId)(laneId).pipe(
+      Effect.mapError(storeError("claim.read.decode-lane-id"))
+    )
+    const raw = yield* Effect.try({
+      try: () =>
+        this.#database.prepare(
+          "SELECT revision, record FROM work_lane_claims WHERE lane_id = ?"
+        ).get(decodedLaneId),
+      catch: storeError("claim.read")
+    })
+    if (raw === undefined) return Option.none<WorkLaneClaimed>()
+    const row = yield* Schema.decodeUnknownEffect(LaneRow)(raw).pipe(
+      Effect.mapError(storeError("claim.read.decode-row"))
+    )
+    const claimed = yield* Effect.try({
+      try: () => JSON.parse(row.record),
+      catch: storeError("claim.read.parse")
+    }).pipe(
+      Effect.flatMap((value) => Schema.decodeUnknownEffect(WorkLaneClaimed)(value)),
+      Effect.mapError(storeError("claim.read.decode"))
+    )
+    if (claimed.revision !== row.revision) {
+      return yield* new WorkStoreError({
+        cause: { laneId: decodedLaneId, rowRevision: row.revision, recordRevision: claimed.revision },
+        operation: "claim.read.revision-mismatch"
+      })
+    }
+    return Option.some(claimed)
   })
 
   readonly decisions = Effect.fn("WorkStore.decisions")(function*(this: WorkStore, laneId: string) {

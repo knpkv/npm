@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
-import { Effect, Schema } from "effect"
+import { Effect, Option, Schema } from "effect"
 import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
@@ -15,7 +15,7 @@ import {
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
   type WorkGoalFamily,
   workHistoryMaxEvents,
-  type WorkLaneClaim,
+  WorkLaneClaim,
   workSnapshotMaxGoals,
   WorkStore
 } from "../src/index.js"
@@ -394,6 +394,10 @@ describe("durable Work projection", () => {
       expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
       expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
       const changed = { ...history[1], goal: { ...history[1].goal, summary: "changed transaction" } }
+      expect(yield* service.recordMany("transaction-replay-only", history.slice(0, 2))).toEqual(history.slice(0, 2))
+      expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[0], changed]))).toMatchObject({
+        failure: { _tag: "WorkCheckpointConflictError" }
+      })
       expect(yield* Effect.result(service.recordMany("transaction-1", [history[0], changed]))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-1" }
       })
@@ -418,11 +422,17 @@ describe("durable Work projection", () => {
         worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat-durable-work"
       }
       expect(yield* service.claim(claim)).toMatchObject({ revision: 1, head: claim.head })
+      const current = yield* service.currentClaim(claim.laneId)
+      expect(Option.isSome(current)).toBe(true)
+      if (Option.isSome(current)) expect(current.value).toMatchObject({ revision: 1, head: claim.head })
       expect(yield* Effect.result(service.claim(claim))).toMatchObject({
         failure: { _tag: "WorkLaneClaimConflictError", actualRevision: 1 }
       })
       const next = yield* service.claim({ ...claim, expectedRevision: 1, phase: "validation" })
       expect(next.revision).toBe(2)
+      const updated = yield* service.currentClaim(claim.laneId)
+      expect(Option.isSome(updated)).toBe(true)
+      if (Option.isSome(updated)) expect(updated.value).toMatchObject({ revision: 2, phase: "validation" })
       const handoff: WorkDecisionHandoff = {
         decision: "handoff",
         goalId: "goal-packages",
@@ -436,6 +446,61 @@ describe("durable Work projection", () => {
       expect(yield* service.handoff(handoff)).toEqual(handoff)
       expect(yield* service.handoff(handoff)).toEqual(handoff)
       expect(yield* service.decisions("goal-packages")).toEqual([handoff])
+
+      for (const head of ["a".repeat(41), "a".repeat(63)]) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, head }))).toMatchObject({
+          failure: {}
+        })
+      }
+      for (const worktree of ["/..", "/repo/..", "//repo", "/repo//nested"]) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
+          failure: {}
+        })
+      }
+    }).pipe(provideNodeServices))
+
+  it.effect("reads a durable lane claim after reopening the store", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-lane-restart-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const claim: WorkLaneClaim = {
+        branch: "feat/durable-work",
+        expectedRevision: 0,
+        head: "a".repeat(64),
+        laneId: "goal-restart",
+        owner: { id: "owner-packages", name: "Package owner" },
+        parent: null,
+        phase: "validation",
+        worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat-durable-work"
+      }
+      const claimed = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* WorkStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const service = yield* makeWorkService(store)
+          return yield* service.claim(claim)
+        })
+      )
+      const current = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* WorkStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const service = yield* makeWorkService(store)
+          return yield* service.currentClaim(claim.laneId)
+        })
+      )
+      expect(Option.isSome(current)).toBe(true)
+      if (Option.isSome(current)) expect(current.value).toEqual(claimed)
+      const unknown = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* WorkStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const service = yield* makeWorkService(store)
+          return yield* service.currentClaim("unknown-lane")
+        })
+      )
+      expect(Option.isNone(unknown)).toBe(true)
     }).pipe(provideNodeServices))
 
   it.effect("rejects cross-history inconsistencies before durable mutation", () =>
