@@ -604,7 +604,9 @@ const extractAliasMutations = (segments, reachability, aliases = [], offset = 0)
     const commandInfo = firstExecutableWordInfo(segment.text)
     const commandName = resolvedShellCommandName(segment.text, start, aliases)
     if (commandName !== "alias" && commandName !== "unalias") continue
-    for (const word of words.slice((commandInfo?.index ?? -1) + 1)) {
+    const resolvedWords = resolvedShellCommandWords(segment.text, start, aliases)
+    if (resolvedWords === undefined) return undefined
+    for (const word of resolvedWords.slice(1)) {
       const name = word.replace(/=.*$/u, "")
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) {
         if (word.includes("=")) return undefined
@@ -1054,10 +1056,10 @@ const resolveAliasMutations = (segments, definitions) => {
       const mayReachability = segmentMayReachability(segments, definitions, aliases)
       if (
         segments.some(
-          ({ text }, index) =>
+          ({ start, text }, index) =>
             mayReachability[index] &&
             !mustReachability[index] &&
-            ["alias", "unalias"].includes(firstExecutableWord(text) ?? "")
+            ["alias", "unalias"].includes(resolvedShellCommandName(text, start, aliases) ?? "")
         )
       )
         return undefined
@@ -2470,6 +2472,8 @@ for (const command of [
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "alias helper=$1\nhelper pnpm\npnpm --filter @knpkv/browser-pairing build",
   "alias define=alias\ndefine pnpm=:\npnpm --filter @knpkv/browser-pairing build",
+  "alias define='alias pnpm=:'\ndefine\npnpm --filter @knpkv/browser-pairing build",
+  "alias define=alias\ntest -e package.json && define pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "f() { alias pnpm=:; }; alias invoke=f\ninvoke\npnpm --filter @knpkv/browser-pairing build",
   "true x>/definitely/not/present/output && pnpm --filter @knpkv/browser-pairing build",
   '"`printf alias`" pnpm=:; pnpm --filter @knpkv/browser-pairing build',
@@ -2588,6 +2592,8 @@ for (const [command, expected] of [
   ["alias cache=printf\ncache -p /usr/bin/true pnpm\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias invoke=printf\ninvoke eval stop\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias define=printf\ndefine pnpm=:\npnpm --filter @knpkv/browser-pairing build", []],
+  ["alias define='printf pnpm=:'\ndefine\npnpm --filter @knpkv/browser-pairing build", []],
+  ["alias define=alias\nfalse && define pnpm=:\npnpm --filter @knpkv/browser-pairing build", []],
   ["f() { FOO=1; }; alias invoke=f\ninvoke\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias loader=printf\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build", []],
   [
