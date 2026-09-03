@@ -127,7 +127,7 @@ const normalizeHttpSchemeSeparators = (value: string): string => {
 }
 
 const sanitizeDecodedAuthority = (value: string): string => {
-  const at = value.indexOf("@")
+  const at = value.lastIndexOf("@")
   return at < 0 ? sanitizeCredentialText(value) : `${redactedCredential}@${value.slice(at + 1)}`
 }
 

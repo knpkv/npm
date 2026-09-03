@@ -439,6 +439,16 @@ describe("sanitized approval requests", () => {
       expect(encoded).not.toContain("leaked-canary")
       expect(request.fields[0]?.value).toContain(visible)
     }
+
+    const repeatedUserInfo = approvalRequestFor({
+      kind: "nix.apply",
+      ref: "https://user%3Afirst%40second%3Aleaked-canary%40origin.test/repo"
+    })
+    const repeatedUserInfoValue = repeatedUserInfo.fields[0]?.value
+    expect(repeatedUserInfoValue).toContain("origin.test")
+    expect(repeatedUserInfoValue).not.toContain("first")
+    expect(repeatedUserInfoValue).not.toContain("second")
+    expect(repeatedUserInfoValue).not.toContain("leaked-canary")
   })
 
   it("redacts credentials from backslash-delimited HTTP authorities", () => {
