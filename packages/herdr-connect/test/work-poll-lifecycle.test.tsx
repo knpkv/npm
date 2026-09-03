@@ -180,8 +180,8 @@ describe("Connect Work polling ownership", () => {
 
     const agentButton = host.querySelector('[data-agent-key="SER8:agent-reviewer"]')
     expect(agentButton).not.toBeNull()
-    agentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
     await act(async () => {
+      agentButton?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
     expect(host.querySelector('[data-work-goal-state="available"]')).not.toBeNull()
