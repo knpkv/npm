@@ -454,7 +454,7 @@ const extractAliasMutations = (segments, reachability, aliases = []) => {
     if (!reachability[index]) continue
     const words = shellWords(segment.text)
     if (words === undefined) return undefined
-    const commandName = firstShellWord(segment.text)
+    const commandName = firstExecutableWord(segment.text)
     if (commandName !== "alias" && commandName !== "unalias") continue
     if (hasActiveAliasDefinition(segment.text, segment.start, aliases)) continue
     for (const word of words.slice(1)) {
@@ -1828,6 +1828,8 @@ stop 0
 pnpm --filter @knpkv/browser-pairing build`,
   "X=1 exit 0; pnpm --filter @knpkv/browser-pairing build",
   ">/dev/null exit 0; pnpm --filter @knpkv/browser-pairing build",
+  "X=1 alias pnpm=:; pnpm --filter @knpkv/browser-pairing build",
+  ">/dev/null alias pnpm=:; pnpm --filter @knpkv/browser-pairing build",
   String.raw`pnpm \
 () { :; }; pnpm --filter @knpkv/browser-pairing build`,
   String.raw`\
