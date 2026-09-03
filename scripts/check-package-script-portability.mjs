@@ -375,6 +375,11 @@ const groupedCommandBody = (text) => {
   return closeIndex === trimmed.length - 1 ? trimmed.slice(1, -1) : undefined
 }
 
+const hasStatusSafeContinuation = (segments, index, nextOperator) =>
+  nextOperator === undefined ||
+  nextOperator === "&&" ||
+  (nextOperator === ";" && segments.slice(index + 1).every(({ text }) => text.trim() === ""))
+
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source)) return false
@@ -382,7 +387,9 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const reachability = segmentReachability(segments)
   if (
     segments.some(({ text, nextOperator }, index) => {
-      if (!reachability[index] || nextOperator === "&" || nextOperator === "||") return false
+      if (!reachability[index] || !hasStatusSafeContinuation(segments, index, nextOperator)) {
+        return false
+      }
       if (matcher.test(text.trim())) return true
       const body = groupedCommandBody(text)
       return body !== undefined && hasExecutableLifecycleCommand(body, matcher, visited)
@@ -395,8 +402,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
     const invoked = segments.some(({ text, nextOperator, start }, index) => {
       if (
         !reachability[index] ||
-        nextOperator === "&" ||
-        nextOperator === "||" ||
+        !hasStatusSafeContinuation(segments, index, nextOperator) ||
         firstShellWord(text) !== definition.name
       ) {
         return false
@@ -615,6 +621,30 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "test -f absent && pnpm --filter @knpkv/browser-pairing build; true" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "test -f present && pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build | cat" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "exit 0; pnpm --filter @knpkv/browser-pairing build" },
     browserPairingDependency
   ),
@@ -634,7 +664,7 @@ assert.deepEqual(
     { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build; exit 0" },
     browserPairingDependency
   ),
-  []
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
@@ -696,7 +726,7 @@ assert.deepEqual(
     },
     browserPairingDependency
   ),
-  []
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
