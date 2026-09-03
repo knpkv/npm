@@ -18,6 +18,8 @@
   "scripts": {
     "start": "bun src/bin.ts",
     "start:web": "bun src/bin.ts web",
+    "prebuild": "pnpm --filter @knpkv/browser-pairing build",
+    "precheck": "pnpm --filter @knpkv/browser-pairing build",
     "prestart": "pnpm --filter @knpkv/browser-pairing build",
     "prestart:web": "pnpm --filter @knpkv/browser-pairing build",
     "prepack": "tsc -b",
