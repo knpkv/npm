@@ -448,8 +448,8 @@ const hasUnquotedShellExpansion = (text) => {
       if (character === quote) quote = undefined
       else if (
         quote === '"' &&
-        character === "$" &&
-        /(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*?#$!-]|\(|\{)/u.test(text.slice(index + 1))
+        ((character === "$" && /(?:[A-Za-z_][A-Za-z0-9_]*|[0-9]+|[@*?#$!-]|\(|\{)/u.test(text.slice(index + 1))) ||
+          character === "`")
       ) {
         return true
       }
@@ -477,19 +477,52 @@ const separatedRedirectionWord = /^(?:\d+)?(?:>>?|<<<?|<>|>&|<&|>\|)$/u
 const assignmentWord = /^[A-Za-z_][A-Za-z0-9_]*=/u
 
 const hasPotentiallyFailingRedirection = (text) => {
-  const words = shellWords(text)
-  if (words === undefined) return true
-  for (let index = 0; index < words.length; index++) {
-    const word = words[index]
-    if (!redirectionWord.test(word)) continue
-    const operator = word.match(/^(?:\d+)?(>>?|<<<?|<>|>&|<&|>\|)/u)?.[1]
+  if (shellWords(text) === undefined) return true
+  let quote
+  let escaped = false
+  for (let index = 0; index < text.length; index++) {
+    const character = text[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (character !== ">" && character !== "<") continue
+    const operator = text.slice(index).match(/^(>>?|<<<?|<>|>&|<&|>\|)/u)?.[1]
     if (operator === undefined) return true
-    const operand = word.slice(word.indexOf(operator) + operator.length) || words[index + 1]
-    if (operand === undefined) return true
+    index += operator.length - 1
     if (operator.startsWith("<<")) continue
+    let operandIndex = index + 1
+    while (/\s/u.test(text[operandIndex] ?? "")) operandIndex++
+    if (operandIndex >= text.length) return true
+    const operandStart = operandIndex
+    let operandQuote
+    while (operandIndex < text.length) {
+      const operandCharacter = text[operandIndex]
+      if (operandQuote !== undefined) {
+        if (operandCharacter === operandQuote) operandQuote = undefined
+      } else if (operandCharacter === "'" || operandCharacter === '"') {
+        operandQuote = operandCharacter
+      } else if (/\s|[;|&(){}]/u.test(operandCharacter)) {
+        break
+      }
+      operandIndex++
+    }
+    if (operandQuote !== undefined) return true
+    const operand = text.slice(operandStart, operandIndex).replaceAll(/['"]/gu, "")
     if (operator.includes("&")) {
       if (/^[0-9-]+$/u.test(operand)) continue
-      if (word.slice(word.indexOf(operator) + operator.length)) continue
       return true
     }
     if (operand === "/dev/null") continue
@@ -1074,6 +1107,12 @@ const hasStatusSafeContinuation = (segments, index, nextOperator) =>
     })) ||
   (nextOperator === ";" && segments.slice(index + 1).every(({ text }) => text.trim() === ""))
 
+const hasReachableGatingRedirection = (segments, reachability) =>
+  segments.some(
+    ({ text, nextOperator }, index) =>
+      reachability[index] && nextOperator === "&&" && hasPotentiallyFailingRedirection(text)
+  )
+
 const hasMayReachableTerminationBeforeMatcher = (segments, definitions, aliases, matcher, offset = 0) => {
   const scopedSegments = rebaseShellSegments(segments, offset)
   const mayReachability = segmentMayReachability(scopedSegments, definitions, aliases)
@@ -1182,7 +1221,7 @@ const hasReachableLifecycleCommand = (command, matcher, visited = new Set()) => 
   const aliases = resolveAliasMutations(segments, definitions)
   if (aliases === undefined) return false
   const reachability = segmentRequiredReachability(segments, definitions, aliases)
-  if (segments.some(({ text }, index) => reachability[index] && hasPotentiallyFailingRedirection(text))) return false
+  if (hasReachableGatingRedirection(segments, reachability)) return false
   if (hasErrexitLifecycleRisk(segments, definitions, aliases, matcher)) return false
   if (hasMayReachableTerminationBeforeMatcher(segments, definitions, aliases, matcher)) return false
   if (segments.some(({ text, start }, index) => reachability[index] && hasPersistentPathMutation(text, start, aliases)))
@@ -1236,7 +1275,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const aliases = resolveAliasMutations(segments, definitions)
   if (aliases === undefined) return false
   const reachability = segmentReachability(segments, definitions, aliases)
-  if (segments.some(({ text }, index) => reachability[index] && hasPotentiallyFailingRedirection(text))) return false
+  if (hasReachableGatingRedirection(segments, reachability)) return false
   if (hasErrexitLifecycleRisk(segments, definitions, aliases, matcher)) return false
   if (hasMayReachableTerminationBeforeMatcher(segments, definitions, aliases, matcher)) return false
   if (segments.some(({ text, start }, index) => reachability[index] && hasPersistentPathMutation(text, start, aliases)))
@@ -1277,7 +1316,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   })
 }
 
-const resolvedShellCommandWords = (text, start, aliases) => {
+const resolvedShellCommandWords = (text, start, aliases, visited = new Set()) => {
   const words = shellWords(text)
   const commandInfo = firstExecutableWordInfo(text)
   if (words === undefined || commandInfo === undefined) return undefined
@@ -1285,8 +1324,11 @@ const resolvedShellCommandWords = (text, start, aliases) => {
     .filter((alias) => alias.name === commandInfo.word && alias.start <= start)
     .toSorted((left, right) => left.start - right.start)
     .at(-1)
+  if (active?.kind === "define" && visited.has(active.name)) return undefined
   const commandWords =
-    active?.kind === "define" ? shellWords(active.value) : [resolvedShellCommandName(text, start, aliases)]
+    active?.kind === "define"
+      ? resolvedShellCommandWords(active.value, start, aliases, new Set([...visited, active.name]))
+      : [resolvedShellCommandName(text, start, aliases)]
   if (commandWords === undefined || commandWords[0] === undefined) return undefined
   return [...commandWords, ...words.slice(commandInfo.index + 1)]
 }
@@ -1305,14 +1347,15 @@ const hasOrderedPrepackLifecycleCommand = (command) => {
   if (aliases === undefined) return false
   const visited = new Set()
   const definitionKey = (definition) => `${definition.name}:${definition.start}:${definition.end}`
-  const scan = (nestedSegments, inheritedBuild) => {
-    const reachability = segmentRequiredReachability(nestedSegments, definitions, aliases)
+  const scan = (nestedSegments, inheritedBuild, offset = 0) => {
+    const scopedSegments = rebaseShellSegments(nestedSegments, offset)
+    const reachability = segmentRequiredReachability(scopedSegments, definitions, aliases)
     let buildSeen = inheritedBuild
-    for (const [index, segment] of nestedSegments.entries()) {
+    for (const [index, segment] of scopedSegments.entries()) {
       if (!reachability[index]) continue
       const text = segment.text.trim()
       if (
-        !hasActiveFunctionDefinition(text, segment.start, definitions) &&
+        !hasActiveFunctionDefinition(text, segment.start, definitions, aliases) &&
         !hasActiveAliasDefinition(text, segment.start, aliases) &&
         browserPairingBuild.test(text)
       ) {
@@ -1323,7 +1366,11 @@ const hasOrderedPrepackLifecycleCommand = (command) => {
       }
       const body = groupedCommandBody(text)
       if (body !== undefined) {
-        const nestedBuild = scan(shellCommandSegments(body, true), buildSeen)
+        const nestedBuild = scan(
+          shellCommandSegments(body, true),
+          buildSeen,
+          segment.start + segment.text.indexOf(body)
+        )
         if (!nestedBuild.valid) return nestedBuild
         buildSeen = nestedBuild.buildSeen
       }
@@ -1337,7 +1384,7 @@ const hasOrderedPrepackLifecycleCommand = (command) => {
         .at(-1)
       if (definition !== undefined && !visited.has(definitionKey(definition))) {
         visited.add(definitionKey(definition))
-        const nestedBuild = scan(shellCommandSegments(definition.body, true), buildSeen)
+        const nestedBuild = scan(shellCommandSegments(definition.body, true), buildSeen, definition.start)
         if (!nestedBuild.valid) return nestedBuild
         buildSeen = nestedBuild.buildSeen
       }
@@ -2424,6 +2471,8 @@ for (const command of [
   "alias helper=$1\nhelper pnpm\npnpm --filter @knpkv/browser-pairing build",
   "alias define=alias\ndefine pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "f() { alias pnpm=:; }; alias invoke=f\ninvoke\npnpm --filter @knpkv/browser-pairing build",
+  "true x>/definitely/not/present/output && pnpm --filter @knpkv/browser-pairing build",
+  '"`printf alias`" pnpm=:; pnpm --filter @knpkv/browser-pairing build',
   "> /dev/null local PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build",
   "test -e package.json && exit 0; pnpm --filter @knpkv/browser-pairing build"
 ]) {
@@ -2499,6 +2548,8 @@ assert.deepEqual(
 for (const command of [
   "X=1 tsc -b; pnpm --filter @knpkv/browser-pairing build && vite build",
   "alias compile=tsc\ncompile -b\npnpm --filter @knpkv/browser-pairing build && vite build",
+  "alias wrapper=tsc\nalias compile=wrapper\ncompile -b\npnpm --filter @knpkv/browser-pairing build && vite build",
+  "printf ready; alias compile=tsc\n{ compile -b; }; pnpm --filter @knpkv/browser-pairing build && vite build",
   "f() { :; }; f; f() { tsc -b; }; f; pnpm --filter @knpkv/browser-pairing build && vite build"
 ]) {
   assert.deepEqual(
@@ -2530,6 +2581,7 @@ for (const [command, expected] of [
   ["printf '$builtin'; pnpm --filter @knpkv/browser-pairing build", []],
   ["printf '$1'; pnpm --filter @knpkv/browser-pairing build", []],
   ["alias helper='$1'\npnpm --filter @knpkv/browser-pairing build", []],
+  ["'`printf alias`' pnpm=:; pnpm --filter @knpkv/browser-pairing build", []],
   ["alias disable=printf\ndisable -n\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias options=printf\noptions -n\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias decl=printf\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build", []],
@@ -2544,7 +2596,13 @@ for (const [command, expected] of [
   ],
   ["alias gate=false\n{ gate && alias pnpm=:; }\npnpm --filter @knpkv/browser-pairing build", []],
   ["> /dev/null local FOO=1; pnpm --filter @knpkv/browser-pairing build", []],
-  ["true >/dev/null && pnpm --filter @knpkv/browser-pairing build", []]
+  ["true >/dev/null && pnpm --filter @knpkv/browser-pairing build", []],
+  ["printf ready > build.log; pnpm --filter @knpkv/browser-pairing build", []],
+  [
+    "alias wrapper=printf\nalias compile=wrapper\ncompile -b\npnpm --filter @knpkv/browser-pairing build && vite build",
+    []
+  ],
+  ["printf ready; alias compile=printf\n{ compile -b; }; pnpm --filter @knpkv/browser-pairing build && vite build", []]
 ]) {
   assert.deepEqual(
     findCodeCommitWebLifecycleGaps(
