@@ -191,6 +191,22 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("normalizes special-scheme authorities without rewriting query data", () => {
+    const refs = ["https:\\\\user:backslash-secret@example.test\\repo", "ftp:\\\\user:ftp-secret@example.test\\repo"]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toMatch(/(?:backslash|ftp)-secret/u)
+      expect(encoded).toContain("[redacted credential]")
+    }
+    const query = "https://example.test/repo?ref=feature\\candidate"
+    expect(approvalRequestFor({ kind: "nix.apply", ref: query }).fields[0]?.value).toBe(query)
+  })
+
   it("redacts complete arbitrary authorization values", () => {
     const refs = ["Authorization: Custom scheme-secret trailing-value", "https://example.test/password%3Dleaked-canary"]
     for (const ref of refs) {
@@ -223,6 +239,26 @@ describe("sanitized approval requests", () => {
     expect(encoded).toContain("[redacted credential]")
     expect(approvalRequestFor({ kind: "nix.apply", ref: "ref=main,mirror=backup" }).fields[0]?.value).toBe(
       "ref=main,mirror=backup"
+    )
+  })
+
+  it("redacts cookie headers and folded authorization continuations", () => {
+    for (const ref of [
+      "Cookie: SID=leaked-cookie-canary; theme=dark",
+      "set-cookie: session_id=leaked-set-cookie-canary; Path=/",
+      "Authorization: Bearer first-folded-canary\r\n second-folded-canary"
+    ]) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toMatch(/(?:cookie|folded)-canary/u)
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "cookiePolicy=strict" }).fields[0]?.value).toBe(
+      "cookiePolicy=strict"
     )
   })
 
@@ -345,6 +381,10 @@ describe("sanitized approval requests", () => {
       { ref: '{"pass\\u0077ord":"escaped-json-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password": plain-json-leaked-canary}', redacted: "[redacted credential]" },
       { ref: '{"Authorization": Bearer plain-auth-leaked-canary}', redacted: "[redacted credential]" },
+      { ref: '{"password":123456}', redacted: "[redacted credential]" },
+      { ref: '{"credentials":{"value":"structured-leaked-canary"}}', redacted: "[redacted credential]" },
+      { ref: '{"refreshToken":"camel-token-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"clientSecret":"camel-secret-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
@@ -358,7 +398,9 @@ describe("sanitized approval requests", () => {
         payload: { kind: "nix.apply", ref }
       })
       const encoded = JSON.stringify({ request, projection })
-      expect(encoded).not.toMatch(/(?:json|prefixed-json|nested-json|escaped-json|plain|auth)-leaked-canary/u)
+      expect(encoded).not.toMatch(
+        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
+      )
       expect(encoded).toContain(redacted)
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: '{"revision":"release"}' }).fields[0]?.value).toBe(
@@ -426,12 +468,34 @@ describe("sanitized approval requests", () => {
         ref: "https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253Fsha%253Drelease"
       }).fields[0]?.value
     ).toBe("https://mirror.test/?ref=https%253A%252F%252Forigin.test%252Frepo%253Fsha%253Drelease")
+    expect(
+      approvalRequestFor({
+        kind: "nix.apply",
+        ref: "https://host%2Fpath%3Fref%3Drelease"
+      }).fields[0]?.value
+    ).toBe("https://host%2Fpath%3Fref%3Drelease")
+  })
+
+  it("preserves Nix revision identity query fields", () => {
+    const ref = "git+https://example.test/repo?rev=abc123&dir=hosts/ser8"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    expect(request.fields[0]?.value).toBe(ref)
+    expect(projection.payload.kind === "nix.apply" ? projection.payload.ref : "").toBe(ref)
+    expect(
+      approvalRequestFor({ kind: "nix.apply", ref: "git+https://example.test/repo?token=secret-canary" }).fields[0]
+        ?.value
+    ).not.toContain("secret-canary")
   })
 
   it("redacts encoded credential assignments inside safe coordinates", () => {
     for (const ref of [
       "https://mirror.test/?ref=password%3Dleaked-canary",
-      "https://mirror.test/?ref=password%ZZ%3Dmalformed-leaked-canary"
+      "https://mirror.test/?ref=password%ZZ%3Dmalformed-leaked-canary",
+      "https://mirror.test/?ref=password%25ZZ%3Ddecode-created-malformed-leaked-canary"
     ]) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
       const projection = sanitizeJobRecord({
@@ -449,7 +513,8 @@ describe("sanitized approval requests", () => {
       "https://host%2Fpath%3Fref%3Dhttps%253A%252F%252Forigin.test%252Frepo%253Fsig%253Dsecret-canary",
       "https://host%3Fref%3Dsig%253Dsecret-canary%ZZ",
       "https://host%2Fpath%3Fref%3Dfoo%ZZAuthorization: Bearer detached-secret-canary",
-      "https://host%2Fpath%3Fref%3Dpassword=%40secret-canary"
+      "https://host%2Fpath%3Fref%3Dpassword=%40secret-canary",
+      "https://host%2Fpath%3Fref%3Dpassword: leaked-whitespace-canary"
     ]
     for (const ref of refs) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
@@ -658,7 +723,12 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts credential environment assignments while preserving regions", () => {
-    const refs = ["AWS_SECRET_ACCESS_KEY=first-secret", "PRIVATE_KEY=second-secret"]
+    const refs = [
+      "AWS_SECRET_ACCESS_KEY=first-secret",
+      "PRIVATE_KEY=second-secret",
+      "ssh_passphrase=third-passphrase-secret",
+      "//registry.example/:_auth=fourth-auth-secret"
+    ]
     for (const ref of refs) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
       const projection = sanitizeJobRecord({
@@ -668,10 +738,30 @@ describe("sanitized approval requests", () => {
       const encoded = JSON.stringify({ request, projection })
       expect(encoded).not.toContain("first-secret")
       expect(encoded).not.toContain("second-secret")
+      expect(encoded).not.toContain("third-passphrase-secret")
+      expect(encoded).not.toContain("fourth-auth-secret")
       expect(encoded).toContain("[redacted credential]")
     }
     const region = approvalRequestFor({ kind: "nix.apply", ref: "AWS_REGION=us-east-1" })
     expect(region.fields[0]?.value).toBe("AWS_REGION=us-east-1")
+  })
+
+  it("redacts passwords in recognizable netrc records", () => {
+    for (const ref of [
+      "machine example.test login deploy password netrc-leaked-canary",
+      "machine example.test\\n login deploy\\n password multiline-netrc-leaked-canary"
+    ]) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toMatch(/(?:netrc|leaked)-canary/u)
+      expect(encoded).toContain("[redacted credential]")
+    }
+    const visible = "machine example.test login deploy account release"
+    expect(approvalRequestFor({ kind: "nix.apply", ref: visible }).fields[0]?.value).toBe(visible)
   })
 
   it("redacts quoted credentials while preserving non-credential labels", () => {

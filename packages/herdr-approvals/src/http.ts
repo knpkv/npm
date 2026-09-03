@@ -1868,9 +1868,11 @@ export const startHttpServer = async (
         discardApprovalProofMutation(request)
         return {}
       }
-      approvalProofMutationsByRequest.delete(request)
-      session.locked = false
-      httpRuntime.runSync(session.lock.release(1))
+      if (mutation !== undefined) {
+        approvalProofMutationsByRequest.delete(request)
+        session.locked = false
+        httpRuntime.runSync(session.lock.release(1))
+      }
       return {
         "cache-control": "no-store",
         "set-cookie": approvalProofCookie(session.token, secure)
