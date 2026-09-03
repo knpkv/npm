@@ -8,7 +8,7 @@ import * as Atom from "effect/unstable/reactivity/Atom"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
-import { useEffect, useRef, type KeyboardEvent, type ReactNode } from "react"
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
 import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
 import {
@@ -25,12 +25,20 @@ import {
   pageScrollCommand,
   wheelScrollCommand
 } from "./terminal-input.js"
-import { AgentDirectory, connectAgentKey, ConnectWorkspace, type AgentActivityFilter } from "./view.js"
+import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
 import { bindTerminalViewport } from "./terminal-viewport.js"
 import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
+import {
+  applyTerminalModifierToInput,
+  dispatchTerminalKey,
+  toggleTerminalModifier,
+  type TerminalInputApplication,
+  type TerminalModifier,
+  type TerminalRailKey
+} from "./terminal-keyboard.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
   detail: Schema.String
@@ -200,7 +208,21 @@ const socketUrl = (agent: ConnectAgent, cols: number, rows: number): string => {
   return url.toString()
 }
 
-const terminalWorker = (container: HTMLElement, agent: ConnectAgent, update: (state: ConnectionState) => void) =>
+type TerminalInputCommand = Extract<TerminalClientCommand, { readonly type: "terminal.input" }>
+
+type TerminalKeyboardCallbacks = {
+  readonly getModifier: () => TerminalModifier | null
+  readonly setModifier: (modifier: TerminalModifier | null) => void
+  readonly reportError: (error: TerminalInputApplication) => void
+  readonly setInputSender: (sendInput: (command: TerminalInputCommand) => void) => void
+}
+
+const terminalWorker = (
+  container: HTMLElement,
+  agent: ConnectAgent,
+  update: (state: ConnectionState) => void,
+  keyboard: TerminalKeyboardCallbacks
+) =>
   Effect.scoped(
     Effect.gen(function* () {
       update({ _tag: "connecting", agent })
@@ -261,10 +283,24 @@ const terminalWorker = (container: HTMLElement, agent: ConnectAgent, update: (st
           socket.send(JSON.stringify(command))
         }
       }
+      const sendInput = (text: string): void => send({ type: "terminal.input", text })
+      keyboard.setInputSender((command) => send(command))
+      yield* Effect.addFinalizer(() => Effect.sync(() => keyboard.setInputSender(() => {})))
+      const applyInput = (text: string): string | null => {
+        const application = applyTerminalModifierToInput(keyboard.getModifier(), text)
+        if (application._tag === "unsupported") {
+          keyboard.reportError(application)
+          return null
+        }
+        keyboard.setModifier(application.nextModifier)
+        return application.text
+      }
       const input = terminal.terminal.onData((text) => {
+        const appliedText = applyInput(text)
+        if (appliedText === null) return
         if (ready) {
-          send({ type: "terminal.input", text })
-        } else if (pendingInput.push(text) === "overflow") {
+          sendInput(appliedText)
+        } else if (pendingInput.push(appliedText) === "overflow") {
           inputOverflow = true
           update({
             _tag: "failed",
@@ -392,7 +428,7 @@ const terminalWorker = (container: HTMLElement, agent: ConnectAgent, update: (st
             ready = true
             const queued = pendingInput.drain()
             if (queued.length > 0) {
-              send({ type: "terminal.input", text: queued })
+              sendInput(queued)
             }
             if (pendingResize !== null) {
               send({
@@ -454,12 +490,28 @@ export const ConnectSurface = ({
   const requestId = useRef(0)
   const terminalRef = useRef<HTMLDivElement>(null)
   const terminalViewportRef = useRef<HTMLDivElement>(null)
+  const terminalInputRef = useRef<(command: TerminalInputCommand) => void>(() => {})
+  const terminalModifierRef = useRef<TerminalModifier | null>(null)
+  const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
+  const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   useAtomMount(atoms.agentsPoll)
 
   useEffect(() => {
     const container = terminalRef.current
     if (connectionRequest === null || container === null) return
-    const fiber = Effect.runFork(terminalWorker(container, connectionRequest.agent, setConnection))
+    const fiber = Effect.runFork(
+      terminalWorker(container, connectionRequest.agent, setConnection, {
+        getModifier: () => terminalModifierRef.current,
+        reportError: () => setTerminalKeyError("That modifier combination is not supported."),
+        setInputSender: (sendInput) => {
+          terminalInputRef.current = sendInput
+        },
+        setModifier: (modifier) => {
+          terminalModifierRef.current = modifier
+          setTerminalModifier((current) => (current === modifier ? current : modifier))
+        }
+      })
+    )
     return () => {
       Effect.runFork(Fiber.interrupt(fiber))
       container.replaceChildren()
@@ -487,6 +539,10 @@ export const ConnectSurface = ({
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)
+    terminalInputRef.current = () => {}
+    terminalModifierRef.current = null
+    setTerminalModifier(null)
+    setTerminalKeyError(null)
     setSelectedKey(key)
     setConnection({ _tag: "connecting", agent })
     requestId.current += 1
@@ -542,6 +598,29 @@ export const ConnectSurface = ({
   const disconnect = (): void => {
     setConnectionRequest(null)
     setConnection({ _tag: "idle" })
+    terminalInputRef.current = () => {}
+    terminalModifierRef.current = null
+    setTerminalModifier(null)
+    setTerminalKeyError(null)
+  }
+
+  const changeTerminalModifier = (modifier: TerminalModifier): void => {
+    const next = toggleTerminalModifier(terminalModifierRef.current, modifier)
+    terminalModifierRef.current = next
+    setTerminalModifier(next)
+    setTerminalKeyError(null)
+  }
+
+  const sendTerminalRailKey = (key: TerminalRailKey): void => {
+    const dispatch = dispatchTerminalKey(key, terminalModifierRef.current)
+    if (dispatch._tag === "unsupported") {
+      setTerminalKeyError("That modifier combination is not supported.")
+      return
+    }
+    terminalInputRef.current(dispatch.command)
+    terminalModifierRef.current = dispatch.nextModifier
+    setTerminalModifier(dispatch.nextModifier)
+    setTerminalKeyError(null)
   }
 
   const directoryScreen = (
@@ -668,6 +747,12 @@ export const ConnectSurface = ({
         </div>
         <StateLabel label="connected" tone="positive" size="compact" />
       </div>
+      <TerminalKeyRail
+        error={terminalKeyError}
+        modifier={terminalModifier}
+        onKey={sendTerminalRailKey}
+        onModifierChange={changeTerminalModifier}
+      />
       <div
         aria-label={selected === null ? "Agent terminal" : `${selected.name} terminal`}
         className="ghostty-terminal"
