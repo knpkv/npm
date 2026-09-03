@@ -601,7 +601,6 @@ const extractAliasMutations = (segments, reachability, aliases = [], offset = 0)
       continue
     }
     if (hasDynamicExecutableIdentity(segment.text)) return undefined
-    const commandInfo = firstExecutableWordInfo(segment.text)
     const commandName = resolvedShellCommandName(segment.text, start, aliases)
     if (commandName !== "alias" && commandName !== "unalias") continue
     const resolvedWords = resolvedShellCommandWords(segment.text, start, aliases)
