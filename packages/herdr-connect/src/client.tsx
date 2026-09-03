@@ -48,7 +48,7 @@ import {
 } from "./terminal-keyboard.js"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { ConnectAgentIdentity } from "./work-goal-link-view.js"
-import { resolveConnectWorkGoal, type ConnectWorkGoalResolution } from "./work-goal-link.js"
+import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
@@ -644,12 +644,13 @@ export const ConnectSurface = ({
     (connectionRequest !== null && connectAgentKey(connectionRequest.agent) === selectedKey
       ? connectionRequest.agent
       : null)
+  const currentWork = workSnapshotForAssociation(work)
   const workGoalResolution: ConnectWorkGoalResolution =
     selected === null
       ? { _tag: "unavailable", reason: "snapshot_unavailable" }
-      : AsyncResult.isSuccess(work)
-        ? resolveConnectWorkGoal(selected, work.value)
-        : { _tag: "unavailable", reason: "snapshot_unavailable" }
+      : currentWork === null
+        ? { _tag: "unavailable", reason: "snapshot_unavailable" }
+        : resolveConnectWorkGoal(selected, currentWork)
   const selectAgent = (agent: ConnectAgent): void => {
     preferenceApplied.current = true
     const key = connectAgentKey(agent)

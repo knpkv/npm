@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { agentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
-import { Schema } from "effect"
+import { Cause, Option, Schema } from "effect"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { ConnectAgent } from "../src/model.js"
-import { resolveConnectWorkGoal } from "../src/work-goal-link.js"
+import { resolveConnectWorkGoal, workSnapshotForAssociation } from "../src/work-goal-link.js"
 
 const worker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
   agentId: "agent-reviewer",
@@ -49,6 +50,14 @@ const snapshot = (goals: ReadonlyArray<typeof workGoal>): typeof WorkSnapshots.T
   })
 
 describe("Connect Work goal association", () => {
+  it("keeps the last successful Work snapshot during a refresh failure", () => {
+    const previous = AsyncResult.success(snapshot([workGoal]))
+    const failed = AsyncResult.failureWithPrevious(Cause.die("refresh failed"), { previous: Option.some(previous) })
+
+    expect(workSnapshotForAssociation(failed)).toEqual(previous.value)
+    expect(workSnapshotForAssociation(AsyncResult.failure(Cause.die("initial failure")))).toBeNull()
+  })
+
   it("resolves an exact current Work goal and canonical same-origin URL", () => {
     expect(resolveConnectWorkGoal(connectAgent, snapshot([workGoal]))).toEqual({
       _tag: "available",

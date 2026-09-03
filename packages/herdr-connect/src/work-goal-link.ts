@@ -1,5 +1,6 @@
 import type { WorkGoalId, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import type { ConnectAgent } from "./model.js"
 
 export type ConnectWorkGoalResolution =
@@ -12,6 +13,15 @@ export type ConnectWorkGoalResolution =
   | { readonly _tag: "missing" }
   | { readonly _tag: "ambiguous"; readonly goalIds: ReadonlyArray<WorkGoalId> }
   | { readonly _tag: "unavailable"; readonly reason: "snapshot_unavailable" }
+
+/** Keeps the last valid Work projection available for association during refresh failures. */
+export const workSnapshotForAssociation = <E>(
+  result: AsyncResult.AsyncResult<WorkSnapshots, E>
+): WorkSnapshots | null => {
+  if (AsyncResult.isSuccess(result)) return result.value
+  if (result._tag !== "Failure" || result.previousSuccess._tag !== "Some") return null
+  return result.previousSuccess.value.value
+}
 
 const sameAgent = (
   agent: Pick<ConnectAgent, "host" | "id">,
