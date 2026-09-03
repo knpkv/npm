@@ -44,6 +44,11 @@ const codeCommitWebLifecycleRequirements = [
     matches: (command) => hasExecutableLifecycleCommand(command, codeCommitWebRoleCheck)
   }
 ]
+const codeCommitLifecycleRequirements = ["prestart", "prestart:web"].map((script) => ({
+  script,
+  description: "a browser-pairing build",
+  matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
+}))
 
 const hasDirectEnvironmentAssignment = (command) => {
   let quote
@@ -354,6 +359,7 @@ const unsupportedShellWords = new Set([
   "if",
   "select",
   "then",
+  "trap",
   "until",
   "while"
 ])
@@ -365,6 +371,11 @@ const hasUnsupportedShellControl = (source) => {
     segments.some(({ text }) => text.trim().startsWith("!")) ||
     segments.some(({ nextOperator }) => nextOperator === "&")
   )
+}
+
+const hasActiveFunctionDefinition = (text, start, definitions) => {
+  const commandName = firstShellWord(text)
+  return commandName !== undefined && definitions.some(({ name, end }) => name === commandName && end <= start)
 }
 
 const groupedCommandBody = (text) => {
@@ -401,11 +412,11 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const segments = shellCommandSegments(source, true)
   const reachability = segmentReachability(segments)
   if (
-    segments.some(({ text, nextOperator }, index) => {
+    segments.some(({ text, nextOperator, start }, index) => {
       if (!reachability[index] || !hasStatusSafeContinuation(segments, index, nextOperator)) {
         return false
       }
-      if (matcher.test(text.trim())) return true
+      if (!hasActiveFunctionDefinition(text, start, definitions) && matcher.test(text.trim())) return true
       const body = groupedCommandBody(text)
       return body !== undefined && hasExecutableLifecycleCommand(body, matcher, visited)
     })
@@ -471,6 +482,11 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
     .map(([name]) => `${manifestPath}: scripts.${name} uses a POSIX-only environment assignment`)
 
 export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {
+  if (manifestPath === "packages/codecommit/package.json") {
+    return codeCommitLifecycleRequirements
+      .filter(({ script, matches }) => !matches(scripts?.[script] ?? ""))
+      .map(({ script, description }) => `${manifestPath}: scripts.${script} must include ${description}`)
+  }
   if (
     manifestPath !== "packages/codecommit-web/package.json" ||
     !("@knpkv/browser-pairing" in { ...dependencies, ...devDependencies })
@@ -684,6 +700,46 @@ assert.deepEqual(
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm() { true; }; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "tsc() { true; }; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "build_pairing() { true; }; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "trap 'exit 0' 0; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "trap 'exit 0' 0; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && vite" },
     browserPairingDependency
   ),
@@ -860,6 +916,29 @@ assert.deepEqual(
     browserPairingDependency
   ),
   []
+)
+const codeCommitScripts = {
+  start: "bun src/bin.ts",
+  "start:web": "bun src/bin.ts web",
+  prestart: "pnpm --filter @knpkv/browser-pairing build",
+  "prestart:web": "pnpm --filter @knpkv/browser-pairing build"
+}
+assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/codecommit/package.json", codeCommitScripts, {}), [])
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit/package.json",
+    { ...codeCommitScripts, prestart: "bun src/bin.ts" },
+    {}
+  ),
+  ["packages/codecommit/package.json: scripts.prestart must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit/package.json",
+    { ...codeCommitScripts, "prestart:web": "bun src/bin.ts web" },
+    {}
+  ),
+  ["packages/codecommit/package.json: scripts.prestart:web must include a browser-pairing build"]
 )
 assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/other/package.json", {}, browserPairingDependency), [])
 
