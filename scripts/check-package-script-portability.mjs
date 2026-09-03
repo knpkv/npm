@@ -408,7 +408,8 @@ const hasStatusSafeContinuation = (segments, index, nextOperator) =>
 
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
-  if (hasUnsupportedShellControl(source)) return false
+  if (hasUnsupportedShellControl(source) || definitions.some(({ body }) => hasUnsupportedShellControl(body)))
+    return false
   const segments = shellCommandSegments(source, true)
   const reachability = segmentReachability(segments)
   if (
@@ -733,6 +734,25 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "trap 'exit 0' 0; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "cleanup() { trap 'exit 0' 0; }; cleanup; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "cleanup() { trap 'exit 0' 0; }; cleanup; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
