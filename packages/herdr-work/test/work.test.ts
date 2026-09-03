@@ -247,7 +247,7 @@ describe("durable Work projection", () => {
         "goal-connect-v2",
         "goal-connect-v3"
       ])
-      expect(supersededV2.goal).toMatchObject({
+      expect(snapshots.day.goals.find(({ id }) => id === "goal-connect-v2")).toMatchObject({
         blocker: { since: 0, summary: "Audit gate failed" },
         state: "blocked"
       })
