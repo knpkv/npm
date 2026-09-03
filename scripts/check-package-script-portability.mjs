@@ -362,6 +362,7 @@ const hasUnsupportedShellControl = (source) => {
   const segments = shellCommandSegments(source, true)
   return (
     segments.some(({ text }) => unsupportedShellWords.has(firstShellWord(text) ?? "")) ||
+    segments.some(({ text }) => text.trim().startsWith("!")) ||
     segments.some(({ nextOperator }) => nextOperator === "&")
   )
 }
@@ -375,9 +376,23 @@ const groupedCommandBody = (text) => {
   return closeIndex === trimmed.length - 1 ? trimmed.slice(1, -1) : undefined
 }
 
+const hasStatusRecoveryOperator = (command) => {
+  const segments = shellCommandSegments(command, true)
+  return segments.some(({ text, nextOperator }) => {
+    if (nextOperator === "||") return true
+    const body = groupedCommandBody(text)
+    return body !== undefined && hasStatusRecoveryOperator(body)
+  })
+}
+
 const hasStatusSafeContinuation = (segments, index, nextOperator) =>
   nextOperator === undefined ||
-  nextOperator === "&&" ||
+  (nextOperator === "&&" &&
+    !segments.slice(index).some(({ text, nextOperator: followingOperator }) => {
+      if (followingOperator === "||") return true
+      const body = groupedCommandBody(text)
+      return body !== undefined && hasStatusRecoveryOperator(body)
+    })) ||
   (nextOperator === ";" && segments.slice(index + 1).every(({ text }) => text.trim() === ""))
 
 const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) => {
@@ -641,6 +656,38 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "! true && pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "! true && tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && false || true" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm --filter @knpkv/browser-pairing build && vite" },
+    browserPairingDependency
+  ),
+  []
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
