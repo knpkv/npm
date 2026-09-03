@@ -1,12 +1,15 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
-import { requiresApproval, type JobRecord, type JobStatus } from "@knpkv/herdr-fleet/model"
+import { requiresApproval, type JobStatus } from "@knpkv/herdr-fleet/model"
 import { Predicate } from "effect"
 import { useMemo, useState, type KeyboardEvent, type ReactElement } from "react"
+import { approvalRequestFor, type ApprovalRequest, type SanitizedJobRecord } from "./approval-request.js"
+import { ApprovalRequestDisclosure } from "./approval-request-view.js"
 
 export type ActivityFilter = "all" | "exceptions" | "work" | "approvals" | "deployments" | "human" | "agent"
 
 export type ActivityItem = {
   readonly actor: string
+  readonly approvalRequest: ApprovalRequest | null
   readonly categories: ReadonlyArray<Exclude<ActivityFilter, "all">>
   readonly connectHref: string | null
   readonly connectLabel: string | null
@@ -78,7 +81,7 @@ export const statusTone = (status: JobStatus): "neutral" | "positive" | "critica
   }
 }
 
-export const jobTitle = (record: Pick<JobRecord, "payload">): string => {
+export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string => {
   switch (record.payload.kind) {
     case "browser.mcp.recover":
       return "Recover browser MCP"
@@ -93,7 +96,7 @@ export const jobTitle = (record: Pick<JobRecord, "payload">): string => {
   }
 }
 
-const safeSummary = (record: JobRecord): string => {
+const safeSummary = (record: SanitizedJobRecord): string => {
   switch (record.payload.kind) {
     case "browser.mcp.recover":
       return "Checked the configured Chrome DevTools MCP runtime."
@@ -115,7 +118,7 @@ const safeSummary = (record: JobRecord): string => {
 const isException = (status: JobStatus): boolean =>
   status === "failed" || status === "interrupted" || status === "rejected" || status === "expired"
 
-const categoriesFor = (record: JobRecord): ReadonlyArray<Exclude<ActivityFilter, "all">> => {
+const categoriesFor = (record: SanitizedJobRecord): ReadonlyArray<Exclude<ActivityFilter, "all">> => {
   const categories: Array<Exclude<ActivityFilter, "all">> = []
   if (isException(record.status)) categories.push("exceptions")
   if (record.payload.kind.startsWith("agent.")) categories.push("work", "agent")
@@ -151,7 +154,7 @@ const timeLabel = (timestamp: number): string =>
     minute: "2-digit"
   }).format(timestamp)
 
-const evidenceFor = (record: JobRecord): ReadonlyArray<string> => {
+const evidenceFor = (record: SanitizedJobRecord): ReadonlyArray<string> => {
   const evidence = [`Status: ${statusLabel(record.status)}`, `Submitted by ${record.actor}`]
   if (record.approvedBy !== null) evidence.push(`Approved by ${record.approvedBy}`)
   if (record.rejectedBy !== null) evidence.push(`Rejected by ${record.rejectedBy}`)
@@ -162,7 +165,7 @@ const evidenceFor = (record: JobRecord): ReadonlyArray<string> => {
   return evidence
 }
 
-export const activityItemsFor = (records: ReadonlyArray<JobRecord>): ReadonlyArray<ActivityItem> =>
+export const activityItemsFor = (records: ReadonlyArray<SanitizedJobRecord>): ReadonlyArray<ActivityItem> =>
   records
     .map((record): ActivityItem => {
       const categories = categoriesFor(record)
@@ -174,6 +177,7 @@ export const activityItemsFor = (records: ReadonlyArray<JobRecord>): ReadonlyArr
         .toLocaleLowerCase()
       return {
         actor: record.actor,
+        approvalRequest: requiresApproval(record.payload) ? approvalRequestFor(record.payload) : null,
         categories,
         connectHref: record.connectTarget?.url ?? null,
         connectLabel: record.worker === undefined ? null : `Open ${record.worker.name} in Connect`,
@@ -267,6 +271,9 @@ const ActivityRow = ({
               <li key={detail}>{detail}</li>
             ))}
           </ul>
+          {item.approvalRequest === null ? null : (
+            <ApprovalRequestDisclosure id={item.id} request={item.approvalRequest} />
+          )}
           {item.connectHref === null || item.connectLabel === null ? null : (
             <a href={item.connectHref}>{item.connectLabel} →</a>
           )}
@@ -285,7 +292,7 @@ export const ActivityHistory = ({
   readonly hasMore?: boolean
   readonly loading?: boolean
   readonly onLoadMore?: () => void
-  readonly records: ReadonlyArray<JobRecord>
+  readonly records: ReadonlyArray<SanitizedJobRecord>
 }): ReactElement => {
   const items = useMemo(() => activityItemsFor(records), [records])
   const [filter, setFilter] = useState<ActivityFilter>("all")

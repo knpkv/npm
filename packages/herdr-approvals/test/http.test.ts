@@ -41,6 +41,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import WebSocketClient from "ws"
+import { SanitizedJobRecord } from "../src/approval-request.js"
 import { resolveApprovalPage } from "../src/approval-url.js"
 import { authorize } from "../src/auth.js"
 import {
@@ -138,6 +139,9 @@ const assets = {
   worker: ""
 }
 
+const approvalProofCookieCount = (response: Response): number =>
+  response.headers.get("set-cookie")?.match(/fleet_approval_proof_/gu)?.length ?? 0
+
 const directTls = {
   certificatePath: join(import.meta.dirname, "fixtures/ser8.example.test.crt"),
   privateKeyPath: join(import.meta.dirname, "fixtures/ser8.example.test.key")
@@ -146,7 +150,7 @@ const directTls = {
 const secureRequestBody = (
   url: string,
   headers: Readonly<Record<string, string>>
-): Promise<{ readonly body: string; readonly status: number }> =>
+): Promise<{ readonly body: string; readonly setCookie: string | undefined; readonly status: number }> =>
   new Promise((resolve, reject) => {
     const request = httpsRequest(
       url,
@@ -157,7 +161,12 @@ const secureRequestBody = (
         response.on("data", (chunk: string) => {
           body += chunk
         })
-        response.once("end", () => resolve({ body, status: response.statusCode ?? 0 }))
+        response.once("end", () =>
+          resolve({
+            body,
+            setCookie: response.headers["set-cookie"]?.[0],
+            status: response.statusCode ?? 0
+          }))
       }
     )
     request.once("error", reject)
@@ -263,6 +272,1024 @@ const waitForFile = Effect.fn("HostHttpTest.waitForFile")(function*(path: string
 })
 
 describe("host HTTP authority", () => {
+  it.effect("serves a sanitized request and keeps it after a bodyless approval", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-approval-request-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            id: Effect.succeed("job-disclosure"),
+            nonce: Effect.succeed("nonce-disclosure"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          const pending = yield* fleet.submit(
+            {
+              payload: {
+                kind: "agent.delegate",
+                mode: "work",
+                prompt: "raw terminal prompt token=secret-value",
+                repository: "/srv/npm"
+              }
+            },
+            "submitter@example.com"
+          )
+          const prooflessPending: JobRecord = {
+            actor: "submitter@example.com",
+            approvalNonce: null,
+            approvedBy: null,
+            createdAt: 900,
+            error: null,
+            hash: "b".repeat(64),
+            id: "proofless-pending",
+            payload: pending.payload,
+            result: null,
+            status: "pending_approval",
+            updatedAt: 900
+          }
+          yield* store.put(prooflessPending)
+          let failApproval = true
+          const retryableFleet: FleetService = {
+            ...fleet,
+            approve: (jobId, approval, actor) => {
+              if (failApproval) {
+                failApproval = false
+                return Effect.fail(
+                  new FleetOperationError({
+                    cause: "transient test failure",
+                    detail: "approval backend temporarily unavailable",
+                    operation: "test.approve"
+                  })
+                )
+              }
+              return fleet.approve(jobId, approval, actor)
+            }
+          }
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, retryableFleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) return yield* Effect.die("approval listener missing")
+          const headers = {
+            "tailscale-user-login": "andrey@example.com"
+          }
+          const dashboardResponse = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const dashboard = yield* Effect.promise(() => dashboardResponse.text())
+          const proofCookie = dashboardResponse.headers.get("set-cookie")
+          if (proofCookie === null) {
+            return yield* new FleetValidationError({ detail: "approval proof cookie missing from dashboard" })
+          }
+          const proofCookieHeader = proofCookie.split(";", 1)[0]
+          expect(dashboardResponse.headers.get("cache-control")).toBe("no-store")
+          expect(dashboard).toContain("[redacted internal prompt]")
+          expect(dashboard).not.toContain("raw terminal prompt")
+          expect(dashboard).not.toContain("secret-value")
+          expect(dashboard).not.toContain(pending.hash)
+          expect(dashboard).not.toContain("nonce-disclosure")
+          const dashboardSnapshot = Schema.decodeUnknownSync(DashboardSnapshot)(JSON.parse(dashboard))
+          expect(
+            dashboardSnapshot.pendingApprovals.local.find(({ id }) => id === prooflessPending.id)
+          ).toMatchObject({ approvalAvailable: false, id: prooflessPending.id })
+          expect(
+            dashboardSnapshot.pendingApprovals.local.find(({ id }) => id === pending.id)
+          ).toMatchObject({ approvalAvailable: true, id: pending.id })
+          const page = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/`, { headers }).then((response) => {
+              expect(response.headers.get("cache-control")).toBe("no-store")
+              return response.text()
+            })
+          )
+          expect(page).toContain("View full request")
+          expect(page).toContain("[redacted internal prompt]")
+          expect(page).not.toContain("raw terminal prompt")
+          expect(page).not.toContain("secret-value")
+          expect(page).not.toContain(pending.hash)
+          expect(page).not.toContain("nonce-disclosure")
+
+          const withoutProof = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(withoutProof.status).toBe(409)
+          yield* Effect.promise(() => withoutProof.text())
+
+          const prooflessDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${prooflessPending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(prooflessDecision.status).toBe(409)
+          yield* Effect.promise(() => prooflessDecision.text())
+
+          const transientFailure = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(transientFailure.status).toBe(503)
+          yield* Effect.promise(() => transientFailure.text())
+
+          const decided = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(decided.status).toBe(200)
+          const decidedBody = yield* Effect.promise(() => decided.text())
+          const decidedRecord = Schema.decodeUnknownSync(SanitizedJobRecord)(JSON.parse(decidedBody))
+          expect("approvalNonce" in decidedRecord).toBe(false)
+          expect("hash" in decidedRecord).toBe(false)
+          expect(decidedBody).not.toContain("secret-value")
+          expect(decidedBody).not.toContain("nonce-disclosure")
+          expect(decidedBody).not.toContain(pending.hash)
+
+          const replay = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${pending.id}/approve`, {
+              headers: {
+                ...headers,
+                cookie: proofCookieHeader,
+                origin: new URL(approvalUrl).origin
+              },
+              method: "POST"
+            })
+          )
+          expect(replay.status).toBe(409)
+          yield* Effect.promise(() => replay.text())
+
+          let terminal = yield* fleet.get(pending.id)
+          for (
+            let attempt = 0;
+            attempt < 100 && (terminal.status === "queued" || terminal.status === "running");
+            attempt += 1
+          ) {
+            yield* Effect.yieldNow
+            terminal = yield* fleet.get(pending.id)
+          }
+          expect(terminal.status).toBe("succeeded")
+          const history = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())
+          )
+          expect(history).toContain("Completed")
+          expect(history).not.toContain("secret-value")
+          const retainedDashboard = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers }).then((response) => response.text())
+          )
+          expect(retainedDashboard).toContain("[redacted internal prompt]")
+          expect(retainedDashboard).not.toContain("secret-value")
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("binds bodyless approval proofs to their browser session", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-session-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    let observedAt = 0
+    let pendingApprovalsEnumerations = 0
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const initialRefreshStarted = yield* Deferred.make<void>()
+          const initialReleaseRefresh = yield* Deferred.make<void>()
+          const overlapRefreshStarted = yield* Deferred.make<void>()
+          const overlapReleaseRefresh = yield* Deferred.make<void>()
+          let refreshGate = {
+            release: initialReleaseRefresh,
+            started: initialRefreshStarted
+          }
+          let pausePendingRefresh = false
+          yield* Effect.forEach(
+            Array.from({ length: pendingApprovalPageMaxRecords + 1 }, (_, index) => pendingRecord("ALPHA", index)),
+            (record) => store.put(record),
+            { discard: true }
+          )
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const instrumentedFleet: FleetService = {
+            ...fleet,
+            pendingApprovals: () => {
+              pendingApprovalsEnumerations += 1
+              return fleet.pendingApprovals()
+            },
+            get: (jobId) => {
+              const pending = fleet.get(jobId)
+              if (!pausePendingRefresh) return pending
+              pausePendingRefresh = false
+              return pending.pipe(
+                Effect.flatMap((record) =>
+                  Deferred.succeed(refreshGate.started, undefined).pipe(
+                    Effect.andThen(Deferred.await(refreshGate.release)),
+                    Effect.as(record)
+                  )
+                )
+              )
+            }
+          }
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, instrumentedFleet, assets, {
+                now: () => observedAt,
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          const headers = { "tailscale-user-login": "andrey@example.com" }
+          const origin = new URL(approvalUrl).origin
+          const dashboardA = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieA = dashboardA.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieA === undefined) {
+            return yield* new FleetValidationError({ detail: "first approval proof cookie missing" })
+          }
+          expect(dashboardA.headers.get("cache-control")).toBe("no-store")
+          expect(dashboardA.headers.get("set-cookie")).not.toContain("Secure")
+          const dashboardAData = Schema.decodeUnknownSync(DashboardSnapshot)(
+            JSON.parse(yield* Effect.promise(() => dashboardA.text()))
+          )
+          const continuation = dashboardAData.pendingApprovals.nextCursors.at(0)
+          if (continuation === undefined) {
+            return yield* new FleetValidationError({ detail: "approval continuation missing" })
+          }
+          const dashboardB = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieB = dashboardB.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieB === undefined || cookieB === cookieA) {
+            return yield* new FleetValidationError({ detail: "approval proof sessions were not isolated" })
+          }
+          yield* Effect.promise(() => dashboardB.text())
+          const dashboardC = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          const cookieC = dashboardC.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieC === undefined || cookieC === cookieA || cookieC === cookieB) {
+            return yield* new FleetValidationError({ detail: "third approval proof session was not isolated" })
+          }
+          yield* Effect.promise(() => dashboardC.text())
+          const parameters = new URLSearchParams({
+            cursorCreatedAt: String(continuation.cursor.createdAt),
+            cursorHost: continuation.host,
+            cursorId: continuation.cursor.id
+          })
+          const firstConcurrentPending = pendingRecord("ALPHA", 200)
+          pausePendingRefresh = true
+          const firstRefresh = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+                headers: { ...headers, cookie: cookieA }
+              })
+            )
+          )
+          yield* Deferred.await(initialRefreshStarted)
+          yield* store.put(firstConcurrentPending)
+          const firstDisclosure = yield* Effect.promise(() =>
+            fetch(
+              `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${firstConcurrentPending.id}`,
+              { headers }
+            )
+          )
+          expect(firstDisclosure.status).toBe(200)
+          const firstCookie = firstDisclosure.headers.get("set-cookie")?.split(";", 1)[0]
+          if (firstCookie === undefined) {
+            return yield* new FleetValidationError({ detail: "initial concurrent proof cookie missing" })
+          }
+          expect(firstDisclosure.headers.get("cache-control")).toBe("no-store")
+          yield* Effect.promise(() => firstDisclosure.text())
+          yield* Deferred.succeed(initialReleaseRefresh, undefined)
+          const firstRefreshResponse = yield* Fiber.join(firstRefresh)
+          expect(firstRefreshResponse.status).toBe(200)
+          expect(firstRefreshResponse.headers.get("cache-control")).toBe("no-store")
+          yield* Effect.promise(() => firstRefreshResponse.text())
+          const firstContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: firstCookie }
+            })
+          )
+          expect(firstContinuation.status).toBe(200)
+          yield* Effect.promise(() => firstContinuation.text())
+          const firstDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${firstConcurrentPending.id}/approve`, {
+              headers: { ...headers, cookie: firstCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(firstDecision.status).toBe(200)
+          yield* Effect.promise(() => firstDecision.text())
+          const staleSnapshotPending = pendingRecord("ALPHA", 102)
+          yield* store.put(staleSnapshotPending)
+          const staleSnapshotDisclosure = yield* Effect.promise(() =>
+            fetch(
+              `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${staleSnapshotPending.id}`,
+              { headers: { ...headers, cookie: cookieA } }
+            )
+          )
+          expect(staleSnapshotDisclosure.status).toBe(200)
+          yield* Effect.promise(() => staleSnapshotDisclosure.text())
+          const staleSnapshotContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieA }
+            })
+          )
+          expect(staleSnapshotContinuation.status).toBe(200)
+          yield* Effect.promise(() => staleSnapshotContinuation.text())
+          const staleSnapshotDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${staleSnapshotPending.id}/approve`, {
+              headers: { ...headers, cookie: cookieA, origin },
+              method: "POST"
+            })
+          )
+          expect(staleSnapshotDecision.status).toBe(200)
+          yield* Effect.promise(() => staleSnapshotDecision.text())
+          const continuationResponse = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieA }
+            })
+          )
+          expect(continuationResponse.status).toBe(200)
+          const continuationBody = yield* Effect.promise(() => continuationResponse.text())
+          expect(continuationBody).toContain("alpha-job-00")
+          const secondSessionContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieB }
+            })
+          )
+          expect(secondSessionContinuation.status).toBe(200)
+          yield* Effect.promise(() => secondSessionContinuation.text())
+          expect(pendingApprovalsEnumerations).toBe(0)
+          const newlyPending = pendingRecord("ALPHA", 100)
+          yield* store.put(newlyPending)
+          const dashboardD = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie: cookieB } })
+          )
+          const cookieD = dashboardD.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookieD === undefined) {
+            return yield* new FleetValidationError({ detail: "new approval proof session missing" })
+          }
+          const dashboardDData = Schema.decodeUnknownSync(DashboardSnapshot)(
+            JSON.parse(yield* Effect.promise(() => dashboardD.text()))
+          )
+          if (!dashboardDData.pendingApprovals.local.some(({ id }) => id === newlyPending.id)) {
+            return yield* new FleetValidationError({ detail: "new pending approval missing from first page" })
+          }
+          const newContinuation = dashboardDData.pendingApprovals.nextCursors.at(0)
+          if (newContinuation === undefined) {
+            return yield* new FleetValidationError({ detail: "new approval continuation missing" })
+          }
+          const newContinuationParameters = new URLSearchParams({
+            cursorCreatedAt: String(newContinuation.cursor.createdAt),
+            cursorHost: newContinuation.host,
+            cursorId: newContinuation.cursor.id
+          })
+          const newContinuationResponse = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+              headers: { ...headers, cookie: cookieD }
+            })
+          )
+          expect(newContinuationResponse.status).toBe(200)
+          yield* Effect.promise(() => newContinuationResponse.text())
+          const newDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${newlyPending.id}/approve`, {
+              headers: { ...headers, cookie: cookieD, origin },
+              method: "POST"
+            })
+          )
+          expect(newDecision.status).toBe(200)
+          yield* Effect.promise(() => newDecision.text())
+          observedAt = 60 * 1_000
+          const refreshedSessionContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+              headers: { ...headers, cookie: cookieB }
+            })
+          )
+          expect(refreshedSessionContinuation.status).toBe(200)
+          yield* Effect.promise(() => refreshedSessionContinuation.text())
+          expect(pendingApprovalsEnumerations).toBe(0)
+          const wrongSessionDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: cookieC, origin },
+              method: "POST"
+            })
+          )
+          expect(wrongSessionDecision.status).toBe(409)
+          yield* Effect.promise(() => wrongSessionDecision.text())
+          const matchingSessionDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: cookieA, origin },
+              method: "POST"
+            })
+          )
+          expect(matchingSessionDecision.status).toBe(200)
+          yield* Effect.promise(() => matchingSessionDecision.text())
+
+          const concurrentPending = pendingRecord("ALPHA", 101)
+          observedAt = 120 * 1_000
+          refreshGate = {
+            release: overlapReleaseRefresh,
+            started: overlapRefreshStarted
+          }
+          pausePendingRefresh = true
+          yield* store.put(concurrentPending)
+          const concurrentDisclosureFiber = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(
+                `${approvalUrl}/v1/pending-approval?host=ALPHA&jobId=${concurrentPending.id}`,
+                { headers: { ...headers, cookie: cookieB } }
+              )
+            )
+          )
+          yield* Deferred.await(overlapRefreshStarted)
+          const staleRefresh = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+                headers: { ...headers, cookie: cookieA }
+              })
+            )
+          )
+          yield* Deferred.succeed(overlapReleaseRefresh, undefined)
+          const concurrentDisclosure = yield* Fiber.join(concurrentDisclosureFiber)
+          expect(concurrentDisclosure.status).toBe(200)
+          yield* Effect.promise(() => concurrentDisclosure.text())
+          const staleRefreshResponse = yield* Fiber.join(staleRefresh)
+          expect(staleRefreshResponse.status).toBe(200)
+          yield* Effect.promise(() => staleRefreshResponse.text())
+          expect(pendingApprovalsEnumerations).toBe(0)
+          const concurrentContinuation = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
+              headers: { ...headers, cookie: cookieB }
+            })
+          )
+          expect(concurrentContinuation.status).toBe(200)
+          yield* Effect.promise(() => concurrentContinuation.text())
+          const concurrentDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${concurrentPending.id}/approve`, {
+              headers: { ...headers, cookie: cookieB, origin },
+              method: "POST"
+            })
+          )
+          expect(concurrentDecision.status).toBe(200)
+          yield* Effect.promise(() => concurrentDecision.text())
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  }, 15_000)
+
+  it.effect("retains paginated proofs and renews their shared lifetime", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-retention-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    const headers = { "tailscale-user-login": "andrey@example.com" }
+    let observedAt = 0
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const delayedStatusStarted = yield* Deferred.make<void>()
+          const releaseDelayedStatus = yield* Deferred.make<void>()
+          const overlapPendingPageStarted = yield* Deferred.make<void>()
+          const concurrentDecisionStarted = yield* Deferred.make<void>()
+          let delayStatus = false
+          let signalOverlapPendingPage = false
+          let signalConcurrentDecision = false
+          yield* Effect.forEach(
+            Array.from(
+              { length: pendingApprovalPageMaxRecords * 40 },
+              (_, index) => pendingRecord("ALPHA", index)
+            ),
+            (record) => store.put(record),
+            { discard: true }
+          )
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const instrumentedFleet: FleetService = {
+            ...fleet,
+            pendingApprovalPage: (cursor) =>
+              fleet.pendingApprovalPage(cursor).pipe(
+                Effect.tap(() => {
+                  if (!signalOverlapPendingPage) return Effect.void
+                  signalOverlapPendingPage = false
+                  return Deferred.succeed(overlapPendingPageStarted, undefined)
+                })
+              ),
+            approve: (jobId, approval, actor) => (signalConcurrentDecision
+              ? Deferred.succeed(concurrentDecisionStarted, undefined).pipe(
+                Effect.andThen(fleet.approve(jobId, approval, actor))
+              )
+              : fleet.approve(jobId, approval, actor)),
+            status: () =>
+              delayStatus
+                ? Deferred.succeed(delayedStatusStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseDelayedStatus)),
+                  Effect.andThen(fleet.status())
+                )
+                : fleet.status()
+          }
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, instrumentedFleet, assets, {
+                now: () => observedAt,
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          const origin = new URL(approvalUrl).origin
+          const dashboard = yield* Effect.promise(
+            () => fetch(`${approvalUrl}/v1/dashboard`, { headers })
+          )
+          const cookie = dashboard.headers.get("set-cookie")?.split(";", 1)[0]
+          if (cookie === undefined) {
+            return yield* new FleetValidationError({ detail: "approval proof cookie missing" })
+          }
+          let snapshot = Schema.decodeUnknownSync(DashboardSnapshot)(
+            JSON.parse(yield* Effect.promise(() => dashboard.text()))
+          )
+          const retainedJobId = snapshot.pendingApprovals.local[0]?.id
+          if (retainedJobId === undefined) {
+            return yield* new FleetValidationError({ detail: "initial pending approval missing" })
+          }
+          const concurrentDecisionJobId = snapshot.pendingApprovals.local.find(({ id }) => id !== retainedJobId)?.id
+          if (concurrentDecisionJobId === undefined) {
+            return yield* new FleetValidationError({ detail: "concurrent pending approval missing" })
+          }
+          while (snapshot.pendingApprovals.nextCursors.length > 0) {
+            const continuation = snapshot.pendingApprovals.nextCursors[0]
+            if (continuation === undefined) break
+            const parameters = new URLSearchParams({
+              cursorCreatedAt: String(continuation.cursor.createdAt),
+              cursorHost: continuation.host,
+              cursorId: continuation.cursor.id
+            })
+            const page = yield* Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {
+                headers: { ...headers, cookie }
+              })
+            )
+            expect(page.status).toBe(200)
+            snapshot = {
+              ...snapshot,
+              pendingApprovals: Schema.decodeUnknownSync(FleetPendingApprovals)(
+                yield* Effect.promise(() => page.json())
+              )
+            }
+          }
+          const retainedDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${retainedJobId}/approve`, {
+              headers: { ...headers, cookie, origin },
+              method: "POST"
+            })
+          )
+          expect(retainedDecision.status).toBe(200)
+          yield* Effect.promise(() => retainedDecision.text())
+          observedAt = 10 * 60 * 1_000
+          const overlapPending = pendingRecord("ALPHA", 10_000)
+          const expiredPending = pendingRecord("ALPHA", 10_001)
+          yield* store.put(overlapPending)
+          yield* store.put(expiredPending)
+          delayStatus = true
+          const refreshedFiber = yield* Effect.forkChild(
+            Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
+          )
+          yield* Deferred.await(delayedStatusStarted)
+          signalConcurrentDecision = true
+          const concurrentDecisionFiber = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/jobs/${concurrentDecisionJobId}/approve`, {
+                headers: { ...headers, cookie, origin },
+                method: "POST"
+              })
+            )
+          )
+          yield* Deferred.await(concurrentDecisionStarted)
+          signalOverlapPendingPage = true
+          observedAt = 20 * 60 * 1_000
+          const overlappingFiber = yield* Effect.forkChild(
+            Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
+          )
+          yield* Deferred.await(overlapPendingPageStarted)
+          yield* Deferred.succeed(releaseDelayedStatus, undefined)
+          const refreshed = yield* Fiber.join(refreshedFiber)
+          expect(refreshed.status).toBe(200)
+          yield* Effect.promise(() => refreshed.text())
+          const concurrentDecision = yield* Fiber.join(concurrentDecisionFiber)
+          expect(concurrentDecision.status).toBe(200)
+          yield* Effect.promise(() => concurrentDecision.text())
+          const overlapping = yield* Fiber.join(overlappingFiber)
+          expect(overlapping.status).toBe(200)
+          yield* Effect.promise(() => overlapping.text())
+          delayStatus = false
+          observedAt = 26 * 60 * 1_000
+          const decision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${overlapPending.id}/approve`, {
+              headers: { ...headers, cookie, origin },
+              method: "POST"
+            })
+          )
+          expect(decision.status).toBe(200)
+          observedAt = 36 * 60 * 1_000
+          const expiredDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/${expiredPending.id}/approve`, {
+              headers: { ...headers, cookie, origin },
+              method: "POST"
+            })
+          )
+          expect(expiredDecision.status).toBe(409)
+        }).pipe(Effect.scoped),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  }, 15_000)
+
+  it.effect("does not evict active approval proof sessions at capacity", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-session-capacity-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    const headers = { "tailscale-user-login": "andrey@example.com" }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.put(pendingRecord("ALPHA", 0))
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          const origin = new URL(approvalUrl).origin
+          let firstCookie: string | undefined
+          let capacityResponse: Response | undefined
+          for (let attempt = 0; attempt < 300; attempt += 1) {
+            const response = yield* Effect.promise(
+              () => fetch(`${approvalUrl}/v1/dashboard`, { headers })
+            )
+            if (attempt === 0) firstCookie = response.headers.get("set-cookie")?.split(";", 1)[0]
+            if (response.status === 503) {
+              capacityResponse = response
+              break
+            }
+            expect(response.status).toBe(200)
+            yield* Effect.promise(() => response.text())
+          }
+          if (capacityResponse === undefined || firstCookie === undefined) {
+            return yield* new FleetValidationError({ detail: "approval proof capacity was not bounded" })
+          }
+          expect(yield* Effect.promise(() => capacityResponse.json())).toEqual({
+            error: "FleetOperationError",
+            detail: "approval proof session capacity reached"
+          })
+          const decision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
+              headers: { ...headers, cookie: firstCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(decision.status).toBe(200)
+          yield* Effect.promise(() => decision.text())
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  }, 30_000)
+
+  it.effect("does not retain proof sessions when dashboard disclosure fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-proof-session-failure-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-ser8"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      approvalPort: 0,
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    const headers = { "tailscale-user-login": "andrey@example.com" }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          yield* store.put(pendingRecord("ALPHA", 0))
+          const failingStatusStarted = yield* Deferred.make<void>()
+          const releaseFailingStatus = yield* Deferred.make<void>()
+          const concurrentPendingPageStarted = yield* Deferred.make<void>()
+          const concurrentStatusStarted = yield* Deferred.make<void>()
+          let failNextStatus = false
+          let signalConcurrentPendingPage = false
+          let signalConcurrentStatus = false
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          let failStatus = false
+          const instrumentedFleet: FleetService = {
+            ...fleet,
+            pendingApprovalPage: (cursor) =>
+              fleet.pendingApprovalPage(cursor).pipe(
+                Effect.tap(() => {
+                  if (!signalConcurrentPendingPage) return Effect.void
+                  signalConcurrentPendingPage = false
+                  return Deferred.succeed(concurrentPendingPageStarted, undefined)
+                })
+              ),
+            status: () => {
+              if (failNextStatus) {
+                failNextStatus = false
+                return Deferred.succeed(failingStatusStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseFailingStatus)),
+                  Effect.andThen(
+                    Effect.fail(
+                      new FleetOperationError({
+                        cause: "test",
+                        detail: "dashboard status unavailable",
+                        operation: "fleet.status"
+                      })
+                    )
+                  )
+                )
+              }
+              if (signalConcurrentStatus) {
+                signalConcurrentStatus = false
+                return Deferred.succeed(concurrentStatusStarted, undefined).pipe(
+                  Effect.andThen(fleet.status())
+                )
+              }
+              return failStatus
+                ? Effect.fail(
+                  new FleetOperationError({
+                    cause: "test",
+                    detail: "dashboard status unavailable",
+                    operation: "fleet.status"
+                  })
+                )
+                : fleet.status()
+            }
+          }
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, instrumentedFleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const approvalUrl = server.approvalUrl
+          if (approvalUrl === null) {
+            return yield* new FleetValidationError({ detail: "approval listener missing" })
+          }
+          const origin = new URL(approvalUrl).origin
+          const initial = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          expect(initial.status).toBe(200)
+          const retainedCookie = initial.headers.get("set-cookie")?.split(";", 1)[0]
+          if (retainedCookie === undefined) {
+            return yield* new FleetValidationError({ detail: "retained approval proof cookie missing" })
+          }
+          yield* Effect.promise(() => initial.text())
+          const initializedSnapshot = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie: retainedCookie } })
+          )
+          expect(initializedSnapshot.status).toBe(200)
+          yield* Effect.promise(() => initializedSnapshot.text())
+          failStatus = true
+          for (let attempt = 0; attempt < 256; attempt += 1) {
+            const response = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+            expect(response.status).toBe(503)
+            yield* Effect.promise(() => response.text())
+          }
+          failStatus = false
+          const recoveredWithoutCookie = yield* Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers }))
+          expect(recoveredWithoutCookie.status).toBe(200)
+          expect(recoveredWithoutCookie.headers.get("set-cookie")).toContain("fleet_approval_proof_session=")
+          yield* Effect.promise(() => recoveredWithoutCookie.text())
+          yield* store.put(pendingRecord("ALPHA", 1))
+          failStatus = true
+          const failedReusedDisclosure = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, {
+              headers: { ...headers, cookie: retainedCookie }
+            })
+          )
+          expect(failedReusedDisclosure.status).toBe(503)
+          yield* Effect.promise(() => failedReusedDisclosure.text())
+          const rolledBackDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-01/approve`, {
+              headers: { ...headers, cookie: retainedCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(rolledBackDecision.status).toBe(409)
+          yield* Effect.promise(() => rolledBackDecision.text())
+          failStatus = false
+          const recovered = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/dashboard`, {
+              headers: { ...headers, cookie: retainedCookie }
+            })
+          )
+          expect(recovered.status).toBe(200)
+          expect(recovered.headers.get("set-cookie")).toContain("fleet_approval_proof_session=")
+          yield* Effect.promise(() => recovered.text())
+          const decision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-01/approve`, {
+              headers: { ...headers, cookie: retainedCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(decision.status).toBe(200)
+          yield* Effect.promise(() => decision.text())
+
+          yield* store.put(pendingRecord("ALPHA", 2))
+          failNextStatus = true
+          const failedConcurrentDisclosure = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard`, {
+                headers: { ...headers, cookie: retainedCookie }
+              })
+            )
+          )
+          yield* Deferred.await(failingStatusStarted)
+          signalConcurrentPendingPage = true
+          signalConcurrentStatus = true
+          const succeedingConcurrentDisclosure = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/dashboard`, {
+                headers: { ...headers, cookie: retainedCookie }
+              })
+            )
+          )
+          yield* Deferred.await(concurrentPendingPageStarted)
+          expect(yield* Deferred.isDone(concurrentStatusStarted)).toBe(false)
+          yield* Deferred.succeed(releaseFailingStatus, undefined)
+          const failedConcurrentResponse = yield* Fiber.join(failedConcurrentDisclosure)
+          expect(failedConcurrentResponse.status).toBe(503)
+          yield* Effect.promise(() => failedConcurrentResponse.text())
+          yield* Deferred.await(concurrentStatusStarted)
+          const succeedingConcurrentResponse = yield* Fiber.join(succeedingConcurrentDisclosure)
+          expect(succeedingConcurrentResponse.status).toBe(200)
+          yield* Effect.promise(() => succeedingConcurrentResponse.text())
+          const concurrentDecision = yield* Effect.promise(() =>
+            fetch(`${approvalUrl}/v1/jobs/alpha-job-02/approve`, {
+              headers: { ...headers, cookie: retainedCookie, origin },
+              method: "POST"
+            })
+          )
+          expect(concurrentDecision.status).toBe(200)
+          yield* Effect.promise(() => concurrentDecision.text())
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  }, 30_000)
+
   it.effect("marks notification counts incomplete when fleet discovery fails", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-push-directory-failure-test-"))
     const unavailable = new TailscaleCommandError({
@@ -426,7 +1453,7 @@ describe("host HTTP authority", () => {
       const rawBaseBytes = Buffer.byteLength(JSON.stringify(base))
       const snapshot = Schema.decodeUnknownSync(DashboardSnapshot)({
         ...base,
-        records: [record],
+        records: [{ ...record, approvalAvailable: false }],
         status: {
           ...base.status,
           revision: "x".repeat(
@@ -1031,6 +2058,7 @@ esac
           const dashboardResponse = yield* Effect.promise(() => fetch(`${server.approvalUrl}/v1/dashboard`))
           const dashboardBody = yield* Effect.promise(() => dashboardResponse.text())
           expect(dashboardResponse.status).toBe(200)
+          expect(approvalProofCookieCount(dashboardResponse)).toBe(1)
           expect(Buffer.byteLength(dashboardBody)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )
@@ -1055,6 +2083,7 @@ esac
             continuationUrl.searchParams.set("cursorId", continuation.cursor.id)
             const continuationResponse = yield* Effect.promise(() => fetch(continuationUrl))
             expect(continuationResponse.status).toBe(200)
+            expect(approvalProofCookieCount(continuationResponse)).toBe(1)
             const continuationBody = yield* Effect.promise(() => continuationResponse.text())
             expect(Buffer.byteLength(continuationBody)).toBeLessThanOrEqual(
               fleetResponseBodyMaxBytes
@@ -1078,6 +2107,7 @@ esac
           targetUrl.searchParams.set("jobId", hiddenJobId)
           const targetResponse = yield* Effect.promise(() => fetch(targetUrl))
           expect(targetResponse.status).toBe(200)
+          expect(approvalProofCookieCount(targetResponse)).toBe(1)
           expect(
             Schema.decodeUnknownSync(PendingApprovalTarget)(
               yield* Effect.promise(() => targetResponse.json())
@@ -1253,6 +2283,153 @@ esac
     )
   })
 
+  it.effect("re-sanitizes legacy peer approval payloads at browser boundaries", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-legacy-peer-test-"))
+    const tailscale = join(root, "tailscale-main")
+    writeFileSync(
+      tailscale,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+  status) printf '%s\n' '{"Peer":{"ser8":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.2"]}},"Self":{"HostName":"ALPHA","ID":"node-alpha","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.scoped(
+          Effect.gen(function*() {
+            const pendingPort = yield* Effect.promise(availablePort)
+            const peerServer = createServer((request, response) => {
+              const requestUrl = new URL(request.url ?? "/", "http://peer.local")
+              const hasCursor = requestUrl.searchParams.has("cursorCreatedAt")
+              response.writeHead(200, { "content-type": "application/json" })
+              response.end(JSON.stringify({
+                host: "SER8",
+                approvals: [
+                  {
+                    id: "legacy-peer-job",
+                    createdAt: 1,
+                    actor: "andrey@example.com",
+                    approvalExpiresAt: 10_000,
+                    status: "pending_approval",
+                    payload: {
+                      kind: "agent.delegate",
+                      mode: "work",
+                      prompt: "peer-secret-canary",
+                      repository: "/srv/npm"
+                    }
+                  }
+                ],
+                nextCursor: hasCursor ? null : { createdAt: 1, id: "legacy-peer-job" }
+              }))
+            })
+            yield* Effect.promise(
+              () =>
+                new Promise<void>((resolve, reject) => {
+                  peerServer.once("error", reject)
+                  peerServer.listen(pendingPort, "127.0.0.2", resolve)
+                })
+            )
+            yield* Effect.addFinalizer(() =>
+              Effect.promise(
+                () =>
+                  new Promise<void>((resolve, reject) => {
+                    peerServer.close((error) => error === undefined ? resolve() : reject(error))
+                  })
+              )
+            )
+            const approvalPort = yield* Effect.promise(availablePort)
+            const hostConfig: HostConfiguration = {
+              ...config(root),
+              approvalHub: {
+                host: "ALPHA",
+                nodeId: "node-alpha",
+                url: `https://alpha.example.test:${approvalPort}/`
+              },
+              approvalNodes: ["node-alpha"],
+              approvalPort,
+              approvalTls: directTls,
+              crossHost: true,
+              host: "ALPHA",
+              port: pendingPort,
+              tailscaleCommand: tailscale
+            }
+            const fleet = yield* makeFleetService({
+              approvalEnabled: true,
+              host: hostConfig.host,
+              operations,
+              store
+            })
+            const server = yield* Effect.acquireRelease(
+              Effect.promise(() =>
+                startHttpServer(hostConfig, fleet, assets, {
+                  terminalConnector: unusedTerminal
+                })
+              ),
+              (running) => Effect.promise(running.close)
+            )
+            if (server.serveUrl === null) {
+              return yield* new FleetValidationError({
+                detail: "legacy peer disclosure test requires the approval hub listener"
+              })
+            }
+            const requestHeaders = {
+              host: `alpha.example.test:${approvalPort}`,
+              "tailscale-user-login": "andrey@example.com"
+            }
+            const dashboardResponse = yield* Effect.promise(() =>
+              secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
+            )
+            expect(dashboardResponse.status).toBe(200)
+            expect(dashboardResponse.body).not.toContain("peer-secret-canary")
+            expect(dashboardResponse.body).toContain("/srv/npm")
+            const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
+              JSON.parse(dashboardResponse.body)
+            )
+            const continuation = dashboard.pendingApprovals.nextCursors.find(
+              ({ host }) => host === "SER8"
+            )
+            if (continuation === undefined) {
+              return yield* new FleetValidationError({
+                detail: "legacy peer disclosure test requires a remote continuation"
+              })
+            }
+            const continuationParameters = new URLSearchParams({
+              cursorCreatedAt: String(continuation.cursor.createdAt),
+              cursorHost: continuation.host,
+              cursorId: continuation.cursor.id
+            })
+            const continuationResponse = yield* Effect.promise(() =>
+              secureRequestBody(
+                `${server.serveUrl}/v1/dashboard-pending?${continuationParameters.toString()}`,
+                requestHeaders
+              )
+            )
+            expect(continuationResponse.status).toBe(200)
+            expect(continuationResponse.body).not.toContain("peer-secret-canary")
+            expect(continuationResponse.body).toContain("/srv/npm")
+            const targetResponse = yield* Effect.promise(() =>
+              secureRequestBody(
+                `${server.serveUrl}/v1/pending-approval?host=SER8&jobId=legacy-peer-job`,
+                requestHeaders
+              )
+            )
+            expect(targetResponse.status).toBe(200)
+            expect(targetResponse.body).not.toContain("peer-secret-canary")
+            expect(targetResponse.body).toContain("/srv/npm")
+          })
+        ),
+      (store) => Effect.sync(() => store.close())
+    ).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it.effect("pages worst-case history without exceeding the response limit", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-history-page-test-"))
     const hostConfig = config(root)
@@ -1325,7 +2502,7 @@ esac
           const dashboard = Schema.decodeUnknownSync(DashboardSnapshot)(
             JSON.parse(dashboardBody)
           )
-          expect(dashboard.historyNextCursor).not.toBeNull()
+          expect(dashboard.historyNextCursor).toBeNull()
         }).pipe(Effect.scoped),
       (store) => Effect.sync(() => store.close())
     ).pipe(
@@ -1489,6 +2666,7 @@ esac
             operations: directTlsOperations,
             store
           })
+          yield* store.put(pendingRecord("SER8", 0))
           const server = yield* Effect.acquireRelease(
             Effect.promise(() =>
               startHttpServer(hostConfig, fleet, assets, {
@@ -1568,6 +2746,7 @@ esac
             secureRequestBody(`${server.serveUrl}/v1/dashboard`, requestHeaders)
           )
           expect(dashboardResponse.status).toBe(200)
+          expect(dashboardResponse.setCookie).toContain("Secure")
           expect(Buffer.byteLength(dashboardResponse.body)).toBeLessThanOrEqual(
             fleetResponseBodyMaxBytes
           )

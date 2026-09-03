@@ -11,7 +11,6 @@ import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { JobRecord } from "@knpkv/herdr-fleet/model"
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
@@ -44,6 +43,7 @@ import {
 } from "./internal/dashboard-pending-state.js"
 import { FleetShell } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
+import { SanitizedJobRecord } from "./approval-request.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -70,7 +70,7 @@ type PullState = {
   readonly refreshing: boolean
 }
 
-type BrowserRequest = { readonly method?: "GET" } | { readonly body: string; readonly method: "DELETE" | "POST" }
+type BrowserRequest = { readonly method?: "GET" } | { readonly body?: string; readonly method: "DELETE" | "POST" }
 
 const initialPull: PullState = {
   distance: 0,
@@ -86,7 +86,7 @@ const fetchJson = Effect.fn("ApprovalClient.fetchJson")(function* <A>(
   const client = yield* HttpClient.HttpClient
   const baseRequest = HttpClientRequest.make(init?.method ?? "GET")(url)
   const request =
-    init !== undefined && "body" in init
+    init !== undefined && "body" in init && init.body !== undefined
       ? baseRequest.pipe(HttpClientRequest.bodyText(init.body, "application/json"))
       : baseRequest
   const response = yield* client
@@ -134,8 +134,7 @@ const loadPendingApprovalTarget = Effect.fn("Dashboard.loadPendingApprovalTarget
 })
 
 const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecision) {
-  yield* fetchJson(JobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
-    body: JSON.stringify({ hash: decision.hash, nonce: decision.nonce }),
+  yield* fetchJson(SanitizedJobRecord, `/v1/jobs/${encodeURIComponent(decision.jobId)}/${decision.decision}`, {
     method: "POST"
   })
 })
