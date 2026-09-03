@@ -342,6 +342,7 @@ describe("sanitized approval requests", () => {
       { ref: '{"password":"json-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"database-password":"prefixed-json-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"Authorization":"quoted-auth-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"pass\\u0077ord":"escaped-json-leaked-canary"}', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
         redacted: "%5Bredacted%20credential%5D"
@@ -354,7 +355,7 @@ describe("sanitized approval requests", () => {
         payload: { kind: "nix.apply", ref }
       })
       const encoded = JSON.stringify({ request, projection })
-      expect(encoded).not.toMatch(/(?:json|prefixed-json|nested-json)-leaked-canary/u)
+      expect(encoded).not.toMatch(/(?:json|prefixed-json|nested-json|escaped-json)-leaked-canary/u)
       expect(encoded).toContain(redacted)
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: '{"revision":"release"}' }).fields[0]?.value).toBe(
@@ -479,6 +480,10 @@ describe("sanitized approval requests", () => {
     const encoded = JSON.stringify({ request, projection })
     expect(encoded).not.toContain("malformed-auth-leaked-canary")
     expect(encoded).toContain("[redacted credential]")
+
+    const invalidUtf8 = "https://example.test/repo/foo%E0%A4x%25"
+    const invalidUtf8Request = approvalRequestFor({ kind: "nix.apply", ref: invalidUtf8 })
+    expect(invalidUtf8Request.fields[0]?.value).toContain("[redacted credential]")
   })
 
   it("preserves encoded literal percent characters in safe coordinates", () => {

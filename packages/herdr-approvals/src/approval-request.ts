@@ -60,7 +60,7 @@ export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const quotedCredentialAssignment =
-  /((?:"(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|authorization|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))"|'(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|authorization|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
+  /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
 const whitespaceCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const privateKeyMaterial =
@@ -77,23 +77,30 @@ const encodedUriAuthorityBoundary = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*%(?
 const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
 const encodedUriMaxDepth = 3
 const hasMalformedPercentEscape = (value: string): boolean => /%(?![0-9a-f]{2})/iu.test(value)
+const credentialKey =
+  /^(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|authorization|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))$/iu
+
+const decodeCredentialKey = (value: string): string =>
+  value.replace(/\\u([0-9a-f]{4})/giu, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
 
 type EncodedText =
   | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
   | { readonly _tag: "malformed" | "overflow" }
 
-const decodeEncodedRuns = (value: string): string | undefined => {
+const decodeEncodedRuns = (value: string): { readonly value: string; readonly hadDecodeError: boolean } | undefined => {
   let changed = false
+  let hadDecodeError = false
   const decoded = value.replace(/(?:%[0-9a-f]{2})+/giu, (escaped) => {
     try {
       const decodedRun = decodeURIComponent(escaped)
       if (decodedRun !== escaped) changed = true
       return decodedRun
     } catch {
+      hadDecodeError = true
       return escaped
     }
   })
-  return changed ? decoded : undefined
+  return changed ? { hadDecodeError, value: decoded } : undefined
 }
 
 const encodedText = (value: string): EncodedText | undefined => {
@@ -107,7 +114,8 @@ const encodedText = (value: string): EncodedText | undefined => {
     } catch {
       const partiallyDecoded = decodeEncodedRuns(candidate)
       if (partiallyDecoded !== undefined) {
-        candidate = partiallyDecoded
+        if (partiallyDecoded.hadDecodeError) return { _tag: "malformed" }
+        candidate = partiallyDecoded.value
         continue
       }
       if (layers > 1 && /%(?![0-9a-f]{2})/iu.test(candidate)) {
@@ -143,7 +151,9 @@ const sanitizeCredentialText = (value: string): string =>
     )
     .replace(
       quotedCredentialAssignment,
-      (_match, prefix: string, credential: string) => {
+      (_match, prefix: string, doubleKey: string | undefined, singleKey: string | undefined, credential: string) => {
+        const key = decodeCredentialKey(doubleKey ?? singleKey ?? "")
+        if (!credentialKey.test(key)) return _match
         const quote = credential.startsWith("'") ? "'" : "\""
         return `${prefix}${quote}${redactedCredential}${quote}`
       }
