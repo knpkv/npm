@@ -75,25 +75,45 @@ export class CredentialCookieError extends Schema.TaggedError<CredentialCookieEr
   { reason: Schema.Literals(["invalid-credential", "invalid-attribute", "invalid-max-age"]) }
 ) {}
 
-export interface CredentialCookieOptions {
+interface CredentialCookieOptionsBase {
   readonly name: string
   readonly path: string
   readonly httpOnly: boolean
   readonly sameSite: "strict" | "lax" | "none"
-  readonly secure: boolean
   readonly maxAge?: number
-  readonly sourceOrigin?: string
 }
 
-const CredentialCookieOptionsSchema = Schema.Struct({
-  name: Schema.String,
-  path: Schema.String,
-  httpOnly: Schema.Boolean,
-  sameSite: Schema.Literals(["strict", "lax", "none"]),
-  secure: Schema.Boolean,
-  maxAge: Schema.optionalKey(Schema.Number),
-  sourceOrigin: Schema.optionalKey(Schema.String)
-})
+/** Cookie policy with an origin required whenever the Secure attribute is enabled. */
+export type CredentialCookieOptions =
+  | (CredentialCookieOptionsBase & {
+    readonly secure: true
+    readonly sourceOrigin: string
+  })
+  | (CredentialCookieOptionsBase & {
+    readonly secure: false
+    readonly sourceOrigin?: string
+  })
+
+const CredentialCookieOptionsSchema = Schema.Union([
+  Schema.Struct({
+    name: Schema.String,
+    path: Schema.String,
+    httpOnly: Schema.Boolean,
+    sameSite: Schema.Literals(["strict", "lax", "none"]),
+    secure: Schema.Literal(true),
+    maxAge: Schema.optionalKey(Schema.Number),
+    sourceOrigin: Schema.String
+  }),
+  Schema.Struct({
+    name: Schema.String,
+    path: Schema.String,
+    httpOnly: Schema.Boolean,
+    sameSite: Schema.Literals(["strict", "lax", "none"]),
+    secure: Schema.Literal(false),
+    maxAge: Schema.optionalKey(Schema.Number),
+    sourceOrigin: Schema.optionalKey(Schema.String)
+  })
+])
 
 const isLoopbackIpv4 = (hostname: string): boolean => {
   const octets = hostname.split(".")

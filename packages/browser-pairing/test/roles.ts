@@ -1,5 +1,6 @@
 import type { Redacted } from "effect"
 import { CsrfToken, PairingCode, readBootstrapToken, SessionToken } from "../src/schema.js"
+import type { CredentialCookieOptions } from "../src/schema.js"
 
 const pairingCode = PairingCode.make("ab".repeat(32))
 const sessionToken = SessionToken.make("cd".repeat(32))
@@ -12,6 +13,26 @@ const acceptsCsrfToken = (value: CsrfToken): CsrfToken => value
 acceptsPairingCode(pairingCode)
 acceptsSessionToken(sessionToken)
 acceptsCsrfToken(csrfToken)
+
+const secureCookieOptions: CredentialCookieOptions = {
+  name: "cc_session",
+  path: "/",
+  httpOnly: true,
+  sameSite: "strict",
+  secure: true,
+  sourceOrigin: "https://example.test"
+}
+void secureCookieOptions
+
+// @ts-expect-error Secure cookies must carry the origin used to establish trust.
+const missingSecureCookieOrigin: CredentialCookieOptions = {
+  name: "cc_session",
+  path: "/",
+  httpOnly: true,
+  sameSite: "strict",
+  secure: true
+}
+void missingSecureCookieOrigin
 
 const bootstrap = readBootstrapToken(`#bootstrap_token=${"ab".repeat(32)}`)
 if (bootstrap._tag === "present") {

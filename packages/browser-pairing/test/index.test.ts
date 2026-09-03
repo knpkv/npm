@@ -102,6 +102,7 @@ describe("browser pairing primitives", () => {
 
   it("rejects cookie delimiters, control characters, and invalid max ages", () => {
     expect(() =>
+      // @ts-expect-error Exercise the runtime boundary with a secure cookie missing its source origin.
       serializeRuntimeCredentialCookie("ab".repeat(32), {
         name: "cc_session",
         path: "/",

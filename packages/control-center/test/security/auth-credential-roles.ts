@@ -27,7 +27,8 @@ const cookieOptions: CredentialCookieOptions = {
   path: "/",
   httpOnly: true,
   sameSite: "strict",
-  secure: true
+  secure: true,
+  sourceOrigin: "https://example.test"
 }
 serializeCredentialCookie(sessionCredential, cookieOptions)
 // @ts-expect-error Only session credentials may enter the cookie serializer.
