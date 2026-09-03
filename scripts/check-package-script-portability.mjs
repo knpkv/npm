@@ -347,21 +347,33 @@ const extractAliasMutations = (segments, reachability) => {
     for (const word of words.slice(1)) {
       const name = word.replace(/=.*$/u, "")
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) continue
-      if (commandName === "alias" && word.includes("=")) mutations.push({ kind: "define", name, start: segment.start })
+      if (commandName === "alias" && word.includes("=")) {
+        mutations.push({ kind: "define", name, value: word.slice(word.indexOf("=") + 1), start: segment.start })
+      }
       if (commandName === "unalias") mutations.push({ kind: "remove", name, start: segment.start })
     }
   }
   return mutations
 }
 
-const hasActiveAliasDefinition = (text, start, aliases) => {
+const activeAliasDefinition = (text, start, aliases) => {
   const commandName = firstShellWord(text)
-  if (commandName === undefined) return false
-  const active = aliases
+  if (commandName === undefined) return undefined
+  return aliases
     .filter((alias) => alias.name === commandName && alias.start <= start)
     .toSorted((left, right) => left.start - right.start)
     .at(-1)
-  return active?.kind === "define"
+}
+
+const hasActiveAliasDefinition = (text, start, aliases) =>
+  activeAliasDefinition(text, start, aliases)?.kind === "define"
+
+const aliasCommandResult = (text, start, aliases) => {
+  const active = activeAliasDefinition(text, start, aliases)
+  if (active?.kind !== "define") return undefined
+  if (active.value === ":" || active.value === "true") return "success"
+  if (active.value === "false") return "failure"
+  return "unknown"
 }
 
 const hasActiveFunctionDefinition = (text, start, definitions) => {
@@ -383,14 +395,17 @@ const segmentReachability = (segments, definitions = [], aliases = []) => {
     reachability.push(reachable)
     const text = segment.text.trim()
     if (reachable) {
+      const aliasedResult = aliasCommandResult(text, segment.start, aliases)
       previousResult =
-        text === "true"
-          ? "success"
-          : text === "false"
-            ? "failure"
-            : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
-              ? "success"
-              : "unknown"
+        aliasedResult !== undefined
+          ? aliasedResult
+          : text === "true"
+            ? "success"
+            : text === "false"
+              ? "failure"
+              : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
+                ? "success"
+                : "unknown"
       if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
     }
   }
@@ -478,6 +493,27 @@ const hasShellTermination = (command) => {
   })
 }
 
+const sameAliasMutations = (left, right) =>
+  left.length === right.length &&
+  left.every(
+    (mutation, index) =>
+      mutation.kind === right[index]?.kind &&
+      mutation.name === right[index]?.name &&
+      mutation.value === right[index]?.value &&
+      mutation.start === right[index]?.start
+  )
+
+const resolveAliasMutations = (segments, definitions) => {
+  let aliases = []
+  for (let iteration = 0; iteration <= segments.length; iteration += 1) {
+    const reachability = segmentReachability(segments, definitions, aliases)
+    const next = extractAliasMutations(segments, reachability)
+    if (sameAliasMutations(next, aliases)) return next
+    aliases = next
+  }
+  return undefined
+}
+
 const hasStatusRecoveryOperator = (command) => {
   const segments = shellCommandSegments(command, true)
   return segments.some(({ text, nextOperator }) => {
@@ -505,7 +541,8 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source) || hasUnsafeInvokedFunction(command, visited)) return false
   const segments = shellCommandSegments(source, true)
-  const aliases = extractAliasMutations(segments, segmentReachability(segments, definitions))
+  const aliases = resolveAliasMutations(segments, definitions)
+  if (aliases === undefined) return false
   const reachability = segmentReachability(segments, definitions, aliases)
   if (
     segments.some(({ text, nextOperator, start }, index) => {
@@ -706,6 +743,17 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "alias pnpm=true\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "alias pnpm=:; alias true=false; true && unalias pnpm; pnpm --filter @knpkv/browser-pairing build"
+    },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
