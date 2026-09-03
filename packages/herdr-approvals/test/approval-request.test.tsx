@@ -473,6 +473,25 @@ describe("sanitized approval requests", () => {
     expect(visible.fields[0]?.value).not.toContain("[redacted credential]")
   })
 
+  it("redacts standalone PEM private-key material while preserving public keys", () => {
+    const privateKey = [
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      "b3Bl-leaked-canary",
+      "-----END OPENSSH PRIVATE KEY-----"
+    ].join("\n")
+    const request = approvalRequestFor({ kind: "nix.apply", ref: privateKey })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref: privateKey }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("b3Bl-leaked-canary")
+    expect(encoded).toContain("[redacted credential]")
+
+    const publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIvisible-public-key user@example.test"
+    expect(approvalRequestFor({ kind: "nix.apply", ref: publicKey }).fields[0]?.value).toContain("visible-public-key")
+  })
+
   it("redacts unsafe query values through raw whitespace", () => {
     const refs = [
       "https://example.test/repo?X-Amz-Signature=first-secret second-secret",

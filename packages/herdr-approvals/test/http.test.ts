@@ -831,7 +831,9 @@ esac
         Effect.gen(function*() {
           const delayedStatusStarted = yield* Deferred.make<void>()
           const releaseDelayedStatus = yield* Deferred.make<void>()
+          const overlapPendingPageStarted = yield* Deferred.make<void>()
           let delayStatus = false
+          let signalOverlapPendingPage = false
           yield* Effect.forEach(
             Array.from(
               { length: pendingApprovalPageMaxRecords * 40 },
@@ -848,6 +850,14 @@ esac
           })
           const instrumentedFleet: FleetService = {
             ...fleet,
+            pendingApprovalPage: (cursor) =>
+              fleet.pendingApprovalPage(cursor).pipe(
+                Effect.tap(() => {
+                  if (!signalOverlapPendingPage) return Effect.void
+                  signalOverlapPendingPage = false
+                  return Deferred.succeed(overlapPendingPageStarted, undefined)
+                })
+              ),
             status: () =>
               delayStatus
                 ? Deferred.succeed(delayedStatusStarted, undefined).pipe(
@@ -914,21 +924,29 @@ esac
           expect(retainedDecision.status).toBe(200)
           yield* Effect.promise(() => retainedDecision.text())
           observedAt = 15 * 60 * 1_000 - 1_000
-          yield* store.put(pendingRecord("ALPHA", 10_000))
+          const overlapPending = pendingRecord("ALPHA", 10_000)
+          yield* store.put(overlapPending)
           delayStatus = true
           const refreshedFiber = yield* Effect.forkChild(
             Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
           )
           yield* Deferred.await(delayedStatusStarted)
-          observedAt = 25 * 60 * 1_000 - 1_000
+          signalOverlapPendingPage = true
+          observedAt = 15 * 60 * 1_000 + 1_000
+          const overlappingFiber = yield* Effect.forkChild(
+            Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
+          )
+          yield* Deferred.await(overlapPendingPageStarted)
           yield* Deferred.succeed(releaseDelayedStatus, undefined)
           const refreshed = yield* Fiber.join(refreshedFiber)
           expect(refreshed.status).toBe(200)
           yield* Effect.promise(() => refreshed.text())
+          const overlapping = yield* Fiber.join(overlappingFiber)
+          expect(overlapping.status).toBe(200)
+          yield* Effect.promise(() => overlapping.text())
           delayStatus = false
-          observedAt = 30 * 60 * 1_000
           const decision = yield* Effect.promise(() =>
-            fetch(`${approvalUrl}/v1/jobs/alpha-job-10000/approve`, {
+            fetch(`${approvalUrl}/v1/jobs/${overlapPending.id}/approve`, {
               headers: { ...headers, cookie, origin },
               method: "POST"
             })

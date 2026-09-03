@@ -155,6 +155,7 @@ type ApprovalProofUse = {
 }
 type ApprovalProofSession = {
   expiresAt: number
+  locked: boolean
   readonly lock: SemaphoreModule.Semaphore
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
@@ -1349,6 +1350,7 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
     })
   }
   yield* session.lock.take(1)
+  session.locked = true
   const checked = yield* Effect.exit(
     Effect.gen(function*() {
       const proof = session.proofsByJob.get(jobId)
@@ -1383,6 +1385,7 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
     })
   )
   if (Exit.isFailure(checked)) {
+    session.locked = false
     yield* session.lock.release(1)
     return yield* Effect.failCause(checked.cause)
   }
@@ -1643,6 +1646,7 @@ export const startHttpServer = async (
           retainApprovalProofJob(jobId)
         }
       }
+      session.locked = false
       httpRuntime.runSync(session.lock.release(1))
     }
     const approvalProofSessionFor = (
@@ -1654,7 +1658,7 @@ export const startHttpServer = async (
       const token = cookieValue(request, approvalProofCookieName)
       if (token === undefined) return undefined
       const session = approvalProofSessions.get(token)
-      if (session === undefined || session.expiresAt <= observedAt) {
+      if (session === undefined || (!session.locked && session.expiresAt <= observedAt)) {
         if (session !== undefined) {
           releaseApprovalProofs(session)
           approvalProofSessions.delete(token)
@@ -1738,7 +1742,7 @@ export const startHttpServer = async (
       function*(records: ReadonlyArray<JobRecord>, request: IncomingMessage) {
         const observedAt = now()
         for (const [token, session] of approvalProofSessions) {
-          if (session.expiresAt <= observedAt) {
+          if (!session.locked && session.expiresAt <= observedAt) {
             releaseApprovalProofs(session)
             approvalProofSessions.delete(token)
           }
@@ -1764,6 +1768,7 @@ export const startHttpServer = async (
           yield* lock.take(1)
           session = {
             expiresAt: observedAt + approvalProofMaxAgeSeconds * 1_000,
+            locked: true,
             lock,
             proofsByJob: new Map<string, ApprovalProof>(),
             token
@@ -1791,6 +1796,7 @@ export const startHttpServer = async (
           })
         } else if (existingMutation === undefined) {
           yield* session.lock.take(1)
+          session.locked = true
           approvalProofMutationsByRequest.set(request, {
             created: false,
             previousExpiresAt: session.expiresAt,
@@ -1845,6 +1851,7 @@ export const startHttpServer = async (
         return {}
       }
       approvalProofMutationsByRequest.delete(request)
+      session.locked = false
       httpRuntime.runSync(session.lock.release(1))
       return { "set-cookie": approvalProofCookie(session.token, secure) }
     }
@@ -3037,6 +3044,7 @@ export const startHttpServer = async (
               Effect.ensuring(
                 Effect.sync(() => {
                   if (proofSession !== undefined) {
+                    proofSession.locked = false
                     httpRuntime.runSync(proofSession.lock.release(1))
                     proofSession = undefined
                   }
