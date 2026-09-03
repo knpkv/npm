@@ -7,9 +7,6 @@ import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import {
-  __herdrWorkEncodedBytesForTest,
-  __herdrWorkMaximumSnapshotBytesForTest,
-  __herdrWorkSnapshotEnvelopeMaxBytesForTest,
   makeWorkService,
   projectWorkSnapshots,
   type WorkGoal,
@@ -20,6 +17,11 @@ import {
   workSnapshotMaxGoals,
   WorkStore
 } from "../src/index.js"
+import {
+  __herdrWorkEncodedBytesForTest,
+  __herdrWorkMaximumSnapshotBytesForTest,
+  __herdrWorkSnapshotEnvelopeMaxBytesForTest
+} from "../src/store.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off

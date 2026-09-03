@@ -271,7 +271,28 @@ export const WorkSnapshot = Schema.Struct({
   asOf: Timestamp,
   goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
   families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals)))
-})
+}).check(
+  Schema.makeFilter(
+    (snapshot) => {
+      const families = snapshot.families ?? []
+      const goalIds = new Set(snapshot.goals.map((goal) => goal.id))
+      const seenCanonical = new Set<string>()
+      const seenMember = new Set<string>()
+      for (const group of families) {
+        if (seenCanonical.has(group.canonicalGoalId)) return false
+        seenCanonical.add(group.canonicalGoalId)
+        if (!goalIds.has(group.canonicalGoalId)) return false
+        for (const member of group.superseded) {
+          if (seenMember.has(member.id)) return false
+          seenMember.add(member.id)
+          if (goalIds.has(member.id)) return false
+        }
+      }
+      return true
+    },
+    { expected: "families consistent with active goals and without duplicated members" }
+  )
+)
 export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
 
 export const WorkSnapshots = Schema.Struct({

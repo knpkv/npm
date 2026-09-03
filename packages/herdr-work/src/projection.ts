@@ -18,7 +18,22 @@ const windowOffset = {
   month: 30 * 24 * 60 * 60 * 1_000
 } satisfies Readonly<Record<WorkSnapshotWindow, number>>
 
-const compareString = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
+const compareString = (left: string, right: string): number => {
+  let li = 0
+  let ri = 0
+  const leftLength = left.length
+  const rightLength = right.length
+  while (li < leftLength && ri < rightLength) {
+    const leftCode = left.codePointAt(li)
+    const rightCode = right.codePointAt(ri)
+    if (leftCode === undefined || rightCode === undefined) break
+    if (leftCode !== rightCode) return leftCode < rightCode ? -1 : 1
+    li += leftCode > 0xffff ? 2 : 1
+    ri += rightCode > 0xffff ? 2 : 1
+  }
+  if (li >= leftLength && ri >= rightLength) return 0
+  return li >= leftLength ? -1 : 1
+}
 
 const projectionError = (
   reason: WorkProjectionError["reason"],
@@ -120,6 +135,7 @@ const snapshotAt = (
   for (const event of events.toSorted((left, right) => left.occurredAt - right.occurredAt)) {
     if (event.occurredAt <= asOf) latest.set(event.goal.id, event.goal)
   }
+  const families = familiesFor(latest)
   return {
     window,
     observedAt,
@@ -130,7 +146,7 @@ const snapshotAt = (
         compareString(left.title, right.title) ||
         compareString(left.id, right.id)
     ),
-    families: familiesFor(latest)
+    ...(families.length > 0 ? { families } : {})
   }
 }
 

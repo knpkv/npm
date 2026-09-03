@@ -505,9 +505,15 @@ export const WorkBoard = ({
                               {entry.summary} · {formatTimestamp(entry.updatedAt)}
                             </Text>
                             {blockersFor(entry).length === 0 ? null : (
-                              <Text tone="secondary" variant="meta">
-                                Blocker: {blockersFor(entry)[0]?.summary}
-                              </Text>
+                              <ul className="work-detail-list">
+                                {blockersFor(entry).map((blocker) => (
+                                  <li key={`${blocker.since}-${blocker.summary}`}>
+                                    <Text tone="secondary" variant="meta">
+                                      Blocker: {blocker.summary} · {formatTimestamp(blocker.since)}
+                                    </Text>
+                                  </li>
+                                ))}
+                              </ul>
                             )}
                             {entry.review === undefined || entry.review === null ? null : (
                               <Text tone="secondary" variant="meta">
