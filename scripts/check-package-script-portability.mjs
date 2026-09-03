@@ -331,7 +331,7 @@ const extractFunctionDefinitions = (command) => {
   return { definitions, source: withoutDefinitions }
 }
 
-const firstShellWord = (text) => text.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
+const firstShellWord = (text) => text.trim().match(/^\\?([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
 
 const hasActiveFunctionDefinition = (text, start, definitions) => {
   const commandName = firstShellWord(text)
@@ -396,7 +396,7 @@ const hasUnsupportedShellControl = (source) => {
   const segments = shellCommandSegments(source, true)
   return (
     segments.some(({ text }) => unsupportedShellWords.has(firstShellWord(text) ?? "")) ||
-    segments.some(({ text }) => /^(?:\.|source)(?:\s|$)/u.test(text.trim())) ||
+    segments.some(({ text }) => /^\\?(?:\.|source)(?:\s|$)/u.test(text.trim())) ||
     segments.some(({ text }) => text.trim().startsWith("!")) ||
     segments.some(({ nextOperator }) => nextOperator === "&")
   )
@@ -1101,6 +1101,22 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "source ./stop.sh; tsc -p tsconfig.roles.json --noEmit" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "stop() { exit 0; }; \\eval stop; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "\\. ./stop.sh; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
