@@ -61,8 +61,7 @@ const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const quotedCredentialAssignment =
   /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
-const quotedCredentialPlainAssignment =
-  /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)([^\s,;}][^,;}]*?)(?=\s*[,;}]|$)/giu
+const quotedCredentialAssignmentKey = /(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*/gu
 const whitespaceCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const privateKeyMaterial =
@@ -84,6 +83,19 @@ const credentialKey =
 
 const decodeCredentialKey = (value: string): string =>
   value.replace(/\\u([0-9a-f]{4})/giu, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
+
+const sanitizeQuotedPlainCredentials = (value: string): string => {
+  for (const match of value.matchAll(quotedCredentialAssignmentKey)) {
+    const key = decodeCredentialKey(match[1] ?? match[2] ?? "")
+    if (!credentialKey.test(key)) continue
+    const valueStart = (match.index ?? 0) + match[0].length
+    const firstValueCharacter = value[valueStart]
+    if (firstValueCharacter !== undefined && firstValueCharacter !== "\"" && firstValueCharacter !== "'") {
+      return `${value.slice(0, valueStart)}${redactedCredential}`
+    }
+  }
+  return value
+}
 
 type EncodedText =
   | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
@@ -143,8 +155,8 @@ const reencodeText = (value: string, layers: number): string | undefined => {
   }
 }
 
-const sanitizeCredentialText = (value: string): string =>
-  value
+const sanitizeCredentialText = (value: string): string => {
+  const sanitized = value
     .replace(privateKeyMaterial, redactedCredential)
     .replace(credentialDigestAuthorization, "$1[redacted credential]")
     .replace(
@@ -162,13 +174,6 @@ const sanitizeCredentialText = (value: string): string =>
       }
     )
     .replace(
-      quotedCredentialPlainAssignment,
-      (_match, prefix: string, doubleKey: string | undefined, singleKey: string | undefined) =>
-        credentialKey.test(decodeCredentialKey(doubleKey ?? singleKey ?? ""))
-          ? `${prefix}${redactedCredential}`
-          : _match
-    )
-    .replace(
       whitespaceCredentialAssignment,
       (_match, prefix: string) => `${prefix}${redactedCredential}`
     )
@@ -177,6 +182,8 @@ const sanitizeCredentialText = (value: string): string =>
       (match, prefix: string, credential: string) =>
         credential === redactedCredential ? match : `${prefix}${redactedCredential}`
     )
+  return sanitizeQuotedPlainCredentials(sanitized)
+}
 
 const sanitizeEncodedCredentialAssignments = (value: string): string =>
   value.replace(encodedCredentialAssignment, (match) => {
