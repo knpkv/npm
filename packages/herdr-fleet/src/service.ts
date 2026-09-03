@@ -288,10 +288,12 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             operation: "fleet.worker_started"
           })
         }
-        if (identity.relationship === undefined) {
+        const coordinatorHandled = record.payload.mode === "consult" ||
+          record.payload.channel === "coordinator_chat"
+        if (!coordinatorHandled && identity.relationship === undefined) {
           return yield* new FleetOperationError({
             cause: identity,
-            detail: "agent.delegate worker identity is missing its exact relationship",
+            detail: "delegated worker identity is missing its exact relationship",
             operation: "fleet.worker_started"
           })
         }

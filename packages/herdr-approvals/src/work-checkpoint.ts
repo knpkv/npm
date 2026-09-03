@@ -1,5 +1,5 @@
 import { FleetValidationError, type HostConfiguration } from "@knpkv/herdr-fleet"
-import { WorkGoalCheckpoint } from "@knpkv/herdr-work/model"
+import { WorkGoalCheckpoint, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Effect, Schema } from "effect"
 
 export const workSnapshotPath = "/v1/work"
@@ -20,6 +20,26 @@ export const workCheckpointFromJson = Effect.fn("Fleetctl.workCheckpointFromJson
       (cause) =>
         new FleetValidationError({
           detail: `invalid work checkpoint: ${String(cause)}`
+        })
+    )
+  )
+})
+
+export const workSnapshotFromJson = Effect.fn("Fleetctl.workSnapshotFromJson")(function*(text: string) {
+  const input = yield* Effect.try({
+    try: () => JSON.parse(text),
+    catch: (cause) =>
+      new FleetValidationError({
+        detail: `invalid work snapshot JSON: ${String(cause)}`
+      })
+  })
+  return yield* Schema.decodeUnknownEffect(WorkSnapshots, {
+    onExcessProperty: "error"
+  })(input).pipe(
+    Effect.mapError(
+      (cause) =>
+        new FleetValidationError({
+          detail: `invalid work snapshot: ${String(cause)}`
         })
     )
   )

@@ -14,7 +14,7 @@ const program = LanguageModel.generateText({ prompt: "Review the current change.
 )
 ```
 
-The default access mode is read-only. It starts Claude in non-interactive plan mode with only read-oriented tools. Set `access: "workspace-write"` to allow `Edit` and `Write`; shell execution remains disabled in both modes.
+The default access mode is read-only. It starts Claude in non-interactive plan mode with only read-oriented tools. Set `access: "prompt-only"` to disable all model-invocable tools, deny built-in and MCP tool names, and isolate ordinary settings without replacing enterprise-managed MCP configuration, or `access: "workspace-write"` to allow `Edit` and `Write`; shell execution remains disabled in every mode.
 
 Requests time out after two minutes by default. Output is bounded, prompts are sent over stdin, sessions are not persisted, and Claude's JSON response is schema-decoded before it enters the Effect AI response model. Effect toolkits and file prompt parts are rejected.
 

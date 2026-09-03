@@ -10,14 +10,15 @@ export const ReviewKind = Schema.Literals(["review", "security", "tests", "expla
 export type ReviewKind = typeof ReviewKind.Type
 export const reviewKindOptions = ReviewKind.literals
 
-export const ReviewProvider = Schema.Literals(["codex"])
+export const ReviewProvider = Schema.Literals(["codex", "claude"])
 export type ReviewProvider = typeof ReviewProvider.Type
 
-export const ReviewHarness = Schema.Literals(["native-codex"])
+export const ReviewHarness = Schema.Literals(["native-codex", "native-claude"])
 export type ReviewHarness = typeof ReviewHarness.Type
 
 export const ReviewModel = Schema.Literals([
   "configured-default",
+  "default",
   "gpt-5.6-luna",
   "gpt-5.6-terra",
   "gpt-5.6-sol"
@@ -27,6 +28,20 @@ export type ReviewModel = typeof ReviewModel.Type
 export const reviewProviderOptions = ReviewProvider.literals
 export const reviewHarnessOptions = ReviewHarness.literals
 export const reviewModelOptions = ReviewModel.literals
+
+/** Models accepted by each local reviewer CLI. */
+export const reviewModelOptionsForProvider = (provider: ReviewProvider): ReadonlyArray<ReviewModel> =>
+  provider === "claude"
+    ? ["configured-default", "default"]
+    : ["configured-default", "gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]
+
+const isReviewProfileExecution = (profile: {
+  readonly provider: ReviewProvider
+  readonly harness: ReviewHarness
+  readonly model: ReviewModel
+}): boolean =>
+  profile.harness === (profile.provider === "claude" ? "native-claude" : "native-codex") &&
+  reviewModelOptionsForProvider(profile.provider).includes(profile.model)
 
 export const ReviewProfileConfig = Schema.Struct({
   id: Schema.String.check(
@@ -43,7 +58,9 @@ export const ReviewProfileConfig = Schema.Struct({
   skillIds: Schema.Array(
     Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(256))
   ).check(Schema.isMaxLength(reviewProfileSkillLimit), Schema.isUnique())
-})
+}).check(
+  Schema.makeFilter(isReviewProfileExecution, { expected: "a supported reviewer provider, harness, and model" })
+)
 export type ReviewProfileConfig = typeof ReviewProfileConfig.Type
 
 export const defaultReviewProfiles: ReadonlyArray<ReviewProfileConfig> = [
