@@ -515,7 +515,7 @@ esac
       tailscaleCommand
     }
     let observedAt = 0
-    let pendingApprovalCalls = 0
+    let pendingApprovalsEnumerations = 0
     return Effect.acquireUseRelease(
       JobStore.open(join(root, "jobs.sqlite")),
       (store) =>
@@ -543,15 +543,18 @@ esac
           const instrumentedFleet: FleetService = {
             ...fleet,
             pendingApprovals: () => {
-              pendingApprovalCalls += 1
-              const pending = fleet.pendingApprovals()
+              pendingApprovalsEnumerations += 1
+              return fleet.pendingApprovals()
+            },
+            get: (jobId) => {
+              const pending = fleet.get(jobId)
               if (!pausePendingRefresh) return pending
               pausePendingRefresh = false
               return pending.pipe(
-                Effect.flatMap((records) =>
+                Effect.flatMap((record) =>
                   Deferred.succeed(refreshGate.started, undefined).pipe(
                     Effect.andThen(Deferred.await(refreshGate.release)),
-                    Effect.as(records)
+                    Effect.as(record)
                   )
                 )
               )
@@ -687,7 +690,7 @@ esac
           )
           expect(secondSessionContinuation.status).toBe(200)
           yield* Effect.promise(() => secondSessionContinuation.text())
-          expect(pendingApprovalCalls).toBe(1)
+          expect(pendingApprovalsEnumerations).toBe(0)
           const newlyPending = pendingRecord("ALPHA", 100)
           yield* store.put(newlyPending)
           const dashboardD = yield* Effect.promise(() =>
@@ -735,7 +738,7 @@ esac
           )
           expect(refreshedSessionContinuation.status).toBe(200)
           yield* Effect.promise(() => refreshedSessionContinuation.text())
-          expect(pendingApprovalCalls).toBe(2)
+          expect(pendingApprovalsEnumerations).toBe(0)
           const wrongSessionDecision = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/jobs/alpha-job-00/approve`, {
               headers: { ...headers, cookie: cookieC, origin },
@@ -784,7 +787,7 @@ esac
           const staleRefreshResponse = yield* Fiber.join(staleRefresh)
           expect(staleRefreshResponse.status).toBe(200)
           yield* Effect.promise(() => staleRefreshResponse.text())
-          expect(pendingApprovalCalls).toBe(3)
+          expect(pendingApprovalsEnumerations).toBe(0)
           const concurrentContinuation = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard-pending?${newContinuationParameters.toString()}`, {
               headers: { ...headers, cookie: cookieB }

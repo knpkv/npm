@@ -1709,21 +1709,24 @@ export const startHttpServer = async (
           const disclosureGenerationAtStart = pendingApprovalProofDisclosureGeneration
           let refresh = pendingApprovalProofRefresh
           if (refresh === undefined) {
-            const refreshRequest = service.pendingApprovals().pipe(
-              Effect.mapError(
-                (cause) =>
-                  new FleetOperationError({
-                    cause,
-                    detail: "could not refresh approval proof retention",
-                    operation: "approval.proof.prune"
+            const proofIds = [...new Set(activeApprovalProofs().map(({ jobId }) => jobId))]
+            const refreshRequest = Effect.forEach(proofIds, (jobId) =>
+              service.get(jobId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new FleetOperationError({
+                      cause,
+                      detail: "could not refresh approval proof retention",
+                      operation: "approval.proof.prune"
+                    })
+                )
+              )).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    pendingApprovalProofRefresh = undefined
                   })
-              ),
-              Effect.ensuring(
-                Effect.sync(() => {
-                  pendingApprovalProofRefresh = undefined
-                })
+                )
               )
-            )
             refresh = yield* Effect.cached(refreshRequest)
             pendingApprovalProofRefresh = refresh
           }

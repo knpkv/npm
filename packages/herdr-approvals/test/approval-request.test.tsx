@@ -411,6 +411,10 @@ describe("sanitized approval requests", () => {
         ref: '{"auths":{"one.example":{"auth":"first-docker-auth-leaked-canary"},"two.example":{"auth":"second-docker-auth-leaked-canary"}}}',
         redacted: "[redacted credential]"
       },
+      {
+        ref: "DefaultEndpointsProtocol=https;AccountName=myacct;AccountKey=azure-leaked-canary;EndpointSuffix=core.windows.net",
+        redacted: "[redacted credential]"
+      },
       { ref: '{"refreshToken":"camel-token-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"clientSecret":"camel-secret-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
@@ -427,7 +431,7 @@ describe("sanitized approval requests", () => {
       })
       const encoded = JSON.stringify({ request, projection })
       expect(encoded).not.toMatch(
-        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|docker-auth|first-docker-auth|second-docker-auth|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
+        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|docker-auth|first-docker-auth|second-docker-auth|azure|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
       )
       expect(encoded).toContain(redacted)
     }
@@ -440,6 +444,19 @@ describe("sanitized approval requests", () => {
     expect(
       approvalRequestFor({ kind: "nix.apply", ref: '{"metadata":{"auth":"visible-auth"}}' }).fields[0]?.value
     ).toBe('{"metadata":{"auth":"visible-auth"}}')
+  })
+
+  it("returns long credential-free coordinates without scanning credential patterns", () => {
+    const ref = "a".repeat(3 * 1_024)
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    expect(request.fields[0]?.value).toBe(ref)
+    expect(projection.payload.kind).toBe("nix.apply")
+    if (projection.payload.kind !== "nix.apply") return
+    expect(projection.payload.ref).toBe(ref)
   })
 
   it("redacts ODBC password assignments and preserves following structured fields", () => {
