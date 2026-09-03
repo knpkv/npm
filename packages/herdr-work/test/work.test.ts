@@ -463,11 +463,16 @@ describe("durable Work projection", () => {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-bytes-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const store = yield* WorkStore.open(path)
-      const service = yield* makeWorkService(store)
       const event = checkpoint("event-byte-cap", 0, "working", "local")
-      yield* service.record(event)
-      store.close()
+      yield* Effect.acquireUseRelease(
+        WorkStore.open(path),
+        (store) =>
+          Effect.gen(function*() {
+            const service = yield* makeWorkService(store)
+            yield* service.record(event)
+          }),
+        (store) => Effect.sync(() => store.close())
+      )
 
       const database = new DatabaseSync(path)
       database.exec("BEGIN IMMEDIATE")
