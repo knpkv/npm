@@ -61,6 +61,8 @@ const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const quotedCredentialAssignment =
   /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
+const quotedCredentialPlainAssignment =
+  /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)([^\s,;}][^,;}]*?)(?=\s*[,;}]|$)/giu
 const whitespaceCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const privateKeyMaterial =
@@ -160,6 +162,13 @@ const sanitizeCredentialText = (value: string): string =>
       }
     )
     .replace(
+      quotedCredentialPlainAssignment,
+      (_match, prefix: string, doubleKey: string | undefined, singleKey: string | undefined) =>
+        credentialKey.test(decodeCredentialKey(doubleKey ?? singleKey ?? ""))
+          ? `${prefix}${redactedCredential}`
+          : _match
+    )
+    .replace(
       whitespaceCredentialAssignment,
       (_match, prefix: string) => `${prefix}${redactedCredential}`
     )
@@ -246,7 +255,9 @@ const sanitizeEncodedUri = (value: string): string => {
   if (encodedUri && !encodedUriAuthorityBoundary.test(normalized)) return sanitizeDecodedUri(normalized)
   const authoritySanitized = encodedUri ? sanitizeUriAuthority(normalized) : normalized
   const encoded = encodedText(authoritySanitized)
-  if (encoded === undefined) return sanitizeDecodedUri(value)
+  if (encoded === undefined) {
+    return authoritySanitized === normalized ? sanitizeDecodedUri(authoritySanitized) : redactedCredential
+  }
   if (encoded._tag !== "encoded") return redactedCredential
   try {
     const sanitized = sanitizeDecodedUri(encoded.value)

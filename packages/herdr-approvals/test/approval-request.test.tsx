@@ -343,6 +343,8 @@ describe("sanitized approval requests", () => {
       { ref: '{"database-password":"prefixed-json-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"Authorization":"quoted-auth-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"pass\\u0077ord":"escaped-json-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"password": plain-json-leaked-canary}', redacted: "[redacted credential]" },
+      { ref: '{"Authorization": Bearer plain-auth-leaked-canary}', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
         redacted: "%5Bredacted%20credential%5D"
@@ -355,7 +357,7 @@ describe("sanitized approval requests", () => {
         payload: { kind: "nix.apply", ref }
       })
       const encoded = JSON.stringify({ request, projection })
-      expect(encoded).not.toMatch(/(?:json|prefixed-json|nested-json|escaped-json)-leaked-canary/u)
+      expect(encoded).not.toMatch(/(?:json|prefixed-json|nested-json|escaped-json|plain|auth)-leaked-canary/u)
       expect(encoded).toContain(redacted)
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: '{"revision":"release"}' }).fields[0]?.value).toBe(
@@ -444,7 +446,8 @@ describe("sanitized approval requests", () => {
   it("redacts queries hidden behind encoded URI authorities", () => {
     const refs = [
       "https://host%2Fpath%3Fref%3Dhttps%253A%252F%252Forigin.test%252Frepo%253Fsig%253Dsecret-canary",
-      "https://host%3Fref%3Dsig%253Dsecret-canary%ZZ"
+      "https://host%3Fref%3Dsig%253Dsecret-canary%ZZ",
+      "https://host%2Fpath%3Fref%3Dfoo%ZZAuthorization: Bearer detached-secret-canary"
     ]
     for (const ref of refs) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
