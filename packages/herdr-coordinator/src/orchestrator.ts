@@ -18,8 +18,10 @@ import {
   type OrchestratorCommand as OrchestratorCommandType,
   OrchestratorEvent,
   type OrchestratorEvent as OrchestratorEventType,
+  OrchestratorIdempotencyKey,
   OrchestratorPendingDispatch,
   OrchestratorPendingDispatchStatus,
+  OrchestratorPendingQuery,
   type OrchestratorReceipt as OrchestratorReceiptType,
   OrchestratorResult
 } from "./orchestrator-model.js"
@@ -91,8 +93,10 @@ export interface OrchestratorService {
   readonly events: (
     dispatchRequestId: string
   ) => Stream.Stream<OrchestratorEventType, OrchestratorError>
-  /** Lists accepted and queued commands so a restarted worker can resume them explicitly. */
-  readonly pending: () => Effect.Effect<ReadonlyArray<typeof OrchestratorPendingDispatch.Type>, OrchestratorError>
+  /** Lists one bounded page of accepted and queued commands for explicit restart resumption. */
+  readonly pending: (
+    query?: typeof OrchestratorPendingQuery.Type
+  ) => Effect.Effect<ReadonlyArray<typeof OrchestratorPendingDispatch.Type>, OrchestratorError>
   readonly queue: (dispatchRequestId: string) => Effect.Effect<OrchestratorEventType, OrchestratorError>
   readonly run: (dispatchRequestId: string) => Effect.Effect<OrchestratorEventType, OrchestratorError>
   readonly settle: (
@@ -222,29 +226,51 @@ const makeOrchestrator: Effect.Effect<
     return yield* Effect.forEach(decodedRows, decodeEvent)
   })
 
-  const listPending = Effect.fn("Orchestrator.listPending")(function*() {
-    const rows = yield* sql`
+  const listPending = Effect.fn("Orchestrator.listPending")(
+    function*(query: typeof OrchestratorPendingQuery.Type = {}) {
+      const decodedQuery = yield* Schema.decodeUnknownEffect(OrchestratorPendingQuery)(query).pipe(
+        Effect.mapError(() => new OrchestratorValidationError({ detail: "pending query is invalid" }))
+      )
+      const limit = decodedQuery.limit ?? 256
+      const rows = decodedQuery.after === undefined
+        ? yield* sql`
       SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
         activity_idempotency_key AS "activityIdempotencyKey", command,
         accepted_at AS "acceptedAt", status
       FROM orchestrator_dispatches
       WHERE status IN ('accepted', 'queued')
       ORDER BY accepted_at ASC, dispatch_request_id ASC
+      LIMIT ${limit}
     `.pipe(Effect.mapError(storageError("pending.list")))
-    const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
-      Effect.mapError(storageError("pending.decode-row"))
-    )
-    return yield* Effect.forEach(decodedRows, (row) =>
-      Effect.gen(function*() {
-        const status = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatchStatus)(row.status).pipe(
-          Effect.mapError(() => new OrchestratorStorageError({ cause: row.status, operation: "pending.decode-status" }))
-        )
-        const command = yield* decodeCommand(row.command)
-        return yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({ ...row, command, status }).pipe(
-          Effect.mapError(storageError("pending.decode"))
-        )
-      }))
-  })
+        : yield* sql`
+      SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
+        activity_idempotency_key AS "activityIdempotencyKey", command,
+        accepted_at AS "acceptedAt", status
+      FROM orchestrator_dispatches
+      WHERE status IN ('accepted', 'queued')
+        AND (accepted_at > ${decodedQuery.after.acceptedAt}
+          OR (accepted_at = ${decodedQuery.after.acceptedAt}
+            AND dispatch_request_id > ${decodedQuery.after.dispatchRequestId}))
+      ORDER BY accepted_at ASC, dispatch_request_id ASC
+      LIMIT ${limit}
+    `.pipe(Effect.mapError(storageError("pending.list")))
+      const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
+        Effect.mapError(storageError("pending.decode-row"))
+      )
+      return yield* Effect.forEach(decodedRows, (row) =>
+        Effect.gen(function*() {
+          const status = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatchStatus)(row.status).pipe(
+            Effect.mapError(() =>
+              new OrchestratorStorageError({ cause: row.status, operation: "pending.decode-status" })
+            )
+          )
+          const command = yield* decodeCommand(row.command)
+          return yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({ ...row, command, status }).pipe(
+            Effect.mapError(storageError("pending.decode"))
+          )
+        }))
+    }
+  )
 
   const appendTransition = Effect.fn("Orchestrator.transition")(function*(
     dispatchRequestId: string,
@@ -319,7 +345,7 @@ const makeOrchestrator: Effect.Effect<
       Effect.mapError(() => new OrchestratorValidationError({ detail: "command is not a typed fleet job" }))
     )
     const decodedKey = yield* Schema.decodeUnknownEffect(
-      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+      OrchestratorIdempotencyKey
     )(idempotencyKey).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "idempotency key is invalid" }))
     )
@@ -476,7 +502,7 @@ export const sqliteLayer = (filename: string) =>
         Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.exists" }))
       )
       if (!directoryExists) {
-        yield* fileSystem.makeDirectory(directory, { mode: 0o700 }).pipe(
+        yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
           Effect.mapError((cause) =>
             new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.create" })
           )
@@ -485,7 +511,8 @@ export const sqliteLayer = (filename: string) =>
       const directoryInfo = yield* fileSystem.stat(directory).pipe(
         Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.stat" }))
       )
-      if (directoryInfo.type !== "Directory" || (directoryInfo.mode & 0o777) !== 0o700) {
+      const privateMode = paths.sep !== "/" || (directoryInfo.mode & 0o777) === 0o700
+      if (directoryInfo.type !== "Directory" || !privateMode) {
         return yield* new OrchestratorStorageError({
           cause: { directory, mode: directoryInfo.mode, type: directoryInfo.type },
           operation: "sqlite.secure.directory.private"

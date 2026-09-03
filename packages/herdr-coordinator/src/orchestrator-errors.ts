@@ -1,6 +1,10 @@
 import { Schema } from "effect"
 
-const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+const Identifier = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
 
 export class OrchestratorValidationError extends Schema.TaggedError<OrchestratorValidationError>()(
   "OrchestratorValidationError",

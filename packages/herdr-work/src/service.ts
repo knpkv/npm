@@ -35,7 +35,10 @@ export interface WorkService {
   ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
   readonly handoff: (
     handoff: WorkDecisionHandoff
-  ) => Effect.Effect<WorkDecisionHandoff, WorkDecisionHandoffConflictError | WorkStoreError>
+  ) => Effect.Effect<
+    WorkDecisionHandoff,
+    WorkDecisionHandoffConflictError | WorkProjectionError | WorkStoreError
+  >
   readonly decisions: (
     laneId: string
   ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>

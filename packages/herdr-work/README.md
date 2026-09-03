@@ -9,13 +9,16 @@ Each `WorkGoalCheckpoint` stores a complete, Schema-decoded goal state at its ex
 `WorkStore` persists events in SQLite. Recording the exact same checkpoint again is an idempotent replay; reusing an event ID or goal timestamp with changed content returns `WorkCheckpointConflictError`. `makeWorkService` is the small runtime interface for recording checkpoints, reading the current durable lane claim, and reading all four snapshots. An unknown lane returns `Option.none()`; a stored claim is Schema-decoded and its revision is checked against the durable row.
 
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
-transaction. Reusing its transaction ID with the same batch replays it; a
-different batch returns `WorkTransactionConflictError`. `claim` is a durable
+transaction. Reusing its transaction ID with the same batch replays it. A
+changed event with an existing event ID or goal/timestamp returns
+`WorkCheckpointConflictError`; a different batch that passes those checkpoint
+identity checks returns `WorkTransactionConflictError`. `claim` is a durable
 compare-and-set lane claim containing the canonical worktree, branch, exact
 head, owner, parent, phase, and expected revision. `handoff` stores a compact,
-credential-free decision record for later recovery. Replay aliases retain
-fixed-size canonical SHA-256 identities under a bounded ledger, and lane
-claims validate Git branch refs before persisting their authority.
+credential-free decision record for later recovery under a 16,384-row and
+2 MiB encoded-byte ledger. Replay aliases retain fixed-size canonical SHA-256
+identities under a bounded ledger, and lane claims validate Git branch refs
+before persisting their authority.
 
 `WorkBoard` renders these persisted outbound-link forms:
 

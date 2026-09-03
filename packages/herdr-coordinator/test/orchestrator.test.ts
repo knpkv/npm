@@ -137,6 +137,27 @@ describe("durable coordinator orchestrator", () => {
       ))
   })
 
+  it.effect("rejects malformed activity idempotency keys before persistence", () =>
+    withTemporaryRoot("herdr-orchestrator-identity-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          expect(
+            yield* Effect.result(orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:\uD800" },
+              "dispatch:malformed-activity"
+            ))
+          ).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
+          expect(
+            yield* Effect.result(orchestrator.submit(
+              command,
+              "dispatch:\uD800"
+            ))
+          ).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
+        })
+      )))
+
   it.effect("recovers a running dispatch from the durable database after restart", () => {
     return withTemporaryRoot("herdr-orchestrator-restart-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -230,6 +251,39 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("pages pending restart work with a bounded typed query", () =>
+    withTemporaryRoot("herdr-orchestrator-pending-page-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          const receipts = yield* Effect.forEach([0, 1, 2], (index) =>
+            orchestrator.submit(
+              { ...command, activityIdempotencyKey: `activity:pending-page:${index}` },
+              `dispatch:pending-page:${index}`
+            ))
+          const first = yield* orchestrator.pending({ limit: 2 })
+          expect(first).toHaveLength(2)
+          const cursor = first.at(-1)
+          if (cursor === undefined) return yield* Effect.die("pending page did not return its limit")
+          const second = yield* orchestrator.pending({
+            after: {
+              acceptedAt: cursor.acceptedAt,
+              dispatchRequestId: cursor.dispatchRequestId
+            },
+            limit: 2
+          })
+          expect(second).toHaveLength(1)
+          expect([...first, ...second].map(({ dispatchRequestId }) => dispatchRequestId)).toEqual(
+            receipts
+              .toSorted((left, right) =>
+                left.acceptedAt - right.acceptedAt || left.dispatchRequestId.localeCompare(right.dispatchRequestId)
+              )
+              .map(({ dispatchRequestId }) => dispatchRequestId)
+          )
+        })
+      )))
+
   it.effect("secures SQLite database and journal files", () =>
     withTemporaryRoot("herdr-orchestrator-permissions-", (root) =>
       withDatabase(
@@ -260,6 +314,13 @@ describe("durable coordinator orchestrator", () => {
         )
         expect(created).toMatchObject({ _tag: "Success" })
         expect(statSync(createdDirectory).mode & 0o777).toBe(0o700)
+
+        const nestedDirectory = join(root, "nested", "state")
+        const nested = yield* Effect.result(
+          withDatabase(join(nestedDirectory, "orchestrator.sqlite"), Effect.void)
+        )
+        expect(nested).toMatchObject({ _tag: "Success" })
+        expect(statSync(nestedDirectory).mode & 0o777).toBe(0o700)
 
         const callerDirectory = join(root, "caller-state")
         mkdirSync(callerDirectory, { mode: 0o755 })

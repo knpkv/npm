@@ -52,6 +52,11 @@ const LaneRow = Schema.Struct({ record: Schema.String, revision: Schema.Number }
 const DecisionRow = Schema.Struct({ record: Schema.String })
 const CountRow = Schema.Struct({ count: Schema.Number })
 const LedgerBytesRow = Schema.Struct({ bytes: Schema.Number })
+const TransactionId = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
 const storeError = (operation: string) => (cause: unknown) => new WorkStoreError({ cause, operation })
 type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
 type AppendDecision =
@@ -75,12 +80,15 @@ type HandoffDecision =
   | { readonly _tag: "conflict"; readonly error: WorkDecisionHandoffConflictError }
   | { readonly _tag: "replayed"; readonly value: WorkDecisionHandoffType }
   | { readonly _tag: "inserted"; readonly value: WorkDecisionHandoffType }
+  | { readonly _tag: "rejected"; readonly error: WorkProjectionError }
 
 const utf8 = new TextEncoder()
 const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSON.stringify(value)).byteLength
 const maximumTimestamp = 8_640_000_000_000_000
 const workTransactionMaxRecords = 16_384
 const workTransactionMaxBytes = 2 * 1024 * 1024
+const workDecisionMaxRecords = 16_384
+const workDecisionMaxBytes = 2 * 1024 * 1024
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
   observedAt: maximumTimestamp,
   now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
@@ -164,7 +172,10 @@ export interface WorkStoreService {
   ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
   readonly decision: (
     handoff: WorkDecisionHandoff
-  ) => Effect.Effect<WorkDecisionHandoff, WorkDecisionHandoffConflictError | WorkStoreError>
+  ) => Effect.Effect<
+    WorkDecisionHandoff,
+    WorkDecisionHandoffConflictError | WorkProjectionError | WorkStoreError
+  >
   readonly decisions: (
     laneId: string
   ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>
@@ -248,6 +259,7 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
       Effect.mapError(storeError("append.decode"))
     )
+    yield* this.secureFiles()
     const decision = yield* Effect.try({
       try: () => {
         let transaction = false
@@ -364,7 +376,6 @@ export class WorkStore implements WorkStoreService {
     if (decision.changes !== 1 && decision.changes !== 1n) {
       return yield* storeError("append.insert.count")(decision.changes)
     }
-    yield* this.secureFiles()
     return decoded
   })
 
@@ -380,9 +391,9 @@ export class WorkStore implements WorkStoreService {
         reason: "capacity_exceeded"
       })
     }
-    const transaction = yield* Schema.decodeUnknownEffect(
-      Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
-    )(transactionId).pipe(Effect.mapError(storeError("appendMany.decode.transaction")))
+    const transaction = yield* Schema.decodeUnknownEffect(TransactionId)(transactionId).pipe(
+      Effect.mapError(storeError("appendMany.decode.transaction"))
+    )
     const decoded = yield* Effect.forEach(events, (event) =>
       Schema.decodeUnknownEffect(WorkGoalCheckpoint)(event).pipe(
         Effect.mapError(storeError("appendMany.decode.event"))
@@ -403,6 +414,7 @@ export class WorkStore implements WorkStoreService {
     )
     const transactionRecord = JSON.stringify({ digest, version: "herdr.work.transaction.v2" })
     const transactionEntryBytes = utf8.encode(transaction).byteLength + utf8.encode(transactionRecord).byteLength
+    yield* this.secureFiles()
     const decision = yield* Effect.try({
       try: () => {
         let inTransaction = false
@@ -465,12 +477,14 @@ export class WorkStore implements WorkStoreService {
                FROM work_goal_events`
             ).all()
           )
+          const rowsByEventId = new Map(rows.map((row) => [row.eventId, row]))
+          const rowsByGoalTime = new Map(rows.map((row) => [
+            JSON.stringify([row.goalId, row.occurredAt]),
+            row
+          ]))
           const existing = decoded.map((event) => {
-            const row = rows.find(
-              (candidate) =>
-                candidate.eventId === event.eventId ||
-                (candidate.goalId === event.goal.id && candidate.occurredAt === event.occurredAt)
-            )
+            const row = rowsByEventId.get(event.eventId) ??
+              rowsByGoalTime.get(JSON.stringify([event.goal.id, event.occurredAt]))
             return row === undefined
               ? undefined
               : Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(row.record))
@@ -620,9 +634,7 @@ export class WorkStore implements WorkStoreService {
               })
             } satisfies AppendManyDecision
           }
-          const history = Schema.decodeUnknownSync(StoredEventRows)(
-            this.#database.prepare("SELECT record FROM work_goal_events").all()
-          ).map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+          const history = rows.map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
           const prospective = [...history, ...newEvents].toSorted((left, right) =>
             left.occurredAt - right.occurredAt || left.eventId.localeCompare(right.eventId)
           )
@@ -746,8 +758,6 @@ export class WorkStore implements WorkStoreService {
       catch: storeError("appendMany.insert")
     })
     if (decision._tag === "rejected") return yield* decision.error
-    if (decision._tag === "replayed") return decision.events
-    yield* this.secureFiles()
     return decision.events
   })
 
@@ -758,6 +768,7 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(WorkLaneClaim)(claim).pipe(
       Effect.mapError(storeError("claim.decode"))
     )
+    yield* this.secureFiles()
     const decision = yield* Effect.try({
       try: () => {
         let inTransaction = false
@@ -813,7 +824,6 @@ export class WorkStore implements WorkStoreService {
       catch: storeError("claim.write")
     })
     if (decision._tag === "conflict") return yield* decision.error
-    yield* this.secureFiles()
     return decision.value
   })
 
@@ -824,6 +834,9 @@ export class WorkStore implements WorkStoreService {
     const decoded = yield* Schema.decodeUnknownEffect(WorkDecisionHandoff)(handoff).pipe(
       Effect.mapError(storeError("decision.decode"))
     )
+    yield* this.secureFiles()
+    const encodedHandoff = JSON.stringify(decoded)
+    const handoffEntryBytes = utf8.encode(decoded.id).byteLength + utf8.encode(encodedHandoff).byteLength
     const result = yield* Effect.try({
       try: () => {
         let inTransaction = false
@@ -844,9 +857,42 @@ export class WorkStore implements WorkStoreService {
               error: new WorkDecisionHandoffConflictError({ handoffId: decoded.id })
             } satisfies HandoffDecision
           }
+          const decisionCount = Schema.decodeUnknownSync(CountRow)(
+            this.#database.prepare("SELECT COUNT(*) AS count FROM work_decision_handoffs").get()
+          ).count
+          if (decisionCount >= workDecisionMaxRecords) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work decision history cannot exceed ${workDecisionMaxRecords} handoffs`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies HandoffDecision
+          }
+          const decisionBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+            this.#database.prepare(
+              `SELECT COALESCE(SUM(length(CAST(handoff_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+               FROM work_decision_handoffs`
+            ).get()
+          ).bytes
+          if (decisionBytes + handoffEntryBytes > workDecisionMaxBytes) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work decision history cannot exceed ${workDecisionMaxBytes} encoded bytes`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies HandoffDecision
+          }
           this.#database.prepare(
             "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-          ).run(decoded.id, decoded.laneId, decoded.occurredAt, JSON.stringify(decoded))
+          ).run(decoded.id, decoded.laneId, decoded.occurredAt, encodedHandoff)
           this.#database.exec("COMMIT")
           inTransaction = false
           return { _tag: "inserted", value: decoded } satisfies HandoffDecision
@@ -857,8 +903,7 @@ export class WorkStore implements WorkStoreService {
       },
       catch: storeError("decision.write")
     })
-    if (result._tag === "conflict") return yield* result.error
-    if (result._tag === "inserted") yield* this.secureFiles()
+    if (result._tag === "conflict" || result._tag === "rejected") return yield* result.error
     return result.value
   })
 

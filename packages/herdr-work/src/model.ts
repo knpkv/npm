@@ -1,7 +1,11 @@
 import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
-const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+const Identifier = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
 // Approval hosts are bounded identifiers, not DNS names; the approvals app also
 // accepts labels such as "PI 5".
 const ApprovalHostName = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
@@ -244,17 +248,16 @@ export interface WorkGoalCheckpoint extends Schema.Schema.Type<typeof WorkGoalCh
 const CanonicalWorktree = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(2_048),
+  Schema.isPattern(/^[^\p{Cc}]+$/u),
   Schema.makeFilter(
-    (value) =>
-      value.startsWith("/") &&
-      !value.includes("\u0000") &&
-      !value.includes("//") &&
-      !value.includes("/./") &&
-      !value.includes("/../") &&
-      value !== "/.." &&
-      !value.endsWith("/.") &&
-      !value.endsWith("/..") &&
-      !value.endsWith("/"),
+    (value) => {
+      const isPosix = value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")
+      const isWindows = /^[A-Za-z]:[\\/]/.test(value) && !(value.includes("/") && value.includes("\\"))
+      if (!isPosix && !isWindows) return false
+      const separator = isPosix || value.includes("/") ? "/" : "\\"
+      const parts = value.split(separator)
+      return parts.slice(1).every((part) => part.length > 0 && part !== "." && part !== "..")
+    },
     { expected: "an absolute canonical worktree path" }
   )
 )
@@ -266,6 +269,7 @@ const Branch = Schema.String.check(
   Schema.makeFilter(
     (value) =>
       value !== "@" &&
+      value !== "HEAD" &&
       !value.startsWith("-") &&
       !value.startsWith("/") &&
       !value.endsWith("/") &&
@@ -313,7 +317,12 @@ export interface WorkLaneClaim extends Schema.Schema.Type<typeof WorkLaneClaim> 
 export const WorkLaneClaimed = Schema.Struct({
   ...WorkLaneClaim.fields,
   revision: Revision
-})
+}).check(
+  Schema.makeFilter(
+    ({ expectedRevision, revision }) => revision === expectedRevision + 1,
+    { expected: "a claimed revision exactly one greater than its expected revision" }
+  )
+)
 export interface WorkLaneClaimed extends Schema.Schema.Type<typeof WorkLaneClaimed> {}
 
 export const WorkDecisionHandoff = Schema.Struct({

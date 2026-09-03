@@ -2,7 +2,11 @@ import { JobActor, JobIdentifier, JobPayload } from "@knpkv/herdr-fleet/model"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet/response"
 import { Schema } from "effect"
 
-const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+const Identifier = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
 const Detail = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096))
 const utf8 = new TextEncoder()
 const utf8MaxBytes = (maximumBytes: number) =>
@@ -24,6 +28,9 @@ export type DispatchRequestId = typeof DispatchRequestId.Type
 
 export const ActivityIdempotencyKey = Identifier
 export type ActivityIdempotencyKey = typeof ActivityIdempotencyKey.Type
+
+export const OrchestratorIdempotencyKey = Identifier
+export type OrchestratorIdempotencyKey = typeof OrchestratorIdempotencyKey.Type
 
 /** The only command family accepted by the durable coordinator. */
 export const OrchestratorCommand = Schema.Struct({
@@ -79,9 +86,16 @@ const OrchestratorSettledEvent = Schema.Struct({
   result: OrchestratorResult
 })
 
-const OrchestratorFailureEvent = Schema.Struct({
+const OrchestratorDeliveryFailedEvent = Schema.Struct({
   ...orchestratorEventFields,
-  type: Schema.Literals(["delivery_failed", "task_failed"]),
+  type: Schema.Literal("delivery_failed"),
+  detail: Detail,
+  result: Schema.Null
+})
+
+const OrchestratorTaskFailedEvent = Schema.Struct({
+  ...orchestratorEventFields,
+  type: Schema.Literal("task_failed"),
   detail: Detail,
   result: Schema.Null
 })
@@ -91,26 +105,48 @@ export const OrchestratorEvent = Schema.Union([
   OrchestratorQueuedEvent,
   OrchestratorRunningEvent,
   OrchestratorSettledEvent,
-  OrchestratorFailureEvent
+  OrchestratorDeliveryFailedEvent,
+  OrchestratorTaskFailedEvent
 ])
 export type OrchestratorEvent = typeof OrchestratorEvent.Type
 
 export const OrchestratorPendingDispatchStatus = Schema.Literals(["accepted", "queued"])
 export type OrchestratorPendingDispatchStatus = typeof OrchestratorPendingDispatchStatus.Type
 
+const PendingPageLimit = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 1, maximum: 256 })
+)
+export const OrchestratorPendingCursor = Schema.Struct({
+  acceptedAt: Timestamp,
+  dispatchRequestId: DispatchRequestId
+})
+export type OrchestratorPendingCursor = typeof OrchestratorPendingCursor.Type
+
+export const OrchestratorPendingQuery = Schema.Struct({
+  limit: Schema.optional(PendingPageLimit),
+  after: Schema.optional(OrchestratorPendingCursor)
+})
+export interface OrchestratorPendingQuery extends Schema.Schema.Type<typeof OrchestratorPendingQuery> {}
+
 export const OrchestratorPendingDispatch = Schema.Struct({
   dispatchRequestId: DispatchRequestId,
-  idempotencyKey: Identifier,
+  idempotencyKey: OrchestratorIdempotencyKey,
   activityIdempotencyKey: ActivityIdempotencyKey,
   command: OrchestratorCommand,
   acceptedAt: Timestamp,
   status: OrchestratorPendingDispatchStatus
-})
+}).check(
+  Schema.makeFilter(
+    ({ activityIdempotencyKey, command }) => activityIdempotencyKey === command.activityIdempotencyKey,
+    { expected: "pending activity idempotency key equal to its command key" }
+  )
+)
 export type OrchestratorPendingDispatch = typeof OrchestratorPendingDispatch.Type
 
 export const OrchestratorReceipt = Schema.Struct({
   dispatchRequestId: DispatchRequestId,
-  idempotencyKey: Identifier,
+  idempotencyKey: OrchestratorIdempotencyKey,
   acceptedAt: Timestamp,
   status: Schema.Literal("accepted")
 })

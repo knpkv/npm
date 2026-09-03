@@ -16,6 +16,7 @@ import {
   type WorkGoalFamily,
   workHistoryMaxEvents,
   WorkLaneClaim,
+  WorkLaneClaimed,
   workSnapshotMaxGoals,
   WorkStore
 } from "../src/index.js"
@@ -391,6 +392,11 @@ describe("durable Work projection", () => {
       const store = yield* WorkStore.open(join(directory, "work.sqlite"))
       yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
       const service = yield* makeWorkService(store)
+      for (const transactionId of ["transaction-\uD800", "transaction-\uDC00"]) {
+        expect(yield* Effect.result(service.recordMany(transactionId, [history[0]]))).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "appendMany.decode.transaction" }
+        })
+      }
       expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
       expect(yield* service.recordMany("transaction-1", history.slice(0, 2))).toEqual(history.slice(0, 2))
       const changed = { ...history[1], goal: { ...history[1].goal, summary: "changed transaction" } }
@@ -423,6 +429,7 @@ describe("durable Work projection", () => {
       )
 
       expect(yield* service.recordMany("transaction-linear-snapshot", events)).toEqual(events)
+      expect(yield* service.recordMany("transaction-linear-replay", events)).toEqual(events)
       expect(yield* store.list()).toHaveLength(workHistoryMaxEvents)
     }).pipe(provideNodeServices), 30_000)
 
@@ -480,6 +487,45 @@ describe("durable Work projection", () => {
         failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
       })
       expect(yield* reopened.list()).toEqual([event])
+    }).pipe(provideNodeServices))
+
+  it.effect("bounds durable decision handoffs by encoded bytes", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-decision-bytes-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const store = yield* WorkStore.open(path)
+      store.close()
+
+      const handoff: WorkDecisionHandoff = {
+        decision: "handoff",
+        goalId: "goal-decision-cap",
+        id: "handoff-overflow",
+        laneId: "goal-decision-cap",
+        occurredAt: 0,
+        owner: { id: "owner-packages", name: "Package owner" },
+        summary: "x".repeat(4_096),
+        version: "herdr.work.decision.v1"
+      }
+      const database = new DatabaseSync(path)
+      database.exec("BEGIN IMMEDIATE")
+      const insert = database.prepare(
+        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+      )
+      for (let index = 0; index < 500; index++) {
+        const seeded = { ...handoff, id: `handoff-seed-${index}`, occurredAt: index }
+        insert.run(seeded.id, seeded.laneId, seeded.occurredAt, JSON.stringify(seeded))
+      }
+      database.exec("COMMIT")
+      database.close()
+
+      const reopened = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => reopened.close()))
+      const service = yield* makeWorkService(reopened)
+      expect(yield* Effect.result(service.handoff(handoff))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+      })
+      expect(yield* service.decisions(handoff.laneId)).toHaveLength(500)
     }).pipe(provideNodeServices))
 
   it.effect("compare-and-set claims and retains compact decision handoffs", () =>
@@ -545,14 +591,41 @@ describe("durable Work projection", () => {
           failure: {}
         })
       }
-      for (const branch of ["/main", "main/", "foo..bar", "foo.lock", ".hidden"]) {
+      for (const branch of ["/main", "main/", "foo..bar", "foo.lock", ".hidden", "HEAD"]) {
         expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, branch }))).toMatchObject({
           failure: {}
         })
       }
-      for (const branch of ["main", "feat/durable-work"]) {
+      for (const branch of ["main", "head", "feat/durable-work"]) {
         expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, branch })).toMatchObject({ branch })
       }
+      for (const worktree of ["C:\\repo\\worktree", "C:/repo/worktree"]) {
+        expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree })).toMatchObject({ worktree })
+      }
+      for (const worktree of ["C:\\repo\\..\\other", "C:/repo/../other"]) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
+          failure: {}
+        })
+      }
+      const invalidRevisions: ReadonlyArray<readonly [number, number]> = [[3, 3], [3, 5]]
+      for (const [expectedRevision, revision] of invalidRevisions) {
+        expect(
+          yield* Effect.result(
+            Schema.decodeUnknownEffect(WorkLaneClaimed)({
+              ...claim,
+              expectedRevision,
+              revision
+            })
+          )
+        ).toMatchObject({ failure: {} })
+      }
+      expect(
+        yield* Schema.decodeUnknownEffect(WorkLaneClaimed)({
+          ...claim,
+          expectedRevision: 3,
+          revision: 4
+        })
+      ).toMatchObject({ expectedRevision: 3, revision: 4 })
     }).pipe(provideNodeServices))
 
   it.effect("reads a durable lane claim after reopening the store", () =>
