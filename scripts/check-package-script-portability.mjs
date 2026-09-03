@@ -55,9 +55,14 @@ const browserPairingConsumerLifecycleRequirements = [
   }
 ]
 const codeCommitWebLifecycleRequirements = browserPairingConsumerLifecycleRequirements
-const controlCenterLifecycleRequirements = browserPairingConsumerLifecycleRequirements.filter(({ script }) =>
-  ["predev", "pretest", "prebuild", "precheck"].includes(script)
-)
+const controlCenterRoleCheck = (command) =>
+  hasExecutableLifecycleCommand(command, codeCommitWebRoleCheck) ||
+  /(?:^|&&)\s*tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit\s*$/u.test(command)
+const controlCenterLifecycleRequirements = browserPairingConsumerLifecycleRequirements
+  .filter(({ script }) => ["predev", "pretest", "prebuild", "precheck", "check"].includes(script))
+  .map((requirement) =>
+    requirement.script === "check" ? { ...requirement, matches: controlCenterRoleCheck } : requirement
+  )
 const codeCommitLifecycleRequirements = ["prestart", "prestart:web"].map((script) => ({
   script,
   description: "a browser-pairing build",
@@ -432,6 +437,17 @@ const firstExecutableWord = (text) => {
   return undefined
 }
 
+const hasPathMutation = (text) => {
+  const words = shellWords(text)
+  if (words === undefined) return true
+  const executableIndex = words.findIndex((word) => !assignmentWord.test(word))
+  const assignments = words.slice(0, executableIndex === -1 ? words.length : executableIndex)
+  return (
+    assignments.some((word) => /^PATH=/u.test(word)) ||
+    (words[0] === "export" && words.slice(1).some((word) => /^PATH=/u.test(word)))
+  )
+}
+
 const extractAliasMutations = (segments, reachability, aliases = []) => {
   const mutations = []
   for (const [index, segment] of segments.entries()) {
@@ -730,6 +746,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const aliases = resolveAliasMutations(segments, definitions)
   if (aliases === undefined) return false
   const reachability = segmentReachability(segments, definitions, aliases)
+  if (segments.some(({ text }, index) => reachability[index] && hasPathMutation(text))) return false
   if (
     segments.some(({ text, nextOperator, start }, index) => {
       if (!reachability[index] || !hasStatusSafeContinuation(segments, index, nextOperator)) {
@@ -1772,7 +1789,8 @@ const controlCenterScripts = {
   predev: "pnpm --filter @knpkv/browser-pairing build",
   pretest: "pnpm --filter @knpkv/browser-pairing build",
   prebuild: "pnpm --filter @knpkv/browser-pairing build",
-  precheck: "pnpm --filter @knpkv/browser-pairing build"
+  precheck: "pnpm --filter @knpkv/browser-pairing build",
+  check: "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit"
 }
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
@@ -1789,6 +1807,14 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/control-center/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/control-center/package.json",
+    { ...controlCenterScripts, check: "tsc -b tsconfig.json" },
+    browserPairingDependency
+  ),
+  ["packages/control-center/package.json: scripts.check must include the role-aware tsc check"]
 )
 
 const lifecycleGap = (script) =>
@@ -1817,6 +1843,26 @@ pnpm --filter @knpkv/browser-pairing build`
     [lifecycleGap("predev")]
   )
 }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev:
+        "mkdir -p /tmp/fake; ln -sf /usr/bin/true /tmp/fake/pnpm; PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  [lifecycleGap("predev")]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "FOO=1; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
