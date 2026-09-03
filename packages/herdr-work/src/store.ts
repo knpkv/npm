@@ -797,6 +797,18 @@ export class WorkStore implements WorkStoreService {
               })
             } satisfies ClaimDecision
           }
+          if (actualRevision >= Number.MAX_SAFE_INTEGER) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: "work lane claim revision cannot exceed Number.MAX_SAFE_INTEGER",
+                reason: "capacity_exceeded"
+              })
+            } satisfies ClaimDecision
+          }
           const revision = actualRevision + 1
           const result: WorkLaneClaimed = { ...decoded, revision }
           const encodedRecord = JSON.stringify(result)
@@ -979,6 +991,12 @@ export class WorkStore implements WorkStoreService {
       return yield* new WorkStoreError({
         cause: { laneId: decodedLaneId, rowRevision: row.revision, recordRevision: claimed.revision },
         operation: "claim.read.revision-mismatch"
+      })
+    }
+    if (claimed.laneId !== decodedLaneId) {
+      return yield* new WorkStoreError({
+        cause: { requestedLaneId: decodedLaneId, recordLaneId: claimed.laneId },
+        operation: "claim.read.lane-mismatch"
       })
     }
     return Option.some(claimed)

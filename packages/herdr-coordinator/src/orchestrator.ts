@@ -553,7 +553,7 @@ export const sqliteLayer = (filename: string) =>
       const directoryInfo = yield* fileSystem.stat(directory).pipe(
         Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.stat" }))
       )
-      const privateMode = paths.sep !== "/" || (directoryInfo.mode & 0o777) === 0o700
+      const privateMode = paths.sep === "/" && (directoryInfo.mode & 0o777) === 0o700
       if (directoryInfo.type !== "Directory" || !privateMode) {
         return yield* new OrchestratorStorageError({
           cause: { directory, mode: directoryInfo.mode, type: directoryInfo.type },

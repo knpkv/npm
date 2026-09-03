@@ -651,6 +651,21 @@ describe("durable Work projection", () => {
       for (const branch of ["main", "head", "feat/durable-work"]) {
         expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, branch })).toMatchObject({ branch })
       }
+      expect(
+        yield* Effect.result(
+          Schema.decodeUnknownEffect(WorkLaneClaim)({
+            ...claim,
+            expectedRevision: Number.MAX_SAFE_INTEGER
+          })
+        )
+      ).toMatchObject({ failure: {} })
+      expect(
+        yield* Schema.decodeUnknownEffect(WorkLaneClaimed)({
+          ...claim,
+          expectedRevision: Number.MAX_SAFE_INTEGER - 1,
+          revision: Number.MAX_SAFE_INTEGER
+        })
+      ).toMatchObject({ expectedRevision: Number.MAX_SAFE_INTEGER - 1, revision: Number.MAX_SAFE_INTEGER })
       for (const worktree of ["C:\\repo\\worktree", "C:/repo/worktree"]) {
         expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree })).toMatchObject({ worktree })
       }
@@ -819,6 +834,27 @@ describe("durable Work projection", () => {
         })
       )
       expect(Option.isNone(unknown)).toBe(true)
+
+      const database = new DatabaseSync(path)
+      database.prepare(
+        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+      ).run(
+        "goal-key",
+        1,
+        JSON.stringify({ ...claim, laneId: "goal-record", revision: 1 })
+      )
+      database.close()
+      const mismatch = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* WorkStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const service = yield* makeWorkService(store)
+          return yield* Effect.result(service.currentClaim("goal-key"))
+        })
+      )
+      expect(mismatch).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "claim.read.lane-mismatch" }
+      })
     }).pipe(provideNodeServices))
 
   it.effect("rejects cross-history inconsistencies before durable mutation", () =>

@@ -291,6 +291,10 @@ const Revision = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
 )
+const ExpectedRevision = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 })
+)
 
 export const WorkLanePhase = Schema.Literals([
   "claim",
@@ -310,7 +314,7 @@ export const WorkLaneClaim = Schema.Struct({
   owner: WorkOwner,
   parent: Schema.NullOr(Identifier),
   phase: WorkLanePhase,
-  expectedRevision: Revision
+  expectedRevision: ExpectedRevision
 })
 export interface WorkLaneClaim extends Schema.Schema.Type<typeof WorkLaneClaim> {}
 
