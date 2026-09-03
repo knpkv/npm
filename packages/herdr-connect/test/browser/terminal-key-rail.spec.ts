@@ -24,6 +24,10 @@ type TerminalOutputBoundary = {
   readonly run: (write: () => void) => void
 }
 
+type TerminalOutputWriter = {
+  readonly write: (data: Uint8Array) => void
+}
+
 type PendingTerminalInput = {
   readonly push: (text: string) => "overflow" | "queued"
 }
@@ -49,6 +53,11 @@ declare global {
       options: TerminalInputHandlerOptions
     ) => (text: string) => void
     terminalOutputBoundary?: TerminalOutputBoundary
+    writeTerminalOutput?: (
+      terminal: TerminalOutputWriter,
+      data: Uint8Array,
+      outputBoundary: TerminalOutputBoundary
+    ) => void
   }
 }
 
@@ -72,7 +81,7 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
   await page.addScriptTag({ path: ghosttyScript })
   await page.addScriptTag({
     content:
-      `${terminalOutputSource}\nwindow.terminalOutputBoundary = makeTerminalOutputBoundary()\nwindow.makeTerminalInputHandler = makeTerminalInputHandler`,
+      `${terminalOutputSource}\nwindow.terminalOutputBoundary = makeTerminalOutputBoundary()\nwindow.makeTerminalInputHandler = makeTerminalInputHandler\nwindow.writeTerminalOutput = writeTerminalOutput`,
     type: "module"
   })
 
@@ -89,6 +98,8 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
     if (outputBoundary === undefined) throw new Error("terminal output boundary missing")
     const makeTerminalInputHandler = window.makeTerminalInputHandler
     if (makeTerminalInputHandler === undefined) throw new Error("terminal input handler missing")
+    const writeTerminalOutput = window.writeTerminalOutput
+    if (writeTerminalOutput === undefined) throw new Error("terminal output writer missing")
     const pendingInput: PendingTerminalInput = { push: () => "queued" }
     const input = makeTerminalInputHandler({
       applyInput: (value) => {
@@ -112,7 +123,7 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
     })
     const subscription = terminal.onData(input)
 
-    outputBoundary.run(() => terminal.write("\u001b[6n"))
+    writeTerminalOutput(terminal, new TextEncoder().encode("\u001b[6n"), outputBoundary)
     await new Promise((resolve) => setTimeout(resolve, 100))
     terminal.input("c", true)
     subscription.dispose()

@@ -6,6 +6,10 @@ export type TerminalOutputBoundary = {
   readonly run: (write: () => void) => void
 }
 
+type TerminalOutputWriter = {
+  readonly write: (data: Uint8Array) => void
+}
+
 /** Mark synchronous Ghostty output so generated protocol replies bypass key modifiers. */
 export const makeTerminalOutputBoundary = (): TerminalOutputBoundary => {
   let depth = 0
@@ -21,6 +25,13 @@ export const makeTerminalOutputBoundary = (): TerminalOutputBoundary => {
     }
   }
 }
+
+/** Render server output through the production provenance boundary. */
+export const writeTerminalOutput = (
+  terminal: TerminalOutputWriter,
+  data: Uint8Array,
+  outputBoundary: TerminalOutputBoundary
+): void => outputBoundary.run(() => terminal.write(data))
 
 export type TerminalInputFailure = "connection_unavailable" | "input_queue_overflow"
 

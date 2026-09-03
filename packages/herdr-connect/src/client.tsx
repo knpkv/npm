@@ -25,7 +25,12 @@ import {
   pageScrollCommand,
   wheelScrollCommand
 } from "./terminal-input.js"
-import { makeTerminalInputHandler, makeTerminalOutputBoundary, type TerminalOutputBoundary } from "./terminal-output.js"
+import {
+  makeTerminalInputHandler,
+  makeTerminalOutputBoundary,
+  type TerminalOutputBoundary,
+  writeTerminalOutput
+} from "./terminal-output.js"
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
@@ -230,7 +235,7 @@ const renderTerminalOutput = (
   Effect.runFork(
     Effect.try({
       try: () => {
-        outputBoundary.run(() => terminal.write(data))
+        writeTerminalOutput(terminal, data, outputBoundary)
       },
       catch: (cause) =>
         new ConnectProtocolError({
