@@ -84,15 +84,31 @@ const credentialKey =
 const decodeCredentialKey = (value: string): string =>
   value.replace(/\\u([0-9a-f]{4})/giu, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
 
+const quotedValueEnd = (value: string, start: number, quote: string): number | undefined => {
+  for (let index = start + 1; index < value.length; index += 1) {
+    if (value[index] === "\\") {
+      index += 1
+    } else if (value[index] === quote) {
+      return index + 1
+    }
+  }
+  return undefined
+}
+
 const sanitizeQuotedPlainCredentials = (value: string): string => {
   for (const match of value.matchAll(quotedCredentialAssignmentKey)) {
     const key = decodeCredentialKey(match[1] ?? match[2] ?? "")
     if (!credentialKey.test(key)) continue
     const valueStart = (match.index ?? 0) + match[0].length
     const firstValueCharacter = value[valueStart]
-    if (firstValueCharacter !== undefined && firstValueCharacter !== "\"" && firstValueCharacter !== "'") {
+    if (firstValueCharacter === undefined) continue
+    if (firstValueCharacter === "\"" || firstValueCharacter === "'") {
+      const valueEnd = quotedValueEnd(value, valueStart, firstValueCharacter)
+      if (valueEnd !== undefined && /^\s*[\]}]\s*$/u.test(value.slice(valueEnd))) continue
+    } else {
       return `${value.slice(0, valueStart)}${redactedCredential}`
     }
+    return `${value.slice(0, valueStart)}${redactedCredential}`
   }
   return value
 }

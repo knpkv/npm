@@ -345,6 +345,7 @@ describe("sanitized approval requests", () => {
       { ref: '{"pass\\u0077ord":"escaped-json-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password": plain-json-leaked-canary}', redacted: "[redacted credential]" },
       { ref: '{"Authorization": Bearer plain-auth-leaked-canary}', redacted: "[redacted credential]" },
+      { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
         redacted: "%5Bredacted%20credential%5D"
