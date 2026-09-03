@@ -58,7 +58,7 @@ export const SanitizedJobRecord = Schema.Struct({
 export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
 const credentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n]+))/giu
@@ -67,6 +67,7 @@ const encodedCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))%(?:25){0,2}(?:3d|3a))([^/?#\s&]*)/giu
 const safeUriQueryKeys = new Set(["branch", "ref", "revision", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
+const encodedUriAuthorityBoundary = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*%(?:25){0,2}2f/iu
 const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
 const encodedUriMaxDepth = 3
 
@@ -123,7 +124,9 @@ const sanitizeEncodedPathSegment = (value: string): string => {
   const encoded = encodedText(value)
   if (encoded === undefined) return sanitizeCredentialText(value)
   if (encoded._tag !== "encoded") return redactedCredential
-  let sanitized = sanitizeCredentialText(encoded.value)
+  let sanitized = uriPrefix.test(encoded.value)
+    ? sanitizeDecodedUri(encoded.value)
+    : sanitizeCredentialText(encoded.value)
   for (let layer = 0; layer < encoded.layers; layer += 1) {
     sanitized = encodeURIComponent(sanitized)
   }
@@ -138,11 +141,12 @@ const sanitizeEncodedUriPath = (value: string): string =>
   )
 
 const sanitizeEncodedUri = (value: string): string => {
+  if (uriPrefix.test(value) && !encodedUriAuthorityBoundary.test(value)) return sanitizeDecodedUri(value)
   const encoded = encodedText(value)
-  if (encoded === undefined) return sanitizeUriQueryParameters(value)
+  if (encoded === undefined) return sanitizeDecodedUri(value)
   if (encoded._tag !== "encoded") return redactedCredential
   try {
-    let sanitized = sanitizeCredentialText(sanitizeUriQueryParameters(encoded.value))
+    let sanitized = sanitizeDecodedUri(encoded.value)
     for (let layer = 0; layer < encoded.layers; layer += 1) {
       sanitized = encodeURIComponent(sanitized)
     }
@@ -151,6 +155,11 @@ const sanitizeEncodedUri = (value: string): string => {
     return redactedCredential
   }
 }
+
+const sanitizeDecodedUri = (value: string): string =>
+  sanitizeEncodedCredentialAssignments(
+    sanitizeEncodedUriPath(sanitizeCredentialText(sanitizeUriQueryParameters(value)))
+  )
 
 const sanitizeUriQueryParameters = (value: string): string => {
   if (encodedUriPrefix.test(value)) return sanitizeEncodedUri(value)
@@ -171,9 +180,7 @@ const sanitizeUriQueryParameters = (value: string): string => {
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
   const sanitized = uriPrefix.test(value) || encodedUriPrefix.test(value)
-    ? sanitizeEncodedCredentialAssignments(
-      sanitizeEncodedUriPath(sanitizeCredentialText(sanitizeUriQueryParameters(value)))
-    )
+    ? sanitizeEncodedUri(value)
     : encodedText(value) === undefined
     ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
     : sanitizeEncodedUri(value)

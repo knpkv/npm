@@ -398,6 +398,33 @@ describe("sanitized approval requests", () => {
     expect(visible.fields[0]?.value).toContain("visible-value")
   })
 
+  it("redacts credentials across encoded URI boundaries", () => {
+    const refs = [
+      {
+        ref: "https://example.test%2Frepo%2Fpass%77ord%3Dleaked-canary",
+        visible: "%5Bredacted%20credential%5D"
+      },
+      {
+        ref: "https://mirror.test/cache/https%3A%2F%2Fuser%3Aleaked-canary%40origin.test",
+        visible: "origin.test"
+      },
+      {
+        ref: "https://mirror.test/cache/https%3A%2F%2Forigin.test%2Frepo",
+        visible: "origin.test%2Frepo"
+      }
+    ]
+    for (const { ref, visible } of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("leaked-canary")
+      expect(request.fields[0]?.value).toContain(visible)
+    }
+  })
+
   it("redacts unsafe query values through raw whitespace", () => {
     const refs = [
       "https://example.test/repo?X-Amz-Signature=first-secret second-secret",
@@ -453,6 +480,24 @@ describe("sanitized approval requests", () => {
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: 'ref="release candidate"' }).fields[0]?.value).toBe(
       'ref="release candidate"'
+    )
+  })
+
+  it("redacts unterminated quoted credentials through the end of the value", () => {
+    const refs = ['password="first-secret second-secret', "password='first-secret second-secret"]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("first-secret")
+      expect(encoded).not.toContain("second-secret")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(approvalRequestFor({ kind: "nix.apply", ref: 'ref="release candidate' }).fields[0]?.value).toBe(
+      'ref="release candidate'
     )
   })
 
