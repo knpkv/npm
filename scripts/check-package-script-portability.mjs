@@ -980,24 +980,30 @@ const hasReachableCommandCacheMutation = (command, aliases = undefined, offset =
   })
 }
 
-const hasInvokedCommand = (source, name, definitions = [], aliases = [], offset = 0) => {
+const invokedCommandStarts = (source, name, definitions = [], aliases = [], offset = 0) => {
   const segments = rebaseShellSegments(shellCommandSegments(source, true), offset)
   const reachability = segmentReachability(segments, definitions, aliases)
-  return segments.some((segment, index) => {
+  return segments.flatMap((segment, index) => {
     const { start, text } = segment
-    if (!reachability[index]) return false
-    if (resolvedShellCommandName(text, start, aliases) === name) return true
+    if (!reachability[index]) return []
+    const starts = resolvedShellCommandName(text, start, aliases) === name ? [start] : []
     const body = groupedCommandBody(text)
-    return body !== undefined && hasInvokedCommand(body, name, definitions, aliases, start + text.indexOf(body))
+    return body === undefined
+      ? starts
+      : starts.concat(invokedCommandStarts(body, name, definitions, aliases, start + text.indexOf(body)))
   })
 }
+
+const hasInvokedCommand = (source, name, definitions = [], aliases = [], offset = 0) =>
+  invokedCommandStarts(source, name, definitions, aliases, offset).length > 0
 
 const hasUnsafeInvokedFunction = (
   command,
   visited = new Set(),
   inheritedAliases = [],
   inheritedDefinitions = [],
-  offset = 0
+  offset = 0,
+  executionPosition = undefined
 ) => {
   const { definitions: localDefinitions, source } = extractFunctionDefinitions(command)
   const definitions = [
@@ -1021,22 +1027,28 @@ const hasUnsafeInvokedFunction = (
   if (hasUnsupportedShellControl(source, aliases, offset)) return true
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
-    const invoked = hasInvokedCommand(source, definition.name, definitions, aliases, offset)
-    const activeDefinition = definitions
-      .filter((candidate) => candidate.name === definition.name && candidate.end <= definition.end)
-      .at(-1)
-    if (activeDefinition !== definition && !definition.grouped) return false
-    return (
-      (definition.grouped || invoked) &&
-      (hasShellTermination(definition.body, aliases, definition.start) ||
+    const invocationStarts = definition.grouped
+      ? [definition.start]
+      : invokedCommandStarts(source, definition.name, definitions, aliases, offset)
+    const hasLocalDefinition = localDefinitions.some((candidate) => candidate.name === definition.name)
+    return invocationStarts.some((invokedAt) => {
+      const lookupPosition = hasLocalDefinition ? invokedAt : (executionPosition ?? invokedAt)
+      const activeDefinition = definitions
+        .filter((candidate) => candidate.name === definition.name && candidate.end <= lookupPosition)
+        .at(-1)
+      if (!definition.grouped && activeDefinition !== definition) return false
+      return (
+        hasShellTermination(definition.body, aliases, definition.start) ||
         hasUnsafeInvokedFunction(
           definition.body,
           new Set([...visited, definition.name]),
           aliases,
           definitions,
-          definition.start
-        ))
-    )
+          definition.start,
+          executionPosition ?? invokedAt
+        )
+      )
+    })
   })
 }
 
@@ -2540,6 +2552,18 @@ for (const command of [
   )
   assert.deepEqual(result, [lifecycleGap("predev")])
 }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev:
+        "stop() { exit 0; }; wrapper() { stop; }; stop() { :; }; wrapper; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  []
+)
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
