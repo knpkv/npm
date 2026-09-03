@@ -332,9 +332,33 @@ const extractFunctionDefinitions = (command) => {
 }
 
 const firstShellWord = (text) => {
-  const raw = text.trim().match(/^(?:(?:\\.)|[A-Za-z0-9_])+/u)?.[0]
-  const normalized = raw?.replaceAll("\\", "")
-  return normalized !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
+  const source = text.trim()
+  let normalized = ""
+  let quote
+  let escaped = false
+  for (const character of source) {
+    if (escaped) {
+      normalized += character
+      escaped = false
+      continue
+    }
+    if (character === "\\" && quote !== "'") {
+      escaped = true
+      continue
+    }
+    if (quote !== undefined) {
+      if (character === quote) quote = undefined
+      else normalized += character
+      continue
+    }
+    if (character === "'" || character === '"') {
+      quote = character
+      continue
+    }
+    if (/\s/u.test(character)) break
+    normalized += character
+  }
+  return quote === undefined && !escaped && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
 }
 
 const extractAliasMutations = (segments, reachability, aliases = []) => {
@@ -803,6 +827,22 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: 'co"mmand" alias pnpm=true\npnpm --filter @knpkv/browser-pairing build' },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: 'co"mmand" alias tsc=true\ntsc -p tsconfig.roles.json --noEmit' },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
