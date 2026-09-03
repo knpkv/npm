@@ -696,6 +696,7 @@ const hasErrexitLifecycleRisk = (segments, definitions, aliases, matcher) => {
 }
 
 const unsupportedShellWords = new Set([
+  "builtin",
   "case",
   "command",
   "do",
@@ -2144,6 +2145,7 @@ for (const command of [
   "set -en; pnpm --filter @knpkv/browser-pairing build",
   'set -o "$opts"; pnpm --filter @knpkv/browser-pairing build',
   "hash -p /usr/bin/true pnpm; pnpm --filter @knpkv/browser-pairing build",
+  "stop() { exit 0; }; builtin eval stop; pnpm --filter @knpkv/browser-pairing build",
   "alias gate=true\n{ gate && alias pnpm=:; }\npnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "> /dev/null local PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build",
@@ -2284,6 +2286,7 @@ for (const invalidRoleCheck of [
   "alias tsc=:; tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
   "setup() { tsc() { :; }; }; setup; tsc -p tsconfig.roles.json --noEmit",
   "hash -p /usr/bin/true tsc; tsc -p tsconfig.roles.json --noEmit",
+  "stop() { exit 0; }; builtin eval stop; tsc -p tsconfig.roles.json --noEmit",
   "test -e package.json && exit 0; tsc -p tsconfig.roles.json --noEmit"
 ]) {
   assert.deepEqual(
@@ -2295,6 +2298,18 @@ for (const invalidRoleCheck of [
     ["packages/control-center/package.json: scripts.check must include the role-aware tsc check"]
   )
 }
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      prepack:
+        "stop() { exit 0; }; builtin eval stop; pnpm --filter @knpkv/browser-pairing build && tsc -b && vite build"
+    },
+    browserPairingDependency
+  ),
+  [lifecycleGap("prepack")]
+)
 
 for (const command of [
   `cleanup() { trap "exit 0" 0; }; { cleanup; }; pnpm --filter @knpkv/browser-pairing build`,
