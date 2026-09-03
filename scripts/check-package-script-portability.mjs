@@ -366,7 +366,7 @@ const extractAliasMutations = (segments, reachability, aliases = []) => {
   for (const [index, segment] of segments.entries()) {
     if (!reachability[index]) continue
     const words = segment.text.trim().split(/\s+/u)
-    const commandName = words[0]
+    const commandName = firstShellWord(segment.text)
     if (commandName !== "alias" && commandName !== "unalias") continue
     if (hasActiveAliasDefinition(segment.text, segment.start, aliases)) continue
     for (const word of words.slice(1)) {
@@ -840,6 +840,22 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: 'co"mmand" alias tsc=true\ntsc -p tsconfig.roles.json --noEmit' },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: 'a"lias" pnpm=true\npnpm --filter @knpkv/browser-pairing build' },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: 'a"lias" tsc=true\ntsc -p tsconfig.roles.json --noEmit' },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
