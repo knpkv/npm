@@ -331,7 +331,14 @@ const extractFunctionDefinitions = (command) => {
   return { definitions, source: withoutDefinitions }
 }
 
-const segmentReachability = (segments) => {
+const firstShellWord = (text) => text.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
+
+const hasActiveFunctionDefinition = (text, start, definitions) => {
+  const commandName = firstShellWord(text)
+  return commandName !== undefined && definitions.some(({ name, end }) => name === commandName && end <= start)
+}
+
+const segmentReachability = (segments, definitions = []) => {
   const reachability = []
   let previousResult = "unknown"
   let terminated = false
@@ -350,7 +357,7 @@ const segmentReachability = (segments) => {
           ? "success"
           : text === "false"
             ? "failure"
-            : isKnownSuccessfulShellCommand(text)
+            : isKnownSuccessfulShellCommand(text, segment.start, definitions)
               ? "success"
               : "unknown"
       if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
@@ -360,13 +367,12 @@ const segmentReachability = (segments) => {
 }
 
 // A command whose failure already fails the lifecycle may continue on its success path.
-const isKnownSuccessfulShellCommand = (text) =>
-  /^(?:printf|echo|:)(?:\s|$)/u.test(text.trim()) ||
-  browserPairingBuild.test(text.trim()) ||
-  codeCommitWebRoleCheck.test(text.trim()) ||
-  /^tsc\s+-b(?:\s|$)/u.test(text.trim())
-
-const firstShellWord = (text) => text.trim().match(/^([A-Za-z_][A-Za-z0-9_]*)(?:\s|$)/u)?.[1]
+const isKnownSuccessfulShellCommand = (text, start, definitions) =>
+  !hasActiveFunctionDefinition(text, start, definitions) &&
+  (/^(?:printf|echo|:)(?:\s|$)/u.test(text.trim()) ||
+    browserPairingBuild.test(text.trim()) ||
+    codeCommitWebRoleCheck.test(text.trim()) ||
+    /^tsc\s+-b(?:\s|$)/u.test(text.trim()))
 
 const unsupportedShellWords = new Set([
   "case",
@@ -396,7 +402,7 @@ const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source)) return true
   const segments = shellCommandSegments(source, true)
-  const reachability = segmentReachability(segments)
+  const reachability = segmentReachability(segments, definitions)
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
     const invoked = segments.some(({ text, start }, index) => {
@@ -411,11 +417,6 @@ const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
       hasUnsafeInvokedFunction(definition.body, new Set([...visited, definition.name]))
     )
   })
-}
-
-const hasActiveFunctionDefinition = (text, start, definitions) => {
-  const commandName = firstShellWord(text)
-  return commandName !== undefined && definitions.some(({ name, end }) => name === commandName && end <= start)
 }
 
 const groupedCommandBody = (text) => {
@@ -454,7 +455,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source) || hasUnsafeInvokedFunction(command, visited)) return false
   const segments = shellCommandSegments(source, true)
-  const reachability = segmentReachability(segments)
+  const reachability = segmentReachability(segments, definitions)
   if (
     segments.some(({ text, nextOperator, start }, index) => {
       if (!reachability[index] || !hasStatusSafeContinuation(segments, index, nextOperator)) {
@@ -999,6 +1000,22 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, check: "tsc -p tsconfig.roles.json --noEmit && vite\ntrue" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "echo() { false; }; echo ready && pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, check: "printf() { false; }; printf ready && tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
