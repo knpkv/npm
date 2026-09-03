@@ -419,6 +419,23 @@ describe("durable Work projection", () => {
       expect(yield* store.list()).toEqual(history.slice(0, 2))
     }).pipe(provideNodeServices))
 
+  it.effect("rejects a transaction extension after an exact replay prefix", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-prefix-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+
+      expect(yield* service.recordMany("transaction-prefix", [history[0]])).toEqual([history[0]])
+      expect(
+        yield* Effect.result(service.recordMany("transaction-prefix", history.slice(0, 2)))
+      ).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-prefix" }
+      })
+      expect(yield* store.list()).toEqual([history[0]])
+    }).pipe(provideNodeServices))
+
   it.effect("keeps maximum same-goal batches within the snapshot budget", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-snapshot-batch-"))
