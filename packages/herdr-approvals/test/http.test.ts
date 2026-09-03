@@ -839,8 +839,10 @@ esac
           const delayedStatusStarted = yield* Deferred.make<void>()
           const releaseDelayedStatus = yield* Deferred.make<void>()
           const overlapPendingPageStarted = yield* Deferred.make<void>()
+          const concurrentDecisionStarted = yield* Deferred.make<void>()
           let delayStatus = false
           let signalOverlapPendingPage = false
+          let signalConcurrentDecision = false
           yield* Effect.forEach(
             Array.from(
               { length: pendingApprovalPageMaxRecords * 40 },
@@ -865,6 +867,11 @@ esac
                   return Deferred.succeed(overlapPendingPageStarted, undefined)
                 })
               ),
+            approve: (jobId, approval, actor) => (signalConcurrentDecision
+              ? Deferred.succeed(concurrentDecisionStarted, undefined).pipe(
+                Effect.andThen(fleet.approve(jobId, approval, actor))
+              )
+              : fleet.approve(jobId, approval, actor)),
             status: () =>
               delayStatus
                 ? Deferred.succeed(delayedStatusStarted, undefined).pipe(
@@ -900,6 +907,10 @@ esac
           const retainedJobId = snapshot.pendingApprovals.local[0]?.id
           if (retainedJobId === undefined) {
             return yield* new FleetValidationError({ detail: "initial pending approval missing" })
+          }
+          const concurrentDecisionJobId = snapshot.pendingApprovals.local.find(({ id }) => id !== retainedJobId)?.id
+          if (concurrentDecisionJobId === undefined) {
+            return yield* new FleetValidationError({ detail: "concurrent pending approval missing" })
           }
           while (snapshot.pendingApprovals.nextCursors.length > 0) {
             const continuation = snapshot.pendingApprovals.nextCursors[0]
@@ -940,6 +951,16 @@ esac
             Effect.promise(() => fetch(`${approvalUrl}/v1/dashboard`, { headers: { ...headers, cookie } }))
           )
           yield* Deferred.await(delayedStatusStarted)
+          signalConcurrentDecision = true
+          const concurrentDecisionFiber = yield* Effect.forkChild(
+            Effect.promise(() =>
+              fetch(`${approvalUrl}/v1/jobs/${concurrentDecisionJobId}/approve`, {
+                headers: { ...headers, cookie, origin },
+                method: "POST"
+              })
+            )
+          )
+          yield* Deferred.await(concurrentDecisionStarted)
           signalOverlapPendingPage = true
           observedAt = 20 * 60 * 1_000
           const overlappingFiber = yield* Effect.forkChild(
@@ -950,6 +971,9 @@ esac
           const refreshed = yield* Fiber.join(refreshedFiber)
           expect(refreshed.status).toBe(200)
           yield* Effect.promise(() => refreshed.text())
+          const concurrentDecision = yield* Fiber.join(concurrentDecisionFiber)
+          expect(concurrentDecision.status).toBe(200)
+          yield* Effect.promise(() => concurrentDecision.text())
           const overlapping = yield* Fiber.join(overlappingFiber)
           expect(overlapping.status).toBe(200)
           yield* Effect.promise(() => overlapping.text())

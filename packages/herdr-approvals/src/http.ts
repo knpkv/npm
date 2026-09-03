@@ -150,15 +150,18 @@ type ApprovalProof = {
 }
 type ApprovalProofUse = {
   readonly approval: Approval
+  readonly lockHeld: boolean
   readonly session: ApprovalProofSession
   readonly sessionToken: string
 }
 type ApprovalProofSession = {
+  disclosing: boolean
   expiresAt: number
   locked: boolean
   waiters: number
   readonly lock: SemaphoreModule.Semaphore
   readonly proofsByJob: Map<string, ApprovalProof>
+  readonly stagedJobIds: Set<string>
   readonly token: string
 }
 type ApprovalProofMutation = {
@@ -1350,15 +1353,18 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
       jobId
     })
   }
-  session.waiters += 1
-  yield* session.lock.take(1).pipe(
-    Effect.ensuring(
-      Effect.sync(() => {
-        session.waiters -= 1
-      })
+  const lockHeld = !(session.disclosing && session.proofsByJob.has(jobId) && !session.stagedJobIds.has(jobId))
+  if (lockHeld) {
+    session.waiters += 1
+    yield* session.lock.take(1).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          session.waiters -= 1
+        })
+      )
     )
-  )
-  session.locked = true
+    session.locked = true
+  }
   const checked = yield* Effect.exit(
     Effect.gen(function*() {
       const proof = session.proofsByJob.get(jobId)
@@ -1387,14 +1393,17 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
       }
       return {
         approval: { hash: proof.hash, nonce: proof.nonce },
+        lockHeld,
         session,
         sessionToken: token
       } satisfies ApprovalProofUse
     })
   )
   if (Exit.isFailure(checked)) {
-    session.locked = false
-    yield* session.lock.release(1)
+    if (lockHeld) {
+      session.locked = false
+      yield* session.lock.release(1)
+    }
     return yield* Effect.failCause(checked.cause)
   }
   return checked.value
@@ -1654,6 +1663,8 @@ export const startHttpServer = async (
           retainApprovalProofJob(jobId)
         }
       }
+      for (const jobId of session.stagedJobIds) session.stagedJobIds.delete(jobId)
+      session.disclosing = false
       session.locked = false
       httpRuntime.runSync(session.lock.release(1))
     }
@@ -1775,11 +1786,13 @@ export const startHttpServer = async (
           const lock = Semaphore.makeUnsafe(1)
           yield* lock.take(1)
           session = {
+            disclosing: true,
             expiresAt: observedAt,
             locked: true,
             waiters: 0,
             lock,
             proofsByJob: new Map<string, ApprovalProof>(),
+            stagedJobIds: new Set<string>(),
             token
           }
           if (approvalProofSessions.size >= approvalProofSessionMaxCount) {
@@ -1814,6 +1827,7 @@ export const startHttpServer = async (
             )
           )
           session.locked = true
+          session.disclosing = true
           approvalProofMutationsByRequest.set(request, {
             created: false,
             previousExpiresAt: session.expiresAt,
@@ -1845,6 +1859,7 @@ export const startHttpServer = async (
               jobId: record.id,
               nonce: record.approvalNonce
             })
+            session.stagedJobIds.add(record.id)
           }
         }
         approvalProofSessionsByRequest.set(request, session)
@@ -1870,6 +1885,8 @@ export const startHttpServer = async (
       }
       if (mutation !== undefined) {
         approvalProofMutationsByRequest.delete(request)
+        for (const jobId of session.stagedJobIds) session.stagedJobIds.delete(jobId)
+        session.disclosing = false
         session.locked = false
         httpRuntime.runSync(session.lock.release(1))
       }
@@ -3059,7 +3076,7 @@ export const startHttpServer = async (
                   now
                 )
                 approval = proof.approval
-                proofSession = proof.session
+                proofSession = proof.lockHeld ? proof.session : undefined
                 proofSessionToken = proof.sessionToken
               } else {
                 approval = submittedApproval

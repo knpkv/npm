@@ -248,6 +248,8 @@ describe("sanitized approval requests", () => {
       "set-cookie: session_id=leaked-set-cookie-canary; Path=/",
       "Cookie: SID=first-folded-cookie-canary\r\n second-folded-cookie-canary",
       "Set-Cookie: SID=first-folded-set-cookie-canary\n second-folded-set-cookie-canary",
+      "Authorization: Basic first-folded-basic-canary\r\n second-folded-basic-canary",
+      "Authorization: Digest first-folded-digest-canary\n second-folded-digest-canary",
       "Authorization: Bearer first-folded-canary\r\n second-folded-canary"
     ]) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
@@ -265,6 +267,10 @@ describe("sanitized approval requests", () => {
     expect(approvalRequestFor({ kind: "nix.apply", ref: "release-cookie=stable" }).fields[0]?.value).toBe(
       "release-cookie=stable"
     )
+    const followingField = "Cookie: SID=first-cookie-canary\r\nref=main"
+    const followingFieldValue = approvalRequestFor({ kind: "nix.apply", ref: followingField }).fields[0]?.value
+    expect(followingFieldValue).not.toContain("first-cookie-canary")
+    expect(followingFieldValue).toContain("ref=main")
   })
 
   it("redacts standalone encoded credential assignments", () => {
@@ -541,6 +547,22 @@ describe("sanitized approval requests", () => {
       expect(encoded).not.toContain("secret-canary")
       expect(encoded).toContain("redacted")
     }
+  })
+
+  it("redacts whitespace after encoded URI authorities", () => {
+    const ref = "https://user%3Aleaked-canary%40origin.test%2Frepo trailing-canary"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("leaked-canary")
+    expect(encoded).not.toContain("trailing-canary")
+    expect(encoded).toContain("[redacted credential]")
+
+    const safe = "https://origin.test%2Frepo"
+    expect(approvalRequestFor({ kind: "nix.apply", ref: safe }).fields[0]?.value).toBe(safe)
   })
 
   it("redacts encoded query credentials inside URI path segments", () => {
