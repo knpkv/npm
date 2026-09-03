@@ -68,7 +68,7 @@ const controlCenterLifecycleRequirements = browserPairingConsumerLifecycleRequir
   .map((requirement) =>
     requirement.script === "check" ? { ...requirement, matches: controlCenterRoleCheck } : requirement
   )
-const codeCommitLifecycleRequirements = ["prebuild", "precheck", "prestart", "prestart:web", "prepack"].map(
+const codeCommitLifecycleRequirements = ["prebuild", "precheck", "prestart", "prestart:web", "pretest", "prepack"].map(
   (script) => ({
     script,
     description: "a browser-pairing build",
@@ -569,9 +569,8 @@ const extractAliasMutations = (segments, reachability, aliases = [], offset = 0)
     }
     if (hasDynamicExecutableIdentity(segment.text)) return undefined
     const commandInfo = firstExecutableWordInfo(segment.text)
-    const commandName = commandInfo?.word
+    const commandName = resolvedShellCommandName(segment.text, start, aliases)
     if (commandName !== "alias" && commandName !== "unalias") continue
-    if (hasActiveAliasDefinition(segment.text, start, aliases)) continue
     for (const word of words.slice((commandInfo?.index ?? -1) + 1)) {
       const name = word.replace(/=.*$/u, "")
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) {
@@ -623,8 +622,8 @@ const isShellTerminatingCommand = (text, start = 0, includeReturn = true, aliase
   return commandName !== undefined && ["exec", "exit", ...(includeReturn ? ["return"] : [])].includes(commandName)
 }
 
-const hasActiveFunctionDefinition = (text, start, definitions) => {
-  const commandName = firstExecutableWord(text)
+const hasActiveFunctionDefinition = (text, start, definitions, aliases = []) => {
+  const commandName = resolvedShellCommandName(text, start, aliases)
   return (
     commandName !== undefined &&
     definitions.some(({ name, end, reachable }) => name === commandName && end <= start && reachable !== false)
@@ -726,7 +725,7 @@ const segmentRequiredReachability = (segments, definitions = [], aliases = []) =
 
 // A command whose failure already fails the lifecycle may continue on its success path.
 const isKnownSuccessfulShellCommand = (text, start, definitions, aliases = []) =>
-  !hasActiveFunctionDefinition(text, start, definitions) &&
+  !hasActiveFunctionDefinition(text, start, definitions, aliases) &&
   !hasActiveAliasDefinition(text, start, aliases) &&
   !hasPotentiallyFailingRedirection(text) &&
   (/^(?:true|printf|echo|:)(?:\s|$)/u.test(text.trim()) ||
@@ -946,24 +945,26 @@ const hasReachableCommandCacheMutation = (command, aliases = undefined, offset =
   })
 }
 
-const hasInvokedCommand = (source, name, definitions = []) => {
+const hasInvokedCommand = (source, name, definitions = [], aliases = []) => {
   const segments = shellCommandSegments(source, true)
-  const reachability = segmentReachability(segments, definitions)
+  const reachability = segmentReachability(segments, definitions, aliases)
   return segments.some((segment, index) => {
-    const { text } = segment
+    const { start, text } = segment
     if (!reachability[index]) return false
-    if (firstExecutableWord(text) === name) return true
+    if (resolvedShellCommandName(text, start, aliases) === name) return true
     const body = groupedCommandBody(text)
-    return body !== undefined && hasInvokedCommand(body, name, definitions)
+    return body !== undefined && hasInvokedCommand(body, name, definitions, aliases)
   })
 }
 
 const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source)) return true
+  const aliases = resolveAliasMutations(shellCommandSegments(source, true), definitions)
+  if (aliases === undefined) return true
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
-    const invoked = hasInvokedCommand(source, definition.name, definitions)
+    const invoked = hasInvokedCommand(source, definition.name, definitions, aliases)
     const activeDefinition = definitions
       .filter((candidate) => candidate.name === definition.name && candidate.end <= definition.end)
       .at(-1)
@@ -1154,7 +1155,7 @@ const hasReachableExecutableMutation = (command, executableName, visited = new S
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
     const invoked = segments.some(({ text, start }, index) => {
-      if (!reachability[index] || firstShellWord(text) !== definition.name) return false
+      if (!reachability[index] || resolvedShellCommandName(text, start, aliases) !== definition.name) return false
       const activeDefinition = definitions
         .filter((candidate) => candidate.name === definition.name && candidate.end <= start)
         .at(-1)
@@ -1190,7 +1191,7 @@ const hasReachableLifecycleCommand = (command, matcher, visited = new Set()) => 
     segments.some(({ text, nextOperator, start }, index) => {
       if (!reachability[index] || !hasStatusSafeContinuation(segments, index, nextOperator)) return false
       if (
-        !hasActiveFunctionDefinition(text, start, definitions) &&
+        !hasActiveFunctionDefinition(text, start, definitions, aliases) &&
         !hasActiveAliasDefinition(text, start, aliases) &&
         matcher.test(text.trim())
       )
@@ -1207,7 +1208,7 @@ const hasReachableLifecycleCommand = (command, matcher, visited = new Set()) => 
       if (
         !reachability[index] ||
         !hasStatusSafeContinuation(segments, index, nextOperator) ||
-        firstExecutableWord(text) !== definition.name
+        resolvedShellCommandName(text, start, aliases) !== definition.name
       ) {
         return false
       }
@@ -1246,7 +1247,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
         return false
       }
       if (
-        !hasActiveFunctionDefinition(text, start, definitions) &&
+        !hasActiveFunctionDefinition(text, start, definitions, aliases) &&
         !hasActiveAliasDefinition(text, start, aliases) &&
         matcher.test(text.trim())
       )
@@ -1263,7 +1264,7 @@ const hasExecutableLifecycleCommand = (command, matcher, visited = new Set()) =>
       if (
         !reachability[index] ||
         !hasStatusSafeContinuation(segments, index, nextOperator) ||
-        firstShellWord(text) !== definition.name
+        resolvedShellCommandName(text, start, aliases) !== definition.name
       ) {
         return false
       }
@@ -2340,6 +2341,7 @@ const codeCommitScripts = {
   precheck: "pnpm --filter @knpkv/browser-pairing build",
   prestart: "pnpm --filter @knpkv/browser-pairing build",
   "prestart:web": "pnpm --filter @knpkv/browser-pairing build",
+  pretest: "pnpm --filter @knpkv/browser-pairing build",
   prepack: "pnpm --filter @knpkv/browser-pairing build && tsc -b"
 }
 assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/codecommit/package.json", codeCommitScripts, {}), [])
@@ -2420,6 +2422,8 @@ for (const command of [
   "set -e; fail() { false; }; fail; pnpm --filter @knpkv/browser-pairing build",
   "builtin=alias\n$builtin pnpm=:\npnpm --filter @knpkv/browser-pairing build",
   "alias helper=$1\nhelper pnpm\npnpm --filter @knpkv/browser-pairing build",
+  "alias define=alias\ndefine pnpm=:\npnpm --filter @knpkv/browser-pairing build",
+  "f() { alias pnpm=:; }; alias invoke=f\ninvoke\npnpm --filter @knpkv/browser-pairing build",
   "> /dev/null local PATH=/tmp/fake; pnpm --filter @knpkv/browser-pairing build",
   "test -e package.json && exit 0; pnpm --filter @knpkv/browser-pairing build"
 ]) {
@@ -2531,6 +2535,8 @@ for (const [command, expected] of [
   ["alias decl=printf\ndecl PATH=/tmp/fake\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias cache=printf\ncache -p /usr/bin/true pnpm\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias invoke=printf\ninvoke eval stop\npnpm --filter @knpkv/browser-pairing build", []],
+  ["alias define=printf\ndefine pnpm=:\npnpm --filter @knpkv/browser-pairing build", []],
+  ["f() { FOO=1; }; alias invoke=f\ninvoke\npnpm --filter @knpkv/browser-pairing build", []],
   ["alias loader=printf\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build", []],
   [
     "alias loader=wrapper\nalias wrapper=printf\nloader -f ./fake-pnpm.so pnpm\npnpm --filter @knpkv/browser-pairing build",

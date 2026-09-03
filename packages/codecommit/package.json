@@ -22,6 +22,7 @@
     "precheck": "pnpm --filter @knpkv/browser-pairing build",
     "prestart": "pnpm --filter @knpkv/browser-pairing build",
     "prestart:web": "pnpm --filter @knpkv/browser-pairing build",
+    "pretest": "pnpm --filter @knpkv/browser-pairing build",
     "prepack": "pnpm --filter @knpkv/browser-pairing build && tsc -b",
     "build": "tsc -b",
     "check": "tsc -b tsconfig.json",
