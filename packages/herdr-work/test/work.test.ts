@@ -9,6 +9,7 @@ import { DatabaseSync } from "node:sqlite"
 import {
   __herdrWorkEncodedBytesForTest,
   __herdrWorkMaximumSnapshotBytesForTest,
+  __herdrWorkSnapshotEnvelopeMaxBytesForTest,
   makeWorkService,
   projectWorkSnapshots,
   type WorkGoal,
@@ -839,4 +840,82 @@ describe("durable Work projection", () => {
       )
       expect(unrelatedEstimated).toBeGreaterThanOrEqual(unrelatedActual)
     }))
+
+  it.effect("allows valid append with long unrelated ID and small family groups", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-long-unrelated-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+
+      const escapedId = "\u0001".repeat(256)
+      const longUnrelated: WorkGoalCheckpointType = {
+        ...checkpointForGoal(escapedId, "event-long-created", 0, 0),
+        goal: {
+          ...checkpointForGoal(escapedId, "event-long-created", 0, 0).goal,
+          title: "long unrelated",
+          summary: "long unrelated summary",
+          detail: "long unrelated detail"
+        }
+      }
+      const smallCount = 138
+      const smallGoals = Array.from(
+        { length: smallCount },
+        (_, index) => checkpointForGoal(`goal-small-${index}`, `event-small-${index}`, index + 1, index + 1)
+      )
+      const canonicalBase = checkpointForGoal("goal-family-canonical", "event-canonical-base", 0, 0)
+      const supersededBase = checkpointForGoal("goal-family-superseded", "event-superseded-base", 0, 0)
+      const canonical = familyCheckpoint(
+        canonicalBase,
+        "event-canonical",
+        10_000,
+        "goal-family-canonical",
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        supersededBase,
+        "event-superseded",
+        10_000,
+        "goal-family-canonical",
+        "superseded"
+      )
+
+      const history = [...smallGoals, longUnrelated, canonicalBase, supersededBase, canonical]
+      for (const event of history) yield* store.append(event)
+
+      const snapshotsBefore = yield* service.snapshots(20_000)
+      expect(Buffer.byteLength(JSON.stringify(snapshotsBefore))).toBeLessThanOrEqual(
+        fleetResponseBodyMaxBytes
+      )
+
+      const estimated = __herdrWorkMaximumSnapshotBytesForTest(history, superseded)
+      const snapshotsAfter = yield* projectWorkSnapshots([...history, superseded], 20_001)
+      const actualAfter = Buffer.byteLength(JSON.stringify(snapshotsAfter))
+      expect(estimated).toBeGreaterThanOrEqual(actualAfter)
+      expect(estimated).toBeLessThanOrEqual(fleetResponseBodyMaxBytes)
+
+      // Must remain appendable despite long unrelated ID inflating previous max*size bound
+      yield* store.append(superseded)
+      expect(yield* store.list()).toHaveLength(history.length + 1)
+
+      // Prove previous max*size amplification would have rejected this valid history
+      const maximumGoalBytes = new Map<string, number>()
+      for (const { goal } of [...history, superseded]) {
+        const bytes = __herdrWorkEncodedBytesForTest(goal)
+        maximumGoalBytes.set(goal.id, Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes))
+      }
+      const encodedGoals = [...maximumGoalBytes.values()].reduce((total, bytes) => total + bytes, 0)
+      const separators = Math.max(0, maximumGoalBytes.size - 1)
+      const maxEncodedId = Math.max(
+        0,
+        ...Array.from(maximumGoalBytes.keys(), (id) => __herdrWorkEncodedBytesForTest(id))
+      )
+      const oldFamiliesPerWindow = 2 * encodedGoals + separators +
+        (maxEncodedId + 64) * Math.max(1, maximumGoalBytes.size)
+      const oldEstimated = __herdrWorkSnapshotEnvelopeMaxBytesForTest +
+        4 * Math.max(encodedGoals + separators, oldFamiliesPerWindow)
+      expect(oldEstimated).toBeGreaterThan(fleetResponseBodyMaxBytes)
+      expect(oldEstimated).toBeGreaterThan(estimated)
+    }).pipe(provideNodeServices), 30_000)
 })

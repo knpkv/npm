@@ -48,16 +48,37 @@ const maximumSnapshotBytes = (
     0
   )
   const separators = Math.max(0, maximumGoalBytes.size - 1)
-  const maximumEncodedCanonicalGoalIdBytes = Math.max(
-    0,
-    ...Array.from(maximumGoalBytes.keys(), (id) => encodedBytes(id))
-  )
-  // Structural bytes for {"canonicalGoalId":"","canonical":<goal>,"superseded":[]} beyond the
-  // encoded goal and id values is 49 (measured via JSON.stringify), 64 reserves it safely.
-  const familyGroupStructuralOverhead = 64
-  const familyGroupsOverhead = maximumEncodedCanonicalGoalIdBytes + familyGroupStructuralOverhead
-  const familiesPerWindowBytes = 2 * encodedGoals + separators +
-    familyGroupsOverhead * Math.max(1, maximumGoalBytes.size)
+  // Derive the typed family overhead from actual projected family groups rather than
+  // charging the maximum encoded canonicalGoalId for every distinct goal. The projection
+  // keeps a latest durable goal per id; only canonical goals with superseded members
+  // form a family group and repeat the canonicalGoalId outside the canonical payload.
+  const latest = new Map<string, WorkGoalCheckpointType["goal"]>()
+  for (
+    const event of [...history, candidate].toSorted(
+      (left, right) => left.occurredAt - right.occurredAt
+    )
+  ) {
+    latest.set(event.goal.id, event.goal)
+  }
+  const canonicalById = new Map<string, WorkGoalCheckpointType["goal"]>()
+  for (const goal of latest.values()) {
+    if (goal.goalFamily?.role === "canonical") canonicalById.set(goal.id, goal)
+  }
+  let canonicalBytesSum = 0
+  let familyGroupsOverheadSum = 0
+  for (const [canonicalGoalId] of canonicalById) {
+    const supersededCount = [...latest.values()].filter(
+      (goal) =>
+        goal.goalFamily?.role === "superseded" &&
+        goal.goalFamily.canonicalGoalId === canonicalGoalId
+    ).length
+    if (supersededCount === 0) continue
+    canonicalBytesSum += maximumGoalBytes.get(canonicalGoalId) ?? 0
+    // Structural bytes for {"canonicalGoalId":"","canonical":<goal>,"superseded":[]} beyond the
+    // encoded goal and id values is 49 (measured via JSON.stringify), 64 reserves it safely.
+    familyGroupsOverheadSum += encodedBytes(canonicalGoalId) + 64
+  }
+  const familiesPerWindowBytes = encodedGoals + canonicalBytesSum + familyGroupsOverheadSum + separators
   return workSnapshotEnvelopeMaxBytes + 4 * Math.max(encodedGoals + separators, familiesPerWindowBytes)
 }
 
