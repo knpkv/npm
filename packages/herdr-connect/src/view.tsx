@@ -1,7 +1,15 @@
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
-import type { ReactNode, Ref } from "react"
+import { useState, type ReactNode, type Ref } from "react"
 import type { ConnectAgent } from "./model.js"
+import {
+  serializeTerminalKey,
+  terminalKeyDescriptors,
+  terminalModifiers,
+  type TerminalModifier,
+  type TerminalRailKey
+} from "./terminal-keyboard.js"
+import { nextTerminalRailIndex } from "./terminal-rail-navigation.js"
 
 type AgentActivity = "working" | "ready" | "attention" | "finished"
 export type AgentActivityFilter = "all" | AgentActivity
@@ -375,3 +383,115 @@ export const ConnectWorkspace = ({ directory, mode, terminal, terminalViewportRe
     </div>
   </div>
 )
+
+type TerminalKeyRailProps = {
+  readonly modifier: TerminalModifier | null
+  readonly onFocusTerminal: () => void
+  readonly onModifierChange: (modifier: TerminalModifier) => void
+  readonly onKey: (key: TerminalRailKey) => void
+  readonly error?: string | null
+  readonly disabled?: boolean
+}
+
+const modifierLabel = (modifier: TerminalModifier): string => (modifier === "ctrl" ? "Ctrl" : "Alt")
+
+/** A fixed, keyboard-accessible set of terminal controls for touch layouts. */
+export const TerminalKeyRail = ({
+  disabled = false,
+  error = null,
+  modifier,
+  onFocusTerminal,
+  onKey,
+  onModifierChange
+}: TerminalKeyRailProps) => {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const modifierCount = terminalModifiers.length
+  const terminalKeyAvailability = terminalKeyDescriptors.map(
+    (descriptor) => serializeTerminalKey(descriptor.key, modifier)._tag === "supported"
+  )
+  const enabledRail = [
+    ...terminalModifiers.map(() => !disabled),
+    ...terminalKeyAvailability.map((available) => !disabled && available)
+  ]
+  const tabStopIndex = enabledRail[activeIndex] === true ? activeIndex : enabledRail.findIndex((enabled) => enabled)
+  return (
+    <div
+      aria-label="Terminal keyboard controls"
+      aria-orientation="horizontal"
+      className="terminal-key-rail"
+      data-terminal-key-rail
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-terminal-key]")]
+        const currentIndex = buttons.findIndex((button) => button === event.target)
+        if (currentIndex < 0) return
+        const nextIndex = nextTerminalRailIndex(
+          event.key,
+          currentIndex,
+          buttons.map(({ disabled }) => !disabled)
+        )
+        if (nextIndex === null) return
+        const next = buttons.at(nextIndex)
+        if (next === undefined) return
+        event.preventDefault()
+        setActiveIndex(nextIndex)
+        next.focus()
+      }}
+      role="toolbar"
+    >
+      <div className="terminal-key-scroll">
+        <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
+          {terminalModifiers.map((item, index) => (
+            <button
+              aria-pressed={modifier === item}
+              className="terminal-key terminal-key-modifier"
+              data-terminal-key={item}
+              disabled={disabled}
+              key={item}
+              onClick={(event) => {
+                setActiveIndex(index)
+                onModifierChange(item)
+                if (event.detail === 0) onFocusTerminal()
+              }}
+              onFocus={() => setActiveIndex(index)}
+              onPointerDown={(event) => event.preventDefault()}
+              tabIndex={tabStopIndex === index ? 0 : -1}
+              type="button"
+            >
+              {modifierLabel(item)}
+            </button>
+          ))}
+        </div>
+        <div aria-label="Terminal keys" className="terminal-key-group" role="group">
+          {terminalKeyDescriptors.map((descriptor, index) => {
+            const serialization = serializeTerminalKey(descriptor.key, modifier)
+            const unavailable = serialization._tag === "unsupported"
+            const railIndex = modifierCount + index
+            return (
+              <button
+                aria-label={
+                  modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`
+                }
+                className="terminal-key"
+                data-terminal-key={descriptor.key}
+                disabled={disabled || unavailable}
+                key={descriptor.key}
+                onClick={() => onKey(descriptor.key)}
+                onFocus={() => setActiveIndex(railIndex)}
+                onPointerDown={(event) => event.preventDefault()}
+                tabIndex={tabStopIndex === railIndex ? 0 : -1}
+                title={unavailable ? "Choose a supported modifier combination" : undefined}
+                type="button"
+              >
+                {descriptor.label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+      <small aria-live="polite" className="terminal-key-error">
+        {error ?? ""}
+      </small>
+    </div>
+  )
+}

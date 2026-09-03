@@ -2,6 +2,7 @@ import { expect, type Page, test } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
 
 const packageRoot = resolve(fileURLToPath(new URL("../..", import.meta.url)))
 const workspaceRoot = resolve(packageRoot, "../..")
@@ -10,6 +11,21 @@ const connectorCss = readCss(resolve(packageRoot, "src/styles.css")).replace(
   "@import \"@knpkv/rly/styles.css\";",
   ""
 )
+const terminalRailNavigationSource = transpileModule(
+  readFileSync(resolve(packageRoot, "src/terminal-rail-navigation.ts"), "utf8"),
+  {
+    compilerOptions: {
+      module: ModuleKind.ESNext,
+      target: ScriptTarget.ES2022
+    }
+  }
+).outputText
+
+declare global {
+  interface Window {
+    nextTerminalRailIndex?: (key: string, currentIndex: number, enabled: ReadonlyArray<boolean>) => number | null
+  }
+}
 const fixtureCss = [
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/generated-tokens.css")),
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/base.css")),
@@ -112,6 +128,46 @@ const setStandaloneDirectory = (page: Page): Promise<void> =>
       </body>
     </html>`)
 
+const terminalRail = `
+  <div aria-label="Terminal keyboard controls" class="terminal-key-rail" data-terminal-key-rail role="toolbar">
+    <div class="terminal-key-scroll">
+      <div aria-label="Terminal modifiers" class="terminal-key-group" role="group">
+        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="ctrl" tabindex="0" type="button">Ctrl</button>
+        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="alt" tabindex="-1" type="button">Alt</button>
+      </div>
+      <div aria-label="Terminal keys" class="terminal-key-group" role="group">
+        <button aria-label="Escape" class="terminal-key" data-terminal-key="escape" tabindex="-1" type="button">Esc</button>
+        <button aria-label="Tab" class="terminal-key" data-terminal-key="tab" tabindex="-1" type="button">Tab</button>
+        <button aria-label="Arrow left" class="terminal-key" data-terminal-key="arrowLeft" tabindex="-1" type="button">←</button>
+        <button aria-label="Arrow up" class="terminal-key" data-terminal-key="arrowUp" tabindex="-1" type="button">↑</button>
+        <button aria-label="Arrow down" class="terminal-key" data-terminal-key="arrowDown" tabindex="-1" type="button">↓</button>
+        <button aria-label="Arrow right" class="terminal-key" data-terminal-key="arrowRight" tabindex="-1" type="button">→</button>
+      </div>
+    </div>
+    <small aria-live="polite" class="terminal-key-error"></small>
+  </div>`
+
+const setTerminal = (page: Page): Promise<void> =>
+  page.setContent(`
+    <!doctype html>
+    <html data-rly-root data-rly-theme="dark">
+      <head><style>${fixtureCss}</style></head>
+      <body class="connect-body">
+        <div class="connect-shell">
+          <div class="connect-workspace" data-mode="terminal">
+            <div aria-hidden="true" class="connect-directory-screen" inert></div>
+            <div aria-label="Agent terminal" class="connect-terminal-screen">
+              <section class="terminal-stage">
+                <div class="terminal-bar"><button class="terminal-back" type="button">Agents</button><div><strong>agent-01</strong><small>SER8 · codex</small></div><span class="fixture-state">connected</span></div>
+                ${terminalRail}
+                <div aria-label="Agent terminal" class="ghostty-terminal"><pre>echo hello</pre></div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </body>
+    </html>`)
+
 test("390x844 keeps directory chrome dense and the full list reachable without an inner clipped scroller", async ({ page }) => {
   await setEmbeddedDirectory(page)
 
@@ -175,4 +231,71 @@ test("desktop keeps its spacious hierarchy and scroll ownership", async ({ page 
   expect(await page.locator(".connect-agents").evaluate((element) => getComputedStyle(element).overflowY)).toBe(
     "auto"
   )
+})
+
+test("390x844 keeps the terminal rail reachable with truthful button semantics", async ({ page }) => {
+  await setTerminal(page)
+
+  const rail = page.locator("[data-terminal-key-rail]")
+  const ctrl = page.locator("[data-terminal-key=\"ctrl\"]")
+  await expect(rail).toBeVisible()
+  await expect(rail).toHaveAttribute("role", "toolbar")
+  await expect(ctrl).toHaveAttribute("aria-pressed", "false")
+  await expect(ctrl).toHaveAccessibleName("Ctrl")
+  expect(await page.locator("[aria-keyshortcuts]").count()).toBe(0)
+  await expect(page.locator("[data-terminal-key=\"tab\"]")).toBeEnabled()
+  expect(await rail.locator(".terminal-key-scroll").evaluate((element) => getComputedStyle(element).overflowX)).toBe(
+    "auto"
+  )
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
+  await ctrl.focus()
+  expect(await ctrl.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid")
+})
+
+test("terminal toolbar arrow navigation skips disabled controls", async ({ page }) => {
+  await setTerminal(page)
+  const rail = page.locator("[data-terminal-key-rail]")
+  await expect(rail.locator("button[tabindex=\"0\"]")).toHaveCount(1)
+  await expect(rail.locator("button[tabindex=\"-1\"]")).toHaveCount(7)
+  await page.addScriptTag({
+    content: `${terminalRailNavigationSource}\nwindow.nextTerminalRailIndex = nextTerminalRailIndex`,
+    type: "module"
+  })
+  const focusedKey = await page.evaluate(() => {
+    const rail = document.querySelector<HTMLElement>("[data-terminal-key-rail]")
+    const helper = window.nextTerminalRailIndex
+    if (rail === null || helper === undefined) throw new Error("terminal rail fixture missing")
+    const buttons = [...rail.querySelectorAll<HTMLButtonElement>("button[data-terminal-key]")]
+    const current = buttons.find((button) => button.dataset.terminalKey === "ctrl")
+    const disabled = buttons.find((button) => button.dataset.terminalKey === "escape")
+    if (current === undefined || disabled === undefined) throw new Error("terminal button fixture missing")
+    disabled.disabled = true
+    const nextIndex = helper(
+      "ArrowRight",
+      buttons.indexOf(current),
+      buttons.map(({ disabled: isDisabled }) => !isDisabled)
+    )
+    if (nextIndex === null) throw new Error("terminal toolbar navigation unavailable")
+    buttons[nextIndex]?.focus()
+    return document.activeElement?.getAttribute("data-terminal-key")
+  })
+  await expect(rail.locator("button[tabindex=\"0\"]")).toHaveCount(1)
+  expect(focusedKey).toBe("alt")
+})
+
+test("desktop terminal rail preserves the three-row stage and accessible key labels", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await setTerminal(page)
+
+  await expect(page.locator("[data-terminal-key=\"escape\"]")).toHaveAccessibleName("Escape")
+  await expect(page.locator("[data-terminal-key=\"arrowUp\"]")).toHaveAccessibleName("Arrow up")
+  expect(await page.locator("[aria-keyshortcuts]").count()).toBe(0)
+  expect(
+    await page.locator(".terminal-stage").evaluate((element) =>
+      getComputedStyle(element).gridTemplateRows.split(" ").length
+    )
+  ).toBe(3)
+  expect(await page.locator(".terminal-key").count()).toBe(8)
+  await expect(page.locator(".terminal-key-error")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
 })
