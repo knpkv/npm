@@ -118,6 +118,38 @@ const sanitizeEncodedCredentialAssignments = (value: string): string =>
     return sanitized
   })
 
+const httpSchemePrefix = /^(https?):[\\/]{1,}/iu
+const uriAuthority = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/))([^/?#\s]*)([\s\S]*)$/iu
+
+const normalizeHttpSchemeSeparators = (value: string): string => {
+  if (!httpSchemePrefix.test(value)) return value
+  return value.replace(httpSchemePrefix, (_match, scheme: string) => `${scheme}://`).replaceAll("\\", "/")
+}
+
+const sanitizeDecodedAuthority = (value: string): string => {
+  const at = value.indexOf("@")
+  return at < 0 ? sanitizeCredentialText(value) : `${redactedCredential}@${value.slice(at + 1)}`
+}
+
+const sanitizeUriAuthority = (value: string): string => {
+  const match = uriAuthority.exec(value)
+  if (match === null) return value
+  const prefix = match[1]
+  const authority = match[2]
+  const suffix = match[3]
+  if (prefix === undefined || authority === undefined || suffix === undefined) return redactedCredential
+
+  const encoded = encodedText(authority)
+  if (encoded === undefined) return `${prefix}${sanitizeDecodedAuthority(authority)}${suffix}`
+  if (encoded._tag !== "encoded") return `${prefix}${redactedCredential}${suffix}`
+
+  let sanitized = sanitizeDecodedAuthority(encoded.value)
+  for (let layer = 0; layer < encoded.layers; layer += 1) {
+    sanitized = encodeURIComponent(sanitized)
+  }
+  return `${prefix}${sanitized}${suffix}`
+}
+
 const uriAuthorityAndPath = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*)(\/[^?#\s]*)?/iu
 
 const sanitizeEncodedPathSegment = (value: string): string => {
@@ -141,8 +173,9 @@ const sanitizeEncodedUriPath = (value: string): string =>
   )
 
 const sanitizeEncodedUri = (value: string): string => {
-  if (uriPrefix.test(value) && !encodedUriAuthorityBoundary.test(value)) return sanitizeDecodedUri(value)
-  const encoded = encodedText(value)
+  const normalized = normalizeHttpSchemeSeparators(value)
+  if (uriPrefix.test(normalized) && !encodedUriAuthorityBoundary.test(normalized)) return sanitizeDecodedUri(normalized)
+  const encoded = encodedText(normalized)
   if (encoded === undefined) return sanitizeDecodedUri(value)
   if (encoded._tag !== "encoded") return redactedCredential
   try {
@@ -158,7 +191,9 @@ const sanitizeEncodedUri = (value: string): string => {
 
 const sanitizeDecodedUri = (value: string): string =>
   sanitizeEncodedCredentialAssignments(
-    sanitizeEncodedUriPath(sanitizeCredentialText(sanitizeUriQueryParameters(value)))
+    sanitizeEncodedUriPath(
+      sanitizeCredentialText(sanitizeUriQueryParameters(sanitizeUriAuthority(normalizeHttpSchemeSeparators(value))))
+    )
   )
 
 const sanitizeUriQueryParameters = (value: string): string => {
@@ -179,7 +214,7 @@ const sanitizeUriQueryParameters = (value: string): string => {
 }
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
-  const sanitized = uriPrefix.test(value) || encodedUriPrefix.test(value)
+  const sanitized = uriPrefix.test(value) || httpSchemePrefix.test(value) || encodedUriPrefix.test(value)
     ? sanitizeEncodedUri(value)
     : encodedText(value) === undefined
     ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
