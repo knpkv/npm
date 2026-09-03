@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
+import { ModuleKind, ScriptTarget, transpileModule } from "typescript"
 
 type GhosttyTerminal = {
   readonly onData: (handler: (value: string) => void) => { readonly dispose: () => void }
@@ -35,7 +36,15 @@ const ghosttyScript = resolve(
   new URL("../../../..", import.meta.url).pathname,
   "node_modules/.pnpm/ghostty-web@0.4.0/node_modules/ghostty-web/dist/ghostty-web.umd.cjs"
 )
-const terminalOutputSource = readFileSync(resolve(packageRoot, "dist/terminal-output.js"), "utf8")
+const terminalOutputSource = transpileModule(
+  readFileSync(resolve(packageRoot, "src/terminal-output.ts"), "utf8"),
+  {
+    compilerOptions: {
+      module: ModuleKind.ESNext,
+      target: ScriptTarget.ES2022
+    }
+  }
+).outputText
 
 test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ page }) => {
   await page.setContent("<div id=\"terminal\" style=\"block-size: 240px; inline-size: 640px\"></div>")
