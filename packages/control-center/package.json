@@ -49,6 +49,8 @@
     "benchmark:runtime": "pnpm build && pnpm benchmark:runtime:prepared",
     "benchmark:runtime:prepared": "rimraf test-results/control-center/runtime-benchmark.json && CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json playwright test e2e/real-runtime.spec.ts --grep \"measures warmed\" --config playwright.config.ts && pnpm benchmark:validate-runtime",
     "benchmark:validate-runtime": "CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT=test-results/control-center/runtime-benchmark.json tsx scripts/validateRuntimeBenchmarkReport.ts",
+    "prebuild": "pnpm --filter @knpkv/browser-pairing build",
+    "precheck": "pnpm --filter @knpkv/browser-pairing build",
     "build": "tsx scripts/run-build.ts",
     "check": "pnpm validate:boundaries && pnpm lint:rly-css-tokens && tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "clean": "rimraf dist *.tsbuildinfo node_modules/.cache",

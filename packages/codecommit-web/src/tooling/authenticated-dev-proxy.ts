@@ -3,6 +3,10 @@ import type { ProxyOptions } from "vite"
 export const authenticatedDevBackendOrigin = "http://127.0.0.1:3000"
 export const authenticatedDevPublicOrigin = "http://localhost:5173"
 export const authenticatedDevPublicOriginEnvironment = `CODECOMMIT_WEB_PUBLIC_ORIGIN=${authenticatedDevPublicOrigin}`
+export const authenticatedDevServerOptions = {
+  port: 5173,
+  strictPort: true
+}
 
 export type AuthenticatedDevProxyOriginDecision = "forward" | "reject"
 

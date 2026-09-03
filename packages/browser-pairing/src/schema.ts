@@ -205,7 +205,7 @@ export const serializeCredentialCookie: (
   return parts.join("; ")
 }
 
-/** Credential-bearing bootstrap result; the present token remains redacted until transport. */
+/** A credential-bearing bootstrap result; the present token remains redacted until transport. */
 export type BootstrapTokenRead =
   | { readonly _tag: "missing" }
   | { readonly _tag: "malformed" }

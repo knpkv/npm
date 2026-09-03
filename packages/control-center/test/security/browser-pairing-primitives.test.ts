@@ -18,6 +18,11 @@ describe("Control Center browser pairing seam", () => {
     expect(packageManifest.scripts.predev).toContain("pnpm --filter @knpkv/browser-pairing build")
   })
 
+  it("builds browser-pairing before standalone build and check", () => {
+    expect(packageManifest.scripts.prebuild).toBe("pnpm --filter @knpkv/browser-pairing build")
+    expect(packageManifest.scripts.precheck).toBe("pnpm --filter @knpkv/browser-pairing build")
+  })
+
   it.effect("uses the shared CSRF digest verifier while keeping request policy local", () =>
     Effect.gen(function*() {
       const digest = yield* hashCsrfToken(pairingCode)

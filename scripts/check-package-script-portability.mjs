@@ -17,7 +17,7 @@ const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
 const browserPairingBuild = /^pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build\s*$/u
 const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit$/u
-const codeCommitWebLifecycleRequirements = [
+const browserPairingConsumerLifecycleRequirements = [
   {
     script: "predev",
     description: "a browser-pairing build",
@@ -39,11 +39,25 @@ const codeCommitWebLifecycleRequirements = [
     matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
   },
   {
+    script: "prebuild",
+    description: "a browser-pairing build",
+    matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
+  },
+  {
+    script: "precheck",
+    description: "a browser-pairing build",
+    matches: (command) => hasExecutableLifecycleCommand(command, browserPairingBuild)
+  },
+  {
     script: "check",
     description: "the role-aware tsc check",
     matches: (command) => hasExecutableLifecycleCommand(command, codeCommitWebRoleCheck)
   }
 ]
+const codeCommitWebLifecycleRequirements = browserPairingConsumerLifecycleRequirements
+const controlCenterLifecycleRequirements = browserPairingConsumerLifecycleRequirements.filter(({ script }) =>
+  ["predev", "pretest", "prebuild", "precheck"].includes(script)
+)
 const codeCommitLifecycleRequirements = ["prestart", "prestart:web"].map((script) => ({
   script,
   description: "a browser-pairing build",
@@ -278,6 +292,22 @@ const shellCommandSegments = (command, sanitized = false) => {
 const functionDefinitionPattern =
   /(?:^|[;\n]|&&|\|\||[|&({])\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(\{|\()/gu
 
+const foldShellContinuations = (command) => {
+  let result = ""
+  let quote
+  for (let index = 0; index < command.length; index++) {
+    const character = command[index]
+    if (character === "\\" && quote !== "'" && command[index + 1] === "\n") {
+      index++
+      continue
+    }
+    result += character
+    if (quote === undefined && (character === "'" || character === '"')) quote = character
+    else if (quote === character) quote = undefined
+  }
+  return result
+}
+
 const matchingBrace = (source, openIndex, opener, closer) => {
   let depth = 0
   let quote
@@ -307,7 +337,7 @@ const matchingBrace = (source, openIndex, opener, closer) => {
 }
 
 const extractFunctionDefinitions = (command) => {
-  const source = removeShellComments(removeHereDocumentBodies(command))
+  const source = foldShellContinuations(removeShellComments(removeHereDocumentBodies(command)))
   const definitions = []
   functionDefinitionPattern.lastIndex = 0
   for (const match of source.matchAll(functionDefinitionPattern)) {
@@ -322,7 +352,8 @@ const extractFunctionDefinitions = (command) => {
       start: nameIndex,
       end: closeIndex + 1,
       body: source.slice(openIndex + 1, closeIndex),
-      grouped: ["{", "("].includes(match[0][0] ?? "")
+      grouped: ["{", "("].includes(match[0][0] ?? ""),
+      reachable: !/(?:^|[;\n])(?:true\s*\|\||false\s*&&)\s*$/u.test(source.slice(0, nameIndex))
     })
     functionDefinitionPattern.lastIndex = closeIndex + 1
   }
@@ -388,6 +419,19 @@ const firstShellWord = (text) => {
   return word !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(word) ? word : undefined
 }
 
+const redirectionWord = /^(?:\d+)?(?:>>?|<<<?|<>|>&|<&|>\|)/u
+const assignmentWord = /^[A-Za-z_][A-Za-z0-9_]*=/u
+
+const firstExecutableWord = (text) => {
+  const words = shellWords(text)
+  if (words === undefined) return undefined
+  for (const word of words) {
+    if (assignmentWord.test(word) || redirectionWord.test(word)) continue
+    return /^[A-Za-z_][A-Za-z0-9_]*$/u.test(word) ? word : undefined
+  }
+  return undefined
+}
+
 const extractAliasMutations = (segments, reachability, aliases = []) => {
   const mutations = []
   for (const [index, segment] of segments.entries()) {
@@ -410,7 +454,7 @@ const extractAliasMutations = (segments, reachability, aliases = []) => {
 }
 
 const activeAliasDefinition = (text, start, aliases) => {
-  const commandName = firstShellWord(text)
+  const commandName = firstExecutableWord(text)
   if (commandName === undefined) return undefined
   return aliases
     .filter((alias) => alias.name === commandName && alias.start <= start)
@@ -421,32 +465,36 @@ const activeAliasDefinition = (text, start, aliases) => {
 const hasActiveAliasDefinition = (text, start, aliases) =>
   activeAliasDefinition(text, start, aliases)?.kind === "define"
 
-const aliasCommandResult = (text, start, aliases, visited = new Set()) => {
-  const active = activeAliasDefinition(text, start, aliases)
-  if (active?.kind !== "define") {
-    const commandName = firstShellWord(text)
-    if (commandName === ":" || commandName === "true") return "success"
-    if (commandName === "false") return "failure"
-    return undefined
-  }
-  if (visited.has(active.name)) return "unknown"
-  const replacement = active.value.trim()
-  if (replacement === ":" || replacement === "true") return "success"
-  const replacementName = firstShellWord(replacement)
-  if (replacementName === undefined || replacementName !== replacement) {
-    return "unknown"
-  }
-  return aliasCommandResult(replacement, start, aliases, new Set([...visited, active.name]))
+const resolvedShellCommandName = (text, start, aliases, visited = new Set()) => {
+  const commandName = firstExecutableWord(text)
+  if (commandName === undefined) return undefined
+  const active = aliases
+    .filter((alias) => alias.name === commandName && alias.start <= start)
+    .toSorted((left, right) => left.start - right.start)
+    .at(-1)
+  if (active?.kind !== "define") return commandName
+  if (visited.has(active.name)) return undefined
+  return resolvedShellCommandName(active.value, start, aliases, new Set([...visited, active.name]))
 }
 
-const isShellTerminatingCommand = (text, includeReturn = true) => {
-  const commandName = firstShellWord(text)
+const aliasCommandResult = (text, start, aliases) => {
+  const commandName = resolvedShellCommandName(text, start, aliases)
+  if (commandName === ":" || commandName === "true") return "success"
+  if (commandName === "false") return "failure"
+  return undefined
+}
+
+const isShellTerminatingCommand = (text, includeReturn = true, aliases = []) => {
+  const commandName = resolvedShellCommandName(text, 0, aliases)
   return commandName !== undefined && ["exec", "exit", ...(includeReturn ? ["return"] : [])].includes(commandName)
 }
 
 const hasActiveFunctionDefinition = (text, start, definitions) => {
-  const commandName = firstShellWord(text)
-  return commandName !== undefined && definitions.some(({ name, end }) => name === commandName && end <= start)
+  const commandName = firstExecutableWord(text)
+  return (
+    commandName !== undefined &&
+    definitions.some(({ name, end, reachable }) => name === commandName && end <= start && reachable !== false)
+  )
 }
 
 const segmentReachability = (segments, definitions = [], aliases = []) => {
@@ -474,7 +522,7 @@ const segmentReachability = (segments, definitions = [], aliases = []) => {
               : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
                 ? "success"
                 : "unknown"
-      if (isShellTerminatingCommand(text)) terminated = true
+      if (isShellTerminatingCommand(text, true, aliases)) terminated = true
     }
   }
   return reachability
@@ -505,7 +553,7 @@ const segmentMayReachability = (segments, definitions = [], aliases = []) => {
               : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
                 ? "success"
                 : "unknown"
-      if (isShellTerminatingCommand(text)) terminated = true
+      if (isShellTerminatingCommand(text, true, aliases)) terminated = true
     }
   }
   return reachability
@@ -541,28 +589,37 @@ const unsupportedShellWords = new Set([
 
 const hasUnsupportedShellControl = (source) => {
   const segments = shellCommandSegments(source, true)
-  return (
-    segments.some(({ text }) => unsupportedShellWords.has(firstShellWord(text) ?? "")) ||
-    segments.some(({ text }) => /^\\?(?:\.|source)(?:\s|$)/u.test(text.trim())) ||
-    segments.some(({ text }) => text.trim().startsWith("!")) ||
-    segments.some(({ nextOperator }) => nextOperator === "&")
-  )
+  return segments.some(({ text, nextOperator }) => {
+    const commandName = firstExecutableWord(text)
+    if (unsupportedShellWords.has(commandName ?? "")) return true
+    if (/^\\?(?:\.|source)(?:\s|$)/u.test(text.trim()) || text.trim().startsWith("!")) return true
+    if (nextOperator === "&") return true
+    const body = groupedCommandBody(text)
+    return body !== undefined && hasUnsupportedShellControl(body)
+  })
+}
+
+const hasInvokedCommand = (source, name, definitions = []) => {
+  const segments = shellCommandSegments(source, true)
+  const reachability = segmentReachability(segments, definitions)
+  return segments.some(({ text }, index) => {
+    if (!reachability[index]) return false
+    if (firstExecutableWord(text) === name) return true
+    const body = groupedCommandBody(text)
+    return body !== undefined && hasInvokedCommand(body, name, definitions)
+  })
 }
 
 const hasUnsafeInvokedFunction = (command, visited = new Set()) => {
   const { definitions, source } = extractFunctionDefinitions(command)
   if (hasUnsupportedShellControl(source)) return true
-  const segments = shellCommandSegments(source, true)
-  const reachability = segmentReachability(segments, definitions)
   return definitions.some((definition) => {
     if (visited.has(definition.name)) return false
-    const invoked = segments.some(({ text, start }, index) => {
-      if (!reachability[index] || firstShellWord(text) !== definition.name) return false
-      const activeDefinition = definitions
-        .filter((candidate) => candidate.name === definition.name && candidate.end <= start)
-        .at(-1)
-      return activeDefinition === definition
-    })
+    const invoked = hasInvokedCommand(source, definition.name, definitions)
+    const activeDefinition = definitions
+      .filter((candidate) => candidate.name === definition.name && candidate.end <= definition.end)
+      .at(-1)
+    if (activeDefinition !== definition && !definition.grouped) return false
     return (
       (definition.grouped || invoked) &&
       (hasShellTermination(definition.body) ||
@@ -589,7 +646,7 @@ const hasShellTermination = (command) => {
     const trimmed = text.trim()
     if (isShellTerminatingCommand(trimmed, false)) return true
     const body = groupedCommandBody(trimmed)
-    return body !== undefined && hasShellTermination(body)
+    return body !== undefined && trimmed.startsWith("{") && hasShellTermination(body)
   })
 }
 
@@ -607,10 +664,22 @@ const sameAliasMutations = (left, right) =>
 const resolveAliasMutations = (segments, definitions) => {
   let aliases = []
   for (let iteration = 0; iteration <= segments.length; iteration += 1) {
-    const reachability = segmentMayReachability(segments, definitions, aliases)
-    const next = extractAliasMutations(segments, reachability, aliases)
+    const mustReachability = segmentReachability(segments, definitions, aliases)
+    const next = extractAliasMutations(segments, mustReachability, aliases)
     if (next === undefined) return undefined
-    if (sameAliasMutations(next, aliases)) return next
+    if (sameAliasMutations(next, aliases)) {
+      const mayReachability = segmentMayReachability(segments, definitions, aliases)
+      if (
+        segments.some(
+          ({ text }, index) =>
+            mayReachability[index] &&
+            !mustReachability[index] &&
+            ["alias", "unalias"].includes(firstExecutableWord(text) ?? "")
+        )
+      )
+        return undefined
+      return next
+    }
     if (
       next.some((mutation) => {
         if (mutation.kind !== "remove") return false
@@ -742,13 +811,16 @@ export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependenci
       .filter(({ script, matches }) => !matches(scripts?.[script] ?? ""))
       .map(({ script, description }) => `${manifestPath}: scripts.${script} must include ${description}`)
   }
-  if (
-    manifestPath !== "packages/codecommit-web/package.json" ||
-    !("@knpkv/browser-pairing" in { ...dependencies, ...devDependencies })
-  ) {
+  const requirements =
+    manifestPath === "packages/codecommit-web/package.json"
+      ? codeCommitWebLifecycleRequirements
+      : manifestPath === "packages/control-center/package.json"
+        ? controlCenterLifecycleRequirements
+        : undefined
+  if (requirements === undefined || !("@knpkv/browser-pairing" in { ...dependencies, ...devDependencies })) {
     return []
   }
-  return codeCommitWebLifecycleRequirements
+  return requirements
     .filter(({ script, matches }) => !matches(scripts?.[script] ?? ""))
     .map(({ script, description }) => `${manifestPath}: scripts.${script} must include ${description}`)
 }
@@ -792,6 +864,8 @@ assert.equal(classifyWorkspacePattern("packages/**"), undefined)
 const codeCommitWebScripts = {
   predev: "pnpm --filter @knpkv/browser-pairing build",
   prestart: "pnpm --filter @knpkv/browser-pairing build",
+  prebuild: "pnpm --filter @knpkv/browser-pairing build",
+  precheck: "pnpm --filter @knpkv/browser-pairing build",
   pretest: "pnpm --filter @knpkv/browser-pairing build",
   "test:browser": 'pnpm --filter "@knpkv/browser-pairing" build',
   check: "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit"
@@ -1220,7 +1294,7 @@ assert.deepEqual(
     { ...codeCommitWebScripts, check: "true || tsc() { true; }; tsc -p tsconfig.roles.json --noEmit" },
     browserPairingDependency
   ),
-  ["packages/codecommit-web/package.json: scripts.check must include the role-aware tsc check"]
+  []
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
@@ -1693,6 +1767,64 @@ assert.deepEqual(
   ["packages/codecommit/package.json: scripts.prestart:web must include a browser-pairing build"]
 )
 assert.deepEqual(findCodeCommitWebLifecycleGaps("packages/other/package.json", {}, browserPairingDependency), [])
+
+const controlCenterScripts = {
+  predev: "pnpm --filter @knpkv/browser-pairing build",
+  pretest: "pnpm --filter @knpkv/browser-pairing build",
+  prebuild: "pnpm --filter @knpkv/browser-pairing build",
+  precheck: "pnpm --filter @knpkv/browser-pairing build"
+}
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/control-center/package.json",
+    controlCenterScripts,
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/control-center/package.json",
+    { ...controlCenterScripts, predev: 'echo "pnpm --filter @knpkv/browser-pairing build"' },
+    browserPairingDependency
+  ),
+  ["packages/control-center/package.json: scripts.predev must include a browser-pairing build"]
+)
+
+const lifecycleGap = (script) =>
+  `packages/codecommit-web/package.json: scripts.${script} must include a browser-pairing build`
+for (const command of [
+  `cleanup() { trap "exit 0" 0; }; { cleanup; }; pnpm --filter @knpkv/browser-pairing build`,
+  "alias pnpm=:; test -e /definitely-not-present && unalias pnpm\npnpm --filter @knpkv/browser-pairing build",
+  "{ command trap 'exit 0' 0; }; pnpm --filter @knpkv/browser-pairing build",
+  String.raw`alias stop=exit
+stop 0
+pnpm --filter @knpkv/browser-pairing build`,
+  "X=1 exit 0; pnpm --filter @knpkv/browser-pairing build",
+  ">/dev/null exit 0; pnpm --filter @knpkv/browser-pairing build",
+  String.raw`pnpm \
+() { :; }; pnpm --filter @knpkv/browser-pairing build`,
+  String.raw`\
+  command alias pnpm=:
+pnpm --filter @knpkv/browser-pairing build`
+]) {
+  assert.deepEqual(
+    findCodeCommitWebLifecycleGaps(
+      "packages/codecommit-web/package.json",
+      { ...codeCommitWebScripts, predev: command },
+      browserPairingDependency
+    ),
+    [lifecycleGap("predev")]
+  )
+}
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "prepare() { (exit 0); }; prepare; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
 
 const workspaceManifestPaths = Effect.fn("PackageScriptPortability.workspaceManifestPaths")(
   function* (fileSystem, path, repositoryRoot, patterns) {

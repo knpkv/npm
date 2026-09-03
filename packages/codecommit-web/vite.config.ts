@@ -4,6 +4,7 @@ import path from "node:path"
 import { defineConfig, loadEnv } from "vite"
 import {
   authenticatedDevBackendOrigin,
+  authenticatedDevServerOptions,
   makeAuthenticatedDevProxyConfig
 } from "./src/tooling/authenticated-dev-proxy.js"
 import { productionPrototypeBoundary } from "./src/tooling/production-prototype-boundary.js"
@@ -41,6 +42,7 @@ export default defineConfig(({ mode }) => {
       }
     },
     server: {
+      ...authenticatedDevServerOptions,
       proxy: makeAuthenticatedDevProxyConfig(backendOrigin)
     }
   }

@@ -18,6 +18,8 @@
     "prestart": "pnpm --filter @knpkv/browser-pairing build && pnpm --filter \"@knpkv/relay-product...\" build && pnpm --filter \"@knpkv/review...\" build && pnpm build",
     "dev": "CODECOMMIT_WEB_PUBLIC_ORIGIN=http://localhost:5173 bun run --watch src/main.ts & vite --clearScreen false",
     "prepack": "tsc -b && vite build",
+    "prebuild": "pnpm --filter @knpkv/browser-pairing build",
+    "precheck": "pnpm --filter @knpkv/browser-pairing build",
     "build": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc -p tsconfig.roles.json --noEmit",
     "pretest": "pnpm --filter @knpkv/browser-pairing build",

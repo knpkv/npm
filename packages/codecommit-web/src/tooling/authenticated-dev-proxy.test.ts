@@ -17,11 +17,16 @@ import {
   authenticatedDevProxyOriginDecision,
   authenticatedDevPublicOrigin,
   authenticatedDevPublicOriginEnvironment,
+  authenticatedDevServerOptions,
   makeAuthenticatedDevProxyConfig,
   setAuthenticatedDevProxyOrigin
 } from "./authenticated-dev-proxy.js"
 
 describe("authenticated development proxy", () => {
+  it("pins Vite to the advertised development port", () => {
+    expect(authenticatedDevServerOptions).toEqual({ port: 5173, strictPort: true })
+  })
+
   it("proxies bootstrap and API traffic through one exact backend origin", () => {
     expect(Object.keys(authenticatedDevProxyConfig).sort()).toEqual(["/api", "/auth"])
     for (const options of Object.values(authenticatedDevProxyConfig)) {
