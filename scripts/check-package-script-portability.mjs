@@ -275,7 +275,8 @@ const shellCommandSegments = (command, sanitized = false) => {
   return segments
 }
 
-const functionDefinitionPattern = /(?:^|[;\n]|&&|\|\||[|&({])\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(\s*\)\s*\{/gu
+const functionDefinitionPattern =
+  /(?:^|[;\n]|&&|\|\||[|&({])\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(\s*\))?\s*(\{|\()/gu
 
 const matchingBrace = (source, openIndex, opener, closer) => {
   let depth = 0
@@ -311,8 +312,9 @@ const extractFunctionDefinitions = (command) => {
   functionDefinitionPattern.lastIndex = 0
   for (const match of source.matchAll(functionDefinitionPattern)) {
     const name = match[1]
+    const opener = match[match.length - 1]
     const openIndex = match.index + match[0].length - 1
-    const closeIndex = matchingBrace(source, openIndex, "{", "}")
+    const closeIndex = matchingBrace(source, openIndex, opener, opener === "{" ? "}" : ")")
     if (closeIndex === undefined) continue
     const nameIndex = source.indexOf(name, match.index)
     definitions.push({
@@ -331,10 +333,12 @@ const extractFunctionDefinitions = (command) => {
   return { definitions, source: withoutDefinitions }
 }
 
-const firstShellWord = (text) => {
-  const source = text.trim()
-  let normalized = ""
+const shellWords = (text) => {
+  const words = []
+  let word = ""
+  let hasWord = false
   let quote
+  const source = text.trim()
   for (let index = 0; index < source.length; index++) {
     const character = source[index]
     const nextCharacter = source[index + 1]
@@ -343,34 +347,53 @@ const firstShellWord = (text) => {
         index++
         continue
       }
-      if (quote === '"' && nextCharacter !== undefined && !["$", "`", '"', "\\"].includes(nextCharacter)) {
-        normalized += "\\"
-      }
       if (nextCharacter === undefined) return undefined
-      normalized += nextCharacter
+      if (quote === '"' && !["$", "`", '"', "\\", "\n"].includes(nextCharacter)) {
+        word += "\\"
+      }
+      word += nextCharacter
+      hasWord = true
       index++
       continue
     }
     if (quote !== undefined) {
       if (character === quote) quote = undefined
-      else normalized += character
+      else word += character
+      hasWord = true
       continue
     }
     if (character === "'" || character === '"') {
       quote = character
+      hasWord = true
       continue
     }
-    if (/\s/u.test(character)) break
-    normalized += character
+    if (/\s/u.test(character)) {
+      if (hasWord) {
+        words.push(word)
+        word = ""
+        hasWord = false
+      }
+      continue
+    }
+    word += character
+    hasWord = true
   }
-  return quote === undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
+  if (quote !== undefined) return undefined
+  if (hasWord) words.push(word)
+  return words
+}
+
+const firstShellWord = (text) => {
+  const word = shellWords(text)?.[0]
+  return word !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(word) ? word : undefined
 }
 
 const extractAliasMutations = (segments, reachability, aliases = []) => {
   const mutations = []
   for (const [index, segment] of segments.entries()) {
     if (!reachability[index]) continue
-    const words = segment.text.trim().split(/\s+/u)
+    const words = shellWords(segment.text)
+    if (words === undefined) return undefined
     const commandName = firstShellWord(segment.text)
     if (commandName !== "alias" && commandName !== "unalias") continue
     if (hasActiveAliasDefinition(segment.text, segment.start, aliases)) continue
@@ -416,6 +439,11 @@ const aliasCommandResult = (text, start, aliases, visited = new Set()) => {
   return aliasCommandResult(replacement, start, aliases, new Set([...visited, active.name]))
 }
 
+const isShellTerminatingCommand = (text, includeReturn = true) => {
+  const commandName = firstShellWord(text)
+  return commandName !== undefined && ["exec", "exit", ...(includeReturn ? ["return"] : [])].includes(commandName)
+}
+
 const hasActiveFunctionDefinition = (text, start, definitions) => {
   const commandName = firstShellWord(text)
   return commandName !== undefined && definitions.some(({ name, end }) => name === commandName && end <= start)
@@ -446,7 +474,7 @@ const segmentReachability = (segments, definitions = [], aliases = []) => {
               : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
                 ? "success"
                 : "unknown"
-      if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
+      if (isShellTerminatingCommand(text)) terminated = true
     }
   }
   return reachability
@@ -477,7 +505,7 @@ const segmentMayReachability = (segments, definitions = [], aliases = []) => {
               : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
                 ? "success"
                 : "unknown"
-      if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
+      if (isShellTerminatingCommand(text)) terminated = true
     }
   }
   return reachability
@@ -501,6 +529,7 @@ const unsupportedShellWords = new Set([
   "eval",
   "fi",
   "for",
+  "function",
   "if",
   "select",
   "source",
@@ -558,13 +587,14 @@ const hasShellTermination = (command) => {
   return segments.some(({ text }, index) => {
     if (!reachability[index]) return false
     const trimmed = text.trim()
-    if (/^(?:exec|exit)(?:\s|$)/u.test(trimmed)) return true
+    if (isShellTerminatingCommand(trimmed, false)) return true
     const body = groupedCommandBody(trimmed)
     return body !== undefined && hasShellTermination(body)
   })
 }
 
 const sameAliasMutations = (left, right) =>
+  left !== undefined &&
   left.length === right.length &&
   left.every(
     (mutation, index) =>
@@ -579,6 +609,7 @@ const resolveAliasMutations = (segments, definitions) => {
   for (let iteration = 0; iteration <= segments.length; iteration += 1) {
     const reachability = segmentMayReachability(segments, definitions, aliases)
     const next = extractAliasMutations(segments, reachability, aliases)
+    if (next === undefined) return undefined
     if (sameAliasMutations(next, aliases)) return next
     if (
       next.some((mutation) => {
@@ -1129,6 +1160,40 @@ assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
     "packages/codecommit-web/package.json",
     { ...codeCommitWebScripts, predev: "pnpm() { true; }; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "pnpm() ( true ); pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "function pnpm { true; }; pnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+for (const aliasCommand of ["alias 'pnpm=:'", 'alias "pnpm=:"']) {
+  assert.deepEqual(
+    findCodeCommitWebLifecycleGaps(
+      "packages/codecommit-web/package.json",
+      { ...codeCommitWebScripts, predev: `${aliasCommand}; pnpm --filter @knpkv/browser-pairing build` },
+      browserPairingDependency
+    ),
+    ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+  )
+}
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: String.raw`e\xit 0; pnpm --filter @knpkv/browser-pairing build` },
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
