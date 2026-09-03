@@ -49,6 +49,7 @@ import {
 import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, type ConnectWorkGoalResolution } from "./work-goal-link.js"
+import { WorkPollMount } from "./work-poll.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
   detail: Schema.String
@@ -578,7 +579,6 @@ export const ConnectSurface = ({
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   useAtomMount(atoms.agentsPoll)
-  useAtomMount(atoms.workPoll)
 
   useEffect(() => {
     const container = terminalRef.current
@@ -893,6 +893,7 @@ export const ConnectSurface = ({
 
   return (
     <div className={embedded ? "connect-shell connect-shell-embedded" : "connect-shell"}>
+      <WorkPollMount atom={atoms.workPoll} />
       <ConnectWorkspace
         directory={directoryScreen}
         mode={connection._tag === "connected" ? "terminal" : "directory"}
