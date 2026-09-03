@@ -132,16 +132,16 @@ const terminalRail = `
   <div aria-label="Terminal keyboard controls" class="terminal-key-rail" data-terminal-key-rail role="toolbar">
     <div class="terminal-key-scroll">
       <div aria-label="Terminal modifiers" class="terminal-key-group" role="group">
-        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="ctrl" type="button">Ctrl</button>
-        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="alt" type="button">Alt</button>
+        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="ctrl" tabindex="0" type="button">Ctrl</button>
+        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="alt" tabindex="-1" type="button">Alt</button>
       </div>
       <div aria-label="Terminal keys" class="terminal-key-group" role="group">
-        <button aria-label="Escape" class="terminal-key" data-terminal-key="escape" type="button">Esc</button>
-        <button aria-label="Tab" class="terminal-key" data-terminal-key="tab" type="button">Tab</button>
-        <button aria-label="Arrow left" class="terminal-key" data-terminal-key="arrowLeft" type="button">←</button>
-        <button aria-label="Arrow up" class="terminal-key" data-terminal-key="arrowUp" type="button">↑</button>
-        <button aria-label="Arrow down" class="terminal-key" data-terminal-key="arrowDown" type="button">↓</button>
-        <button aria-label="Arrow right" class="terminal-key" data-terminal-key="arrowRight" type="button">→</button>
+        <button aria-label="Escape" class="terminal-key" data-terminal-key="escape" tabindex="-1" type="button">Esc</button>
+        <button aria-label="Tab" class="terminal-key" data-terminal-key="tab" tabindex="-1" type="button">Tab</button>
+        <button aria-label="Arrow left" class="terminal-key" data-terminal-key="arrowLeft" tabindex="-1" type="button">←</button>
+        <button aria-label="Arrow up" class="terminal-key" data-terminal-key="arrowUp" tabindex="-1" type="button">↑</button>
+        <button aria-label="Arrow down" class="terminal-key" data-terminal-key="arrowDown" tabindex="-1" type="button">↓</button>
+        <button aria-label="Arrow right" class="terminal-key" data-terminal-key="arrowRight" tabindex="-1" type="button">→</button>
       </div>
     </div>
     <small aria-live="polite" class="terminal-key-error"></small>
@@ -254,6 +254,9 @@ test("390x844 keeps the terminal rail reachable with truthful button semantics",
 
 test("terminal toolbar arrow navigation skips disabled controls", async ({ page }) => {
   await setTerminal(page)
+  const rail = page.locator("[data-terminal-key-rail]")
+  await expect(rail.locator("button[tabindex=\"0\"]")).toHaveCount(1)
+  await expect(rail.locator("button[tabindex=\"-1\"]")).toHaveCount(7)
   await page.addScriptTag({
     content: `${terminalRailNavigationSource}\nwindow.nextTerminalRailIndex = nextTerminalRailIndex`,
     type: "module"

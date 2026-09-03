@@ -1,6 +1,6 @@
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
-import type { ReactNode, Ref } from "react"
+import { useState, type ReactNode, type Ref } from "react"
 import type { ConnectAgent } from "./model.js"
 import {
   serializeTerminalKey,
@@ -403,76 +403,86 @@ export const TerminalKeyRail = ({
   onFocusTerminal,
   onKey,
   onModifierChange
-}: TerminalKeyRailProps) => (
-  <div
-    aria-label="Terminal keyboard controls"
-    aria-orientation="horizontal"
-    className="terminal-key-rail"
-    data-terminal-key-rail
-    onKeyDown={(event) => {
-      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
-      const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-terminal-key]")]
-      const currentIndex = buttons.findIndex((button) => button === event.target)
-      if (currentIndex < 0) return
-      const nextIndex = nextTerminalRailIndex(
-        event.key,
-        currentIndex,
-        buttons.map(({ disabled }) => !disabled)
-      )
-      if (nextIndex === null) return
-      const next = buttons.at(nextIndex)
-      if (next === undefined) return
-      event.preventDefault()
-      next.focus()
-    }}
-    role="toolbar"
-  >
-    <div className="terminal-key-scroll">
-      <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
-        {terminalModifiers.map((item) => (
-          <button
-            aria-pressed={modifier === item}
-            className="terminal-key terminal-key-modifier"
-            data-terminal-key={item}
-            disabled={disabled}
-            key={item}
-            onClick={(event) => {
-              onModifierChange(item)
-              if (event.detail === 0) onFocusTerminal()
-            }}
-            onPointerDown={(event) => event.preventDefault()}
-            type="button"
-          >
-            {modifierLabel(item)}
-          </button>
-        ))}
-      </div>
-      <div aria-label="Terminal keys" className="terminal-key-group" role="group">
-        {terminalKeyDescriptors.map((descriptor) => {
-          const serialization = serializeTerminalKey(descriptor.key, modifier)
-          const unavailable = serialization._tag === "unsupported"
-          return (
+}: TerminalKeyRailProps) => {
+  const [activeIndex, setActiveIndex] = useState(0)
+  const modifierCount = terminalModifiers.length
+  return (
+    <div
+      aria-label="Terminal keyboard controls"
+      aria-orientation="horizontal"
+      className="terminal-key-rail"
+      data-terminal-key-rail
+      onKeyDown={(event) => {
+        if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+        const buttons = [...event.currentTarget.querySelectorAll<HTMLButtonElement>("button[data-terminal-key]")]
+        const currentIndex = buttons.findIndex((button) => button === event.target)
+        if (currentIndex < 0) return
+        const nextIndex = nextTerminalRailIndex(
+          event.key,
+          currentIndex,
+          buttons.map(({ disabled }) => !disabled)
+        )
+        if (nextIndex === null) return
+        const next = buttons.at(nextIndex)
+        if (next === undefined) return
+        event.preventDefault()
+        setActiveIndex(nextIndex)
+        next.focus()
+      }}
+      role="toolbar"
+    >
+      <div className="terminal-key-scroll">
+        <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
+          {terminalModifiers.map((item, index) => (
             <button
-              aria-label={
-                modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`
-              }
-              className="terminal-key"
-              data-terminal-key={descriptor.key}
-              disabled={disabled || unavailable}
-              key={descriptor.key}
-              onClick={() => onKey(descriptor.key)}
+              aria-pressed={modifier === item}
+              className="terminal-key terminal-key-modifier"
+              data-terminal-key={item}
+              disabled={disabled}
+              key={item}
+              onClick={(event) => {
+                onModifierChange(item)
+                if (event.detail === 0) onFocusTerminal()
+              }}
+              onFocus={() => setActiveIndex(index)}
               onPointerDown={(event) => event.preventDefault()}
-              title={unavailable ? "Choose a supported modifier combination" : undefined}
+              tabIndex={activeIndex === index ? 0 : -1}
               type="button"
             >
-              {descriptor.label}
+              {modifierLabel(item)}
             </button>
-          )
-        })}
+          ))}
+        </div>
+        <div aria-label="Terminal keys" className="terminal-key-group" role="group">
+          {terminalKeyDescriptors.map((descriptor, index) => {
+            const serialization = serializeTerminalKey(descriptor.key, modifier)
+            const unavailable = serialization._tag === "unsupported"
+            const railIndex = modifierCount + index
+            return (
+              <button
+                aria-label={
+                  modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`
+                }
+                className="terminal-key"
+                data-terminal-key={descriptor.key}
+                disabled={disabled || unavailable}
+                key={descriptor.key}
+                onClick={() => onKey(descriptor.key)}
+                onFocus={() => setActiveIndex(railIndex)}
+                onPointerDown={(event) => event.preventDefault()}
+                tabIndex={activeIndex === railIndex ? 0 : -1}
+                title={unavailable ? "Choose a supported modifier combination" : undefined}
+                type="button"
+              >
+                {descriptor.label}
+              </button>
+            )
+          })}
+        </div>
       </div>
+      <small aria-live="polite" className="terminal-key-error">
+        {error ?? ""}
+      </small>
     </div>
-    <small aria-live="polite" className="terminal-key-error">
-      {error ?? ""}
-    </small>
-  </div>
-)
+  )
+}
