@@ -341,6 +341,7 @@ describe("sanitized approval requests", () => {
     const refs = [
       { ref: '{"password":"json-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"database-password":"prefixed-json-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"Authorization":"quoted-auth-leaked-canary"}', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
         redacted: "%5Bredacted%20credential%5D"
@@ -392,7 +393,7 @@ describe("sanitized approval requests", () => {
         ref: "https://user:leaked%2Fcanary@example.test/repo"
       },
       {
-        redacted: "[redacted credential]",
+        redacted: "%255Bredacted%2520credential%255D",
         ref: "https://example.test/foo%25release-pass%2577ord%253Dleaked-canary"
       }
     ]
@@ -466,6 +467,18 @@ describe("sanitized approval requests", () => {
     expect(encoded).not.toContain("leaked-canary")
     expect(encoded).toContain("%5Bredacted%20credential%5D")
     expect(approvalRequestFor({ kind: "nix.apply", ref: refs[1] }).fields[0]?.value).toBe(refs[1])
+  })
+
+  it("redacts credentials in malformed encoded URI path segments", () => {
+    const ref = 'https://example.test/repo/foo%ZZ"Authorization"="malformed-auth-leaked-canary"%25ZZ'
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("malformed-auth-leaked-canary")
+    expect(encoded).toContain("[redacted credential]")
   })
 
   it("preserves encoded literal percent characters in safe coordinates", () => {

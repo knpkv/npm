@@ -60,7 +60,7 @@ export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 const credentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]))+)/giu
 const quotedCredentialAssignment =
-  /((?:"(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))"|'(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
+  /((?:"(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|authorization|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))"|'(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|authorization|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
 const whitespaceCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key))\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const privateKeyMaterial =
@@ -76,6 +76,7 @@ const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const encodedUriAuthorityBoundary = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*%(?:25){0,2}2f/iu
 const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
 const encodedUriMaxDepth = 3
+const hasMalformedPercentEscape = (value: string): boolean => /%(?![0-9a-f]{2})/iu.test(value)
 
 type EncodedText =
   | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
@@ -197,11 +198,11 @@ const sanitizeUriAuthority = (value: string): string => {
 
   const sanitized = sanitizeDecodedAuthority(encoded.value)
   if (sanitized === encoded.value) {
-    return /%(?![0-9a-f]{2})/iu.test(encoded.value) || reencodeText(encoded.value, encoded.layers) === undefined
+    return hasMalformedPercentEscape(authority) || reencodeText(encoded.value, encoded.layers) === undefined
       ? `${prefix}${redactedCredential}${suffix}`
       : `${prefix}${authority}${suffix}`
   }
-  if (/%(?![0-9a-f]{2})/iu.test(encoded.value)) return `${prefix}${redactedCredential}${suffix}`
+  if (hasMalformedPercentEscape(authority)) return `${prefix}${redactedCredential}${suffix}`
   return `${prefix}${reencodeText(sanitized, encoded.layers) ?? redactedCredential}${suffix}`
 }
 
@@ -213,9 +214,11 @@ const sanitizeEncodedPathSegment = (value: string): string => {
   if (encoded._tag !== "encoded") return redactedCredential
   const sanitized = sanitizeDecodedUri(encoded.value)
   if (sanitized === encoded.value) {
-    return reencodeText(encoded.value, encoded.layers) === undefined ? redactedCredential : value
+    return hasMalformedPercentEscape(value) || reencodeText(encoded.value, encoded.layers) === undefined
+      ? redactedCredential
+      : value
   }
-  if (/%(?![0-9a-f]{2})/iu.test(encoded.value)) return redactedCredential
+  if (hasMalformedPercentEscape(value)) return redactedCredential
   return reencodeText(sanitized, encoded.layers) ?? redactedCredential
 }
 
@@ -241,7 +244,7 @@ const sanitizeEncodedUri = (value: string): string => {
         ? redactedCredential
         : authoritySanitized
     }
-    if (/%(?![0-9a-f]{2})/iu.test(encoded.value)) return redactedCredential
+    if (hasMalformedPercentEscape(normalized)) return redactedCredential
     return reencodeText(sanitized, encoded.layers) ?? redactedCredential
   } catch {
     return redactedCredential
