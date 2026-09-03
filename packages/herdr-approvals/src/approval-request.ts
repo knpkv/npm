@@ -251,6 +251,20 @@ const sanitizeUriAuthority = (value: string): string => {
 
 const uriAuthorityAndPath = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*)(\/[^?#\s]*)?/iu
 
+const encodedAuthorityQueryBoundary = /%(?:25){0,3}(?:3f|23)/iu
+const encodedAuthorityUserInfoMarker = /@|%(?:25){0,3}40/iu
+
+const encodedAuthorityHasQueryBeforeUserInfo = (value: string): boolean => {
+  const match = uriAuthority.exec(value)
+  if (match === null) return false
+  const authority = match[2]
+  if (authority === undefined) return false
+  const queryBoundary = authority.search(encodedAuthorityQueryBoundary)
+  if (queryBoundary < 0) return false
+  const userInfoMarker = authority.search(encodedAuthorityUserInfoMarker)
+  return userInfoMarker < 0 || queryBoundary < userInfoMarker
+}
+
 const sanitizeEncodedPathSegment = (value: string): string => {
   const encoded = encodedText(value)
   if (encoded === undefined) return sanitizeCredentialText(value)
@@ -276,7 +290,10 @@ const sanitizeEncodedUri = (value: string): string => {
   const normalized = normalizeHttpSchemeSeparators(value)
   const encodedUri = uriPrefix.test(normalized)
   if (encodedUri && !encodedUriAuthorityBoundary.test(normalized)) return sanitizeDecodedUri(normalized)
-  const authoritySanitized = encodedUri ? sanitizeUriAuthority(normalized) : normalized
+  if (encodedUri && encodedAuthorityHasQueryBeforeUserInfo(normalized)) return redactedCredential
+  const authorityHasEncodedQuery = encodedUri &&
+    encodedAuthorityQueryBoundary.test(uriAuthority.exec(normalized)?.[2] ?? "")
+  const authoritySanitized = encodedUri && !authorityHasEncodedQuery ? sanitizeUriAuthority(normalized) : normalized
   if (authoritySanitized !== normalized && /\s/u.test(normalized)) return redactedCredential
   const encoded = encodedText(authoritySanitized)
   if (encoded === undefined) {

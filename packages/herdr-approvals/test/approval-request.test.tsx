@@ -448,7 +448,8 @@ describe("sanitized approval requests", () => {
     const refs = [
       "https://host%2Fpath%3Fref%3Dhttps%253A%252F%252Forigin.test%252Frepo%253Fsig%253Dsecret-canary",
       "https://host%3Fref%3Dsig%253Dsecret-canary%ZZ",
-      "https://host%2Fpath%3Fref%3Dfoo%ZZAuthorization: Bearer detached-secret-canary"
+      "https://host%2Fpath%3Fref%3Dfoo%ZZAuthorization: Bearer detached-secret-canary",
+      "https://host%2Fpath%3Fref%3Dpassword=%40secret-canary"
     ]
     for (const ref of refs) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
