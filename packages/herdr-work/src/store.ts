@@ -89,25 +89,41 @@ const workSnapshotEnvelopeMaxBytes = encodedBytes({
   month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] }
 })
 
+const makeSnapshotByteAccumulator = (history: ReadonlyArray<WorkGoalCheckpointType>) => {
+  const maximumGoalBytes = new Map<string, number>()
+  let encodedGoals = 0
+  for (const { goal } of history) {
+    const bytes = encodedBytes(goal)
+    const previous = maximumGoalBytes.get(goal.id)
+    if (previous === undefined) {
+      maximumGoalBytes.set(goal.id, bytes)
+      encodedGoals += bytes
+    } else if (bytes > previous) {
+      maximumGoalBytes.set(goal.id, bytes)
+      encodedGoals += bytes - previous
+    }
+  }
+  return {
+    add: (candidate: WorkGoalCheckpointType): number => {
+      const bytes = encodedBytes(candidate.goal)
+      const previous = maximumGoalBytes.get(candidate.goal.id)
+      if (previous === undefined) {
+        maximumGoalBytes.set(candidate.goal.id, bytes)
+        encodedGoals += bytes
+      } else if (bytes > previous) {
+        maximumGoalBytes.set(candidate.goal.id, bytes)
+        encodedGoals += bytes - previous
+      }
+      const separators = Math.max(0, maximumGoalBytes.size - 1)
+      return workSnapshotEnvelopeMaxBytes + 4 * (encodedGoals + separators)
+    }
+  }
+}
+
 const maximumSnapshotBytes = (
   history: ReadonlyArray<WorkGoalCheckpointType>,
   candidate: WorkGoalCheckpointType
-): number => {
-  const maximumGoalBytes = new Map<string, number>()
-  for (const { goal } of [...history, candidate]) {
-    const bytes = encodedBytes(goal)
-    maximumGoalBytes.set(
-      goal.id,
-      Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes)
-    )
-  }
-  const encodedGoals = [...maximumGoalBytes.values()].reduce(
-    (total, bytes) => total + bytes,
-    0
-  )
-  const separators = Math.max(0, maximumGoalBytes.size - 1)
-  return workSnapshotEnvelopeMaxBytes + 4 * (encodedGoals + separators)
-}
+): number => makeSnapshotByteAccumulator(history).add(candidate)
 
 const transactionIdentity = (events: ReadonlyArray<WorkGoalCheckpointType>) =>
   events.map(({ eventId, goal, occurredAt }) => ({ eventId, goalId: goal.id, occurredAt }))
@@ -191,6 +207,8 @@ export class WorkStore implements WorkStoreService {
           occurred_at INTEGER NOT NULL,
           record TEXT NOT NULL
         );
+        CREATE INDEX IF NOT EXISTS work_decision_handoffs_lane_time
+          ON work_decision_handoffs (lane_id, occurred_at, handoff_id);
       `)
       const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
         this.#database.prepare("PRAGMA table_info(work_goal_events)").all()
@@ -614,9 +632,9 @@ export class WorkStore implements WorkStoreService {
             inTransaction = false
             return { _tag: "rejected", error: familyError } satisfies AppendManyDecision
           }
-          let snapshotHistory = history
+          const snapshotBytes = makeSnapshotByteAccumulator(history)
           for (const event of newEvents) {
-            if (maximumSnapshotBytes(snapshotHistory, event) > fleetResponseBodyMaxBytes) {
+            if (snapshotBytes.add(event) > fleetResponseBodyMaxBytes) {
               this.#database.exec("ROLLBACK")
               inTransaction = false
               return {
@@ -628,7 +646,6 @@ export class WorkStore implements WorkStoreService {
                 })
               } satisfies AppendManyDecision
             }
-            snapshotHistory = [...snapshotHistory, event]
           }
           const goalIds = new Set(history.map(({ goal }) => goal.id))
           for (const event of newEvents) goalIds.add(event.goal.id)

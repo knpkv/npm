@@ -252,6 +252,7 @@ const makeOrchestrator: Effect.Effect<
     detail: string | null,
     result: string | null
   ) {
+    yield* secureFiles
     const decodedTarget = yield* Schema.decodeUnknownEffect(transitionTarget)(target).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: `invalid transition target ${target}` }))
     )
@@ -307,7 +308,6 @@ const makeOrchestrator: Effect.Effect<
     ).pipe(
       Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("transition.transaction")(cause)))
     )
-    yield* secureFiles
     return event
   })
 
@@ -324,6 +324,7 @@ const makeOrchestrator: Effect.Effect<
       Effect.mapError(() => new OrchestratorValidationError({ detail: "idempotency key is invalid" }))
     )
     const encodedCommand = JSON.stringify(decodedCommand)
+    yield* secureFiles
     const receipt = yield* sql.withTransaction(
       Effect.gen(function*() {
         const existingRows = yield* sql`
@@ -411,7 +412,6 @@ const makeOrchestrator: Effect.Effect<
     ).pipe(
       Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("submit.transaction")(cause)))
     )
-    yield* secureFiles
     return receipt
   })
 

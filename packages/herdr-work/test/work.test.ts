@@ -410,6 +410,22 @@ describe("durable Work projection", () => {
       expect(yield* store.list()).toEqual(history.slice(0, 2))
     }).pipe(provideNodeServices))
 
+  it.effect("keeps maximum same-goal batches within the snapshot budget", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-snapshot-batch-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      const events = Array.from(
+        { length: workHistoryMaxEvents },
+        (_, index) => checkpointForGoal("goal-linear", `event-linear-${index}`, index, 0)
+      )
+
+      expect(yield* service.recordMany("transaction-linear-snapshot", events)).toEqual(events)
+      expect(yield* store.list()).toHaveLength(workHistoryMaxEvents)
+    }).pipe(provideNodeServices), 30_000)
+
   it.effect("rejects oversized batches before reading their elements", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-oversized-batch-"))
@@ -508,6 +524,16 @@ describe("durable Work projection", () => {
       expect(yield* service.handoff(handoff)).toEqual(handoff)
       expect(yield* service.handoff(handoff)).toEqual(handoff)
       expect(yield* service.decisions("goal-packages")).toEqual([handoff])
+
+      const database = new DatabaseSync(store.path)
+      const queryPlan = database.prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT record FROM work_decision_handoffs
+         WHERE lane_id = ?
+         ORDER BY occurred_at ASC, handoff_id ASC`
+      ).all("goal-packages")
+      database.close()
+      expect(queryPlan.some((row) => String(row.detail).includes("work_decision_handoffs_lane_time"))).toBe(true)
 
       for (const head of ["a".repeat(41), "a".repeat(63)]) {
         expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, head }))).toMatchObject({
