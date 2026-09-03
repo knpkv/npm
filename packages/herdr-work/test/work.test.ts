@@ -14,7 +14,9 @@ import {
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
   type WorkGoalFamily,
   workHistoryMaxEvents,
+  WorkSnapshot,
   workSnapshotMaxGoals,
+  WorkSnapshots,
   WorkStore
 } from "../src/index.js"
 import {
@@ -920,4 +922,48 @@ describe("durable Work projection", () => {
       expect(oldEstimated).toBeGreaterThan(fleetResponseBodyMaxBytes)
       expect(oldEstimated).toBeGreaterThan(estimated)
     }).pipe(provideNodeServices), 30_000)
+
+  it.effect("rejects family snapshots where the canonical payload diverges from the active goal", () =>
+    Effect.gen(function*() {
+      const base = checkpointForGoal("goal-canonical-diverge", "event-base-diverge", 0, 0)
+      const old = checkpointForGoal("goal-old-diverge", "event-old-diverge", 0, 0)
+      const canonical = familyCheckpoint(
+        base,
+        "event-canonical-diverge",
+        10,
+        "goal-canonical-diverge",
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        old,
+        "event-superseded-diverge",
+        10,
+        "goal-canonical-diverge",
+        "superseded"
+      )
+      const valid = yield* projectWorkSnapshots([base, old, canonical, superseded], 11)
+      expect(Schema.decodeUnknownResult(WorkSnapshots)(valid)._tag).toBe("Success")
+      // Legacy snapshot without families remains valid
+      const legacyNow = { ...valid.now }
+      delete (legacyNow as { families?: unknown }).families
+      expect(Schema.decodeUnknownResult(WorkSnapshot)(legacyNow)._tag).toBe("Success")
+      // Invalid: same id but different canonical payload (title) must be rejected
+      const divergentCanonical = { ...valid.now.families![0]!.canonical, title: "stale title" }
+      const divergentSnapshot = {
+        ...valid.now,
+        families: [{ ...valid.now.families![0]!, canonical: divergentCanonical }]
+      }
+      expect(Schema.decodeUnknownResult(WorkSnapshot)(divergentSnapshot)._tag).toBe("Failure")
+      expect(
+        Schema.decodeUnknownResult(WorkSnapshots)({ ...valid, now: divergentSnapshot })._tag
+      ).toBe("Failure")
+      // Invalid: family canonical id not in goals must also be rejected (id-only check)
+      const orphanCanonical = {
+        ...valid.now.families![0]!,
+        canonicalGoalId: "goal-missing",
+        canonical: { ...valid.now.families![0]!.canonical, id: "goal-missing", title: "goal-missing" }
+      }
+      const orphanSnapshot = { ...valid.now, families: [orphanCanonical] }
+      expect(Schema.decodeUnknownResult(WorkSnapshot)(orphanSnapshot)._tag).toBe("Failure")
+    }))
 })

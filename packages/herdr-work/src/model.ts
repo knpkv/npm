@@ -1,5 +1,5 @@
 import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
-import { Schema } from "effect"
+import { Equal, Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
 // Approval hosts are bounded identifiers, not DNS names; the approvals app also
@@ -275,17 +275,19 @@ export const WorkSnapshot = Schema.Struct({
   Schema.makeFilter(
     (snapshot) => {
       const families = snapshot.families ?? []
-      const goalIds = new Set(snapshot.goals.map((goal) => goal.id))
+      const goalById = new Map(snapshot.goals.map((goal) => [goal.id, goal] as const))
       const seenCanonical = new Set<string>()
       const seenMember = new Set<string>()
       for (const group of families) {
         if (seenCanonical.has(group.canonicalGoalId)) return false
         seenCanonical.add(group.canonicalGoalId)
-        if (!goalIds.has(group.canonicalGoalId)) return false
+        const active = goalById.get(group.canonicalGoalId)
+        if (active === undefined) return false
+        if (!Equal.equals(active, group.canonical)) return false
         for (const member of group.superseded) {
           if (seenMember.has(member.id)) return false
           seenMember.add(member.id)
-          if (goalIds.has(member.id)) return false
+          if (goalById.has(member.id)) return false
         }
       }
       return true
