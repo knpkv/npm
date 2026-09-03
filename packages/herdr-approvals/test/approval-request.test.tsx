@@ -246,6 +246,10 @@ describe("sanitized approval requests", () => {
     for (const ref of [
       "Cookie: SID=leaked-cookie-canary; theme=dark",
       "set-cookie: session_id=leaked-set-cookie-canary; Path=/",
+      "cookie=plain-cookie-canary",
+      "set-cookie=plain-set-cookie-canary",
+      "cookie%3Dencoded-cookie-canary",
+      "https://example.test/repo?ref=cookie%3Dencoded-query-cookie-canary",
       "Cookie: SID=first-folded-cookie-canary\r\n second-folded-cookie-canary",
       "Set-Cookie: SID=first-folded-set-cookie-canary\n second-folded-set-cookie-canary",
       "Authorization: Basic first-folded-basic-canary\r\n second-folded-basic-canary",
@@ -259,7 +263,7 @@ describe("sanitized approval requests", () => {
       })
       const encoded = JSON.stringify({ request, projection })
       expect(encoded).not.toMatch(/(?:cookie|folded)-canary/u)
-      expect(encoded).toContain("[redacted credential]")
+      expect(encoded).toMatch(/(?:\[redacted credential\]|%5Bredacted%20credential%5D)/u)
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: "cookiePolicy=strict" }).fields[0]?.value).toBe(
       "cookiePolicy=strict"
@@ -398,6 +402,10 @@ describe("sanitized approval requests", () => {
         ref: '{"auths":{"registry.example":{"auth":"docker-auth-leaked-canary"}}}',
         redacted: "[redacted credential]"
       },
+      {
+        ref: '{"auths":{"one.example":{"auth":"first-docker-auth-leaked-canary"},"two.example":{"auth":"second-docker-auth-leaked-canary"}}}',
+        redacted: "[redacted credential]"
+      },
       { ref: '{"refreshToken":"camel-token-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"clientSecret":"camel-secret-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
@@ -414,7 +422,7 @@ describe("sanitized approval requests", () => {
       })
       const encoded = JSON.stringify({ request, projection })
       expect(encoded).not.toMatch(
-        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|docker-auth|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
+        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|docker-auth|first-docker-auth|second-docker-auth|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
       )
       expect(encoded).toContain(redacted)
     }
@@ -427,6 +435,47 @@ describe("sanitized approval requests", () => {
     expect(
       approvalRequestFor({ kind: "nix.apply", ref: '{"metadata":{"auth":"visible-auth"}}' }).fields[0]?.value
     ).toBe('{"metadata":{"auth":"visible-auth"}}')
+  })
+
+  it("redacts ODBC password assignments and preserves following structured fields", () => {
+    const refs = [
+      "Driver={PostgreSQL};Uid=deploy;Pwd=odbc-leaked-canary",
+      '{"password":"quoted-leaked-canary","revision":"release-2026"}'
+    ]
+    for (const ref of refs) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toContain("leaked-canary")
+      expect(encoded).toContain("[redacted credential]")
+    }
+    expect(
+      approvalRequestFor({
+        kind: "nix.apply",
+        ref: '{"password":"quoted-leaked-canary","revision":"release-2026"}'
+      }).fields[0]?.value
+    ).toBe('{"password":"[redacted credential]","revision":"release-2026"}')
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "workingDir=/srv/pwd-cache" }).fields[0]?.value).toBe(
+      "workingDir=/srv/pwd-cache"
+    )
+  })
+
+  it("preserves literal percent characters in filesystem coordinates", () => {
+    const ref = "/srv/npm%release"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    expect(request.fields[0]?.value).toBe(ref)
+    expect(projection.payload.kind === "nix.apply" ? projection.payload.ref : "").toBe(ref)
+    const deeplyEncodedCredential = "password%2525253Ddeeply-encoded-canary"
+    expect(approvalRequestFor({ kind: "nix.apply", ref: deeplyEncodedCredential }).fields[0]?.value).not.toContain(
+      "deeply-encoded-canary"
+    )
   })
 
   it("redacts credentials nested inside safe URL coordinates", () => {

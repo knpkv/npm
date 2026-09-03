@@ -58,14 +58,16 @@ export const SanitizedJobRecord = Schema.Struct({
 export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
 const credentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]))+)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]))+)/giu
 const quotedCredentialAssignment =
   /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
 const quotedCredentialAssignmentKey = /(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*/gu
+const cookieCredentialAssignment =
+  /((?:^|[^\w-])(?:cookie|set-cookie)\s*[:=]\s*)(?!\[redacted credential\])([^\r\n]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$|[\r\n]))/giu
 const whitespaceCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const malformedCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)(?:%(?![0-9a-f]{2})[^\s=:]*)+\s*[:=]\s*)([^\s,;]+)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)(?:%(?![0-9a-f]{2})[^\s=:]*)+\s*[:=]\s*)([^\s,;]+)/giu
 const netrcRecord = /(^|[\r\n])([ \t]*(?:machine|default)\b(?:(?![\r\n][ \t]*(?:machine|default)\b)[\s\S])*)/gimu
 const netrcPassword = /\bpassword[ \t]+[^\r\n]*/iu
 const privateKeyMaterial =
@@ -77,10 +79,11 @@ const credentialAuthorizationContinuation = /((?:authorization)\s*[:=]\s*)[^\r\n
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n]+))/giu
 const dockerAuthAssignment =
-  /((?:"auths"|'auths')\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?(?:"auth"|'auth')\s*:\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')/giu
+  /((?:"auths"|'auths')\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?(?:"auth"|'auth')\s*:\s*)((?!"\[redacted credential\]"|'\[redacted credential\]')(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'))/giu
 const credentialUri = /(^|[^\w])\/\/[^/?#]*@/gu
 const encodedCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)%(?:25){0,3}(?:3d|3a))([^/?#\s&]*)/giu
+  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)%(?:25){0,3}(?:3d|3a))([^/?#\s&]*)/giu
+const encodedCookieAssignment = /(^|[^\w-])((?:cookie|set-cookie)%(?:25){0,3}(?:3d|3a))([^/?#\s&]*)/giu
 const safeUriQueryKeys = new Set(["branch", "dir", "ref", "revision", "rev", "sha"])
 const encodedUriPrefix = /^(?:[a-z][a-z\d+.-]*%3a)?%2f%2f/iu
 const encodedUriAuthorityBoundary = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)[^/?#\s]*%(?:25){0,2}2f/iu
@@ -88,7 +91,7 @@ const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
 const encodedUriMaxDepth = 3
 const hasMalformedPercentEscape = (value: string): boolean => /%(?![0-9a-f]{2})/iu.test(value)
 const credentialKey =
-  /^(?:(?:[a-z\d]+[_-])*[a-z\d]*(?:password|passwd|secret|token|credential|credentials|authorization|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth|cookie|set-cookie)$/iu
+  /^(?:(?:[a-z\d]+[_-])*[a-z\d]*(?:password|passwd|pwd|secret|token|credential|credentials|authorization|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth|cookie|set-cookie)$/iu
 
 const decodeCredentialKey = (value: string): string =>
   value.replace(/\\u([0-9a-f]{4})/giu, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)))
@@ -113,7 +116,10 @@ const sanitizeQuotedPlainCredentials = (value: string): string => {
     if (firstValueCharacter === undefined) continue
     if (firstValueCharacter === "\"" || firstValueCharacter === "'") {
       const valueEnd = quotedValueEnd(value, valueStart, firstValueCharacter)
-      if (valueEnd !== undefined && /^\s*[\]}]\s*$/u.test(value.slice(valueEnd))) continue
+      if (valueEnd !== undefined) {
+        const suffix = value.slice(valueEnd)
+        if (/^\s*[,;]/u.test(suffix) || /^\s*[\]}]\s*$/u.test(suffix)) continue
+      }
     } else {
       return `${value.slice(0, valueStart)}${redactedCredential}`
     }
@@ -181,6 +187,20 @@ const reencodeText = (value: string, layers: number): string | undefined => {
 }
 
 const sanitizeCredentialText = (value: string): string => {
+  const sanitizeDockerCredentials = (text: string): string => {
+    let sanitized = text
+    while (true) {
+      const next = sanitized.replace(
+        dockerAuthAssignment,
+        (_match, prefix: string, credential: string) => {
+          const quote = credential.startsWith("'") ? "'" : "\""
+          return `${prefix}${quote}${redactedCredential}${quote}`
+        }
+      )
+      if (next === sanitized) return sanitized
+      sanitized = next
+    }
+  }
   const sanitized = value
     .replace(privateKeyMaterial, redactedCredential)
     .replace(
@@ -190,6 +210,7 @@ const sanitizeCredentialText = (value: string): string => {
     .replace(credentialCookieHeader, "$1$2[redacted credential]")
     .replace(credentialAuthorizationContinuation, "$1[redacted credential]")
     .replace(credentialDigestAuthorization, "$1[redacted credential]")
+    .replace(cookieCredentialAssignment, (_match, prefix: string) => `${prefix}${redactedCredential}`)
     .replace(
       credentialAuthorization,
       (match, prefix: string, credential: string) =>
@@ -204,13 +225,10 @@ const sanitizeCredentialText = (value: string): string => {
         return `${prefix}${quote}${redactedCredential}${quote}`
       }
     )
-    .replace(
-      dockerAuthAssignment,
-      (_match, prefix: string, credential: string) => {
-        const quote = credential.startsWith("'") ? "'" : "\""
-        return `${prefix}${quote}${redactedCredential}${quote}`
-      }
-    )
+    .replace(dockerAuthAssignment, (_match, prefix: string, credential: string) => {
+      const quote = credential.startsWith("'") ? "'" : "\""
+      return `${prefix}${quote}${redactedCredential}${quote}`
+    })
     .replace(
       whitespaceCredentialAssignment,
       (_match, prefix: string) => `${prefix}${redactedCredential}`
@@ -224,21 +242,26 @@ const sanitizeCredentialText = (value: string): string => {
       (match, prefix: string, credential: string) =>
         credential === redactedCredential ? match : `${prefix}${redactedCredential}`
     )
-  return sanitizeQuotedPlainCredentials(sanitized)
+  return sanitizeQuotedPlainCredentials(sanitizeDockerCredentials(sanitized))
+}
+
+const sanitizeEncodedCredential = (match: string): string => {
+  const encoded = encodedText(match)
+  if (encoded?._tag !== "encoded") {
+    return redactedCredential
+  }
+  let sanitized = sanitizeCredentialText(encoded.value)
+  for (let layer = 0; layer < encoded.layers; layer += 1) {
+    sanitized = encodeURIComponent(sanitized)
+  }
+  return sanitized
 }
 
 const sanitizeEncodedCredentialAssignments = (value: string): string =>
-  value.replace(encodedCredentialAssignment, (match) => {
-    const encoded = encodedText(match)
-    if (encoded?._tag !== "encoded") {
-      return redactedCredential
-    }
-    let sanitized = sanitizeCredentialText(encoded.value)
-    for (let layer = 0; layer < encoded.layers; layer += 1) {
-      sanitized = encodeURIComponent(sanitized)
-    }
-    return sanitized
-  })
+  value
+    .replace(encodedCredentialAssignment, sanitizeEncodedCredential)
+    .replace(encodedCookieAssignment, (_match, prefix: string, key: string, credential: string) =>
+      `${prefix}${sanitizeEncodedCredential(`${key}${credential}`)}`)
 
 const specialSchemePrefix = /^(?:https?|ftp):[\\/]{1,}/iu
 const uriAuthority = /^((?:[a-z][a-z\d+.-]*:\/\/|\/\/))([^/?#\s]*)([\s\S]*)$/iu
@@ -370,11 +393,14 @@ const sanitizeUriQueryParameters = (value: string): string => {
 }
 
 const sanitizeRequestText = (value: string, maximumLength: number): string => {
+  const encoded = encodedText(value)
   const sanitized = uriPrefix.test(value) || specialSchemePrefix.test(value) || encodedUriPrefix.test(value)
     ? sanitizeEncodedUri(value)
-    : encodedText(value) === undefined
-    ? sanitizeCredentialText(sanitizeUriQueryParameters(value))
-    : sanitizeEncodedUri(value)
+    : encoded?._tag === "encoded"
+    ? sanitizeEncodedUri(value)
+    : encoded?._tag === "overflow"
+    ? redactedCredential
+    : sanitizeCredentialText(sanitizeUriQueryParameters(value))
   return sanitized.length <= maximumLength
     ? sanitized
     : `${sanitized.slice(0, maximumLength - redactedCredential.length)}${redactedCredential}`
