@@ -214,6 +214,7 @@ type TerminalInputCommand = Extract<TerminalClientCommand, { readonly type: "ter
 type TerminalKeyboardCallbacks = {
   readonly getModifier: () => TerminalModifier | null
   readonly setModifier: (modifier: TerminalModifier | null) => void
+  readonly setTerminalFocus: (focus: () => void) => () => void
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
   readonly setCursorModeReader: (read: () => TerminalCursorMode) => () => void
@@ -296,6 +297,8 @@ const terminalWorker = (
         })
       }
       applyTerminalInputIdentity(textarea)
+      const releaseTerminalFocus = keyboard.setTerminalFocus(() => terminal.terminal.focus())
+      yield* Effect.addFinalizer(() => Effect.sync(releaseTerminalFocus))
       let ready = false
       let socket: WebSocket | null = null
       let inputOverflow = false
@@ -562,6 +565,7 @@ export const ConnectSurface = ({
   const terminalViewportRef = useRef<HTMLDivElement>(null)
   const terminalInputRef = useRef<(command: TerminalInputCommand) => boolean>(() => false)
   const terminalInputOwnerRef = useRef<symbol | null>(null)
+  const terminalFocusRef = useRef<() => void>(() => {})
   const terminalCursorModeReaderRef = useRef<() => TerminalCursorMode>(() => "normal")
   const terminalCursorModeOwnerRef = useRef<symbol | null>(null)
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
@@ -575,6 +579,12 @@ export const ConnectSurface = ({
     const fiber = Effect.runFork(
       terminalWorker(container, connectionRequest.agent, setConnection, {
         getModifier: () => terminalModifierRef.current,
+        setTerminalFocus: (focus) => {
+          terminalFocusRef.current = focus
+          return () => {
+            if (terminalFocusRef.current === focus) terminalFocusRef.current = () => {}
+          }
+        },
         reportError: () => setTerminalKeyError("That modifier combination is not supported."),
         setInputSender: (sendInput) => {
           const owner = Symbol("terminal-input-sender")
@@ -632,6 +642,7 @@ export const ConnectSurface = ({
     const key = connectAgentKey(agent)
     terminalInputOwnerRef.current = null
     terminalInputRef.current = () => false
+    terminalFocusRef.current = () => {}
     terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
@@ -694,6 +705,7 @@ export const ConnectSurface = ({
     setConnection({ _tag: "idle" })
     terminalInputOwnerRef.current = null
     terminalInputRef.current = () => false
+    terminalFocusRef.current = () => {}
     terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
@@ -850,6 +862,7 @@ export const ConnectSurface = ({
       <TerminalKeyRail
         error={terminalKeyError}
         modifier={terminalModifier}
+        onFocusTerminal={() => terminalFocusRef.current()}
         onKey={sendTerminalRailKey}
         onModifierChange={changeTerminalModifier}
       />

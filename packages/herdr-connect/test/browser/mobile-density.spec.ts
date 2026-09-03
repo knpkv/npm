@@ -114,18 +114,21 @@ const setStandaloneDirectory = (page: Page): Promise<void> =>
 
 const terminalRail = `
   <div aria-label="Terminal keyboard controls" class="terminal-key-rail" data-terminal-key-rail role="toolbar">
-    <div aria-label="Terminal modifiers" class="terminal-key-group" role="group">
-      <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="ctrl" type="button">Ctrl</button>
-      <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="alt" type="button">Alt</button>
+    <div class="terminal-key-scroll">
+      <div aria-label="Terminal modifiers" class="terminal-key-group" role="group">
+        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="ctrl" type="button">Ctrl</button>
+        <button aria-pressed="false" class="terminal-key terminal-key-modifier" data-terminal-key="alt" type="button">Alt</button>
+      </div>
+      <div aria-label="Terminal keys" class="terminal-key-group" role="group">
+        <button aria-label="Escape" class="terminal-key" data-terminal-key="escape" type="button">Esc</button>
+        <button aria-label="Tab" class="terminal-key" data-terminal-key="tab" type="button">Tab</button>
+        <button aria-label="Arrow left" class="terminal-key" data-terminal-key="arrowLeft" type="button">←</button>
+        <button aria-label="Arrow up" class="terminal-key" data-terminal-key="arrowUp" type="button">↑</button>
+        <button aria-label="Arrow down" class="terminal-key" data-terminal-key="arrowDown" type="button">↓</button>
+        <button aria-label="Arrow right" class="terminal-key" data-terminal-key="arrowRight" type="button">→</button>
+      </div>
     </div>
-    <div aria-label="Terminal keys" class="terminal-key-group" role="group">
-      <button aria-label="Escape" class="terminal-key" data-terminal-key="escape" type="button">Esc</button>
-      <button aria-label="Tab" class="terminal-key" data-terminal-key="tab" type="button">Tab</button>
-      <button aria-label="Arrow left" class="terminal-key" data-terminal-key="arrowLeft" type="button">←</button>
-      <button aria-label="Arrow up" class="terminal-key" data-terminal-key="arrowUp" type="button">↑</button>
-      <button aria-label="Arrow down" class="terminal-key" data-terminal-key="arrowDown" type="button">↓</button>
-      <button aria-label="Arrow right" class="terminal-key" data-terminal-key="arrowRight" type="button">→</button>
-    </div>
+    <small aria-live="polite" class="terminal-key-error"></small>
   </div>`
 
 const setTerminal = (page: Page): Promise<void> =>
@@ -225,7 +228,9 @@ test("390x844 keeps the terminal rail reachable with truthful button semantics",
   await expect(ctrl).toHaveAccessibleName("Ctrl")
   expect(await page.locator("[aria-keyshortcuts]").count()).toBe(0)
   await expect(page.locator("[data-terminal-key=\"tab\"]")).toBeEnabled()
-  expect(await rail.evaluate((element) => getComputedStyle(element).overflowX)).toBe("auto")
+  expect(await rail.locator(".terminal-key-scroll").evaluate((element) => getComputedStyle(element).overflowX)).toBe(
+    "auto"
+  )
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await ctrl.focus()
   expect(await ctrl.evaluate((element) => getComputedStyle(element).outlineStyle)).toBe("solid")
@@ -244,5 +249,6 @@ test("desktop terminal rail preserves the three-row stage and accessible key lab
     )
   ).toBe(3)
   expect(await page.locator(".terminal-key").count()).toBe(8)
+  await expect(page.locator(".terminal-key-error")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
 })

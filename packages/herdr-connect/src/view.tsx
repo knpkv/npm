@@ -385,6 +385,7 @@ export const ConnectWorkspace = ({ directory, mode, terminal, terminalViewportRe
 
 type TerminalKeyRailProps = {
   readonly modifier: TerminalModifier | null
+  readonly onFocusTerminal: () => void
   readonly onModifierChange: (modifier: TerminalModifier) => void
   readonly onKey: (key: TerminalRailKey) => void
   readonly error?: string | null
@@ -398,51 +399,57 @@ export const TerminalKeyRail = ({
   disabled = false,
   error = null,
   modifier,
+  onFocusTerminal,
   onKey,
   onModifierChange
 }: TerminalKeyRailProps) => (
   <div aria-label="Terminal keyboard controls" className="terminal-key-rail" data-terminal-key-rail role="toolbar">
-    <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
-      {terminalModifiers.map((item) => (
-        <button
-          aria-pressed={modifier === item}
-          className="terminal-key terminal-key-modifier"
-          data-terminal-key={item}
-          disabled={disabled}
-          key={item}
-          onClick={() => onModifierChange(item)}
-          onPointerDown={(event) => event.preventDefault()}
-          type="button"
-        >
-          {modifierLabel(item)}
-        </button>
-      ))}
-    </div>
-    <div aria-label="Terminal keys" className="terminal-key-group" role="group">
-      {terminalKeyDescriptors.map((descriptor) => {
-        const serialization = serializeTerminalKey(descriptor.key, modifier)
-        const unavailable = serialization._tag === "unsupported"
-        return (
+    <div className="terminal-key-scroll">
+      <div aria-label="Terminal modifiers" className="terminal-key-group" role="group">
+        {terminalModifiers.map((item) => (
           <button
-            aria-label={modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`}
-            className="terminal-key"
-            data-terminal-key={descriptor.key}
-            disabled={disabled || unavailable}
-            key={descriptor.key}
-            onClick={() => onKey(descriptor.key)}
+            aria-pressed={modifier === item}
+            className="terminal-key terminal-key-modifier"
+            data-terminal-key={item}
+            disabled={disabled}
+            key={item}
+            onClick={(event) => {
+              onModifierChange(item)
+              if (event.detail === 0) onFocusTerminal()
+            }}
             onPointerDown={(event) => event.preventDefault()}
-            title={unavailable ? "Choose a supported modifier combination" : undefined}
             type="button"
           >
-            {descriptor.label}
+            {modifierLabel(item)}
           </button>
-        )
-      })}
+        ))}
+      </div>
+      <div aria-label="Terminal keys" className="terminal-key-group" role="group">
+        {terminalKeyDescriptors.map((descriptor) => {
+          const serialization = serializeTerminalKey(descriptor.key, modifier)
+          const unavailable = serialization._tag === "unsupported"
+          return (
+            <button
+              aria-label={
+                modifier === null ? descriptor.ariaLabel : `${modifierLabel(modifier)} ${descriptor.ariaLabel}`
+              }
+              className="terminal-key"
+              data-terminal-key={descriptor.key}
+              disabled={disabled || unavailable}
+              key={descriptor.key}
+              onClick={() => onKey(descriptor.key)}
+              onPointerDown={(event) => event.preventDefault()}
+              title={unavailable ? "Choose a supported modifier combination" : undefined}
+              type="button"
+            >
+              {descriptor.label}
+            </button>
+          )
+        })}
+      </div>
     </div>
-    {error === null ? null : (
-      <small aria-live="polite" className="terminal-key-error">
-        {error}
-      </small>
-    )}
+    <small aria-live="polite" className="terminal-key-error">
+      {error ?? ""}
+    </small>
   </div>
 )

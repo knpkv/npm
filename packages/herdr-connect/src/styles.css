@@ -345,13 +345,19 @@
   }
 
   .terminal-key-rail {
-    align-items: center;
     border-block-end: 1px solid var(--rly-color-border-1);
+    display: grid;
+    gap: var(--rly-space-8);
+    min-inline-size: 0;
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+
+  .terminal-key-scroll {
+    align-items: center;
     display: flex;
     gap: var(--rly-space-8);
     min-inline-size: 0;
     overflow-x: auto;
-    padding: var(--rly-space-8) var(--rly-space-12);
     scrollbar-width: thin;
   }
 
@@ -397,9 +403,9 @@
 
   .terminal-key-error {
     color: var(--rly-color-critical-ink);
-    display: inline-flex;
-    margin-inline-start: auto;
-    white-space: nowrap;
+    display: block;
+    min-block-size: 1lh;
+    overflow-wrap: anywhere;
   }
 
   .terminal-bar strong,
@@ -579,6 +585,10 @@
     .terminal-key-rail {
       gap: var(--rly-space-4);
       padding: var(--rly-space-6) var(--rly-space-8);
+    }
+
+    .terminal-key-scroll {
+      gap: var(--rly-space-4);
     }
 
     .terminal-key {
