@@ -368,6 +368,7 @@ esac
             return yield* new FleetValidationError({ detail: "approval proof cookie missing from dashboard" })
           }
           const proofCookieHeader = proofCookie.split(";", 1)[0]
+          expect(dashboardResponse.headers.get("cache-control")).toBe("no-store")
           expect(dashboard).toContain("[redacted internal prompt]")
           expect(dashboard).not.toContain("raw terminal prompt")
           expect(dashboard).not.toContain("secret-value")
@@ -381,7 +382,10 @@ esac
             dashboardSnapshot.pendingApprovals.local.find(({ id }) => id === pending.id)
           ).toMatchObject({ approvalAvailable: true, id: pending.id })
           const page = yield* Effect.promise(() =>
-            fetch(`${approvalUrl}/`, { headers }).then((response) => response.text())
+            fetch(`${approvalUrl}/`, { headers }).then((response) => {
+              expect(response.headers.get("cache-control")).toBe("no-store")
+              return response.text()
+            })
           )
           expect(page).toContain("View full request")
           expect(page).toContain("[redacted internal prompt]")
@@ -573,6 +577,7 @@ esac
           if (cookieA === undefined) {
             return yield* new FleetValidationError({ detail: "first approval proof cookie missing" })
           }
+          expect(dashboardA.headers.get("cache-control")).toBe("no-store")
           expect(dashboardA.headers.get("set-cookie")).not.toContain("Secure")
           const dashboardAData = Schema.decodeUnknownSync(DashboardSnapshot)(
             JSON.parse(yield* Effect.promise(() => dashboardA.text()))
@@ -620,10 +625,12 @@ esac
           if (firstCookie === undefined) {
             return yield* new FleetValidationError({ detail: "initial concurrent proof cookie missing" })
           }
+          expect(firstDisclosure.headers.get("cache-control")).toBe("no-store")
           yield* Effect.promise(() => firstDisclosure.text())
           yield* Deferred.succeed(initialReleaseRefresh, undefined)
           const firstRefreshResponse = yield* Fiber.join(firstRefresh)
           expect(firstRefreshResponse.status).toBe(200)
+          expect(firstRefreshResponse.headers.get("cache-control")).toBe("no-store")
           yield* Effect.promise(() => firstRefreshResponse.text())
           const firstContinuation = yield* Effect.promise(() =>
             fetch(`${approvalUrl}/v1/dashboard-pending?${parameters.toString()}`, {

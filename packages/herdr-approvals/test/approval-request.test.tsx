@@ -316,6 +316,22 @@ describe("sanitized approval requests", () => {
     )
   })
 
+  it("redacts whitespace-bearing unquoted credential values completely", () => {
+    const ref = "password=first-secret second-secret"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("first-secret")
+    expect(encoded).not.toContain("second-secret")
+    expect(encoded).toContain("[redacted credential]")
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "ref=release candidate" }).fields[0]?.value).toBe(
+      "ref=release candidate"
+    )
+  })
+
   it("redacts credentials nested inside safe URL coordinates", () => {
     const refs = [
       {
@@ -380,6 +396,33 @@ describe("sanitized approval requests", () => {
     const encoded = JSON.stringify({ request, projection })
     expect(encoded).not.toContain("leaked-canary")
     expect(encoded).toContain("%5Bredacted%20credential%5D")
+  })
+
+  it("redacts encoded query credentials inside URI path segments", () => {
+    const refs = [
+      "https://example.test/repo%3FX-Amz-Signature%3Dleaked-canary",
+      "https://example.test/repo%3Fref%3Dmain"
+    ]
+    const request = approvalRequestFor({ kind: "nix.apply", ref: refs[0] })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref: refs[0] }
+    })
+    const encoded = JSON.stringify({ request, projection })
+    expect(encoded).not.toContain("leaked-canary")
+    expect(encoded).toContain("%5Bredacted%20credential%5D")
+    expect(approvalRequestFor({ kind: "nix.apply", ref: refs[1] }).fields[0]?.value).toBe(refs[1])
+  })
+
+  it("preserves encoded literal percent characters in safe coordinates", () => {
+    const ref = "https://example.test/repo%25release"
+    const request = approvalRequestFor({ kind: "nix.apply", ref })
+    const projection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref }
+    })
+    expect(request.fields[0]?.value).toBe(ref)
+    expect(projection.payload.kind === "nix.apply" ? projection.payload.ref : "").toBe(ref)
   })
 
   it("decodes credential keys before matching URI path assignments", () => {
@@ -493,6 +536,20 @@ describe("sanitized approval requests", () => {
       expect(encoded).not.toContain(canary)
       expect(encoded).toContain("[redacted credential]")
     }
+
+    const pgpPrivateKey = [
+      "-----BEGIN PGP PRIVATE KEY BLOCK-----",
+      "pgp-leaked-canary",
+      "-----END PGP PRIVATE KEY BLOCK-----"
+    ].join("\n")
+    const pgpRequest = approvalRequestFor({ kind: "nix.apply", ref: pgpPrivateKey })
+    const pgpProjection = sanitizeJobRecord({
+      ...recordFor("pending_approval"),
+      payload: { kind: "nix.apply", ref: pgpPrivateKey }
+    })
+    const pgpEncoded = JSON.stringify({ request: pgpRequest, projection: pgpProjection })
+    expect(pgpEncoded).not.toContain("pgp-leaked-canary")
+    expect(pgpEncoded).toContain("[redacted credential]")
 
     const publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIvisible-public-key user@example.test"
     expect(approvalRequestFor({ kind: "nix.apply", ref: publicKey }).fields[0]?.value).toContain("visible-public-key")

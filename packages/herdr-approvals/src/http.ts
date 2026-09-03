@@ -156,6 +156,7 @@ type ApprovalProofUse = {
 type ApprovalProofSession = {
   expiresAt: number
   locked: boolean
+  waiters: number
   readonly lock: SemaphoreModule.Semaphore
   readonly proofsByJob: Map<string, ApprovalProof>
   readonly token: string
@@ -1349,7 +1350,14 @@ const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
       jobId
     })
   }
-  yield* session.lock.take(1)
+  session.waiters += 1
+  yield* session.lock.take(1).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        session.waiters -= 1
+      })
+    )
+  )
   session.locked = true
   const checked = yield* Effect.exit(
     Effect.gen(function*() {
@@ -1658,7 +1666,7 @@ export const startHttpServer = async (
       const token = cookieValue(request, approvalProofCookieName)
       if (token === undefined) return undefined
       const session = approvalProofSessions.get(token)
-      if (session === undefined || (!session.locked && session.expiresAt <= observedAt)) {
+      if (session === undefined || (!session.locked && session.waiters === 0 && session.expiresAt <= observedAt)) {
         if (session !== undefined) {
           releaseApprovalProofs(session)
           approvalProofSessions.delete(token)
@@ -1742,7 +1750,7 @@ export const startHttpServer = async (
       function*(records: ReadonlyArray<JobRecord>, request: IncomingMessage) {
         const observedAt = now()
         for (const [token, session] of approvalProofSessions) {
-          if (!session.locked && session.expiresAt <= observedAt) {
+          if (!session.locked && session.waiters === 0 && session.expiresAt <= observedAt) {
             releaseApprovalProofs(session)
             approvalProofSessions.delete(token)
           }
@@ -1767,15 +1775,16 @@ export const startHttpServer = async (
           const lock = Semaphore.makeUnsafe(1)
           yield* lock.take(1)
           session = {
-            expiresAt: observedAt + approvalProofMaxAgeSeconds * 1_000,
+            expiresAt: observedAt,
             locked: true,
+            waiters: 0,
             lock,
             proofsByJob: new Map<string, ApprovalProof>(),
             token
           }
           if (approvalProofSessions.size >= approvalProofSessionMaxCount) {
             const emptySession = [...approvalProofSessions].find(
-              ([, candidate]) => candidate.proofsByJob.size === 0
+              ([, candidate]) => !candidate.locked && candidate.proofsByJob.size === 0
             )
             if (emptySession === undefined) {
               yield* lock.release(1)
@@ -1795,7 +1804,15 @@ export const startHttpServer = async (
             session
           })
         } else if (existingMutation === undefined) {
-          yield* session.lock.take(1)
+          const selectedSession = session
+          selectedSession.waiters += 1
+          yield* selectedSession.lock.take(1).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                selectedSession.waiters -= 1
+              })
+            )
+          )
           session.locked = true
           approvalProofMutationsByRequest.set(request, {
             created: false,
@@ -1853,7 +1870,10 @@ export const startHttpServer = async (
       approvalProofMutationsByRequest.delete(request)
       session.locked = false
       httpRuntime.runSync(session.lock.release(1))
-      return { "set-cookie": approvalProofCookie(session.token, secure) }
+      return {
+        "cache-control": "no-store",
+        "set-cookie": approvalProofCookie(session.token, secure)
+      }
     }
     if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
       throw new LanWorkConfigurationError({
