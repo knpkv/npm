@@ -30,6 +30,8 @@ describe("orchestrator event model", () => {
       { ...event, detail: null, result: null, type: "running" },
       { ...event, detail: null, result: "done", type: "settled" },
       { ...event, detail: "delivery failed", result: null, type: "delivery_failed" },
+      { ...event, detail: "", result: null, type: "delivery_failed" },
+      { ...event, detail: "d".repeat(4_097), result: null, type: "delivery_failed" },
       { ...event, detail: "task failed", result: null, type: "task_failed" }
     ]
     for (const candidate of valid) {
@@ -39,7 +41,9 @@ describe("orchestrator event model", () => {
     const invalid = [
       { ...event, detail: null, result: "unexpected", type: "accepted" },
       { ...event, detail: null, result: null, type: "settled" },
-      { ...event, detail: null, result: null, type: "task_failed" }
+      { ...event, detail: null, result: null, type: "task_failed" },
+      { ...event, detail: "\uD800", result: null, type: "task_failed" },
+      { ...event, detail: null, result: "\uD800", type: "settled" }
     ]
     for (const candidate of invalid) {
       expect(Schema.decodeUnknownResult(OrchestratorEvent)(candidate)._tag).toBe("Failure")

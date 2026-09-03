@@ -18,6 +18,7 @@ import {
   type OrchestratorCommand as OrchestratorCommandType,
   OrchestratorEvent,
   type OrchestratorEvent as OrchestratorEventType,
+  OrchestratorEventDetail,
   OrchestratorIdempotencyKey,
   OrchestratorPendingDispatch,
   OrchestratorPendingDispatchStatus,
@@ -300,7 +301,7 @@ const makeOrchestrator: Effect.Effect<
     const decodedTarget = yield* Schema.decodeUnknownEffect(transitionTarget)(target).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: `invalid transition target ${target}` }))
     )
-    const decodedDetail = yield* Schema.decodeUnknownEffect(Schema.NullOr(Schema.String))(detail).pipe(
+    const decodedDetail = yield* Schema.decodeUnknownEffect(Schema.NullOr(OrchestratorEventDetail))(detail).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "invalid transition detail" }))
     )
     const decodedResult = yield* Schema.decodeUnknownEffect(Schema.NullOr(OrchestratorResult))(result).pipe(

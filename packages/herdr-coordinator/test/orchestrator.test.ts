@@ -113,6 +113,29 @@ describe("durable coordinator orchestrator", () => {
         })
       )))
 
+  it.effect("persists fleet-valid failure details exactly", () =>
+    withTemporaryRoot("herdr-orchestrator-details-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          const details = ["", "d".repeat(4_097)]
+          for (const [index, detail] of details.entries()) {
+            const receipt = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: `activity:detail:${index}` },
+              `dispatch:detail:${index}`
+            )
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            yield* orchestrator.run(receipt.dispatchRequestId)
+            const event = index === 0
+              ? yield* orchestrator.failDelivery(receipt.dispatchRequestId, detail)
+              : yield* orchestrator.failTask(receipt.dispatchRequestId, detail)
+            expect(event).toMatchObject({ detail })
+            expect((yield* Stream.runCollect(orchestrator.events(receipt.dispatchRequestId))).at(-1)).toEqual(event)
+          }
+        })
+      )))
+
   it.effect("fails closed on idempotency conflicts and recovers running work without retry", () => {
     return withTemporaryRoot("herdr-orchestrator-recovery-", (root) =>
       withDatabase(

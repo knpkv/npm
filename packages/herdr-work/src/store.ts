@@ -74,6 +74,7 @@ type AppendManyDecision =
 
 type ClaimDecision =
   | { readonly _tag: "conflict"; readonly error: WorkLaneClaimConflictError }
+  | { readonly _tag: "rejected"; readonly error: WorkProjectionError }
   | { readonly _tag: "claimed"; readonly value: WorkLaneClaimed }
 
 type HandoffDecision =
@@ -87,6 +88,8 @@ const encodedBytes = (value: typeof Schema.Json.Type): number => utf8.encode(JSO
 const maximumTimestamp = 8_640_000_000_000_000
 const workTransactionMaxRecords = 16_384
 const workTransactionMaxBytes = 2 * 1024 * 1024
+const workLaneMaxRecords = workSnapshotMaxGoals
+const workLaneMaxBytes = 2 * 1024 * 1024
 const workDecisionMaxRecords = 16_384
 const workDecisionMaxBytes = 2 * 1024 * 1024
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
@@ -166,7 +169,7 @@ export interface WorkStoreService {
   >
   readonly claim: (
     claim: WorkLaneClaim
-  ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkStoreError>
+  ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkProjectionError | WorkStoreError>
   readonly currentClaim: (
     laneId: string
   ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
@@ -516,6 +519,17 @@ export class WorkStore implements WorkStoreService {
             } satisfies AppendManyDecision
           }
           const newEvents = decoded.filter((_, index) => existing[index] === undefined)
+          if (
+            (compactTransaction !== undefined || legacyCompactTransaction !== undefined) &&
+            newEvents.length !== 0
+          ) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkTransactionConflictError({ transactionId: transaction })
+            } satisfies AppendManyDecision
+          }
           if (newEvents.length !== 0 && existing.some((candidate) => candidate !== undefined)) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
@@ -610,15 +624,6 @@ export class WorkStore implements WorkStoreService {
             inTransaction = false
             return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
           }
-          if (compactTransaction !== undefined || legacyCompactTransaction !== undefined) {
-            this.#database.exec("ROLLBACK")
-            inTransaction = false
-            return {
-              _tag: "rejected",
-              error: new WorkTransactionConflictError({ transactionId: transaction })
-            } satisfies AppendManyDecision
-          }
-
           const eventCount = Schema.decodeUnknownSync(CountRow)(
             this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_events").get()
           ).count
@@ -794,13 +799,51 @@ export class WorkStore implements WorkStoreService {
           }
           const revision = actualRevision + 1
           const result: WorkLaneClaimed = { ...decoded, revision }
+          const encodedRecord = JSON.stringify(result)
+          const entryBytes = utf8.encode(decoded.laneId).byteLength + utf8.encode(encodedRecord).byteLength
+          const existingEntryBytes = existing === undefined
+            ? 0
+            : utf8.encode(decoded.laneId).byteLength + utf8.encode(existing.record).byteLength
+          const claimCount = Schema.decodeUnknownSync(CountRow)(
+            this.#database.prepare("SELECT COUNT(*) AS count FROM work_lane_claims").get()
+          ).count
+          if (existing === undefined && claimCount >= workLaneMaxRecords) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work lane claims cannot exceed ${workLaneMaxRecords} lanes`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies ClaimDecision
+          }
+          const claimBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+            this.#database.prepare(
+              `SELECT COALESCE(SUM(length(CAST(lane_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+               FROM work_lane_claims`
+            ).get()
+          ).bytes
+          if (claimBytes - existingEntryBytes + entryBytes > workLaneMaxBytes) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work lane claims cannot exceed ${workLaneMaxBytes} encoded bytes`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies ClaimDecision
+          }
           const changes = existing === undefined
             ? this.#database.prepare(
               "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
-            ).run(decoded.laneId, revision, JSON.stringify(result)).changes
+            ).run(decoded.laneId, revision, encodedRecord).changes
             : this.#database.prepare(
               "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ? AND revision = ?"
-            ).run(revision, JSON.stringify(result), decoded.laneId, decoded.expectedRevision).changes
+            ).run(revision, encodedRecord, decoded.laneId, decoded.expectedRevision).changes
           if (changes !== 1 && changes !== 1n) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
@@ -823,7 +866,7 @@ export class WorkStore implements WorkStoreService {
       },
       catch: storeError("claim.write")
     })
-    if (decision._tag === "conflict") return yield* decision.error
+    if (decision._tag === "conflict" || decision._tag === "rejected") return yield* decision.error
     return decision.value
   })
 

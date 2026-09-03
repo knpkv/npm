@@ -29,7 +29,7 @@ export interface WorkService {
   >
   readonly claim: (
     claim: WorkLaneClaim
-  ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkStoreError>
+  ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkProjectionError | WorkStoreError>
   readonly currentClaim: (
     laneId: string
   ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>

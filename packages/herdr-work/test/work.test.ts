@@ -404,6 +404,9 @@ describe("durable Work projection", () => {
       expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[2]]))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-replay-only" }
       })
+      expect(yield* Effect.result(service.recordMany("transaction-replay-only", history.slice(0, 3)))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-replay-only" }
+      })
       expect(yield* Effect.result(service.recordMany("transaction-replay-only", [history[0], changed]))).toMatchObject({
         failure: { _tag: "WorkCheckpointConflictError" }
       })
@@ -658,6 +661,103 @@ describe("durable Work projection", () => {
           revision: 4
         })
       ).toMatchObject({ expectedRevision: 3, revision: 4 })
+    }).pipe(provideNodeServices))
+
+  it.effect("bounds durable lane claims by count and encoded bytes", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-lane-capacity-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const claim: WorkLaneClaim = {
+        branch: "feat/durable-work",
+        expectedRevision: 0,
+        head: "0123456789012345678901234567890123456789",
+        laneId: "goal-lane-cap",
+        owner: { id: "owner-packages", name: "Package owner" },
+        parent: null,
+        phase: "implementation",
+        worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat-durable-work"
+      }
+      yield* Effect.acquireUseRelease(
+        WorkStore.open(path),
+        (store) =>
+          Effect.gen(function*() {
+            const service = yield* makeWorkService(store)
+            yield* service.claim(claim)
+          }),
+        (store) => Effect.sync(() => store.close())
+      )
+
+      const database = new DatabaseSync(path)
+      const insert = database.prepare(
+        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+      )
+      for (let index = 0; index < workSnapshotMaxGoals - 1; index++) {
+        const laneId = `goal-lane-seed-${index}`
+        insert.run(laneId, 1, JSON.stringify({ ...claim, laneId, revision: 1 }))
+      }
+      database.close()
+
+      yield* Effect.acquireUseRelease(
+        WorkStore.open(path),
+        (store) =>
+          Effect.gen(function*() {
+            const service = yield* makeWorkService(store)
+            expect(yield* Effect.result(service.claim({ ...claim, laneId: "goal-lane-overflow" }))).toMatchObject({
+              failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+            })
+            expect(yield* service.claim({ ...claim, expectedRevision: 1, phase: "validation" })).toMatchObject({
+              laneId: claim.laneId,
+              phase: "validation",
+              revision: 2
+            })
+          }),
+        (store) => Effect.sync(() => store.close())
+      )
+
+      const countDatabase = new DatabaseSync(path)
+      const count = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(
+        countDatabase.prepare("SELECT COUNT(*) AS count FROM work_lane_claims").get()
+      ).count
+      countDatabase.close()
+      expect(count).toBe(workSnapshotMaxGoals)
+
+      const bytesDirectory = mkdtempSync(join(tmpdir(), "herdr-work-lane-bytes-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(bytesDirectory, { force: true, recursive: true })))
+      const bytesPath = join(bytesDirectory, "work.sqlite")
+      yield* Effect.acquireUseRelease(
+        WorkStore.open(bytesPath),
+        () => Effect.void,
+        (store) => Effect.sync(() => store.close())
+      )
+      const bytesDatabase = new DatabaseSync(bytesPath)
+      const bytesInsert = bytesDatabase.prepare(
+        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+      )
+      const largeOwner = { id: "owner-packages", name: "x".repeat(4_096) }
+      for (let index = 0; index < 500; index++) {
+        const laneId = `goal-lane-bytes-${index}`
+        bytesInsert.run(
+          laneId,
+          1,
+          JSON.stringify({ ...claim, laneId, owner: largeOwner, revision: 1 })
+        )
+      }
+      bytesDatabase.close()
+
+      yield* Effect.acquireUseRelease(
+        WorkStore.open(bytesPath),
+        (store) =>
+          Effect.gen(function*() {
+            const service = yield* makeWorkService(store)
+            expect(yield* Effect.result(service.claim({ ...claim, laneId: "goal-lane-bytes-overflow" }))).toMatchObject(
+              {
+                failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+              }
+            )
+          }),
+        (store) => Effect.sync(() => store.close())
+      )
     }).pipe(provideNodeServices))
 
   it.effect("reads a durable lane claim after reopening the store", () =>

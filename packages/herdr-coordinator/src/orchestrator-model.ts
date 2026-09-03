@@ -7,14 +7,20 @@ const Identifier = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
 )
-const Detail = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096))
 const utf8 = new TextEncoder()
 const utf8MaxBytes = (maximumBytes: number) =>
   Schema.makeFilter(
     (value: string) => utf8.encode(value).byteLength <= maximumBytes,
     { expected: `UTF-8 text no larger than ${maximumBytes} bytes` }
   )
-export const OrchestratorResult = Schema.String.check(
+const UnicodeScalarText = Schema.String.check(
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
+export const OrchestratorEventDetail = UnicodeScalarText.check(
+  Schema.isMaxLength(fleetResponseBodyMaxBytes),
+  utf8MaxBytes(fleetResponseBodyMaxBytes)
+)
+export const OrchestratorResult = UnicodeScalarText.check(
   Schema.isMaxLength(fleetResponseBodyMaxBytes),
   utf8MaxBytes(fleetResponseBodyMaxBytes)
 )
@@ -89,14 +95,14 @@ const OrchestratorSettledEvent = Schema.Struct({
 const OrchestratorDeliveryFailedEvent = Schema.Struct({
   ...orchestratorEventFields,
   type: Schema.Literal("delivery_failed"),
-  detail: Detail,
+  detail: OrchestratorEventDetail,
   result: Schema.Null
 })
 
 const OrchestratorTaskFailedEvent = Schema.Struct({
   ...orchestratorEventFields,
   type: Schema.Literal("task_failed"),
-  detail: Detail,
+  detail: OrchestratorEventDetail,
   result: Schema.Null
 })
 
