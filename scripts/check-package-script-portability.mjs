@@ -337,13 +337,14 @@ const firstShellWord = (text) => {
   return normalized !== undefined && /^[A-Za-z_][A-Za-z0-9_]*$/u.test(normalized) ? normalized : undefined
 }
 
-const extractAliasMutations = (segments, reachability) => {
+const extractAliasMutations = (segments, reachability, aliases = []) => {
   const mutations = []
   for (const [index, segment] of segments.entries()) {
     if (!reachability[index]) continue
     const words = segment.text.trim().split(/\s+/u)
     const commandName = words[0]
     if (commandName !== "alias" && commandName !== "unalias") continue
+    if (hasActiveAliasDefinition(segment.text, segment.start, aliases)) continue
     for (const word of words.slice(1)) {
       const name = word.replace(/=.*$/u, "")
       if (!/^[A-Za-z_][A-Za-z0-9_]*$/u.test(name)) continue
@@ -368,12 +369,22 @@ const activeAliasDefinition = (text, start, aliases) => {
 const hasActiveAliasDefinition = (text, start, aliases) =>
   activeAliasDefinition(text, start, aliases)?.kind === "define"
 
-const aliasCommandResult = (text, start, aliases) => {
+const aliasCommandResult = (text, start, aliases, visited = new Set()) => {
   const active = activeAliasDefinition(text, start, aliases)
-  if (active?.kind !== "define") return undefined
-  if (active.value === ":" || active.value === "true") return "success"
-  if (active.value === "false") return "failure"
-  return "unknown"
+  if (active?.kind !== "define") {
+    const commandName = firstShellWord(text)
+    if (commandName === ":" || commandName === "true") return "success"
+    if (commandName === "false") return "failure"
+    return undefined
+  }
+  if (visited.has(active.name)) return "unknown"
+  const replacement = active.value.trim()
+  if (replacement === ":" || replacement === "true") return "success"
+  const replacementName = firstShellWord(replacement)
+  if (replacementName === undefined || replacementName !== replacement) {
+    return "unknown"
+  }
+  return aliasCommandResult(replacement, start, aliases, new Set([...visited, active.name]))
 }
 
 const hasActiveFunctionDefinition = (text, start, definitions) => {
@@ -391,6 +402,37 @@ const segmentReachability = (segments, definitions = [], aliases = []) => {
       (index === 0 ||
         (segment.operator === "&&" && previousResult === "success") ||
         (segment.operator === "||" && previousResult === "failure") ||
+        (segment.operator !== "&&" && segment.operator !== "||"))
+    reachability.push(reachable)
+    const text = segment.text.trim()
+    if (reachable) {
+      const aliasedResult = aliasCommandResult(text, segment.start, aliases)
+      previousResult =
+        aliasedResult !== undefined
+          ? aliasedResult
+          : text === "true"
+            ? "success"
+            : text === "false"
+              ? "failure"
+              : isKnownSuccessfulShellCommand(text, segment.start, definitions, aliases)
+                ? "success"
+                : "unknown"
+      if (/^(?:exec|exit|return)(?:\s|$)/u.test(text)) terminated = true
+    }
+  }
+  return reachability
+}
+
+const segmentMayReachability = (segments, definitions = [], aliases = []) => {
+  const reachability = []
+  let previousResult = "unknown"
+  let terminated = false
+  for (const [index, segment] of segments.entries()) {
+    const reachable =
+      !terminated &&
+      (index === 0 ||
+        (segment.operator === "&&" && previousResult !== "failure") ||
+        (segment.operator === "||" && previousResult !== "success") ||
         (segment.operator !== "&&" && segment.operator !== "||"))
     reachability.push(reachable)
     const text = segment.text.trim()
@@ -506,9 +548,24 @@ const sameAliasMutations = (left, right) =>
 const resolveAliasMutations = (segments, definitions) => {
   let aliases = []
   for (let iteration = 0; iteration <= segments.length; iteration += 1) {
-    const reachability = segmentReachability(segments, definitions, aliases)
-    const next = extractAliasMutations(segments, reachability)
+    const reachability = segmentMayReachability(segments, definitions, aliases)
+    const next = extractAliasMutations(segments, reachability, aliases)
     if (sameAliasMutations(next, aliases)) return next
+    if (
+      next.some((mutation) => {
+        if (mutation.kind !== "remove") return false
+        const segmentIndex = segments.findIndex(({ start }) => start === mutation.start)
+        const segment = segments[segmentIndex]
+        const following = segments[segmentIndex + 1]
+        if (segment?.nextOperator !== ";" || following === undefined) return false
+        const priorDefinition = next
+          .filter((candidate) => candidate.name === mutation.name && candidate.start < mutation.start)
+          .at(-1)
+        return priorDefinition?.kind === "define" && firstShellWord(following.text) === mutation.name
+      })
+    ) {
+      return undefined
+    }
     aliases = next
   }
   return undefined
@@ -856,6 +913,81 @@ assert.deepEqual(
     browserPairingDependency
   ),
   ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "test -e package.json && alias pnpm=:\npnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    { ...codeCommitWebScripts, predev: "false && alias pnpm=:\npnpm --filter @knpkv/browser-pairing build" },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "alias pnpm=:; alias unalias=:; unalias pnpm; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev:
+        "alias pnpm=:; alias gate=false; alias false=true; gate || unalias pnpm; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "alias pnpm=:; alias gate=false; gate || unalias pnpm\npnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  []
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "alias pnpm=:\nunalias pnpm; pnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  ["packages/codecommit-web/package.json: scripts.predev must include a browser-pairing build"]
+)
+assert.deepEqual(
+  findCodeCommitWebLifecycleGaps(
+    "packages/codecommit-web/package.json",
+    {
+      ...codeCommitWebScripts,
+      predev: "alias pnpm=:\nunalias pnpm\npnpm --filter @knpkv/browser-pairing build"
+    },
+    browserPairingDependency
+  ),
+  []
 )
 assert.deepEqual(
   findCodeCommitWebLifecycleGaps(
