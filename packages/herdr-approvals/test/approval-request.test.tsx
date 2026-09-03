@@ -246,6 +246,8 @@ describe("sanitized approval requests", () => {
     for (const ref of [
       "Cookie: SID=leaked-cookie-canary; theme=dark",
       "set-cookie: session_id=leaked-set-cookie-canary; Path=/",
+      "Cookie: SID=first-folded-cookie-canary\r\n second-folded-cookie-canary",
+      "Set-Cookie: SID=first-folded-set-cookie-canary\n second-folded-set-cookie-canary",
       "Authorization: Bearer first-folded-canary\r\n second-folded-canary"
     ]) {
       const request = approvalRequestFor({ kind: "nix.apply", ref })
@@ -259,6 +261,9 @@ describe("sanitized approval requests", () => {
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: "cookiePolicy=strict" }).fields[0]?.value).toBe(
       "cookiePolicy=strict"
+    )
+    expect(approvalRequestFor({ kind: "nix.apply", ref: "release-cookie=stable" }).fields[0]?.value).toBe(
+      "release-cookie=stable"
     )
   })
 
@@ -383,6 +388,10 @@ describe("sanitized approval requests", () => {
       { ref: '{"Authorization": Bearer plain-auth-leaked-canary}', redacted: "[redacted credential]" },
       { ref: '{"password":123456}', redacted: "[redacted credential]" },
       { ref: '{"credentials":{"value":"structured-leaked-canary"}}', redacted: "[redacted credential]" },
+      {
+        ref: '{"auths":{"registry.example":{"auth":"docker-auth-leaked-canary"}}}',
+        redacted: "[redacted credential]"
+      },
       { ref: '{"refreshToken":"camel-token-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"clientSecret":"camel-secret-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
@@ -399,13 +408,19 @@ describe("sanitized approval requests", () => {
       })
       const encoded = JSON.stringify({ request, projection })
       expect(encoded).not.toMatch(
-        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
+        /(?:json|prefixed-json|nested-json|escaped-json|plain|auth|structured|docker-auth|camel-token|camel-secret|quoted|trailing)-leaked-canary/u
       )
       expect(encoded).toContain(redacted)
     }
     expect(approvalRequestFor({ kind: "nix.apply", ref: '{"revision":"release"}' }).fields[0]?.value).toBe(
       '{"revision":"release"}'
     )
+    expect(approvalRequestFor({ kind: "nix.apply", ref: '{"authority":"registry.example"}' }).fields[0]?.value).toBe(
+      '{"authority":"registry.example"}'
+    )
+    expect(
+      approvalRequestFor({ kind: "nix.apply", ref: '{"metadata":{"auth":"visible-auth"}}' }).fields[0]?.value
+    ).toBe('{"metadata":{"auth":"visible-auth"}}')
   })
 
   it("redacts credentials nested inside safe URL coordinates", () => {

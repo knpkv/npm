@@ -71,10 +71,13 @@ const netrcPassword = /\bpassword[ \t]+[^\r\n]*/iu
 const privateKeyMaterial =
   /-----BEGIN (?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?(?:-----END (?:[A-Z0-9][A-Z0-9 -]* )?PRIVATE KEY(?: BLOCK)?-----|$)/giu
 const credentialDigestAuthorization = /((?:authorization)\s*[:=]\s*)digest\s+[^\r\n]*/giu
-const credentialCookieHeader = /((?:cookie|set-cookie)\s*[:=]\s*)[^\r\n]*/giu
+const credentialCookieHeader =
+  /(^|[\r\n])([ \t]*(?:cookie|set-cookie)\s*:\s*)[^\r\n]*(?:(?:\r\n|\r|\n)[ \t]+[^\r\n]*)*/gimu
 const credentialAuthorizationContinuation = /((?:authorization)\s*[:=]\s*)[^\r\n]*(?:(?:\r\n|\r|\n)[ \t]+[^\r\n]*)+/giu
 const credentialAuthorization =
   /((?:authorization)\s*[:=]\s*)((?:(?:[a-z][a-z\d+.-]*\s+)?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')|[^\r\n]+))/giu
+const dockerAuthAssignment =
+  /((?:"auths"|'auths')\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?(?:"(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?(?:"auth"|'auth')\s*:\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*')/giu
 const credentialUri = /(^|[^\w])\/\/[^/?#]*@/gu
 const encodedCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|credential|credentials|passphrase|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)%(?:25){0,3}(?:3d|3a))([^/?#\s&]*)/giu
@@ -184,7 +187,7 @@ const sanitizeCredentialText = (value: string): string => {
       netrcRecord,
       (_match, prefix: string, record: string) => prefix + record.replace(netrcPassword, redactedCredential)
     )
-    .replace(credentialCookieHeader, "$1[redacted credential]")
+    .replace(credentialCookieHeader, "$1$2[redacted credential]")
     .replace(credentialAuthorizationContinuation, "$1[redacted credential]")
     .replace(credentialDigestAuthorization, "$1[redacted credential]")
     .replace(
@@ -197,6 +200,13 @@ const sanitizeCredentialText = (value: string): string => {
       (_match, prefix: string, doubleKey: string | undefined, singleKey: string | undefined, credential: string) => {
         const key = decodeCredentialKey(doubleKey ?? singleKey ?? "")
         if (!credentialKey.test(key)) return _match
+        const quote = credential.startsWith("'") ? "'" : "\""
+        return `${prefix}${quote}${redactedCredential}${quote}`
+      }
+    )
+    .replace(
+      dockerAuthAssignment,
+      (_match, prefix: string, credential: string) => {
         const quote = credential.startsWith("'") ? "'" : "\""
         return `${prefix}${quote}${redactedCredential}${quote}`
       }
