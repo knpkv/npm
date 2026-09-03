@@ -105,6 +105,7 @@ const decodeEncodedRuns = (value: string): { readonly value: string; readonly ha
 
 const encodedText = (value: string): EncodedText | undefined => {
   if (!value.includes("%")) return undefined
+  const sourceHasMalformedPercentEscape = hasMalformedPercentEscape(value)
   let candidate = value
   for (let layers = 1; layers <= encodedUriMaxDepth; layers += 1) {
     try {
@@ -114,7 +115,7 @@ const encodedText = (value: string): EncodedText | undefined => {
     } catch {
       const partiallyDecoded = decodeEncodedRuns(candidate)
       if (partiallyDecoded !== undefined) {
-        if (partiallyDecoded.hadDecodeError) return { _tag: "malformed" }
+        if (sourceHasMalformedPercentEscape || partiallyDecoded.hadDecodeError) return { _tag: "malformed" }
         candidate = partiallyDecoded.value
         continue
       }

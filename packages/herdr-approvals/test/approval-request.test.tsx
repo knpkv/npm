@@ -426,15 +426,19 @@ describe("sanitized approval requests", () => {
   })
 
   it("redacts encoded credential assignments inside safe coordinates", () => {
-    const ref = "https://mirror.test/?ref=password%3Dleaked-canary"
-    const request = approvalRequestFor({ kind: "nix.apply", ref })
-    const projection = sanitizeJobRecord({
-      ...recordFor("pending_approval"),
-      payload: { kind: "nix.apply", ref }
-    })
-    const encoded = JSON.stringify({ request, projection })
-    expect(encoded).not.toContain("leaked-canary")
-    expect(encoded).toContain("%5Bredacted%20credential%5D")
+    for (const ref of [
+      "https://mirror.test/?ref=password%3Dleaked-canary",
+      "https://mirror.test/?ref=password%ZZ%3Dmalformed-leaked-canary"
+    ]) {
+      const request = approvalRequestFor({ kind: "nix.apply", ref })
+      const projection = sanitizeJobRecord({
+        ...recordFor("pending_approval"),
+        payload: { kind: "nix.apply", ref }
+      })
+      const encoded = JSON.stringify({ request, projection })
+      expect(encoded).not.toMatch(/(?:leaked|malformed)-canary/u)
+      expect(encoded).toContain("redacted")
+    }
   })
 
   it("redacts queries hidden behind encoded URI authorities", () => {
