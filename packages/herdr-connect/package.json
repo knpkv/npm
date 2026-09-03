@@ -54,7 +54,7 @@
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
     "test": "vitest run",
-    "test:browser": "playwright test --config playwright.config.ts"
+    "test:browser": "pnpm build && playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0-rc.109",

@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 
 type GhosttyTerminal = {
@@ -17,20 +18,32 @@ type GhosttyWeb = {
   }) => GhosttyTerminal
 }
 
+type TerminalOutputBoundary = {
+  readonly isActive: () => boolean
+  readonly run: (write: () => void) => void
+}
+
 declare global {
   interface Window {
     readonly GhosttyWeb: GhosttyWeb
+    terminalOutputBoundary?: TerminalOutputBoundary
   }
 }
 
+const packageRoot = resolve(new URL("../..", import.meta.url).pathname)
 const ghosttyScript = resolve(
   new URL("../../../..", import.meta.url).pathname,
   "node_modules/.pnpm/ghostty-web@0.4.0/node_modules/ghostty-web/dist/ghostty-web.umd.cjs"
 )
+const terminalOutputSource = readFileSync(resolve(packageRoot, "dist/terminal-output.js"), "utf8")
 
 test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ page }) => {
   await page.setContent("<div id=\"terminal\" style=\"block-size: 240px; inline-size: 640px\"></div>")
   await page.addScriptTag({ path: ghosttyScript })
+  await page.addScriptTag({
+    content: `${terminalOutputSource}\nwindow.terminalOutputBoundary = makeTerminalOutputBoundary()`,
+    type: "module"
+  })
 
   const result = await page.evaluate(async () => {
     await window.GhosttyWeb.init()
@@ -40,9 +53,10 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
     terminal.open(container)
     const sent: Array<string> = []
     let modifier: "ctrl" | null = "ctrl"
-    let processingTerminalOutput = false
+    const outputBoundary = window.terminalOutputBoundary
+    if (outputBoundary === undefined) throw new Error("terminal output boundary missing")
     const subscription = terminal.onData((value) => {
-      if (processingTerminalOutput) {
+      if (outputBoundary.isActive()) {
         sent.push(value)
         return
       }
@@ -54,10 +68,8 @@ test("Ghostty protocol replies stay unchanged while Ctrl is latched", async ({ p
       sent.push(value)
     })
 
-    processingTerminalOutput = true
-    terminal.write("\u001b[6n")
+    outputBoundary.run(() => terminal.write("\u001b[6n"))
     await new Promise((resolve) => setTimeout(resolve, 100))
-    processingTerminalOutput = false
     terminal.input("c", true)
     subscription.dispose()
     terminal.dispose()

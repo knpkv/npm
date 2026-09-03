@@ -25,6 +25,7 @@ import {
   pageScrollCommand,
   wheelScrollCommand
 } from "./terminal-input.js"
+import { makeTerminalOutputBoundary, type TerminalOutputBoundary } from "./terminal-output.js"
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
@@ -223,24 +224,20 @@ type TerminalKeyboardCallbacks = {
 const renderTerminalOutput = (
   terminal: Terminal,
   data: Uint8Array,
-  setProcessing: (processing: boolean) => void,
+  outputBoundary: TerminalOutputBoundary,
   onError: (error: ConnectProtocolError) => void
 ): void => {
   Effect.runFork(
     Effect.try({
       try: () => {
-        setProcessing(true)
-        terminal.write(data)
+        outputBoundary.run(() => terminal.write(data))
       },
       catch: (cause) =>
         new ConnectProtocolError({
           detail: "terminal output could not be rendered",
           cause
         })
-    }).pipe(
-      Effect.ensuring(Effect.sync(() => setProcessing(false))),
-      Effect.catch((error) => Effect.sync(() => onError(error)))
-    )
+    }).pipe(Effect.catch((error) => Effect.sync(() => onError(error))))
   )
 }
 
@@ -302,7 +299,7 @@ const terminalWorker = (
       let ready = false
       let socket: WebSocket | null = null
       let inputOverflow = false
-      let processingTerminalOutput = false
+      const outputBoundary = makeTerminalOutputBoundary()
       let pendingResize: {
         readonly cols: number
         readonly rows: number
@@ -331,7 +328,7 @@ const terminalWorker = (
         return application
       }
       const input = terminal.terminal.onData((text) => {
-        if (processingTerminalOutput) {
+        if (outputBoundary.isActive()) {
           if (ready) {
             if (!sendInput(text)) {
               update({ _tag: "failed", agent, detail: "terminal input could not be sent" })
@@ -470,17 +467,10 @@ const terminalWorker = (
         const message = (event: MessageEvent<ArrayBuffer | string>): void => {
           const binary = Schema.decodeUnknownResult(Schema.instanceOf(ArrayBuffer))(event.data)
           if (Result.isSuccess(binary)) {
-            renderTerminalOutput(
-              terminal.terminal,
-              new Uint8Array(binary.success),
-              (processing) => {
-                processingTerminalOutput = processing
-              },
-              (error) => {
-                update({ _tag: "failed", agent, detail: error.detail })
-                connectedSocket.close(4400, "terminal output could not be rendered")
-              }
-            )
+            renderTerminalOutput(terminal.terminal, new Uint8Array(binary.success), outputBoundary, (error) => {
+              update({ _tag: "failed", agent, detail: error.detail })
+              connectedSocket.close(4400, "terminal output could not be rendered")
+            })
             return
           }
           const decoded = Schema.decodeUnknownResult(Schema.fromJsonString(TerminalServerSignal))(event.data)
