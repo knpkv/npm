@@ -105,6 +105,22 @@ describe("Connect Work goal association", () => {
     })
   })
 
+  it("ignores completed ownership while resolving the one active goal", () => {
+    const completed = Schema.decodeUnknownSync(WorkGoal)({
+      ...workGoal,
+      id: "goal-completed",
+      state: "completed",
+      title: "Completed goal"
+    })
+    expect(resolveConnectWorkGoal(connectAgent, snapshot([completed, workGoal]))).toEqual({
+      _tag: "available",
+      goalId: "goal-review",
+      href: "/?tab=work&window=now&goal=goal-review",
+      title: "Review browser pairing"
+    })
+    expect(resolveConnectWorkGoal(connectAgent, snapshot([completed]))).toEqual({ _tag: "missing" })
+  })
+
   it("fails closed when a duplicated goal record makes ownership ambiguous", () => {
     const duplicate = Schema.decodeUnknownSync(WorkGoal)({
       ...workGoal,

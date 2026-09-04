@@ -1,9 +1,11 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
+import { AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { Effect, Option, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
-import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { execPath } from "node:process"
@@ -11,7 +13,10 @@ import { DatabaseSync } from "node:sqlite"
 import {
   makeWorkService,
   projectWorkSnapshots,
-  type WorkDecisionHandoff,
+  WorkAgentBinding,
+  WorkAgentBindingRequest,
+  WorkDecisionHandoff,
+  WorkDispatchHandoff,
   type WorkGoal,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
@@ -27,6 +32,7 @@ import {
 } from "../src/index.js"
 import {
   __herdrWorkEncodedBytesForTest,
+  __herdrWorkLaneOperationMaxBytesForTest,
   __herdrWorkMaximumSnapshotBytesForTest,
   __herdrWorkSnapshotEnvelopeMaxBytesForTest
 } from "../src/store.js"
@@ -37,17 +43,34 @@ const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const openScopedStore = (path: string) =>
   Effect.gen(function*() {
-    const store = yield* WorkStore.open(path)
-    let open = true
+    const state = { open: true }
+    const store = yield* Effect.acquireRelease(
+      // Existing explicit state makes manual close and scope release one idempotent owner.
+      // eslint-disable-next-line local-rules/require-immediate-work-store-cleanup
+      WorkStore.open(path),
+      (store) =>
+        Effect.sync(() => {
+          if (state.open) {
+            state.open = false
+            store.close()
+          }
+        })
+    )
     const close = () => {
-      if (open) {
-        open = false
+      if (state.open) {
+        state.open = false
         store.close()
       }
     }
-    yield* Effect.addFinalizer(() => Effect.sync(close))
     return { close, store }
   })
+
+const safelyOpenResult = (path: string) =>
+  Effect.result(Effect.acquireUseRelease(
+    WorkStore.open(path),
+    () => Effect.void,
+    (store) => Effect.sync(() => store.close())
+  ))
 
 class LockHolderError extends Schema.TaggedError<LockHolderError>()(
   "LockHolderError",
@@ -191,7 +214,221 @@ const history = [
   checkpoint("event-review", 30 * day, "review", "review")
 ]
 
+const laneClaim = (laneId: string, goalId: string = laneId): WorkLaneClaim => ({
+  branch: "feat/durable-work",
+  expectedRevision: 0,
+  goalId,
+  head: "0123456789012345678901234567890123456789",
+  laneId,
+  operationId: `operation-${laneId}`,
+  owner: { id: "owner-packages", name: "Package owner" },
+  parent: null,
+  phase: "implementation",
+  worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat-durable-work"
+})
+
+const startedWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
+  agentId: "agent-package-worker",
+  host: "SER8",
+  name: "Package worker",
+  paneId: "wE:p3"
+})
+
 describe("durable Work projection", () => {
+  it("exports an exact typed dispatch, lane revision, and worker binding contract", () => {
+    const request = {
+      dispatchRequestId: "dispatch:worker-start",
+      expectedRevision: 1,
+      laneId: "lane:package",
+      version: "herdr.work.agent-binding-request.v1",
+      worker: startedWorker
+    }
+    expect(Schema.decodeUnknownResult(WorkAgentBindingRequest)(request)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(WorkAgentBindingRequest)({
+        ...request,
+        expectedRevision: -1
+      })._tag
+    ).toBe("Failure")
+  })
+
+  it.effect("atomically binds a started worker, replays exactly, and recovers after restart", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-agent-binding-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const path = join(directory, "work.sqlite")
+        const first = yield* openScopedStore(path)
+        const service = yield* makeWorkService(first.store)
+        yield* service.record(history[0])
+        const lane = yield* service.claim(laneClaim("lane:package", history[0].goal.id))
+        yield* TestClock.setTime(1)
+        const request = Schema.decodeUnknownSync(WorkAgentBindingRequest)({
+          dispatchRequestId: "dispatch:worker-start",
+          expectedRevision: lane.revision,
+          laneId: lane.laneId,
+          version: "herdr.work.agent-binding-request.v1",
+          worker: startedWorker
+        })
+        const binding = yield* service.bindAgent(request)
+        expect(Schema.decodeUnknownResult(WorkAgentBinding)(binding)._tag).toBe("Success")
+        expect(binding).toMatchObject({
+          checkpoint: {
+            eventId: request.dispatchRequestId,
+            goal: {
+              agentHierarchy: { agent: startedWorker },
+              connectTarget: { agentId: startedWorker.agentId, host: startedWorker.host }
+            }
+          },
+          lane: {
+            expectedRevision: lane.revision,
+            operationId: request.dispatchRequestId,
+            revision: lane.revision + 1
+          }
+        })
+        expect(yield* service.bindAgent(request)).toEqual(binding)
+        expect(
+          yield* Effect.result(service.bindAgent({
+            ...request,
+            worker: { ...startedWorker, agentId: "agent-conflicting-worker" }
+          }))
+        ).toMatchObject({
+          failure: { _tag: "WorkAgentBindingConflictError", dispatchRequestId: request.dispatchRequestId }
+        })
+        expect(
+          yield* Effect.result(service.bindAgent({
+            ...request,
+            dispatchRequestId: "dispatch:stale-worker-start"
+          }))
+        ).toMatchObject({
+          failure: {
+            _tag: "WorkAgentBindingAuthorityError",
+            actualRevision: lane.revision + 1,
+            reason: "stale_revision"
+          }
+        })
+        first.close()
+
+        const reopened = yield* openScopedStore(path)
+        const restarted = yield* makeWorkService(reopened.store)
+        expect(Option.getOrThrow(yield* restarted.agentBinding(request.dispatchRequestId))).toEqual(binding)
+        expect(Option.getOrThrow(yield* restarted.currentClaim(lane.laneId))).toEqual(binding.lane)
+        expect((yield* restarted.snapshots(binding.checkpoint.occurredAt)).now.goals[0]).toMatchObject({
+          agentHierarchy: { agent: startedWorker },
+          connectTarget: { agentId: startedWorker.agentId, host: startedWorker.host }
+        })
+      }).pipe(provideNodeServices)
+    ))
+
+  for (
+    const tamper of [
+      {
+        name: "missing lane-operation companion",
+        mutate: (database: DatabaseSync, dispatchRequestId: string) =>
+          database.prepare("DELETE FROM work_lane_operations WHERE operation_id = ?").run(dispatchRequestId)
+      },
+      {
+        name: "mutated checkpoint companion",
+        mutate: (database: DatabaseSync, dispatchRequestId: string) =>
+          database.prepare("UPDATE work_goal_events SET record = '{}' WHERE event_id = ?").run(dispatchRequestId)
+      }
+    ]
+  ) {
+    it.effect(`rejects agent-binding replay with a ${tamper.name}`, () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const directory = mkdtempSync(join(tmpdir(), "herdr-work-agent-binding-readback-"))
+          yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+          const path = join(directory, "work.sqlite")
+          const first = yield* openScopedStore(path)
+          const service = yield* makeWorkService(first.store)
+          yield* service.record(history[0])
+          const lane = yield* service.claim(laneClaim("lane:readback", history[0].goal.id))
+          yield* TestClock.setTime(1)
+          const request = Schema.decodeUnknownSync(WorkAgentBindingRequest)({
+            dispatchRequestId: `dispatch:${tamper.name}`,
+            expectedRevision: lane.revision,
+            laneId: lane.laneId,
+            version: "herdr.work.agent-binding-request.v1",
+            worker: startedWorker
+          })
+          yield* service.bindAgent(request)
+          first.close()
+
+          const database = new DatabaseSync(path)
+          tamper.mutate(database, request.dispatchRequestId)
+          database.close()
+
+          const reopened = yield* openScopedStore(path)
+          const restarted = yield* makeWorkService(reopened.store)
+          expect(yield* Effect.result(restarted.bindAgent(request))).toMatchObject({
+            failure: { _tag: "WorkStoreError" }
+          })
+          expect(yield* Effect.result(restarted.agentBinding(request.dispatchRequestId))).toMatchObject({
+            failure: { _tag: "WorkStoreError" }
+          })
+        }).pipe(provideNodeServices)
+      ))
+  }
+
+  it.effect("rejects agent binding when a historical checkpoint record disagrees with its row identity", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-agent-binding-history-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const path = join(directory, "work.sqlite")
+        const first = yield* openScopedStore(path)
+        const service = yield* makeWorkService(first.store)
+        yield* service.record(history[0])
+        const lane = yield* service.claim(laneClaim("lane:history-identity", history[0].goal.id))
+        first.close()
+        const request = Schema.decodeUnknownSync(WorkAgentBindingRequest)({
+          dispatchRequestId: "dispatch:history-identity",
+          expectedRevision: lane.revision,
+          laneId: lane.laneId,
+          version: "herdr.work.agent-binding-request.v1",
+          worker: startedWorker
+        })
+        const database = new DatabaseSync(path)
+        database.prepare("UPDATE work_goal_events SET record = ? WHERE event_id = ?").run(
+          JSON.stringify({ ...history[0], eventId: request.dispatchRequestId }),
+          history[0].eventId
+        )
+        database.close()
+        const reopened = yield* openScopedStore(path)
+        const restarted = yield* makeWorkService(reopened.store)
+        expect(yield* Effect.result(restarted.bindAgent(request))).toMatchObject({
+          failure: { _tag: "WorkStoreError" }
+        })
+        expect(Option.isNone(yield* restarted.agentBinding(request.dispatchRequestId))).toBe(true)
+      }).pipe(provideNodeServices)
+    ))
+
+  it("binds dispatch lineage to the persisted coordinator handoff", () => {
+    const binding = {
+      dispatchRequestId: "dispatch:sol",
+      handoff: {
+        blockers: [],
+        decision: "handoff",
+        dispatchIds: ["dispatch:luna"],
+        evidenceRefs: [],
+        goalId: "goal:package",
+        id: "handoff:package",
+        laneId: "lane:package",
+        occurredAt: 1,
+        owner: { id: "owner:package", name: "Package owner" },
+        sessionId: "session:package",
+        summary: "Escalate failed work",
+        version: "herdr.work.decision.v1"
+      },
+      lineage: ["dispatch:luna"]
+    }
+    expect(Schema.decodeUnknownResult(WorkDispatchHandoff)(binding)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(WorkDispatchHandoff)({ ...binding, lineage: ["dispatch:other"] })._tag
+    ).toBe("Failure")
+  })
+
   it.effect("does not mutate a caller-owned state directory", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-work-mode-test-"))
     const stateDirectory = join(root, "state")
@@ -209,6 +446,80 @@ describe("durable Work projection", () => {
         })
     ).pipe(provideNodeServices)
   })
+
+  it.effect("rejects writable and substituted authority paths before database creation", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const root = mkdtempSync(join(tmpdir(), "herdr-work-unsafe-path-test-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+
+        for (const mode of [0o775, 0o777]) {
+          const stateDirectory = join(root, mode.toString(8))
+          mkdirSync(stateDirectory)
+          chmodSync(stateDirectory, mode)
+          const database = join(stateDirectory, "work.sqlite")
+          const result = yield* safelyOpenResult(database)
+          expect(result).toMatchObject({
+            failure: { _tag: "WorkStoreError", operation: "open.directory.unsafe" }
+          })
+          expect(existsSync(database)).toBe(false)
+          expect(statSync(stateDirectory).mode & 0o777).toBe(mode)
+        }
+
+        const realDirectory = join(root, "real")
+        mkdirSync(realDirectory, { mode: 0o700 })
+        const linkedDirectory = join(root, "linked")
+        symlinkSync(realDirectory, linkedDirectory)
+        const linkedResult = yield* safelyOpenResult(join(linkedDirectory, "work.sqlite"))
+        expect(linkedResult).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "open.directory.path-identity" }
+        })
+        expect(existsSync(join(realDirectory, "work.sqlite"))).toBe(false)
+
+        const safeDirectory = join(root, "safe")
+        mkdirSync(safeDirectory, { mode: 0o700 })
+        const danglingTarget = join(safeDirectory, "missing-target")
+        const database = join(safeDirectory, "work.sqlite")
+        symlinkSync(danglingTarget, database)
+        const databaseResult = yield* safelyOpenResult(database)
+        expect(databaseResult).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "open.path-identity" }
+        })
+        expect(existsSync(danglingTarget)).toBe(false)
+      }).pipe(provideNodeServices)
+    ))
+
+  it.effect("rejects an unsafe existing database before schema migration", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        if (platform() === "win32") return
+        const root = mkdtempSync(join(tmpdir(), "herdr-work-unsafe-database-test-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+        chmodSync(root, 0o700)
+        const unsafePath = join(root, "unsafe.sqlite")
+        const unsafe = new DatabaseSync(unsafePath)
+        unsafe.exec("CREATE TABLE preserved (id TEXT PRIMARY KEY)")
+        unsafe.close()
+        chmodSync(unsafePath, 0o660)
+
+        expect(yield* safelyOpenResult(unsafePath)).toMatchObject({
+          failure: { _tag: "WorkStoreError", operation: "open.file.unsafe" }
+        })
+        expect(statSync(unsafePath).mode & 0o777).toBe(0o660)
+        const unchanged = new DatabaseSync(unsafePath, { readOnly: true })
+        expect(unchanged.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table'").get())
+          .toEqual({ count: 1 })
+        unchanged.close()
+
+        const safePath = join(root, "safe.sqlite")
+        const safe = new DatabaseSync(safePath)
+        safe.close()
+        chmodSync(safePath, 0o600)
+        const opened = yield* openScopedStore(safePath)
+        expect(statSync(safePath).mode & 0o777).toBe(0o600)
+        opened.close()
+      }).pipe(provideNodeServices)
+    ))
 
   it.effect("derives now, day, week, and month from recorded timestamps", () =>
     Effect.gen(function*() {
@@ -369,12 +680,11 @@ describe("durable Work projection", () => {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const first = yield* WorkStore.open(path)
-      for (const event of history) yield* first.append(event)
+      const first = yield* openScopedStore(path)
+      for (const event of history) yield* first.store.append(event)
       first.close()
-      const reopened = yield* WorkStore.open(path)
-      yield* Effect.addFinalizer(() => Effect.sync(() => reopened.close()))
-      expect(yield* reopened.list()).toEqual(history)
+      const reopened = yield* openScopedStore(path)
+      expect(yield* reopened.store.list()).toEqual(history)
     }).pipe(provideNodeServices))
 
   it.effect("replays an identical checkpoint without duplicating the durable event", () =>
@@ -452,7 +762,7 @@ describe("durable Work projection", () => {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-transaction-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const store = yield* WorkStore.open(path)
+      const store = yield* openScopedStore(path)
       store.close()
 
       const legacyEvents = history.slice(0, 2)
@@ -462,12 +772,12 @@ describe("durable Work projection", () => {
       ).run("transaction-legacy", JSON.stringify(legacyEvents))
       database.close()
 
-      const missingStore = yield* WorkStore.open(path)
-      const missingService = yield* makeWorkService(missingStore)
+      const missingStore = yield* openScopedStore(path)
+      const missingService = yield* makeWorkService(missingStore.store)
       expect(yield* Effect.result(missingService.recordMany("transaction-legacy", legacyEvents))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" }
       })
-      expect(yield* missingStore.list()).toEqual([])
+      expect(yield* missingStore.store.list()).toEqual([])
       missingStore.close()
 
       const repaired = new DatabaseSync(path)
@@ -489,8 +799,8 @@ describe("durable Work projection", () => {
       ).run("goal-denormalized-drift", 99, driftedEvent.eventId)
       corrupted.close()
 
-      const corruptedStore = yield* WorkStore.open(path)
-      const corruptedService = yield* makeWorkService(corruptedStore)
+      const corruptedStore = yield* openScopedStore(path)
+      const corruptedService = yield* makeWorkService(corruptedStore.store)
       expect(yield* Effect.result(corruptedService.recordMany("transaction-legacy", legacyEvents))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" }
       })
@@ -502,8 +812,8 @@ describe("durable Work projection", () => {
       ).run(driftedEvent.goal.id, driftedEvent.occurredAt, driftedEvent.eventId)
       restored.close()
 
-      const completeStore = yield* WorkStore.open(path)
-      const completeService = yield* makeWorkService(completeStore)
+      const completeStore = yield* openScopedStore(path)
+      const completeService = yield* makeWorkService(completeStore.store)
       expect(yield* completeService.recordMany("transaction-legacy", legacyEvents)).toEqual(legacyEvents)
       const changed = { ...legacyEvents[1], goal: { ...legacyEvents[1].goal, summary: "changed legacy" } }
       expect(yield* Effect.result(completeService.recordMany("transaction-legacy", [legacyEvents[0], changed])))
@@ -514,7 +824,7 @@ describe("durable Work projection", () => {
       expect(yield* Effect.result(completeService.recordMany("transaction-legacy", [unrelated]))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" }
       })
-      expect(yield* completeStore.list()).toEqual(legacyEvents)
+      expect(yield* completeStore.store.list()).toEqual(legacyEvents)
       completeStore.close()
     }).pipe(provideNodeServices))
 
@@ -745,8 +1055,10 @@ database.close()`,
         yield* Effect.result(service.claim({
           branch: "feat/busy-timeout",
           expectedRevision: 0,
+          goalId: "goal-busy-timeout",
           head: "0123456789012345678901234567890123456789",
           laneId: "goal-busy-timeout",
+          operationId: "operation-busy-timeout",
           owner: { id: "owner-packages", name: "Package owner" },
           parent: null,
           phase: "implementation",
@@ -938,27 +1250,40 @@ database.close()`,
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-decision-bytes-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const store = yield* WorkStore.open(path)
+      const store = yield* openScopedStore(path)
+      const initialService = yield* makeWorkService(store.store)
+      yield* initialService.claim(laneClaim("goal-decision-cap"))
       store.close()
 
       const handoff: WorkDecisionHandoff = {
+        blockers: [],
         decision: "handoff",
+        dispatchIds: [],
+        evidenceRefs: [],
         goalId: "goal-decision-cap",
         id: "handoff-overflow",
         laneId: "goal-decision-cap",
         occurredAt: 0,
         owner: { id: "owner-packages", name: "Package owner" },
+        sessionId: "session-overflow",
         summary: "x".repeat(4_096),
         version: "herdr.work.decision.v1"
       }
       const database = new DatabaseSync(path)
       database.exec("BEGIN IMMEDIATE")
       const insert = database.prepare(
-        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+        `INSERT INTO work_decision_handoffs
+           (handoff_id, session_id, lane_id, occurred_at, record)
+         VALUES (?, ?, ?, ?, ?)`
       )
       for (let index = 0; index < 500; index++) {
-        const seeded = { ...handoff, id: `handoff-seed-${index}`, occurredAt: index }
-        insert.run(seeded.id, seeded.laneId, seeded.occurredAt, JSON.stringify(seeded))
+        const seeded = {
+          ...handoff,
+          id: `handoff-seed-${index}`,
+          occurredAt: index,
+          sessionId: `session-seed-${index}`
+        }
+        insert.run(seeded.id, seeded.sessionId, seeded.laneId, seeded.occurredAt, JSON.stringify(seeded))
       }
       database.exec("COMMIT")
       database.close()
@@ -980,15 +1305,20 @@ database.close()`,
       yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
       const service = yield* makeWorkService(store)
       const handoff: WorkDecisionHandoff = {
+        blockers: [],
         decision: "handoff",
+        dispatchIds: [],
+        evidenceRefs: [],
         goalId: "lane-\uFFFD",
         id: "handoff-replacement-lane",
         laneId: "lane-\uFFFD",
         occurredAt: 0,
         owner: { id: "owner-packages", name: "Package owner" },
+        sessionId: "session-replacement-lane",
         summary: "Replacement character remains a valid distinct lane",
         version: "herdr.work.decision.v1"
       }
+      yield* service.claim(laneClaim(handoff.laneId, handoff.goalId))
       yield* service.handoff(handoff)
       for (const malformedLaneId of ["lane-\uD800", "lane-\uDC00"]) {
         expect(yield* Effect.result(service.decisions(malformedLaneId))).toMatchObject({
@@ -1009,8 +1339,10 @@ database.close()`,
       const claim: WorkLaneClaim = {
         branch: "feat/durable-work",
         expectedRevision: 0,
+        goalId: "goal-packages",
         head: "0123456789012345678901234567890123456789",
         laneId: "goal-packages",
+        operationId: "operation-claim-1",
         owner: { id: "owner-packages", name: "Package owner" },
         parent: null,
         phase: "implementation",
@@ -1020,26 +1352,92 @@ database.close()`,
       const current = yield* service.currentClaim(claim.laneId)
       expect(Option.isSome(current)).toBe(true)
       if (Option.isSome(current)) expect(current.value).toMatchObject({ revision: 1, head: claim.head })
-      expect(yield* Effect.result(service.claim(claim))).toMatchObject({
+      expect(yield* service.claim(claim)).toMatchObject({ operationId: claim.operationId, revision: 1 })
+      expect(yield* Effect.result(service.claim({ ...claim, phase: "review" }))).toMatchObject({
+        failure: { _tag: "WorkLaneOperationConflictError", operationId: claim.operationId }
+      })
+      expect(
+        yield* Effect.result(service.claim({
+          ...claim,
+          operationId: "operation-stale",
+          phase: "review"
+        }))
+      ).toMatchObject({
         failure: { _tag: "WorkLaneClaimConflictError", actualRevision: 1 }
       })
-      const next = yield* service.claim({ ...claim, expectedRevision: 1, phase: "validation" })
+      const next = yield* service.claim({
+        ...claim,
+        expectedRevision: 1,
+        operationId: "operation-claim-2",
+        phase: "validation"
+      })
       expect(next.revision).toBe(2)
+      expect(yield* service.claim(claim)).toMatchObject({ operationId: claim.operationId, revision: 1 })
+      expect(
+        yield* Effect.result(service.claim({
+          ...claim,
+          expectedRevision: 2,
+          goalId: "goal-other",
+          operationId: "operation-move-goal",
+          phase: "review"
+        }))
+      ).toMatchObject({
+        failure: { _tag: "WorkLaneGoalConflictError", activeLaneId: claim.laneId, goalId: "goal-other" }
+      })
+      expect(
+        yield* Effect.result(service.claim({
+          ...claim,
+          goalId: claim.goalId,
+          laneId: "lane-competing",
+          operationId: "operation-competing"
+        }))
+      ).toMatchObject({
+        failure: {
+          _tag: "WorkLaneGoalConflictError",
+          activeLaneId: claim.laneId,
+          goalId: claim.goalId,
+          laneId: "lane-competing"
+        }
+      })
+      const active = yield* service.activeGoalClaim(claim.goalId)
+      expect(active).toEqual(Option.some(next))
       const updated = yield* service.currentClaim(claim.laneId)
       expect(Option.isSome(updated)).toBe(true)
       if (Option.isSome(updated)) expect(updated.value).toMatchObject({ revision: 2, phase: "validation" })
       const handoff: WorkDecisionHandoff = {
+        blockers: [{ id: "review", detail: "Fresh exact-head review required" }],
         decision: "handoff",
+        dispatchIds: ["dispatch-1", "dispatch-2"],
+        evidenceRefs: [{ id: "test", kind: "test", reference: "pnpm --filter @knpkv/herdr-work test" }],
         goalId: "goal-packages",
         id: "handoff-1",
         laneId: "goal-packages",
         occurredAt: 1,
         owner: claim.owner,
+        sessionId: "session-package-coordinator",
         summary: "Coordinator owns release verification",
         version: "herdr.work.decision.v1"
       }
       expect(yield* service.handoff(handoff)).toEqual(handoff)
       expect(yield* service.handoff(handoff)).toEqual(handoff)
+      expect(yield* service.coordinatorHandoff(handoff.sessionId)).toEqual(Option.some(handoff))
+      expect(yield* Effect.result(service.handoff({ ...handoff, summary: "Changed" }))).toMatchObject({
+        failure: { _tag: "WorkCoordinatorHandoffConflictError", sessionId: handoff.sessionId }
+      })
+      expect(
+        yield* Effect.result(service.handoff({
+          ...handoff,
+          goalId: "goal-other",
+          id: "handoff-wrong-authority",
+          sessionId: "session-wrong-authority"
+        }))
+      ).toMatchObject({
+        failure: {
+          _tag: "WorkDecisionAuthorityConflictError",
+          goalId: "goal-other",
+          laneId: handoff.laneId
+        }
+      })
       expect(yield* service.decisions("goal-packages")).toEqual([handoff])
 
       const database = new DatabaseSync(store.path)
@@ -1153,31 +1551,103 @@ database.close()`,
       ).toMatchObject({ expectedRevision: 3, revision: 4 })
     }).pipe(provideNodeServices))
 
+  it.effect("reads an exact coordinator session handoff after restart", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-coordinator-restart-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const first = yield* openScopedStore(path)
+      const handoff: WorkDecisionHandoff = {
+        blockers: [{ id: "review", detail: "Fresh exact-head review required" }],
+        decision: "handoff",
+        dispatchIds: ["dispatch-417"],
+        evidenceRefs: [{ id: "head", kind: "commit", reference: "a".repeat(40) }],
+        goalId: "goal-package",
+        id: "handoff-restart",
+        laneId: "lane-package",
+        occurredAt: 1,
+        owner: { id: "owner-packages", name: "Package owner" },
+        sessionId: "session-restart",
+        summary: "Continue from the durable package checkpoint",
+        version: "herdr.work.decision.v1"
+      }
+      const firstService = yield* makeWorkService(first.store)
+      yield* firstService.claim(laneClaim(handoff.laneId, handoff.goalId))
+      yield* firstService.handoff(handoff)
+      first.close()
+
+      const reopened = yield* openScopedStore(path)
+      const service = yield* makeWorkService(reopened.store)
+      expect(yield* service.coordinatorHandoff(handoff.sessionId)).toEqual(Option.some(handoff))
+      expect(yield* service.handoff(handoff)).toEqual(handoff)
+      expect(yield* Effect.result(service.handoff({ ...handoff, blockers: [] }))).toMatchObject({
+        failure: { _tag: "WorkCoordinatorHandoffConflictError", sessionId: handoff.sessionId }
+      })
+    }).pipe(provideNodeServices))
+
+  it.effect("rejects malformed surrogate text in coordinator handoffs", () =>
+    Effect.gen(function*() {
+      const handoff: WorkDecisionHandoff = {
+        blockers: [],
+        decision: "handoff",
+        dispatchIds: [],
+        evidenceRefs: [],
+        goalId: "goal-text",
+        id: "handoff-text",
+        laneId: "lane-text",
+        occurredAt: 1,
+        owner: { id: "owner-packages", name: "Package owner" },
+        sessionId: "session-text",
+        summary: "Valid text \uFFFD",
+        version: "herdr.work.decision.v1"
+      }
+      expect(yield* Schema.decodeUnknownEffect(WorkDecisionHandoff)(handoff)).toEqual(handoff)
+      for (const malformed of ["\uD800", "\uDC00"]) {
+        expect(
+          yield* Effect.result(Schema.decodeUnknownEffect(WorkDecisionHandoff)({ ...handoff, summary: malformed }))
+        ).toMatchObject({ failure: {} })
+        expect(
+          yield* Effect.result(
+            Schema.decodeUnknownEffect(WorkDecisionHandoff)({
+              ...handoff,
+              owner: { ...handoff.owner, name: malformed }
+            })
+          )
+        ).toMatchObject({ failure: {} })
+      }
+    }))
+
   it.effect("rejects denormalized handoff identity drift and preserves decision ordering", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-decision-denormalized-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const store = yield* WorkStore.open(path)
+      const store = yield* openScopedStore(path)
       store.close()
       const first: WorkDecisionHandoff = {
+        blockers: [],
         decision: "handoff",
+        dispatchIds: [],
+        evidenceRefs: [],
         goalId: "goal-decision-identity",
         id: "handoff-record-1",
         laneId: "goal-decision-identity",
         occurredAt: 1,
         owner: { id: "owner-packages", name: "Package owner" },
+        sessionId: "session-record-1",
         summary: "First handoff",
         version: "herdr.work.decision.v1"
       }
       const database = new DatabaseSync(path)
       database.prepare(
-        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-      ).run("handoff-row-1", first.laneId, 2, JSON.stringify(first))
+        `INSERT INTO work_decision_handoffs
+           (handoff_id, session_id, lane_id, occurred_at, record)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run("handoff-row-1", first.sessionId, first.laneId, 2, JSON.stringify(first))
       database.close()
 
-      const mismatchedStore = yield* WorkStore.open(path)
-      const mismatchedService = yield* makeWorkService(mismatchedStore)
+      const mismatchedStore = yield* openScopedStore(path)
+      const mismatchedService = yield* makeWorkService(mismatchedStore.store)
       expect(yield* Effect.result(mismatchedService.decisions(first.laneId))).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "decisions.decode.identity-mismatch" }
       })
@@ -1188,15 +1658,18 @@ database.close()`,
         goalId: "goal-decision-replay",
         id: "handoff-replay",
         laneId: "goal-decision-replay",
-        occurredAt: 3
+        occurredAt: 3,
+        sessionId: "session-replay"
       }
       const replaySeed = new DatabaseSync(path)
       replaySeed.prepare(
-        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-      ).run(replay.id, "foreign-lane", 4, JSON.stringify(replay))
+        `INSERT INTO work_decision_handoffs
+           (handoff_id, session_id, lane_id, occurred_at, record)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(replay.id, replay.sessionId, "foreign-lane", 4, JSON.stringify(replay))
       replaySeed.close()
-      const replayStore = yield* WorkStore.open(path)
-      const replayService = yield* makeWorkService(replayStore)
+      const replayStore = yield* openScopedStore(path)
+      const replayService = yield* makeWorkService(replayStore.store)
       expect(yield* Effect.result(replayService.handoff(replay))).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "decision.decode.identity-mismatch" }
       })
@@ -1216,10 +1689,18 @@ database.close()`,
       repaired.prepare(
         "UPDATE work_decision_handoffs SET handoff_id = ?, occurred_at = ? WHERE handoff_id = ?"
       ).run(first.id, first.occurredAt, "handoff-row-1")
-      const second = { ...first, id: "handoff-record-2", occurredAt: 2, summary: "Second handoff" }
+      const second = {
+        ...first,
+        id: "handoff-record-2",
+        occurredAt: 2,
+        sessionId: "session-record-2",
+        summary: "Second handoff"
+      }
       repaired.prepare(
-        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-      ).run(second.id, second.laneId, second.occurredAt, JSON.stringify(second))
+        `INSERT INTO work_decision_handoffs
+           (handoff_id, session_id, lane_id, occurred_at, record)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(second.id, second.sessionId, second.laneId, second.occurredAt, JSON.stringify(second))
       repaired.close()
 
       const orderedStore = yield* WorkStore.open(path)
@@ -1236,8 +1717,10 @@ database.close()`,
       const claim: WorkLaneClaim = {
         branch: "feat/durable-work",
         expectedRevision: 0,
+        goalId: "goal-lane-cap",
         head: "0123456789012345678901234567890123456789",
         laneId: "goal-lane-cap",
+        operationId: "operation-lane-cap",
         owner: { id: "owner-packages", name: "Package owner" },
         parent: null,
         phase: "implementation",
@@ -1255,11 +1738,14 @@ database.close()`,
 
       const database = new DatabaseSync(path)
       const insert = database.prepare(
-        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+        `INSERT INTO work_lane_claims
+           (lane_id, goal_id, operation_id, phase, revision, record)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       for (let index = 0; index < workSnapshotMaxGoals - 1; index++) {
         const laneId = `goal-lane-seed-${index}`
-        insert.run(laneId, 1, JSON.stringify({ ...claim, laneId, revision: 1 }))
+        const seeded = { ...claim, goalId: laneId, laneId, operationId: `operation-lane-seed-${index}`, revision: 1 }
+        insert.run(laneId, seeded.goalId, seeded.operationId, seeded.phase, 1, JSON.stringify(seeded))
       }
       database.close()
 
@@ -1268,10 +1754,24 @@ database.close()`,
         (store) =>
           Effect.gen(function*() {
             const service = yield* makeWorkService(store)
-            expect(yield* Effect.result(service.claim({ ...claim, laneId: "goal-lane-overflow" }))).toMatchObject({
+            expect(
+              yield* Effect.result(service.claim({
+                ...claim,
+                goalId: "goal-lane-overflow",
+                laneId: "goal-lane-overflow",
+                operationId: "operation-lane-overflow"
+              }))
+            ).toMatchObject({
               failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
             })
-            expect(yield* service.claim({ ...claim, expectedRevision: 1, phase: "validation" })).toMatchObject({
+            expect(
+              yield* service.claim({
+                ...claim,
+                expectedRevision: 1,
+                operationId: "operation-lane-cap-update",
+                phase: "validation"
+              })
+            ).toMatchObject({
               laneId: claim.laneId,
               phase: "validation",
               revision: 2
@@ -1297,15 +1797,28 @@ database.close()`,
       )
       const bytesDatabase = new DatabaseSync(bytesPath)
       const bytesInsert = bytesDatabase.prepare(
-        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+        `INSERT INTO work_lane_claims
+           (lane_id, goal_id, operation_id, phase, revision, record)
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
       const largeOwner = { id: "owner-packages", name: "x".repeat(4_096) }
       for (let index = 0; index < 500; index++) {
         const laneId = `goal-lane-bytes-${index}`
+        const seeded = {
+          ...claim,
+          goalId: laneId,
+          laneId,
+          operationId: `operation-lane-bytes-${index}`,
+          owner: largeOwner,
+          revision: 1
+        }
         bytesInsert.run(
           laneId,
+          seeded.goalId,
+          seeded.operationId,
+          seeded.phase,
           1,
-          JSON.stringify({ ...claim, laneId, owner: largeOwner, revision: 1 })
+          JSON.stringify(seeded)
         )
       }
       bytesDatabase.close()
@@ -1315,13 +1828,97 @@ database.close()`,
         (store) =>
           Effect.gen(function*() {
             const service = yield* makeWorkService(store)
-            expect(yield* Effect.result(service.claim({ ...claim, laneId: "goal-lane-bytes-overflow" }))).toMatchObject(
+            expect(
+              yield* Effect.result(service.claim({
+                ...claim,
+                goalId: "goal-lane-bytes-overflow",
+                laneId: "goal-lane-bytes-overflow",
+                operationId: "operation-lane-bytes-overflow"
+              }))
+            ).toMatchObject(
               {
                 failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
               }
             )
           }),
         (store) => Effect.sync(() => store.close())
+      )
+    }).pipe(provideNodeServices))
+
+  it.effect("bounds lane operation replay history while preserving old replay", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-operation-bytes-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const claim: WorkLaneClaim = {
+        branch: "feat/durable-work",
+        expectedRevision: 0,
+        goalId: "goal-operation-cap",
+        head: "0123456789012345678901234567890123456789",
+        laneId: "lane-operation-cap",
+        operationId: "operation-cap-first",
+        owner: { id: "owner-packages", name: "Package owner" },
+        parent: null,
+        phase: "implementation",
+        worktree: "/repo/worktree"
+      }
+      const first = yield* openScopedStore(path)
+      const firstService = yield* makeWorkService(first.store)
+      yield* firstService.claim(claim)
+      first.close()
+
+      const database = new DatabaseSync(path)
+      const insert = database.prepare(
+        `INSERT INTO work_lane_operations
+           (operation_id, lane_id, goal_id, phase, revision, record)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      const totals = () =>
+        Schema.decodeUnknownSync(
+          Schema.Struct({ operationBytes: Schema.Number })
+        )(
+          database.prepare(
+            `SELECT operation_bytes AS operationBytes
+           FROM work_lane_operation_totals WHERE singleton = 1`
+          ).get()
+        ).operationBytes
+      let operationBytes = totals()
+      for (let index = 0;; index += 1) {
+        const operationId = `operation-cap-seed-${index}`
+        const laneId = `lane-cap-seed-${index}`
+        const seeded = {
+          ...claim,
+          expectedRevision: 0,
+          goalId: `goal-cap-seed-${index}`,
+          laneId,
+          operationId,
+          owner: { id: "owner-packages", name: "x".repeat(4_096) },
+          revision: 1
+        }
+        const record = JSON.stringify(seeded)
+        const entryBytes = utf8ByteLength(operationId) + utf8ByteLength(record)
+        if (operationBytes + entryBytes > __herdrWorkLaneOperationMaxBytesForTest) break
+        insert.run(operationId, laneId, seeded.goalId, seeded.phase, seeded.revision, record)
+        operationBytes += entryBytes
+      }
+      database.close()
+
+      const reopened = yield* openScopedStore(path)
+      const service = yield* makeWorkService(reopened.store)
+      expect(yield* service.claim(claim)).toMatchObject({ operationId: claim.operationId, revision: 1 })
+      const overflow = {
+        ...claim,
+        expectedRevision: 1,
+        operationId: "operation-cap-overflow",
+        owner: { id: "owner-packages", name: "x".repeat(4_096) },
+        phase: "validation",
+        worktree: `/${"w".repeat(2_047)}`
+      }
+      expect(yield* Effect.result(service.claim(overflow))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+      })
+      expect(yield* service.currentClaim(claim.laneId)).toEqual(
+        Option.some({ ...claim, revision: 1 })
       )
     }).pipe(provideNodeServices))
 
@@ -1333,8 +1930,10 @@ database.close()`,
       const claim: WorkLaneClaim = {
         branch: "feat/durable-work",
         expectedRevision: 0,
+        goalId: "goal-restart",
         head: "a".repeat(64),
         laneId: "goal-restart",
+        operationId: "operation-restart",
         owner: { id: "owner-packages", name: "Package owner" },
         parent: null,
         phase: "validation",
@@ -1353,11 +1952,15 @@ database.close()`,
           const store = yield* WorkStore.open(path)
           yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
           const service = yield* makeWorkService(store)
-          return yield* service.currentClaim(claim.laneId)
+          const byLane = yield* service.currentClaim(claim.laneId)
+          const byGoal = yield* service.activeGoalClaim(claim.goalId)
+          const replay = yield* service.claim(claim)
+          return { byGoal, byLane, replay }
         })
       )
-      expect(Option.isSome(current)).toBe(true)
-      if (Option.isSome(current)) expect(current.value).toEqual(claimed)
+      expect(current.byLane).toEqual(Option.some(claimed))
+      expect(current.byGoal).toEqual(Option.some(claimed))
+      expect(current.replay).toEqual(claimed)
       const unknown = yield* Effect.scoped(
         Effect.gen(function*() {
           const store = yield* WorkStore.open(path)
@@ -1369,36 +1972,73 @@ database.close()`,
       expect(Option.isNone(unknown)).toBe(true)
 
       const database = new DatabaseSync(path)
-      database.prepare(
-        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
-      ).run(
+      const insertClaim = database.prepare(
+        `INSERT INTO work_lane_claims
+           (lane_id, goal_id, operation_id, phase, revision, record)
+         VALUES (?, ?, ?, ?, ?, ?)`
+      )
+      insertClaim.run(
         "goal-key",
+        "goal-key",
+        "operation-key",
+        claim.phase,
         1,
-        JSON.stringify({ ...claim, laneId: "goal-record", revision: 1 })
+        JSON.stringify({
+          ...claim,
+          goalId: "goal-key",
+          laneId: "goal-record",
+          operationId: "operation-key",
+          revision: 1
+        })
       )
-      database.prepare(
-        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
-      ).run(
+      insertClaim.run(
         "goal-revision",
+        "goal-revision",
+        "operation-revision",
+        claim.phase,
         1,
-        JSON.stringify({ ...claim, laneId: "goal-revision", expectedRevision: 1, revision: 2 })
+        JSON.stringify({
+          ...claim,
+          expectedRevision: 1,
+          goalId: "goal-revision",
+          laneId: "goal-revision",
+          operationId: "operation-revision",
+          revision: 2
+        })
       )
-      database.prepare(
-        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
-      ).run("goal-malformed", 1, "not-json")
+      insertClaim.run(
+        "goal-malformed",
+        "goal-malformed",
+        "operation-malformed",
+        claim.phase,
+        1,
+        "not-json"
+      )
       const mismatchedHandoff: WorkDecisionHandoff = {
+        blockers: [],
         decision: "handoff",
+        dispatchIds: [],
+        evidenceRefs: [],
         goalId: "goal-record",
         id: "handoff-mismatched-lane",
         laneId: "goal-record",
         occurredAt: 2,
         owner: claim.owner,
+        sessionId: "session-mismatched-lane",
         summary: "Mismatched lane fixture",
         version: "herdr.work.decision.v1"
       }
       database.prepare(
-        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
-      ).run(mismatchedHandoff.id, "goal-key", mismatchedHandoff.occurredAt, JSON.stringify(mismatchedHandoff))
+        `INSERT INTO work_decision_handoffs
+           (handoff_id, session_id, lane_id, occurred_at, record)
+         VALUES (?, ?, ?, ?, ?)`
+      ).run(
+        mismatchedHandoff.id,
+        mismatchedHandoff.sessionId,
+        "goal-key",
+        mismatchedHandoff.occurredAt,
+        JSON.stringify(mismatchedHandoff)
+      )
       database.close()
       const mismatch = yield* Effect.scoped(
         Effect.gen(function*() {
@@ -1409,7 +2049,7 @@ database.close()`,
         })
       )
       expect(mismatch).toMatchObject({
-        failure: { _tag: "WorkStoreError", operation: "claim.read.lane-mismatch" }
+        failure: { _tag: "WorkStoreError", operation: "claim.read.identity-mismatch" }
       })
       const writeMismatches = yield* Effect.scoped(
         Effect.gen(function*() {
@@ -1417,14 +2057,32 @@ database.close()`,
           yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
           const service = yield* makeWorkService(store)
           return yield* Effect.all([
-            Effect.result(service.claim({ ...claim, laneId: "goal-key", expectedRevision: 1 })),
-            Effect.result(service.claim({ ...claim, laneId: "goal-revision", expectedRevision: 1 })),
-            Effect.result(service.claim({ ...claim, laneId: "goal-malformed", expectedRevision: 1 }))
+            Effect.result(service.claim({
+              ...claim,
+              goalId: "goal-key",
+              laneId: "goal-key",
+              operationId: "operation-write-key",
+              expectedRevision: 1
+            })),
+            Effect.result(service.claim({
+              ...claim,
+              goalId: "goal-revision",
+              laneId: "goal-revision",
+              operationId: "operation-write-revision",
+              expectedRevision: 1
+            })),
+            Effect.result(service.claim({
+              ...claim,
+              goalId: "goal-malformed",
+              laneId: "goal-malformed",
+              operationId: "operation-write-malformed",
+              expectedRevision: 1
+            }))
           ])
         })
       )
       expect(writeMismatches).toMatchObject([
-        { failure: { _tag: "WorkStoreError", operation: "claim.write.inconsistent" } },
+        { failure: { _tag: "WorkStoreError", operation: "claim.write.identity-mismatch" } },
         { failure: { _tag: "WorkStoreError" } },
         { failure: { _tag: "WorkStoreError" } }
       ])
@@ -1439,6 +2097,174 @@ database.close()`,
       expect(decisionMismatch).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "decisions.decode.lane-mismatch" }
       })
+    }).pipe(provideNodeServices))
+
+  it.effect("transactionally migrates the previous lane and handoff schema", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-authority-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const legacyClaim = {
+        branch: "feat/legacy-work",
+        expectedRevision: 0,
+        head: "0123456789012345678901234567890123456789",
+        laneId: "goal:legacy",
+        owner: { id: "owner:legacy", name: "Legacy owner" },
+        parent: null,
+        phase: "implementation",
+        revision: 1,
+        worktree: "/worktrees/legacy"
+      }
+      const legacyHandoff = {
+        decision: "handoff",
+        goalId: "goal:legacy",
+        id: "handoff:legacy",
+        laneId: "goal:legacy",
+        occurredAt: 1,
+        owner: legacyClaim.owner,
+        summary: "Legacy decision",
+        version: "herdr.work.decision.v1"
+      }
+      const database = new DatabaseSync(path)
+      database.exec(`
+        CREATE TABLE work_lane_claims (
+          lane_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE work_decision_handoffs (
+          handoff_id TEXT PRIMARY KEY, lane_id TEXT NOT NULL, occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE work_dispatch_handoffs (
+          dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL UNIQUE, lane_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE orchestrator_dispatch_metadata (
+          dispatch_request_id TEXT PRIMARY KEY, route TEXT NOT NULL, work_link TEXT
+        );
+      `)
+      database.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)")
+        .run(legacyClaim.laneId, legacyClaim.revision, JSON.stringify(legacyClaim))
+      database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
+        .run(legacyHandoff.id, legacyHandoff.laneId, legacyHandoff.occurredAt, JSON.stringify(legacyHandoff))
+      const lineage = ["dispatch:legacy-luna"]
+      database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
+        .run(
+          "dispatch:legacy-sol",
+          legacyHandoff.id,
+          legacyHandoff.laneId,
+          legacyHandoff.occurredAt,
+          JSON.stringify(lineage),
+          JSON.stringify(legacyHandoff)
+        )
+      database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
+        .run("dispatch:legacy-sol", "{}", JSON.stringify({ handoff: legacyHandoff, lineage }))
+      database.close()
+
+      const concurrentHandoff = {
+        ...legacyHandoff,
+        id: "handoff:concurrent",
+        occurredAt: 2,
+        summary: "Concurrent legacy decision"
+      }
+      const writer = spawn(
+        execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { DatabaseSync } from "node:sqlite"
+const database = new DatabaseSync(process.argv[1])
+const handoff = JSON.parse(process.argv[2])
+database.exec("BEGIN IMMEDIATE")
+database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
+  .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+process.stdout.write("locked\\n")
+await new Promise((resolve) => setTimeout(resolve, 250))
+database.exec("COMMIT")
+database.close()`,
+          path,
+          JSON.stringify(concurrentHandoff)
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] }
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => writer.kill()))
+      yield* Effect.callback<void, LockHolderError>((resume) => {
+        writer.stdout.setEncoding("utf8")
+        writer.stdout.once("data", () => resume(Effect.void))
+        writer.once("error", (cause) => resume(Effect.fail(new LockHolderError({ cause: String(cause) }))))
+      })
+
+      const opened = yield* openScopedStore(path)
+      const service = yield* makeWorkService(opened.store)
+      expect(yield* service.currentClaim(legacyClaim.laneId)).toMatchObject({
+        value: { goalId: legacyClaim.laneId, operationId: legacyClaim.laneId, revision: 1 }
+      })
+      expect(yield* service.coordinatorHandoff(legacyHandoff.id)).toMatchObject({
+        value: { dispatchIds: lineage, id: legacyHandoff.id, sessionId: legacyHandoff.id }
+      })
+      expect(yield* service.coordinatorHandoff(concurrentHandoff.id)).toMatchObject({
+        value: { id: concurrentHandoff.id, sessionId: concurrentHandoff.id }
+      })
+      opened.close()
+      const migrated = new DatabaseSync(path)
+      const dispatchRecord = migrated.prepare(
+        "SELECT record FROM work_dispatch_handoffs WHERE dispatch_request_id = ?"
+      ).get("dispatch:legacy-sol")
+      const metadataRecord = migrated.prepare(
+        "SELECT work_link AS workLink FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
+      ).get("dispatch:legacy-sol")
+      migrated.close()
+      expect(Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(dispatchRecord).record)
+        .toContain(lineage[0])
+      expect(Schema.decodeUnknownSync(Schema.Struct({ workLink: Schema.String }))(metadataRecord).workLink)
+        .toContain(lineage[0])
+
+      const corruptedPath = join(directory, "corrupted.sqlite")
+      const corrupted = new DatabaseSync(corruptedPath)
+      corrupted.exec("CREATE TABLE work_lane_claims (lane_id TEXT PRIMARY KEY, revision INTEGER, record TEXT)")
+      corrupted.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)").run("goal:corrupt", 1, "not-json")
+      corrupted.close()
+      expect(yield* safelyOpenResult(corruptedPath)).toMatchObject({ failure: { _tag: "WorkStoreError" } })
+      const unchanged = new DatabaseSync(corruptedPath)
+      const columns = unchanged.prepare("PRAGMA table_info(work_lane_claims)").all()
+      unchanged.close()
+      expect(columns.some((column) =>
+        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "goal_id"
+      ))
+        .toBe(false)
+    }).pipe(provideNodeServices))
+
+  it.effect("fails closed when denormalized lane authority hides an active claim", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-lane-authority-drift-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const claim = laneClaim("lane-authority", "goal-authority")
+      const first = yield* openScopedStore(path)
+      const firstService = yield* makeWorkService(first.store)
+      yield* firstService.claim(claim)
+      first.close()
+
+      const database = new DatabaseSync(path)
+      database.prepare(
+        "UPDATE work_lane_claims SET goal_id = ?, phase = 'shipped' WHERE lane_id = ?"
+      ).run("goal-hidden", claim.laneId)
+      database.close()
+
+      const reopened = yield* openScopedStore(path)
+      const service = yield* makeWorkService(reopened.store)
+      expect(yield* Effect.result(service.activeGoalClaim(claim.goalId))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "claim.goal.identity-mismatch" }
+      })
+      expect(
+        yield* Effect.result(service.claim({
+          ...laneClaim("lane-competing-authority", claim.goalId),
+          operationId: "operation-competing-authority"
+        }))
+      ).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "claim.write.identity-mismatch" }
+      })
+      const count = new DatabaseSync(path)
+      expect(count.prepare("SELECT COUNT(*) AS count FROM work_lane_claims").get()).toEqual({ count: 1 })
+      count.close()
     }).pipe(provideNodeServices))
 
   it.effect("rejects cross-history inconsistencies before durable mutation", () =>
@@ -2174,5 +3000,13 @@ database.close()`,
         families: [validGroup]
       })._tag
     ).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshot)({
+        window: "now",
+        observedAt: 0,
+        asOf: 0,
+        goals: [supersededGoal]
+      })._tag
+    ).toBe("Failure")
   })
 })

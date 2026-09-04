@@ -1,18 +1,41 @@
 import { Clock, Effect } from "effect"
 import type { Option } from "effect"
 import type {
+  WorkAgentBindingAuthorityError,
+  WorkAgentBindingConflictError,
   WorkCheckpointConflictError,
+  WorkCoordinatorHandoffConflictError,
+  WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkLaneClaimConflictError,
+  WorkLaneGoalConflictError,
+  WorkLaneOperationConflictError,
   WorkProjectionError,
   WorkStoreError,
   WorkTransactionConflictError
 } from "./errors.js"
-import type { WorkDecisionHandoff, WorkGoalCheckpoint, WorkLaneClaim, WorkLaneClaimed, WorkSnapshots } from "./model.js"
+import type {
+  WorkAgentBinding,
+  WorkAgentBindingRequest,
+  WorkDecisionHandoff,
+  WorkGoalCheckpoint,
+  WorkLaneClaim,
+  WorkLaneClaimed,
+  WorkSnapshots
+} from "./model.js"
 import { projectWorkSnapshots } from "./projection.js"
 import type { WorkStoreService } from "./store.js"
 
 export interface WorkService {
+  readonly bindAgent: (
+    request: WorkAgentBindingRequest
+  ) => Effect.Effect<
+    WorkAgentBinding,
+    WorkAgentBindingAuthorityError | WorkAgentBindingConflictError | WorkProjectionError | WorkStoreError
+  >
+  readonly agentBinding: (
+    dispatchRequestId: string
+  ) => Effect.Effect<Option.Option<WorkAgentBinding>, WorkStoreError>
   readonly record: (
     event: WorkGoalCheckpoint
   ) => Effect.Effect<
@@ -29,22 +52,43 @@ export interface WorkService {
   >
   readonly claim: (
     claim: WorkLaneClaim
-  ) => Effect.Effect<WorkLaneClaimed, WorkLaneClaimConflictError | WorkProjectionError | WorkStoreError>
+  ) => Effect.Effect<
+    WorkLaneClaimed,
+    | WorkLaneClaimConflictError
+    | WorkLaneGoalConflictError
+    | WorkLaneOperationConflictError
+    | WorkProjectionError
+    | WorkStoreError
+  >
   readonly currentClaim: (
     laneId: string
+  ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
+  readonly activeGoalClaim: (
+    goalId: string
   ) => Effect.Effect<Option.Option<WorkLaneClaimed>, WorkStoreError>
   readonly handoff: (
     handoff: WorkDecisionHandoff
   ) => Effect.Effect<
     WorkDecisionHandoff,
-    WorkDecisionHandoffConflictError | WorkProjectionError | WorkStoreError
+    | WorkCoordinatorHandoffConflictError
+    | WorkDecisionAuthorityConflictError
+    | WorkDecisionHandoffConflictError
+    | WorkProjectionError
+    | WorkStoreError
   >
+  readonly coordinatorHandoff: (
+    sessionId: string
+  ) => Effect.Effect<Option.Option<WorkDecisionHandoff>, WorkStoreError>
   readonly decisions: (
     laneId: string
   ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>
 }
 
-export const makeWorkService = Effect.fn("HerdrWork.makeService")(function*(store: WorkStoreService) {
+export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store: WorkStoreService) {
+  const bindAgent = Effect.fn("HerdrWork.bindAgent")((request: WorkAgentBindingRequest) => store.bindAgent(request))
+  const agentBinding = Effect.fn("HerdrWork.agentBinding")((dispatchRequestId: string) =>
+    store.agentBinding(dispatchRequestId)
+  )
   const record = Effect.fn("HerdrWork.record")((event: WorkGoalCheckpoint) => store.append(event))
   const snapshots = Effect.fn("HerdrWork.snapshots")(function*(observedAt?: number) {
     const timestamp = observedAt ?? (yield* Clock.currentTimeMillis)
@@ -56,7 +100,25 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function*(stor
   ) => store.appendMany(transactionId, events))
   const claim = Effect.fn("HerdrWork.claim")((lane: WorkLaneClaim) => store.claim(lane))
   const currentClaim = Effect.fn("HerdrWork.currentClaim")((laneId: string) => store.currentClaim(laneId))
+  const activeGoalClaim = Effect.fn("HerdrWork.activeGoalClaim")((goalId: string) => store.activeGoalClaim(goalId))
   const handoff = Effect.fn("HerdrWork.handoff")((decision: WorkDecisionHandoff) => store.decision(decision))
+  const coordinatorHandoff = Effect.fn("HerdrWork.coordinatorHandoff")((sessionId: string) =>
+    store.coordinatorHandoff(sessionId)
+  )
   const decisions = Effect.fn("HerdrWork.decisions")((laneId: string) => store.decisions(laneId))
-  return { claim, currentClaim, decisions, handoff, record, recordMany, snapshots } satisfies WorkService
+  return Effect.succeed(
+    {
+      agentBinding,
+      activeGoalClaim,
+      bindAgent,
+      claim,
+      coordinatorHandoff,
+      currentClaim,
+      decisions,
+      handoff,
+      record,
+      recordMany,
+      snapshots
+    } satisfies WorkService
+  )
 })

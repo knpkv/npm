@@ -58,14 +58,14 @@ export const SanitizedJobRecord = Schema.Struct({
 export type SanitizedJobRecord = typeof SanitizedJobRecord.Type
 
 const credentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]))+)/giu
+  /((?:(?:[a-z0-9]+[\s_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[\s_-]?key|private[\s_-]?key|access[\s_-]?key(?:[\s_-]?id)?|secret[\s_-]?access[\s_-]?key)|_auth)\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$|(?:\[redacted credential\]|[^\s,;]|[,;](?!\s*(?:(?:[a-z0-9]+[\s_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[\s_-]?key|private[\s_-]?key|access[\s_-]?key(?:[\s_-]?id)?|secret[\s_-]?access[\s_-]?key)|_auth)\s*[:=]))+)/giu
 const quotedCredentialAssignment =
   /((?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*)("(?:\\[\s\S]|[^"\\])*"|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*$|'(?:\\[\s\S]|[^'\\])*$)/giu
 const quotedCredentialAssignmentKey = /(?:"((?:\\[\s\S]|[^"\\])*)"|'((?:\\[\s\S]|[^'\\])*)')\s*[:=]\s*/gu
 const cookieCredentialAssignment =
   /((?:^|[^\w-])(?:cookie|set-cookie)\s*[:=]\s*)(?!\[redacted credential\])([^\r\n]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$|[\r\n]))/giu
 const whitespaceCredentialAssignment =
-  /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
+  /((?:(?:[a-z0-9]+[\s_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[\s_-]?key|private[\s_-]?key|access[\s_-]?key(?:[\s_-]?id)?|secret[\s_-]?access[\s_-]?key)|_auth)\s*[:=]\s*)(?!\[redacted credential\])([\s\S]*?)(?=(?:[,;]\s*[a-z0-9]+(?:[_-][a-z0-9]+)*\s*[:=]|$))/giu
 const malformedCredentialAssignment =
   /((?:(?:[a-z0-9]+[_-])*(?:password|passwd|pwd|secret|token|credential|credentials|passphrase|accountkey|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth)(?:%(?![0-9a-f]{2})[^\s=:]*)+\s*[:=]\s*)([^\s,;]+)/giu
 const netrcRecord = /(^|[\r\n])([ \t]*(?:machine|default)\b(?:(?![\r\n][ \t]*(?:machine|default)\b)[\s\S])*)/gimu
@@ -91,10 +91,10 @@ const uriPrefix = /^(?:[a-z][a-z\d+.-]*:\/\/|\/\/)/iu
 const encodedUriMaxDepth = 3
 const hasMalformedPercentEscape = (value: string): boolean => /%(?![0-9a-f]{2})/iu.test(value)
 const credentialKey =
-  /^(?:(?:[a-z\d]+[_-])*[a-z\d]*(?:password|passwd|pwd|secret|token|credential|credentials|authorization|passphrase|accountkey|api[_-]?key|private[_-]?key|access[_-]?key(?:[_-]?id)?|secret[_-]?access[_-]?key)|_auth|cookie|set-cookie)$/iu
+  /^(?:(?:[a-z\d]+[\s_-])*[a-z\d]*(?:password|passwd|pwd|secret|token|credential|credentials|authorization|passphrase|accountkey|api[\s_-]?key|private[\s_-]?key|access[\s_-]?key(?:[\s_-]?id)?|secret[\s_-]?access[\s_-]?key)|_auth|cookie|set[\s_-]cookie)$/iu
 
 const credentialSignal =
-  /(?:[?&#][^=#&\s]+(?:=|%3a|%3d)|password|passwd|pwd|secret|token|credential|passphrase|accountkey|authorization|cookie|set-cookie|_auth|auths|-----begin|\\u[0-9a-f]{4}|(?:^|[\r\n])[ \t]*(?:machine|default)\b)/iu
+  /(?:[?&#][^=#&\s]+(?:=|%3a|%3d)|password|passwd|pwd|secret|token|credential|passphrase|accountkey|api[\s_-]+key|access[\s_-]+key|private[\s_-]+key|authorization|cookie|set-cookie|_auth|auths|-----begin|\\u[0-9a-f]{4}|(?:^|[\r\n])[ \t]*(?:machine|default)\b)/iu
 
 const decodeCredentialKey = (value: string): string =>
   value.replace(/\\u([0-9a-f]{4})/giu, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)))

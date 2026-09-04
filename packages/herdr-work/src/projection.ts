@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
 import { WorkProjectionError } from "./errors.js"
-import { validateGoalFamilyHistory } from "./goal-family.js"
+import { workHistoryError } from "./internal/history-validation.js"
 import {
   type WorkGoal,
   WorkGoalCheckpoint,
@@ -49,45 +49,8 @@ const validateHistory = Effect.fn("HerdrWork.validateHistory")(function*(
   )(input).pipe(
     Effect.mapError((cause) => projectionError("malformed", "work checkpoint history is malformed", cause))
   )
-  const eventIds = new Set<string>()
-  const goalTimes = new Set<string>()
-  const createdAt = new Map<string, number>()
-  const ordered = events.toSorted((left, right) => left.occurredAt - right.occurredAt)
-  for (const event of ordered) {
-    if (eventIds.has(event.eventId)) {
-      return yield* projectionError("duplicate_event", `work event ${event.eventId} occurs more than once`, event)
-    }
-    eventIds.add(event.eventId)
-    const timeKey = `${event.goal.id}\u0000${event.occurredAt}`
-    if (goalTimes.has(timeKey)) {
-      return yield* projectionError(
-        "ambiguous_checkpoint",
-        `goal ${event.goal.id} has more than one checkpoint at ${event.occurredAt}`,
-        event
-      )
-    }
-    goalTimes.add(timeKey)
-    const firstCreatedAt = createdAt.get(event.goal.id)
-    if (firstCreatedAt !== undefined && firstCreatedAt !== event.goal.createdAt) {
-      return yield* projectionError(
-        "inconsistent_history",
-        `goal ${event.goal.id} changed its creation timestamp`,
-        event
-      )
-    }
-    createdAt.set(event.goal.id, event.goal.createdAt)
-  }
-  for (const [goalId, timestamp] of createdAt) {
-    if (!events.some((event) => event.goal.id === goalId && event.occurredAt === timestamp)) {
-      return yield* projectionError(
-        "inconsistent_history",
-        `goal ${goalId} has no checkpoint at its creation timestamp`,
-        { goalId, timestamp }
-      )
-    }
-  }
-  const familyError = validateGoalFamilyHistory(events)
-  if (familyError !== undefined) return yield* familyError
+  const historyError = workHistoryError(events)
+  if (historyError !== undefined) return yield* historyError
   return events
 })
 

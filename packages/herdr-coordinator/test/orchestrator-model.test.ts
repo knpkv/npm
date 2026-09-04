@@ -5,7 +5,9 @@ import {
   OrchestratorEvent,
   OrchestratorIdempotencyKey,
   OrchestratorPendingDispatch,
-  OrchestratorPendingQuery
+  OrchestratorPendingQuery,
+  OrchestratorRequest,
+  OrchestratorWorkLink
 } from "../src/orchestrator-model.js"
 
 const event = {
@@ -73,8 +75,57 @@ describe("orchestrator event model", () => {
     ).toBe("Failure")
   })
 
+  it("binds a request activity key to its decoded command", () => {
+    const request = {
+      acceptedAt: 1,
+      activityIdempotencyKey: "activity:model",
+      command: {
+        activityIdempotencyKey: "activity:model",
+        actor: "coordinator",
+        kind: "fleet.job",
+        payload: { kind: "nix.check" }
+      },
+      dispatchRequestId: "dispatch:model",
+      idempotencyKey: "dispatch:model-key",
+      route: null,
+      status: "accepted",
+      workLink: null
+    }
+    expect(Schema.decodeUnknownResult(OrchestratorRequest)(request)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(OrchestratorRequest)({ ...request, activityIdempotencyKey: "activity:other" })._tag
+    ).toBe("Failure")
+  })
+
   it("bounds pending recovery queries", () => {
+    expect(Schema.decodeUnknownResult(OrchestratorPendingQuery)({})._tag).toBe("Success")
     expect(Schema.decodeUnknownResult(OrchestratorPendingQuery)({ limit: 256 })._tag).toBe("Success")
     expect(Schema.decodeUnknownResult(OrchestratorPendingQuery)({ limit: 257 })._tag).toBe("Failure")
+    expect(Schema.decodeUnknownResult(OrchestratorPendingQuery)({ limit: undefined })._tag).toBe("Failure")
+    expect(Schema.decodeUnknownResult(OrchestratorPendingQuery)({ after: undefined })._tag).toBe("Failure")
+  })
+
+  it("binds Work lineage to the handoff dispatch IDs", () => {
+    const link = {
+      handoff: {
+        blockers: [],
+        decision: "handoff",
+        dispatchIds: ["dispatch:parent", "dispatch:earlier"],
+        evidenceRefs: [],
+        goalId: "goal:model",
+        id: "handoff:model",
+        laneId: "lane:model",
+        occurredAt: 1,
+        owner: { id: "owner:model", name: "Coordinator" },
+        sessionId: "session:model",
+        summary: "Escalate failed work",
+        version: "herdr.work.decision.v1"
+      },
+      lineage: ["dispatch:parent"]
+    }
+    expect(Schema.decodeUnknownResult(OrchestratorWorkLink)(link)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(OrchestratorWorkLink)({ ...link, lineage: ["dispatch:unrelated"] })._tag
+    ).toBe("Failure")
   })
 })

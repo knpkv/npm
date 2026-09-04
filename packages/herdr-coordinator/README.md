@@ -24,7 +24,9 @@ the caller-supplied `idempotency_key` and the command's
 command to match, while reusing the latter under another idempotency key is a
 conflict. Its durable event stream records `accepted`,
 `queued`, `running`, `settled`, `delivery_failed`, and `task_failed`; activity
-idempotency keys are persisted with every event. `recover` returns a pull-based
+idempotency keys are persisted with every event. `events(requestId)` first
+replays persisted history, then follows the SQLite journal in sequence until it
+emits exactly one terminal event. `recover` returns a pull-based
 stream that pages running work in bounded batches, marks it `delivery_failed`,
 and never retries it implicitly.
 `pending` returns the exact typed command records for accepted and queued work
@@ -32,12 +34,36 @@ after restart; callers resume those records explicitly. The
 route-aware `submitRouted` operation durably records the executable Luna/Sol
 route. A Sol submission requires a typed Work handoff and lineage in the same
 SQLite transaction; a linked Sol escalation is accepted only when its parent
-request lookup proves a terminal Luna failure. `request` returns that complete
-validated projection for escalation decisions. The
-exported `singleRunnerLayer` composes Effect's SingleRunner with SQL-backed
-MessageStorage and a local runner identity; provide an Effect SQL client and
-Crypto implementation at the application boundary. Its SQLite layer creates a
+request lookup proves a terminal Luna failure. Every lineage request must also
+appear in the persisted handoff's dispatch IDs. `request` returns that complete
+validated projection for escalation decisions and revalidates its referenced
+Work decision. The package deliberately uses this SQLite journal/outbox seam,
+not Effect Cluster. It schedules no automatic activity retry: after restart,
+ambiguous running work becomes `delivery_failed` and the caller must reconcile
+any external side effect before resubmission. The package does not claim
+exactly-once external execution.
+
+Routed Sol work cannot enter `running` through the plain `run` transition.
+The Nix consumer calls the exported typed `workerStarted` operation with the
+dispatch request ID, Work lane, lane expected revision, and full
+`AgentWorkerIdentity`. That boundary commits the running event together with
+the Work lane compare-and-set, `agentHierarchy.agent`, canonical Connect
+target, and goal checkpoint in one SQLite transaction. Exact replay survives a
+restart; a changed worker or stale lane authority is a typed conflict, never a
+sequential repair.
+
+`PullRequestEvidenceProvider.exactHeadGateEvidence` accepts no caller-built
+evidence object. Its source performs one bounded provider observation, samples
+the head before and after that read, and must return the observed head on every
+check, thread, and review record. The provider rejects any source-sensitive item
+bound to another commit. A changed or unexpected observation head returns
+`PullRequestEvidenceStale`; unbound, missing, or duplicated required-check
+evidence returns `PullRequestEvidenceInvalid`. Review history retains distinct
+provider review IDs, including multiple submissions by one reviewer, and rejects
+duplicate IDs.
+
+`sqliteLayer` directly supplies `Orchestrator`. It creates a
 0700 state directory and keeps the database, WAL, and shared-memory files at
-0600, reapplying those modes after durable writes. The exported SQLite layer
+0600, reapplying those modes after durable writes. The SQLite layer
 currently supports POSIX paths only and fails closed on Windows until it can
 validate private directory ACLs.

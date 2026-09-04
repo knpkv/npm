@@ -13,7 +13,7 @@ export class OrchestratorValidationError extends Schema.TaggedError<Orchestrator
 
 export class OrchestratorStorageError extends Schema.TaggedError<OrchestratorStorageError>()(
   "OrchestratorStorageError",
-  { operation: Schema.String, cause: Schema.Unknown }
+  { operation: Schema.String, cause: Schema.Defect() }
 ) {}
 
 export class OrchestratorConflictError extends Schema.TaggedError<OrchestratorConflictError>()(
@@ -31,9 +31,28 @@ export class OrchestratorTransitionError extends Schema.TaggedError<Orchestrator
   { dispatchRequestId: Identifier, from: Schema.String, to: Schema.String }
 ) {}
 
+export class OrchestratorWorkerBindingConflictError
+  extends Schema.TaggedError<OrchestratorWorkerBindingConflictError>()(
+    "OrchestratorWorkerBindingConflictError",
+    { dispatchRequestId: Identifier }
+  )
+{}
+
+export class OrchestratorWorkerStartAuthorityError extends Schema.TaggedError<OrchestratorWorkerStartAuthorityError>()(
+  "OrchestratorWorkerStartAuthorityError",
+  {
+    laneId: Identifier,
+    expectedRevision: Schema.Number,
+    actualRevision: Schema.Number,
+    reason: Schema.Literals(["missing_lane", "stale_revision", "shipped_lane", "missing_goal", "terminal_goal"])
+  }
+) {}
+
 export type OrchestratorError =
   | OrchestratorValidationError
   | OrchestratorStorageError
   | OrchestratorConflictError
   | OrchestratorNotFoundError
   | OrchestratorTransitionError
+  | OrchestratorWorkerBindingConflictError
+  | OrchestratorWorkerStartAuthorityError

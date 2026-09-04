@@ -1,8 +1,20 @@
 import { NodeCrypto, NodeFileSystem, NodePath } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { makeWorkSqlBridge } from "@knpkv/herdr-work"
-import { Clock, Context, Crypto, Effect, Equal, FileSystem, Layer, Option, Path, Schema, Stream } from "effect"
-import { RunnerAddress, SingleRunner } from "effect/unstable/cluster"
+import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
+import {
+  Clock,
+  Context,
+  Crypto,
+  Effect,
+  Equal,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  Schedule,
+  Schema,
+  Stream
+} from "effect"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import {
@@ -11,13 +23,19 @@ import {
   OrchestratorNotFoundError,
   OrchestratorStorageError,
   OrchestratorTransitionError,
-  OrchestratorValidationError
+  OrchestratorValidationError,
+  OrchestratorWorkerBindingConflictError,
+  OrchestratorWorkerStartAuthorityError
 } from "./orchestrator-errors.js"
 import {
   ActivityIdempotencyKey,
   DispatchRequestId,
   OrchestratorCommand,
   type OrchestratorCommand as OrchestratorCommandType,
+  OrchestratorDispatchActivated,
+  type OrchestratorDispatchActivated as OrchestratorDispatchActivatedType,
+  OrchestratorDispatchActivation,
+  type OrchestratorDispatchActivation as OrchestratorDispatchActivationType,
   OrchestratorEvent,
   type OrchestratorEvent as OrchestratorEventType,
   OrchestratorEventDetail,
@@ -44,6 +62,7 @@ const Row = Schema.Struct({
   idempotencyKey: Schema.String,
   command: Schema.String,
   acceptedAt: Schema.Number,
+  isRouted: Schema.Literals([0, 1]),
   status: Schema.String,
   route: Schema.NullOr(Schema.String),
   workLink: Schema.NullOr(Schema.String)
@@ -64,6 +83,7 @@ const LifecycleRow = Schema.Struct({
   idempotencyKey: Schema.String,
   command: Schema.String,
   acceptedAt: Schema.Number,
+  isRouted: Schema.Literals([0, 1]),
   status: Schema.String,
   sequence: Schema.NullOr(Schema.Number),
   type: Schema.NullOr(Schema.String),
@@ -79,6 +99,7 @@ const RecoveryRow = Schema.Struct({
   dispatchRequestId: DispatchRequestId,
   acceptedAt: Schema.Number
 })
+const SqliteColumnRow = Schema.Struct({ name: Schema.String })
 type RecoveryRow = typeof RecoveryRow.Type
 const recoveryPageSize = 256
 
@@ -90,8 +111,19 @@ const verifyPathIdentity = (
   paths: Path.Path,
   operation: string
 ): Effect.Effect<void, OrchestratorStorageError> =>
-  fileSystem.exists(path).pipe(
-    Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.exists` })),
+  fileSystem.readLink(path).pipe(
+    Effect.matchEffect({
+      onFailure: (cause) =>
+        cause.reason._tag === "NotFound" || cause.reason._tag === "Unknown"
+          ? Effect.void
+          : Effect.fail(new OrchestratorStorageError({ cause, operation: `${operation}.readlink` })),
+      onSuccess: (target) => Effect.fail(new OrchestratorStorageError({ cause: { path, target }, operation }))
+    }),
+    Effect.andThen(
+      fileSystem.exists(path).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.exists` }))
+      )
+    ),
     Effect.flatMap((exists) => {
       if (!exists) {
         const parent = paths.dirname(path)
@@ -207,6 +239,9 @@ const validTransition = (from: CurrentStatus, to: TransitionTarget): boolean =>
 const validEventTransition = (from: CurrentStatus, to: CurrentStatus): boolean =>
   to !== "accepted" && validTransition(from, to)
 
+const isTerminalEvent = (event: OrchestratorEventType): boolean =>
+  event.type === "settled" || event.type === "delivery_failed" || event.type === "task_failed"
+
 export interface OrchestratorService {
   readonly submit: (
     command: OrchestratorCommandType,
@@ -228,6 +263,10 @@ export interface OrchestratorService {
     query?: typeof OrchestratorPendingQuery.Type
   ) => Effect.Effect<ReadonlyArray<typeof OrchestratorPendingDispatch.Type>, OrchestratorError>
   readonly queue: (dispatchRequestId: string) => Effect.Effect<OrchestratorEventType, OrchestratorError>
+  /** Atomically records the running event and exact worker identity in Work. */
+  readonly workerStarted: (
+    activation: OrchestratorDispatchActivationType
+  ) => Effect.Effect<OrchestratorDispatchActivatedType, OrchestratorError>
   readonly run: (dispatchRequestId: string) => Effect.Effect<OrchestratorEventType, OrchestratorError>
   readonly settle: (
     dispatchRequestId: string,
@@ -291,7 +330,7 @@ const makeOrchestrator: Effect.Effect<
 > = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   const cryptoService = yield* Crypto.Crypto
-  const workSql = makeWorkSqlBridge(sql)
+  const workSql = makeSqliteWorkBridge(sql)
   const fileSecurity = yield* Effect.serviceOption(SqliteFileSecurity)
   const secureFiles = Option.match(fileSecurity, {
     onNone: () => Effect.void,
@@ -306,6 +345,7 @@ const makeOrchestrator: Effect.Effect<
       activity_idempotency_key TEXT NOT NULL UNIQUE,
       command TEXT NOT NULL,
       accepted_at INTEGER NOT NULL,
+      is_routed INTEGER NOT NULL DEFAULT 0 CHECK (is_routed IN (0, 1)),
       status TEXT NOT NULL
     )
   `.pipe(Effect.mapError(storageError("initialize.dispatches")))
@@ -330,6 +370,27 @@ const makeOrchestrator: Effect.Effect<
       FOREIGN KEY (dispatch_request_id) REFERENCES orchestrator_dispatches(dispatch_request_id)
     )
   `.pipe(Effect.mapError(storageError("initialize.dispatch-metadata")))
+  yield* sql.withTransaction(
+    Effect.gen(function*() {
+      const columns = yield* sql`PRAGMA table_info(orchestrator_dispatches)`.pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SqliteColumnRow))),
+        Effect.mapError(storageError("initialize.dispatch-columns"))
+      )
+      if (columns.some(({ name }) => name === "is_routed")) return
+      yield* sql`
+        ALTER TABLE orchestrator_dispatches
+        ADD COLUMN is_routed INTEGER NOT NULL DEFAULT 0 CHECK (is_routed IN (0, 1))
+      `.pipe(Effect.mapError(storageError("initialize.add-routed-discriminator")))
+      yield* sql`
+        UPDATE orchestrator_dispatches
+        SET is_routed = 1
+        WHERE EXISTS (
+          SELECT 1 FROM orchestrator_dispatch_metadata metadata
+          WHERE metadata.dispatch_request_id = orchestrator_dispatches.dispatch_request_id
+        )
+      `.pipe(Effect.mapError(storageError("initialize.backfill-routed-discriminator")))
+    })
+  ).pipe(Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("initialize.route-migration")(cause))))
   yield* workSql.initialize.pipe(Effect.mapError(storageError("initialize.work")))
   yield* sql`
     CREATE INDEX IF NOT EXISTS orchestrator_pending_dispatches_order
@@ -415,7 +476,7 @@ const makeOrchestrator: Effect.Effect<
     const rows = yield* sql`
       SELECT d.dispatch_request_id AS "dispatchRequestId", d.idempotency_key AS "idempotencyKey",
         d.activity_idempotency_key AS "activityIdempotencyKey", d.command,
-        d.accepted_at AS "acceptedAt", d.status,
+        d.accepted_at AS "acceptedAt", d.is_routed AS "isRouted", d.status,
         m.route, m.work_link AS "workLink",
         e.sequence, e.type, e.activity_idempotency_key AS "eventActivityIdempotencyKey",
         e.occurred_at AS "occurredAt", e.detail, e.result
@@ -438,12 +499,19 @@ const makeOrchestrator: Effect.Effect<
       Effect.mapError(() => new OrchestratorStorageError({ cause: first.status, operation: "decode.dispatch.status" }))
     )
     const metadata = yield* decodeMetadata(first.route, first.workLink)
+    if ((first.isRouted === 1) !== (metadata.route !== null)) {
+      return yield* new OrchestratorStorageError({
+        cause: { isRouted: first.isRouted, route: metadata.route },
+        operation: "decode.metadata-presence-mismatch"
+      })
+    }
     const dispatch: DispatchRow = {
       activityIdempotencyKey: first.activityIdempotencyKey,
       acceptedAt: first.acceptedAt,
       command: first.command,
       dispatchRequestId: first.dispatchRequestId,
       idempotencyKey: first.idempotencyKey,
+      isRouted: first.isRouted,
       status,
       route: metadata.route,
       workLink: metadata.workLink
@@ -483,17 +551,47 @@ const makeOrchestrator: Effect.Effect<
     return { dispatch, events }
   })
 
-  const listPending = Effect.fn("Orchestrator.listPending")(
+  const validateLinkedParent = Effect.fn("Orchestrator.validateLinkedParent")(function*(
+    route: OrchestratorRouteType | null
+  ) {
+    if (route?.model !== "gpt-5.6-sol" || route.linkedRequestId === null) return
+    const parent = yield* loadValidatedEvents(route.linkedRequestId)
+    if (
+      parent.dispatch.route?.model !== "gpt-5.6-luna" ||
+      (parent.dispatch.status !== "delivery_failed" && parent.dispatch.status !== "task_failed")
+    ) {
+      return yield* new OrchestratorValidationError({
+        detail: "linked Sol escalation must reference a failed Luna request"
+      })
+    }
+  })
+
+  const validateDurableReadback = Effect.fn("Orchestrator.validateDurableReadback")(function*(
+    dispatch: DispatchRow,
+    operation: string
+  ) {
+    yield* validateLinkedParent(dispatch.route)
+    if (dispatch.route?.model !== "gpt-5.6-sol" || dispatch.workLink === null) return
+    yield* workSql.requireDispatchHandoff({
+      dispatchRequestId: dispatch.dispatchRequestId,
+      handoff: dispatch.workLink.handoff,
+      lineage: dispatch.workLink.lineage
+    }).pipe(Effect.mapError(storageError(operation)))
+  })
+
+  const listPending = Effect.fn("Orchestrator.pending")(
     function*(query: typeof OrchestratorPendingQuery.Type = {}) {
       const decodedQuery = yield* Schema.decodeUnknownEffect(OrchestratorPendingQuery)(query).pipe(
         Effect.mapError(() => new OrchestratorValidationError({ detail: "pending query is invalid" }))
       )
-      const limit = decodedQuery.limit ?? 256
-      const rows = decodedQuery.after === undefined
-        ? yield* sql`
+      return yield* sql.withTransaction(
+        Effect.gen(function*() {
+          const limit = decodedQuery.limit ?? 256
+          const rows = decodedQuery.after === undefined
+            ? yield* sql`
       SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
         activity_idempotency_key AS "activityIdempotencyKey", command,
-        accepted_at AS "acceptedAt", status,
+        accepted_at AS "acceptedAt", is_routed AS "isRouted", status,
         m.route, m.work_link AS "workLink"
       FROM orchestrator_dispatches
       LEFT JOIN orchestrator_dispatch_metadata m USING (dispatch_request_id)
@@ -501,10 +599,10 @@ const makeOrchestrator: Effect.Effect<
       ORDER BY accepted_at ASC, dispatch_request_id ASC
       LIMIT ${limit}
     `.pipe(Effect.mapError(storageError("pending.list")))
-        : yield* sql`
+            : yield* sql`
       SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
         activity_idempotency_key AS "activityIdempotencyKey", command,
-        accepted_at AS "acceptedAt", status,
+        accepted_at AS "acceptedAt", is_routed AS "isRouted", status,
         m.route, m.work_link AS "workLink"
       FROM orchestrator_dispatches
       LEFT JOIN orchestrator_dispatch_metadata m USING (dispatch_request_id)
@@ -515,36 +613,46 @@ const makeOrchestrator: Effect.Effect<
       ORDER BY accepted_at ASC, dispatch_request_id ASC
       LIMIT ${limit}
     `.pipe(Effect.mapError(storageError("pending.list")))
-      const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
-        Effect.mapError(storageError("pending.decode-row"))
-      )
-      const pending = yield* Effect.forEach(decodedRows, (row) =>
-        Effect.gen(function*() {
-          const snapshot = yield* loadValidatedEvents(row.dispatchRequestId)
-          if (snapshot.dispatch.status !== "accepted" && snapshot.dispatch.status !== "queued") return Option.none()
-          const command = yield* decodeCommand(snapshot.dispatch.command)
-          const pendingInput = {
-            acceptedAt: snapshot.dispatch.acceptedAt,
-            activityIdempotencyKey: snapshot.dispatch.activityIdempotencyKey,
-            command,
-            dispatchRequestId: snapshot.dispatch.dispatchRequestId,
-            idempotencyKey: snapshot.dispatch.idempotencyKey,
-            status: snapshot.dispatch.status
-          }
-          const pendingDispatch = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)(
-            snapshot.dispatch.route === null
-              ? pendingInput
-              : { ...pendingInput, route: snapshot.dispatch.route, workLink: snapshot.dispatch.workLink }
-          ).pipe(
-            Effect.mapError(storageError("pending.decode"))
+          const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
+            Effect.mapError(storageError("pending.decode-row"))
           )
-          return Option.some(pendingDispatch)
-        }))
-      return pending.flatMap((value) =>
-        Option.match(value, {
-          onNone: () => [],
-          onSome: (pendingDispatch) => [pendingDispatch]
+          const pending = yield* Effect.forEach(decodedRows, (row) =>
+            Effect.gen(function*() {
+              const snapshot = yield* loadValidatedEvents(row.dispatchRequestId)
+              if (snapshot.dispatch.status !== "accepted" && snapshot.dispatch.status !== "queued") {
+                return Option.none()
+              }
+              yield* validateDurableReadback(snapshot.dispatch, "pending.work-link")
+              const command = yield* decodeCommand(snapshot.dispatch.command)
+              const pendingInput = {
+                acceptedAt: snapshot.dispatch.acceptedAt,
+                activityIdempotencyKey: snapshot.dispatch.activityIdempotencyKey,
+                command,
+                dispatchRequestId: snapshot.dispatch.dispatchRequestId,
+                idempotencyKey: snapshot.dispatch.idempotencyKey,
+                status: snapshot.dispatch.status
+              }
+              const pendingDispatch = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)(
+                snapshot.dispatch.route === null
+                  ? pendingInput
+                  : { ...pendingInput, route: snapshot.dispatch.route, workLink: snapshot.dispatch.workLink }
+              ).pipe(
+                Effect.mapError(storageError("pending.decode"))
+              )
+              return Option.some(pendingDispatch)
+            }))
+          return pending.flatMap((value) =>
+            Option.match(value, {
+              onNone: () => [],
+              onSome: (pendingDispatch) => [pendingDispatch]
+            })
+          )
         })
+      ).pipe(
+        Effect.catchTag(
+          "SqlError",
+          (cause) => Effect.fail(new OrchestratorStorageError({ cause, operation: "pending.transaction" }))
+        )
       )
     }
   )
@@ -579,6 +687,11 @@ const makeOrchestrator: Effect.Effect<
               : Effect.fail(error))
         )
         const dispatch = snapshot.dispatch
+        if (decodedTarget === "running" && dispatch.route?.model === "gpt-5.6-sol") {
+          return yield* new OrchestratorValidationError({
+            detail: "routed Sol dispatches require workerStarted with Work lane authority"
+          })
+        }
         if (!validTransition(dispatch.status, decodedTarget)) {
           return yield* new OrchestratorTransitionError({
             dispatchRequestId: decodedDispatchRequestId,
@@ -661,6 +774,133 @@ const makeOrchestrator: Effect.Effect<
     return event
   })
 
+  const workerStarted: OrchestratorService["workerStarted"] = Effect.fn(
+    "Orchestrator.workerStarted"
+  )(function*(activation) {
+    const decoded = yield* Schema.decodeUnknownEffect(OrchestratorDispatchActivation)(activation).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "worker-start activation is invalid" }))
+    )
+    yield* secureFiles
+    return yield* sql.withTransaction(
+      Effect.gen(function*() {
+        const snapshot = yield* loadValidatedEvents(decoded.dispatchRequestId)
+        const dispatch = snapshot.dispatch
+        if (
+          dispatch.route?.model !== "gpt-5.6-sol" ||
+          dispatch.workLink === null ||
+          dispatch.workLink.handoff.laneId !== decoded.laneId
+        ) {
+          return yield* new OrchestratorValidationError({
+            detail: "worker start must match the routed dispatch Work lane"
+          })
+        }
+        yield* validateDurableReadback(dispatch, "worker-start.work-link")
+        if (dispatch.status !== "queued") {
+          if (
+            dispatch.status !== "running" &&
+            dispatch.status !== "settled" &&
+            dispatch.status !== "delivery_failed" &&
+            dispatch.status !== "task_failed"
+          ) {
+            return yield* new OrchestratorTransitionError({
+              dispatchRequestId: decoded.dispatchRequestId,
+              from: dispatch.status,
+              to: "running"
+            })
+          }
+          const binding = yield* workSql.requireAgentBinding(decoded).pipe(
+            Effect.mapError((error): OrchestratorError =>
+              error._tag === "WorkAgentBindingConflictError"
+                ? new OrchestratorWorkerBindingConflictError({ dispatchRequestId: decoded.dispatchRequestId })
+                : storageError("worker-start.work-binding")(error)
+            )
+          )
+          const event = snapshot.events.find(({ type }) => type === "running")
+          if (event === undefined || event.occurredAt !== binding.checkpoint.occurredAt) {
+            return yield* new OrchestratorStorageError({
+              cause: { binding, events: snapshot.events },
+              operation: "worker-start.replay-boundary-mismatch"
+            })
+          }
+          return yield* Schema.decodeUnknownEffect(OrchestratorDispatchActivated)({ binding, event }).pipe(
+            Effect.mapError(storageError("worker-start.decode-replay"))
+          )
+        }
+        const last = snapshot.events.at(-1)
+        if (last === undefined) {
+          return yield* new OrchestratorStorageError({
+            cause: decoded.dispatchRequestId,
+            operation: "worker-start.missing-event"
+          })
+        }
+        const timestamp = yield* now
+        if (timestamp < last.occurredAt) {
+          return yield* new OrchestratorStorageError({
+            cause: { dispatchRequestId: decoded.dispatchRequestId, previous: last.occurredAt, timestamp },
+            operation: "worker-start.timestamp-regression"
+          })
+        }
+        const bindingDecision = yield* workSql.acceptAgentBinding(decoded, timestamp).pipe(
+          Effect.mapError((error): OrchestratorError => {
+            if (error._tag === "WorkAgentBindingConflictError") {
+              return new OrchestratorWorkerBindingConflictError({ dispatchRequestId: decoded.dispatchRequestId })
+            }
+            if (error._tag === "WorkAgentBindingAuthorityError") {
+              return new OrchestratorWorkerStartAuthorityError({
+                actualRevision: error.actualRevision,
+                expectedRevision: error.expectedRevision,
+                laneId: error.laneId,
+                reason: error.reason
+              })
+            }
+            return storageError("worker-start.work-binding")(error)
+          })
+        )
+        if (bindingDecision._tag === "replayed") {
+          return yield* new OrchestratorStorageError({
+            cause: bindingDecision.binding,
+            operation: "worker-start.partial-binding"
+          })
+        }
+        const binding = bindingDecision.binding
+        const event = yield* Schema.decodeUnknownEffect(OrchestratorEvent)({
+          activityIdempotencyKey: last.activityIdempotencyKey,
+          dispatchRequestId: decoded.dispatchRequestId,
+          occurredAt: binding.checkpoint.occurredAt,
+          sequence: last.sequence + 1,
+          type: "running",
+          detail: null,
+          result: null
+        }).pipe(
+          Effect.mapError(() => new OrchestratorValidationError({ detail: "worker-start event exceeds bounds" }))
+        )
+        yield* sql`
+          INSERT INTO orchestrator_events
+            (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+          VALUES (${event.dispatchRequestId}, ${event.sequence}, ${event.type},
+            ${event.activityIdempotencyKey}, ${event.occurredAt}, NULL, NULL)
+        `.pipe(Effect.mapError(storageError("worker-start.insert-event")))
+        const updated = yield* sql`
+          UPDATE orchestrator_dispatches SET status = 'running'
+          WHERE dispatch_request_id = ${decoded.dispatchRequestId} AND status = 'queued'
+          RETURNING dispatch_request_id
+        `.pipe(Effect.mapError(storageError("worker-start.update-dispatch")))
+        if (updated.length !== 1) {
+          return yield* new OrchestratorTransitionError({
+            dispatchRequestId: decoded.dispatchRequestId,
+            from: dispatch.status,
+            to: "running"
+          })
+        }
+        return yield* Schema.decodeUnknownEffect(OrchestratorDispatchActivated)({ binding, event }).pipe(
+          Effect.mapError(storageError("worker-start.decode"))
+        )
+      })
+    ).pipe(
+      Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("worker-start.transaction")(cause)))
+    )
+  })
+
   const submitInternal = Effect.fn("Orchestrator.submitInternal")(function*(
     decodedCommand: OrchestratorCommandType,
     decodedKey: OrchestratorIdempotencyKeyType,
@@ -673,33 +913,39 @@ const makeOrchestrator: Effect.Effect<
     yield* secureFiles
     return yield* sql.withTransaction(
       Effect.gen(function*() {
-        const dispatchRequestId = yield* cryptoService.randomUUIDv4.pipe(
-          Effect.mapError(storageError("submit.request-id")),
-          Effect.flatMap((value) =>
-            Schema.decodeUnknownEffect(DispatchRequestId)(value).pipe(
-              Effect.mapError(() =>
-                new OrchestratorStorageError({ cause: value, operation: "submit.request-id-schema" })
+        const replayIds = yield* sql`
+          SELECT dispatch_request_id AS "dispatchRequestId"
+          FROM orchestrator_dispatches
+          WHERE idempotency_key = ${decodedKey}
+            OR activity_idempotency_key = ${decodedCommand.activityIdempotencyKey}
+          ORDER BY dispatch_request_id ASC
+          LIMIT 1
+        `.pipe(
+          Effect.mapError(storageError("submit.preload-replay")),
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({
+            dispatchRequestId: DispatchRequestId
+          })))),
+          Effect.mapError(storageError("submit.decode-preloaded-replay"))
+        )
+        const replayId = replayIds[0]?.dispatchRequestId
+        const dispatchRequestId = replayId ??
+          (yield* cryptoService.randomUUIDv4.pipe(
+            Effect.mapError(storageError("submit.request-id")),
+            Effect.flatMap((value) =>
+              Schema.decodeUnknownEffect(DispatchRequestId)(value).pipe(
+                Effect.mapError(() =>
+                  new OrchestratorStorageError({ cause: value, operation: "submit.request-id-schema" })
+                )
               )
             )
-          )
-        )
-        if (route?.model === "gpt-5.6-sol" && route.linkedRequestId !== null) {
-          const parent = yield* loadValidatedEvents(route.linkedRequestId)
-          if (
-            parent.dispatch.route?.model !== "gpt-5.6-luna" ||
-            (parent.dispatch.status !== "delivery_failed" && parent.dispatch.status !== "task_failed")
-          ) {
-            return yield* new OrchestratorValidationError({
-              detail: "linked Sol escalation must reference a failed Luna request"
-            })
-          }
-        }
+          ))
+        yield* validateLinkedParent(route)
         const acceptedAt = yield* now
         const insertedRows = yield* sql`
           INSERT INTO orchestrator_dispatches
-            (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+            (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, is_routed, status)
           VALUES (${dispatchRequestId}, ${decodedKey}, ${decodedCommand.activityIdempotencyKey},
-            ${encodedCommand}, ${acceptedAt}, 'accepted')
+            ${encodedCommand}, ${acceptedAt}, ${route === null ? 0 : 1}, 'accepted')
           ON CONFLICT DO NOTHING
           RETURNING dispatch_request_id
         `.pipe(Effect.mapError(storageError("submit.insert-or-reload")))
@@ -708,7 +954,7 @@ const makeOrchestrator: Effect.Effect<
           const persistedRows = yield* sql`
             SELECT d.dispatch_request_id AS "dispatchRequestId", d.idempotency_key AS "idempotencyKey",
               d.activity_idempotency_key AS "activityIdempotencyKey", d.command,
-              d.accepted_at AS "acceptedAt", d.status,
+              d.accepted_at AS "acceptedAt", d.is_routed AS "isRouted", d.status,
               m.route, m.work_link AS "workLink"
             FROM orchestrator_dispatches d
             LEFT JOIN orchestrator_dispatch_metadata m USING (dispatch_request_id)
@@ -852,17 +1098,38 @@ const makeOrchestrator: Effect.Effect<
 
   const service: OrchestratorService = {
     events: (dispatchRequestId) =>
-      Stream.fromIterableEffect(
+      Stream.unwrap(
         Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
           Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" })),
-          Effect.flatMap(loadValidatedEvents),
-          Effect.map(({ events }) => events)
+          Effect.map((decodedDispatchRequestId) =>
+            Stream.succeed(undefined).pipe(
+              Stream.concat(
+                Stream.fromSchedule(Schedule.spaced("100 millis")).pipe(Stream.map(() => undefined))
+              ),
+              Stream.mapEffect(() => loadValidatedEvents(decodedDispatchRequestId)),
+              Stream.mapAccum(
+                () => -1,
+                (lastSequence, snapshot): readonly [number, ReadonlyArray<OrchestratorEventType>] => {
+                  const unseen = snapshot.events.filter(({ sequence }) => sequence > lastSequence)
+                  const last = unseen.at(-1)
+                  return [last?.sequence ?? lastSequence, unseen]
+                }
+              ),
+              Stream.takeUntil(isTerminalEvent)
+            )
+          )
         )
       ),
-    failDelivery: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "delivery_failed", detail, null),
-    failTask: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "task_failed", detail, null),
+    failDelivery: Effect.fn("Orchestrator.failDelivery")((dispatchRequestId, detail) =>
+      appendTransition(dispatchRequestId, "delivery_failed", detail, null)
+    ),
+    failTask: Effect.fn("Orchestrator.failTask")((dispatchRequestId, detail) =>
+      appendTransition(dispatchRequestId, "task_failed", detail, null)
+    ),
     pending: listPending,
-    queue: (dispatchRequestId) => appendTransition(dispatchRequestId, "queued", null, null),
+    queue: Effect.fn("Orchestrator.queue")((dispatchRequestId) =>
+      appendTransition(dispatchRequestId, "queued", null, null)
+    ),
     recover: () =>
       Stream.paginate<void, OrchestratorEventType, OrchestratorError>(
         undefined,
@@ -902,16 +1169,22 @@ const makeOrchestrator: Effect.Effect<
           return page
         })
       ),
-    run: (dispatchRequestId) => appendTransition(dispatchRequestId, "running", null, null),
-    settle: (dispatchRequestId, result) => appendTransition(dispatchRequestId, "settled", null, result),
+    run: Effect.fn("Orchestrator.run")((dispatchRequestId) =>
+      appendTransition(dispatchRequestId, "running", null, null)
+    ),
+    settle: Effect.fn("Orchestrator.settle")((dispatchRequestId, result) =>
+      appendTransition(dispatchRequestId, "settled", null, result)
+    ),
     submit,
     submitRouted,
-    request: (dispatchRequestId) =>
+    workerStarted,
+    request: Effect.fn("Orchestrator.request")((dispatchRequestId) =>
       Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
         Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" })),
         Effect.flatMap(loadValidatedEvents),
         Effect.flatMap((snapshot) =>
           Effect.gen(function*() {
+            yield* validateDurableReadback(snapshot.dispatch, "request.work-link")
             const command = yield* decodeCommand(snapshot.dispatch.command)
             return yield* Schema.decodeUnknownEffect(OrchestratorRequest)({
               ...snapshot.dispatch,
@@ -920,70 +1193,61 @@ const makeOrchestrator: Effect.Effect<
           })
         )
       )
+    )
   }
   return service
 })
 
-/** Durable dispatch/event service. Requires a SQL client and Effect Crypto. */
-export const layer: Layer.Layer<Orchestrator, OrchestratorError, SqlClientService | Crypto.Crypto> = Layer.effect(
+const orchestratorLayer: Layer.Layer<Orchestrator, OrchestratorError, SqlClientService | Crypto.Crypto> = Layer.effect(
   Orchestrator,
   makeOrchestrator
 )
-
-/** Single-process cluster runner with SQL-backed MessageStorage and runner state. */
-export const singleRunnerLayer = SingleRunner.layer({
-  runnerStorage: "sql",
-  shardingConfig: {
-    runnerAddress: Option.some(RunnerAddress.make("localhost", 34_431)),
-    runnerListenAddress: Option.none()
-  }
-})
 
 /**
  * Node SQLite and Crypto services used by the durable coordinator layers.
  * Fails closed on non-POSIX paths until an ACL-backed private-directory check exists.
  */
-export const sqliteLayer = (filename: string) =>
-  Layer.unwrap(
-    Effect.gen(function*() {
-      const fileSystem = yield* FileSystem.FileSystem
-      const paths = yield* Path.Path
-      const directory = paths.dirname(filename)
-      const directoryExists = yield* fileSystem.exists(directory).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.exists" }))
-      )
-      if (!directoryExists) {
-        yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
+export const sqliteLayer = (filename: string): Layer.Layer<Orchestrator, OrchestratorError> =>
+  orchestratorLayer.pipe(Layer.provide(
+    Layer.unwrap(
+      Effect.gen(function*() {
+        const fileSystem = yield* FileSystem.FileSystem
+        const paths = yield* Path.Path
+        const directory = paths.dirname(filename)
+        const directoryExists = yield* fileSystem.exists(directory).pipe(
           Effect.mapError((cause) =>
-            new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.create" })
+            new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.exists" })
           )
         )
-      }
-      const directoryInfo = yield* fileSystem.stat(directory).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.stat" }))
-      )
-      const privateMode = paths.sep === "/" && (directoryInfo.mode & 0o777) === 0o700
-      if (directoryInfo.type !== "Directory" || !privateMode) {
-        return yield* new OrchestratorStorageError({
-          cause: { directory, mode: directoryInfo.mode, type: directoryInfo.type },
-          operation: "sqlite.secure.directory.private"
-        })
-      }
-      yield* verifyPathIdentity(directory, fileSystem, paths, "sqlite.secure.directory.path-identity")
-      yield* Effect.forEach(
-        [filename, `${filename}-wal`, `${filename}-shm`],
-        (path) => verifyPathIdentity(path, fileSystem, paths, "sqlite.secure.path-identity"),
-        { discard: true }
-      )
-      const security = secureSqliteFiles(filename, fileSystem, paths)
-      return Layer.mergeAll(
-        SqliteClient.layer({ filename }),
-        NodeCrypto.layer,
-        Layer.succeed(SqliteFileSecurity, { secure: security })
-      ).pipe(Layer.tap(() => security))
-    })
-  ).pipe(Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)))
-
-export const make = Effect.fn("Orchestrator.make")(function*() {
-  return yield* makeOrchestrator
-})
+        if (!directoryExists) {
+          yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
+            Effect.mapError((cause) =>
+              new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.create" })
+            )
+          )
+        }
+        const directoryInfo = yield* fileSystem.stat(directory).pipe(
+          Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.directory.stat" }))
+        )
+        const privateMode = paths.sep === "/" && (directoryInfo.mode & 0o777) === 0o700
+        if (directoryInfo.type !== "Directory" || !privateMode) {
+          return yield* new OrchestratorStorageError({
+            cause: { directory, mode: directoryInfo.mode, type: directoryInfo.type },
+            operation: "sqlite.secure.directory.private"
+          })
+        }
+        yield* verifyPathIdentity(directory, fileSystem, paths, "sqlite.secure.directory.path-identity")
+        yield* Effect.forEach(
+          [filename, `${filename}-wal`, `${filename}-shm`],
+          (path) => verifyPathIdentity(path, fileSystem, paths, "sqlite.secure.path-identity"),
+          { discard: true }
+        )
+        const security = secureSqliteFiles(filename, fileSystem, paths)
+        return Layer.mergeAll(
+          SqliteClient.layer({ filename }),
+          NodeCrypto.layer,
+          Layer.succeed(SqliteFileSecurity, { secure: security })
+        ).pipe(Layer.tap(() => security))
+      })
+    ).pipe(Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)))
+  ))

@@ -1,28 +1,33 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { WorkStore } from "@knpkv/herdr-work"
-import { Effect, Layer, Option, Schema, Stream } from "effect"
+import { AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
+import { makeWorkService, WorkGoalCheckpoint, WorkStore } from "@knpkv/herdr-work"
+import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
-import { ClusterSchema, Entity, MessageStorage, RunnerAddress, SingleRunner } from "effect/unstable/cluster"
-import { Rpc } from "effect/unstable/rpc"
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import { spawn } from "node:child_process"
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { execPath } from "node:process"
 import { DatabaseSync } from "node:sqlite"
 import {
-  layer as orchestratorLayer,
   Orchestrator,
   type OrchestratorCommand,
+  OrchestratorDispatchActivation,
   OrchestratorPendingDispatch,
   OrchestratorRequest,
   type OrchestratorRoutedSubmission,
   type OrchestratorWorkLink,
-  singleRunnerLayer,
   sqliteLayer
 } from "../src/index.js"
 
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
+
+class LegacyWriterError extends Schema.TaggedError<LegacyWriterError>()(
+  "LegacyWriterError",
+  { cause: Schema.String }
+) {}
 
 const command: OrchestratorCommand = {
   actor: "coordinator",
@@ -30,6 +35,13 @@ const command: OrchestratorCommand = {
   kind: "fleet.job",
   payload: { kind: "nix.check" }
 }
+
+const startedWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
+  agentId: "agent-package-worker",
+  host: "SER8",
+  name: "Package worker",
+  paneId: "wE:p3"
+})
 
 const lunaRoute = {
   action: "dispatch",
@@ -42,12 +54,16 @@ const lunaRoute = {
 
 const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => ({
   handoff: {
+    blockers: [{ id: "luna-failed", detail: "The linked Luna request failed" }],
     decision: "handoff",
+    dispatchIds: lineage,
+    evidenceRefs: [{ id: "linked-request", kind: "review", reference: "linked Luna terminal event" }],
     goalId: "goal:escalation",
     id: "handoff:escalation",
     laneId: "lane:escalation",
     occurredAt: 0,
     owner: { id: "agent:coordinator", name: "Coordinator" },
+    sessionId: "session:escalation",
     summary: "Escalate the failed Luna request to Sol",
     version: "herdr.work.decision.v1"
   },
@@ -71,13 +87,56 @@ const makeSolSubmission = (
   workLink: makeWorkLink(parentDispatchRequestId === null ? [] : [parentDispatchRequestId])
 })
 
+const recordWorkAuthority = (path: string, workLink: OrchestratorWorkLink) =>
+  Effect.scoped(
+    Effect.gen(function*() {
+      const store = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      yield* service.record({
+        eventId: `created:${workLink.handoff.goalId}`,
+        goal: {
+          blocker: null,
+          connectTarget: null,
+          createdAt: 0,
+          delivery: "local",
+          detail: "Durable coordinator Work goal",
+          id: workLink.handoff.goalId,
+          owner: workLink.handoff.owner,
+          repository: { branch: "feat/herdr-npm-packages", repository: "npm" },
+          spend: null,
+          state: "working",
+          summary: "Exercise routed worker activation",
+          title: "Coordinator activation",
+          updatedAt: 0
+        },
+        occurredAt: 0,
+        version: "herdr.work.event.v1"
+      })
+      const claim = yield* service.claim({
+        branch: "feat/herdr-npm-packages",
+        expectedRevision: 0,
+        goalId: workLink.handoff.goalId,
+        head: "0123456789012345678901234567890123456789",
+        laneId: workLink.handoff.laneId,
+        operationId: `operation:${workLink.handoff.laneId}`,
+        owner: workLink.handoff.owner,
+        parent: null,
+        phase: "implementation",
+        worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat/herdr-npm-packages"
+      })
+      yield* TestClock.setTime(1)
+      return claim
+    }).pipe(provideNodeServices)
+  )
+
 const withDatabase = <A, E, R>(
   path: string,
   effect: Effect.Effect<A, E, R>
 ) =>
   effect.pipe(
     // @effect-diagnostics-next-line strictEffectProvide:off
-    Effect.provide(Layer.provide(orchestratorLayer, sqliteLayer(path))),
+    Effect.provide(sqliteLayer(path)),
     Effect.scoped
   )
 
@@ -93,31 +152,692 @@ const withTemporaryRoot = <A, E, R>(
     })
   )
 
-const DurableEntity = Entity.make("HerdrDurableTestEntity", [
-  Rpc.make("Echo", {
-    payload: { value: Schema.String },
-    success: Schema.String
-  }).annotate(ClusterSchema.Persisted, true)
-])
-
-const DurableEntityLayer = DurableEntity.toLayer({
-  Echo: ({ payload }) => Effect.succeed(payload.value)
-})
-
-const testSingleRunnerLayer = SingleRunner.layer({
-  runnerStorage: "sql",
-  shardingConfig: {
-    entityMessagePollInterval: 0,
-    entityReplyPollInterval: 0,
-    refreshAssignmentsInterval: 0,
-    runnerAddress: Option.some(RunnerAddress.make("localhost", 34_431)),
-    runnerListenAddress: Option.none(),
-    shardLockExpiration: 1_000,
-    shardLockRefreshInterval: 100
-  }
-})
-
 describe("durable coordinator orchestrator", () => {
+  it("exports the Nix-consumer worker-start activation contract", () => {
+    expect(
+      Schema.decodeUnknownResult(OrchestratorDispatchActivation)({
+        dispatchRequestId: "dispatch:worker-start",
+        expectedRevision: 1,
+        laneId: "lane:escalation",
+        version: "herdr.work.agent-binding-request.v1",
+        worker: startedWorker
+      })._tag
+    ).toBe("Success")
+  })
+
+  it.effect("atomically activates a dispatch and its Work agent binding, including restart replay", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const activation = Schema.decodeUnknownSync(OrchestratorDispatchActivation)({
+          dispatchRequestId: "placeholder",
+          expectedRevision: lane.revision,
+          laneId: lane.laneId,
+          version: "herdr.work.agent-binding-request.v1",
+          worker: startedWorker
+        })
+        const first = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            expect(yield* Effect.result(orchestrator.run(receipt.dispatchRequestId))).toMatchObject({
+              failure: { _tag: "OrchestratorValidationError" }
+            })
+            return yield* orchestrator.workerStarted({
+              ...activation,
+              dispatchRequestId: receipt.dispatchRequestId
+            })
+          })
+        )
+        expect(first).toMatchObject({
+          binding: {
+            checkpoint: {
+              goal: {
+                agentHierarchy: { agent: startedWorker },
+                connectTarget: { agentId: startedWorker.agentId, host: startedWorker.host }
+              }
+            },
+            lane: { expectedRevision: lane.revision, revision: lane.revision + 1 }
+          },
+          event: { type: "running" }
+        })
+        expect(first.event.occurredAt).toBe(first.binding.checkpoint.occurredAt)
+
+        const replay = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.workerStarted(first.binding.request)
+          })
+        )
+        expect(replay).toEqual(first)
+
+        const store = yield* Effect.acquireRelease(
+          WorkStore.open(path).pipe(provideNodeServices),
+          (store) => Effect.sync(() => store.close())
+        )
+        const work = yield* makeWorkService(store)
+        expect(Option.getOrThrow(yield* work.agentBinding(first.event.dispatchRequestId))).toEqual(first.binding)
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                ...first.binding.request,
+                worker: { ...startedWorker, agentId: "agent-conflicting-worker" }
+              })
+            })
+          ))
+        ).toMatchObject({
+          failure: {
+            _tag: "OrchestratorWorkerBindingConflictError",
+            dispatchRequestId: first.event.dispatchRequestId
+          }
+        })
+      })
+    }))
+
+  it.effect("rejects queued replay when a persisted binding lost its lane-operation companion", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-partial-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-partial")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const activation = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            return yield* orchestrator.workerStarted({
+              dispatchRequestId: receipt.dispatchRequestId,
+              expectedRevision: lane.revision,
+              laneId: lane.laneId,
+              version: "herdr.work.agent-binding-request.v1",
+              worker: startedWorker
+            })
+          })
+        )
+        const database = new DatabaseSync(path)
+        database.prepare("DELETE FROM work_lane_operations WHERE operation_id = ?")
+          .run(activation.binding.lane.operationId)
+        database.prepare("DELETE FROM orchestrator_events WHERE dispatch_request_id = ? AND type = 'running'")
+          .run(activation.event.dispatchRequestId)
+        database.prepare("UPDATE orchestrator_dispatches SET status = 'queued' WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        database.close()
+
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted(activation.binding.request)
+            })
+          ))
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+        const readback = new DatabaseSync(path)
+        expect(
+          readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
+            .get(activation.event.dispatchRequestId)
+        ).toEqual({ status: "queued" })
+        expect(
+          readback.prepare(
+            "SELECT COUNT(*) AS count FROM orchestrator_events WHERE dispatch_request_id = ? AND type = 'running'"
+          ).get(activation.event.dispatchRequestId)
+        ).toEqual({ count: 0 })
+        readback.close()
+      })
+    }))
+
+  it.effect("rejects a queued dispatch when its Work binding was committed independently", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-independent-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-independent")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const request = {
+          dispatchRequestId: receipt.dispatchRequestId,
+          expectedRevision: lane.revision,
+          laneId: lane.laneId,
+          version: "herdr.work.agent-binding-request.v1",
+          worker: startedWorker
+        } satisfies OrchestratorDispatchActivation
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+            const work = yield* makeWorkService(store)
+            yield* work.bindAgent(request)
+          }).pipe(provideNodeServices)
+        )
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted(request)
+            })
+          ))
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError", operation: "worker-start.partial-binding" } })
+        const readback = new DatabaseSync(path)
+        expect(
+          readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
+            .get(receipt.dispatchRequestId)
+        ).toEqual({ status: "queued" })
+        expect(
+          readback.prepare(
+            "SELECT COUNT(*) AS count FROM orchestrator_events WHERE dispatch_request_id = ? AND type = 'running'"
+          ).get(receipt.dispatchRequestId)
+        ).toEqual({ count: 0 })
+        readback.close()
+      })
+    }))
+
+  it.effect("reports a shipped target lane as typed worker-start authority failure", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-shipped-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-shipped")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const shipped = yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+            const work = yield* makeWorkService(store)
+            return yield* work.claim({
+              ...lane,
+              expectedRevision: lane.revision,
+              operationId: "operation:ship-worker-lane",
+              phase: "shipped"
+            })
+          }).pipe(provideNodeServices)
+        )
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: shipped.revision,
+                laneId: shipped.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({
+          failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "shipped_lane" }
+        })
+      })
+    }))
+
+  it.effect("rolls back dispatch activation when lane CAS authority is stale", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-stale-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-stale")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            expect(
+              yield* Effect.result(orchestrator.workerStarted({
+                dispatchRequestId: accepted.dispatchRequestId,
+                expectedRevision: lane.revision - 1,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              }))
+            ).toMatchObject({
+              failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "stale_revision" }
+            })
+            return accepted
+          })
+        )
+        const database = new DatabaseSync(path)
+        const state = database.prepare(
+          `SELECT d.status,
+             (SELECT COUNT(*) FROM orchestrator_events WHERE dispatch_request_id = ?) AS events,
+             (SELECT COUNT(*) FROM work_agent_bindings WHERE dispatch_request_id = ?) AS bindings
+           FROM orchestrator_dispatches d WHERE d.dispatch_request_id = ?`
+        ).get(receipt.dispatchRequestId, receipt.dispatchRequestId, receipt.dispatchRequestId)
+        database.close()
+        expect(
+          Schema.decodeUnknownSync(Schema.Struct({
+            bindings: Schema.Number,
+            events: Schema.Number,
+            status: Schema.String
+          }))(state)
+        ).toEqual({ bindings: 0, events: 2, status: "queued" })
+      })
+    }))
+
+  it.effect("rejects worker activation when Work history is ahead of the coordinator clock", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-future-work-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-future-work")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const database = new DatabaseSync(path)
+        const row = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          database.prepare("SELECT record FROM work_goal_events WHERE goal_id = ?").get(lane.goalId)
+        )
+        const checkpoint = Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(row.record))
+        const future = {
+          ...checkpoint,
+          goal: { ...checkpoint.goal, createdAt: 200, updatedAt: 200 },
+          occurredAt: 200
+        }
+        database.prepare("UPDATE work_goal_events SET occurred_at = ?, record = ? WHERE event_id = ?")
+          .run(future.occurredAt, JSON.stringify(future), future.eventId)
+        database.close()
+        yield* TestClock.setTime(100)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: lane.revision,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+        const readback = new DatabaseSync(path)
+        expect(
+          readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
+            .get(receipt.dispatchRequestId)
+        ).toEqual({ status: "queued" })
+        expect(
+          readback.prepare("SELECT COUNT(*) AS count FROM work_agent_bindings WHERE dispatch_request_id = ?")
+            .get(receipt.dispatchRequestId)
+        ).toEqual({ count: 0 })
+        readback.close()
+      })
+    }))
+
+  for (
+    const tamper of [
+      {
+        name: "dispatch handoff deletion",
+        mutate: (database: DatabaseSync, dispatchRequestId: string) =>
+          database.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+            .run(dispatchRequestId)
+      },
+      {
+        name: "decision record mutation",
+        mutate: (database: DatabaseSync, _dispatchRequestId: string) =>
+          database.prepare("UPDATE work_decision_handoffs SET record = '{}' WHERE handoff_id = ?")
+            .run("handoff:escalation")
+      }
+    ]
+  ) {
+    it.effect(`rejects worker start after durable Work ${tamper.name}`, () =>
+      withTemporaryRoot("herdr-orchestrator-worker-start-tamper-", (root) => {
+        const path = join(root, "orchestrator.sqlite")
+        const submission = makeSolSubmission(null, `dispatch:worker-start:${tamper.name}`)
+        return Effect.gen(function*() {
+          const lane = yield* recordWorkAuthority(path, submission.workLink)
+          const receipt = yield* withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              const accepted = yield* orchestrator.submitRouted(submission)
+              yield* orchestrator.queue(accepted.dispatchRequestId)
+              return accepted
+            })
+          )
+          const database = new DatabaseSync(path)
+          tamper.mutate(database, receipt.dispatchRequestId)
+          database.close()
+
+          expect(
+            yield* Effect.result(withDatabase(
+              path,
+              Effect.gen(function*() {
+                const orchestrator = yield* Orchestrator
+                return yield* orchestrator.workerStarted({
+                  dispatchRequestId: receipt.dispatchRequestId,
+                  expectedRevision: lane.revision,
+                  laneId: lane.laneId,
+                  version: "herdr.work.agent-binding-request.v1",
+                  worker: startedWorker
+                })
+              })
+            ))
+          ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+          const readback = new DatabaseSync(path)
+          expect(
+            readback.prepare(
+              "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
+            ).get(receipt.dispatchRequestId)
+          ).toEqual({ status: "queued" })
+          expect(
+            readback.prepare(
+              "SELECT COUNT(*) AS count FROM work_agent_bindings WHERE dispatch_request_id = ?"
+            ).get(receipt.dispatchRequestId)
+          ).toEqual({ count: 0 })
+          readback.close()
+        })
+      }))
+  }
+
+  it.effect("rejects worker start when another lane hides conflicting goal authority", () =>
+    withTemporaryRoot("herdr-orchestrator-hidden-lane-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:hidden-lane")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const hidden = {
+          ...lane,
+          laneId: "lane:hidden-conflict",
+          operationId: "operation:hidden-conflict",
+          revision: 1
+        }
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `INSERT INTO work_lane_claims
+             (lane_id, goal_id, operation_id, phase, revision, record)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          hidden.laneId,
+          "goal:hidden-index",
+          hidden.operationId,
+          hidden.phase,
+          hidden.revision,
+          JSON.stringify(hidden)
+        )
+        database.close()
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: lane.revision,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+      })
+    }))
+
+  it.effect("accepts worker start with a valid shipped unrelated lane", () =>
+    withTemporaryRoot("herdr-orchestrator-shipped-lane-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:shipped-lane")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const shipped = {
+          ...lane,
+          goalId: "goal:shipped-unrelated",
+          laneId: "lane:shipped-unrelated",
+          operationId: "operation:shipped-unrelated",
+          phase: "shipped",
+          revision: 1
+        } satisfies typeof lane
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `INSERT INTO work_lane_claims
+             (lane_id, goal_id, operation_id, phase, revision, record)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          shipped.laneId,
+          shipped.goalId,
+          shipped.operationId,
+          shipped.phase,
+          shipped.revision,
+          JSON.stringify(shipped)
+        )
+        database.close()
+        const activation = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            return yield* orchestrator.workerStarted({
+              dispatchRequestId: receipt.dispatchRequestId,
+              expectedRevision: lane.revision,
+              laneId: lane.laneId,
+              version: "herdr.work.agent-binding-request.v1",
+              worker: startedWorker
+            })
+          })
+        )
+        expect(activation.event.type).toBe("running")
+      })
+    }))
+
+  it.effect("rejects worker start when checkpoint row identity disagrees with its record", () =>
+    withTemporaryRoot("herdr-orchestrator-checkpoint-identity-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:checkpoint-identity")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const database = new DatabaseSync(path)
+        const row = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          database.prepare("SELECT record FROM work_goal_events WHERE goal_id = ?").get(lane.goalId)
+        )
+        const checkpoint = Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(row.record))
+        database.prepare("UPDATE work_goal_events SET record = ? WHERE event_id = ?").run(
+          JSON.stringify({ ...checkpoint, eventId: receipt.dispatchRequestId }),
+          checkpoint.eventId
+        )
+        database.close()
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: lane.revision,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+        const readback = new DatabaseSync(path)
+        expect(
+          readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
+            .get(receipt.dispatchRequestId)
+        ).toEqual({ status: "queued" })
+        readback.close()
+      })
+    }))
+
+  for (
+    const capacity of [
+      {
+        name: "operation count",
+        update: "UPDATE work_lane_operation_totals SET operation_count = 16384 WHERE singleton = 1"
+      },
+      {
+        name: "operation bytes",
+        update: "UPDATE work_lane_operation_totals SET operation_bytes = 2097152 WHERE singleton = 1"
+      }
+    ]
+  ) {
+    it.effect(`applies the Work agent-binding ${capacity.name} bound before activation`, () =>
+      withTemporaryRoot("herdr-orchestrator-worker-start-capacity-", (root) => {
+        const path = join(root, "orchestrator.sqlite")
+        const submission = makeSolSubmission(null, `dispatch:worker-start:${capacity.name}`)
+        return Effect.gen(function*() {
+          const lane = yield* recordWorkAuthority(path, submission.workLink)
+          const receipt = yield* withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              const accepted = yield* orchestrator.submitRouted(submission)
+              yield* orchestrator.queue(accepted.dispatchRequestId)
+              return accepted
+            })
+          )
+          const database = new DatabaseSync(path)
+          database.exec(capacity.update)
+          database.close()
+          expect(
+            yield* Effect.result(withDatabase(
+              path,
+              Effect.gen(function*() {
+                const orchestrator = yield* Orchestrator
+                return yield* orchestrator.workerStarted({
+                  dispatchRequestId: receipt.dispatchRequestId,
+                  expectedRevision: lane.revision,
+                  laneId: lane.laneId,
+                  version: "herdr.work.agent-binding-request.v1",
+                  worker: startedWorker
+                })
+              })
+            ))
+          ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+          const readback = new DatabaseSync(path)
+          expect(
+            readback.prepare(
+              "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
+            ).get(receipt.dispatchRequestId)
+          ).toEqual({ status: "queued" })
+          readback.close()
+        })
+      }))
+  }
+
+  it.effect("applies the Work snapshot byte bound before dispatch activation", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-snapshot-capacity-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start:snapshot-capacity")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const database = new DatabaseSync(path)
+        const insert = database.prepare(
+          "INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+        )
+        const maximumText = "x".repeat(4_096)
+        for (const index of Array.from({ length: 20 }, (_, index) => index)) {
+          const goalId = `goal:snapshot-capacity:${index}`
+          const event = Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+            eventId: `event:snapshot-capacity:${index}`,
+            goal: {
+              blocker: null,
+              connectTarget: null,
+              createdAt: 0,
+              delivery: "local",
+              detail: maximumText,
+              id: goalId,
+              owner: { id: `owner:${index}`, name: maximumText },
+              repository: { branch: maximumText, repository: maximumText },
+              spend: null,
+              state: "working",
+              summary: maximumText,
+              title: maximumText,
+              updatedAt: 0
+            },
+            occurredAt: 0,
+            version: "herdr.work.event.v1"
+          })
+          insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event))
+        }
+        database.close()
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: lane.revision,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
+        const readback = new DatabaseSync(path)
+        expect(
+          readback.prepare(
+            "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
+          ).get(receipt.dispatchRequestId)
+        ).toEqual({ status: "queued" })
+        readback.close()
+      })
+    }))
+
   it.effect("accepts idempotent typed commands and records the complete lifecycle", () => {
     return withTemporaryRoot("herdr-orchestrator-", (root) =>
       withDatabase(
@@ -140,6 +860,37 @@ describe("durable coordinator orchestrator", () => {
         })
       ))
   })
+
+  it.effect("follows persisted events from accepted through one terminal event", () =>
+    withTemporaryRoot("herdr-orchestrator-live-events-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          const receipt = yield* orchestrator.submit(
+            { ...command, activityIdempotencyKey: "activity:live-events" },
+            "dispatch:live-events"
+          )
+          const acceptedSeen = yield* Deferred.make<void>()
+          const eventsFiber = yield* orchestrator.events(receipt.dispatchRequestId).pipe(
+            Stream.tap((event) => event.type === "accepted" ? Deferred.succeed(acceptedSeen, undefined) : Effect.void),
+            Stream.runCollect,
+            Effect.forkChild
+          )
+          yield* Deferred.await(acceptedSeen)
+          yield* orchestrator.queue(receipt.dispatchRequestId)
+          yield* orchestrator.run(receipt.dispatchRequestId)
+          yield* orchestrator.settle(receipt.dispatchRequestId, "done")
+          yield* TestClock.adjust("100 millis")
+          const events = yield* Fiber.join(eventsFiber)
+          expect(events.map(({ sequence, type }) => ({ sequence, type }))).toEqual([
+            { sequence: 0, type: "accepted" },
+            { sequence: 1, type: "queued" },
+            { sequence: 2, type: "running" },
+            { sequence: 3, type: "settled" }
+          ])
+        })
+      )))
 
   it.effect("persists executable route metadata for typed request lookup", () =>
     withTemporaryRoot("herdr-orchestrator-route-", (root) => {
@@ -179,6 +930,7 @@ describe("durable coordinator orchestrator", () => {
     withTemporaryRoot("herdr-orchestrator-work-link-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
+        yield* recordWorkAuthority(path, makeWorkLink([]))
         const linked = yield* withDatabase(
           path,
           Effect.gen(function*() {
@@ -232,6 +984,7 @@ describe("durable coordinator orchestrator", () => {
         const decisions = yield* Effect.scoped(
           Effect.gen(function*() {
             const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
             return yield* store.decisions("lane:escalation")
           }).pipe(provideNodeServices)
         )
@@ -239,6 +992,364 @@ describe("durable coordinator orchestrator", () => {
         expect(decisions[0]).toMatchObject({
           id: "handoff:escalation",
           laneId: "lane:escalation"
+        })
+      })
+    }))
+
+  it.effect("replays an accepted Sol binding after its Work lane ships", () =>
+    withTemporaryRoot("herdr-orchestrator-work-replay-shipped-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const authority = yield* recordWorkAuthority(path, makeWorkLink([]))
+        const accepted = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:replay-shipped-luna" },
+              idempotencyKey: "dispatch:replay-shipped-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+            const submission = makeSolSubmission(luna.dispatchRequestId, "dispatch:replay-shipped-sol")
+            const receipt = yield* orchestrator.submitRouted(submission)
+            return { receipt, submission }
+          })
+        )
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+            const service = yield* makeWorkService(store)
+            return yield* service.claim({
+              branch: authority.branch,
+              expectedRevision: authority.revision,
+              goalId: authority.goalId,
+              head: authority.head,
+              laneId: authority.laneId,
+              operationId: "operation:replay-shipped",
+              owner: authority.owner,
+              parent: authority.parent,
+              phase: "shipped",
+              worktree: authority.worktree
+            })
+          }).pipe(provideNodeServices)
+        )
+
+        const replayed = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return {
+              receipt: yield* orchestrator.submitRouted(accepted.submission),
+              request: yield* orchestrator.request(accepted.receipt.dispatchRequestId)
+            }
+          })
+        )
+        expect(replayed.receipt).toEqual(accepted.receipt)
+        expect(replayed.request.workLink).toEqual(accepted.submission.workLink)
+      })
+    }))
+
+  it.effect("fails closed when routed metadata disappears", () =>
+    withTemporaryRoot("herdr-orchestrator-route-presence-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:route-presence" },
+              idempotencyKey: "dispatch:route-presence",
+              route: lunaRoute,
+              workLink: null
+            })
+          })
+        )
+        const database = new DatabaseSync(path)
+        database.prepare("DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?")
+          .run(receipt.dispatchRequestId)
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.request(receipt.dispatchRequestId))
+          })
+        )
+        expect(result).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "decode.metadata-presence-mismatch" }
+        })
+      })
+    }))
+
+  it.effect("backfills the routed discriminator when reopening the prior journal schema", () =>
+    withTemporaryRoot("herdr-orchestrator-route-migration-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const database = new DatabaseSync(path)
+        database.exec(`
+          PRAGMA foreign_keys = ON;
+          CREATE TABLE orchestrator_dispatches (
+            dispatch_request_id TEXT PRIMARY KEY,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            activity_idempotency_key TEXT NOT NULL UNIQUE,
+            command TEXT NOT NULL,
+            accepted_at INTEGER NOT NULL,
+            status TEXT NOT NULL
+          );
+          CREATE TABLE orchestrator_events (
+            dispatch_request_id TEXT NOT NULL,
+            sequence INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            activity_idempotency_key TEXT NOT NULL,
+            occurred_at INTEGER NOT NULL,
+            detail TEXT,
+            result TEXT,
+            PRIMARY KEY (dispatch_request_id, sequence)
+          );
+          CREATE TABLE orchestrator_dispatch_metadata (
+            dispatch_request_id TEXT PRIMARY KEY,
+            route TEXT NOT NULL,
+            work_link TEXT
+          );
+        `)
+        database.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+           VALUES (?, ?, ?, ?, 0, 'accepted')`
+        ).run(
+          "dispatch:migrated-route",
+          "idempotency:migrated-route",
+          "activity:migrated-route",
+          JSON.stringify({ ...command, activityIdempotencyKey: "activity:migrated-route" })
+        )
+        database.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           VALUES (?, 0, 'accepted', ?, 0, NULL, NULL)`
+        ).run("dispatch:migrated-route", "activity:migrated-route")
+        database.prepare(
+          `INSERT INTO orchestrator_dispatch_metadata (dispatch_request_id, route, work_link)
+           VALUES (?, ?, NULL)`
+        ).run("dispatch:migrated-route", JSON.stringify(lunaRoute))
+        database.close()
+
+        const request = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.request("dispatch:migrated-route")
+          })
+        )
+        expect(request.route).toEqual(lunaRoute)
+        const reopened = new DatabaseSync(path)
+        const routed = reopened.prepare(
+          "SELECT is_routed AS isRouted FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
+        ).get("dispatch:migrated-route")
+        reopened.close()
+        expect(routed).toEqual({ isRouted: 1 })
+      })
+    }))
+
+  it.effect("migrates the previous populated Work handoff table before indexing sessions", () =>
+    withTemporaryRoot("herdr-orchestrator-work-schema-migration-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const lane = {
+          branch: "feat/legacy",
+          expectedRevision: 0,
+          head: "0123456789012345678901234567890123456789",
+          laneId: "goal:legacy",
+          owner: { id: "owner:legacy", name: "Legacy owner" },
+          parent: null,
+          phase: "implementation",
+          revision: 1,
+          worktree: "/worktrees/legacy"
+        }
+        const legacy = {
+          decision: "handoff",
+          goalId: "goal:legacy",
+          id: "handoff:legacy",
+          laneId: "goal:legacy",
+          occurredAt: 1,
+          owner: { id: "owner:legacy", name: "Legacy owner" },
+          summary: "Legacy coordinator handoff",
+          version: "herdr.work.decision.v1"
+        }
+        const database = new DatabaseSync(path)
+        database.exec("PRAGMA journal_mode = WAL")
+        database.exec(`
+          CREATE TABLE work_lane_claims (
+            lane_id TEXT PRIMARY KEY,
+            revision INTEGER NOT NULL,
+            record TEXT NOT NULL
+          );
+          CREATE TABLE work_decision_handoffs (
+            handoff_id TEXT PRIMARY KEY,
+            lane_id TEXT NOT NULL,
+            occurred_at INTEGER NOT NULL,
+            record TEXT NOT NULL
+          );
+          CREATE TABLE work_dispatch_handoffs (
+            dispatch_request_id TEXT PRIMARY KEY,
+            handoff_id TEXT NOT NULL UNIQUE,
+            lane_id TEXT NOT NULL,
+            occurred_at INTEGER NOT NULL,
+            lineage TEXT NOT NULL,
+            record TEXT NOT NULL
+          );
+          CREATE TABLE orchestrator_dispatch_metadata (
+            dispatch_request_id TEXT PRIMARY KEY,
+            route TEXT NOT NULL,
+            work_link TEXT
+          );
+        `)
+        database.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)")
+          .run(lane.laneId, lane.revision, JSON.stringify(lane))
+        database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
+          .run(legacy.id, legacy.laneId, legacy.occurredAt, JSON.stringify(legacy))
+        const lineage = ["dispatch:legacy-luna"]
+        database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
+          .run(
+            "dispatch:legacy-sol",
+            legacy.id,
+            legacy.laneId,
+            legacy.occurredAt,
+            JSON.stringify(lineage),
+            JSON.stringify(legacy)
+          )
+        database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
+          .run(
+            "dispatch:legacy-sol",
+            JSON.stringify({
+              ...lunaRoute,
+              linkedRequestId: lineage[0],
+              model: "gpt-5.6-sol",
+              reasoningEffort: "high"
+            }),
+            JSON.stringify({ handoff: legacy, lineage })
+          )
+        database.close()
+
+        const concurrent = { ...legacy, id: "handoff:legacy-concurrent", occurredAt: 2 }
+        const writer = spawn(
+          execPath,
+          [
+            "--input-type=module",
+            "-e",
+            `import { DatabaseSync } from "node:sqlite"
+const database = new DatabaseSync(process.argv[1])
+const handoff = JSON.parse(process.argv[2])
+database.exec("BEGIN IMMEDIATE")
+database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
+  .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+process.stdout.write("locked\\n")
+await new Promise((resolve) => setTimeout(resolve, 250))
+database.exec("COMMIT")
+database.close()`,
+            path,
+            JSON.stringify(concurrent)
+          ],
+          { stdio: ["ignore", "pipe", "pipe"] }
+        )
+        yield* Effect.addFinalizer(() => Effect.sync(() => writer.kill()))
+        yield* Effect.callback<void, LegacyWriterError>((resume) => {
+          writer.stdout.setEncoding("utf8")
+          writer.stdout.once("data", () => resume(Effect.void))
+          writer.once("error", (cause) => resume(Effect.fail(new LegacyWriterError({ cause: String(cause) }))))
+        })
+
+        yield* withDatabase(path, Effect.void)
+        const migrated = new DatabaseSync(path)
+        const decision = migrated.prepare(
+          "SELECT session_id AS sessionId, record FROM work_decision_handoffs WHERE handoff_id = ?"
+        ).get(legacy.id)
+        const migratedLane = migrated.prepare(
+          "SELECT goal_id AS goalId, operation_id AS operationId, phase, record FROM work_lane_claims WHERE lane_id = ?"
+        ).get(lane.laneId)
+        const dispatch = migrated.prepare(
+          "SELECT record FROM work_dispatch_handoffs WHERE dispatch_request_id = ?"
+        ).get("dispatch:legacy-sol")
+        const metadata = migrated.prepare(
+          "SELECT work_link AS workLink FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
+        ).get("dispatch:legacy-sol")
+        const concurrentDecision = migrated.prepare(
+          "SELECT session_id AS sessionId FROM work_decision_handoffs WHERE handoff_id = ?"
+        ).get(concurrent.id)
+        migrated.close()
+        expect(Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String, record: Schema.String }))(decision))
+          .toMatchObject({ sessionId: legacy.id, record: expect.stringContaining("dispatch:legacy-luna") })
+        const decodedLane = Schema.decodeUnknownSync(Schema.Struct({
+          goalId: Schema.String,
+          operationId: Schema.String,
+          phase: Schema.String,
+          record: Schema.String
+        }))(migratedLane)
+        expect(decodedLane).toMatchObject({
+          goalId: lane.laneId,
+          operationId: lane.laneId,
+          phase: lane.phase
+        })
+        expect(JSON.parse(decodedLane.record)).toEqual({ ...lane, goalId: lane.laneId, operationId: lane.laneId })
+        expect(Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(dispatch).record)
+          .toContain("dispatch:legacy-luna")
+        expect(Schema.decodeUnknownSync(Schema.Struct({ workLink: Schema.String }))(metadata).workLink)
+          .toContain("dispatch:legacy-luna")
+        expect(Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String }))(concurrentDecision).sessionId)
+          .toBe(concurrent.id)
+      })
+    }))
+
+  it.effect("revalidates the referenced Work decision during request readback", () =>
+    withTemporaryRoot("herdr-orchestrator-work-readback-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* recordWorkAuthority(path, makeWorkLink([]))
+        const sol = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:readback-luna" },
+              idempotencyKey: "dispatch:readback-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+            return yield* orchestrator.submitRouted(makeSolSubmission(luna.dispatchRequestId, "dispatch:readback-sol"))
+          })
+        )
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `UPDATE work_decision_handoffs
+           SET record = replace(record, 'Escalate the failed Luna request to Sol', 'Changed durable decision')
+           WHERE handoff_id = ?`
+        ).run("handoff:escalation")
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return {
+              pending: yield* Effect.result(orchestrator.pending()),
+              request: yield* Effect.result(orchestrator.request(sol.dispatchRequestId))
+            }
+          })
+        )
+        expect(result.request).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "request.work-link" }
+        })
+        expect(result.pending).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "pending.work-link" }
         })
       })
     }))
@@ -315,10 +1426,38 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("rejects a Sol link whose lineage contradicts its Work handoff", () =>
+    withTemporaryRoot("herdr-orchestrator-work-lineage-reject-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission("dispatch:lineage-parent", "dispatch:lineage-invalid-sol")
+      const contradictory = {
+        ...submission,
+        workLink: submission.workLink === null ? null : {
+          ...submission.workLink,
+          handoff: { ...submission.workLink.handoff, dispatchIds: ["dispatch:unrelated"] }
+        }
+      } satisfies OrchestratorRoutedSubmission
+      return Effect.gen(function*() {
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.submitRouted(contradictory))
+          })
+        )
+        expect(result).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
+        const database = new DatabaseSync(path)
+        const count = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
+        database.close()
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(count).count).toBe(0)
+      })
+    }))
+
   it.effect("rolls back Sol acceptance when the Work handoff cannot be recorded", () =>
     withTemporaryRoot("herdr-orchestrator-work-atomicity-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
+        yield* recordWorkAuthority(path, makeWorkLink([]))
         const failedLuna = yield* withDatabase(
           path,
           Effect.gen(function*() {
@@ -335,9 +1474,17 @@ describe("durable coordinator orchestrator", () => {
           })
         )
         const database = new DatabaseSync(path)
-        database.prepare("UPDATE work_decision_totals SET decision_count = ? WHERE singleton = 1").run(16_384)
+        database.exec(`
+          WITH RECURSIVE capacity(value) AS (
+            VALUES(1)
+            UNION ALL
+            SELECT value + 1 FROM capacity WHERE value < 16384
+          )
+          INSERT INTO work_decision_handoffs (handoff_id, session_id, lane_id, occurred_at, record)
+          SELECT 'capacity:' || value, 'session:capacity:' || value, 'lane:capacity', value, '{}'
+          FROM capacity
+        `)
         database.close()
-
         const result = yield* withDatabase(
           path,
           Effect.gen(function*() {
@@ -367,6 +1514,66 @@ describe("durable coordinator orchestrator", () => {
           dispatches: 1,
           workLinks: 0
         })
+      })
+    }))
+
+  it.effect("rolls back Sol acceptance when the handoff lacks active lane authority", () =>
+    withTemporaryRoot("herdr-orchestrator-work-authority-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const authority = makeWorkLink([])
+        yield* recordWorkAuthority(path, authority)
+        const failedLuna = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:authority-luna" },
+              idempotencyKey: "dispatch:authority-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            return yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+          })
+        )
+        const submission = makeSolSubmission(
+          failedLuna.dispatchRequestId,
+          "dispatch:authority-invalid-sol"
+        )
+        const wrongGoal = {
+          ...submission,
+          workLink: submission.workLink === null ? null : {
+            ...submission.workLink,
+            handoff: { ...submission.workLink.handoff, goalId: "goal:other" }
+          }
+        } satisfies OrchestratorRoutedSubmission
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.submitRouted(wrongGoal))
+          })
+        )
+        expect(result).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "submit.work-link" }
+        })
+
+        const remaining = new DatabaseSync(path)
+        const counts = remaining.prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
+             (SELECT COUNT(*) FROM orchestrator_events WHERE type = 'accepted') AS accepted,
+             (SELECT COUNT(*) FROM work_dispatch_handoffs) AS workLinks`
+        ).get()
+        remaining.close()
+        expect(
+          Schema.decodeUnknownSync(
+            Schema.Struct({ accepted: Schema.Number, dispatches: Schema.Number, workLinks: Schema.Number })
+          )(counts)
+        ).toEqual({ accepted: 1, dispatches: 1, workLinks: 0 })
       })
     }))
 
@@ -415,7 +1622,9 @@ describe("durable coordinator orchestrator", () => {
           expect(result).toMatchObject({
             failure: { _tag: "OrchestratorStorageError", operation: "transition.timestamp-regression" }
           })
-          expect(yield* Stream.runCollect(orchestrator.events(receipt.dispatchRequestId))).toHaveLength(2)
+          expect(
+            yield* orchestrator.events(receipt.dispatchRequestId).pipe(Stream.take(2), Stream.runCollect)
+          ).toHaveLength(2)
         })
       )))
 
@@ -720,7 +1929,7 @@ describe("durable coordinator orchestrator", () => {
             const malformed = yield* Effect.result(Stream.runCollect(orchestrator.events("dispatch:\uD800")))
             const malformedTransition = yield* Effect.result(orchestrator.run("dispatch:\uD800"))
             const missingTransition = yield* Effect.result(orchestrator.run("dispatch:missing"))
-            const replacement = yield* Stream.runCollect(orchestrator.events("dispatch:\uFFFD"))
+            const replacement = yield* orchestrator.events("dispatch:\uFFFD").pipe(Stream.take(1), Stream.runCollect)
             return { malformed, malformedTransition, missingTransition, replacement }
           })
         )
@@ -1122,6 +2331,38 @@ describe("durable coordinator orchestrator", () => {
         })
       )))
 
+  it.effect("does not report pending exhaustion while a selected row transitions", () =>
+    withTemporaryRoot("herdr-orchestrator-pending-race-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          for (let index = 0; index < 32; index += 1) {
+            yield* TestClock.setTime(index)
+            const selected = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: `activity:pending-race:${index}:a` },
+              `dispatch:pending-race:${index}:a`
+            )
+            yield* orchestrator.queue(selected.dispatchRequestId)
+            const later = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: `activity:pending-race:${index}:b` },
+              `dispatch:pending-race:${index}:b`
+            )
+            const [page] = yield* Effect.all([
+              orchestrator.pending({ limit: 1 }),
+              orchestrator.run(selected.dispatchRequestId)
+            ], { concurrency: 2 })
+            expect(page).toHaveLength(1)
+            expect([selected.dispatchRequestId, later.dispatchRequestId]).toContain(page[0]?.dispatchRequestId)
+            yield* orchestrator.settle(selected.dispatchRequestId, "selected complete")
+            yield* orchestrator.queue(later.dispatchRequestId)
+            yield* orchestrator.run(later.dispatchRequestId)
+            yield* orchestrator.settle(later.dispatchRequestId, "later complete")
+          }
+          expect(yield* orchestrator.pending()).toEqual([])
+        })
+      )))
+
   it.effect("secures SQLite database and journal files", () =>
     withTemporaryRoot("herdr-orchestrator-permissions-", (root) =>
       withDatabase(
@@ -1225,32 +2466,24 @@ describe("durable coordinator orchestrator", () => {
         })
       })))
 
-  it.effect("runs a durable entity through SingleRunner with SQL storage", () =>
-    withTemporaryRoot("herdr-single-runner-", (root) => {
-      const path = join(root, "cluster.sqlite")
-      return Effect.gen(function*() {
-        const result = yield* DurableEntity.client.pipe(
-          Effect.flatMap((clientFor) => clientFor("entity-1").Echo({ value: "executed" }))
-        )
-        expect(result).toBe("executed")
-      }).pipe(
-        // @effect-diagnostics-next-line strictEffectProvide:off
-        Effect.provide(DurableEntityLayer.pipe(
-          Layer.provideMerge(testSingleRunnerLayer),
-          Layer.provide(sqliteLayer(path))
-        ))
-      )
-    }))
+  it.effect("rejects dangling SQLite database and journal symlinks before opening", () =>
+    withTemporaryRoot("herdr-orchestrator-dangling-path-", (root) =>
+      Effect.gen(function*() {
+        const paths: ReadonlyArray<readonly [string, string]> = [["database", ""], ["wal", "-wal"], ["shm", "-shm"]]
+        for (const [name, suffix] of paths) {
+          const stateDirectory = join(root, name)
+          mkdirSync(stateDirectory, { mode: 0o700 })
+          const database = join(stateDirectory, "orchestrator.sqlite")
+          if (suffix !== "") yield* withDatabase(database, Effect.void)
+          const target = join(stateDirectory, "missing-target")
+          symlinkSync(target, `${database}${suffix}`)
 
-  it.effect("provides SQL-backed MessageStorage with the default runner address", () =>
-    withTemporaryRoot("herdr-single-runner-storage-", (root) =>
-      Effect.scoped(
-        Effect.gen(function*() {
-          const storage = yield* MessageStorage.MessageStorage
-          expect(storage).toBeDefined()
-        }).pipe(
-          // @effect-diagnostics-next-line strictEffectProvide:off
-          Effect.provide(Layer.provide(singleRunnerLayer, sqliteLayer(join(root, "cluster.sqlite"))))
-        )
-      )))
+          const result = yield* Effect.result(withDatabase(database, Effect.void))
+          expect(result).toMatchObject({
+            _tag: "Failure",
+            failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.path-identity" }
+          })
+          expect(existsSync(target)).toBe(false)
+        }
+      })))
 })

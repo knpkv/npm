@@ -88,6 +88,30 @@ type PairingDecision =
   | "replayed"
   | "rejected"
 
+const decidePairing = (
+  state: PairingState,
+  candidateDigest: string,
+  pairingDigest: string,
+  now: number,
+  expiresAt: number
+): PairingDecision => {
+  if (!equalDigest(candidateDigest, pairingDigest)) return "rejected"
+  if (state.consumed) return "replayed"
+  if (now >= expiresAt) return "expired"
+  return "accepted"
+}
+
+const pairingFailure = (decision: Exclude<PairingDecision, "accepted">) => {
+  switch (decision) {
+    case "rejected":
+      return new LanWorkPairingRejectedError({ detail: "pairing code rejected" })
+    case "expired":
+      return new LanWorkPairingExpiredError({ detail: "pairing code expired" })
+    case "replayed":
+      return new LanWorkPairingReplayedError({ detail: "pairing code already used" })
+  }
+}
+
 const equalDigest = (left: string, right: string): boolean => {
   if (left.length !== right.length) return false
   let difference = 0
@@ -184,26 +208,19 @@ export const makeLanWorkPairing = Effect.fn("LanWork.makePairing")(function*(now
 
   const consume = Effect.fn("LanWorkPairing.consume")(function*(code: LanWorkPairingCode) {
     const candidateDigest = yield* makeDigest(cryptoService, code)
+    const current = yield* Ref.get(state)
+    const preflight = decidePairing(current, candidateDigest, pairingDigest, now(), expiresAt)
+    if (preflight !== "accepted") return yield* pairingFailure(preflight)
+    const session = yield* randomSessionToken(cryptoService)
+    const sessionDigest = yield* makeDigest(cryptoService, session)
     const decision = yield* Ref.modify<PairingState, PairingDecision>(state, (current) => {
-      if (!equalDigest(candidateDigest, pairingDigest)) return ["rejected", current]
-      if (current.consumed) return ["replayed", current]
-      if (now() >= expiresAt) return ["expired", current]
-      return ["accepted", { ...current, consumed: true }]
+      const decision = decidePairing(current, candidateDigest, pairingDigest, now(), expiresAt)
+      return decision === "accepted"
+        ? [decision, { consumed: true, sessionDigest }]
+        : [decision, current]
     })
-    switch (decision) {
-      case "rejected":
-        return yield* new LanWorkPairingRejectedError({ detail: "pairing code rejected" })
-      case "expired":
-        return yield* new LanWorkPairingExpiredError({ detail: "pairing code expired" })
-      case "replayed":
-        return yield* new LanWorkPairingReplayedError({ detail: "pairing code already used" })
-      case "accepted": {
-        const session = yield* randomSessionToken(cryptoService)
-        const sessionDigest = yield* makeDigest(cryptoService, session)
-        yield* Ref.update(state, (current) => ({ ...current, sessionDigest }))
-        return Redacted.make(session)
-      }
-    }
+    if (decision !== "accepted") return yield* pairingFailure(decision)
+    return Redacted.make(session)
   })
 
   const authorizeSession = Effect.fn("LanWorkPairing.authorizeSession")(function*(token: string | undefined) {

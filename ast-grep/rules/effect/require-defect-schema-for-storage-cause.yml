@@ -1,0 +1,31 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: require-defect-schema-for-storage-cause
+language: tsx
+severity: error
+message: "Use Schema.Defect() for a storage error's defect-like cause"
+
+rule:
+  all:
+    - pattern:
+        context: "const value = { cause: Schema.Unknown }"
+        selector: pair
+    - inside:
+        all:
+          - kind: class_declaration
+          - regex: "(?:Storage|Store)Error"
+        stopBy: end
+
+files:
+  - "packages/**/src/**/*.ts"
+  - "packages/**/src/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+  - "repos/**"
+
+note: |
+  Storage failures wrap filesystem, database, and decoder defects. Schema.Defect()
+  gives those unknown runtime causes a stable encoded representation. Domain-level
+  unknown values remain valid when they are not a storage-error cause.

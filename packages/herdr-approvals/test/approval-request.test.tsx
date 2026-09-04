@@ -97,6 +97,32 @@ const renderDashboard = (record: JobRecord): string =>
   )
 
 describe("sanitized approval requests", () => {
+  it("redacts spaced credential labels without hiding nearby prose", () => {
+    for (const ref of [
+      "api key: leaked-canary",
+      '{"api key":"leaked-canary"}',
+      "Secret Access Key=leaked-canary",
+      "access key id: leaked-canary",
+      "api%20key%3Aleaked-canary"
+    ]) {
+      expect(JSON.stringify(approvalRequestFor({ kind: "nix.apply", ref }))).not.toContain("leaked-canary")
+    }
+    expect(JSON.stringify(approvalRequestFor({ kind: "nix.apply", ref: "api key rotation" }))).toContain(
+      "api key rotation"
+    )
+    expect(
+      JSON.stringify(
+        approvalRequestFor({
+          kind: "nix.apply",
+          ref: "password=topsecret, recovery code=leaked-canary"
+        })
+      )
+    ).not.toContain("leaked-canary")
+    expect(JSON.stringify(approvalRequestFor({ kind: "nix.apply", ref: "password=secret, branch=main" }))).toContain(
+      "branch=main"
+    )
+  })
+
   it("keeps every typed work field while marking the internal prompt redacted", () => {
     expect(approvalRequestFor(approvalPayload)).toEqual({
       fields: [

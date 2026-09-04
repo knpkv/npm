@@ -1,6 +1,6 @@
 import { JobActor, JobIdentifier, JobPayload } from "@knpkv/herdr-fleet/model"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet/response"
-import { WorkDecisionHandoff } from "@knpkv/herdr-work/model"
+import { WorkAgentBinding, WorkAgentBindingRequest, WorkDecisionHandoff } from "@knpkv/herdr-work/model"
 import { Schema } from "effect"
 
 const Identifier = Schema.String.check(
@@ -78,7 +78,12 @@ export const OrchestratorWorkLink = Schema.Struct({
       { expected: "unique dispatch IDs in Work lineage" }
     )
   )
-})
+}).check(
+  Schema.makeFilter(
+    ({ handoff, lineage }) => lineage.every((dispatchId) => handoff.dispatchIds.includes(dispatchId)),
+    { expected: "Work lineage contained in the persisted handoff dispatch IDs" }
+  )
+)
 export interface OrchestratorWorkLink extends Schema.Schema.Type<typeof OrchestratorWorkLink> {}
 
 /** The only command family accepted by the durable coordinator. */
@@ -180,14 +185,43 @@ export const OrchestratorEvent = Schema.Union([
 ])
 export type OrchestratorEvent = typeof OrchestratorEvent.Type
 
-const routeAndWorkLink = Schema.makeFilter(
-  ({ route, workLink }: { readonly route: OrchestratorRoute | null; readonly workLink: OrchestratorWorkLink | null }) =>
-    (route === null && workLink === null) ||
-    (route?.model === "gpt-5.6-luna" && workLink === null) ||
-    (route?.model === "gpt-5.6-sol" &&
-      workLink !== null &&
-      (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId))),
-  { expected: "route and Work link form a valid durable dispatch binding" }
+/** Public Nix-consumer input for the exact durable worker-start boundary. */
+export const OrchestratorDispatchActivation = WorkAgentBindingRequest
+export type OrchestratorDispatchActivation = typeof OrchestratorDispatchActivation.Type
+
+/** Atomically committed coordinator running event and Work agent binding. */
+export const OrchestratorDispatchActivated = Schema.Struct({
+  event: OrchestratorEvent,
+  binding: WorkAgentBinding
+}).check(
+  Schema.makeFilter(
+    ({ binding, event }) =>
+      event.type === "running" &&
+      event.dispatchRequestId === binding.request.dispatchRequestId &&
+      event.occurredAt === binding.checkpoint.occurredAt,
+    { expected: "one running dispatch event with its exact Work agent binding" }
+  )
+)
+export interface OrchestratorDispatchActivated extends
+  Schema.Schema.Type<
+    typeof OrchestratorDispatchActivated
+  >
+{}
+
+const requestBindings = Schema.makeFilter(
+  ({ activityIdempotencyKey, command, route, workLink }: {
+    readonly activityIdempotencyKey: ActivityIdempotencyKey
+    readonly command: OrchestratorCommand
+    readonly route: OrchestratorRoute | null
+    readonly workLink: OrchestratorWorkLink | null
+  }) =>
+    activityIdempotencyKey === command.activityIdempotencyKey &&
+    ((route === null && workLink === null) ||
+      (route?.model === "gpt-5.6-luna" && workLink === null) ||
+      (route?.model === "gpt-5.6-sol" &&
+        workLink !== null &&
+        (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId)))),
+  { expected: "activity key and route/Work link form valid durable dispatch bindings" }
 )
 
 /** Complete typed request projection, including persisted route and Work link. */
@@ -200,7 +234,7 @@ export const OrchestratorRequest = Schema.Struct({
   status: OrchestratorEventType,
   route: Schema.NullOr(OrchestratorRoute),
   workLink: Schema.NullOr(OrchestratorWorkLink)
-}).check(routeAndWorkLink)
+}).check(requestBindings)
 export interface OrchestratorRequest extends Schema.Schema.Type<typeof OrchestratorRequest> {}
 
 export const OrchestratorPendingDispatchStatus = Schema.Literals(["accepted", "queued"])
@@ -217,8 +251,8 @@ export const OrchestratorPendingCursor = Schema.Struct({
 export type OrchestratorPendingCursor = typeof OrchestratorPendingCursor.Type
 
 export const OrchestratorPendingQuery = Schema.Struct({
-  limit: Schema.optional(PendingPageLimit),
-  after: Schema.optional(OrchestratorPendingCursor)
+  limit: Schema.optionalKey(PendingPageLimit),
+  after: Schema.optionalKey(OrchestratorPendingCursor)
 })
 export interface OrchestratorPendingQuery extends Schema.Schema.Type<typeof OrchestratorPendingQuery> {}
 

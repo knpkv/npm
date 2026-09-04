@@ -8,24 +8,56 @@ Each `WorkGoalCheckpoint` stores a complete, Schema-decoded goal state at its ex
 
 `WorkStore` persists events in SQLite. Recording the exact same checkpoint again is an idempotent replay; reusing an event ID or goal timestamp with changed content returns `WorkCheckpointConflictError`. `makeWorkService` is the small runtime interface for recording checkpoints, reading the current durable lane claim, and reading all four snapshots. An unknown lane returns `Option.none()`; a stored claim is Schema-decoded and its revision is checked against the durable row.
 
+The store preserves safe caller-owned state-directory modes, but rejects
+group- or world-writable POSIX directories and substituted database paths before
+opening the authority database.
+
 `WorkStore.appendMany` validates a whole checkpoint batch before one SQLite
 transaction. Reusing its transaction ID with the same batch replays it. A
 changed event with an existing event ID or goal/timestamp returns
 `WorkCheckpointConflictError`; a different batch that passes those checkpoint
 identity checks returns `WorkTransactionConflictError`. `claim` is a durable
 compare-and-set lane claim containing the canonical worktree, branch, exact
-head, owner, parent, phase, and expected revision. `handoff` stores a compact,
-credential-free decision record for later recovery under a 16,384-row and
-2 MiB encoded-byte ledger. Replay aliases retain fixed-size canonical SHA-256
+head, owner, parent, phase, authoritative goal ID, operation ID, and expected
+revision. The operation ID replays only its exact committed claim; changed
+content conflicts. Its replay ledger is bounded to 16,384 operations and 2 MiB
+of encoded records while retaining accepted operation identities. A partial
+unique index transactionally permits only one non-shipped lane per goal.
+`activeGoalClaim` reads that authority directly.
+
+`bindAgent` is the replay-safe worker-start operation. Its typed request is
+keyed by dispatch request ID and carries the exact lane plus expected revision.
+One SQLite transaction compare-and-sets that lane, stores the full
+`AgentWorkerIdentity`, derives the canonical `AgentConnectTarget`, and appends
+the matching goal checkpoint. Exact replay returns the original binding after
+restart; changed worker content returns `WorkAgentBindingConflictError`.
+Missing, stale, shipped, or terminal goal authority fails without a partial
+lane, checkpoint, or binding write.
+
+`handoff` stores a compact, credential-free decision record keyed by coordinator
+session ID for later recovery under a 16,384-row and 2 MiB encoded-byte ledger.
+It includes the active goal and lane, dispatch IDs, blocker details, and evidence
+references. A new handoff requires the same active, non-shipped lane and
+authoritative goal; exact replay remains available after that lane advances.
+Changed content for the same session
+conflicts, and `coordinatorHandoff` proves restart readback without retaining an
+unbounded transcript. Replay aliases retain fixed-size canonical SHA-256
 identities under a bounded ledger, and lane claims validate Git branch refs
 before persisting their authority.
 
-`makeWorkSqlBridge` provides the package-owned dispatch binding used by a
-coordinator's SQL transaction. It inserts the decoded Work handoff and its
+`makeSqliteWorkBridge`, exported from the headless `@knpkv/herdr-work/sql`
+subpath, provides the SQLite-specific dispatch binding used by a coordinator's
+transaction. It inserts the decoded Work handoff and its
 bounded dispatch lineage together, and verifies exact replay without repairing
-an incomplete dispatch. The coordinator must call it inside the same
+an incomplete dispatch, including the referenced decision row. Every lineage
+request must appear in the handoff's dispatch IDs. New bindings
+require the handoff's active, non-shipped lane and authoritative goal; exact
+binding replay remains available after the lane advances. The coordinator must call it inside the same
 transaction as acceptance; `WorkStore.decisions` then recovers the handoff from
 the same database. Provider credentials and private locators are excluded.
+The same bridge exposes the transaction-owned agent-binding primitive used by
+the coordinator's durable `workerStarted` boundary; callers cannot repair a
+previously partial activation during replay.
 
 `WorkBoard` renders these persisted outbound-link forms:
 
