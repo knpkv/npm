@@ -22,7 +22,6 @@ import {
   OrchestratorEventDetail,
   OrchestratorIdempotencyKey,
   OrchestratorPendingDispatch,
-  OrchestratorPendingDispatchStatus,
   OrchestratorPendingQuery,
   OrchestratorReceipt,
   type OrchestratorReceipt as OrchestratorReceiptType,
@@ -47,6 +46,21 @@ const EventRow = Schema.Struct({
   result: Schema.NullOr(Schema.String)
 })
 type EventRow = typeof EventRow.Type
+const LifecycleRow = Schema.Struct({
+  activityIdempotencyKey: Schema.String,
+  dispatchRequestId: Schema.String,
+  idempotencyKey: Schema.String,
+  command: Schema.String,
+  acceptedAt: Schema.Number,
+  status: Schema.String,
+  sequence: Schema.NullOr(Schema.Number),
+  type: Schema.NullOr(Schema.String),
+  eventActivityIdempotencyKey: Schema.NullOr(Schema.String),
+  occurredAt: Schema.NullOr(Schema.Number),
+  detail: Schema.NullOr(Schema.String),
+  result: Schema.NullOr(Schema.String)
+})
+type LifecycleRow = typeof LifecycleRow.Type
 const RecoveryRow = Schema.Struct({
   dispatchRequestId: DispatchRequestId,
   acceptedAt: Schema.Number
@@ -350,8 +364,63 @@ const makeOrchestrator: Effect.Effect<
   })
 
   const loadValidatedEvents = Effect.fn("Orchestrator.loadValidatedEvents")(function*(dispatchRequestId: string) {
-    const dispatch = yield* load(dispatchRequestId)
-    const events = yield* listEvents(dispatchRequestId)
+    const decodedDispatchRequestId = yield* Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" }))
+    )
+    const rows = yield* sql`
+      SELECT d.dispatch_request_id AS "dispatchRequestId", d.idempotency_key AS "idempotencyKey",
+        d.activity_idempotency_key AS "activityIdempotencyKey", d.command,
+        d.accepted_at AS "acceptedAt", d.status,
+        e.sequence, e.type, e.activity_idempotency_key AS "eventActivityIdempotencyKey",
+        e.occurred_at AS "occurredAt", e.detail, e.result
+      FROM orchestrator_dispatches d
+      LEFT JOIN orchestrator_events e
+        ON e.dispatch_request_id = d.dispatch_request_id
+      WHERE d.dispatch_request_id = ${decodedDispatchRequestId}
+      ORDER BY e.sequence ASC
+    `.pipe(Effect.mapError(storageError("events.snapshot")))
+    const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(LifecycleRow))(rows).pipe(
+      Effect.mapError(storageError("events.decode-snapshot"))
+    )
+    const first = decodedRows[0]
+    if (first === undefined) {
+      return yield* new OrchestratorNotFoundError({ dispatchRequestId: decodedDispatchRequestId })
+    }
+    const status = yield* Schema.decodeUnknownEffect(currentStatus)(first.status).pipe(
+      Effect.mapError(() => new OrchestratorStorageError({ cause: first.status, operation: "decode.dispatch.status" }))
+    )
+    const dispatch: DispatchRow = {
+      activityIdempotencyKey: first.activityIdempotencyKey,
+      acceptedAt: first.acceptedAt,
+      command: first.command,
+      dispatchRequestId: first.dispatchRequestId,
+      idempotencyKey: first.idempotencyKey,
+      status
+    }
+    const events = yield* Effect.gen(function*() {
+      const eventRows: Array<EventRow> = []
+      for (const row of decodedRows) {
+        const hasEvent = row.sequence !== null || row.type !== null || row.eventActivityIdempotencyKey !== null ||
+          row.occurredAt !== null
+        if (!hasEvent) continue
+        if (
+          row.sequence === null || row.type === null || row.eventActivityIdempotencyKey === null ||
+          row.occurredAt === null
+        ) {
+          return yield* new OrchestratorStorageError({ cause: row, operation: "events.snapshot-row-mismatch" })
+        }
+        eventRows.push({
+          activityIdempotencyKey: row.eventActivityIdempotencyKey,
+          detail: row.detail,
+          dispatchRequestId: row.dispatchRequestId,
+          occurredAt: row.occurredAt,
+          result: row.result,
+          sequence: row.sequence,
+          type: row.type
+        })
+      }
+      return yield* Effect.forEach(eventRows, decodeEvent)
+    })
     yield* validateLifecycleChain(dispatch, events)
     const last = events.at(-1)
     if (last === undefined || last.type !== dispatch.status) {
@@ -360,7 +429,7 @@ const makeOrchestrator: Effect.Effect<
         operation: "events.status-event-mismatch"
       })
     }
-    return events
+    return { dispatch, events }
   })
 
   const listPending = Effect.fn("Orchestrator.listPending")(
@@ -394,19 +463,25 @@ const makeOrchestrator: Effect.Effect<
       const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
         Effect.mapError(storageError("pending.decode-row"))
       )
-      return yield* Effect.forEach(decodedRows, (row) =>
+      const pending = yield* Effect.forEach(decodedRows, (row) =>
         Effect.gen(function*() {
-          yield* loadValidatedEvents(row.dispatchRequestId)
-          const status = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatchStatus)(row.status).pipe(
-            Effect.mapError(() =>
-              new OrchestratorStorageError({ cause: row.status, operation: "pending.decode-status" })
-            )
-          )
-          const command = yield* decodeCommand(row.command)
-          return yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({ ...row, command, status }).pipe(
+          const snapshot = yield* loadValidatedEvents(row.dispatchRequestId)
+          if (snapshot.dispatch.status !== "accepted" && snapshot.dispatch.status !== "queued") return Option.none()
+          const command = yield* decodeCommand(snapshot.dispatch.command)
+          const pendingDispatch = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({
+            ...snapshot.dispatch,
+            command
+          }).pipe(
             Effect.mapError(storageError("pending.decode"))
           )
+          return Option.some(pendingDispatch)
         }))
+      return pending.flatMap((value) =>
+        Option.match(value, {
+          onNone: () => [],
+          onSome: (pendingDispatch) => [pendingDispatch]
+        })
+      )
     }
   )
 
@@ -473,12 +548,43 @@ const makeOrchestrator: Effect.Effect<
             ? { detail: decodedDetail, result: null }
             : { detail: null, result: null })
         }).pipe(Effect.mapError(() => new OrchestratorValidationError({ detail: "transition exceeds event bounds" })))
-        yield* sql`
+        const insertedRows = yield* sql`
           INSERT INTO orchestrator_events
             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
           VALUES (${event.dispatchRequestId}, ${event.sequence}, ${event.type},
             ${event.activityIdempotencyKey}, ${event.occurredAt}, ${event.detail}, ${event.result})
+          ON CONFLICT (dispatch_request_id, sequence) DO NOTHING
+          RETURNING dispatch_request_id AS "dispatchRequestId", sequence, type,
+            activity_idempotency_key AS "activityIdempotencyKey", occurred_at AS "occurredAt", detail, result
         `.pipe(Effect.mapError(storageError("transition.insert-event")))
+        if (insertedRows.length === 0) {
+          const winnerRows = yield* sql`
+            SELECT dispatch_request_id AS "dispatchRequestId", sequence, type,
+              activity_idempotency_key AS "activityIdempotencyKey", occurred_at AS "occurredAt", detail, result
+            FROM orchestrator_events
+            WHERE dispatch_request_id = ${event.dispatchRequestId} AND sequence = ${event.sequence}
+          `.pipe(Effect.mapError(storageError("transition.reload-event")))
+          const winner = yield* Schema.decodeUnknownEffect(Schema.Array(EventRow))(winnerRows).pipe(
+            Effect.mapError(storageError("transition.decode-winner")),
+            Effect.flatMap((rows) => {
+              const first = rows[0]
+              return first === undefined
+                ? Effect.fail(new OrchestratorStorageError({ cause: event, operation: "transition.missing-winner" }))
+                : decodeEvent(first)
+            })
+          )
+          if (winner.dispatchRequestId === event.dispatchRequestId && winner.type !== "accepted") {
+            return yield* new OrchestratorTransitionError({
+              dispatchRequestId: decodedDispatchRequestId,
+              from: winner.type,
+              to: decodedTarget
+            })
+          }
+          return yield* new OrchestratorStorageError({
+            cause: { event, winner },
+            operation: "transition.concurrent-event-mismatch"
+          })
+        }
         yield* sql`
           UPDATE orchestrator_dispatches SET status = ${event.type}
           WHERE dispatch_request_id = ${decodedDispatchRequestId}
@@ -627,7 +733,8 @@ const makeOrchestrator: Effect.Effect<
       Stream.fromIterableEffect(
         Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
           Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" })),
-          Effect.flatMap(loadValidatedEvents)
+          Effect.flatMap(loadValidatedEvents),
+          Effect.map(({ events }) => events)
         )
       ),
     failDelivery: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "delivery_failed", detail, null),

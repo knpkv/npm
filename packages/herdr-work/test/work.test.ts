@@ -27,6 +27,20 @@ import {
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
+const openScopedStore = (path: string) =>
+  Effect.gen(function*() {
+    const store = yield* WorkStore.open(path)
+    let open = true
+    const close = () => {
+      if (open) {
+        open = false
+        store.close()
+      }
+    }
+    yield* Effect.addFinalizer(() => Effect.sync(close))
+    return { close, store }
+  })
+
 class LockHolderError extends Schema.TaggedError<LockHolderError>()(
   "LockHolderError",
   { cause: Schema.String }
@@ -496,13 +510,13 @@ describe("durable Work projection", () => {
       completeStore.close()
     }).pipe(provideNodeServices))
 
-  it.effect("revalidates legacy compact transaction denormalized identities", () =>
+  it.effect("fails closed on legacy compact transaction denormalized identities", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-compact-transaction-"))
       yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
       const path = join(directory, "work.sqlite")
-      const store = yield* WorkStore.open(path)
-      store.close()
+      const initial = yield* openScopedStore(path)
+      initial.close()
 
       const legacyEvents = history.slice(0, 2)
       const secondEvent = legacyEvents[1]
@@ -536,13 +550,13 @@ describe("durable Work projection", () => {
       ).run("goal-denormalized-drift", 99, secondEvent.eventId)
       database.close()
 
-      const corruptedStore = yield* WorkStore.open(path)
-      const corruptedService = yield* makeWorkService(corruptedStore)
+      const corrupted = yield* openScopedStore(path)
+      const corruptedService = yield* makeWorkService(corrupted.store)
       expect(yield* Effect.result(corruptedService.recordMany("transaction-legacy-compact", legacyEvents)))
         .toMatchObject({
           failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy-compact" }
         })
-      corruptedStore.close()
+      corrupted.close()
 
       const restored = new DatabaseSync(path)
       restored.prepare(
@@ -550,10 +564,13 @@ describe("durable Work projection", () => {
       ).run(secondEvent.goal.id, secondEvent.occurredAt, secondEvent.eventId)
       restored.close()
 
-      const completeStore = yield* WorkStore.open(path)
-      const completeService = yield* makeWorkService(completeStore)
-      expect(yield* completeService.recordMany("transaction-legacy-compact", legacyEvents)).toEqual(legacyEvents)
-      completeStore.close()
+      const complete = yield* openScopedStore(path)
+      const completeService = yield* makeWorkService(complete.store)
+      expect(yield* Effect.result(completeService.recordMany("transaction-legacy-compact", legacyEvents)))
+        .toMatchObject({
+          failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy-compact" }
+        })
+      complete.close()
     }).pipe(provideNodeServices))
 
   it.effect("revalidates compact transaction denormalized identities", () =>
@@ -564,10 +581,40 @@ describe("durable Work projection", () => {
       const events = history.slice(0, 2)
       const secondEvent = events[1]
       if (secondEvent === undefined) return yield* Effect.die("compact transaction fixture missing its second event")
-      const store = yield* WorkStore.open(path)
-      const service = yield* makeWorkService(store)
+      const opened = yield* openScopedStore(path)
+      const service = yield* makeWorkService(opened.store)
       expect(yield* service.recordMany("transaction-compact", events)).toEqual(events)
-      store.close()
+
+      const changedEventId = { ...secondEvent, eventId: "event-compact-existing-goal-time" }
+      const collisionReplay = yield* Effect.result(
+        service.recordMany("transaction-compact", [events[0], changedEventId])
+      )
+      expect(collisionReplay).toMatchObject({ failure: { _tag: "WorkCheckpointConflictError" } })
+      opened.close()
+
+      const recordDrift = new DatabaseSync(path)
+      const changedRecord = {
+        ...secondEvent,
+        goal: { ...secondEvent.goal, summary: "Changed persisted checkpoint content" }
+      }
+      recordDrift.prepare(
+        "UPDATE work_goal_events SET record = ? WHERE event_id = ?"
+      ).run(JSON.stringify(changedRecord), secondEvent.eventId)
+      recordDrift.close()
+
+      const recordDriftStore = yield* openScopedStore(path)
+      const recordDriftService = yield* makeWorkService(recordDriftStore.store)
+      expect(yield* Effect.result(recordDriftService.recordMany("transaction-compact", [events[0], changedRecord])))
+        .toMatchObject({
+          failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact" }
+        })
+      recordDriftStore.close()
+
+      const recordRestored = new DatabaseSync(path)
+      recordRestored.prepare(
+        "UPDATE work_goal_events SET record = ? WHERE event_id = ?"
+      ).run(JSON.stringify(secondEvent), secondEvent.eventId)
+      recordRestored.close()
 
       const database = new DatabaseSync(path)
       database.prepare(
@@ -575,12 +622,12 @@ describe("durable Work projection", () => {
       ).run("goal-denormalized-drift", 99, secondEvent.eventId)
       database.close()
 
-      const corruptedStore = yield* WorkStore.open(path)
-      const corruptedService = yield* makeWorkService(corruptedStore)
+      const corrupted = yield* openScopedStore(path)
+      const corruptedService = yield* makeWorkService(corrupted.store)
       expect(yield* Effect.result(corruptedService.recordMany("transaction-compact", events))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact" }
       })
-      corruptedStore.close()
+      corrupted.close()
 
       const restored = new DatabaseSync(path)
       restored.prepare(
@@ -588,25 +635,25 @@ describe("durable Work projection", () => {
       ).run(secondEvent.goal.id, secondEvent.occurredAt, secondEvent.eventId)
       restored.close()
 
-      const completeStore = yield* WorkStore.open(path)
-      const completeService = yield* makeWorkService(completeStore)
+      const complete = yield* openScopedStore(path)
+      const completeService = yield* makeWorkService(complete.store)
       expect(yield* completeService.recordMany("transaction-compact", events)).toEqual(events)
 
-      completeStore.close()
-      const aliasCorrupted = new DatabaseSync(path)
-      aliasCorrupted.prepare(
+      complete.close()
+      const aliasDatabase = new DatabaseSync(path)
+      aliasDatabase.prepare(
         "UPDATE work_goal_events SET goal_id = ? WHERE event_id = ?"
       ).run("goal-denormalized-drift", secondEvent.eventId)
-      aliasCorrupted.close()
+      aliasDatabase.close()
 
-      const aliasCorruptedStore = yield* WorkStore.open(path)
-      const aliasCorruptedService = yield* makeWorkService(aliasCorruptedStore)
+      const aliasCorrupted = yield* openScopedStore(path)
+      const aliasCorruptedService = yield* makeWorkService(aliasCorrupted.store)
       expect(yield* Effect.result(aliasCorruptedService.recordMany("transaction-compact-alias", events))).toMatchObject(
         {
           failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact-alias" }
         }
       )
-      aliasCorruptedStore.close()
+      aliasCorrupted.close()
       const aliasLedger = new DatabaseSync(path)
       expect(
         aliasLedger.prepare(
@@ -621,18 +668,18 @@ describe("durable Work projection", () => {
       ).run(secondEvent.goal.id, secondEvent.eventId)
       aliasRestored.close()
 
-      const eventIdDrift = new DatabaseSync(path)
-      eventIdDrift.prepare(
+      const eventIdDatabase = new DatabaseSync(path)
+      eventIdDatabase.prepare(
         "UPDATE work_goal_events SET event_id = ? WHERE event_id = ?"
       ).run("event-denormalized-drift", secondEvent.eventId)
-      eventIdDrift.close()
+      eventIdDatabase.close()
 
-      const eventIdDriftStore = yield* WorkStore.open(path)
-      const eventIdDriftService = yield* makeWorkService(eventIdDriftStore)
+      const eventIdDrift = yield* openScopedStore(path)
+      const eventIdDriftService = yield* makeWorkService(eventIdDrift.store)
       expect(yield* Effect.result(eventIdDriftService.recordMany("transaction-compact", events))).toMatchObject({
         failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact" }
       })
-      eventIdDriftStore.close()
+      eventIdDrift.close()
 
       const eventIdRestored = new DatabaseSync(path)
       eventIdRestored.prepare(

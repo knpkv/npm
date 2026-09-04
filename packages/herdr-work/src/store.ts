@@ -46,6 +46,10 @@ const LegacyCompactTransactionRecord = Schema.Struct({
 })
 const CompactTransactionRecord = Schema.Struct({
   digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
+  version: Schema.Literal("herdr.work.transaction.v3")
+})
+const PreviousCompactTransactionRecord = Schema.Struct({
+  digest: Schema.String.check(Schema.isPattern(/^[a-f0-9]{64}$/)),
   version: Schema.Literal("herdr.work.transaction.v2")
 })
 const LaneRow = Schema.Struct({ record: Schema.String, revision: Schema.Number })
@@ -164,8 +168,7 @@ const maximumSnapshotBytes = (
   candidate: WorkGoalCheckpointType
 ): number => makeSnapshotByteAccumulator(history).add(candidate)
 
-const transactionIdentity = (events: ReadonlyArray<WorkGoalCheckpointType>) =>
-  events.map(({ eventId, goal, occurredAt }) => ({ eventId, goalId: goal.id, occurredAt }))
+const transactionContent = (events: ReadonlyArray<WorkGoalCheckpointType>) => JSON.stringify(events)
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
   Schema.decodeUnknownEffect(StoredEventRow)(row).pipe(
@@ -488,12 +491,12 @@ export class WorkStore implements WorkStoreService {
     }
     const digest = yield* this.#cryptoService.digest(
       "SHA-256",
-      new TextEncoder().encode(JSON.stringify(transactionIdentity(decoded)))
+      new TextEncoder().encode(transactionContent(decoded))
     ).pipe(
       Effect.mapError(storeError("appendMany.digest")),
       Effect.map(Encoding.encodeHex)
     )
-    const transactionRecord = JSON.stringify({ digest, version: "herdr.work.transaction.v2" })
+    const transactionRecord = JSON.stringify({ digest, version: "herdr.work.transaction.v3" })
     const transactionEntryBytes = utf8.encode(transaction).byteLength + utf8.encode(transactionRecord).byteLength
     yield* this.secureFiles()
     const decision = yield* Effect.try({
@@ -507,6 +510,7 @@ export class WorkStore implements WorkStoreService {
           ).get(transaction)
           let compactTransaction: typeof CompactTransactionRecord.Type | undefined
           let legacyCompactTransaction: typeof LegacyCompactTransactionRecord.Type | undefined
+          let unsupportedCompactTransaction = false
           let legacyTransaction: ReadonlyArray<WorkGoalCheckpointType> | undefined
           if (storedTransaction !== undefined) {
             const stored = Schema.decodeUnknownSync(TransactionRow)(storedTransaction)
@@ -518,8 +522,14 @@ export class WorkStore implements WorkStoreService {
               const legacyCompact = Schema.decodeUnknownResult(LegacyCompactTransactionRecord)(previous)
               if (legacyCompact._tag === "Success") {
                 legacyCompactTransaction = legacyCompact.success
+                unsupportedCompactTransaction = true
               } else {
-                legacyTransaction = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
+                const previousCompact = Schema.decodeUnknownResult(PreviousCompactTransactionRecord)(previous)
+                if (previousCompact._tag === "Success") {
+                  unsupportedCompactTransaction = true
+                } else {
+                  legacyTransaction = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
+                }
               }
             }
           }
@@ -561,42 +571,6 @@ export class WorkStore implements WorkStoreService {
             row
           }))
           const decodedEventsByEventId = new Map(decodedRows.map(({ event, row }) => [row.eventId, event]))
-          if (compactTransaction !== undefined) {
-            const denormalizedMismatch = decoded.some((event) => {
-              const row = rowsByEventId.get(event.eventId) ??
-                rowsByGoalTime.get(JSON.stringify([event.goal.id, event.occurredAt]))
-              return row === undefined ||
-                row.eventId !== event.eventId ||
-                row.goalId !== event.goal.id ||
-                row.occurredAt !== event.occurredAt
-            })
-            if (denormalizedMismatch) {
-              this.#database.exec("ROLLBACK")
-              inTransaction = false
-              return {
-                _tag: "rejected",
-                error: new WorkTransactionConflictError({ transactionId: transaction })
-              } satisfies AppendManyDecision
-            }
-          }
-          if (legacyCompactTransaction !== undefined) {
-            const denormalizedMismatch = legacyCompactTransaction.events.some((identity, index) => {
-              const event = decoded[index]
-              const row = rowsByEventId.get(identity.eventId)
-              return row === undefined ||
-                event === undefined ||
-                row.goalId !== event.goal.id ||
-                row.occurredAt !== event.occurredAt
-            })
-            if (denormalizedMismatch) {
-              this.#database.exec("ROLLBACK")
-              inTransaction = false
-              return {
-                _tag: "rejected",
-                error: new WorkTransactionConflictError({ transactionId: transaction })
-              } satisfies AppendManyDecision
-            }
-          }
           if (legacyTransaction !== undefined) {
             const legacyRows = legacyTransaction.map((event) => rowsByEventId.get(event.eventId))
             if (
@@ -665,10 +639,54 @@ export class WorkStore implements WorkStoreService {
               })
             } satisfies AppendManyDecision
           }
+          if (compactTransaction !== undefined) {
+            const denormalizedMismatch = decoded.some((event) => {
+              const row = rowsByEventId.get(event.eventId) ??
+                rowsByGoalTime.get(JSON.stringify([event.goal.id, event.occurredAt]))
+              return row === undefined ||
+                row.eventId !== event.eventId ||
+                row.goalId !== event.goal.id ||
+                row.occurredAt !== event.occurredAt
+            })
+            if (denormalizedMismatch) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkTransactionConflictError({ transactionId: transaction })
+              } satisfies AppendManyDecision
+            }
+          }
+          if (legacyCompactTransaction !== undefined) {
+            const denormalizedMismatch = legacyCompactTransaction.events.some((identity, index) => {
+              const event = decoded[index]
+              const row = rowsByEventId.get(identity.eventId)
+              return row === undefined ||
+                event === undefined ||
+                row.goalId !== event.goal.id ||
+                row.occurredAt !== event.occurredAt
+            })
+            if (denormalizedMismatch) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkTransactionConflictError({ transactionId: transaction })
+              } satisfies AppendManyDecision
+            }
+          }
           const corruptedRow = decodedRows.find(({ event, row }) =>
             row.eventId !== event.eventId || row.goalId !== event.goal.id || row.occurredAt !== event.occurredAt
           )
           if (corruptedRow !== undefined) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkTransactionConflictError({ transactionId: transaction })
+            } satisfies AppendManyDecision
+          }
+          if (unsupportedCompactTransaction) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return {
@@ -686,7 +704,7 @@ export class WorkStore implements WorkStoreService {
           }
           const newEvents = decoded.filter((_, index) => existing[index] === undefined)
           if (
-            (compactTransaction !== undefined || legacyCompactTransaction !== undefined) &&
+            compactTransaction !== undefined &&
             newEvents.length !== 0
           ) {
             this.#database.exec("ROLLBACK")
@@ -721,21 +739,6 @@ export class WorkStore implements WorkStoreService {
           if (newEvents.length === 0) {
             if (compactTransaction !== undefined) {
               if (compactTransaction.digest !== digest) {
-                this.#database.exec("ROLLBACK")
-                inTransaction = false
-                return {
-                  _tag: "rejected",
-                  error: new WorkTransactionConflictError({ transactionId: transaction })
-                } satisfies AppendManyDecision
-              }
-              this.#database.exec("ROLLBACK")
-              inTransaction = false
-              return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
-            }
-            if (legacyCompactTransaction !== undefined) {
-              const expected = legacyCompactTransaction.events
-              const actual = transactionIdentity(decoded)
-              if (!Equal.equals(expected, actual)) {
                 this.#database.exec("ROLLBACK")
                 inTransaction = false
                 return {
