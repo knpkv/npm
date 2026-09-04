@@ -162,7 +162,7 @@ const history = [
 ]
 
 describe("durable Work projection", () => {
-  it.effect("secures a pre-existing state directory before opening SQLite", () => {
+  it.effect("does not mutate a caller-owned state directory", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-work-mode-test-"))
     const stateDirectory = join(root, "state")
     mkdirSync(stateDirectory, { mode: 0o755 })
@@ -170,9 +170,7 @@ describe("durable Work projection", () => {
       WorkStore.open(join(stateDirectory, "work.sqlite")),
       () =>
         Effect.sync(() => {
-          if (platform() !== "win32") {
-            expect(statSync(stateDirectory).mode & 0o777).toBe(0o700)
-          }
+          if (platform() !== "win32") expect(statSync(stateDirectory).mode & 0o777).toBe(0o755)
         }),
       (store) =>
         Effect.sync(() => {
@@ -834,6 +832,21 @@ describe("durable Work projection", () => {
       for (const worktree of ["C:\\repo\\worktree", "C:/repo/worktree"]) {
         expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree })).toMatchObject({ worktree })
       }
+      for (
+        const worktree of [
+          "C:\\repo\\bad*name",
+          "C:\\repo\\bad?name",
+          "C:\\repo\\bad.",
+          "C:\\repo\\bad "
+        ]
+      ) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
+          failure: {}
+        })
+      }
+      expect(
+        yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree: "/repo/bad*name" })
+      ).toMatchObject({ worktree: "/repo/bad*name" })
       for (const worktree of ["C:\\repo\\..\\other", "C:/repo/../other"]) {
         expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
           failure: {}

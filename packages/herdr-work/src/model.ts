@@ -256,7 +256,13 @@ const CanonicalWorktree = Schema.String.check(
       if (!isPosix && !isWindows) return false
       const separator = isPosix || value.includes("/") ? "/" : "\\"
       const parts = value.split(separator)
-      return parts.slice(1).every((part) => part.length > 0 && part !== "." && part !== "..")
+      return parts.slice(1).every(
+        (part) =>
+          part.length > 0 &&
+          part !== "." &&
+          part !== ".." &&
+          (!isWindows || (!/[<>:"|?*]/.test(part) && !/[. ]$/.test(part)))
+      )
     },
     { expected: "an absolute canonical worktree path" }
   )

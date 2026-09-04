@@ -280,12 +280,17 @@ export class WorkStore implements WorkStoreService {
     const fileSystem = yield* FileSystem.FileSystem
     const paths = yield* Path.Path
     const directory = paths.dirname(path)
+    const directoryExists = yield* fileSystem.exists(directory).pipe(
+      Effect.mapError(storeError("open.directory.exists"))
+    )
     yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
       Effect.mapError(storeError("open.directory"))
     )
-    yield* fileSystem.chmod(directory, 0o700).pipe(
-      Effect.mapError(storeError("open.secureDirectory"))
-    )
+    if (!directoryExists) {
+      yield* fileSystem.chmod(directory, 0o700).pipe(
+        Effect.mapError(storeError("open.secureDirectory"))
+      )
+    }
     const store = yield* Effect.try({
       try: () => new WorkStore(path, fileSystem, cryptoService),
       catch: storeError("open.database")

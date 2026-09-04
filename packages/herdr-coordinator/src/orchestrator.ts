@@ -440,6 +440,12 @@ const makeOrchestrator: Effect.Effect<
           })
         }
         const timestamp = yield* now
+        if (timestamp < last.occurredAt) {
+          return yield* new OrchestratorStorageError({
+            cause: { dispatchRequestId: decodedDispatchRequestId, previous: last.occurredAt, timestamp },
+            operation: "transition.timestamp-regression"
+          })
+        }
         const event = yield* Schema.decodeUnknownEffect(OrchestratorEvent)({
           activityIdempotencyKey: last.activityIdempotencyKey,
           dispatchRequestId: decodedDispatchRequestId,
@@ -486,17 +492,44 @@ const makeOrchestrator: Effect.Effect<
     yield* secureFiles
     const receipt = yield* sql.withTransaction(
       Effect.gen(function*() {
-        const existingRows = yield* sql`
-          SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
+        const dispatchRequestId = yield* cryptoService.randomUUIDv4.pipe(
+          Effect.mapError(storageError("submit.request-id")),
+          Effect.flatMap((value) =>
+            Schema.decodeUnknownEffect(DispatchRequestId)(value).pipe(
+              Effect.mapError(() =>
+                new OrchestratorStorageError({ cause: value, operation: "submit.request-id-schema" })
+              )
+            )
+          )
+        )
+        const acceptedAt = yield* now
+        const persistedRows = yield* sql`
+          INSERT INTO orchestrator_dispatches
+            (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+          VALUES (${dispatchRequestId}, ${decodedKey}, ${decodedCommand.activityIdempotencyKey},
+            ${encodedCommand}, ${acceptedAt}, 'accepted')
+          ON CONFLICT DO UPDATE SET idempotency_key = orchestrator_dispatches.idempotency_key
+          RETURNING dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
             activity_idempotency_key AS "activityIdempotencyKey", command,
             accepted_at AS "acceptedAt", status
-          FROM orchestrator_dispatches WHERE idempotency_key = ${decodedKey}
-        `.pipe(Effect.mapError(storageError("submit.lookup")))
-        const existing = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(existingRows).pipe(
-          Effect.mapError(storageError("submit.decode-existing"))
+        `.pipe(Effect.mapError(storageError("submit.insert-or-reload")))
+        const persisted = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(persistedRows).pipe(
+          Effect.mapError(storageError("submit.decode-persisted"))
         )
-        const first = existing[0]
-        if (first !== undefined) {
+        const first = persisted[0]
+        if (first === undefined) {
+          return yield* new OrchestratorStorageError({
+            cause: { dispatchRequestId, idempotencyKey: decodedKey },
+            operation: "submit.insert-or-reload-empty"
+          })
+        }
+        if (first.dispatchRequestId !== dispatchRequestId && first.idempotencyKey !== decodedKey) {
+          return yield* new OrchestratorConflictError({
+            detail: "activity idempotency key was already used",
+            idempotencyKey: decodedKey
+          })
+        }
+        if (first.dispatchRequestId !== dispatchRequestId) {
           const oldCommand = yield* decodeCommand(first.command)
           if (!Equal.equals(oldCommand, decodedCommand)) {
             return yield* new OrchestratorConflictError({
@@ -536,33 +569,6 @@ const makeOrchestrator: Effect.Effect<
             status: "accepted"
           }).pipe(Effect.mapError(storageError("submit.decode-receipt")))
         }
-        const activityRows = yield* sql`
-          SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
-            activity_idempotency_key AS "activityIdempotencyKey", command,
-            accepted_at AS "acceptedAt", status
-          FROM orchestrator_dispatches
-          WHERE activity_idempotency_key = ${decodedCommand.activityIdempotencyKey}
-        `.pipe(Effect.mapError(storageError("submit.lookup-activity")))
-        const activity = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(activityRows).pipe(
-          Effect.mapError(storageError("submit.decode-activity"))
-        )
-        if (activity.length > 0) {
-          return yield* new OrchestratorConflictError({
-            detail: "activity idempotency key was already used",
-            idempotencyKey: decodedKey
-          })
-        }
-        const dispatchRequestId = yield* cryptoService.randomUUIDv4.pipe(
-          Effect.mapError(storageError("submit.request-id")),
-          Effect.flatMap((value) =>
-            Schema.decodeUnknownEffect(DispatchRequestId)(value).pipe(
-              Effect.mapError(() =>
-                new OrchestratorStorageError({ cause: value, operation: "submit.request-id-schema" })
-              )
-            )
-          )
-        )
-        const acceptedAt = yield* now
         const event = {
           activityIdempotencyKey: decodedCommand.activityIdempotencyKey,
           detail: null,
@@ -572,12 +578,6 @@ const makeOrchestrator: Effect.Effect<
           sequence: 0,
           type: "accepted"
         } satisfies OrchestratorEventType
-        yield* sql`
-          INSERT INTO orchestrator_dispatches
-            (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
-          VALUES (${dispatchRequestId}, ${decodedKey}, ${event.activityIdempotencyKey},
-            ${encodedCommand}, ${acceptedAt}, ${event.type})
-        `.pipe(Effect.mapError(storageError("submit.insert-dispatch")))
         yield* sql`
           INSERT INTO orchestrator_events
             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)

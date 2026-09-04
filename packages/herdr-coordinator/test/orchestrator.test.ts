@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
+import { TestClock } from "effect/testing"
 import { ClusterSchema, Entity, MessageStorage, RunnerAddress, SingleRunner } from "effect/unstable/cluster"
 import { Rpc } from "effect/unstable/rpc"
 import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
@@ -90,6 +91,55 @@ describe("durable coordinator orchestrator", () => {
         })
       ))
   })
+
+  it.effect("converges concurrent identical submissions on one durable receipt", () =>
+    withTemporaryRoot("herdr-orchestrator-concurrent-submit-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = withDatabase(
+        path,
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          return yield* orchestrator.submit(
+            { ...command, activityIdempotencyKey: "activity:concurrent-submit" },
+            "dispatch:concurrent-submit"
+          )
+        })
+      )
+      return Effect.gen(function*() {
+        yield* withDatabase(path, Effect.void)
+        const receipts = yield* Effect.all([submission, submission], { concurrency: 2 })
+        expect(receipts[0]).toEqual(receipts[1])
+
+        const database = new DatabaseSync(path)
+        const dispatchCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
+        const eventCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_events").get()
+        database.close()
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(dispatchCount).count).toBe(1)
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(eventCount).count).toBe(1)
+      })
+    }))
+
+  it.effect("rejects a backward transition timestamp before mutation", () =>
+    withTemporaryRoot("herdr-orchestrator-timestamp-regression-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          yield* TestClock.setTime(100)
+          const orchestrator = yield* Orchestrator
+          const receipt = yield* orchestrator.submit(
+            { ...command, activityIdempotencyKey: "activity:timestamp-regression" },
+            "dispatch:timestamp-regression"
+          )
+          yield* TestClock.setTime(200)
+          yield* orchestrator.queue(receipt.dispatchRequestId)
+          yield* TestClock.setTime(199)
+          const result = yield* Effect.result(orchestrator.run(receipt.dispatchRequestId))
+          expect(result).toMatchObject({
+            failure: { _tag: "OrchestratorStorageError", operation: "transition.timestamp-regression" }
+          })
+          expect(yield* Stream.runCollect(orchestrator.events(receipt.dispatchRequestId))).toHaveLength(2)
+        })
+      )))
 
   it.effect("rejects dispatch status and event mismatches before transition", () =>
     withTemporaryRoot("herdr-orchestrator-status-mismatch-", (root) => {
@@ -596,6 +646,7 @@ describe("durable coordinator orchestrator", () => {
         database.exec("COMMIT")
         database.close()
 
+        yield* TestClock.setTime(total)
         const recovered = yield* withDatabase(
           path,
           Effect.gen(function*() {
