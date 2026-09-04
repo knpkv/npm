@@ -291,6 +291,21 @@ describe("durable Work projection", () => {
           agentHierarchy: { agent: startedWorker },
           updatedAt: binding.checkpoint.occurredAt
         })
+        const future = {
+          ...binding.checkpoint,
+          eventId: "event:caller-future",
+          goal: {
+            ...binding.checkpoint.goal,
+            summary: "Caller-authored future state",
+            updatedAt: day
+          },
+          occurredAt: day
+        }
+        yield* service.record(future)
+        const currentSnapshot = yield* service.snapshots()
+        expect(currentSnapshot.observedAt).toBe(binding.checkpoint.occurredAt)
+        expect(currentSnapshot.now.goals[0]?.summary).not.toBe(future.goal.summary)
+        expect((yield* service.snapshots(day)).now.goals[0]?.summary).toBe(future.goal.summary)
         expect(yield* service.bindAgent(request)).toEqual(binding)
         expect(
           yield* Effect.result(service.bindAgent({

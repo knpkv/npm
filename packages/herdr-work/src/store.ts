@@ -102,6 +102,7 @@ const AgentBindingRow = Schema.Struct({
   host: Schema.String,
   record: Schema.String
 })
+const AgentBindingRows = Schema.Array(AgentBindingRow)
 const CountRow = Schema.Struct({ count: Schema.Number })
 const DecisionLedgerTotalsRow = Schema.Struct({
   decisionBytes: Schema.Number,
@@ -509,6 +510,11 @@ export interface WorkStoreService {
     laneId: string
   ) => Effect.Effect<ReadonlyArray<WorkDecisionHandoff>, WorkStoreError>
   readonly list: () => Effect.Effect<ReadonlyArray<WorkGoalCheckpointType>, WorkStoreError>
+  /** Atomically reads projection history and its coordinator-owned logical-time boundary. */
+  readonly snapshotInput: () => Effect.Effect<{
+    readonly events: ReadonlyArray<WorkGoalCheckpointType>
+    readonly logicalObservedAt: number | null
+  }, WorkStoreError>
 }
 
 export class WorkStore implements WorkStoreService {
@@ -2166,6 +2172,93 @@ export class WorkStore implements WorkStoreService {
       catch: storeError("list")
     })
     return yield* Effect.forEach(rows, decodeRow)
+  })
+
+  readonly snapshotInput = Effect.fn("WorkStore.snapshotInput")(function*(this: WorkStore) {
+    const source = yield* Effect.try({
+      try: () => {
+        let inTransaction = false
+        try {
+          this.#database.exec("BEGIN")
+          inTransaction = true
+          const events = this.#database.prepare(
+            `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+             FROM work_goal_events ORDER BY occurred_at ASC, event_id ASC
+             LIMIT ?`
+          ).all(workHistoryMaxEvents + 1)
+          const bindings = this.#database.prepare(
+            `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+               expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+             FROM work_agent_bindings ORDER BY dispatch_request_id ASC
+             LIMIT ?`
+          ).all(workLaneOperationMaxRecords + 1)
+          const laneOperations = this.#database.prepare(
+            `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
+               phase, revision, record
+             FROM work_lane_operations ORDER BY operation_id ASC
+             LIMIT ?`
+          ).all(workLaneOperationMaxRecords + 1)
+          this.#database.exec("COMMIT")
+          inTransaction = false
+          return { bindings, events, laneOperations }
+        } catch (cause) {
+          if (inTransaction) this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      catch: storeError("snapshot-input.read")
+    })
+    const eventRows = yield* Schema.decodeUnknownEffect(Schema.Array(AgentBindingGoalEventRow))(source.events).pipe(
+      Effect.mapError(storeError("snapshot-input.decode-events"))
+    )
+    const bindingRows = yield* Schema.decodeUnknownEffect(AgentBindingRows)(source.bindings).pipe(
+      Effect.mapError(storeError("snapshot-input.decode-bindings"))
+    )
+    const laneRows = yield* Schema.decodeUnknownEffect(Schema.Array(AgentBindingLaneOperationRow))(
+      source.laneOperations
+    ).pipe(Effect.mapError(storeError("snapshot-input.decode-lane-operations")))
+    if (
+      eventRows.length > workHistoryMaxEvents ||
+      bindingRows.length > workLaneOperationMaxRecords ||
+      laneRows.length > workLaneOperationMaxRecords
+    ) {
+      return yield* new WorkStoreError({ cause: source, operation: "snapshot-input.capacity" })
+    }
+    const events = yield* Effect.forEach(eventRows, (row) => {
+      const decision = decodeAgentBindingGoalEvent(row, "snapshot-input.event")
+      return decision._tag === "valid" ? Effect.succeed(decision.checkpoint) : Effect.fail(decision.error)
+    })
+    const eventById = new Map(eventRows.map((row) => [row.eventId, row]))
+    const laneByOperation = new Map(laneRows.map((row) => [row.operationId, row]))
+    let logicalObservedAt: number | null = null
+    for (const row of bindingRows) {
+      const binding = yield* Effect.try({
+        try: () => Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record)),
+        catch: storeError("snapshot-input.decode-binding")
+      })
+      if (
+        row.dispatchRequestId !== binding.request.dispatchRequestId ||
+        row.laneId !== binding.request.laneId ||
+        row.expectedRevision !== binding.request.expectedRevision ||
+        row.revision !== binding.lane.revision ||
+        row.agentId !== binding.request.worker.agentId ||
+        row.host.toLowerCase() !== binding.request.worker.host.toLowerCase()
+      ) {
+        return yield* new WorkStoreError({
+          cause: { binding, row },
+          operation: "snapshot-input.binding-identity-mismatch"
+        })
+      }
+      const readbackError = agentBindingReadbackError(
+        binding,
+        laneByOperation.get(binding.lane.operationId),
+        eventById.get(binding.checkpoint.eventId),
+        "snapshot-input.binding"
+      )
+      if (readbackError !== undefined) return yield* readbackError
+      logicalObservedAt = Math.max(logicalObservedAt ?? 0, binding.checkpoint.occurredAt)
+    }
+    return { events, logicalObservedAt }
   })
 
   private secureFiles() {
