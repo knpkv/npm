@@ -1,11 +1,19 @@
 import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { Equal, Schema } from "effect"
 
-const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
+const Identifier = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
 // Approval hosts are bounded identifiers, not DNS names; the approvals app also
 // accepts labels such as "PI 5".
 const ApprovalHostName = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
-const Text = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096), Schema.isPattern(/^[^\p{Cc}]+$/u))
+const Text = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(4_096),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u)
+)
 const Timestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
@@ -33,6 +41,15 @@ export const workSnapshotMaxGoals = 1_024
 
 export const WorkGoalId = Identifier
 export type WorkGoalId = typeof WorkGoalId.Type
+
+export const WorkDispatchRequestId = Identifier
+export type WorkDispatchRequestId = typeof WorkDispatchRequestId.Type
+
+export const WorkLaneOperationId = Identifier
+export type WorkLaneOperationId = typeof WorkLaneOperationId.Type
+
+export const WorkCoordinatorSessionId = Identifier
+export type WorkCoordinatorSessionId = typeof WorkCoordinatorSessionId.Type
 
 export const WorkState = Schema.Literals(["planned", "working", "blocked", "review", "deployed", "completed"])
 export type WorkState = typeof WorkState.Type
@@ -263,6 +280,202 @@ export const WorkGoalCheckpoint = Schema.Struct({
 )
 export interface WorkGoalCheckpoint extends Schema.Schema.Type<typeof WorkGoalCheckpoint> {}
 
+const CanonicalWorktree = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2_048),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u),
+  Schema.makeFilter(
+    (value) => {
+      const isPosix = value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")
+      const isWindows = /^[A-Za-z]:[\\/]/.test(value) && !(value.includes("/") && value.includes("\\"))
+      if (!isPosix && !isWindows) return false
+      const separator = isPosix || value.includes("/") ? "/" : "\\"
+      const parts = value.split(separator)
+      const isReservedWindowsDevice = (part: string): boolean =>
+        /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i.test(part)
+      return parts.slice(1).every((part) =>
+        part.length > 0 &&
+        part !== "." &&
+        part !== ".." &&
+        (!isWindows || (
+          !/[<>:"|?*]/.test(part) &&
+          !/[. ]$/.test(part) &&
+          !isReservedWindowsDevice(part)
+        ))
+      )
+    },
+    { expected: "an absolute canonical worktree path" }
+  )
+)
+
+const Branch = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(256),
+  Schema.isPattern(/^[A-Za-z0-9._/-]+$/),
+  Schema.makeFilter(
+    (value) =>
+      value !== "@" &&
+      value !== "HEAD" &&
+      !value.startsWith("-") &&
+      !value.startsWith("/") &&
+      !value.endsWith("/") &&
+      !value.endsWith(".") &&
+      !value.includes("//") &&
+      !value.includes("..") &&
+      !value.includes("@{") &&
+      value.split("/").every((part) => !part.startsWith(".") && !part.endsWith(".lock")),
+    { expected: "a valid Git branch ref" }
+  )
+)
+
+const ExactHead = Schema.String.check(
+  Schema.isPattern(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  Schema.isMaxLength(64)
+)
+
+const Revision = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER })
+)
+const ExpectedRevision = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER - 1 })
+)
+
+export const WorkLanePhase = Schema.Literals([
+  "claim",
+  "implementation",
+  "validation",
+  "review",
+  "shipped"
+])
+export type WorkLanePhase = typeof WorkLanePhase.Type
+
+/** Compare-and-set authority for one package-owned Work lane. */
+export const WorkLaneClaim = Schema.Struct({
+  operationId: WorkLaneOperationId,
+  goalId: WorkGoalId,
+  laneId: WorkGoalId,
+  worktree: CanonicalWorktree,
+  branch: Branch,
+  head: ExactHead,
+  owner: WorkOwner,
+  parent: Schema.NullOr(Identifier),
+  phase: WorkLanePhase,
+  expectedRevision: ExpectedRevision
+})
+export interface WorkLaneClaim extends Schema.Schema.Type<typeof WorkLaneClaim> {}
+
+export const WorkLaneClaimed = Schema.Struct({
+  ...WorkLaneClaim.fields,
+  revision: Revision
+}).check(
+  Schema.makeFilter(
+    ({ expectedRevision, revision }) => revision === expectedRevision + 1,
+    { expected: "a claimed revision exactly one greater than its expected revision" }
+  )
+)
+export interface WorkLaneClaimed extends Schema.Schema.Type<typeof WorkLaneClaimed> {}
+
+/** Compare-and-set authority used exactly when a dispatched worker starts. */
+export const WorkAgentBindingRequest = Schema.Struct({
+  version: Schema.Literal("herdr.work.agent-binding-request.v1"),
+  dispatchRequestId: WorkDispatchRequestId,
+  laneId: WorkGoalId,
+  expectedRevision: ExpectedRevision,
+  worker: AgentWorkerIdentity
+})
+export interface WorkAgentBindingRequest extends Schema.Schema.Type<typeof WorkAgentBindingRequest> {}
+
+/** Durable result of atomically binding a started worker to its Work goal. */
+export const WorkAgentBinding = Schema.Struct({
+  version: Schema.Literal("herdr.work.agent-binding.v1"),
+  request: WorkAgentBindingRequest,
+  lane: WorkLaneClaimed,
+  checkpoint: WorkGoalCheckpoint
+}).check(
+  Schema.makeFilter(
+    ({ checkpoint, lane, request }) =>
+      lane.laneId === request.laneId &&
+      lane.goalId === checkpoint.goal.id &&
+      lane.expectedRevision === request.expectedRevision &&
+      lane.revision === request.expectedRevision + 1 &&
+      lane.operationId === request.dispatchRequestId &&
+      checkpoint.eventId === request.dispatchRequestId &&
+      Equal.equals(checkpoint.goal.agentHierarchy?.agent, request.worker) &&
+      checkpoint.goal.connectTarget?.agentId === request.worker.agentId &&
+      checkpoint.goal.connectTarget.host.toLowerCase() === request.worker.host.toLowerCase(),
+    { expected: "one exact dispatch, lane revision, worker, and Work checkpoint binding" }
+  )
+)
+export interface WorkAgentBinding extends Schema.Schema.Type<typeof WorkAgentBinding> {}
+
+export const WorkCoordinatorBlocker = Schema.Struct({
+  id: Identifier,
+  detail: Text
+})
+export interface WorkCoordinatorBlocker extends Schema.Schema.Type<typeof WorkCoordinatorBlocker> {}
+
+export const WorkEvidenceReference = Schema.Struct({
+  id: Identifier,
+  kind: Schema.Literals(["commit", "test", "review", "document"]),
+  reference: Text
+})
+export interface WorkEvidenceReference extends Schema.Schema.Type<typeof WorkEvidenceReference> {}
+
+export const WorkDecisionHandoff = Schema.Struct({
+  version: Schema.Literal("herdr.work.decision.v1"),
+  id: Identifier,
+  sessionId: WorkCoordinatorSessionId,
+  laneId: WorkGoalId,
+  goalId: WorkGoalId,
+  decision: Schema.Literals(["continue", "blocked", "handoff", "complete"]),
+  summary: Text,
+  owner: WorkOwner,
+  dispatchIds: Schema.Array(WorkDispatchRequestId).check(
+    Schema.isMaxLength(32),
+    Schema.makeFilter(
+      (ids) => new Set(ids).size === ids.length,
+      { expected: "unique dispatch IDs in a coordinator handoff" }
+    )
+  ),
+  blockers: Schema.Array(WorkCoordinatorBlocker).check(
+    Schema.isMaxLength(32),
+    Schema.makeFilter(
+      (blockers) => new Set(blockers.map(({ id }) => id)).size === blockers.length,
+      { expected: "unique blocker IDs in a coordinator handoff" }
+    )
+  ),
+  evidenceRefs: Schema.Array(WorkEvidenceReference).check(
+    Schema.isMaxLength(64),
+    Schema.makeFilter(
+      (references) => new Set(references.map(({ id }) => id)).size === references.length,
+      { expected: "unique evidence reference IDs in a coordinator handoff" }
+    )
+  ),
+  occurredAt: Timestamp
+})
+export interface WorkDecisionHandoff extends Schema.Schema.Type<typeof WorkDecisionHandoff> {}
+
+/** A durable dispatch-to-Work binding written with the dispatch acceptance. */
+export const WorkDispatchHandoff = Schema.Struct({
+  dispatchRequestId: WorkDispatchRequestId,
+  handoff: WorkDecisionHandoff,
+  lineage: Schema.Array(WorkDispatchRequestId).check(
+    Schema.isMaxLength(32),
+    Schema.makeFilter(
+      (ids) => new Set(ids).size === ids.length,
+      { expected: "unique dispatch IDs in Work lineage" }
+    )
+  )
+}).check(
+  Schema.makeFilter(
+    ({ handoff, lineage }) => lineage.every((dispatchId) => handoff.dispatchIds.includes(dispatchId)),
+    { expected: "Work lineage contained in the persisted handoff dispatch IDs" }
+  )
+)
+export interface WorkDispatchHandoff extends Schema.Schema.Type<typeof WorkDispatchHandoff> {}
+
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type
 
@@ -278,7 +491,7 @@ export const WorkSnapshot = Schema.Struct({
       const families = snapshot.families ?? []
       const goalById = new Map<string, WorkGoal>()
       for (const goal of snapshot.goals) {
-        if (goalById.has(goal.id)) return false
+        if (goal.goalFamily?.role === "superseded" || goalById.has(goal.id)) return false
         goalById.set(goal.id, goal)
       }
       const seenCanonical = new Set<string>()
@@ -300,7 +513,7 @@ export const WorkSnapshot = Schema.Struct({
     },
     {
       expected:
-        "families consistent with active goals, without duplicated active or superseded members, and within total distinct goal limit"
+        "families consistent with non-superseded active goals, without duplicated active or superseded members, and within total distinct goal limit"
     }
   )
 )

@@ -33,12 +33,12 @@ const sameAgent = (
     (target?.agentId === agent.id && target.host.toLowerCase() === agent.host.toLowerCase())
 }
 
-/** Resolves only the live Work projection; duplicate owners remain unavailable. */
+/** Resolves only active goals in the live Work projection; duplicate active owners remain ambiguous. */
 export const resolveConnectWorkGoal = (
   agent: Pick<ConnectAgent, "host" | "id">,
   snapshots: WorkSnapshots
 ): Exclude<ConnectWorkGoalResolution, { readonly _tag: "unavailable" }> => {
-  const goals = snapshots.now.goals.filter((goal) => sameAgent(agent, goal))
+  const goals = snapshots.now.goals.filter((goal) => goal.state !== "completed" && sameAgent(agent, goal))
   if (goals.length === 0) return { _tag: "missing" }
   if (goals.length > 1) return { _tag: "ambiguous", goalIds: goals.map(({ id }) => id) }
   const goal = goals[0]

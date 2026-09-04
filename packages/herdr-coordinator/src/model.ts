@@ -92,3 +92,6 @@ export const CoordinatorLifecycleEvent = Schema.Union([
   CoordinatorLifecycleCompleted
 ])
 export type CoordinatorLifecycleEvent = typeof CoordinatorLifecycleEvent.Type
+
+export * from "./orchestrator-model.js"
+export * from "./pull-request-evidence-model.js"

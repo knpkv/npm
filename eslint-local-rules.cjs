@@ -1603,6 +1603,226 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-immediate-work-store-cleanup": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "register WorkStore cleanup immediately after a successful test acquisition",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        missingCleanup: "Register an Effect finalizer for this WorkStore before inspecting or transforming it."
+      }
+    },
+    create(context) {
+      const isWorkStoreOpenCall = (expression) => {
+        if (
+          expression.type !== "CallExpression" ||
+          expression.callee.type !== "MemberExpression" ||
+          staticPropertyName(expression.callee.property) !== "open" ||
+          expression.callee.object.type !== "Identifier"
+        ) {
+          return false
+        }
+        return isNamedImportFrom(
+          context,
+          expression.callee.object,
+          ["@knpkv/herdr-work", "@knpkv/herdr-work/store", "../src/index.js", "../src/store.js"],
+          ["WorkStore"]
+        )
+      }
+      const isWorkStoreOpen = (expression) =>
+        expression.type === "YieldExpression" &&
+        expression.delegate &&
+        expression.argument !== null &&
+        isWorkStoreOpenCall(expression.argument)
+      const isProtectedAcquisition = (node) => {
+        let child = node
+        let parent = node.parent
+        while (parent !== undefined && parent.type !== "YieldExpression") {
+          if (
+            parent.type === "CallExpression" &&
+            (isEffectFunction(context, parent.callee, "acquireRelease") ||
+              isEffectFunction(context, parent.callee, "acquireUseRelease")) &&
+            parent.arguments[0] === child
+          ) {
+            const releaseIndex = isEffectFunction(context, parent.callee, "acquireRelease") ? 1 : 2
+            const release = parent.arguments[releaseIndex]
+            if (release?.type === "ArrowFunctionExpression" || release?.type === "FunctionExpression") {
+              const resource = release.params[0]
+              if (resource?.type === "Identifier") {
+                const variable = resolvedVariable(context, resource)
+                if (variable !== undefined && releaseClosesVariable(release, variable)) return true
+              }
+            }
+            return false
+          }
+          child = parent
+          parent = parent.parent
+        }
+        return false
+      }
+      const isCloseCall = (root, variable) =>
+        root.type === "CallExpression" &&
+        root.arguments.length === 0 &&
+        root.callee.type === "MemberExpression" &&
+        staticPropertyName(root.callee.property) === "close" &&
+        root.callee.object.type === "Identifier" &&
+        resolvedVariable(context, root.callee.object) === variable
+      const returnedExpression = (callback) => {
+        if (callback.type !== "ArrowFunctionExpression" && callback.type !== "FunctionExpression") return undefined
+        if (callback.body.type !== "BlockStatement") return callback.body
+        return callback.body.body.length === 1 && callback.body.body[0].type === "ReturnStatement"
+          ? (callback.body.body[0].argument ?? undefined)
+          : undefined
+      }
+      const closesVariable = (finalizer, variable) => {
+        const cleanupEffect = returnedExpression(finalizer)
+        if (
+          cleanupEffect?.type !== "CallExpression" ||
+          !isEffectFunction(context, cleanupEffect.callee, "sync") ||
+          cleanupEffect.arguments.length !== 1
+        ) {
+          return false
+        }
+        const cleanup = cleanupEffect.arguments[0]
+        if (cleanup.type === "SpreadElement") return false
+        const close = returnedExpression(cleanup)
+        return close !== undefined && isCloseCall(close, variable)
+      }
+      const releaseClosesVariable = (release, variable) => {
+        if (closesVariable(release, variable)) return true
+        const cleanupEffect = returnedExpression(release)
+        if (
+          cleanupEffect?.type !== "CallExpression" ||
+          !isEffectFunction(context, cleanupEffect.callee, "sync") ||
+          cleanupEffect.arguments.length !== 1
+        )
+          return false
+        const cleanup = cleanupEffect.arguments[0]
+        if (
+          cleanup.type === "SpreadElement" ||
+          (cleanup.type !== "ArrowFunctionExpression" && cleanup.type !== "FunctionExpression") ||
+          cleanup.body.type !== "BlockStatement"
+        )
+          return false
+        const statementsClose = (statements) =>
+          statements.some((statement) => {
+            return statement.type === "ExpressionStatement" && isCloseCall(statement.expression, variable)
+          })
+        return statementsClose(cleanup.body.body)
+      }
+      const isImmediateFinalizer = (statement, variable) =>
+        statement?.type === "ExpressionStatement" &&
+        statement.expression.type === "YieldExpression" &&
+        statement.expression.delegate &&
+        statement.expression.argument?.type === "CallExpression" &&
+        isEffectFunction(context, statement.expression.argument.callee, "addFinalizer") &&
+        statement.expression.argument.arguments.length === 1 &&
+        statement.expression.argument.arguments[0].type !== "SpreadElement" &&
+        releaseClosesVariable(statement.expression.argument.arguments[0], variable)
+
+      return {
+        CallExpression(node) {
+          if (!isWorkStoreOpenCall(node)) return
+          if (isProtectedAcquisition(node)) return
+          const yieldExpression = node.parent
+          const declarator = yieldExpression?.parent
+          const declaration = declarator?.parent
+          const block = declaration?.parent
+          if (
+            yieldExpression?.type === "YieldExpression" &&
+            yieldExpression.delegate &&
+            declarator?.type === "VariableDeclarator" &&
+            declarator.id.type === "Identifier" &&
+            declarator.init === yieldExpression &&
+            declaration?.type === "VariableDeclaration" &&
+            block?.type === "BlockStatement"
+          ) {
+            return
+          }
+          context.report({ messageId: "missingCleanup", node })
+        },
+        VariableDeclarator(node) {
+          if (node.id.type !== "Identifier" || node.init === null || !isWorkStoreOpen(node.init)) return
+          const declaration = node.parent
+          const block = declaration?.parent
+          if (declaration?.type !== "VariableDeclaration" || block?.type !== "BlockStatement") return
+          if (declaration.declarations.at(-1) !== node) {
+            context.report({ messageId: "missingCleanup", node })
+            return
+          }
+          const index = block.body.indexOf(declaration)
+          const variable = resolvedVariable(context, node.id)
+          if (variable !== undefined && isImmediateFinalizer(block.body[index + 1], variable)) return
+          context.report({ messageId: "missingCleanup", node })
+        }
+      }
+    }
+  },
+  "require-named-orchestrator-service-effects": {
+    meta: {
+      type: "problem",
+      docs: {
+        description: "require operation-specific Effect.fn names on public coordinator effects",
+        category: "Best Practices",
+        recommended: false
+      },
+      schema: [],
+      messages: {
+        unnamed: "Wrap public OrchestratorService Effect operation '{{name}}' with Effect.fn('Orchestrator.{{name}}')."
+      }
+    },
+    create(context) {
+      const filename = context.filename.replaceAll("\\", "/")
+      if (!filename.endsWith("packages/herdr-coordinator/src/orchestrator.ts")) return {}
+      const effectOperations = new Set([
+        "failDelivery",
+        "failTask",
+        "pending",
+        "queue",
+        "request",
+        "run",
+        "settle",
+        "submit",
+        "submitRouted",
+        "workerStarted"
+      ])
+      const hasExpectedEffectName = (expression, name) =>
+        expression?.type === "CallExpression" &&
+        expression.callee.type === "CallExpression" &&
+        isEffectFunction(context, expression.callee.callee, "fn") &&
+        staticPropertyName(expression.callee.arguments[0]) === `Orchestrator.${name}`
+      const resolvesToExpectedEffect = (expression, name) => {
+        if (hasExpectedEffectName(expression, name)) return true
+        if (expression.type !== "Identifier") return false
+        const variable = resolvedVariable(context, expression)
+        const definition = variable?.defs.find((candidate) => candidate.type === "Variable")
+        return (
+          definition?.node.type === "VariableDeclarator" &&
+          definition.node.parent.type === "VariableDeclaration" &&
+          definition.node.parent.kind === "const" &&
+          hasExpectedEffectName(definition.node.init, name)
+        )
+      }
+      return {
+        VariableDeclarator(node) {
+          if (node.id.type !== "Identifier" || node.id.name !== "service" || node.init?.type !== "ObjectExpression") {
+            return
+          }
+          for (const property of node.init.properties) {
+            if (property.type !== "Property") continue
+            const name = staticPropertyName(property.key)
+            if (name !== undefined && effectOperations.has(name) && !resolvesToExpectedEffect(property.value, name)) {
+              context.report({ data: { name }, messageId: "unnamed", node: property })
+            }
+          }
+        }
+      }
+    }
+  },
   "require-structured-reconciliation-key-schema": {
     meta: {
       type: "problem",
@@ -1657,8 +1877,9 @@ module.exports = {
               (node.type === "ArrowFunctionExpression" ||
                 node.type === "FunctionExpression" ||
                 node.type === "FunctionDeclaration")
-            )
+            ) {
               return
+            }
             for (const key of context.sourceCode.visitorKeys[node.type] ?? []) {
               const child = node[key]
               if (Array.isArray(child)) {
@@ -2574,8 +2795,9 @@ module.exports = {
             cleanupFunctionsAfterCall(context, effectCallback, node).some((cleanup) =>
               cleanupAbortsController(context, cleanup, controller)
             )
-          )
+          ) {
             return
+          }
           context.report({ node, messageId: "missingSignal" })
         }
       }

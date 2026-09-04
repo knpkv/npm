@@ -97,6 +97,32 @@ const renderDashboard = (record: JobRecord): string =>
   )
 
 describe("sanitized approval requests", () => {
+  it("redacts spaced credential labels without hiding nearby prose", () => {
+    for (const ref of [
+      "api key: leaked-canary",
+      '{"api key":"leaked-canary"}',
+      "Secret Access Key=leaked-canary",
+      "access key id: leaked-canary",
+      "api%20key%3Aleaked-canary"
+    ]) {
+      expect(JSON.stringify(approvalRequestFor({ kind: "nix.apply", ref }))).not.toContain("leaked-canary")
+    }
+    expect(JSON.stringify(approvalRequestFor({ kind: "nix.apply", ref: "api key rotation" }))).toContain(
+      "api key rotation"
+    )
+    expect(
+      JSON.stringify(
+        approvalRequestFor({
+          kind: "nix.apply",
+          ref: "password=topsecret, recovery code=leaked-canary"
+        })
+      )
+    ).not.toContain("leaked-canary")
+    expect(JSON.stringify(approvalRequestFor({ kind: "nix.apply", ref: "password=secret, branch=main" }))).toContain(
+      "branch=main"
+    )
+  })
+
   it("keeps every typed work field while marking the internal prompt redacted", () => {
     expect(approvalRequestFor(approvalPayload)).toEqual({
       fields: [
@@ -417,6 +443,9 @@ describe("sanitized approval requests", () => {
       },
       { ref: '{"refreshToken":"camel-token-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"clientSecret":"camel-secret-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"apikey":"compact-api-key-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"accesskey":"compact-access-key-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"privatekey":"compact-private-key-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",
