@@ -47,3 +47,8 @@ export class WorkDecisionHandoffConflictError extends Schema.TaggedError<WorkDec
   "WorkDecisionHandoffConflictError",
   { handoffId: Schema.String }
 ) {}
+
+export class WorkDispatchHandoffConflictError extends Schema.TaggedError<WorkDispatchHandoffConflictError>()(
+  "WorkDispatchHandoffConflictError",
+  { dispatchRequestId: Schema.String, handoffId: Schema.String }
+) {}

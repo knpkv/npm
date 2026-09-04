@@ -1,4 +1,6 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
+import { WorkStore } from "@knpkv/herdr-work"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { ClusterSchema, Entity, MessageStorage, RunnerAddress, SingleRunner } from "effect/unstable/cluster"
@@ -11,11 +13,16 @@ import {
   layer as orchestratorLayer,
   Orchestrator,
   type OrchestratorCommand,
+  OrchestratorPendingDispatch,
+  OrchestratorRequest,
   type OrchestratorRoutedSubmission,
   type OrchestratorWorkLink,
   singleRunnerLayer,
   sqliteLayer
 } from "../src/index.js"
+
+// @effect-diagnostics-next-line strictEffectProvide:off
+const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const command: OrchestratorCommand = {
   actor: "coordinator",
@@ -221,7 +228,60 @@ describe("durable coordinator orchestrator", () => {
             metadata: Schema.Number
           }))(counts)
         ).toEqual({ accepted: 2, dispatches: 2, metadata: 2 })
+
+        const decisions = yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            return yield* store.decisions("lane:escalation")
+          }).pipe(provideNodeServices)
+        )
+        expect(decisions).toHaveLength(1)
+        expect(decisions[0]).toMatchObject({
+          id: "handoff:escalation",
+          laneId: "lane:escalation"
+        })
       })
+    }))
+
+  it.effect("rejects invalid public route and Work-link combinations", () =>
+    Effect.gen(function*() {
+      const solRoute = makeSolSubmission(null, "dispatch:schema").route
+      const workLink = makeWorkLink([])
+      const request = {
+        acceptedAt: 0,
+        activityIdempotencyKey: command.activityIdempotencyKey,
+        command,
+        dispatchRequestId: "dispatch:schema",
+        idempotencyKey: "idempotency:schema",
+        route: solRoute,
+        status: "accepted",
+        workLink: null
+      } satisfies typeof OrchestratorRequest.Encoded
+      const pending = {
+        ...request,
+        status: "accepted"
+      } satisfies typeof OrchestratorPendingDispatch.Encoded
+      expect(yield* Effect.result(Schema.decodeUnknownEffect(OrchestratorRequest)(request))).toMatchObject({
+        failure: { _tag: "SchemaError" }
+      })
+      expect(
+        yield* Effect.result(
+          Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({
+            ...pending,
+            route: solRoute,
+            workLink
+          })
+        )
+      ).toMatchObject({ success: expect.anything() })
+      expect(
+        yield* Effect.result(
+          Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({
+            ...pending,
+            route: solRoute,
+            workLink: null
+          })
+        )
+      ).toMatchObject({ failure: { _tag: "SchemaError" } })
     }))
 
   it.effect("rejects a Sol link whose parent is not failed Luna work before acceptance", () =>
@@ -252,6 +312,61 @@ describe("durable coordinator orchestrator", () => {
         database.close()
         expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(dispatchCount).count).toBe(1)
         expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(metadataCount).count).toBe(1)
+      })
+    }))
+
+  it.effect("rolls back Sol acceptance when the Work handoff cannot be recorded", () =>
+    withTemporaryRoot("herdr-orchestrator-work-atomicity-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const failedLuna = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:atomicity-luna" },
+              idempotencyKey: "dispatch:atomicity-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            return yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+          })
+        )
+        const database = new DatabaseSync(path)
+        database.prepare("UPDATE work_decision_totals SET decision_count = ? WHERE singleton = 1").run(16_384)
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.submitRouted(makeSolSubmission(
+              failedLuna.dispatchRequestId,
+              "dispatch:atomicity-sol"
+            )))
+          })
+        )
+        expect(result).toMatchObject({ failure: { _tag: "OrchestratorStorageError", operation: "submit.work-link" } })
+
+        const remaining = new DatabaseSync(path)
+        const counts = remaining.prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
+             (SELECT COUNT(*) FROM orchestrator_events WHERE type = 'accepted') AS accepted,
+             (SELECT COUNT(*) FROM work_dispatch_handoffs) AS workLinks`
+        ).get()
+        remaining.close()
+        expect(
+          Schema.decodeUnknownSync(
+            Schema.Struct({ accepted: Schema.Number, dispatches: Schema.Number, workLinks: Schema.Number })
+          )(counts)
+        ).toEqual({
+          accepted: 1,
+          dispatches: 1,
+          workLinks: 0
+        })
       })
     }))
 

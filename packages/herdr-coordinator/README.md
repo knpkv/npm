@@ -10,6 +10,13 @@ Browser-safe schemas, including the orchestration command, receipt, and event
 contracts, are exported from `@knpkv/herdr-coordinator/model` without loading
 the Node runtime.
 
+`ChatHistory` exposes only normalized, client-visible `AgentWorkerIdentity` and
+canonical `AgentConnectTarget` values for the matching worker. The durable
+`Orchestrator.request` projection is a server-private escalation record: its
+command payload, actor, executable route, Work handoff, and dispatch lineage
+must stay behind the authorized coordinator boundary. Provider credentials and
+private provider locators are never part of either representation.
+
 `Orchestrator` accepts only the typed `fleet.job` command union and returns an
 immediate idempotent receipt. The persisted dispatch identity contains both
 the caller-supplied `idempotency_key` and the command's

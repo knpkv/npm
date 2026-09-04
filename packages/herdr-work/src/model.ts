@@ -38,6 +38,9 @@ export const workSnapshotMaxGoals = 1_024
 export const WorkGoalId = Identifier
 export type WorkGoalId = typeof WorkGoalId.Type
 
+export const WorkDispatchRequestId = Identifier
+export type WorkDispatchRequestId = typeof WorkDispatchRequestId.Type
+
 export const WorkState = Schema.Literals(["planned", "working", "blocked", "review", "deployed", "completed"])
 export type WorkState = typeof WorkState.Type
 
@@ -373,6 +376,20 @@ export const WorkDecisionHandoff = Schema.Struct({
   occurredAt: Timestamp
 })
 export interface WorkDecisionHandoff extends Schema.Schema.Type<typeof WorkDecisionHandoff> {}
+
+/** A durable dispatch-to-Work binding written with the dispatch acceptance. */
+export const WorkDispatchHandoff = Schema.Struct({
+  dispatchRequestId: WorkDispatchRequestId,
+  handoff: WorkDecisionHandoff,
+  lineage: Schema.Array(WorkDispatchRequestId).check(
+    Schema.isMaxLength(32),
+    Schema.makeFilter(
+      (ids) => new Set(ids).size === ids.length,
+      { expected: "unique dispatch IDs in Work lineage" }
+    )
+  )
+})
+export interface WorkDispatchHandoff extends Schema.Schema.Type<typeof WorkDispatchHandoff> {}
 
 export const WorkSnapshotWindow = Schema.Literals(["now", "day", "week", "month"])
 export type WorkSnapshotWindow = typeof WorkSnapshotWindow.Type

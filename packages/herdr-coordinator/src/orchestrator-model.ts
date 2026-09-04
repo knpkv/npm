@@ -180,6 +180,16 @@ export const OrchestratorEvent = Schema.Union([
 ])
 export type OrchestratorEvent = typeof OrchestratorEvent.Type
 
+const routeAndWorkLink = Schema.makeFilter(
+  ({ route, workLink }: { readonly route: OrchestratorRoute | null; readonly workLink: OrchestratorWorkLink | null }) =>
+    (route === null && workLink === null) ||
+    (route?.model === "gpt-5.6-luna" && workLink === null) ||
+    (route?.model === "gpt-5.6-sol" &&
+      workLink !== null &&
+      (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId))),
+  { expected: "route and Work link form a valid durable dispatch binding" }
+)
+
 /** Complete typed request projection, including persisted route and Work link. */
 export const OrchestratorRequest = Schema.Struct({
   dispatchRequestId: DispatchRequestId,
@@ -190,7 +200,7 @@ export const OrchestratorRequest = Schema.Struct({
   status: OrchestratorEventType,
   route: Schema.NullOr(OrchestratorRoute),
   workLink: Schema.NullOr(OrchestratorWorkLink)
-})
+}).check(routeAndWorkLink)
 export interface OrchestratorRequest extends Schema.Schema.Type<typeof OrchestratorRequest> {}
 
 export const OrchestratorPendingDispatchStatus = Schema.Literals(["accepted", "queued"])
@@ -223,8 +233,16 @@ export const OrchestratorPendingDispatch = Schema.Struct({
   workLink: Schema.optionalKey(Schema.NullOr(OrchestratorWorkLink))
 }).check(
   Schema.makeFilter(
-    ({ activityIdempotencyKey, command }) => activityIdempotencyKey === command.activityIdempotencyKey,
-    { expected: "pending activity idempotency key equal to its command key" }
+    ({ activityIdempotencyKey, command, route, workLink }) =>
+      activityIdempotencyKey === command.activityIdempotencyKey &&
+      ((route === undefined && workLink === undefined) ||
+        (route === null && workLink === null) ||
+        (route?.model === "gpt-5.6-luna" && workLink === null) ||
+        (route?.model === "gpt-5.6-sol" &&
+          workLink !== undefined &&
+          workLink !== null &&
+          (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId)))),
+    { expected: "pending activity key and route/Work link form valid durable bindings" }
   )
 )
 export type OrchestratorPendingDispatch = typeof OrchestratorPendingDispatch.Type

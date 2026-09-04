@@ -1,5 +1,6 @@
 import { NodeCrypto, NodeFileSystem, NodePath } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
+import { makeWorkSqlBridge } from "@knpkv/herdr-work"
 import { Clock, Context, Crypto, Effect, Equal, FileSystem, Layer, Option, Path, Schema, Stream } from "effect"
 import { RunnerAddress, SingleRunner } from "effect/unstable/cluster"
 import * as SqlClient from "effect/unstable/sql/SqlClient"
@@ -290,6 +291,7 @@ const makeOrchestrator: Effect.Effect<
 > = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
   const cryptoService = yield* Crypto.Crypto
+  const workSql = makeWorkSqlBridge(sql)
   const fileSecurity = yield* Effect.serviceOption(SqliteFileSecurity)
   const secureFiles = Option.match(fileSecurity, {
     onNone: () => Effect.void,
@@ -328,6 +330,7 @@ const makeOrchestrator: Effect.Effect<
       FOREIGN KEY (dispatch_request_id) REFERENCES orchestrator_dispatches(dispatch_request_id)
     )
   `.pipe(Effect.mapError(storageError("initialize.dispatch-metadata")))
+  yield* workSql.initialize.pipe(Effect.mapError(storageError("initialize.work")))
   yield* sql`
     CREATE INDEX IF NOT EXISTS orchestrator_pending_dispatches_order
     ON orchestrator_dispatches (accepted_at ASC, dispatch_request_id ASC)
@@ -772,12 +775,26 @@ const makeOrchestrator: Effect.Effect<
               operation: "submit.accepted-event-mismatch"
             })
           }
+          if (route?.model === "gpt-5.6-sol" && workLink !== null) {
+            yield* workSql.requireDispatchHandoff({
+              dispatchRequestId: first.dispatchRequestId,
+              handoff: workLink.handoff,
+              lineage: workLink.lineage
+            }).pipe(Effect.mapError(storageError("submit.work-link.replay")))
+          }
           return yield* Schema.decodeUnknownEffect(OrchestratorReceipt)({
             acceptedAt,
             dispatchRequestId: first.dispatchRequestId,
             idempotencyKey: decodedKey,
             status: "accepted"
           }).pipe(Effect.mapError(storageError("submit.decode-receipt")))
+        }
+        if (route?.model === "gpt-5.6-sol" && workLink !== null) {
+          yield* workSql.acceptDispatchHandoff({
+            dispatchRequestId,
+            handoff: workLink.handoff,
+            lineage: workLink.lineage
+          }).pipe(Effect.mapError(storageError("submit.work-link")))
         }
         if (route !== null) {
           yield* sql`

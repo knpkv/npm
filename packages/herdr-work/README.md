@@ -20,6 +20,13 @@ credential-free decision record for later recovery under a 16,384-row and
 identities under a bounded ledger, and lane claims validate Git branch refs
 before persisting their authority.
 
+`makeWorkSqlBridge` provides the package-owned dispatch binding used by a
+coordinator's SQL transaction. It inserts the decoded Work handoff and its
+bounded dispatch lineage together, and verifies exact replay without repairing
+an incomplete dispatch. The coordinator must call it inside the same
+transaction as acceptance; `WorkStore.decisions` then recovers the handoff from
+the same database. Provider credentials and private locators are excluded.
+
 `WorkBoard` renders these persisted outbound-link forms:
 
 - `AgentConnectTarget.url` — local terminal handoff.
