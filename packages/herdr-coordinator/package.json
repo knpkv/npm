@@ -45,6 +45,7 @@
     "@effect/platform-node": "4.0.0-rc.109",
     "@effect/sql-sqlite-node": "4.0.0-rc.109",
     "@knpkv/herdr-fleet": "workspace:^",
+    "@knpkv/herdr-work": "workspace:^",
     "effect": "4.0.0-rc.109"
   },
   "devDependencies": {

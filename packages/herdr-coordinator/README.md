@@ -22,6 +22,11 @@ stream that pages running work in bounded batches, marks it `delivery_failed`,
 and never retries it implicitly.
 `pending` returns the exact typed command records for accepted and queued work
 after restart; callers resume those records explicitly. The
+route-aware `submitRouted` operation durably records the executable Luna/Sol
+route. A Sol submission requires a typed Work handoff and lineage in the same
+SQLite transaction; a linked Sol escalation is accepted only when its parent
+request lookup proves a terminal Luna failure. `request` returns that complete
+validated projection for escalation decisions. The
 exported `singleRunnerLayer` composes Effect's SingleRunner with SQL-backed
 MessageStorage and a local runner identity; provide an Effect SQL client and
 Crypto implementation at the application boundary. Its SQLite layer creates a

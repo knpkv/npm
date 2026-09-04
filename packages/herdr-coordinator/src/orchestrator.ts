@@ -21,11 +21,20 @@ import {
   type OrchestratorEvent as OrchestratorEventType,
   OrchestratorEventDetail,
   OrchestratorIdempotencyKey,
+  type OrchestratorIdempotencyKey as OrchestratorIdempotencyKeyType,
   OrchestratorPendingDispatch,
   OrchestratorPendingQuery,
   OrchestratorReceipt,
   type OrchestratorReceipt as OrchestratorReceiptType,
-  OrchestratorResult
+  OrchestratorRequest,
+  type OrchestratorRequest as OrchestratorRequestType,
+  OrchestratorResult,
+  OrchestratorRoute,
+  type OrchestratorRoute as OrchestratorRouteType,
+  OrchestratorRoutedSubmission,
+  type OrchestratorRoutedSubmission as OrchestratorRoutedSubmissionType,
+  OrchestratorWorkLink,
+  type OrchestratorWorkLink as OrchestratorWorkLinkType
 } from "./orchestrator-model.js"
 
 const Row = Schema.Struct({
@@ -34,7 +43,9 @@ const Row = Schema.Struct({
   idempotencyKey: Schema.String,
   command: Schema.String,
   acceptedAt: Schema.Number,
-  status: Schema.String
+  status: Schema.String,
+  route: Schema.NullOr(Schema.String),
+  workLink: Schema.NullOr(Schema.String)
 })
 const EventRow = Schema.Struct({
   dispatchRequestId: Schema.String,
@@ -58,7 +69,9 @@ const LifecycleRow = Schema.Struct({
   eventActivityIdempotencyKey: Schema.NullOr(Schema.String),
   occurredAt: Schema.NullOr(Schema.Number),
   detail: Schema.NullOr(Schema.String),
-  result: Schema.NullOr(Schema.String)
+  result: Schema.NullOr(Schema.String),
+  route: Schema.NullOr(Schema.String),
+  workLink: Schema.NullOr(Schema.String)
 })
 type LifecycleRow = typeof LifecycleRow.Type
 const RecoveryRow = Schema.Struct({
@@ -106,6 +119,53 @@ const decodeCommand = (text: string) =>
     catch: storageError("decode.command")
   })
 
+const decodeRoute = (text: string) =>
+  Effect.try({
+    try: () => JSON.parse(text),
+    catch: storageError("decode.route.json")
+  }).pipe(
+    Effect.flatMap((value) => Schema.decodeUnknownEffect(OrchestratorRoute)(value)),
+    Effect.mapError(storageError("decode.route"))
+  )
+
+const decodeWorkLink = (text: string) =>
+  Effect.try({
+    try: () => JSON.parse(text),
+    catch: storageError("decode.work-link.json")
+  }).pipe(
+    Effect.flatMap((value) => Schema.decodeUnknownEffect(OrchestratorWorkLink)(value)),
+    Effect.mapError(storageError("decode.work-link"))
+  )
+
+const decodeMetadata = Effect.fn("Orchestrator.decodeMetadata")(function*(
+  routeText: string | null,
+  workLinkText: string | null
+) {
+  const route = routeText === null ? null : yield* decodeRoute(routeText)
+  const workLink = workLinkText === null ? null : yield* decodeWorkLink(workLinkText)
+  if (route === null && workLink !== null) {
+    return yield* new OrchestratorStorageError({
+      cause: { route, workLink },
+      operation: "decode.metadata-mismatch"
+    })
+  }
+  if (route?.model === "gpt-5.6-luna" && workLink !== null) {
+    return yield* new OrchestratorStorageError({
+      cause: { route, workLink },
+      operation: "decode.metadata-mismatch"
+    })
+  }
+  if (route?.model === "gpt-5.6-sol") {
+    if (workLink === null || (route.linkedRequestId !== null && !workLink.lineage.includes(route.linkedRequestId))) {
+      return yield* new OrchestratorStorageError({
+        cause: { route, workLink },
+        operation: "decode.metadata-mismatch"
+      })
+    }
+  }
+  return { route, workLink }
+})
+
 const decodeEvent = (row: EventRow) =>
   Schema.decodeUnknownEffect(OrchestratorEvent)({
     ...row,
@@ -122,7 +182,11 @@ const currentStatus = Schema.Literals([
   "task_failed"
 ])
 type CurrentStatus = typeof currentStatus.Type
-type DispatchRow = Omit<typeof Row.Type, "status"> & { readonly status: CurrentStatus }
+type DispatchRow = Omit<typeof Row.Type, "status" | "route" | "workLink"> & {
+  readonly status: CurrentStatus
+  readonly route: OrchestratorRouteType | null
+  readonly workLink: OrchestratorWorkLinkType | null
+}
 
 const transitionTarget = Schema.Literals([
   "queued",
@@ -147,6 +211,14 @@ export interface OrchestratorService {
     command: OrchestratorCommandType,
     idempotencyKey: string
   ) => Effect.Effect<OrchestratorReceiptType, OrchestratorError>
+  /** Submits with durable route metadata; Sol requires an atomic Work link. */
+  readonly submitRouted: (
+    input: OrchestratorRoutedSubmissionType
+  ) => Effect.Effect<OrchestratorReceiptType, OrchestratorError>
+  /** Loads and validates the complete durable request projection. */
+  readonly request: (
+    dispatchRequestId: string
+  ) => Effect.Effect<OrchestratorRequestType, OrchestratorError>
   readonly events: (
     dispatchRequestId: string
   ) => Stream.Stream<OrchestratorEventType, OrchestratorError>
@@ -249,6 +321,14 @@ const makeOrchestrator: Effect.Effect<
     )
   `.pipe(Effect.mapError(storageError("initialize.events")))
   yield* sql`
+    CREATE TABLE IF NOT EXISTS orchestrator_dispatch_metadata (
+      dispatch_request_id TEXT PRIMARY KEY,
+      route TEXT NOT NULL,
+      work_link TEXT,
+      FOREIGN KEY (dispatch_request_id) REFERENCES orchestrator_dispatches(dispatch_request_id)
+    )
+  `.pipe(Effect.mapError(storageError("initialize.dispatch-metadata")))
+  yield* sql`
     CREATE INDEX IF NOT EXISTS orchestrator_pending_dispatches_order
     ON orchestrator_dispatches (accepted_at ASC, dispatch_request_id ASC)
     WHERE status IN ('accepted', 'queued')
@@ -333,9 +413,12 @@ const makeOrchestrator: Effect.Effect<
       SELECT d.dispatch_request_id AS "dispatchRequestId", d.idempotency_key AS "idempotencyKey",
         d.activity_idempotency_key AS "activityIdempotencyKey", d.command,
         d.accepted_at AS "acceptedAt", d.status,
+        m.route, m.work_link AS "workLink",
         e.sequence, e.type, e.activity_idempotency_key AS "eventActivityIdempotencyKey",
         e.occurred_at AS "occurredAt", e.detail, e.result
       FROM orchestrator_dispatches d
+      LEFT JOIN orchestrator_dispatch_metadata m
+        ON m.dispatch_request_id = d.dispatch_request_id
       LEFT JOIN orchestrator_events e
         ON e.dispatch_request_id = d.dispatch_request_id
       WHERE d.dispatch_request_id = ${decodedDispatchRequestId}
@@ -351,13 +434,16 @@ const makeOrchestrator: Effect.Effect<
     const status = yield* Schema.decodeUnknownEffect(currentStatus)(first.status).pipe(
       Effect.mapError(() => new OrchestratorStorageError({ cause: first.status, operation: "decode.dispatch.status" }))
     )
+    const metadata = yield* decodeMetadata(first.route, first.workLink)
     const dispatch: DispatchRow = {
       activityIdempotencyKey: first.activityIdempotencyKey,
       acceptedAt: first.acceptedAt,
       command: first.command,
       dispatchRequestId: first.dispatchRequestId,
       idempotencyKey: first.idempotencyKey,
-      status
+      status,
+      route: metadata.route,
+      workLink: metadata.workLink
     }
     const events = yield* Effect.gen(function*() {
       const eventRows: Array<EventRow> = []
@@ -404,8 +490,10 @@ const makeOrchestrator: Effect.Effect<
         ? yield* sql`
       SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
         activity_idempotency_key AS "activityIdempotencyKey", command,
-        accepted_at AS "acceptedAt", status
+        accepted_at AS "acceptedAt", status,
+        m.route, m.work_link AS "workLink"
       FROM orchestrator_dispatches
+      LEFT JOIN orchestrator_dispatch_metadata m USING (dispatch_request_id)
       WHERE status IN ('accepted', 'queued')
       ORDER BY accepted_at ASC, dispatch_request_id ASC
       LIMIT ${limit}
@@ -413,8 +501,10 @@ const makeOrchestrator: Effect.Effect<
         : yield* sql`
       SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
         activity_idempotency_key AS "activityIdempotencyKey", command,
-        accepted_at AS "acceptedAt", status
+        accepted_at AS "acceptedAt", status,
+        m.route, m.work_link AS "workLink"
       FROM orchestrator_dispatches
+      LEFT JOIN orchestrator_dispatch_metadata m USING (dispatch_request_id)
       WHERE status IN ('accepted', 'queued')
         AND (accepted_at > ${decodedQuery.after.acceptedAt}
           OR (accepted_at = ${decodedQuery.after.acceptedAt}
@@ -430,10 +520,19 @@ const makeOrchestrator: Effect.Effect<
           const snapshot = yield* loadValidatedEvents(row.dispatchRequestId)
           if (snapshot.dispatch.status !== "accepted" && snapshot.dispatch.status !== "queued") return Option.none()
           const command = yield* decodeCommand(snapshot.dispatch.command)
-          const pendingDispatch = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)({
-            ...snapshot.dispatch,
-            command
-          }).pipe(
+          const pendingInput = {
+            acceptedAt: snapshot.dispatch.acceptedAt,
+            activityIdempotencyKey: snapshot.dispatch.activityIdempotencyKey,
+            command,
+            dispatchRequestId: snapshot.dispatch.dispatchRequestId,
+            idempotencyKey: snapshot.dispatch.idempotencyKey,
+            status: snapshot.dispatch.status
+          }
+          const pendingDispatch = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatch)(
+            snapshot.dispatch.route === null
+              ? pendingInput
+              : { ...pendingInput, route: snapshot.dispatch.route, workLink: snapshot.dispatch.workLink }
+          ).pipe(
             Effect.mapError(storageError("pending.decode"))
           )
           return Option.some(pendingDispatch)
@@ -559,21 +658,17 @@ const makeOrchestrator: Effect.Effect<
     return event
   })
 
-  const submit: OrchestratorService["submit"] = Effect.fn("Orchestrator.submit")(function*(
-    command: OrchestratorCommandType,
-    idempotencyKey: string
+  const submitInternal = Effect.fn("Orchestrator.submitInternal")(function*(
+    decodedCommand: OrchestratorCommandType,
+    decodedKey: OrchestratorIdempotencyKeyType,
+    route: OrchestratorRouteType | null,
+    workLink: OrchestratorWorkLinkType | null
   ) {
-    const decodedCommand = yield* Schema.decodeUnknownEffect(OrchestratorCommand)(command).pipe(
-      Effect.mapError(() => new OrchestratorValidationError({ detail: "command is not a typed fleet job" }))
-    )
-    const decodedKey = yield* Schema.decodeUnknownEffect(
-      OrchestratorIdempotencyKey
-    )(idempotencyKey).pipe(
-      Effect.mapError(() => new OrchestratorValidationError({ detail: "idempotency key is invalid" }))
-    )
     const encodedCommand = JSON.stringify(decodedCommand)
+    const encodedRoute = route === null ? null : JSON.stringify(route)
+    const encodedWorkLink = workLink === null ? null : JSON.stringify(workLink)
     yield* secureFiles
-    const receipt = yield* sql.withTransaction(
+    return yield* sql.withTransaction(
       Effect.gen(function*() {
         const dispatchRequestId = yield* cryptoService.randomUUIDv4.pipe(
           Effect.mapError(storageError("submit.request-id")),
@@ -585,6 +680,17 @@ const makeOrchestrator: Effect.Effect<
             )
           )
         )
+        if (route?.model === "gpt-5.6-sol" && route.linkedRequestId !== null) {
+          const parent = yield* loadValidatedEvents(route.linkedRequestId)
+          if (
+            parent.dispatch.route?.model !== "gpt-5.6-luna" ||
+            (parent.dispatch.status !== "delivery_failed" && parent.dispatch.status !== "task_failed")
+          ) {
+            return yield* new OrchestratorValidationError({
+              detail: "linked Sol escalation must reference a failed Luna request"
+            })
+          }
+        }
         const acceptedAt = yield* now
         const insertedRows = yield* sql`
           INSERT INTO orchestrator_dispatches
@@ -592,38 +698,36 @@ const makeOrchestrator: Effect.Effect<
           VALUES (${dispatchRequestId}, ${decodedKey}, ${decodedCommand.activityIdempotencyKey},
             ${encodedCommand}, ${acceptedAt}, 'accepted')
           ON CONFLICT DO NOTHING
-          RETURNING dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
-            activity_idempotency_key AS "activityIdempotencyKey", command,
-            accepted_at AS "acceptedAt", status
+          RETURNING dispatch_request_id
         `.pipe(Effect.mapError(storageError("submit.insert-or-reload")))
         const wasInserted = insertedRows.length !== 0
-        const persistedRows = !wasInserted
-          ? yield* sql`
-            SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
-              activity_idempotency_key AS "activityIdempotencyKey", command,
-              accepted_at AS "acceptedAt", status
-            FROM orchestrator_dispatches
-            WHERE idempotency_key = ${decodedKey}
-              OR activity_idempotency_key = ${decodedCommand.activityIdempotencyKey}
-          `.pipe(Effect.mapError(storageError("submit.reload")))
-          : insertedRows
-        const persisted = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(persistedRows).pipe(
-          Effect.mapError(storageError("submit.decode-persisted"))
-        )
-        const first = persisted[0]
-        if (first === undefined) {
-          return yield* new OrchestratorStorageError({
-            cause: { dispatchRequestId, idempotencyKey: decodedKey },
-            operation: "submit.insert-or-reload-empty"
-          })
-        }
-        if (!wasInserted && first.dispatchRequestId !== dispatchRequestId && first.idempotencyKey !== decodedKey) {
-          return yield* new OrchestratorConflictError({
-            detail: "activity idempotency key was already used",
-            idempotencyKey: decodedKey
-          })
-        }
         if (!wasInserted) {
+          const persistedRows = yield* sql`
+            SELECT d.dispatch_request_id AS "dispatchRequestId", d.idempotency_key AS "idempotencyKey",
+              d.activity_idempotency_key AS "activityIdempotencyKey", d.command,
+              d.accepted_at AS "acceptedAt", d.status,
+              m.route, m.work_link AS "workLink"
+            FROM orchestrator_dispatches d
+            LEFT JOIN orchestrator_dispatch_metadata m USING (dispatch_request_id)
+            WHERE d.idempotency_key = ${decodedKey}
+              OR d.activity_idempotency_key = ${decodedCommand.activityIdempotencyKey}
+          `.pipe(Effect.mapError(storageError("submit.reload")))
+          const persisted = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(persistedRows).pipe(
+            Effect.mapError(storageError("submit.decode-persisted"))
+          )
+          const first = persisted[0]
+          if (first === undefined) {
+            return yield* new OrchestratorStorageError({
+              cause: { dispatchRequestId, idempotencyKey: decodedKey },
+              operation: "submit.insert-or-reload-empty"
+            })
+          }
+          if (first.idempotencyKey !== decodedKey) {
+            return yield* new OrchestratorConflictError({
+              detail: "activity idempotency key was already used",
+              idempotencyKey: decodedKey
+            })
+          }
           const oldCommand = yield* decodeCommand(first.command)
           if (!Equal.equals(oldCommand, decodedCommand)) {
             return yield* new OrchestratorConflictError({
@@ -643,6 +747,12 @@ const makeOrchestrator: Effect.Effect<
                 })
               ))
           )
+          if (!Equal.equals(snapshot.dispatch.route, route) || !Equal.equals(snapshot.dispatch.workLink, workLink)) {
+            return yield* new OrchestratorConflictError({
+              detail: "idempotency key was already used with different route or Work lineage",
+              idempotencyKey: decodedKey
+            })
+          }
           const accepted = snapshot.events[0]
           if (
             accepted === undefined ||
@@ -669,19 +779,17 @@ const makeOrchestrator: Effect.Effect<
             status: "accepted"
           }).pipe(Effect.mapError(storageError("submit.decode-receipt")))
         }
-        const event = {
-          activityIdempotencyKey: decodedCommand.activityIdempotencyKey,
-          detail: null,
-          dispatchRequestId,
-          occurredAt: acceptedAt,
-          result: null,
-          sequence: 0,
-          type: "accepted"
-        } satisfies OrchestratorEventType
+        if (route !== null) {
+          yield* sql`
+            INSERT INTO orchestrator_dispatch_metadata
+              (dispatch_request_id, route, work_link)
+            VALUES (${dispatchRequestId}, ${encodedRoute}, ${encodedWorkLink})
+          `.pipe(Effect.mapError(storageError("submit.insert-dispatch-metadata")))
+        }
         yield* sql`
           INSERT INTO orchestrator_events
             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
-          VALUES (${dispatchRequestId}, 0, 'accepted', ${event.activityIdempotencyKey}, ${acceptedAt}, NULL, NULL)
+          VALUES (${dispatchRequestId}, 0, 'accepted', ${decodedCommand.activityIdempotencyKey}, ${acceptedAt}, NULL, NULL)
         `.pipe(Effect.mapError(storageError("submit.insert-event")))
         return {
           acceptedAt,
@@ -693,7 +801,36 @@ const makeOrchestrator: Effect.Effect<
     ).pipe(
       Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("submit.transaction")(cause)))
     )
-    return receipt
+  })
+
+  const submit: OrchestratorService["submit"] = Effect.fn("Orchestrator.submit")(function*(
+    command: OrchestratorCommandType,
+    idempotencyKey: string
+  ) {
+    const decodedCommand = yield* Schema.decodeUnknownEffect(OrchestratorCommand)(command).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "command is not a typed fleet job" }))
+    )
+    const decodedKey = yield* Schema.decodeUnknownEffect(OrchestratorIdempotencyKey)(idempotencyKey).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "idempotency key is invalid" }))
+    )
+    return yield* submitInternal(decodedCommand, decodedKey, null, null)
+  })
+
+  const submitRouted: OrchestratorService["submitRouted"] = Effect.fn("Orchestrator.submitRouted")(function*(input) {
+    const decoded = yield* Schema.decodeUnknownEffect(OrchestratorRoutedSubmission)(input).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "routed submission is invalid" }))
+    )
+    if (
+      decoded.route.model === "gpt-5.6-sol" &&
+      decoded.route.linkedRequestId !== null &&
+      decoded.workLink !== null &&
+      !decoded.workLink.lineage.includes(decoded.route.linkedRequestId)
+    ) {
+      return yield* new OrchestratorValidationError({
+        detail: "Work lineage must include the linked Luna request"
+      })
+    }
+    return yield* submitInternal(decoded.command, decoded.idempotencyKey, decoded.route, decoded.workLink)
   })
 
   const service: OrchestratorService = {
@@ -750,7 +887,22 @@ const makeOrchestrator: Effect.Effect<
       ),
     run: (dispatchRequestId) => appendTransition(dispatchRequestId, "running", null, null),
     settle: (dispatchRequestId, result) => appendTransition(dispatchRequestId, "settled", null, result),
-    submit
+    submit,
+    submitRouted,
+    request: (dispatchRequestId) =>
+      Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
+        Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" })),
+        Effect.flatMap(loadValidatedEvents),
+        Effect.flatMap((snapshot) =>
+          Effect.gen(function*() {
+            const command = yield* decodeCommand(snapshot.dispatch.command)
+            return yield* Schema.decodeUnknownEffect(OrchestratorRequest)({
+              ...snapshot.dispatch,
+              command
+            }).pipe(Effect.mapError(storageError("request.decode")))
+          })
+        )
+      )
   }
   return service
 })

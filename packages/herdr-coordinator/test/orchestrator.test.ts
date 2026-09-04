@@ -11,6 +11,8 @@ import {
   layer as orchestratorLayer,
   Orchestrator,
   type OrchestratorCommand,
+  type OrchestratorRoutedSubmission,
+  type OrchestratorWorkLink,
   singleRunnerLayer,
   sqliteLayer
 } from "../src/index.js"
@@ -21,6 +23,46 @@ const command: OrchestratorCommand = {
   kind: "fleet.job",
   payload: { kind: "nix.check" }
 }
+
+const lunaRoute = {
+  action: "dispatch",
+  linkedRequestId: null,
+  model: "gpt-5.6-luna",
+  protocol: "hostd.coordinator.route.v1",
+  reason: "bounded coordination uses Luna",
+  reasoningEffort: "medium"
+} satisfies OrchestratorRoutedSubmission["route"]
+
+const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => ({
+  handoff: {
+    decision: "handoff",
+    goalId: "goal:escalation",
+    id: "handoff:escalation",
+    laneId: "lane:escalation",
+    occurredAt: 0,
+    owner: { id: "agent:coordinator", name: "Coordinator" },
+    summary: "Escalate the failed Luna request to Sol",
+    version: "herdr.work.decision.v1"
+  },
+  lineage
+})
+
+const makeSolSubmission = (
+  parentDispatchRequestId: string | null,
+  idempotencyKey: string
+): OrchestratorRoutedSubmission => ({
+  command: { ...command, activityIdempotencyKey: `activity:${idempotencyKey}` },
+  idempotencyKey,
+  route: {
+    action: "dispatch",
+    linkedRequestId: parentDispatchRequestId,
+    model: "gpt-5.6-sol",
+    protocol: "hostd.coordinator.route.v1",
+    reason: "failed Luna work requires an explicit linked Sol escalation",
+    reasoningEffort: "high"
+  },
+  workLink: makeWorkLink(parentDispatchRequestId === null ? [] : [parentDispatchRequestId])
+})
 
 const withDatabase = <A, E, R>(
   path: string,
@@ -91,6 +133,127 @@ describe("durable coordinator orchestrator", () => {
         })
       ))
   })
+
+  it.effect("persists executable route metadata for typed request lookup", () =>
+    withTemporaryRoot("herdr-orchestrator-route-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:route-luna" },
+              idempotencyKey: "dispatch:route-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+          })
+        )
+        const request = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.request(receipt.dispatchRequestId)
+          })
+        )
+        expect(request).toMatchObject({
+          activityIdempotencyKey: "activity:route-luna",
+          command: { activityIdempotencyKey: "activity:route-luna" },
+          dispatchRequestId: receipt.dispatchRequestId,
+          route: lunaRoute,
+          status: "accepted",
+          workLink: null
+        })
+      })
+    }))
+
+  it.effect("atomically binds a failed-Luna Sol dispatch to its Work lineage", () =>
+    withTemporaryRoot("herdr-orchestrator-work-link-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const linked = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:route-failed-luna" },
+              idempotencyKey: "dispatch:route-failed-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+            const sol = yield* orchestrator.submitRouted(makeSolSubmission(
+              luna.dispatchRequestId,
+              "dispatch:route-sol"
+            ))
+            return yield* orchestrator.request(sol.dispatchRequestId)
+          })
+        )
+        expect(linked.route).toEqual({
+          action: "dispatch",
+          linkedRequestId: linked.workLink?.lineage[0] ?? null,
+          model: "gpt-5.6-sol",
+          protocol: "hostd.coordinator.route.v1",
+          reason: "failed Luna work requires an explicit linked Sol escalation",
+          reasoningEffort: "high"
+        })
+        expect(linked.workLink?.handoff).toMatchObject({
+          decision: "handoff",
+          goalId: "goal:escalation",
+          laneId: "lane:escalation"
+        })
+
+        const database = new DatabaseSync(path)
+        const counts = database.prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
+             (SELECT COUNT(*) FROM orchestrator_dispatch_metadata) AS metadata,
+             (SELECT COUNT(*) FROM orchestrator_events WHERE type = 'accepted') AS accepted`
+        ).get()
+        database.close()
+        expect(
+          Schema.decodeUnknownSync(Schema.Struct({
+            accepted: Schema.Number,
+            dispatches: Schema.Number,
+            metadata: Schema.Number
+          }))(counts)
+        ).toEqual({ accepted: 2, dispatches: 2, metadata: 2 })
+      })
+    }))
+
+  it.effect("rejects a Sol link whose parent is not failed Luna work before acceptance", () =>
+    withTemporaryRoot("herdr-orchestrator-work-link-reject-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:route-live-luna" },
+              idempotencyKey: "dispatch:route-live-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            return yield* Effect.result(orchestrator.submitRouted(makeSolSubmission(
+              luna.dispatchRequestId,
+              "dispatch:route-invalid-sol"
+            )))
+          })
+        )
+        expect(result).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
+
+        const database = new DatabaseSync(path)
+        const dispatchCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
+        const metadataCount = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata").get()
+        database.close()
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(dispatchCount).count).toBe(1)
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(metadataCount).count).toBe(1)
+      })
+    }))
 
   it.effect("converges concurrent identical submissions on one durable receipt", () =>
     withTemporaryRoot("herdr-orchestrator-concurrent-submit-", (root) => {
