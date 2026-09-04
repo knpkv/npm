@@ -657,6 +657,10 @@ const makeOrchestrator: Effect.Effect<
     }
   )
 
+  const allocateTimestamp = Effect.fn("Orchestrator.allocateTimestamp")(function*(floor: number) {
+    return Math.max(yield* now, floor)
+  })
+
   const appendTransition = Effect.fn("Orchestrator.transition")(function*(
     dispatchRequestId: string,
     target: TransitionTarget,
@@ -706,13 +710,7 @@ const makeOrchestrator: Effect.Effect<
             operation: "transition.missing-event"
           })
         }
-        const timestamp = yield* now
-        if (timestamp < last.occurredAt) {
-          return yield* new OrchestratorStorageError({
-            cause: { dispatchRequestId: decodedDispatchRequestId, previous: last.occurredAt, timestamp },
-            operation: "transition.timestamp-regression"
-          })
-        }
+        const timestamp = yield* allocateTimestamp(last.occurredAt)
         const event = yield* Schema.decodeUnknownEffect(OrchestratorEvent)({
           activityIdempotencyKey: last.activityIdempotencyKey,
           dispatchRequestId: decodedDispatchRequestId,
@@ -833,13 +831,7 @@ const makeOrchestrator: Effect.Effect<
             operation: "worker-start.missing-event"
           })
         }
-        const timestamp = yield* now
-        if (timestamp < last.occurredAt) {
-          return yield* new OrchestratorStorageError({
-            cause: { dispatchRequestId: decoded.dispatchRequestId, previous: last.occurredAt, timestamp },
-            operation: "worker-start.timestamp-regression"
-          })
-        }
+        const timestamp = yield* allocateTimestamp(last.occurredAt)
         const bindingDecision = yield* workSql.acceptAgentBinding(decoded, timestamp).pipe(
           Effect.mapError((error): OrchestratorError => {
             if (error._tag === "WorkAgentBindingConflictError") {

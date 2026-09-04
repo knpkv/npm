@@ -304,23 +304,38 @@ describe("durable coordinator orchestrator", () => {
             })
           }).pipe(provideNodeServices)
         )
-        const activation = yield* withDatabase(
+        const lifecycle = yield* withDatabase(
           path,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const receipt = yield* orchestrator.submitRouted(submission)
             yield* orchestrator.queue(receipt.dispatchRequestId)
-            return yield* orchestrator.workerStarted({
+            const activation = yield* orchestrator.workerStarted({
               dispatchRequestId: receipt.dispatchRequestId,
               expectedRevision: lane.revision,
               laneId: lane.laneId,
               version: "herdr.work.agent-binding-request.v1",
               worker: startedWorker
             })
+            const terminal = yield* orchestrator.settle(receipt.dispatchRequestId, "same tick complete")
+            return { activation, terminal }
           })
         )
-        expect(activation.binding.checkpoint.occurredAt).toBe(2)
-        expect(activation.event.occurredAt).toBe(2)
+        expect(lifecycle.activation.binding.checkpoint.occurredAt).toBe(2)
+        expect(lifecycle.activation.event.occurredAt).toBe(2)
+        expect(lifecycle.terminal).toMatchObject({ occurredAt: 2, type: "settled" })
+        const projection = yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+            const work = yield* makeWorkService(store)
+            return yield* work.snapshots(lifecycle.terminal.occurredAt)
+          }).pipe(provideNodeServices)
+        )
+        expect(projection.now.goals[0]).toMatchObject({
+          agentHierarchy: { agent: startedWorker },
+          updatedAt: 2
+        })
       })
     }))
 
@@ -1696,6 +1711,90 @@ database.close()`,
       })
     }))
 
+  it.effect("rolls back Sol acceptance when Work has duplicate active goal authority", () =>
+    withTemporaryRoot("herdr-orchestrator-work-ambiguous-authority-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const workLink = makeWorkLink([])
+        const lane = yield* recordWorkAuthority(path, workLink)
+        const duplicate = {
+          ...lane,
+          laneId: "lane:duplicate-submit-authority",
+          operationId: "operation:duplicate-submit-authority",
+          revision: 1
+        }
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:ambiguous-authority-luna" },
+              idempotencyKey: "dispatch:ambiguous-authority-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            const failedLuna = yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+            const database = new DatabaseSync(path)
+            database.exec("DROP INDEX work_lane_claims_one_active_goal")
+            database.prepare(
+              `INSERT INTO work_lane_claims
+                 (lane_id, goal_id, operation_id, phase, revision, record)
+               VALUES (?, ?, ?, ?, ?, ?)`
+            ).run(
+              duplicate.laneId,
+              duplicate.goalId,
+              duplicate.operationId,
+              duplicate.phase,
+              duplicate.revision,
+              JSON.stringify(duplicate)
+            )
+            database.prepare(
+              `INSERT INTO work_lane_operations
+                 (operation_id, lane_id, goal_id, phase, revision, record)
+               VALUES (?, ?, ?, ?, ?, ?)`
+            ).run(
+              duplicate.operationId,
+              duplicate.laneId,
+              duplicate.goalId,
+              duplicate.phase,
+              duplicate.revision,
+              JSON.stringify(duplicate)
+            )
+            database.close()
+            return yield* Effect.result(orchestrator.submitRouted(makeSolSubmission(
+              failedLuna.dispatchRequestId,
+              "dispatch:ambiguous-authority-sol"
+            )))
+          })
+        )
+        expect(result).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "submit.work-link" }
+        })
+
+        const remaining = new DatabaseSync(path)
+        const counts = remaining.prepare(
+          `SELECT
+             (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
+             (SELECT COUNT(*) FROM orchestrator_events WHERE type = 'accepted') AS accepted,
+             (SELECT COUNT(*) FROM work_dispatch_handoffs) AS workLinks,
+             (SELECT COUNT(*) FROM work_decision_handoffs) AS decisions`
+        ).get()
+        remaining.close()
+        expect(
+          Schema.decodeUnknownSync(
+            Schema.Struct({
+              accepted: Schema.Number,
+              decisions: Schema.Number,
+              dispatches: Schema.Number,
+              workLinks: Schema.Number
+            })
+          )(counts)
+        ).toEqual({ accepted: 1, decisions: 0, dispatches: 1, workLinks: 0 })
+      })
+    }))
+
   it.effect("converges concurrent identical submissions on one durable receipt", () =>
     withTemporaryRoot("herdr-orchestrator-concurrent-submit-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -1723,7 +1822,7 @@ database.close()`,
       })
     }))
 
-  it.effect("rejects a backward transition timestamp before mutation", () =>
+  it.effect("preserves the logical event clock when the sampled clock moves backward", () =>
     withTemporaryRoot("herdr-orchestrator-timestamp-regression-", (root) =>
       withDatabase(
         join(root, "orchestrator.sqlite"),
@@ -1737,13 +1836,17 @@ database.close()`,
           yield* TestClock.setTime(200)
           yield* orchestrator.queue(receipt.dispatchRequestId)
           yield* TestClock.setTime(199)
-          const result = yield* Effect.result(orchestrator.run(receipt.dispatchRequestId))
-          expect(result).toMatchObject({
-            failure: { _tag: "OrchestratorStorageError", operation: "transition.timestamp-regression" }
-          })
-          expect(
-            yield* orchestrator.events(receipt.dispatchRequestId).pipe(Stream.take(2), Stream.runCollect)
-          ).toHaveLength(2)
+          const running = yield* orchestrator.run(receipt.dispatchRequestId)
+          expect(running).toMatchObject({ occurredAt: 200, type: "running" })
+          const events = yield* orchestrator.events(receipt.dispatchRequestId).pipe(
+            Stream.take(3),
+            Stream.runCollect
+          )
+          expect(events.map(({ occurredAt, type }) => ({ occurredAt, type }))).toEqual([
+            { occurredAt: 100, type: "accepted" },
+            { occurredAt: 200, type: "queued" },
+            { occurredAt: 200, type: "running" }
+          ])
         })
       )))
 

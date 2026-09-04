@@ -1967,12 +1967,10 @@ export class WorkStore implements WorkStoreService {
             inTransaction = false
             return { _tag: "rejected", error: laneLedger.error } satisfies HandoffDecision
           }
-          const authority = laneLedger.entries.find(({ claim }) =>
-            claim.laneId === decoded.laneId &&
-            claim.goalId === decoded.goalId &&
-            claim.phase !== "shipped"
+          const activeGoalClaims = laneLedger.entries.filter(({ claim }) =>
+            claim.goalId === decoded.goalId && claim.phase !== "shipped"
           )
-          if (authority === undefined) {
+          if (activeGoalClaims.length !== 1 || activeGoalClaims[0]?.claim.laneId !== decoded.laneId) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return {

@@ -384,6 +384,73 @@ describe("durable Work projection", () => {
       }).pipe(provideNodeServices)
     ))
 
+  it.effect("rejects decision handoff when corrupted storage has duplicate active goal claims", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-decision-ambiguous-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const path = join(directory, "work.sqlite")
+        const opened = yield* openScopedStore(path)
+        const service = yield* makeWorkService(opened.store)
+        const lane = yield* service.claim(laneClaim("lane:decision-authority", "goal:decision-authority"))
+        const duplicate = Schema.decodeUnknownSync(WorkLaneClaimed)({
+          ...laneClaim("lane:duplicate-decision-authority", lane.goalId),
+          revision: 1
+        })
+        const database = new DatabaseSync(path)
+        database.exec("DROP INDEX work_lane_claims_one_active_goal")
+        database.prepare(
+          `INSERT INTO work_lane_claims
+             (lane_id, goal_id, operation_id, phase, revision, record)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          duplicate.laneId,
+          duplicate.goalId,
+          duplicate.operationId,
+          duplicate.phase,
+          duplicate.revision,
+          JSON.stringify(duplicate)
+        )
+        database.prepare(
+          `INSERT INTO work_lane_operations
+             (operation_id, lane_id, goal_id, phase, revision, record)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          duplicate.operationId,
+          duplicate.laneId,
+          duplicate.goalId,
+          duplicate.phase,
+          duplicate.revision,
+          JSON.stringify(duplicate)
+        )
+        database.close()
+
+        const handoff: WorkDecisionHandoff = {
+          blockers: [],
+          decision: "handoff",
+          dispatchIds: ["dispatch:ambiguous-decision"],
+          evidenceRefs: [],
+          goalId: lane.goalId,
+          id: "handoff:ambiguous-decision",
+          laneId: lane.laneId,
+          occurredAt: 1,
+          owner: lane.owner,
+          sessionId: "session:ambiguous-decision",
+          summary: "Must have one active lane authority",
+          version: "herdr.work.decision.v1"
+        }
+        expect(yield* Effect.result(service.handoff(handoff))).toMatchObject({
+          failure: {
+            _tag: "WorkDecisionAuthorityConflictError",
+            goalId: lane.goalId,
+            laneId: lane.laneId
+          }
+        })
+        expect(yield* service.decisions(lane.laneId)).toEqual([])
+        expect(Option.isNone(yield* service.coordinatorHandoff(handoff.sessionId))).toBe(true)
+      }).pipe(provideNodeServices)
+    ))
+
   for (
     const tamper of [
       {
@@ -1469,6 +1536,11 @@ database.close()`,
       const updated = yield* service.currentClaim(claim.laneId)
       expect(Option.isSome(updated)).toBe(true)
       if (Option.isSome(updated)) expect(updated.value).toMatchObject({ revision: 2, phase: "validation" })
+      yield* service.claim({
+        ...laneClaim("lane-shipped-same-goal", claim.goalId),
+        operationId: "operation-shipped-same-goal",
+        phase: "shipped"
+      })
       const handoff: WorkDecisionHandoff = {
         blockers: [{ id: "review", detail: "Fresh exact-head review required" }],
         decision: "handoff",

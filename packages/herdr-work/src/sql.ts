@@ -641,11 +641,8 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
     handoff: WorkDecisionHandoffType
   ) {
     const claims = yield* readValidatedLaneClaims()
-    if (
-      claims.some((claim) =>
-        claim.laneId === handoff.laneId && claim.goalId === handoff.goalId && claim.phase !== "shipped"
-      )
-    ) return
+    const activeGoalClaims = claims.filter((claim) => claim.goalId === handoff.goalId && claim.phase !== "shipped")
+    if (activeGoalClaims.length === 1 && activeGoalClaims[0]?.laneId === handoff.laneId) return
     return yield* new WorkDecisionAuthorityConflictError({ goalId: handoff.goalId, laneId: handoff.laneId })
   })
 
