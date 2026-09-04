@@ -26,6 +26,7 @@ import {
 const provideNodeServices = Effect.provide(NodeServices.layer)
 
 const day = 24 * 60 * 60 * 1_000
+const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength
 
 const goal = (
   updatedAt: number,
@@ -544,6 +545,44 @@ describe("durable Work projection", () => {
       completeStore.close()
     }).pipe(provideNodeServices))
 
+  it.effect("revalidates compact transaction denormalized identities", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-compact-transaction-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const events = history.slice(0, 2)
+      const secondEvent = events[1]
+      if (secondEvent === undefined) return yield* Effect.die("compact transaction fixture missing its second event")
+      const store = yield* WorkStore.open(path)
+      const service = yield* makeWorkService(store)
+      expect(yield* service.recordMany("transaction-compact", events)).toEqual(events)
+      store.close()
+
+      const database = new DatabaseSync(path)
+      database.prepare(
+        "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
+      ).run("goal-denormalized-drift", 99, secondEvent.eventId)
+      database.close()
+
+      const corruptedStore = yield* WorkStore.open(path)
+      const corruptedService = yield* makeWorkService(corruptedStore)
+      expect(yield* Effect.result(corruptedService.recordMany("transaction-compact", events))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact" }
+      })
+      corruptedStore.close()
+
+      const restored = new DatabaseSync(path)
+      restored.prepare(
+        "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
+      ).run(secondEvent.goal.id, secondEvent.occurredAt, secondEvent.eventId)
+      restored.close()
+
+      const completeStore = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => completeStore.close()))
+      const completeService = yield* makeWorkService(completeStore)
+      expect(yield* completeService.recordMany("transaction-compact", events)).toEqual(events)
+    }).pipe(provideNodeServices))
+
   it.effect("rejects a transaction extension after an exact replay prefix", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-prefix-"))
@@ -787,13 +826,24 @@ describe("durable Work projection", () => {
       expect(yield* service.decisions("goal-packages")).toEqual([handoff])
 
       const database = new DatabaseSync(store.path)
-      const queryPlan = database.prepare(
+      const totals = database.prepare(
+        `SELECT decision_count AS decisionCount, decision_bytes AS decisionBytes
+         FROM work_decision_totals WHERE singleton = 1`
+      ).get()
+      database.close()
+      expect(totals).toEqual({
+        decisionCount: 1,
+        decisionBytes: utf8ByteLength(handoff.id) + utf8ByteLength(JSON.stringify(handoff))
+      })
+
+      const queryPlanDatabase = new DatabaseSync(store.path)
+      const queryPlan = queryPlanDatabase.prepare(
         `EXPLAIN QUERY PLAN
          SELECT record FROM work_decision_handoffs
          WHERE lane_id = ?
          ORDER BY occurred_at ASC, handoff_id ASC`
       ).all("goal-packages")
-      database.close()
+      queryPlanDatabase.close()
       expect(queryPlan.some((row) => String(row.detail).includes("work_decision_handoffs_lane_time"))).toBe(true)
 
       for (const head of ["a".repeat(41), "a".repeat(63)]) {
@@ -902,6 +952,35 @@ describe("durable Work projection", () => {
         failure: { _tag: "WorkStoreError", operation: "decisions.decode.identity-mismatch" }
       })
       mismatchedStore.close()
+
+      const replay = {
+        ...first,
+        goalId: "goal-decision-replay",
+        id: "handoff-replay",
+        laneId: "goal-decision-replay",
+        occurredAt: 3
+      }
+      const replaySeed = new DatabaseSync(path)
+      replaySeed.prepare(
+        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+      ).run(replay.id, "foreign-lane", 4, JSON.stringify(replay))
+      replaySeed.close()
+      const replayStore = yield* WorkStore.open(path)
+      const replayService = yield* makeWorkService(replayStore)
+      expect(yield* Effect.result(replayService.handoff(replay))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "decision.decode.identity-mismatch" }
+      })
+      replayStore.close()
+
+      const repairedReplay = new DatabaseSync(path)
+      repairedReplay.prepare(
+        "UPDATE work_decision_handoffs SET lane_id = ?, occurred_at = ? WHERE handoff_id = ?"
+      ).run(replay.laneId, replay.occurredAt, replay.id)
+      repairedReplay.close()
+      const replayedStore = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => replayedStore.close()))
+      const replayedService = yield* makeWorkService(replayedStore)
+      expect(yield* replayedService.handoff(replay)).toEqual(replay)
 
       const repaired = new DatabaseSync(path)
       repaired.prepare(

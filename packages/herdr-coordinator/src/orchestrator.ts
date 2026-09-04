@@ -349,6 +349,20 @@ const makeOrchestrator: Effect.Effect<
     }
   })
 
+  const loadValidatedEvents = Effect.fn("Orchestrator.loadValidatedEvents")(function*(dispatchRequestId: string) {
+    const dispatch = yield* load(dispatchRequestId)
+    const events = yield* listEvents(dispatchRequestId)
+    yield* validateLifecycleChain(dispatch, events)
+    const last = events.at(-1)
+    if (last === undefined || last.type !== dispatch.status) {
+      return yield* new OrchestratorStorageError({
+        cause: { dispatch, event: last },
+        operation: "events.status-event-mismatch"
+      })
+    }
+    return events
+  })
+
   const listPending = Effect.fn("Orchestrator.listPending")(
     function*(query: typeof OrchestratorPendingQuery.Type = {}) {
       const decodedQuery = yield* Schema.decodeUnknownEffect(OrchestratorPendingQuery)(query).pipe(
@@ -601,9 +615,7 @@ const makeOrchestrator: Effect.Effect<
       Stream.fromIterableEffect(
         Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
           Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" })),
-          Effect.flatMap((decodedDispatchRequestId) =>
-            load(decodedDispatchRequestId).pipe(Effect.flatMap(() => listEvents(decodedDispatchRequestId)))
-          )
+          Effect.flatMap(loadValidatedEvents)
         )
       ),
     failDelivery: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "delivery_failed", detail, null),

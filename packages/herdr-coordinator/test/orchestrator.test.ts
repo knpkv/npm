@@ -165,6 +165,17 @@ describe("durable coordinator orchestrator", () => {
         ).run("dispatch:status-mismatch", 0, "activity:status-mismatch", 0)
         database.close()
 
+        const eventsResult = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(Stream.runCollect(orchestrator.events("dispatch:status-mismatch")))
+          })
+        )
+        expect(eventsResult).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "events.status-event-mismatch" }
+        })
+
         const result = yield* withDatabase(
           path,
           Effect.gen(function*() {
@@ -273,6 +284,17 @@ describe("durable coordinator orchestrator", () => {
           "UPDATE orchestrator_events SET type = 'running' WHERE dispatch_request_id = ? AND sequence = 1"
         ).run(receipt.dispatchRequestId)
         database.close()
+
+        const eventsResult = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(Stream.runCollect(orchestrator.events(receipt.dispatchRequestId)))
+          })
+        )
+        expect(eventsResult).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "transition.lifecycle-chain-mismatch" }
+        })
 
         const result = yield* withDatabase(
           path,
