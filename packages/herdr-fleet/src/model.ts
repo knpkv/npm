@@ -236,6 +236,7 @@ export const JobRecord = Schema.Struct({
   status: JobStatus,
   payload: JobPayload,
   result: Schema.NullOr(Schema.String),
+  acceptedReceipt: Schema.optionalKey(Schema.NullOr(Schema.String)),
   error: Schema.NullOr(Schema.String),
   worker: Schema.optionalKey(AgentWorkerIdentity),
   connectTarget: Schema.optionalKey(AgentConnectTarget),

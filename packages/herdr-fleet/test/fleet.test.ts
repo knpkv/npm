@@ -8,12 +8,14 @@ import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
 import {
+  agentConnectTarget,
   AgentWorkerIdentity,
   BrowserMcpRecover,
   decodeBoundedResponseJson,
   FleetOperationError,
   fleetResponseBodyMaxBytes,
   HostConfiguration,
+  type HostOperationLifecycle,
   type HostOperations,
   JobHash,
   jobHash,
@@ -22,7 +24,8 @@ import {
   JobRecord,
   JobStore,
   jobTextMaxLength,
-  makeFleetService
+  makeFleetService,
+  type WorkerStarted
 } from "../src/index.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -76,6 +79,188 @@ const seedJobRecords = (path: string, records: ReadonlyArray<JobRecord>): void =
 }
 
 describe("fleet local authority", () => {
+  it.effect("passes the accepted job identity to host operations", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-accepted-job-test-"))
+    let accepted: { readonly actor: string; readonly jobId: string } | null = null
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: false,
+            host: "SER8",
+            id: Effect.succeed("job-accepted"),
+            now: Effect.succeed(1_000),
+            operations: {
+              ...operations,
+              run: (_payload, _workerStarted, jobId, actor) =>
+                Effect.sync(() => {
+                  accepted = { actor, jobId }
+                  return "accepted"
+                })
+            },
+            store
+          })
+          const job = yield* service.submit({ payload: { kind: "nix.check" } }, "andrey")
+          yield* service.run(job.id)
+          expect(accepted).toEqual({ actor: "andrey", jobId: "job-accepted" })
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("resumes an accepted operation after restart and retains its receipt", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-accepted-recovery-test-"))
+    const databasePath = join(root, "jobs.sqlite")
+    return Effect.gen(function*() {
+      const resumed = yield* Deferred.make<{
+        readonly lifecycle: HostOperationLifecycle
+        readonly workerStarted: WorkerStarted
+      }>()
+      const firstStore = yield* JobStore.open(databasePath)
+      const first = yield* makeFleetService({
+        approvalEnabled: false,
+        host: "SER8",
+        id: Effect.succeed("job-durable-accepted"),
+        now: Effect.succeed(1_000),
+        operations: {
+          ...operations,
+          resumeAccepted: () => Effect.void,
+          run: (_payload, _workerStarted, _jobId, _actor, lifecycle) =>
+            lifecycle.accepted("durable-receipt").pipe(Effect.as("durable-receipt"))
+        },
+        store: firstStore
+      })
+      const queued = yield* first.submit({
+        payload: {
+          kind: "agent.delegate",
+          mode: "consult",
+          prompt: "resume durable work",
+          repository: "/repo"
+        }
+      }, "andrey")
+      expect(yield* first.run(queued.id)).toMatchObject({
+        acceptedReceipt: "durable-receipt",
+        result: "durable-receipt",
+        status: "running"
+      })
+      firstStore.close()
+
+      const secondStore = yield* JobStore.open(databasePath)
+      const second = yield* makeFleetService({
+        approvalEnabled: false,
+        host: "SER8",
+        now: Effect.succeed(2_000),
+        operations: {
+          ...operations,
+          resumeAccepted: (_payload, workerStarted, _jobId, _actor, receipt, lifecycle) =>
+            receipt === "durable-receipt"
+              ? Deferred.succeed(resumed, { lifecycle, workerStarted }).pipe(Effect.asVoid)
+              : Effect.fail(
+                new FleetOperationError({
+                  cause: receipt,
+                  detail: "unexpected durable receipt",
+                  operation: "test.resume_accepted"
+                })
+              )
+        },
+        store: secondStore
+      })
+      expect(yield* second.recover()).toEqual([])
+      const callbacks = yield* Deferred.await(resumed)
+      yield* callbacks.workerStarted(remoteWorker)
+      yield* callbacks.lifecycle.terminal({ type: "settled", detail: "durable complete" })
+      expect(yield* second.get(queued.id)).toMatchObject({
+        acceptedReceipt: "durable-receipt",
+        connectTarget: agentConnectTarget(remoteWorker),
+        result: "durable complete",
+        status: "succeeded",
+        worker: remoteWorker
+      })
+      secondStore.close()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("keeps accepted work recoverable when observer setup fails", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-accepted-observer-failure-test-"))
+    const databasePath = join(root, "jobs.sqlite")
+    return Effect.gen(function*() {
+      const firstStore = yield* JobStore.open(databasePath)
+      const first = yield* makeFleetService({
+        approvalEnabled: false,
+        host: "SER8",
+        id: Effect.succeed("job-observer-failure"),
+        now: Effect.succeed(1_000),
+        operations: {
+          ...operations,
+          resumeAccepted: () => Effect.void,
+          run: (_payload, _workerStarted, _jobId, _actor, lifecycle) =>
+            lifecycle.accepted("recoverable-receipt").pipe(
+              Effect.andThen(
+                Effect.fail(
+                  new FleetOperationError({
+                    cause: "observer setup",
+                    detail: "could not attach durable observer",
+                    operation: "test.attach_observer"
+                  })
+                )
+              )
+            )
+        },
+        store: firstStore
+      })
+      const queued = yield* first.submit({ payload: { kind: "nix.check" } }, "andrey")
+      const failedRun = yield* Effect.result(first.run(queued.id))
+      expect(failedRun).toMatchObject({
+        failure: { _tag: "FleetOperationError", operation: "test.attach_observer" }
+      })
+      expect(yield* first.get(queued.id)).toMatchObject({
+        acceptedReceipt: "recoverable-receipt",
+        error: "accepted operation observer failed: could not attach durable observer",
+        status: "running"
+      })
+      firstStore.close()
+
+      const secondStore = yield* JobStore.open(databasePath)
+      const second = yield* makeFleetService({
+        approvalEnabled: false,
+        host: "SER8",
+        now: Effect.succeed(2_000),
+        operations: {
+          ...operations,
+          resumeAccepted: (_payload, _workerStarted, _jobId, _actor, receipt, lifecycle) =>
+            receipt === "recoverable-receipt"
+              ? lifecycle.terminal({ type: "task_failed", detail: "durable task failed" })
+              : Effect.fail(
+                new FleetOperationError({
+                  cause: receipt,
+                  detail: "unexpected durable receipt",
+                  operation: "test.resume_accepted"
+                })
+              )
+        },
+        store: secondStore
+      })
+      yield* second.recover()
+      expect(yield* second.get(queued.id)).toMatchObject({
+        acceptedReceipt: "recoverable-receipt",
+        error: "durable task failed",
+        status: "failed"
+      })
+      secondStore.close()
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
   it("accepts only Unicode scalar job identifiers", () => {
     expect(Result.isFailure(
       Schema.decodeUnknownResult(JobIdentifier)("\uD800")
