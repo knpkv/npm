@@ -412,24 +412,29 @@ const program = Effect.scoped(
       [
         "--input-type=module",
         "--eval",
-        "console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd')); console.log(import.meta.resolve('@knpkv/herdr-approvals/fleetctl'))"
+        "console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd')); console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd-runtime')); console.log(import.meta.resolve('@knpkv/herdr-approvals/fleetctl'))"
       ],
       consumer
     )
     const resolved = resolution.trim().split("\n")
     const hostdResolution = resolved[0]
-    const fleetctlResolution = resolved[1]
+    const hostdRuntimeResolution = resolved[1]
+    const fleetctlResolution = resolved[2]
     if (
-      resolved.length !== 2 ||
+      resolved.length !== 3 ||
       hostdResolution === undefined ||
+      hostdRuntimeResolution === undefined ||
       fleetctlResolution === undefined ||
       hostdResolution.endsWith("/dist/bin.js") === false ||
+      hostdRuntimeResolution.endsWith("/dist/hostd.js") === false ||
       fleetctlResolution.endsWith("/dist/fleetctl.js") === false
     ) {
       return yield* new HerdrPackContractError({ reason: `Approval runtime subpaths do not resolve: ${resolution}` })
     }
 
-    yield* Console.log("six Herdr pnpm packs are reproducible, exact, dependency-clean, and export both runtimes")
+    yield* Console.log(
+      "six Herdr pnpm packs are reproducible, exact, dependency-clean, and export both executables plus hostd composition"
+    )
   }).pipe(
     // The packed-package verifier owns one Node runtime for the complete check.
     // @effect-diagnostics-next-line strictEffectProvide:off

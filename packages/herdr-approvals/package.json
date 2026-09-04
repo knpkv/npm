@@ -34,6 +34,10 @@
     "./hostd": {
       "types": "./dist/bin.d.ts",
       "import": "./dist/bin.js"
+    },
+    "./hostd-runtime": {
+      "types": "./dist/hostd.d.ts",
+      "import": "./dist/hostd.js"
     }
   },
   "files": [
