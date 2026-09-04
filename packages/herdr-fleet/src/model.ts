@@ -6,6 +6,12 @@ export const JobIdentifier = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
 )
+export const HostOperationReceipt = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2 * 1_024),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
+export type HostOperationReceipt = typeof HostOperationReceipt.Type
 const WorkerTimestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
@@ -236,6 +242,8 @@ export const JobRecord = Schema.Struct({
   status: JobStatus,
   payload: JobPayload,
   result: Schema.NullOr(Schema.String),
+  acceptedReceipt: Schema.optionalKey(Schema.NullOr(HostOperationReceipt)),
+  durableOperation: Schema.optionalKey(Schema.Literal(true)),
   error: Schema.NullOr(Schema.String),
   worker: Schema.optionalKey(AgentWorkerIdentity),
   connectTarget: Schema.optionalKey(AgentConnectTarget),

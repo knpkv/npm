@@ -1,4 +1,4 @@
-import { Clock, Crypto, Effect, Encoding, Ref, Result, Schema } from "effect"
+import { Clock, Crypto, Effect, Encoding, Ref, Result, Schema, Semaphore } from "effect"
 import {
   FleetApprovalError,
   FleetJobNotFoundError,
@@ -18,6 +18,7 @@ import {
   AgentWorkerObservations,
   type CoreJobPayload,
   type HostDetails,
+  HostOperationReceipt,
   JobActor,
   type JobHash,
   type JobPayload,
@@ -36,13 +37,79 @@ export type WorkerStarted = (
   identity: AgentWorkerIdentity
 ) => Effect.Effect<void, FleetOperationError>
 
+export const hostOperationTerminalDetailMaxLength = 20_000
+const terminalDetailEncoder = new TextEncoder()
+const HostOperationTerminalDetail = Schema.String.check(
+  Schema.isMaxLength(hostOperationTerminalDetailMaxLength),
+  Schema.makeFilter(
+    (detail) => terminalDetailEncoder.encode(detail).byteLength <= hostOperationTerminalDetailMaxLength,
+    { expected: `UTF-8 text no larger than ${hostOperationTerminalDetailMaxLength} bytes` }
+  )
+)
+
+export const HostOperationTerminal = Schema.Union([
+  Schema.Struct({ type: Schema.Literal("settled"), detail: HostOperationTerminalDetail }),
+  Schema.Struct({ type: Schema.Literal("delivery_failed"), detail: HostOperationTerminalDetail }),
+  Schema.Struct({ type: Schema.Literal("task_failed"), detail: HostOperationTerminalDetail })
+])
+export type HostOperationTerminal = typeof HostOperationTerminal.Type
+
+const terminalDetailTruncationSuffix = "\n[truncated; authoritative detail remains in coordinator]"
+
+/** Projects an authoritative coordinator detail into Fleet's bounded summary. */
+export const summarizeHostOperationTerminalDetail = (detail: string): string => {
+  if (
+    detail.length <= hostOperationTerminalDetailMaxLength &&
+    terminalDetailEncoder.encode(detail).byteLength <= hostOperationTerminalDetailMaxLength
+  ) return detail
+  const boundary = hostOperationTerminalDetailMaxLength -
+    terminalDetailEncoder.encode(terminalDetailTruncationSuffix).byteLength
+  let bounded = ""
+  let byteLength = 0
+  for (const character of detail) {
+    const characterBytes = terminalDetailEncoder.encode(character).byteLength
+    if (byteLength + characterBytes > boundary) break
+    bounded += character
+    byteLength += characterBytes
+  }
+  return `${bounded}${terminalDetailTruncationSuffix}`
+}
+
+export type HostOperationLifecycle = {
+  /** Persists a durable receipt while the fleet job remains running. */
+  readonly accepted: (receipt: string) => Effect.Effect<void, FleetOperationError>
+  /** Mirrors the authoritative durable terminal event into the fleet job. */
+  readonly terminal: (event: HostOperationTerminal) => Effect.Effect<void, FleetOperationError>
+}
+
+export type ResumeHostOperation = (
+  payload: CoreJobPayload,
+  workerStarted: WorkerStarted,
+  jobId: string,
+  actor: JobActor,
+  receipt: string | null,
+  lifecycle: HostOperationLifecycle
+) => Effect.Effect<void, FleetOperationError>
+
+export type HostOperationRecovery = {
+  /** Identifies operations whose deterministic Fleet job ID is their durable submission identity. */
+  readonly matches: (payload: CoreJobPayload) => boolean
+  /**
+   * Rejoins or idempotently completes submission, including before Fleet persisted a receipt.
+   * It must attach observation in its owning scope and return without waiting for terminal work.
+   */
+  readonly resume: ResumeHostOperation
+}
+
 export type HostOperations = {
   readonly listAgents: () => Effect.Effect<AgentInventory, FleetOperationError>
   readonly inspect: () => Effect.Effect<HostDetails, FleetOperationError>
   readonly run: (
     payload: CoreJobPayload,
     workerStarted: WorkerStarted,
-    jobId: string
+    jobId: string,
+    actor: JobActor,
+    lifecycle: HostOperationLifecycle
   ) => Effect.Effect<string, FleetOperationError>
   readonly runLocal: (
     payload: LocalJobPayload
@@ -50,8 +117,12 @@ export type HostOperations = {
   readonly runCoordinatorChat: (
     payload: AgentDelegate,
     workerStarted: WorkerStarted,
-    jobId: string
+    jobId: string,
+    actor: JobActor,
+    lifecycle: HostOperationLifecycle
   ) => Effect.Effect<string, FleetOperationError>
+  /** Explicit crash recovery for operations backed by another durable store. */
+  readonly recovery?: HostOperationRecovery
 }
 
 export type Approval = {
@@ -77,6 +148,8 @@ type JobChange = Partial<
     JobRecord,
     | "status"
     | "result"
+    | "acceptedReceipt"
+    | "durableOperation"
     | "error"
     | "approvedBy"
     | "approvedAt"
@@ -190,6 +263,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       status: approval ? "pending_approval" : "queued",
       payload: request.payload,
       result: null,
+      acceptedReceipt: null,
       error: null
     }
     return yield* options.store.put(record)
@@ -256,11 +330,191 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     )
   })
 
+  const sameWorkerIdentity = (
+    left: AgentWorkerIdentity,
+    right: AgentWorkerIdentity
+  ): boolean =>
+    left.host.toLowerCase() === right.host.toLowerCase() &&
+    left.agentId === right.agentId &&
+    left.name === right.name &&
+    left.paneId === right.paneId &&
+    left.relationship?.parentAgentId === right.relationship?.parentAgentId &&
+    left.relationship?.relation === right.relationship?.relation
+
+  const makeOperationLifecycle = Effect.fn("FleetService.makeOperationLifecycle")(function*(
+    initial: JobRecord,
+    acceptedAtStart: boolean,
+    recovering: boolean
+  ) {
+    const current = yield* Ref.make(initial)
+    const accepted = yield* Ref.make(acceptedAtStart)
+    const transitions = yield* Semaphore.make(1)
+    const workerStarted: WorkerStarted = Effect.fn("FleetService.workerStarted")(
+      (identity: AgentWorkerIdentity) =>
+        transitions.withPermit(Effect.gen(function*() {
+          const record = yield* Ref.get(current)
+          if (record.status !== "running") {
+            return yield* new FleetOperationError({
+              cause: identity,
+              detail: `cannot attach a worker to a ${record.status} fleet job`,
+              operation: "fleet.worker_started"
+            })
+          }
+          if (record.payload.kind !== "agent.delegate") {
+            return yield* new FleetOperationError({
+              cause: identity,
+              detail: "only agent.delegate jobs can report a worker identity",
+              operation: "fleet.worker_started"
+            })
+          }
+          const coordinatorHandled = record.payload.mode === "consult" ||
+            record.payload.channel === "coordinator_chat"
+          if (!coordinatorHandled && identity.relationship === undefined) {
+            return yield* new FleetOperationError({
+              cause: identity,
+              detail: "delegated worker identity is missing its exact relationship",
+              operation: "fleet.worker_started"
+            })
+          }
+          if (record.worker !== undefined) {
+            if (recovering && sameWorkerIdentity(record.worker, identity)) return
+            return yield* new FleetOperationError({
+              cause: identity,
+              detail: "coordinator reported more than one worker identity",
+              operation: "fleet.worker_started"
+            })
+          }
+          const persisted = yield* options.store.transition(
+            record,
+            updated(record, yield* now, {
+              worker: identity,
+              connectTarget: agentConnectTarget(identity),
+              workerTerminalObservedAt: null
+            })
+          ).pipe(
+            Effect.mapError(
+              (cause) =>
+                new FleetOperationError({
+                  cause,
+                  detail: "could not persist coordinator worker identity",
+                  operation: "fleet.worker_started"
+                })
+            )
+          )
+          yield* Ref.set(current, persisted)
+        }))
+    )
+    const lifecycle: HostOperationLifecycle = {
+      accepted: Effect.fn("FleetService.operationAccepted")((receipt: string) =>
+        transitions.withPermit(Effect.gen(function*() {
+          const decodedReceipt = yield* Schema.decodeUnknownEffect(HostOperationReceipt)(receipt).pipe(
+            Effect.mapError((cause) =>
+              new FleetOperationError({
+                cause,
+                detail: "durable receipt is invalid",
+                operation: "fleet.operation_accepted"
+              })
+            )
+          )
+          if (options.operations.recovery === undefined || initial.durableOperation !== true) {
+            return yield* new FleetOperationError({
+              cause: decodedReceipt,
+              detail: "durable acceptance requires an explicit recovery operation",
+              operation: "fleet.operation_accepted"
+            })
+          }
+          if (yield* Ref.get(accepted)) {
+            return yield* new FleetOperationError({
+              cause: decodedReceipt,
+              detail: "host operation reported more than one accepted receipt",
+              operation: "fleet.operation_accepted"
+            })
+          }
+          const record = yield* Ref.get(current)
+          if (record.status !== "running") {
+            return yield* new FleetOperationError({
+              cause: decodedReceipt,
+              detail: `cannot accept a ${record.status} fleet job`,
+              operation: "fleet.operation_accepted"
+            })
+          }
+          const persisted = yield* options.store.transition(
+            record,
+            updated(record, yield* now, {
+              acceptedReceipt: decodedReceipt,
+              result: decodedReceipt
+            })
+          ).pipe(Effect.mapError(randomError("fleet.operation_accepted")))
+          yield* Ref.set(current, persisted)
+          yield* Ref.set(accepted, true)
+        }))
+      ),
+      terminal: Effect.fn("FleetService.operationTerminal")((event: HostOperationTerminal) =>
+        transitions.withPermit(Effect.gen(function*() {
+          const decodedEvent = yield* Schema.decodeUnknownEffect(HostOperationTerminal)(event).pipe(
+            Effect.mapError((cause) =>
+              new FleetOperationError({
+                cause,
+                detail: "durable terminal summary is invalid",
+                operation: "fleet.operation_terminal"
+              })
+            )
+          )
+          if (!(yield* Ref.get(accepted))) {
+            return yield* new FleetOperationError({
+              cause: decodedEvent,
+              detail: "host operation reported a terminal event before acceptance",
+              operation: "fleet.operation_terminal"
+            })
+          }
+          const record = yield* Ref.get(current)
+          if (
+            decodedEvent.type === "settled" &&
+            decodedEvent.detail.length === 0 &&
+            record.payload.kind === "agent.delegate" &&
+            record.payload.channel === "coordinator_chat"
+          ) {
+            return yield* new FleetOperationError({
+              cause: decodedEvent,
+              detail: "coordinator chat settled without a reply",
+              operation: "fleet.operation_terminal"
+            })
+          }
+          if (record.status !== "running") {
+            return yield* new FleetOperationError({
+              cause: decodedEvent,
+              detail: `cannot settle a ${record.status} fleet job`,
+              operation: "fleet.operation_terminal"
+            })
+          }
+          const terminalObservedAt = yield* now
+          const terminal: JobChange = decodedEvent.type === "settled"
+            ? { status: "succeeded", result: decodedEvent.detail, error: null }
+            : { status: "failed", result: null, error: decodedEvent.detail }
+          const persisted = yield* options.store.transition(
+            record,
+            updated(
+              record,
+              terminalObservedAt,
+              record.worker === undefined
+                ? terminal
+                : { ...terminal, workerTerminalObservedAt: terminalObservedAt }
+            )
+          ).pipe(Effect.mapError(randomError("fleet.operation_terminal")))
+          yield* Ref.set(current, persisted)
+        }))
+      )
+    }
+    return { accepted, current, lifecycle, transitions, workerStarted }
+  })
+
   const runWith = Effect.fn("FleetService.runWith")(function*(
     jobId: string,
     execute: (
       payload: JobPayload,
-      workerStarted: WorkerStarted
+      workerStarted: WorkerStarted,
+      actor: JobActor,
+      lifecycle: HostOperationLifecycle
     ) => Effect.Effect<
       string,
       FleetOperationError | FleetValidationError
@@ -273,93 +527,86 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         detail: `job is ${record.status}, not queued`
       })
     }
+    const corePayload = record.payload.kind === "browser.mcp.recover" ? null : record.payload
+    const durableOperation = corePayload !== null && options.operations.recovery?.matches(corePayload) === true
+    const durableChange: JobChange = durableOperation ? { durableOperation: true } : {}
     const running = yield* options.store.transition(
       record,
-      updated(record, yield* now, { status: "running", result: null, error: null })
+      updated(record, yield* now, {
+        status: "running",
+        result: null,
+        acceptedReceipt: null,
+        ...durableChange,
+        error: null
+      })
     )
-    const current = yield* Ref.make(running)
-    const workerStarted: WorkerStarted = Effect.fn("FleetService.workerStarted")(
-      function*(identity: AgentWorkerIdentity) {
-        const record = yield* Ref.get(current)
-        if (record.payload.kind !== "agent.delegate") {
-          return yield* new FleetOperationError({
-            cause: identity,
-            detail: "only agent.delegate jobs can report a worker identity",
-            operation: "fleet.worker_started"
-          })
-        }
-        const coordinatorHandled = record.payload.mode === "consult" ||
-          record.payload.channel === "coordinator_chat"
-        if (!coordinatorHandled && identity.relationship === undefined) {
-          return yield* new FleetOperationError({
-            cause: identity,
-            detail: "delegated worker identity is missing its exact relationship",
-            operation: "fleet.worker_started"
-          })
-        }
-        if (record.worker !== undefined) {
-          return yield* new FleetOperationError({
-            cause: identity,
-            detail: "coordinator reported more than one worker identity",
-            operation: "fleet.worker_started"
-          })
-        }
+    const { accepted, current, lifecycle, transitions, workerStarted } = yield* makeOperationLifecycle(
+      running,
+      false,
+      false
+    )
+    const result = yield* Effect.result(
+      execute(running.payload, workerStarted, running.actor, lifecycle)
+    )
+    return yield* transitions.withPermit(Effect.gen(function*() {
+      const latest = yield* Ref.get(current)
+      if (yield* Ref.get(accepted)) {
+        if (Result.isSuccess(result) || latest.status !== "running") return latest
         const persisted = yield* options.store.transition(
-          record,
-          updated(record, yield* now, {
-            worker: identity,
-            connectTarget: agentConnectTarget(identity),
-            workerTerminalObservedAt: null
+          latest,
+          updated(latest, yield* now, {
+            error: `accepted operation observer failed: ${result.failure.detail}`
           })
-        ).pipe(
-          Effect.mapError(
-            (cause) =>
-              new FleetOperationError({
-                cause,
-                detail: "could not persist coordinator worker identity",
-                operation: "fleet.worker_started"
-              })
-          )
         )
         yield* Ref.set(current, persisted)
+        return yield* result.failure
       }
-    )
-    const result = yield* Effect.result(execute(running.payload, workerStarted))
-    const latest = yield* Ref.get(current)
-    const terminalObservedAt = yield* now
-    if (Result.isSuccess(result)) {
-      const succeeded: JobChange = latest.worker === undefined
-        ? { status: "succeeded", result: result.success, error: null }
+      if (durableOperation && Result.isFailure(result)) {
+        return yield* result.failure
+      }
+      if (durableOperation && Result.isSuccess(result)) {
+        return yield* new FleetOperationError({
+          cause: jobId,
+          detail: "durable host operation returned without an accepted receipt",
+          operation: "fleet.operation_acceptance_missing"
+        })
+      }
+      if (latest.status !== "running") return latest
+      const terminalObservedAt = yield* now
+      if (Result.isSuccess(result)) {
+        const succeeded: JobChange = latest.worker === undefined
+          ? { status: "succeeded", result: result.success, error: null }
+          : {
+            status: "succeeded",
+            result: result.success,
+            error: null,
+            workerTerminalObservedAt: terminalObservedAt
+          }
+        return yield* options.store.transition(
+          latest,
+          updated(latest, terminalObservedAt, succeeded)
+        )
+      }
+      const failed: JobChange = latest.worker === undefined
+        ? { status: "failed", result: null, error: result.failure.detail }
         : {
-          status: "succeeded",
-          result: result.success,
-          error: null,
+          status: "failed",
+          result: null,
+          error: result.failure.detail,
           workerTerminalObservedAt: terminalObservedAt
         }
       return yield* options.store.transition(
         latest,
-        updated(latest, terminalObservedAt, succeeded)
+        updated(latest, terminalObservedAt, failed)
       )
-    }
-    const failed: JobChange = latest.worker === undefined
-      ? { status: "failed", result: null, error: result.failure.detail }
-      : {
-        status: "failed",
-        result: null,
-        error: result.failure.detail,
-        workerTerminalObservedAt: terminalObservedAt
-      }
-    return yield* options.store.transition(
-      latest,
-      updated(latest, terminalObservedAt, failed)
-    )
+    }))
   })
 
   const run = Effect.fn("FleetService.run")((jobId: string) =>
-    runWith(jobId, (payload, workerStarted) =>
+    runWith(jobId, (payload, workerStarted, actor, lifecycle) =>
       payload.kind === "browser.mcp.recover"
         ? options.operations.runLocal(payload)
-        : options.operations.run(payload, workerStarted, jobId))
+        : options.operations.run(payload, workerStarted, jobId, actor, lifecycle))
   )
 
   const runCoordinatorChat = Effect.fn("FleetService.runCoordinatorChat")(
@@ -375,9 +622,9 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       }
       return yield* runWith(
         jobId,
-        (payload, workerStarted) =>
+        (payload, workerStarted, actor, lifecycle) =>
           payload.kind === "agent.delegate" && payload.channel === "coordinator_chat"
-            ? options.operations.runCoordinatorChat(payload, workerStarted, jobId)
+            ? options.operations.runCoordinatorChat(payload, workerStarted, jobId, actor, lifecycle)
             : Effect.fail(
               new FleetValidationError({
                 detail: "coordinator chat payload changed before execution"
@@ -556,6 +803,37 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         )
       }
       if (record.status === "running") {
+        const receipt = record.acceptedReceipt ?? null
+        const durableOperation = record.durableOperation === true || receipt !== null
+        if (durableOperation) {
+          if (
+            options.operations.recovery === undefined ||
+            record.payload.kind === "browser.mcp.recover"
+          ) {
+            return yield* new FleetOperationError({
+              cause: record.id,
+              detail: "durable fleet job has no recovery operation",
+              operation: "fleet.recover_durable"
+            })
+          }
+          if (!options.operations.recovery.matches(record.payload)) {
+            return yield* new FleetOperationError({
+              cause: record.id,
+              detail: "durable fleet job no longer matches its recovery operation",
+              operation: "fleet.recover_durable"
+            })
+          }
+          const resumed = yield* makeOperationLifecycle(record, receipt !== null, true)
+          yield* options.operations.recovery.resume(
+            record.payload,
+            resumed.workerStarted,
+            record.id,
+            record.actor,
+            receipt,
+            resumed.lifecycle
+          )
+          continue
+        }
         const terminalObservedAt = yield* now
         const failure: JobChange = record.worker === undefined
           ? {
