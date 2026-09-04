@@ -8,11 +8,13 @@ import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
 
+export type HostdLifetimeFork = <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<void>
+
 export interface HostdOperationsComposition {
   readonly config: HostConfiguration
   readonly defaultOperations: HostOperations
-  /** Lifetime for accepted work that outlives the immediate fleet operation. */
-  readonly scope: Scope.Scope
+  /** Registers accepted work for interruption when the hostd process scope closes. */
+  readonly fork: HostdLifetimeFork
 }
 
 export type HostdOperationsComposer = (
@@ -55,7 +57,8 @@ export const makeHostdOperations = Effect.fn("Hostd.makeOperations")(function*(
   const scope = yield* Scope.Scope
   const defaultOperations = yield* makeHostOperations(config)
   if (composeOperations === undefined) return defaultOperations
-  return yield* composeOperations({ config, defaultOperations, scope })
+  const fork: HostdLifetimeFork = (effect) => Effect.forkIn(effect, scope).pipe(Effect.asVoid)
+  return yield* composeOperations({ config, defaultOperations, fork })
 })
 
 /**

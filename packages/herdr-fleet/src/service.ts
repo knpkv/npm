@@ -18,6 +18,7 @@ import {
   AgentWorkerObservations,
   type CoreJobPayload,
   type HostDetails,
+  HostOperationReceipt,
   JobActor,
   type JobHash,
   type JobPayload,
@@ -36,12 +37,43 @@ export type WorkerStarted = (
   identity: AgentWorkerIdentity
 ) => Effect.Effect<void, FleetOperationError>
 
+export const hostOperationTerminalDetailMaxLength = 20_000
+const terminalDetailEncoder = new TextEncoder()
+const HostOperationTerminalDetail = Schema.String.check(
+  Schema.isMaxLength(hostOperationTerminalDetailMaxLength),
+  Schema.makeFilter(
+    (detail) => terminalDetailEncoder.encode(detail).byteLength <= hostOperationTerminalDetailMaxLength,
+    { expected: `UTF-8 text no larger than ${hostOperationTerminalDetailMaxLength} bytes` }
+  )
+)
+
 export const HostOperationTerminal = Schema.Union([
-  Schema.Struct({ type: Schema.Literal("settled"), detail: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("delivery_failed"), detail: Schema.String }),
-  Schema.Struct({ type: Schema.Literal("task_failed"), detail: Schema.String })
+  Schema.Struct({ type: Schema.Literal("settled"), detail: HostOperationTerminalDetail }),
+  Schema.Struct({ type: Schema.Literal("delivery_failed"), detail: HostOperationTerminalDetail }),
+  Schema.Struct({ type: Schema.Literal("task_failed"), detail: HostOperationTerminalDetail })
 ])
 export type HostOperationTerminal = typeof HostOperationTerminal.Type
+
+const terminalDetailTruncationSuffix = "\n[truncated; authoritative detail remains in coordinator]"
+
+/** Projects an authoritative coordinator detail into Fleet's bounded summary. */
+export const summarizeHostOperationTerminalDetail = (detail: string): string => {
+  if (
+    detail.length <= hostOperationTerminalDetailMaxLength &&
+    terminalDetailEncoder.encode(detail).byteLength <= hostOperationTerminalDetailMaxLength
+  ) return detail
+  const boundary = hostOperationTerminalDetailMaxLength -
+    terminalDetailEncoder.encode(terminalDetailTruncationSuffix).byteLength
+  let bounded = ""
+  let byteLength = 0
+  for (const character of detail) {
+    const characterBytes = terminalDetailEncoder.encode(character).byteLength
+    if (byteLength + characterBytes > boundary) break
+    bounded += character
+    byteLength += characterBytes
+  }
+  return `${bounded}${terminalDetailTruncationSuffix}`
+}
 
 export type HostOperationLifecycle = {
   /** Persists a durable receipt while the fleet job remains running. */
@@ -50,14 +82,24 @@ export type HostOperationLifecycle = {
   readonly terminal: (event: HostOperationTerminal) => Effect.Effect<void, FleetOperationError>
 }
 
-export type ResumeAcceptedHostOperation = (
+export type ResumeHostOperation = (
   payload: CoreJobPayload,
   workerStarted: WorkerStarted,
   jobId: string,
   actor: JobActor,
-  receipt: string,
+  receipt: string | null,
   lifecycle: HostOperationLifecycle
 ) => Effect.Effect<void, FleetOperationError>
+
+export type HostOperationRecovery = {
+  /** Identifies operations whose deterministic Fleet job ID is their durable submission identity. */
+  readonly matches: (payload: CoreJobPayload) => boolean
+  /**
+   * Rejoins or idempotently completes submission, including before Fleet persisted a receipt.
+   * It must attach observation in its owning scope and return without waiting for terminal work.
+   */
+  readonly resume: ResumeHostOperation
+}
 
 export type HostOperations = {
   readonly listAgents: () => Effect.Effect<AgentInventory, FleetOperationError>
@@ -79,8 +121,8 @@ export type HostOperations = {
     actor: JobActor,
     lifecycle: HostOperationLifecycle
   ) => Effect.Effect<string, FleetOperationError>
-  /** Reattaches durable lifecycle observation after hostd restarts. */
-  readonly resumeAccepted?: ResumeAcceptedHostOperation
+  /** Explicit crash recovery for operations backed by another durable store. */
+  readonly recovery?: HostOperationRecovery
 }
 
 export type Approval = {
@@ -107,6 +149,7 @@ type JobChange = Partial<
     | "status"
     | "result"
     | "acceptedReceipt"
+    | "durableOperation"
     | "error"
     | "approvedBy"
     | "approvedAt"
@@ -287,12 +330,25 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     )
   })
 
+  const sameWorkerIdentity = (
+    left: AgentWorkerIdentity,
+    right: AgentWorkerIdentity
+  ): boolean =>
+    left.host.toLowerCase() === right.host.toLowerCase() &&
+    left.agentId === right.agentId &&
+    left.name === right.name &&
+    left.paneId === right.paneId &&
+    left.relationship?.parentAgentId === right.relationship?.parentAgentId &&
+    left.relationship?.relation === right.relationship?.relation
+
   const makeOperationLifecycle = Effect.fn("FleetService.makeOperationLifecycle")(function*(
     initial: JobRecord,
-    acceptedAtStart: boolean
+    acceptedAtStart: boolean,
+    recovering: boolean
   ) {
     const current = yield* Ref.make(initial)
     const accepted = yield* Ref.make(acceptedAtStart)
+    const acceptanceAttempted = yield* Ref.make(acceptedAtStart)
     const transitions = yield* Semaphore.make(1)
     const workerStarted: WorkerStarted = Effect.fn("FleetService.workerStarted")(
       (identity: AgentWorkerIdentity) =>
@@ -322,6 +378,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             })
           }
           if (record.worker !== undefined) {
+            if (recovering && sameWorkerIdentity(record.worker, identity)) return
             return yield* new FleetOperationError({
               cause: identity,
               detail: "coordinator reported more than one worker identity",
@@ -351,16 +408,26 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     const lifecycle: HostOperationLifecycle = {
       accepted: Effect.fn("FleetService.operationAccepted")((receipt: string) =>
         transitions.withPermit(Effect.gen(function*() {
-          if (options.operations.resumeAccepted === undefined) {
+          yield* Ref.set(acceptanceAttempted, true)
+          const decodedReceipt = yield* Schema.decodeUnknownEffect(HostOperationReceipt)(receipt).pipe(
+            Effect.mapError((cause) =>
+              new FleetOperationError({
+                cause,
+                detail: "durable receipt is invalid",
+                operation: "fleet.operation_accepted"
+              })
+            )
+          )
+          if (options.operations.recovery === undefined || initial.durableOperation !== true) {
             return yield* new FleetOperationError({
-              cause: receipt,
-              detail: "durable acceptance requires a resumeAccepted host operation",
+              cause: decodedReceipt,
+              detail: "durable acceptance requires an explicit recovery operation",
               operation: "fleet.operation_accepted"
             })
           }
           if (yield* Ref.get(accepted)) {
             return yield* new FleetOperationError({
-              cause: receipt,
+              cause: decodedReceipt,
               detail: "host operation reported more than one accepted receipt",
               operation: "fleet.operation_accepted"
             })
@@ -368,7 +435,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
           const record = yield* Ref.get(current)
           if (record.status !== "running") {
             return yield* new FleetOperationError({
-              cause: receipt,
+              cause: decodedReceipt,
               detail: `cannot accept a ${record.status} fleet job`,
               operation: "fleet.operation_accepted"
             })
@@ -376,8 +443,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
           const persisted = yield* options.store.transition(
             record,
             updated(record, yield* now, {
-              acceptedReceipt: receipt,
-              result: receipt
+              acceptedReceipt: decodedReceipt,
+              result: decodedReceipt
             })
           ).pipe(Effect.mapError(randomError("fleet.operation_accepted")))
           yield* Ref.set(current, persisted)
@@ -386,25 +453,46 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       ),
       terminal: Effect.fn("FleetService.operationTerminal")((event: HostOperationTerminal) =>
         transitions.withPermit(Effect.gen(function*() {
+          const decodedEvent = yield* Schema.decodeUnknownEffect(HostOperationTerminal)(event).pipe(
+            Effect.mapError((cause) =>
+              new FleetOperationError({
+                cause,
+                detail: "durable terminal summary is invalid",
+                operation: "fleet.operation_terminal"
+              })
+            )
+          )
           if (!(yield* Ref.get(accepted))) {
             return yield* new FleetOperationError({
-              cause: event,
+              cause: decodedEvent,
               detail: "host operation reported a terminal event before acceptance",
               operation: "fleet.operation_terminal"
             })
           }
           const record = yield* Ref.get(current)
+          if (
+            decodedEvent.type === "settled" &&
+            decodedEvent.detail.length === 0 &&
+            record.payload.kind === "agent.delegate" &&
+            record.payload.channel === "coordinator_chat"
+          ) {
+            return yield* new FleetOperationError({
+              cause: decodedEvent,
+              detail: "coordinator chat settled without a reply",
+              operation: "fleet.operation_terminal"
+            })
+          }
           if (record.status !== "running") {
             return yield* new FleetOperationError({
-              cause: event,
+              cause: decodedEvent,
               detail: `cannot settle a ${record.status} fleet job`,
               operation: "fleet.operation_terminal"
             })
           }
           const terminalObservedAt = yield* now
-          const terminal: JobChange = event.type === "settled"
-            ? { status: "succeeded", result: event.detail, error: null }
-            : { status: "failed", result: null, error: event.detail }
+          const terminal: JobChange = decodedEvent.type === "settled"
+            ? { status: "succeeded", result: decodedEvent.detail, error: null }
+            : { status: "failed", result: null, error: decodedEvent.detail }
           const persisted = yield* options.store.transition(
             record,
             updated(
@@ -419,7 +507,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         }))
       )
     }
-    return { accepted, current, lifecycle, transitions, workerStarted }
+    return { accepted, acceptanceAttempted, current, lifecycle, transitions, workerStarted }
   })
 
   const runWith = Effect.fn("FleetService.runWith")(function*(
@@ -441,16 +529,25 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         detail: `job is ${record.status}, not queued`
       })
     }
+    const corePayload = record.payload.kind === "browser.mcp.recover" ? null : record.payload
+    const durableOperation = corePayload !== null && options.operations.recovery?.matches(corePayload) === true
+    const durableChange: JobChange = durableOperation ? { durableOperation: true } : {}
     const running = yield* options.store.transition(
       record,
       updated(record, yield* now, {
         status: "running",
         result: null,
         acceptedReceipt: null,
+        ...durableChange,
         error: null
       })
     )
-    const { accepted, current, lifecycle, transitions, workerStarted } = yield* makeOperationLifecycle(running, false)
+    const { acceptanceAttempted, accepted, current, lifecycle, transitions, workerStarted } =
+      yield* makeOperationLifecycle(
+        running,
+        false,
+        false
+      )
     const result = yield* Effect.result(
       execute(running.payload, workerStarted, running.actor, lifecycle)
     )
@@ -466,6 +563,16 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         )
         yield* Ref.set(current, persisted)
         return yield* result.failure
+      }
+      if (durableOperation && (yield* Ref.get(acceptanceAttempted)) && Result.isFailure(result)) {
+        return yield* result.failure
+      }
+      if (durableOperation && Result.isSuccess(result)) {
+        return yield* new FleetOperationError({
+          cause: jobId,
+          detail: "durable host operation returned without an accepted receipt",
+          operation: "fleet.operation_acceptance_missing"
+        })
       }
       if (latest.status !== "running") return latest
       const terminalObservedAt = yield* now
@@ -699,24 +806,33 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         )
       }
       if (record.status === "running") {
-        if (record.acceptedReceipt !== undefined && record.acceptedReceipt !== null) {
+        const receipt = record.acceptedReceipt ?? null
+        const durableOperation = record.durableOperation === true || receipt !== null
+        if (durableOperation) {
           if (
-            options.operations.resumeAccepted === undefined ||
+            options.operations.recovery === undefined ||
             record.payload.kind === "browser.mcp.recover"
           ) {
             return yield* new FleetOperationError({
               cause: record.id,
-              detail: "accepted fleet job has no durable resume operation",
-              operation: "fleet.recover_accepted"
+              detail: "durable fleet job has no recovery operation",
+              operation: "fleet.recover_durable"
             })
           }
-          const resumed = yield* makeOperationLifecycle(record, true)
-          yield* options.operations.resumeAccepted(
+          if (!options.operations.recovery.matches(record.payload)) {
+            return yield* new FleetOperationError({
+              cause: record.id,
+              detail: "durable fleet job no longer matches its recovery operation",
+              operation: "fleet.recover_durable"
+            })
+          }
+          const resumed = yield* makeOperationLifecycle(record, receipt !== null, true)
+          yield* options.operations.recovery.resume(
             record.payload,
             resumed.workerStarted,
             record.id,
             record.actor,
-            record.acceptedReceipt,
+            receipt,
             resumed.lifecycle
           )
           continue

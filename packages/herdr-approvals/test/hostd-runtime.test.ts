@@ -15,6 +15,7 @@ import {
   FleetOperationError,
   type HostConfiguration,
   type HostOperations,
+  JobRecord,
   JobStore,
   makeFleetService
 } from "@knpkv/herdr-fleet"
@@ -25,7 +26,7 @@ import {
   type WorkService,
   WorkStore
 } from "@knpkv/herdr-work"
-import { Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect"
+import { Deferred, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
@@ -163,10 +164,13 @@ describe("hostd runtime operations injection", () => {
           const fleetWorkerStarts = yield* Ref.make(0)
           const solAuthority = yield* Ref.make(Option.none<SolAuthority>())
 
-          const composeOperations: HostdOperationsComposer = ({ defaultOperations, scope }) =>
+          const composeOperations: HostdOperationsComposer = ({ defaultOperations, fork }) =>
             Effect.succeed({
               ...defaultOperations,
-              resumeAccepted: () => Effect.void,
+              recovery: {
+                matches: (payload) => payload.kind === "agent.delegate",
+                resume: () => Effect.void
+              },
               run: Effect.fn("HostdTest.runAccepted")(function*(
                 payload,
                 workerStarted,
@@ -254,9 +258,8 @@ describe("hostd runtime operations injection", () => {
                     })
                   }
                 })
-                yield* Effect.forkIn(
-                  Effect.exit(lifecycle).pipe(Effect.flatMap((exit) => Queue.offer(completions, exit))),
-                  scope
+                yield* fork(
+                  Effect.exit(lifecycle).pipe(Effect.flatMap((exit) => Queue.offer(completions, exit)))
                 )
                 return encodedReceipt
               })
@@ -391,6 +394,122 @@ describe("hostd runtime operations injection", () => {
         }).pipe(Effect.scoped))
     ))
 
+  it.effect("rejoins the package coordinator across the submit-to-receipt crash window", () =>
+    withTemporaryDatabase((root, path) =>
+      withRuntime(path, (orchestrator) =>
+        Effect.gen(function*() {
+          yield* TestClock.setTime(3_000)
+          const payload: Parameters<HostOperations["run"]>[0] = {
+            kind: "agent.delegate",
+            mode: "consult",
+            prompt: "resume the committed request",
+            repository: "/repo"
+          }
+          const fleetJobId = "fleet-crash-window"
+          const releaseTerminal = yield* Deferred.make<void>()
+          const terminalObserved = yield* Deferred.make<void>()
+          const durableCommand = command("andrey", `activity:${fleetJobId}`, payload)
+          const submit = () =>
+            orchestrator.submitRouted({
+              command: durableCommand,
+              idempotencyKey: `dispatch:${fleetJobId}`,
+              route: {
+                protocol: "hostd.coordinator.route.v1",
+                action: "dispatch",
+                model: "gpt-5.6-luna",
+                reasoningEffort: "medium",
+                reason: "bounded coordination uses Luna",
+                linkedRequestId: null
+              },
+              workLink: null
+            }).pipe(Effect.mapError(operationError("hostd.orchestrator.submit")))
+          const committed = yield* submit()
+          const store = yield* JobStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const interrupted = yield* Schema.decodeUnknownEffect(JobRecord)({
+            id: fleetJobId,
+            createdAt: 3_000,
+            updatedAt: 3_000,
+            actor: "andrey",
+            hash: "b".repeat(64),
+            approvalNonce: null,
+            approvalExpiresAt: null,
+            approvedBy: null,
+            approvedAt: null,
+            rejectedBy: null,
+            rejectedAt: null,
+            expiredAt: null,
+            status: "running",
+            payload,
+            result: null,
+            acceptedReceipt: null,
+            durableOperation: true,
+            error: null
+          })
+          yield* store.put(interrupted)
+          const composeOperations: HostdOperationsComposer = ({ defaultOperations, fork }) =>
+            Effect.succeed({
+              ...defaultOperations,
+              recovery: {
+                matches: (candidate) => candidate.kind === "agent.delegate",
+                resume: Effect.fn("HostdTest.resumePending")(function*(
+                  _payload,
+                  _workerStarted,
+                  jobId,
+                  _actor,
+                  receipt,
+                  lifecycle
+                ) {
+                  if (receipt !== null || jobId !== fleetJobId) {
+                    return yield* new FleetOperationError({
+                      cause: { jobId, receipt },
+                      detail: "unexpected recovery identity",
+                      operation: "hostd.orchestrator.resume"
+                    })
+                  }
+                  const replayed = yield* submit()
+                  const encodedReceipt = yield* Schema.encodeEffect(
+                    Schema.fromJsonString(OrchestratorReceipt)
+                  )(replayed).pipe(Effect.mapError(operationError("hostd.orchestrator.receipt")))
+                  yield* lifecycle.accepted(encodedReceipt)
+                  yield* fork(
+                    Deferred.await(releaseTerminal).pipe(
+                      Effect.andThen(orchestrator.queue(replayed.dispatchRequestId)),
+                      Effect.andThen(orchestrator.run(replayed.dispatchRequestId)),
+                      Effect.andThen(orchestrator.settle(replayed.dispatchRequestId, "resumed once")),
+                      Effect.andThen(lifecycle.terminal({ type: "settled", detail: "resumed once" })),
+                      Effect.andThen(Deferred.succeed(terminalObserved, undefined))
+                    )
+                  )
+                })
+              }
+            })
+          const operations = yield* makeHostdOperations(config(root), composeOperations)
+          const fleet = yield* makeFleetService({
+            approvalEnabled: false,
+            host: "SER8",
+            now: Effect.succeed(3_001),
+            operations,
+            store
+          })
+          yield* fleet.recover()
+          expect(yield* fleet.get(fleetJobId)).toMatchObject({ status: "running" })
+          yield* Deferred.succeed(releaseTerminal, undefined)
+          yield* Deferred.await(terminalObserved)
+          const recovered = yield* fleet.get(fleetJobId)
+          const receipt = yield* Schema.decodeEffect(Schema.fromJsonString(OrchestratorReceipt))(
+            recovered.acceptedReceipt
+          )
+          expect(receipt.dispatchRequestId).toBe(committed.dispatchRequestId)
+          expect(recovered).toMatchObject({ result: "resumed once", status: "succeeded" })
+          expect(
+            (yield* Stream.runCollect(orchestrator.events(committed.dispatchRequestId))).map(
+              ({ type }) => type
+            )
+          ).toEqual(["accepted", "queued", "running", "settled"])
+        }).pipe(Effect.scoped))
+    ))
+
   it.effect("keeps default construction and names rejected composition", () =>
     withTemporaryDatabase((root) =>
       Effect.gen(function*() {
@@ -398,6 +517,16 @@ describe("hostd runtime operations injection", () => {
         expect(yield* Effect.result(defaults.runLocal({ kind: "browser.mcp.recover" }))).toMatchObject({
           failure: { _tag: "FleetOperationError", operation: "browser.mcp.recover" }
         })
+        let compositionKeys: ReadonlyArray<string> = []
+        yield* makeHostdOperations(
+          config(root),
+          (composition) =>
+            Effect.sync(() => {
+              compositionKeys = Object.keys(composition).sort()
+              return composition.defaultOperations
+            })
+        )
+        expect(compositionKeys).toEqual(["config", "defaultOperations", "fork"])
 
         const invalid = yield* Effect.result(
           makeHostdOperations(
