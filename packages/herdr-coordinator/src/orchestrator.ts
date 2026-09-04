@@ -260,29 +260,6 @@ const makeOrchestrator: Effect.Effect<
   `.pipe(Effect.mapError(storageError("initialize.running-index")))
   yield* secureFiles
 
-  const load = Effect.fn("Orchestrator.load")(function*(dispatchRequestId: string) {
-    const rows = yield* sql`
-      SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
-        activity_idempotency_key AS "activityIdempotencyKey", command,
-        accepted_at AS "acceptedAt", status
-      FROM orchestrator_dispatches WHERE dispatch_request_id = ${dispatchRequestId}
-    `.pipe(Effect.mapError(storageError("load")))
-    const row = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(rows).pipe(
-      Effect.mapError(storageError("decode.dispatch"))
-    )
-    const first = row[0]
-    if (first === undefined) return yield* new OrchestratorNotFoundError({ dispatchRequestId })
-    const status = yield* Schema.decodeUnknownEffect(currentStatus)(first.status).pipe(
-      Effect.mapError(() =>
-        new OrchestratorStorageError({
-          cause: first.status,
-          operation: "decode.dispatch.status"
-        })
-      )
-    )
-    return { ...first, status }
-  })
-
   const listEvents = Effect.fn("Orchestrator.listEvents")(function*(dispatchRequestId: string) {
     const rows = yield* sql`
       SELECT dispatch_request_id AS "dispatchRequestId", sequence, type,
@@ -506,7 +483,15 @@ const makeOrchestrator: Effect.Effect<
     )
     const event = yield* sql.withTransaction(
       Effect.gen(function*() {
-        const dispatch = yield* load(decodedDispatchRequestId)
+        const snapshot = yield* loadValidatedEvents(decodedDispatchRequestId).pipe(
+          Effect.catchTag("OrchestratorStorageError", (error) =>
+            error.operation === "events.status-event-mismatch"
+              ? Effect.fail(
+                new OrchestratorStorageError({ cause: error.cause, operation: "transition.status-event-mismatch" })
+              )
+              : Effect.fail(error))
+        )
+        const dispatch = snapshot.dispatch
         if (!validTransition(dispatch.status, decodedTarget)) {
           return yield* new OrchestratorTransitionError({
             dispatchRequestId: decodedDispatchRequestId,
@@ -514,19 +499,11 @@ const makeOrchestrator: Effect.Effect<
             to: decodedTarget
           })
         }
-        const events = yield* listEvents(decodedDispatchRequestId)
-        const last = events.at(-1)
+        const last = snapshot.events.at(-1)
         if (last === undefined) {
           return yield* new OrchestratorStorageError({
             cause: decodedDispatchRequestId,
             operation: "transition.missing-event"
-          })
-        }
-        yield* validateLifecycleChain(dispatch, events)
-        if (last.type !== dispatch.status) {
-          return yield* new OrchestratorStorageError({
-            cause: { dispatchRequestId: decodedDispatchRequestId, eventType: last.type, status: dispatch.status },
-            operation: "transition.status-event-mismatch"
           })
         }
         const timestamp = yield* now
