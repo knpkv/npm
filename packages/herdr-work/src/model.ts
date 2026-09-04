@@ -235,6 +235,7 @@ export const WorkGoalFamilyGroup = Schema.Struct({
 }).check(
   Schema.makeFilter(
     (group) =>
+      group.superseded.length > 0 &&
       group.canonical.goalFamily?.role === "canonical" &&
       group.canonical.goalFamily.canonicalGoalId === group.canonicalGoalId &&
       group.superseded.every(

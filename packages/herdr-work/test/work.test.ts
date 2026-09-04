@@ -13,6 +13,7 @@ import {
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
   type WorkGoalFamily,
+  WorkGoalFamilyGroup,
   workHistoryMaxEvents,
   WorkSnapshot,
   workSnapshotMaxGoals,
@@ -1079,5 +1080,48 @@ describe("durable Work projection", () => {
       goals: [goalA, distinctGoal]
     }
     expect(Schema.decodeUnknownResult(WorkSnapshot)(validSnapshot)._tag).toBe("Success")
+  })
+
+  it("rejects empty superseded family groups", () => {
+    const canonicalBase = checkpointForGoal("goal-canonical-empty", "event-canonical-empty-base", 0, 0)
+    const canonicalGoal: WorkGoal = {
+      ...canonicalBase.goal,
+      goalFamily: { canonicalGoalId: canonicalBase.goal.id, role: "canonical" }
+    }
+    const emptyGroup = {
+      canonicalGoalId: canonicalGoal.id,
+      canonical: canonicalGoal,
+      superseded: []
+    }
+    expect(Schema.decodeUnknownResult(WorkGoalFamilyGroup)(emptyGroup)._tag).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshot)({
+        window: "now",
+        observedAt: 0,
+        asOf: 0,
+        goals: [canonicalGoal],
+        families: [emptyGroup]
+      })._tag
+    ).toBe("Failure")
+    const supersededBase = checkpointForGoal("goal-superseded-empty", "event-superseded-empty-base", 0, 0)
+    const supersededGoal: WorkGoal = {
+      ...supersededBase.goal,
+      goalFamily: { canonicalGoalId: canonicalGoal.id, role: "superseded" }
+    }
+    const validGroup = {
+      canonicalGoalId: canonicalGoal.id,
+      canonical: canonicalGoal,
+      superseded: [supersededGoal]
+    }
+    expect(Schema.decodeUnknownResult(WorkGoalFamilyGroup)(validGroup)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshot)({
+        window: "now",
+        observedAt: 0,
+        asOf: 0,
+        goals: [canonicalGoal],
+        families: [validGroup]
+      })._tag
+    ).toBe("Success")
   })
 })
