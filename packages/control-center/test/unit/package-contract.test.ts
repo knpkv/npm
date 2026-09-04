@@ -24,6 +24,7 @@ const validManifest = {
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/ai-runtime": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
+    "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/confluence-api-client": "workspace:^",

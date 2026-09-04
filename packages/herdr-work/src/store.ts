@@ -126,10 +126,10 @@ const workDecisionMaxBytes = 2 * 1024 * 1024
 const workStoreBusyTimeoutMillis = 5_000
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
   observedAt: maximumTimestamp,
-  now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
-  day: { window: "day", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
-  week: { window: "week", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
-  month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] }
+  now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] },
+  day: { window: "day", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] },
+  week: { window: "week", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] },
+  month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] }
 })
 
 const makeSnapshotByteAccumulator = (history: ReadonlyArray<WorkGoalCheckpointType>) => {
@@ -166,9 +166,59 @@ const makeSnapshotByteAccumulator = (history: ReadonlyArray<WorkGoalCheckpointTy
 const maximumSnapshotBytes = (
   history: ReadonlyArray<WorkGoalCheckpointType>,
   candidate: WorkGoalCheckpointType
-): number => makeSnapshotByteAccumulator(history).add(candidate)
+): number => {
+  const maximumGoalBytes = new Map<string, number>()
+  for (const { goal } of [...history, candidate]) {
+    const bytes = encodedBytes(goal)
+    maximumGoalBytes.set(
+      goal.id,
+      Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes)
+    )
+  }
+  const encodedGoals = [...maximumGoalBytes.values()].reduce(
+    (total, bytes) => total + bytes,
+    0
+  )
+  const separators = Math.max(0, maximumGoalBytes.size - 1)
+  // Derive the typed family overhead from actual projected family groups rather than
+  // charging the maximum encoded canonicalGoalId for every distinct goal. The projection
+  // keeps a latest durable goal per id; only canonical goals with superseded members
+  // form a family group and repeat the canonicalGoalId outside the canonical payload.
+  const latest = new Map<string, WorkGoalCheckpointType["goal"]>()
+  for (
+    const event of [...history, candidate].toSorted(
+      (left, right) => left.occurredAt - right.occurredAt
+    )
+  ) {
+    latest.set(event.goal.id, event.goal)
+  }
+  const canonicalById = new Map<string, WorkGoalCheckpointType["goal"]>()
+  for (const goal of latest.values()) {
+    if (goal.goalFamily?.role === "canonical") canonicalById.set(goal.id, goal)
+  }
+  let canonicalBytesSum = 0
+  let familyGroupsOverheadSum = 0
+  for (const [canonicalGoalId] of canonicalById) {
+    const supersededCount = [...latest.values()].filter(
+      (goal) =>
+        goal.goalFamily?.role === "superseded" &&
+        goal.goalFamily.canonicalGoalId === canonicalGoalId
+    ).length
+    if (supersededCount === 0) continue
+    canonicalBytesSum += maximumGoalBytes.get(canonicalGoalId) ?? 0
+    // Structural bytes for {"canonicalGoalId":"","canonical":<goal>,"superseded":[]} beyond the
+    // encoded goal and id values is 49 (measured via JSON.stringify), 64 reserves it safely.
+    familyGroupsOverheadSum += encodedBytes(canonicalGoalId) + 64
+  }
+  const familiesPerWindowBytes = encodedGoals + canonicalBytesSum + familyGroupsOverheadSum + separators
+  return workSnapshotEnvelopeMaxBytes + 4 * Math.max(encodedGoals + separators, familiesPerWindowBytes)
+}
 
 const transactionContent = (events: ReadonlyArray<WorkGoalCheckpointType>) => JSON.stringify(events)
+
+export const __herdrWorkMaximumSnapshotBytesForTest = maximumSnapshotBytes
+export const __herdrWorkEncodedBytesForTest = encodedBytes
+export const __herdrWorkSnapshotEnvelopeMaxBytesForTest = workSnapshotEnvelopeMaxBytes
 
 const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
   Schema.decodeUnknownEffect(StoredEventRow)(row).pipe(

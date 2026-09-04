@@ -1,4 +1,10 @@
+import {
+  CsrfToken as BrowserCsrfToken,
+  PairingCode as BrowserPairingCode,
+  SessionToken as BrowserSessionToken
+} from "@knpkv/browser-pairing/schema"
 import * as Context from "effect/Context"
+import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import {
   HttpApiEndpoint,
@@ -20,14 +26,10 @@ import {
   UnauthorizedApiError
 } from "./errors.js"
 
-const LOWERCASE_SECRET_PATTERN = /^[0-9a-f]{64}$/u
-
 export { SessionId } from "../domain/identifiers.js"
 
 /** Single-use pairing credential accepted only by the public pairing endpoint. */
-export const PairingCode = Schema.String.check(
-  Schema.isPattern(LOWERCASE_SECRET_PATTERN, { expected: "a lowercase 256-bit pairing credential" })
-).pipe(Schema.brand("PairingCode"))
+export const PairingCode = BrowserPairingCode
 
 /** Decoded single-use pairing credential. */
 export type PairingCode = typeof PairingCode.Type
@@ -39,12 +41,15 @@ export const BrowserPairingPermission = Schema.Literals(["workspace-owner", "wor
 export type BrowserPairingPermission = typeof BrowserPairingPermission.Type
 
 /** Mutation proof issued separately from the opaque session cookie. */
-export const CsrfToken = Schema.String.check(
-  Schema.isPattern(LOWERCASE_SECRET_PATTERN, { expected: "a lowercase 256-bit CSRF credential" })
-).pipe(Schema.brand("CsrfToken"))
+export const CsrfToken = BrowserCsrfToken
 
 /** Decoded CSRF credential. */
 export type CsrfToken = typeof CsrfToken.Type
+
+/** Decoded opaque session credential; it is never returned in an API body. */
+export const SessionToken = BrowserSessionToken
+
+export type SessionToken = typeof SessionToken.Type
 
 /** Secret-free metadata describing an authenticated browser session. */
 export const SessionSummary = Schema.Struct({
@@ -114,6 +119,11 @@ export type SessionListResponse = typeof SessionListResponse.Type
 /** Authenticated session attached to endpoint handlers by cookie middleware. */
 export class CurrentSession extends Context.Service<CurrentSession, SessionSummary>()(
   "@knpkv/control-center/api/CurrentSession"
+) {}
+
+/** Server-only session credential retained for bounded stream revalidation. */
+export class CurrentSessionToken extends Context.Service<CurrentSessionToken, Redacted.Redacted<SessionToken>>()(
+  "@knpkv/control-center/api/CurrentSessionToken"
 ) {}
 
 /** Public middleware identity for the opaque `cc_session` cookie. */

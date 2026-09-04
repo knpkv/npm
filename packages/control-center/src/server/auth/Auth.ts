@@ -1,3 +1,13 @@
+import type { BrowserPairingError, PairingCode, SessionToken } from "@knpkv/browser-pairing"
+import {
+  CredentialDigest,
+  credentialDigestsEqual,
+  CsrfToken,
+  hashCredential as hashBrowserCredential,
+  issueCsrfToken,
+  issuePairingCode,
+  issueSessionToken
+} from "@knpkv/browser-pairing"
 import type { FileSystem, Path } from "effect"
 import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Schema } from "effect"
 
@@ -53,27 +63,21 @@ const CSRF_RECOVERY_CONTEXT = Uint8Array.from([
   49
 ])
 
-const fixedTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
-  let difference = left.byteLength ^ right.byteLength
-  const length = Math.max(left.byteLength, right.byteLength)
-  for (let index = 0; index < length; index += 1) {
-    difference |= (left[index] ?? 0) ^ (right[index] ?? 0)
-  }
-  return difference === 0
-}
-
 const makeAuth = Effect.gen(function*() {
   const repository = yield* AuthRepository
   const cryptoService = yield* Crypto.Crypto
 
   const now = Effect.map(Clock.currentTimeMillis, DateTime.makeUnsafe)
 
-  const randomSecret = Effect.fn("Auth.randomSecret")(function*() {
-    const bytes = yield* cryptoService.randomBytes(TOKEN_BYTES).pipe(
-      Effect.mapError(() => new AuthCryptoError())
+  const issueSecret = <Credential>(
+    effect: Effect.Effect<Redacted.Redacted<Credential>, BrowserPairingError, Crypto.Crypto>
+  ) =>
+    effect.pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError((error: BrowserPairingError) =>
+        error.reason === "crypto-failed" ? new AuthCryptoError() : new CredentialRejectedError()
+      )
     )
-    return Redacted.make(Encoding.encodeHex(bytes))
-  })
 
   const randomId = <SchemaType extends Schema.Top>(schema: SchemaType) =>
     cryptoService.randomUUIDv7.pipe(
@@ -88,18 +92,16 @@ const makeAuth = Effect.gen(function*() {
   const hashCredential = Effect.fn("Auth.hashCredential")(function*(
     credential: Redacted.Redacted<string>
   ) {
-    const bytes = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(credential))).pipe(
-      Effect.mapError(() => new CredentialRejectedError())
+    return yield* hashBrowserCredential(credential).pipe(
+      Effect.provideService(Crypto.Crypto, cryptoService),
+      Effect.mapError((error: BrowserPairingError) =>
+        error.reason === "crypto-failed" ? new AuthCryptoError() : new CredentialRejectedError()
+      )
     )
-    if (bytes.byteLength !== TOKEN_BYTES) return yield* new CredentialRejectedError()
-    const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
-      Effect.mapError(() => new AuthCryptoError())
-    )
-    return Encoding.encodeHex(digest)
   })
 
   const deriveRecoveredCsrfToken = Effect.fn("Auth.deriveRecoveredCsrfToken")(function*(
-    sessionToken: Redacted.Redacted<string>
+    sessionToken: Redacted.Redacted<SessionToken>
   ) {
     const tokenBytes = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(sessionToken))).pipe(
       Effect.mapError(() => new CredentialRejectedError())
@@ -111,7 +113,9 @@ const makeAuth = Effect.gen(function*() {
     const digest = yield* cryptoService.digest("SHA-256", input).pipe(
       Effect.mapError(() => new AuthCryptoError())
     )
-    return Encoding.encodeHex(digest)
+    return yield* Schema.decodeUnknownEffect(CsrfToken)(Encoding.encodeHex(digest)).pipe(
+      Effect.mapError(() => new AuthCryptoError())
+    )
   })
 
   const issueValues = Effect.fn("Auth.issuePairingValues")(function*(input: {
@@ -123,7 +127,7 @@ const makeAuth = Effect.gen(function*() {
   }) {
     const createdAt = yield* now
     const pairingCodeId = yield* randomId(PairingCodeId)
-    const pairingCode = yield* randomSecret()
+    const pairingCode = yield* issueSecret(issuePairingCode())
     const codeHash = yield* hashCredential(pairingCode)
     return {
       record: {
@@ -138,7 +142,7 @@ const makeAuth = Effect.gen(function*() {
   })
 
   const authenticateRecord = Effect.fn("Auth.authenticateRecord")(function*(
-    sessionToken: Redacted.Redacted<string>
+    sessionToken: Redacted.Redacted<SessionToken>
   ) {
     const tokenHash = yield* hashCredential(sessionToken)
     const observedAt = yield* now
@@ -150,7 +154,7 @@ const makeAuth = Effect.gen(function*() {
   })
 
   const requireOwner = Effect.fn("Auth.requireOwner")(function*(
-    sessionToken: Redacted.Redacted<string>
+    sessionToken: Redacted.Redacted<SessionToken>
   ) {
     const authenticated = yield* authenticateRecord(sessionToken)
     if (authenticated.summary.permission !== "workspace-owner") {
@@ -175,7 +179,7 @@ const makeAuth = Effect.gen(function*() {
     }),
 
     issuePairingCode: Effect.fn("Auth.issuePairingCode")(function*(
-      ownerSessionToken: Redacted.Redacted<string>,
+      ownerSessionToken: Redacted.Redacted<SessionToken>,
       input: { readonly actor: Actor; readonly permission: Role }
     ) {
       const owner = yield* requireOwner(ownerSessionToken)
@@ -190,13 +194,13 @@ const makeAuth = Effect.gen(function*() {
     }),
 
     consumePairingCode: Effect.fn("Auth.consumePairingCode")(function*(
-      pairingCode: Redacted.Redacted<string>
+      pairingCode: Redacted.Redacted<PairingCode>
     ) {
       const codeHash = yield* hashCredential(pairingCode)
       const createdAt = yield* now
       const sessionId = yield* randomId(SessionId)
-      const sessionToken = yield* randomSecret()
-      const csrfToken = yield* randomSecret()
+      const sessionToken = yield* issueSecret(issueSessionToken())
+      const csrfToken = yield* issueSecret(issueCsrfToken())
       const session = yield* repository.consume({
         codeHash,
         now: createdAt,
@@ -213,13 +217,13 @@ const makeAuth = Effect.gen(function*() {
     }),
 
     authenticate: Effect.fn("Auth.authenticate")(function*(
-      sessionToken: Redacted.Redacted<string>
+      sessionToken: Redacted.Redacted<SessionToken>
     ) {
       return (yield* authenticateRecord(sessionToken)).summary
     }),
 
     recoverCsrfToken: Effect.fn("Auth.recoverCsrfToken")(function*(
-      sessionToken: Redacted.Redacted<string>
+      sessionToken: Redacted.Redacted<SessionToken>
     ) {
       const authenticated = yield* authenticateRecord(sessionToken)
       const csrfToken = yield* deriveRecoveredCsrfToken(sessionToken)
@@ -230,59 +234,51 @@ const makeAuth = Effect.gen(function*() {
     }),
 
     authorizeMutation: Effect.fn("Auth.authorizeMutation")(function*(
-      sessionToken: Redacted.Redacted<string>,
-      csrfToken: Redacted.Redacted<string>
+      sessionToken: Redacted.Redacted<SessionToken>,
+      csrfToken: Redacted.Redacted<CsrfToken>
     ) {
       const authenticated = yield* authenticateRecord(sessionToken)
       const actualHash = yield* hashCredential(csrfToken)
       const recoveredCsrfToken = yield* deriveRecoveredCsrfToken(sessionToken)
-      const actual = yield* Effect.fromResult(Encoding.decodeHex(actualHash)).pipe(
+      const expected = yield* Schema.decodeUnknownEffect(CredentialDigest)(authenticated.csrfHash).pipe(
         Effect.mapError(() => new CredentialRejectedError())
       )
-      const expected = yield* Effect.fromResult(Encoding.decodeHex(authenticated.csrfHash)).pipe(
-        Effect.mapError(() => new CredentialRejectedError())
-      )
-      const supplied = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(csrfToken))).pipe(
-        Effect.mapError(() => new CredentialRejectedError())
-      )
-      const recovered = yield* Effect.fromResult(Encoding.decodeHex(recoveredCsrfToken)).pipe(
-        Effect.mapError(() => new CredentialRejectedError())
-      )
-      const matchesIssuedToken = fixedTimeEqual(actual, expected)
-      const matchesRecoveredToken = fixedTimeEqual(supplied, recovered)
+      const recoveredHash = yield* hashCredential(Redacted.make(recoveredCsrfToken))
+      const matchesIssuedToken = credentialDigestsEqual(actualHash, expected)
+      const matchesRecoveredToken = credentialDigestsEqual(actualHash, recoveredHash)
       if (!matchesIssuedToken && !matchesRecoveredToken) return yield* new CredentialRejectedError()
       return authenticated.summary
     }),
 
     listSessions: Effect.fn("Auth.listSessions")(function*(
-      ownerSessionToken: Redacted.Redacted<string>
+      ownerSessionToken: Redacted.Redacted<SessionToken>
     ) {
       const owner = yield* requireOwner(ownerSessionToken)
       return yield* repository.listSessions(owner.workspaceId)
     }),
 
     revokeSession: Effect.fn("Auth.revokeSession")(function*(
-      ownerSessionToken: Redacted.Redacted<string>,
+      ownerSessionToken: Redacted.Redacted<SessionToken>,
       sessionId: SessionIdType
     ) {
       const owner = yield* requireOwner(ownerSessionToken)
       yield* repository.revokeSession({ workspaceId: owner.workspaceId, sessionId, now: yield* now })
     }),
 
-    logout: Effect.fn("Auth.logout")(function*(sessionToken: Redacted.Redacted<string>) {
+    logout: Effect.fn("Auth.logout")(function*(sessionToken: Redacted.Redacted<SessionToken>) {
       const tokenHash = yield* hashCredential(sessionToken)
       yield* repository.logout(tokenHash, yield* now)
     }),
 
     listPairingCodes: Effect.fn("Auth.listPairingCodes")(function*(
-      ownerSessionToken: Redacted.Redacted<string>
+      ownerSessionToken: Redacted.Redacted<SessionToken>
     ) {
       const owner = yield* requireOwner(ownerSessionToken)
       return yield* repository.listPairingCodes(owner.workspaceId)
     }),
 
     revokePairingCode: Effect.fn("Auth.revokePairingCode")(function*(
-      ownerSessionToken: Redacted.Redacted<string>,
+      ownerSessionToken: Redacted.Redacted<SessionToken>,
       pairingCodeId: PairingCodeIdType
     ) {
       const owner = yield* requireOwner(ownerSessionToken)
@@ -295,7 +291,11 @@ const makeAuth = Effect.gen(function*() {
   }
 })
 
-/** Authentication/session application service. Raw credentials stay redacted at its boundary. */
+/**
+ * Durable workspace auth boundary. Secret values stay redacted and retain
+ * their role brands through issuance and authorization; raw HTTP credentials
+ * are assigned those roles only at the transport boundary.
+ */
 export class Auth extends Context.Service<Auth, Effect.Success<typeof makeAuth>>()(
   "@knpkv/control-center/server/auth/Auth"
 ) {

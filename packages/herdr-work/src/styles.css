@@ -133,6 +133,19 @@
   .work-inspector-section h3 {
     margin: 0;
   }
+  .work-family-history {
+    border: 1px solid var(--rly-color-border-1);
+    border-radius: var(--rly-radius-field);
+    padding: var(--rly-space-8) var(--rly-space-12);
+  }
+  .work-family-history > summary {
+    cursor: pointer;
+    font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+      var(--rly-type-label-font);
+  }
+  .work-family-history[open] > summary {
+    margin-block-end: var(--rly-space-8);
+  }
   .work-detail-list {
     display: grid;
     gap: var(--rly-space-8);

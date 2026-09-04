@@ -299,3 +299,30 @@ test("desktop terminal rail preserves the three-row stage and accessible key lab
   await expect(page.locator(".terminal-key-error")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
 })
+
+test("mobile connected identity exposes a keyboard-focusable Work goal link", async ({ page }) => {
+  await page.setContent(`
+    <!doctype html>
+    <html data-rly-root data-rly-theme="dark">
+      <body class="connect-body">
+        <section class="terminal-stage">
+          <div class="terminal-bar">
+            <button class="terminal-back" type="button">Agents</button>
+            <div class="connect-agent-identity" data-work-goal-state="available">
+              <a aria-label="Review worker · Work goal Review browser pairing" class="connect-agent-work-link" href="/?tab=work&window=now&goal=goal-review" onclick="event.preventDefault(); document.body.dataset.workGoalActivated='true'"><strong>Review worker</strong></a>
+              <small>Work goal · Review browser pairing</small>
+            </div>
+            <span class="fixture-state">connected</span>
+          </div>
+        </section>
+      </body>
+    </html>`)
+  const link = page.locator(".connect-agent-work-link")
+  await expect(link).toHaveAttribute("href", "/?tab=work&window=now&goal=goal-review")
+  await expect(link).toHaveAccessibleName("Review worker · Work goal Review browser pairing")
+  await link.focus()
+  await expect(link).toBeFocused()
+  await expect(link).toBeVisible()
+  await link.press("Enter")
+  await expect(page.locator("body")).toHaveAttribute("data-work-goal-activated", "true")
+})

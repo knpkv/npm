@@ -1,0 +1,11 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "composite": false,
+    "declarationMap": false,
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["test/security/auth-credential-roles.ts"]
+}

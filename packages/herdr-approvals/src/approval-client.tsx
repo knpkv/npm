@@ -11,7 +11,7 @@ import { useEffect, useRef, useState, type TouchEvent } from "react"
 import { createRoot, hydrateRoot } from "react-dom/client"
 import { ChatEntry, ChatHistory, type ChatMode, type ChatRequest } from "@knpkv/herdr-coordinator/model"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet/response"
-import { WorkSnapshots } from "@knpkv/herdr-work/model"
+import { decodeWorkNavigationSelection, workNavigationHref } from "@knpkv/herdr-work/navigation"
 import { WorkBoard } from "@knpkv/herdr-work/react"
 import { PushPublicConfiguration, PushSubscriptionRecord, PushSubscriptionStatus } from "./model.js"
 import {
@@ -44,6 +44,7 @@ import {
 import { FleetShell } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
+import { DashboardWorkPollOwner } from "./work-poll-owner.js"
 
 class BrowserNetworkError extends Schema.TaggedError<BrowserNetworkError>()("BrowserNetworkError", {
   detail: Schema.String
@@ -140,8 +141,6 @@ const decide = Effect.fn("Dashboard.decide")(function* (decision: ApprovalDecisi
 })
 
 const loadChat = fetchJson(ChatHistory, "/v1/chat")
-const loadWork = fetchJson(WorkSnapshots, "/v1/work")
-
 const sendChat = Effect.fn("CoordinatorChat.send")(function* (request: ChatRequest) {
   return yield* fetchJson(ChatEntry, "/v1/chat", {
     body: JSON.stringify(request),
@@ -343,7 +342,8 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
   const chat = browserRuntime.atom(loadChat, {
     initialValue: initial.chat ?? { entries: [] }
   })
-  const work = browserRuntime.atom(loadWork)
+  const connect = makeConnectAtoms()
+  const work = connect.work
   const chatPoll = browserRuntime.atom(
     initial.approvalApp.chatEnabled
       ? Atom.refresh(chat).pipe(Effect.repeat(Schedule.spaced("3 seconds")))
@@ -356,7 +356,7 @@ const makeDashboardAtoms = (initial: DashboardSnapshotType) => {
     chat,
     chatPoll,
     chatSend: browserRuntime.fn(sendChat),
-    connect: makeConnectAtoms(),
+    connect,
     dashboard: browserRuntime.atom(loadDashboard, { initialValue: initial }),
     decision: browserRuntime.fn(decide),
     notification: browserRuntime.atom<NotificationState, NotificationLoadError>(loadNotificationState, {
@@ -601,13 +601,17 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   }, [currentSnapshot?.observedAt, deepLinkTarget])
   if (currentSnapshot === null) {
     return (
-      <main className="app app-error">
-        <h1>Host activity unavailable</h1>
-        <pre>{result._tag === "Failure" ? Cause.pretty(result.cause) : "Loading host activity"}</pre>
-      </main>
+      <>
+        <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
+        <main className="app app-error">
+          <h1>Host activity unavailable</h1>
+          <pre>{result._tag === "Failure" ? Cause.pretty(result.cause) : "Loading host activity"}</pre>
+        </main>
+      </>
     )
   }
   const current = currentSnapshot
+  const workSelection = decodeWorkNavigationSelection(window.location.search)
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
@@ -629,53 +633,61 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     />
   )
   return (
-    <div
-      className="dashboard-gesture"
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={onTouchEnd}
-      onTouchCancel={resetPull}
-    >
-      {canonical ? (
-        <FleetShell
-          approvals={dashboardView}
-          connect={
-            <ConnectSurface
-              atoms={atoms.connect}
-              embedded
-              roomFooter={
-                current.chat === null ? null : (
-                  <CoordinatorChatPanel busy={busyChat} history={current.chat} onSubmit={onChatSubmit} />
-                )
-              }
-            />
-          }
-          hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
-          work={
-            <section className="fleet-workspace">
-              {current.work === null ? (
-                <StatePanel
-                  description="No durable goal projection is configured on this host. Live agent and job activity remain available below."
-                  title="Goals unavailable"
-                  tone="neutral"
-                />
-              ) : (
-                <WorkBoard snapshots={current.work} />
-              )}
-              <AgentActivity snapshot={current} />
-              <ActivityHistory
-                hasMore={current.historyNextCursor !== null}
-                loading={historyBusy}
-                onLoadMore={() => void onLoadHistory()}
-                records={current.records}
+    <>
+      <DashboardWorkPollOwner atom={atoms.connect.work} poll={atoms.connect.workPoll} />
+      <div
+        className="dashboard-gesture"
+        onTouchStart={onTouchStart}
+        onTouchMove={onTouchMove}
+        onTouchEnd={onTouchEnd}
+        onTouchCancel={resetPull}
+      >
+        {canonical ? (
+          <FleetShell
+            approvals={dashboardView}
+            connect={
+              <ConnectSurface
+                atoms={atoms.connect}
+                embedded
+                roomFooter={
+                  current.chat === null ? null : (
+                    <CoordinatorChatPanel busy={busyChat} history={current.chat} onSubmit={onChatSubmit} />
+                  )
+                }
               />
-            </section>
-          }
-        />
-      ) : (
-        dashboardView
-      )}
-    </div>
+            }
+            hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
+            work={
+              <section className="fleet-workspace">
+                {current.work === null ? (
+                  <StatePanel
+                    description="No durable goal projection is configured on this host. Live agent and job activity remain available below."
+                    title="Goals unavailable"
+                    tone="neutral"
+                  />
+                ) : (
+                  <WorkBoard
+                    {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
+                    initialWindow={workSelection.window}
+                    navigation={workNavigationHref}
+                    snapshots={current.work}
+                  />
+                )}
+                <AgentActivity snapshot={current} />
+                <ActivityHistory
+                  hasMore={current.historyNextCursor !== null}
+                  loading={historyBusy}
+                  onLoadMore={() => void onLoadHistory()}
+                  records={current.records}
+                />
+              </section>
+            }
+          />
+        ) : (
+          dashboardView
+        )}
+      </div>
+    </>
   )
 }
 
