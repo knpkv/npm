@@ -632,6 +632,43 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("rejects incomplete queued lifecycle history from pending", () =>
+    withTemporaryRoot("herdr-orchestrator-pending-invalid-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* withDatabase(path, Effect.void)
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+           VALUES (?, ?, ?, ?, ?, 'queued')`
+        ).run(
+          "dispatch:pending-invalid",
+          "idempotency:pending-invalid",
+          "activity:pending-invalid",
+          JSON.stringify({ ...command, activityIdempotencyKey: "activity:pending-invalid" }),
+          0
+        )
+        database.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           VALUES (?, ?, 'accepted', ?, ?, NULL, NULL)`
+        ).run("dispatch:pending-invalid", 0, "activity:pending-invalid", 0)
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.pending())
+          })
+        )
+        expect(result).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "events.status-event-mismatch" }
+        })
+      })
+    }))
+
   it.effect("recovers running dispatches page by page", () =>
     withTemporaryRoot("herdr-orchestrator-recovery-pages-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -850,6 +887,16 @@ describe("durable coordinator orchestrator", () => {
           failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.directory.path-identity" }
         })
         expect(readdirSync(realStateDirectory)).toEqual([])
+
+        const realAncestor = join(root, "real-ancestor")
+        const realNestedState = join(realAncestor, "nested-state")
+        mkdirSync(realNestedState, { mode: 0o700, recursive: true })
+        const linkedAncestor = join(root, "linked-ancestor")
+        symlinkSync(realAncestor, linkedAncestor)
+        const linkedAncestorState = yield* Effect.result(
+          withDatabase(join(linkedAncestor, "nested-state", "orchestrator.sqlite"), Effect.void)
+        )
+        expect(linkedAncestorState).toMatchObject({ _tag: "Success" })
       })))
 
   it.effect("rejects SQLite database and journal path substitutions", () =>

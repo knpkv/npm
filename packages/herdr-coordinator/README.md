@@ -11,7 +11,11 @@ contracts, are exported from `@knpkv/herdr-coordinator/model` without loading
 the Node runtime.
 
 `Orchestrator` accepts only the typed `fleet.job` command union and returns an
-immediate idempotent receipt. Its durable event stream records `accepted`,
+immediate idempotent receipt. The persisted dispatch identity contains both
+the caller-supplied `idempotency_key` and the command's
+`activity_idempotency_key`; replaying the former requires the complete decoded
+command to match, while reusing the latter under another idempotency key is a
+conflict. Its durable event stream records `accepted`,
 `queued`, `running`, `settled`, `delivery_failed`, and `task_failed`; activity
 idempotency keys are persisted with every event. `recover` returns a pull-based
 stream that pages running work in bounded batches, marks it `delivery_failed`,

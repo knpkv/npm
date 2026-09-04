@@ -119,6 +119,7 @@ const workLaneMaxRecords = workSnapshotMaxGoals
 const workLaneMaxBytes = 2 * 1024 * 1024
 const workDecisionMaxRecords = 16_384
 const workDecisionMaxBytes = 2 * 1024 * 1024
+const workStoreBusyTimeoutMillis = 5_000
 const workSnapshotEnvelopeMaxBytes = encodedBytes({
   observedAt: maximumTimestamp,
   now: { window: "now", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [] },
@@ -225,6 +226,7 @@ export class WorkStore implements WorkStoreService {
     this.#database = new DatabaseSync(path)
     try {
       this.#database.exec(`
+        PRAGMA busy_timeout = ${workStoreBusyTimeoutMillis};
         PRAGMA journal_mode = WAL;
         CREATE TABLE IF NOT EXISTS work_goal_events (
           event_id TEXT PRIMARY KEY,
@@ -554,6 +556,11 @@ export class WorkStore implements WorkStoreService {
             JSON.stringify([row.goalId, row.occurredAt]),
             row
           ]))
+          const decodedRows = rows.map((row) => ({
+            event: Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(row.record)),
+            row
+          }))
+          const decodedEventsByEventId = new Map(decodedRows.map(({ event, row }) => [row.eventId, event]))
           if (compactTransaction !== undefined) {
             const denormalizedMismatch = decoded.some((event) => {
               const row = rowsByEventId.get(event.eventId) ??
@@ -591,14 +598,6 @@ export class WorkStore implements WorkStoreService {
             }
           }
           if (legacyTransaction !== undefined) {
-            if (!Equal.equals(legacyTransaction, decoded)) {
-              this.#database.exec("ROLLBACK")
-              inTransaction = false
-              return {
-                _tag: "rejected",
-                error: new WorkTransactionConflictError({ transactionId: transaction })
-              } satisfies AppendManyDecision
-            }
             const legacyRows = legacyTransaction.map((event) => rowsByEventId.get(event.eventId))
             if (
               legacyRows.some((row, index) => {
@@ -638,7 +637,7 @@ export class WorkStore implements WorkStoreService {
               rowsByGoalTime.get(JSON.stringify([event.goal.id, event.occurredAt]))
             return row === undefined
               ? undefined
-              : Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(row.record))
+              : decodedEventsByEventId.get(row.eventId)
           })
           const conflicting = existing.find(
             (candidate, index) => candidate !== undefined && !Equal.equals(candidate, decoded[index])
@@ -664,6 +663,25 @@ export class WorkStore implements WorkStoreService {
                 goalId: event.goal.id,
                 occurredAt: event.occurredAt
               })
+            } satisfies AppendManyDecision
+          }
+          const corruptedRow = decodedRows.find(({ event, row }) =>
+            row.eventId !== event.eventId || row.goalId !== event.goal.id || row.occurredAt !== event.occurredAt
+          )
+          if (corruptedRow !== undefined) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkTransactionConflictError({ transactionId: transaction })
+            } satisfies AppendManyDecision
+          }
+          if (legacyTransaction !== undefined && !Equal.equals(legacyTransaction, decoded)) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkTransactionConflictError({ transactionId: transaction })
             } satisfies AppendManyDecision
           }
           const newEvents = decoded.filter((_, index) => existing[index] === undefined)
@@ -784,7 +802,7 @@ export class WorkStore implements WorkStoreService {
               })
             } satisfies AppendManyDecision
           }
-          const history = rows.map(({ record }) => Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(record)))
+          const history = decodedRows.map(({ event }) => event)
           const prospective = [...history, ...newEvents].toSorted((left, right) =>
             left.occurredAt - right.occurredAt || left.eventId.localeCompare(right.eventId)
           )

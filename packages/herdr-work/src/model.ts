@@ -248,7 +248,7 @@ export interface WorkGoalCheckpoint extends Schema.Schema.Type<typeof WorkGoalCh
 const CanonicalWorktree = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(2_048),
-  Schema.isPattern(/^[^\p{Cc}]+$/u),
+  Schema.isPattern(/^[^\p{Cc}\p{Cs}]+$/u),
   Schema.makeFilter(
     (value) => {
       const isPosix = value.startsWith("/") && !value.startsWith("//") && !value.includes("\\")
@@ -256,12 +256,17 @@ const CanonicalWorktree = Schema.String.check(
       if (!isPosix && !isWindows) return false
       const separator = isPosix || value.includes("/") ? "/" : "\\"
       const parts = value.split(separator)
-      return parts.slice(1).every(
-        (part) =>
-          part.length > 0 &&
-          part !== "." &&
-          part !== ".." &&
-          (!isWindows || (!/[<>:"|?*]/.test(part) && !/[. ]$/.test(part)))
+      const isReservedWindowsDevice = (part: string): boolean =>
+        /^(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$/i.test(part)
+      return parts.slice(1).every((part) =>
+        part.length > 0 &&
+        part !== "." &&
+        part !== ".." &&
+        (!isWindows || (
+          !/[<>:"|?*]/.test(part) &&
+          !/[. ]$/.test(part) &&
+          !isReservedWindowsDevice(part)
+        ))
       )
     },
     { expected: "an absolute canonical worktree path" }

@@ -69,20 +69,20 @@ const verifyPathIdentity = (
         const parent = paths.dirname(path)
         return parent === path ? Effect.void : verifyPathIdentity(parent, fileSystem, paths, operation)
       }
-      return fileSystem.realPath(path).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.realpath` })),
-        Effect.flatMap((realPath) => {
-          const expectedPath = paths.resolve(path)
-          return realPath === expectedPath
-            ? Effect.void
-            : Effect.fail(
-              new OrchestratorStorageError({
-                cause: { expectedPath, path, realPath },
-                operation
-              })
-            )
-        })
-      )
+      const parent = paths.dirname(path)
+      return Effect.all({
+        realPath: fileSystem.realPath(path).pipe(
+          Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.realpath` }))
+        ),
+        realParentPath: fileSystem.realPath(parent).pipe(
+          Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.parent-realpath` }))
+        )
+      }).pipe(Effect.flatMap(({ realParentPath, realPath }) => {
+        const expectedPath = paths.join(realParentPath, paths.basename(path))
+        return realPath === expectedPath
+          ? Effect.void
+          : Effect.fail(new OrchestratorStorageError({ cause: { expectedPath, path, realPath }, operation }))
+      }))
     })
   )
 
@@ -396,6 +396,7 @@ const makeOrchestrator: Effect.Effect<
       )
       return yield* Effect.forEach(decodedRows, (row) =>
         Effect.gen(function*() {
+          yield* loadValidatedEvents(row.dispatchRequestId)
           const status = yield* Schema.decodeUnknownEffect(OrchestratorPendingDispatchStatus)(row.status).pipe(
             Effect.mapError(() =>
               new OrchestratorStorageError({ cause: row.status, operation: "pending.decode-status" })
@@ -517,16 +518,27 @@ const makeOrchestrator: Effect.Effect<
           )
         )
         const acceptedAt = yield* now
-        const persistedRows = yield* sql`
+        const insertedRows = yield* sql`
           INSERT INTO orchestrator_dispatches
             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
           VALUES (${dispatchRequestId}, ${decodedKey}, ${decodedCommand.activityIdempotencyKey},
             ${encodedCommand}, ${acceptedAt}, 'accepted')
-          ON CONFLICT DO UPDATE SET idempotency_key = orchestrator_dispatches.idempotency_key
+          ON CONFLICT DO NOTHING
           RETURNING dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
             activity_idempotency_key AS "activityIdempotencyKey", command,
             accepted_at AS "acceptedAt", status
         `.pipe(Effect.mapError(storageError("submit.insert-or-reload")))
+        const wasInserted = insertedRows.length !== 0
+        const persistedRows = !wasInserted
+          ? yield* sql`
+            SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
+              activity_idempotency_key AS "activityIdempotencyKey", command,
+              accepted_at AS "acceptedAt", status
+            FROM orchestrator_dispatches
+            WHERE idempotency_key = ${decodedKey}
+              OR activity_idempotency_key = ${decodedCommand.activityIdempotencyKey}
+          `.pipe(Effect.mapError(storageError("submit.reload")))
+          : insertedRows
         const persisted = yield* Schema.decodeUnknownEffect(Schema.Array(Row))(persistedRows).pipe(
           Effect.mapError(storageError("submit.decode-persisted"))
         )
@@ -537,13 +549,13 @@ const makeOrchestrator: Effect.Effect<
             operation: "submit.insert-or-reload-empty"
           })
         }
-        if (first.dispatchRequestId !== dispatchRequestId && first.idempotencyKey !== decodedKey) {
+        if (!wasInserted && first.dispatchRequestId !== dispatchRequestId && first.idempotencyKey !== decodedKey) {
           return yield* new OrchestratorConflictError({
             detail: "activity idempotency key was already used",
             idempotencyKey: decodedKey
           })
         }
-        if (first.dispatchRequestId !== dispatchRequestId) {
+        if (!wasInserted) {
           const oldCommand = yield* decodeCommand(first.command)
           if (!Equal.equals(oldCommand, decodedCommand)) {
             return yield* new OrchestratorConflictError({

@@ -2,9 +2,11 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Effect, Option, Schema } from "effect"
+import { spawn } from "node:child_process"
 import { mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
+import { execPath } from "node:process"
 import { DatabaseSync } from "node:sqlite"
 import {
   makeWorkService,
@@ -24,6 +26,11 @@ import {
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
+
+class LockHolderError extends Schema.TaggedError<LockHolderError>()(
+  "LockHolderError",
+  { cause: Schema.String }
+) {}
 
 const day = 24 * 60 * 60 * 1_000
 const utf8ByteLength = (value: string) => new TextEncoder().encode(value).byteLength
@@ -479,8 +486,12 @@ describe("durable Work projection", () => {
       const changed = { ...legacyEvents[1], goal: { ...legacyEvents[1].goal, summary: "changed legacy" } }
       expect(yield* Effect.result(completeService.recordMany("transaction-legacy", [legacyEvents[0], changed])))
         .toMatchObject(
-          { failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" } }
+          { failure: { _tag: "WorkCheckpointConflictError" } }
         )
+      const unrelated = checkpointForGoal("goal-legacy-unrelated", "event-legacy-unrelated", 0, 0)
+      expect(yield* Effect.result(completeService.recordMany("transaction-legacy", [unrelated]))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" }
+      })
       expect(yield* completeStore.list()).toEqual(legacyEvents)
       completeStore.close()
     }).pipe(provideNodeServices))
@@ -578,9 +589,115 @@ describe("durable Work projection", () => {
       restored.close()
 
       const completeStore = yield* WorkStore.open(path)
-      yield* Effect.addFinalizer(() => Effect.sync(() => completeStore.close()))
       const completeService = yield* makeWorkService(completeStore)
       expect(yield* completeService.recordMany("transaction-compact", events)).toEqual(events)
+
+      completeStore.close()
+      const aliasCorrupted = new DatabaseSync(path)
+      aliasCorrupted.prepare(
+        "UPDATE work_goal_events SET goal_id = ? WHERE event_id = ?"
+      ).run("goal-denormalized-drift", secondEvent.eventId)
+      aliasCorrupted.close()
+
+      const aliasCorruptedStore = yield* WorkStore.open(path)
+      const aliasCorruptedService = yield* makeWorkService(aliasCorruptedStore)
+      expect(yield* Effect.result(aliasCorruptedService.recordMany("transaction-compact-alias", events))).toMatchObject(
+        {
+          failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact-alias" }
+        }
+      )
+      aliasCorruptedStore.close()
+      const aliasLedger = new DatabaseSync(path)
+      expect(
+        aliasLedger.prepare(
+          "SELECT record FROM work_goal_transactions WHERE transaction_id = ?"
+        ).get("transaction-compact-alias")
+      ).toBeUndefined()
+      aliasLedger.close()
+
+      const aliasRestored = new DatabaseSync(path)
+      aliasRestored.prepare(
+        "UPDATE work_goal_events SET goal_id = ? WHERE event_id = ?"
+      ).run(secondEvent.goal.id, secondEvent.eventId)
+      aliasRestored.close()
+
+      const eventIdDrift = new DatabaseSync(path)
+      eventIdDrift.prepare(
+        "UPDATE work_goal_events SET event_id = ? WHERE event_id = ?"
+      ).run("event-denormalized-drift", secondEvent.eventId)
+      eventIdDrift.close()
+
+      const eventIdDriftStore = yield* WorkStore.open(path)
+      const eventIdDriftService = yield* makeWorkService(eventIdDriftStore)
+      expect(yield* Effect.result(eventIdDriftService.recordMany("transaction-compact", events))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-compact" }
+      })
+      eventIdDriftStore.close()
+
+      const eventIdRestored = new DatabaseSync(path)
+      eventIdRestored.prepare(
+        "UPDATE work_goal_events SET event_id = ? WHERE event_id = ?"
+      ).run(secondEvent.eventId, "event-denormalized-drift")
+      eventIdRestored.close()
+    }).pipe(provideNodeServices))
+
+  it.effect("configures a bounded SQLite writer lock wait", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-busy-timeout-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const store = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      const lockHolder = spawn(
+        execPath,
+        [
+          "--input-type=module",
+          "-e",
+          `import { DatabaseSync } from "node:sqlite"
+const database = new DatabaseSync(process.argv[1])
+database.exec("BEGIN IMMEDIATE")
+process.stdout.write("locked\\n")
+await new Promise((resolve) => setTimeout(resolve, 250))
+database.exec("COMMIT")
+database.close()`,
+          path
+        ],
+        { stdio: ["ignore", "pipe", "pipe"] }
+      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => lockHolder.kill()))
+      yield* Effect.callback<void, LockHolderError>((resume) => {
+        let ready = false
+        lockHolder.stdout.setEncoding("utf8")
+        lockHolder.stdout.on("data", (chunk: string) => {
+          if (!ready && chunk.includes("locked")) {
+            ready = true
+            resume(Effect.undefined)
+          }
+        })
+        lockHolder.on("error", (cause) => resume(Effect.fail(new LockHolderError({ cause: String(cause) }))))
+        lockHolder.on("close", (code) => {
+          if (!ready) {
+            resume(Effect.fail(
+              new LockHolderError({
+                cause: `lock holder exited before acquiring the lock: ${String(code)}`
+              })
+            ))
+          }
+        })
+      })
+      expect(
+        yield* Effect.result(service.claim({
+          branch: "feat/busy-timeout",
+          expectedRevision: 0,
+          head: "0123456789012345678901234567890123456789",
+          laneId: "goal-busy-timeout",
+          owner: { id: "owner-packages", name: "Package owner" },
+          parent: null,
+          phase: "implementation",
+          worktree: "/home/konopkov/Work/dev/knpkv.dev/worktrees/npm/feat-busy-timeout"
+        }))
+      ).toMatchObject({ _tag: "Success" })
     }).pipe(provideNodeServices))
 
   it.effect("rejects a transaction extension after an exact replay prefix", () =>
@@ -882,6 +999,14 @@ describe("durable Work projection", () => {
       for (const worktree of ["C:\\repo\\worktree", "C:/repo/worktree"]) {
         expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree })).toMatchObject({ worktree })
       }
+      for (const worktree of ["/repo/\uD800", "/repo/\uDC00", "C:\\repo\\\uD800", "C:\\repo\\\uDC00"]) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
+          failure: {}
+        })
+      }
+      for (const worktree of ["/repo/\uFFFD", "/repo/CON.txt", "C:\\repo\\content.txt"]) {
+        expect(yield* Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree })).toMatchObject({ worktree })
+      }
       for (
         const worktree of [
           "C:\\repo\\bad*name",
@@ -890,6 +1015,11 @@ describe("durable Work projection", () => {
           "C:\\repo\\bad "
         ]
       ) {
+        expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
+          failure: {}
+        })
+      }
+      for (const worktree of ["C:\\repo\\CON.txt", "C:\\repo\\nul", "C:\\repo\\Com1.log", "C:\\repo\\LPT9.data"]) {
         expect(yield* Effect.result(Schema.decodeUnknownEffect(WorkLaneClaim)({ ...claim, worktree }))).toMatchObject({
           failure: {}
         })
