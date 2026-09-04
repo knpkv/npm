@@ -49,15 +49,32 @@ const CompactTransactionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.transaction.v2")
 })
 const LaneRow = Schema.Struct({ record: Schema.String, revision: Schema.Number })
-const DecisionRow = Schema.Struct({ record: Schema.String })
+const DecisionRow = Schema.Struct({
+  handoffId: Schema.String,
+  laneId: Schema.String,
+  occurredAt: Schema.Number,
+  record: Schema.String
+})
+const StoredDecisionRow = Schema.Struct({ record: Schema.String })
 const CountRow = Schema.Struct({ count: Schema.Number })
 const LedgerBytesRow = Schema.Struct({ bytes: Schema.Number })
+const TransactionLedgerTotalsRow = Schema.Struct({
+  transactionBytes: Schema.Number,
+  transactionCount: Schema.Number
+})
 const TransactionId = Schema.String.check(
   Schema.isNonEmpty(),
   Schema.isMaxLength(256),
   Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
 )
 const storeError = (operation: string) => (cause: unknown) => new WorkStoreError({ cause, operation })
+const readTransactionLedgerTotals = (database: DatabaseSync) =>
+  Schema.decodeUnknownSync(TransactionLedgerTotalsRow)(
+    database.prepare(
+      `SELECT transaction_count AS transactionCount, transaction_bytes AS transactionBytes
+       FROM work_goal_transaction_totals WHERE singleton = 1`
+    ).get()
+  )
 type AppendRejection = WorkCheckpointConflictError | WorkProjectionError
 type AppendDecision =
   | { readonly _tag: "inserted"; readonly changes: bigint | number }
@@ -210,6 +227,20 @@ export class WorkStore implements WorkStoreService {
           transaction_id TEXT PRIMARY KEY,
           record TEXT NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS work_goal_transaction_totals (
+          singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+          transaction_count INTEGER NOT NULL CHECK (transaction_count >= 0),
+          transaction_bytes INTEGER NOT NULL CHECK (transaction_bytes >= 0)
+        );
+        CREATE TRIGGER IF NOT EXISTS work_goal_transactions_after_insert
+        AFTER INSERT ON work_goal_transactions
+        BEGIN
+          UPDATE work_goal_transaction_totals
+          SET transaction_count = transaction_count + 1,
+              transaction_bytes = transaction_bytes +
+                length(CAST(NEW.transaction_id AS BLOB)) + length(CAST(NEW.record AS BLOB))
+          WHERE singleton = 1;
+        END;
         CREATE TABLE IF NOT EXISTS work_lane_claims (
           lane_id TEXT PRIMARY KEY,
           revision INTEGER NOT NULL,
@@ -230,6 +261,14 @@ export class WorkStore implements WorkStoreService {
       if (!columns.some(({ name }) => name === "transaction_id")) {
         this.#database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
       }
+      this.#database.exec(`
+        INSERT OR IGNORE INTO work_goal_transaction_totals
+          (singleton, transaction_count, transaction_bytes)
+        SELECT 1, COUNT(*), COALESCE(SUM(
+          length(CAST(transaction_id AS BLOB)) + length(CAST(record AS BLOB))
+        ), 0)
+        FROM work_goal_transactions
+      `)
     } catch (error) {
       this.#database.close()
       throw error
@@ -488,6 +527,22 @@ export class WorkStore implements WorkStoreService {
               } satisfies AppendManyDecision
             }
             const legacyRows = legacyTransaction.map((event) => rowsByEventId.get(event.eventId))
+            if (
+              legacyRows.some((row, index) => {
+                const event = legacyTransaction[index]
+                return row === undefined ||
+                  event === undefined ||
+                  row.goalId !== event.goal.id ||
+                  row.occurredAt !== event.occurredAt
+              })
+            ) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkTransactionConflictError({ transactionId: transaction })
+              } satisfies AppendManyDecision
+            }
             const legacyEvents = legacyRows.map((row) =>
               row === undefined
                 ? undefined
@@ -606,10 +661,8 @@ export class WorkStore implements WorkStoreService {
               inTransaction = false
               return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
             }
-            const transactionCount = Schema.decodeUnknownSync(CountRow)(
-              this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_transactions").get()
-            ).count
-            if (transactionCount >= workTransactionMaxRecords) {
+            const transactionLedgerTotals = readTransactionLedgerTotals(this.#database)
+            if (transactionLedgerTotals.transactionCount >= workTransactionMaxRecords) {
               this.#database.exec("ROLLBACK")
               inTransaction = false
               return {
@@ -621,13 +674,7 @@ export class WorkStore implements WorkStoreService {
                 })
               } satisfies AppendManyDecision
             }
-            const ledgerBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
-              this.#database.prepare(
-                `SELECT COALESCE(SUM(length(CAST(transaction_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
-                 FROM work_goal_transactions`
-              ).get()
-            ).bytes
-            if (ledgerBytes + transactionEntryBytes > workTransactionMaxBytes) {
+            if (transactionLedgerTotals.transactionBytes + transactionEntryBytes > workTransactionMaxBytes) {
               this.#database.exec("ROLLBACK")
               inTransaction = false
               return {
@@ -733,10 +780,8 @@ export class WorkStore implements WorkStoreService {
               } satisfies AppendManyDecision
             }
           }
-          const transactionCount = Schema.decodeUnknownSync(CountRow)(
-            this.#database.prepare("SELECT COUNT(*) AS count FROM work_goal_transactions").get()
-          ).count
-          if (transactionCount >= workTransactionMaxRecords) {
+          const transactionLedgerTotals = readTransactionLedgerTotals(this.#database)
+          if (transactionLedgerTotals.transactionCount >= workTransactionMaxRecords) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return {
@@ -748,13 +793,7 @@ export class WorkStore implements WorkStoreService {
               })
             } satisfies AppendManyDecision
           }
-          const ledgerBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
-            this.#database.prepare(
-              `SELECT COALESCE(SUM(length(CAST(transaction_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
-               FROM work_goal_transactions`
-            ).get()
-          ).bytes
-          if (ledgerBytes + transactionEntryBytes > workTransactionMaxBytes) {
+          if (transactionLedgerTotals.transactionBytes + transactionEntryBytes > workTransactionMaxBytes) {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return {
@@ -946,7 +985,7 @@ export class WorkStore implements WorkStoreService {
             "SELECT record FROM work_decision_handoffs WHERE handoff_id = ?"
           ).get(decoded.id)
           if (raw !== undefined) {
-            const previous = Schema.decodeUnknownSync(DecisionRow)(raw)
+            const previous = Schema.decodeUnknownSync(StoredDecisionRow)(raw)
             const prior = Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(previous.record))
             this.#database.exec("ROLLBACK")
             inTransaction = false
@@ -1053,28 +1092,46 @@ export class WorkStore implements WorkStoreService {
     const rows = yield* Effect.try({
       try: () =>
         this.#database.prepare(
-          "SELECT record FROM work_decision_handoffs WHERE lane_id = ? ORDER BY occurred_at ASC, handoff_id ASC"
+          `SELECT handoff_id AS handoffId, lane_id AS laneId, occurred_at AS occurredAt, record
+           FROM work_decision_handoffs
+           WHERE lane_id = ? ORDER BY occurred_at ASC, handoff_id ASC`
         ).all(decodedLaneId),
       catch: storeError("decisions.list")
     })
     return yield* Effect.forEach(rows, (row) =>
       Schema.decodeUnknownEffect(DecisionRow)(row).pipe(
         Effect.mapError(storeError("decisions.decode-row")),
-        Effect.flatMap(({ record }) =>
+        Effect.flatMap((row) =>
           Effect.try({
-            try: () => Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(record)),
+            try: () => Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(row.record)),
             catch: storeError("decisions.decode")
           })
             .pipe(
               Effect.flatMap((handoff) =>
-                handoff.laneId === decodedLaneId
-                  ? Effect.succeed(handoff)
-                  : Effect.fail(
+                handoff.laneId !== decodedLaneId
+                  ? Effect.fail(
                     new WorkStoreError({
                       cause: { requestedLaneId: decodedLaneId, recordLaneId: handoff.laneId },
                       operation: "decisions.decode.lane-mismatch"
                     })
                   )
+                  : handoff.laneId !== row.laneId ||
+                      handoff.id !== row.handoffId ||
+                      handoff.occurredAt !== row.occurredAt
+                  ? Effect.fail(
+                    new WorkStoreError({
+                      cause: {
+                        record: handoff,
+                        row: {
+                          handoffId: row.handoffId,
+                          laneId: row.laneId,
+                          occurredAt: row.occurredAt
+                        }
+                      },
+                      operation: "decisions.decode.identity-mismatch"
+                    })
+                  )
+                  : Effect.succeed(handoff)
               )
             )
         )

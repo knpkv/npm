@@ -13,6 +13,7 @@ import {
   OrchestratorValidationError
 } from "./orchestrator-errors.js"
 import {
+  ActivityIdempotencyKey,
   DispatchRequestId,
   OrchestratorCommand,
   type OrchestratorCommand as OrchestratorCommandType,
@@ -296,6 +297,9 @@ const makeOrchestrator: Effect.Effect<
     detail: string | null,
     result: string | null
   ) {
+    const decodedDispatchRequestId = yield* Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" }))
+    )
     yield* secureFiles
     const decodedTarget = yield* Schema.decodeUnknownEffect(transitionTarget)(target).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: `invalid transition target ${target}` }))
@@ -308,32 +312,57 @@ const makeOrchestrator: Effect.Effect<
     )
     const event = yield* sql.withTransaction(
       Effect.gen(function*() {
-        const dispatch = yield* load(dispatchRequestId)
+        const dispatch = yield* load(decodedDispatchRequestId)
         if (!validTransition(dispatch.status, decodedTarget)) {
           return yield* new OrchestratorTransitionError({
-            dispatchRequestId,
+            dispatchRequestId: decodedDispatchRequestId,
             from: dispatch.status,
             to: decodedTarget
           })
         }
-        const events = yield* listEvents(dispatchRequestId)
+        const events = yield* listEvents(decodedDispatchRequestId)
         const last = events.at(-1)
         if (last === undefined) {
           return yield* new OrchestratorStorageError({
-            cause: dispatchRequestId,
+            cause: decodedDispatchRequestId,
             operation: "transition.missing-event"
           })
         }
         if (last.type !== dispatch.status) {
           return yield* new OrchestratorStorageError({
-            cause: { dispatchRequestId, eventType: last.type, status: dispatch.status },
+            cause: { dispatchRequestId: decodedDispatchRequestId, eventType: last.type, status: dispatch.status },
             operation: "transition.status-event-mismatch"
+          })
+        }
+        const dispatchActivityIdempotencyKey = yield* Schema.decodeUnknownEffect(ActivityIdempotencyKey)(
+          dispatch.activityIdempotencyKey
+        ).pipe(
+          Effect.mapError(() =>
+            new OrchestratorStorageError({
+              cause: dispatch.activityIdempotencyKey,
+              operation: "transition.activity-idempotency-mismatch"
+            })
+          )
+        )
+        const dispatchCommand = yield* decodeCommand(dispatch.command)
+        if (
+          last.activityIdempotencyKey !== dispatchActivityIdempotencyKey ||
+          last.activityIdempotencyKey !== dispatchCommand.activityIdempotencyKey
+        ) {
+          return yield* new OrchestratorStorageError({
+            cause: {
+              commandActivityIdempotencyKey: dispatchCommand.activityIdempotencyKey,
+              dispatchActivityIdempotencyKey,
+              dispatchRequestId: decodedDispatchRequestId,
+              eventActivityIdempotencyKey: last.activityIdempotencyKey
+            },
+            operation: "transition.activity-idempotency-mismatch"
           })
         }
         const timestamp = yield* now
         const event = yield* Schema.decodeUnknownEffect(OrchestratorEvent)({
           activityIdempotencyKey: last.activityIdempotencyKey,
-          dispatchRequestId,
+          dispatchRequestId: decodedDispatchRequestId,
           occurredAt: timestamp,
           sequence: last.sequence + 1,
           type: decodedTarget,
@@ -398,6 +427,28 @@ const makeOrchestrator: Effect.Effect<
           const acceptedAt = yield* Schema.decodeUnknownEffect(Schema.Number)(first.acceptedAt).pipe(
             Effect.mapError(storageError("submit.decode-accepted-at"))
           )
+          const events = yield* listEvents(first.dispatchRequestId)
+          const acceptedEvents = events.filter(({ sequence }) => sequence === 0)
+          const accepted = acceptedEvents[0]
+          if (
+            acceptedEvents.length !== 1 ||
+            accepted === undefined ||
+            accepted.type !== "accepted" ||
+            accepted.dispatchRequestId !== first.dispatchRequestId ||
+            accepted.activityIdempotencyKey !== first.activityIdempotencyKey ||
+            accepted.activityIdempotencyKey !== decodedCommand.activityIdempotencyKey ||
+            accepted.occurredAt !== acceptedAt
+          ) {
+            return yield* new OrchestratorStorageError({
+              cause: {
+                acceptedAt,
+                acceptedEvent: accepted,
+                dispatchActivityIdempotencyKey: first.activityIdempotencyKey,
+                dispatchRequestId: first.dispatchRequestId
+              },
+              operation: "submit.accepted-event-mismatch"
+            })
+          }
           return yield* Schema.decodeUnknownEffect(OrchestratorReceipt)({
             acceptedAt,
             dispatchRequestId: first.dispatchRequestId,

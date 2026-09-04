@@ -453,6 +453,27 @@ describe("durable Work projection", () => {
       }
       repaired.close()
 
+      const driftedEvent = legacyEvents[1]
+      if (driftedEvent === undefined) return yield* Effect.die("legacy fixture missing its second event")
+      const corrupted = new DatabaseSync(path)
+      corrupted.prepare(
+        "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
+      ).run("goal-denormalized-drift", 99, driftedEvent.eventId)
+      corrupted.close()
+
+      const corruptedStore = yield* WorkStore.open(path)
+      const corruptedService = yield* makeWorkService(corruptedStore)
+      expect(yield* Effect.result(corruptedService.recordMany("transaction-legacy", legacyEvents))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" }
+      })
+      corruptedStore.close()
+
+      const restored = new DatabaseSync(path)
+      restored.prepare(
+        "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
+      ).run(driftedEvent.goal.id, driftedEvent.occurredAt, driftedEvent.eventId)
+      restored.close()
+
       const completeStore = yield* WorkStore.open(path)
       const completeService = yield* makeWorkService(completeStore)
       expect(yield* completeService.recordMany("transaction-legacy", legacyEvents)).toEqual(legacyEvents)
@@ -558,6 +579,44 @@ describe("durable Work projection", () => {
         failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
       })
       expect(yield* reopened.list()).toEqual([event])
+    }).pipe(provideNodeServices))
+
+  it.effect("maintains replay ledger totals transactionally without rescanning", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-ledger-totals-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      const first = history.slice(0, 2)
+      yield* service.recordMany("transaction-ledger-1", first)
+
+      const database = new DatabaseSync(store.path)
+      const totalsAfterInsert = database.prepare(
+        `SELECT transaction_count AS transactionCount, transaction_bytes AS transactionBytes
+         FROM work_goal_transaction_totals WHERE singleton = 1`
+      ).get()
+      database.close()
+      expect(totalsAfterInsert).toEqual({
+        transactionCount: 1,
+        transactionBytes: "transaction-ledger-1".length + JSON.stringify({
+          digest: "a".repeat(64),
+          version: "herdr.work.transaction.v2"
+        }).length
+      })
+
+      yield* service.recordMany("transaction-ledger-1", first)
+      const databaseAfterReplay = new DatabaseSync(store.path)
+      const totalsAfterReplay = databaseAfterReplay.prepare(
+        `SELECT transaction_count AS transactionCount, transaction_bytes AS transactionBytes
+         FROM work_goal_transaction_totals WHERE singleton = 1`
+      ).get()
+      const ledgerRows = databaseAfterReplay.prepare(
+        "SELECT COUNT(*) AS count FROM work_goal_transactions"
+      ).get()
+      databaseAfterReplay.close()
+      expect(totalsAfterReplay).toEqual(totalsAfterInsert)
+      expect(ledgerRows).toEqual({ count: 1 })
     }).pipe(provideNodeServices))
 
   it.effect("bounds durable decision handoffs by encoded bytes", () =>
@@ -739,6 +798,52 @@ describe("durable Work projection", () => {
           revision: 4
         })
       ).toMatchObject({ expectedRevision: 3, revision: 4 })
+    }).pipe(provideNodeServices))
+
+  it.effect("rejects denormalized handoff identity drift and preserves decision ordering", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-decision-denormalized-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const store = yield* WorkStore.open(path)
+      store.close()
+      const first: WorkDecisionHandoff = {
+        decision: "handoff",
+        goalId: "goal-decision-identity",
+        id: "handoff-record-1",
+        laneId: "goal-decision-identity",
+        occurredAt: 1,
+        owner: { id: "owner-packages", name: "Package owner" },
+        summary: "First handoff",
+        version: "herdr.work.decision.v1"
+      }
+      const database = new DatabaseSync(path)
+      database.prepare(
+        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+      ).run("handoff-row-1", first.laneId, 2, JSON.stringify(first))
+      database.close()
+
+      const mismatchedStore = yield* WorkStore.open(path)
+      const mismatchedService = yield* makeWorkService(mismatchedStore)
+      expect(yield* Effect.result(mismatchedService.decisions(first.laneId))).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "decisions.decode.identity-mismatch" }
+      })
+      mismatchedStore.close()
+
+      const repaired = new DatabaseSync(path)
+      repaired.prepare(
+        "UPDATE work_decision_handoffs SET handoff_id = ?, occurred_at = ? WHERE handoff_id = ?"
+      ).run(first.id, first.occurredAt, "handoff-row-1")
+      const second = { ...first, id: "handoff-record-2", occurredAt: 2, summary: "Second handoff" }
+      repaired.prepare(
+        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+      ).run(second.id, second.laneId, second.occurredAt, JSON.stringify(second))
+      repaired.close()
+
+      const orderedStore = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => orderedStore.close()))
+      const orderedService = yield* makeWorkService(orderedStore)
+      expect(yield* orderedService.decisions(first.laneId)).toEqual([first, second])
     }).pipe(provideNodeServices))
 
   it.effect("bounds durable lane claims by count and encoded bytes", () =>
