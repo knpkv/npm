@@ -91,6 +91,54 @@ describe("durable coordinator orchestrator", () => {
       ))
   })
 
+  it.effect("rejects dispatch status and event mismatches before transition", () =>
+    withTemporaryRoot("herdr-orchestrator-status-mismatch-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* withDatabase(path, Effect.void)
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+           VALUES (?, ?, ?, ?, ?, 'queued')`
+        ).run(
+          "dispatch:status-mismatch",
+          "idempotency:status-mismatch",
+          "activity:status-mismatch",
+          JSON.stringify({ ...command, activityIdempotencyKey: "activity:status-mismatch" }),
+          0
+        )
+        database.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           VALUES (?, ?, 'accepted', ?, ?, NULL, NULL)`
+        ).run("dispatch:status-mismatch", 0, "activity:status-mismatch", 0)
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.run("dispatch:status-mismatch"))
+          })
+        )
+        expect(result).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "transition.status-event-mismatch" }
+        })
+
+        const remaining = new DatabaseSync(path)
+        const dispatch = remaining.prepare(
+          "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
+        ).get("dispatch:status-mismatch")
+        const eventCount = remaining.prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_events WHERE dispatch_request_id = ?"
+        ).get("dispatch:status-mismatch")
+        remaining.close()
+        expect(dispatch).toEqual({ status: "queued" })
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(eventCount).count).toBe(1)
+      })
+    }))
+
   it.effect("settles empty and fleet-sized results", () =>
     withTemporaryRoot("herdr-orchestrator-results-", (root) =>
       withDatabase(
@@ -181,6 +229,101 @@ describe("durable coordinator orchestrator", () => {
           ).toMatchObject({ failure: { _tag: "OrchestratorValidationError" } })
         })
       )))
+
+  it.effect("validates dispatch IDs before event lookup", () =>
+    withTemporaryRoot("herdr-orchestrator-dispatch-id-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* withDatabase(path, Effect.void)
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+           VALUES (?, ?, ?, ?, ?, 'accepted')`
+        ).run(
+          "dispatch:\uFFFD",
+          "idempotency:dispatch-id",
+          "activity:dispatch-id",
+          JSON.stringify({ ...command, activityIdempotencyKey: "activity:dispatch-id" }),
+          0
+        )
+        database.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           VALUES (?, ?, 'accepted', ?, ?, NULL, NULL)`
+        ).run("dispatch:\uFFFD", 0, "activity:dispatch-id", 0)
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const malformed = yield* Effect.result(Stream.runCollect(orchestrator.events("dispatch:\uD800")))
+            const replacement = yield* Stream.runCollect(orchestrator.events("dispatch:\uFFFD"))
+            return { malformed, replacement }
+          })
+        )
+        expect(result.malformed).toMatchObject({
+          failure: { _tag: "OrchestratorValidationError", detail: "dispatch request ID is invalid" }
+        })
+        expect(result.replacement).toHaveLength(1)
+        expect(result.replacement[0]?.dispatchRequestId).toBe("dispatch:\uFFFD")
+      })
+    }))
+
+  it.effect("decodes replayed receipts at the durable boundary", () =>
+    withTemporaryRoot("herdr-orchestrator-receipt-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* withDatabase(path, Effect.void)
+        const database = new DatabaseSync(path)
+        database.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, status)
+           VALUES (?, ?, ?, ?, ?, 'accepted')`
+        ).run(
+          "dispatch:receipt-valid",
+          "idempotency:receipt-valid",
+          "activity:receipt-valid",
+          JSON.stringify({ ...command, activityIdempotencyKey: "activity:receipt-valid" }),
+          -1
+        )
+        database.close()
+
+        const invalidTimestamp = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:receipt-valid" },
+              "idempotency:receipt-valid"
+            ))
+          })
+        )
+        expect(invalidTimestamp).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "submit.decode-receipt" }
+        })
+
+        const malformedDatabase = new DatabaseSync(path)
+        malformedDatabase.prepare(
+          "UPDATE orchestrator_dispatches SET dispatch_request_id = ? WHERE idempotency_key = ?"
+        ).run("dispatch:\uD800", "idempotency:receipt-valid")
+        malformedDatabase.close()
+        const invalidId = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:receipt-valid" },
+              "idempotency:receipt-valid"
+            ))
+          })
+        )
+        expect(invalidId).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "submit.decode-receipt" }
+        })
+      })
+    }))
 
   it.effect("recovers a running dispatch from the durable database after restart", () => {
     return withTemporaryRoot("herdr-orchestrator-restart-", (root) => {

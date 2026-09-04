@@ -419,6 +419,52 @@ describe("durable Work projection", () => {
       expect(yield* store.list()).toEqual(history.slice(0, 2))
     }).pipe(provideNodeServices))
 
+  it.effect("revalidates legacy transaction rows against durable checkpoints", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-transaction-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const store = yield* WorkStore.open(path)
+      store.close()
+
+      const legacyEvents = history.slice(0, 2)
+      const database = new DatabaseSync(path)
+      database.prepare(
+        "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
+      ).run("transaction-legacy", JSON.stringify(legacyEvents))
+      database.close()
+
+      const missingStore = yield* WorkStore.open(path)
+      const missingService = yield* makeWorkService(missingStore)
+      expect(yield* Effect.result(missingService.recordMany("transaction-legacy", legacyEvents))).toMatchObject({
+        failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" }
+      })
+      expect(yield* missingStore.list()).toEqual([])
+      missingStore.close()
+
+      const repaired = new DatabaseSync(path)
+      const insert = repaired.prepare(
+        `INSERT INTO work_goal_events
+           (event_id, goal_id, occurred_at, record, transaction_id)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      for (const event of legacyEvents) {
+        insert.run(event.eventId, event.goal.id, event.occurredAt, JSON.stringify(event), "transaction-legacy")
+      }
+      repaired.close()
+
+      const completeStore = yield* WorkStore.open(path)
+      const completeService = yield* makeWorkService(completeStore)
+      expect(yield* completeService.recordMany("transaction-legacy", legacyEvents)).toEqual(legacyEvents)
+      const changed = { ...legacyEvents[1], goal: { ...legacyEvents[1].goal, summary: "changed legacy" } }
+      expect(yield* Effect.result(completeService.recordMany("transaction-legacy", [legacyEvents[0], changed])))
+        .toMatchObject(
+          { failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy" } }
+        )
+      expect(yield* completeStore.list()).toEqual(legacyEvents)
+      completeStore.close()
+    }).pipe(provideNodeServices))
+
   it.effect("rejects a transaction extension after an exact replay prefix", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-prefix-"))
@@ -843,6 +889,29 @@ describe("durable Work projection", () => {
         1,
         JSON.stringify({ ...claim, laneId: "goal-record", revision: 1 })
       )
+      database.prepare(
+        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+      ).run(
+        "goal-revision",
+        1,
+        JSON.stringify({ ...claim, laneId: "goal-revision", expectedRevision: 1, revision: 2 })
+      )
+      database.prepare(
+        "INSERT INTO work_lane_claims (lane_id, revision, record) VALUES (?, ?, ?)"
+      ).run("goal-malformed", 1, "not-json")
+      const mismatchedHandoff: WorkDecisionHandoff = {
+        decision: "handoff",
+        goalId: "goal-record",
+        id: "handoff-mismatched-lane",
+        laneId: "goal-record",
+        occurredAt: 2,
+        owner: claim.owner,
+        summary: "Mismatched lane fixture",
+        version: "herdr.work.decision.v1"
+      }
+      database.prepare(
+        "INSERT INTO work_decision_handoffs (handoff_id, lane_id, occurred_at, record) VALUES (?, ?, ?, ?)"
+      ).run(mismatchedHandoff.id, "goal-key", mismatchedHandoff.occurredAt, JSON.stringify(mismatchedHandoff))
       database.close()
       const mismatch = yield* Effect.scoped(
         Effect.gen(function*() {
@@ -854,6 +923,34 @@ describe("durable Work projection", () => {
       )
       expect(mismatch).toMatchObject({
         failure: { _tag: "WorkStoreError", operation: "claim.read.lane-mismatch" }
+      })
+      const writeMismatches = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* WorkStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const service = yield* makeWorkService(store)
+          return yield* Effect.all([
+            Effect.result(service.claim({ ...claim, laneId: "goal-key", expectedRevision: 1 })),
+            Effect.result(service.claim({ ...claim, laneId: "goal-revision", expectedRevision: 1 })),
+            Effect.result(service.claim({ ...claim, laneId: "goal-malformed", expectedRevision: 1 }))
+          ])
+        })
+      )
+      expect(writeMismatches).toMatchObject([
+        { failure: { _tag: "WorkStoreError", operation: "claim.write.inconsistent" } },
+        { failure: { _tag: "WorkStoreError" } },
+        { failure: { _tag: "WorkStoreError" } }
+      ])
+      const decisionMismatch = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const store = yield* WorkStore.open(path)
+          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+          const service = yield* makeWorkService(store)
+          return yield* Effect.result(service.decisions("goal-key"))
+        })
+      )
+      expect(decisionMismatch).toMatchObject({
+        failure: { _tag: "WorkStoreError", operation: "decisions.decode.lane-mismatch" }
       })
     }).pipe(provideNodeServices))
 

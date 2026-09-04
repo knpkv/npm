@@ -22,4 +22,6 @@ exported `singleRunnerLayer` composes Effect's SingleRunner with SQL-backed
 MessageStorage and a local runner identity; provide an Effect SQL client and
 Crypto implementation at the application boundary. Its SQLite layer creates a
 0700 state directory and keeps the database, WAL, and shared-memory files at
-0600, reapplying those modes after durable writes.
+0600, reapplying those modes after durable writes. The exported SQLite layer
+currently supports POSIX paths only and fails closed on Windows until it can
+validate private directory ACLs.

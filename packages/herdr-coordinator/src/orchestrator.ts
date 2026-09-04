@@ -23,6 +23,7 @@ import {
   OrchestratorPendingDispatch,
   OrchestratorPendingDispatchStatus,
   OrchestratorPendingQuery,
+  OrchestratorReceipt,
   type OrchestratorReceipt as OrchestratorReceiptType,
   OrchestratorResult
 } from "./orchestrator-model.js"
@@ -323,6 +324,12 @@ const makeOrchestrator: Effect.Effect<
             operation: "transition.missing-event"
           })
         }
+        if (last.type !== dispatch.status) {
+          return yield* new OrchestratorStorageError({
+            cause: { dispatchRequestId, eventType: last.type, status: dispatch.status },
+            operation: "transition.status-event-mismatch"
+          })
+        }
         const timestamp = yield* now
         const event = yield* Schema.decodeUnknownEffect(OrchestratorEvent)({
           activityIdempotencyKey: last.activityIdempotencyKey,
@@ -391,12 +398,12 @@ const makeOrchestrator: Effect.Effect<
           const acceptedAt = yield* Schema.decodeUnknownEffect(Schema.Number)(first.acceptedAt).pipe(
             Effect.mapError(storageError("submit.decode-accepted-at"))
           )
-          return {
+          return yield* Schema.decodeUnknownEffect(OrchestratorReceipt)({
             acceptedAt,
             dispatchRequestId: first.dispatchRequestId,
             idempotencyKey: decodedKey,
             status: "accepted"
-          } satisfies OrchestratorReceiptType
+          }).pipe(Effect.mapError(storageError("submit.decode-receipt")))
         }
         const activityRows = yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId", idempotency_key AS "idempotencyKey",
@@ -461,7 +468,12 @@ const makeOrchestrator: Effect.Effect<
   const service: OrchestratorService = {
     events: (dispatchRequestId) =>
       Stream.fromIterableEffect(
-        load(dispatchRequestId).pipe(Effect.flatMap(() => listEvents(dispatchRequestId)))
+        Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(
+          Effect.mapError(() => new OrchestratorValidationError({ detail: "dispatch request ID is invalid" })),
+          Effect.flatMap((decodedDispatchRequestId) =>
+            load(decodedDispatchRequestId).pipe(Effect.flatMap(() => listEvents(decodedDispatchRequestId)))
+          )
+        )
       ),
     failDelivery: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "delivery_failed", detail, null),
     failTask: (dispatchRequestId, detail) => appendTransition(dispatchRequestId, "task_failed", detail, null),
@@ -528,7 +540,10 @@ export const singleRunnerLayer = SingleRunner.layer({
   }
 })
 
-/** Node SQLite and Crypto services used by the durable coordinator layers. */
+/**
+ * Node SQLite and Crypto services used by the durable coordinator layers.
+ * Fails closed on non-POSIX paths until an ACL-backed private-directory check exists.
+ */
 export const sqliteLayer = (filename: string) =>
   Layer.unwrap(
     Effect.gen(function*() {

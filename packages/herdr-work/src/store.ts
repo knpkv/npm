@@ -74,7 +74,7 @@ type AppendManyDecision =
 
 type ClaimDecision =
   | { readonly _tag: "conflict"; readonly error: WorkLaneClaimConflictError }
-  | { readonly _tag: "rejected"; readonly error: WorkProjectionError }
+  | { readonly _tag: "rejected"; readonly error: WorkProjectionError | WorkStoreError }
   | { readonly _tag: "claimed"; readonly value: WorkLaneClaimed }
 
 type HandoffDecision =
@@ -429,6 +429,7 @@ export class WorkStore implements WorkStoreService {
           ).get(transaction)
           let compactTransaction: typeof CompactTransactionRecord.Type | undefined
           let legacyCompactTransaction: typeof LegacyCompactTransactionRecord.Type | undefined
+          let legacyTransaction: ReadonlyArray<WorkGoalCheckpointType> | undefined
           if (storedTransaction !== undefined) {
             const stored = Schema.decodeUnknownSync(TransactionRow)(storedTransaction)
             const previous = JSON.parse(stored.record)
@@ -440,15 +441,7 @@ export class WorkStore implements WorkStoreService {
               if (legacyCompact._tag === "Success") {
                 legacyCompactTransaction = legacyCompact.success
               } else {
-                const legacy = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
-                this.#database.exec("ROLLBACK")
-                inTransaction = false
-                return Equal.equals(legacy, decoded)
-                  ? { _tag: "replayed", events: decoded } satisfies AppendManyDecision
-                  : {
-                    _tag: "rejected",
-                    error: new WorkTransactionConflictError({ transactionId: transaction })
-                  } satisfies AppendManyDecision
+                legacyTransaction = Schema.decodeUnknownSync(Schema.Array(WorkGoalCheckpoint))(previous)
               }
             }
           }
@@ -485,6 +478,33 @@ export class WorkStore implements WorkStoreService {
             JSON.stringify([row.goalId, row.occurredAt]),
             row
           ]))
+          if (legacyTransaction !== undefined) {
+            if (!Equal.equals(legacyTransaction, decoded)) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkTransactionConflictError({ transactionId: transaction })
+              } satisfies AppendManyDecision
+            }
+            const legacyRows = legacyTransaction.map((event) => rowsByEventId.get(event.eventId))
+            const legacyEvents = legacyRows.map((row) =>
+              row === undefined
+                ? undefined
+                : Schema.decodeUnknownSync(WorkGoalCheckpoint)(JSON.parse(row.record))
+            )
+            if (
+              legacyEvents.some((event) => event === undefined) ||
+              legacyEvents.some((event, index) => event !== undefined && !Equal.equals(event, legacyTransaction[index]))
+            ) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkTransactionConflictError({ transactionId: transaction })
+              } satisfies AppendManyDecision
+            }
+          }
           const existing = decoded.map((event) => {
             const row = rowsByEventId.get(event.eventId) ??
               rowsByGoalTime.get(JSON.stringify([event.goal.id, event.occurredAt]))
@@ -577,6 +597,11 @@ export class WorkStore implements WorkStoreService {
                   error: new WorkTransactionConflictError({ transactionId: transaction })
                 } satisfies AppendManyDecision
               }
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
+            }
+            if (legacyTransaction !== undefined) {
               this.#database.exec("ROLLBACK")
               inTransaction = false
               return { _tag: "replayed", events: decoded } satisfies AppendManyDecision
@@ -784,6 +809,25 @@ export class WorkStore implements WorkStoreService {
             "SELECT revision, record FROM work_lane_claims WHERE lane_id = ?"
           ).get(decoded.laneId)
           const existing = raw === undefined ? undefined : Schema.decodeUnknownSync(LaneRow)(raw)
+          const existingClaim = existing === undefined
+            ? undefined
+            : Schema.decodeUnknownSync(WorkLaneClaimed)(JSON.parse(existing.record))
+          if (
+            existing !== undefined &&
+            (existingClaim === undefined ||
+              existingClaim.laneId !== decoded.laneId ||
+              existingClaim.revision !== existing.revision)
+          ) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkStoreError({
+                cause: { laneId: decoded.laneId, record: existing.record, revision: existing.revision },
+                operation: "claim.write.inconsistent"
+              })
+            } satisfies ClaimDecision
+          }
           const actualRevision = existing?.revision ?? 0
           if (actualRevision !== decoded.expectedRevision) {
             this.#database.exec("ROLLBACK")
@@ -1021,6 +1065,18 @@ export class WorkStore implements WorkStoreService {
             try: () => Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(record)),
             catch: storeError("decisions.decode")
           })
+            .pipe(
+              Effect.flatMap((handoff) =>
+                handoff.laneId === decodedLaneId
+                  ? Effect.succeed(handoff)
+                  : Effect.fail(
+                    new WorkStoreError({
+                      cause: { requestedLaneId: decodedLaneId, recordLaneId: handoff.laneId },
+                      operation: "decisions.decode.lane-mismatch"
+                    })
+                  )
+              )
+            )
         )
       ))
   })
