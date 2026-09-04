@@ -764,6 +764,19 @@ describe("durable coordinator orchestrator", () => {
           failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.directory.private" }
         })
         expect(statSync(callerDirectory).mode & 0o777).toBe(0o755)
+
+        const realStateDirectory = join(root, "real-state")
+        mkdirSync(realStateDirectory, { mode: 0o700 })
+        const linkedStateDirectory = join(root, "linked-state")
+        symlinkSync(realStateDirectory, linkedStateDirectory)
+        const linkedState = yield* Effect.result(
+          withDatabase(join(linkedStateDirectory, "orchestrator.sqlite"), Effect.void)
+        )
+        expect(linkedState).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.directory.path-identity" }
+        })
+        expect(readdirSync(realStateDirectory)).toEqual([])
       })))
 
   it.effect("rejects SQLite database and journal path substitutions", () =>

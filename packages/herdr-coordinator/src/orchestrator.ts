@@ -460,7 +460,7 @@ const makeOrchestrator: Effect.Effect<
         `.pipe(Effect.mapError(storageError("transition.insert-event")))
         yield* sql`
           UPDATE orchestrator_dispatches SET status = ${event.type}
-          WHERE dispatch_request_id = ${dispatchRequestId}
+          WHERE dispatch_request_id = ${decodedDispatchRequestId}
         `.pipe(Effect.mapError(storageError("transition.update-dispatch")))
         return event
       })
