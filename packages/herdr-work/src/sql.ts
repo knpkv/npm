@@ -255,6 +255,16 @@ export interface SqliteWorkBridge {
 export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge => {
   const initialize = Effect.gen(function*() {
     yield* sql`
+      CREATE TABLE IF NOT EXISTS work_goal_events (
+        event_id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        occurred_at INTEGER NOT NULL,
+        record TEXT NOT NULL,
+        transaction_id TEXT,
+        UNIQUE (goal_id, occurred_at)
+      )
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.goal-events")))
+    yield* sql`
       CREATE TABLE IF NOT EXISTS work_agent_bindings (
         dispatch_request_id TEXT PRIMARY KEY,
         lane_id TEXT NOT NULL,
@@ -275,6 +285,23 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         record TEXT NOT NULL
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-claims")))
+    yield* sql`
+      CREATE TABLE IF NOT EXISTS work_lane_operations (
+        operation_id TEXT PRIMARY KEY,
+        lane_id TEXT NOT NULL,
+        goal_id TEXT NOT NULL,
+        phase TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        record TEXT NOT NULL
+      )
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operations")))
+    yield* sql`
+      CREATE TABLE IF NOT EXISTS work_lane_operation_totals (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        operation_count INTEGER NOT NULL CHECK (operation_count >= 0),
+        operation_bytes INTEGER NOT NULL CHECK (operation_bytes >= 0)
+      )
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operation-totals")))
     yield* sql`
       CREATE TABLE IF NOT EXISTS work_decision_handoffs (
         handoff_id TEXT PRIMARY KEY,
@@ -379,6 +406,35 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
       }
       yield* sql`CREATE UNIQUE INDEX IF NOT EXISTS work_lane_claims_one_active_goal
       ON work_lane_claims (goal_id) WHERE phase <> 'shipped'`
+      yield* sql`
+      CREATE INDEX IF NOT EXISTS work_lane_operations_lane_revision
+        ON work_lane_operations (lane_id, revision)
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operation-index")))
+      yield* sql`
+      CREATE TRIGGER IF NOT EXISTS work_lane_operations_after_insert
+      AFTER INSERT ON work_lane_operations
+      BEGIN
+        UPDATE work_lane_operation_totals
+        SET operation_count = operation_count + 1,
+            operation_bytes = operation_bytes +
+              length(CAST(NEW.operation_id AS BLOB)) + length(CAST(NEW.record AS BLOB))
+        WHERE singleton = 1;
+      END
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operation-trigger")))
+      yield* sql`
+      INSERT OR IGNORE INTO work_lane_operation_totals
+        (singleton, operation_count, operation_bytes)
+      SELECT 1, COUNT(*), COALESCE(SUM(
+        length(CAST(operation_id AS BLOB)) + length(CAST(record AS BLOB))
+      ), 0)
+      FROM work_lane_operations
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operation-totals-row")))
+      yield* sql`
+      INSERT OR IGNORE INTO work_lane_operations
+        (operation_id, lane_id, goal_id, phase, revision, record)
+      SELECT operation_id, lane_id, goal_id, phase, revision, record
+      FROM work_lane_claims
+    `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operation-backfill")))
       yield* sql`
       CREATE TRIGGER IF NOT EXISTS work_decision_handoffs_after_insert
       AFTER INSERT ON work_decision_handoffs
@@ -618,6 +674,14 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         reason: "missing_lane"
       })
     }
+    if (lane.revision !== decoded.expectedRevision) {
+      return yield* new WorkAgentBindingAuthorityError({
+        actualRevision: lane.revision,
+        expectedRevision: decoded.expectedRevision,
+        laneId: decoded.laneId,
+        reason: "stale_revision"
+      })
+    }
     if (lane.phase === "shipped") {
       return yield* new WorkAgentBindingAuthorityError({
         actualRevision: lane.revision,
@@ -631,14 +695,6 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
       return yield* new WorkStoreError({
         cause: { activeGoalClaims, lane },
         operation: "sql-work.agent-binding.goal-authority-conflict"
-      })
-    }
-    if (lane.revision !== decoded.expectedRevision) {
-      return yield* new WorkAgentBindingAuthorityError({
-        actualRevision: lane.revision,
-        expectedRevision: decoded.expectedRevision,
-        laneId: decoded.laneId,
-        reason: "stale_revision"
       })
     }
     const currentRows = yield* sql`
@@ -671,7 +727,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         reason: "terminal_goal"
       })
     }
-    if (current.occurredAt >= decodedBoundaryTime) {
+    if (current.occurredAt > decodedBoundaryTime) {
       return yield* new WorkProjectionError({
         cause: { boundaryTime: decodedBoundaryTime, checkpoint: current },
         detail: "work agent binding cannot advance beyond the coordinator clock",
@@ -685,11 +741,12 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         reason: "capacity_exceeded"
       })
     }
+    const occurredAt = Math.max(decodedBoundaryTime, current.occurredAt + 1)
     const binding = makeWorkAgentBinding(
       decoded,
       lane,
       current,
-      decodedBoundaryTime
+      occurredAt
     )
     const encodedLane = JSON.stringify(binding.lane)
     const history = yield* sql`

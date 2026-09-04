@@ -1722,7 +1722,7 @@ module.exports = {
         isEffectFunction(context, statement.expression.argument.callee, "addFinalizer") &&
         statement.expression.argument.arguments.length === 1 &&
         statement.expression.argument.arguments[0].type !== "SpreadElement" &&
-        closesVariable(statement.expression.argument.arguments[0], variable)
+        releaseClosesVariable(statement.expression.argument.arguments[0], variable)
 
       return {
         CallExpression(node) {
@@ -1800,7 +1800,12 @@ module.exports = {
         if (expression.type !== "Identifier") return false
         const variable = resolvedVariable(context, expression)
         const definition = variable?.defs.find((candidate) => candidate.type === "Variable")
-        return definition?.node.type === "VariableDeclarator" && hasExpectedEffectName(definition.node.init, name)
+        return (
+          definition?.node.type === "VariableDeclarator" &&
+          definition.node.parent.type === "VariableDeclaration" &&
+          definition.node.parent.kind === "const" &&
+          hasExpectedEffectName(definition.node.init, name)
+        )
       }
       return {
         VariableDeclarator(node) {

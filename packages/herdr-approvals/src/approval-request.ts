@@ -94,7 +94,7 @@ const credentialKey =
   /^(?:(?:[a-z\d]+[\s_-])*[a-z\d]*(?:password|passwd|pwd|secret|token|credential|credentials|authorization|passphrase|accountkey|api[\s_-]?key|private[\s_-]?key|access[\s_-]?key(?:[\s_-]?id)?|secret[\s_-]?access[\s_-]?key)|_auth|cookie|set[\s_-]cookie)$/iu
 
 const credentialSignal =
-  /(?:[?&#][^=#&\s]+(?:=|%3a|%3d)|password|passwd|pwd|secret|token|credential|passphrase|accountkey|api[\s_-]+key|access[\s_-]+key|private[\s_-]+key|authorization|cookie|set-cookie|_auth|auths|-----begin|\\u[0-9a-f]{4}|(?:^|[\r\n])[ \t]*(?:machine|default)\b)/iu
+  /(?:[?&#][^=#&\s]+(?:=|%3a|%3d)|password|passwd|pwd|secret|token|credential|passphrase|accountkey|api[\s_-]?key|access[\s_-]?key|private[\s_-]?key|authorization|cookie|set-cookie|_auth|auths|-----begin|\\u[0-9a-f]{4}|(?:^|[\r\n])[ \t]*(?:machine|default)\b)/iu
 
 const decodeCredentialKey = (value: string): string =>
   value.replace(/\\u([0-9a-f]{4})/giu, (_match, code: string) => String.fromCharCode(Number.parseInt(code, 16)))

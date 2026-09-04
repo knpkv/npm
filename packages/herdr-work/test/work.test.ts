@@ -262,7 +262,7 @@ describe("durable Work projection", () => {
         const service = yield* makeWorkService(first.store)
         yield* service.record(history[0])
         const lane = yield* service.claim(laneClaim("lane:package", history[0].goal.id))
-        yield* TestClock.setTime(1)
+        yield* TestClock.setTime(0)
         const request = Schema.decodeUnknownSync(WorkAgentBindingRequest)({
           dispatchRequestId: "dispatch:worker-start",
           expectedRevision: lane.revision,
@@ -271,6 +271,7 @@ describe("durable Work projection", () => {
           worker: startedWorker
         })
         const binding = yield* service.bindAgent(request)
+        expect(binding.checkpoint.occurredAt).toBe(1)
         expect(Schema.decodeUnknownResult(WorkAgentBinding)(binding)._tag).toBe("Success")
         expect(binding).toMatchObject({
           checkpoint: {
@@ -317,6 +318,69 @@ describe("durable Work projection", () => {
           agentHierarchy: { agent: startedWorker },
           connectTarget: { agentId: startedWorker.agentId, host: startedWorker.host }
         })
+      }).pipe(provideNodeServices)
+    ))
+
+  it.effect("rejects agent binding when corrupted storage has duplicate active goal claims", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-agent-binding-ambiguous-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const path = join(directory, "work.sqlite")
+        const opened = yield* openScopedStore(path)
+        const service = yield* makeWorkService(opened.store)
+        yield* service.record(history[0])
+        const lane = yield* service.claim(laneClaim("lane:authority", history[0].goal.id))
+        const duplicate = Schema.decodeUnknownSync(WorkLaneClaimed)({
+          ...laneClaim("lane:duplicate-authority", history[0].goal.id),
+          revision: 1
+        })
+        const database = new DatabaseSync(path)
+        database.exec("DROP INDEX work_lane_claims_one_active_goal")
+        database.prepare(
+          `INSERT INTO work_lane_claims
+             (lane_id, goal_id, operation_id, phase, revision, record)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          duplicate.laneId,
+          duplicate.goalId,
+          duplicate.operationId,
+          duplicate.phase,
+          duplicate.revision,
+          JSON.stringify(duplicate)
+        )
+        database.prepare(
+          `INSERT INTO work_lane_operations
+             (operation_id, lane_id, goal_id, phase, revision, record)
+           VALUES (?, ?, ?, ?, ?, ?)`
+        ).run(
+          duplicate.operationId,
+          duplicate.laneId,
+          duplicate.goalId,
+          duplicate.phase,
+          duplicate.revision,
+          JSON.stringify(duplicate)
+        )
+        database.close()
+
+        yield* TestClock.setTime(1)
+        const dispatchRequestId = "dispatch:ambiguous-authority"
+        expect(
+          yield* Effect.result(service.bindAgent({
+            dispatchRequestId,
+            expectedRevision: lane.revision,
+            laneId: lane.laneId,
+            version: "herdr.work.agent-binding-request.v1",
+            worker: startedWorker
+          }))
+        ).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            operation: "agent-binding.goal-authority-conflict"
+          }
+        })
+        expect(Option.isNone(yield* service.agentBinding(dispatchRequestId))).toBe(true)
+        expect(Option.getOrThrow(yield* service.currentClaim(lane.laneId))).toEqual(lane)
       }).pipe(provideNodeServices)
     ))
 
@@ -450,6 +514,7 @@ describe("durable Work projection", () => {
   it.effect("rejects writable and substituted authority paths before database creation", () =>
     Effect.scoped(
       Effect.gen(function*() {
+        if (platform() === "win32") return
         const root = mkdtempSync(join(tmpdir(), "herdr-work-unsafe-path-test-"))
         yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
 
@@ -2187,9 +2252,19 @@ database.close()`,
       )
       yield* Effect.addFinalizer(() => Effect.sync(() => writer.kill()))
       yield* Effect.callback<void, LockHolderError>((resume) => {
+        let completed = false
+        const complete = (result: Effect.Effect<void, LockHolderError>) => {
+          if (completed) return
+          completed = true
+          resume(result)
+        }
         writer.stdout.setEncoding("utf8")
-        writer.stdout.once("data", () => resume(Effect.void))
-        writer.once("error", (cause) => resume(Effect.fail(new LockHolderError({ cause: String(cause) }))))
+        writer.stdout.once("data", () => complete(Effect.void))
+        writer.once("error", (cause) => complete(Effect.fail(new LockHolderError({ cause: String(cause) }))))
+        writer.once("exit", (code, signal) =>
+          complete(
+            Effect.fail(new LockHolderError({ cause: `lock holder exited before readiness: ${code ?? signal}` }))
+          ))
       })
 
       const opened = yield* openScopedStore(path)

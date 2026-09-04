@@ -443,6 +443,9 @@ describe("sanitized approval requests", () => {
       },
       { ref: '{"refreshToken":"camel-token-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"clientSecret":"camel-secret-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"apikey":"compact-api-key-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"accesskey":"compact-access-key-leaked-canary"}', redacted: "[redacted credential]" },
+      { ref: '{"privatekey":"compact-private-key-leaked-canary"}', redacted: "[redacted credential]" },
       { ref: '{"password":"quoted-leaked-canary"} trailing-leaked-canary', redacted: "[redacted credential]" },
       {
         ref: "https://example.test/repo?ref=%7B%22password%22%3A%22nested-json-leaked-canary%22%7D",

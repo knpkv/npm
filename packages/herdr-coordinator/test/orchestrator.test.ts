@@ -242,6 +242,88 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("repairs the pre-agent-binding Work schema before coordinator-owned activation", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-schema-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-schema")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const database = new DatabaseSync(path)
+        database.exec(`
+          DROP TRIGGER work_lane_operations_after_insert;
+          DROP TABLE work_lane_operation_totals;
+          DROP TABLE work_lane_operations;
+        `)
+        database.close()
+
+        const activation = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            return yield* orchestrator.workerStarted({
+              dispatchRequestId: receipt.dispatchRequestId,
+              expectedRevision: lane.revision,
+              laneId: lane.laneId,
+              version: "herdr.work.agent-binding-request.v1",
+              worker: startedWorker
+            })
+          })
+        )
+        expect(activation.binding.lane.revision).toBe(lane.revision + 1)
+        const repaired = new DatabaseSync(path, { readOnly: true })
+        expect(
+          repaired.prepare(
+            `SELECT operation_count AS operationCount
+             FROM work_lane_operation_totals WHERE singleton = 1`
+          ).get()
+        ).toEqual({ operationCount: 2 })
+        repaired.close()
+      })
+    }))
+
+  it.effect("allocates a monotonic Work checkpoint when worker start shares the current Work tick", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-same-tick-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:worker-start-same-tick")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+            const work = yield* makeWorkService(store)
+            const current = (yield* work.snapshots(1)).now.goals[0]
+            if (current === undefined) return yield* Effect.die("missing seeded Work goal")
+            yield* work.record({
+              eventId: "event:same-tick-authority",
+              goal: { ...current, updatedAt: 1 },
+              occurredAt: 1,
+              version: "herdr.work.event.v1"
+            })
+          }).pipe(provideNodeServices)
+        )
+        const activation = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            return yield* orchestrator.workerStarted({
+              dispatchRequestId: receipt.dispatchRequestId,
+              expectedRevision: lane.revision,
+              laneId: lane.laneId,
+              version: "herdr.work.agent-binding-request.v1",
+              worker: startedWorker
+            })
+          })
+        )
+        expect(activation.binding.checkpoint.occurredAt).toBe(2)
+        expect(activation.event.occurredAt).toBe(2)
+      })
+    }))
+
   it.effect("rejects queued replay when a persisted binding lost its lane-operation companion", () =>
     withTemporaryRoot("herdr-orchestrator-worker-start-partial-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -392,6 +474,28 @@ describe("durable coordinator orchestrator", () => {
           ))
         ).toMatchObject({
           failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "shipped_lane" }
+        })
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: shipped.revision - 1,
+                laneId: shipped.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({
+          failure: {
+            _tag: "OrchestratorWorkerStartAuthorityError",
+            actualRevision: shipped.revision,
+            expectedRevision: shipped.revision - 1,
+            reason: "stale_revision"
+          }
         })
       })
     }))
@@ -1260,9 +1364,24 @@ database.close()`,
         )
         yield* Effect.addFinalizer(() => Effect.sync(() => writer.kill()))
         yield* Effect.callback<void, LegacyWriterError>((resume) => {
+          let completed = false
+          const complete = (result: Effect.Effect<void, LegacyWriterError>) => {
+            if (completed) return
+            completed = true
+            resume(result)
+          }
           writer.stdout.setEncoding("utf8")
-          writer.stdout.once("data", () => resume(Effect.void))
-          writer.once("error", (cause) => resume(Effect.fail(new LegacyWriterError({ cause: String(cause) }))))
+          writer.stdout.once("data", () => complete(Effect.void))
+          writer.once("error", (cause) => complete(Effect.fail(new LegacyWriterError({ cause: String(cause) }))))
+          writer.once(
+            "exit",
+            (code, signal) =>
+              complete(
+                Effect.fail(
+                  new LegacyWriterError({ cause: `legacy writer exited before readiness: ${code ?? signal}` })
+                )
+              )
+          )
         })
 
         yield* withDatabase(path, Effect.void)

@@ -54,7 +54,11 @@ request must appear in the handoff's dispatch IDs. New bindings
 require the handoff's active, non-shipped lane and authoritative goal; exact
 binding replay remains available after the lane advances. The coordinator must call it inside the same
 transaction as acceptance; `WorkStore.decisions` then recovers the handoff from
-the same database. Provider credentials and private locators are excluded.
+the same database. The server-private durable `AgentWorkerIdentity` record stays
+behind the Work service boundary. Its derived, normalized client-visible
+`AgentConnectTarget` excludes provider credentials and private locators and may
+cross only the authenticated Work UI boundary; neither form may be emitted on
+unauthenticated or public surfaces.
 The same bridge exposes the transaction-owned agent-binding primitive used by
 the coordinator's durable `workerStarted` boundary; callers cannot repair a
 previously partial activation during replay.

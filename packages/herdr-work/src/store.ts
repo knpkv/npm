@@ -840,6 +840,17 @@ export class WorkStore implements WorkStoreService {
               })
             )
           }
+          const activeGoalClaims = laneLedger.entries
+            .map(({ claim }) => claim)
+            .filter((claim) => claim.goalId === lane.goalId && claim.phase !== "shipped")
+          if (activeGoalClaims.length !== 1 || activeGoalClaims[0]?.laneId !== lane.laneId) {
+            return reject(
+              new WorkStoreError({
+                cause: { activeGoalClaims, lane },
+                operation: "agent-binding.goal-authority-conflict"
+              })
+            )
+          }
           const currentRaw = this.#database.prepare(
             `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
              FROM work_goal_events
@@ -871,7 +882,7 @@ export class WorkStore implements WorkStoreService {
               })
             )
           }
-          if (current.occurredAt >= observedAt) {
+          if (current.occurredAt > observedAt) {
             return reject(
               new WorkProjectionError({
                 cause: { checkpoint: current, observedAt },
@@ -889,7 +900,7 @@ export class WorkStore implements WorkStoreService {
               })
             )
           }
-          const occurredAt = observedAt
+          const occurredAt = Math.max(observedAt, current.occurredAt + 1)
           const binding = makeWorkAgentBinding(decoded, lane, current, occurredAt)
           const historyRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
             this.#database.prepare(

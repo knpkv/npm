@@ -3655,6 +3655,18 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import { Effect } from "effect"
+    let queue = Effect.fn("Orchestrator.queue")((id) => appendTransition(id, "queued"))
+    queue = (id) => appendTransition(id, "queued")
+    const service: OrchestratorService = { queue }
+  `,
+  expected: 1,
+  filePath: "packages/herdr-coordinator/src/orchestrator.ts",
+  ruleId: "local-rules/require-named-orchestrator-service-effects"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { Effect } from "effect"
     const queue = Effect.fn("Orchestrator.queue")((id) => appendTransition(id, "queued"))
     const submit = Effect.fn("Orchestrator.submit")((command, key) => submitInternal(command, key))
     const service: OrchestratorService = {
@@ -3753,6 +3765,10 @@ await assertRuleDiagnostics({
     const program = Fx.gen(function*() {
       const store = yield* DurableWorkStore.open(path)
       yield* Fx.addFinalizer(() => Fx.sync(() => store.close()))
+      const blockStore = yield* DurableWorkStore.open(otherPath)
+      yield* Fx.addFinalizer(() => Fx.sync(() => {
+        blockStore.close()
+      }))
       inspect(store.path)
     })
   `,
