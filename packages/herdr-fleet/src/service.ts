@@ -348,7 +348,6 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
   ) {
     const current = yield* Ref.make(initial)
     const accepted = yield* Ref.make(acceptedAtStart)
-    const acceptanceAttempted = yield* Ref.make(acceptedAtStart)
     const transitions = yield* Semaphore.make(1)
     const workerStarted: WorkerStarted = Effect.fn("FleetService.workerStarted")(
       (identity: AgentWorkerIdentity) =>
@@ -408,7 +407,6 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     const lifecycle: HostOperationLifecycle = {
       accepted: Effect.fn("FleetService.operationAccepted")((receipt: string) =>
         transitions.withPermit(Effect.gen(function*() {
-          yield* Ref.set(acceptanceAttempted, true)
           const decodedReceipt = yield* Schema.decodeUnknownEffect(HostOperationReceipt)(receipt).pipe(
             Effect.mapError((cause) =>
               new FleetOperationError({
@@ -507,7 +505,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         }))
       )
     }
-    return { accepted, acceptanceAttempted, current, lifecycle, transitions, workerStarted }
+    return { accepted, current, lifecycle, transitions, workerStarted }
   })
 
   const runWith = Effect.fn("FleetService.runWith")(function*(
@@ -542,12 +540,11 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         error: null
       })
     )
-    const { acceptanceAttempted, accepted, current, lifecycle, transitions, workerStarted } =
-      yield* makeOperationLifecycle(
-        running,
-        false,
-        false
-      )
+    const { accepted, current, lifecycle, transitions, workerStarted } = yield* makeOperationLifecycle(
+      running,
+      false,
+      false
+    )
     const result = yield* Effect.result(
       execute(running.payload, workerStarted, running.actor, lifecycle)
     )
@@ -564,7 +561,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
         yield* Ref.set(current, persisted)
         return yield* result.failure
       }
-      if (durableOperation && (yield* Ref.get(acceptanceAttempted)) && Result.isFailure(result)) {
+      if (durableOperation && Result.isFailure(result)) {
         return yield* result.failure
       }
       if (durableOperation && Result.isSuccess(result)) {
