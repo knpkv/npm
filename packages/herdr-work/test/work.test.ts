@@ -287,6 +287,10 @@ describe("durable Work projection", () => {
             revision: lane.revision + 1
           }
         })
+        expect((yield* service.snapshots()).now.goals[0]).toMatchObject({
+          agentHierarchy: { agent: startedWorker },
+          updatedAt: binding.checkpoint.occurredAt
+        })
         expect(yield* service.bindAgent(request)).toEqual(binding)
         expect(
           yield* Effect.result(service.bindAgent({

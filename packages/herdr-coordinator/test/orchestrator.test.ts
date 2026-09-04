@@ -329,7 +329,7 @@ describe("durable coordinator orchestrator", () => {
             const store = yield* WorkStore.open(path)
             yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
             const work = yield* makeWorkService(store)
-            return yield* work.snapshots(lifecycle.terminal.occurredAt)
+            return yield* work.snapshots()
           }).pipe(provideNodeServices)
         )
         expect(projection.now.goals[0]).toMatchObject({

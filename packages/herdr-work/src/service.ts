@@ -42,6 +42,10 @@ export interface WorkService {
     WorkGoalCheckpoint,
     WorkCheckpointConflictError | WorkProjectionError | WorkStoreError
   >
+  /**
+   * Projects history at an explicit timestamp, or at the later of the current
+   * clock and the latest durable logical timestamp when no timestamp is given.
+   */
   readonly snapshots: (observedAt?: number) => Effect.Effect<WorkSnapshots, WorkStoreError | WorkProjectionError>
   readonly recordMany: (
     transactionId: string,
@@ -91,8 +95,12 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
   )
   const record = Effect.fn("HerdrWork.record")((event: WorkGoalCheckpoint) => store.append(event))
   const snapshots = Effect.fn("HerdrWork.snapshots")(function*(observedAt?: number) {
-    const timestamp = observedAt ?? (yield* Clock.currentTimeMillis)
-    return yield* store.list().pipe(Effect.flatMap((events) => projectWorkSnapshots(events, timestamp)))
+    const events = yield* store.list()
+    const timestamp = observedAt ?? Math.max(
+      yield* Clock.currentTimeMillis,
+      ...events.map(({ occurredAt }) => occurredAt)
+    )
+    return yield* projectWorkSnapshots(events, timestamp)
   })
   const recordMany = Effect.fn("HerdrWork.recordMany")((
     transactionId: string,
