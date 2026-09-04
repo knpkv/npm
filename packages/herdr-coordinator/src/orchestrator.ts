@@ -260,21 +260,6 @@ const makeOrchestrator: Effect.Effect<
   `.pipe(Effect.mapError(storageError("initialize.running-index")))
   yield* secureFiles
 
-  const listEvents = Effect.fn("Orchestrator.listEvents")(function*(dispatchRequestId: string) {
-    const rows = yield* sql`
-      SELECT dispatch_request_id AS "dispatchRequestId", sequence, type,
-        activity_idempotency_key AS "activityIdempotencyKey", occurred_at AS "occurredAt",
-        detail, result
-      FROM orchestrator_events
-      WHERE dispatch_request_id = ${dispatchRequestId}
-      ORDER BY sequence ASC
-    `.pipe(Effect.mapError(storageError("events.list")))
-    const decodedRows = yield* Schema.decodeUnknownEffect(Schema.Array(EventRow))(rows).pipe(
-      Effect.mapError(storageError("decode.event.row"))
-    )
-    return yield* Effect.forEach(decodedRows, decodeEvent)
-  })
-
   const validateLifecycleChain = Effect.fn("Orchestrator.validateLifecycleChain")(function*(
     dispatch: DispatchRow,
     events: ReadonlyArray<OrchestratorEventType>
@@ -649,11 +634,17 @@ const makeOrchestrator: Effect.Effect<
           const acceptedAt = yield* Schema.decodeUnknownEffect(Schema.Number)(first.acceptedAt).pipe(
             Effect.mapError(storageError("submit.decode-accepted-at"))
           )
-          const events = yield* listEvents(first.dispatchRequestId)
-          const acceptedEvents = events.filter(({ sequence }) => sequence === 0)
-          const accepted = acceptedEvents[0]
+          const snapshot = yield* loadValidatedEvents(first.dispatchRequestId).pipe(
+            Effect.catchTag("OrchestratorStorageError", (error) =>
+              Effect.fail(
+                new OrchestratorStorageError({
+                  cause: error.cause,
+                  operation: "submit.accepted-event-mismatch"
+                })
+              ))
+          )
+          const accepted = snapshot.events[0]
           if (
-            acceptedEvents.length !== 1 ||
             accepted === undefined ||
             accepted.type !== "accepted" ||
             accepted.dispatchRequestId !== first.dispatchRequestId ||

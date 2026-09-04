@@ -518,6 +518,27 @@ describe("durable coordinator orchestrator", () => {
           status: "accepted"
         })
 
+        const trailingDatabase = new DatabaseSync(path)
+        trailingDatabase.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           VALUES (?, 1, 'queued', ?, ?, NULL, NULL)`
+        ).run("dispatch:receipt-valid", "activity:receipt-valid", 1)
+        trailingDatabase.close()
+        const invalidStatusTail = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:receipt-valid" },
+              "idempotency:receipt-valid"
+            ))
+          })
+        )
+        expect(invalidStatusTail).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "submit.accepted-event-mismatch" }
+        })
+
         const malformedDatabase = new DatabaseSync(path)
         malformedDatabase.prepare(
           "UPDATE orchestrator_events SET activity_idempotency_key = ? WHERE dispatch_request_id = ?"

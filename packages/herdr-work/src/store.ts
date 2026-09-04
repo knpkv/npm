@@ -132,10 +132,14 @@ const workSnapshotEnvelopeMaxBytes = encodedBytes({
   month: { window: "month", observedAt: maximumTimestamp, asOf: maximumTimestamp, goals: [], families: [] }
 })
 
-const makeSnapshotByteAccumulator = (history: ReadonlyArray<WorkGoalCheckpointType>) => {
+const maximumSnapshotBytesForHistory = (
+  history: ReadonlyArray<WorkGoalCheckpointType>
+): number => {
   const maximumGoalBytes = new Map<string, number>()
   let encodedGoals = 0
-  for (const { goal } of history) {
+  const latest = new Map<string, WorkGoalCheckpointType>()
+  for (const event of history) {
+    const { goal } = event
     const bytes = encodedBytes(goal)
     const previous = maximumGoalBytes.get(goal.id)
     if (previous === undefined) {
@@ -145,74 +149,41 @@ const makeSnapshotByteAccumulator = (history: ReadonlyArray<WorkGoalCheckpointTy
       maximumGoalBytes.set(goal.id, bytes)
       encodedGoals += bytes - previous
     }
-  }
-  return {
-    add: (candidate: WorkGoalCheckpointType): number => {
-      const bytes = encodedBytes(candidate.goal)
-      const previous = maximumGoalBytes.get(candidate.goal.id)
-      if (previous === undefined) {
-        maximumGoalBytes.set(candidate.goal.id, bytes)
-        encodedGoals += bytes
-      } else if (bytes > previous) {
-        maximumGoalBytes.set(candidate.goal.id, bytes)
-        encodedGoals += bytes - previous
-      }
-      const separators = Math.max(0, maximumGoalBytes.size - 1)
-      return workSnapshotEnvelopeMaxBytes + 4 * (encodedGoals + separators)
+    const previousLatest = latest.get(goal.id)
+    if (previousLatest === undefined || previousLatest.occurredAt <= event.occurredAt) {
+      latest.set(goal.id, event)
     }
   }
-}
-
-const maximumSnapshotBytes = (
-  history: ReadonlyArray<WorkGoalCheckpointType>,
-  candidate: WorkGoalCheckpointType
-): number => {
-  const maximumGoalBytes = new Map<string, number>()
-  for (const { goal } of [...history, candidate]) {
-    const bytes = encodedBytes(goal)
-    maximumGoalBytes.set(
-      goal.id,
-      Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes)
-    )
-  }
-  const encodedGoals = [...maximumGoalBytes.values()].reduce(
-    (total, bytes) => total + bytes,
-    0
-  )
   const separators = Math.max(0, maximumGoalBytes.size - 1)
   // Derive the typed family overhead from actual projected family groups rather than
   // charging the maximum encoded canonicalGoalId for every distinct goal. The projection
   // keeps a latest durable goal per id; only canonical goals with superseded members
   // form a family group and repeat the canonicalGoalId outside the canonical payload.
-  const latest = new Map<string, WorkGoalCheckpointType["goal"]>()
-  for (
-    const event of [...history, candidate].toSorted(
-      (left, right) => left.occurredAt - right.occurredAt
-    )
-  ) {
-    latest.set(event.goal.id, event.goal)
-  }
-  const canonicalById = new Map<string, WorkGoalCheckpointType["goal"]>()
-  for (const goal of latest.values()) {
-    if (goal.goalFamily?.role === "canonical") canonicalById.set(goal.id, goal)
+  const supersededCounts = new Map<string, number>()
+  for (const { goal } of latest.values()) {
+    if (goal.goalFamily?.role === "superseded") {
+      const count = supersededCounts.get(goal.goalFamily.canonicalGoalId) ?? 0
+      supersededCounts.set(goal.goalFamily.canonicalGoalId, count + 1)
+    }
   }
   let canonicalBytesSum = 0
   let familyGroupsOverheadSum = 0
-  for (const [canonicalGoalId] of canonicalById) {
-    const supersededCount = [...latest.values()].filter(
-      (goal) =>
-        goal.goalFamily?.role === "superseded" &&
-        goal.goalFamily.canonicalGoalId === canonicalGoalId
-    ).length
-    if (supersededCount === 0) continue
-    canonicalBytesSum += maximumGoalBytes.get(canonicalGoalId) ?? 0
-    // Structural bytes for {"canonicalGoalId":"","canonical":<goal>,"superseded":[]} beyond the
-    // encoded goal and id values is 49 (measured via JSON.stringify), 64 reserves it safely.
-    familyGroupsOverheadSum += encodedBytes(canonicalGoalId) + 64
+  for (const [canonicalGoalId, supersededCount] of supersededCounts) {
+    if (supersededCount > 0 && latest.get(canonicalGoalId)?.goal.goalFamily?.role === "canonical") {
+      canonicalBytesSum += maximumGoalBytes.get(canonicalGoalId) ?? 0
+      // Structural bytes for {"canonicalGoalId":"","canonical":<goal>,"superseded":[]} beyond the
+      // encoded goal and id values is 49 (measured via JSON.stringify), 64 reserves it safely.
+      familyGroupsOverheadSum += encodedBytes(canonicalGoalId) + 64
+    }
   }
   const familiesPerWindowBytes = encodedGoals + canonicalBytesSum + familyGroupsOverheadSum + separators
   return workSnapshotEnvelopeMaxBytes + 4 * Math.max(encodedGoals + separators, familiesPerWindowBytes)
 }
+
+const maximumSnapshotBytes = (
+  history: ReadonlyArray<WorkGoalCheckpointType>,
+  candidate: WorkGoalCheckpointType
+): number => maximumSnapshotBytesForHistory([...history, candidate])
 
 const transactionContent = (events: ReadonlyArray<WorkGoalCheckpointType>) => JSON.stringify(events)
 
@@ -865,20 +836,17 @@ export class WorkStore implements WorkStoreService {
             inTransaction = false
             return { _tag: "rejected", error: familyError } satisfies AppendManyDecision
           }
-          const snapshotBytes = makeSnapshotByteAccumulator(history)
-          for (const event of newEvents) {
-            if (snapshotBytes.add(event) > fleetResponseBodyMaxBytes) {
-              this.#database.exec("ROLLBACK")
-              inTransaction = false
-              return {
-                _tag: "rejected",
-                error: new WorkProjectionError({
-                  cause: event,
-                  detail: `work snapshots cannot exceed ${fleetResponseBodyMaxBytes} encoded bytes`,
-                  reason: "capacity_exceeded"
-                })
-              } satisfies AppendManyDecision
-            }
+          if (maximumSnapshotBytesForHistory(prospective) > fleetResponseBodyMaxBytes) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkProjectionError({
+                cause: decoded,
+                detail: `work snapshots cannot exceed ${fleetResponseBodyMaxBytes} encoded bytes`,
+                reason: "capacity_exceeded"
+              })
+            } satisfies AppendManyDecision
           }
           const goalIds = new Set(history.map(({ goal }) => goal.id))
           for (const event of newEvents) goalIds.add(event.goal.id)

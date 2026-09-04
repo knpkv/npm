@@ -814,6 +814,51 @@ database.close()`,
       expect(yield* store.list()).toEqual([history[0]])
     }).pipe(provideNodeServices))
 
+  it.effect("rejects appendMany when family projection exceeds the snapshot budget", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-family-batch-budget-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+      const large = (goalId: string, eventId: string, occurredAt: number): WorkGoalCheckpointType => {
+        const base = maximumTextCheckpoint(0)
+        return {
+          ...base,
+          eventId,
+          goal: { ...base.goal, createdAt: 0, id: goalId, updatedAt: occurredAt },
+          occurredAt
+        }
+      }
+      const canonicalId = "goal-family-batch-canonical"
+      const supersededId = "goal-family-batch-superseded"
+      const unrelated = Array.from({ length: 12 }, (_, index) =>
+        large(`goal-family-batch-${index}`, `event-family-batch-${index}`, 0))
+      const canonicalBase = large(canonicalId, "event-family-batch-canonical-base", 0)
+      const supersededBase = large(supersededId, "event-family-batch-superseded-base", 0)
+      const canonical = familyCheckpoint(
+        canonicalBase,
+        "event-family-batch-canonical",
+        1,
+        canonicalId,
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        supersededBase,
+        "event-family-batch-superseded",
+        1,
+        canonicalId,
+        "superseded"
+      )
+      const events = [...unrelated, canonicalBase, supersededBase, canonical, superseded]
+      const projected = yield* projectWorkSnapshots(events, 2)
+      expect(Buffer.byteLength(JSON.stringify(projected))).toBeGreaterThan(fleetResponseBodyMaxBytes)
+      expect(yield* Effect.result(service.recordMany("transaction-family-batch-budget", events))).toMatchObject({
+        failure: { _tag: "WorkProjectionError", reason: "capacity_exceeded" }
+      })
+      expect(yield* store.list()).toEqual([])
+    }).pipe(provideNodeServices), 30_000)
+
   it.effect("bounds replay transaction storage separately from transaction row count", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-bytes-"))
