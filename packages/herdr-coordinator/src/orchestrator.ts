@@ -56,6 +56,36 @@ const recoveryPageSize = 256
 
 const storageError = (operation: string) => (cause: unknown) => new OrchestratorStorageError({ cause, operation })
 
+const verifyPathIdentity = (
+  path: string,
+  fileSystem: FileSystem.FileSystem,
+  paths: Path.Path,
+  operation: string
+): Effect.Effect<void, OrchestratorStorageError> =>
+  fileSystem.exists(path).pipe(
+    Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.exists` })),
+    Effect.flatMap((exists) => {
+      if (!exists) {
+        const parent = paths.dirname(path)
+        return parent === path ? Effect.void : verifyPathIdentity(parent, fileSystem, paths, operation)
+      }
+      return fileSystem.realPath(path).pipe(
+        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: `${operation}.realpath` })),
+        Effect.flatMap((realPath) => {
+          const expectedPath = paths.resolve(path)
+          return realPath === expectedPath
+            ? Effect.void
+            : Effect.fail(
+              new OrchestratorStorageError({
+                cause: { expectedPath, path, realPath },
+                operation
+              })
+            )
+        })
+      )
+    })
+  )
+
 const decodeCommand = (text: string) =>
   Effect.try({
     try: () => Schema.decodeUnknownSync(OrchestratorCommand)(JSON.parse(text)),
@@ -78,6 +108,7 @@ const currentStatus = Schema.Literals([
   "task_failed"
 ])
 type CurrentStatus = typeof currentStatus.Type
+type DispatchRow = Omit<typeof Row.Type, "status"> & { readonly status: CurrentStatus }
 
 const transitionTarget = Schema.Literals([
   "queued",
@@ -93,6 +124,9 @@ const validTransition = (from: CurrentStatus, to: TransitionTarget): boolean =>
   (from === "queued" && to === "running") ||
   (from === "running" &&
     (to === "settled" || to === "delivery_failed" || to === "task_failed"))
+
+const validEventTransition = (from: CurrentStatus, to: CurrentStatus): boolean =>
+  to !== "accepted" && validTransition(from, to)
 
 export interface OrchestratorService {
   readonly submit: (
@@ -138,14 +172,19 @@ class SqliteFileSecurity extends Context.Service<SqliteFileSecurity, SqliteFileS
 
 const secureSqliteFiles = (
   filename: string,
-  fileSystem: FileSystem.FileSystem
+  fileSystem: FileSystem.FileSystem,
+  paths: Path.Path
 ) => {
   const files = [filename, `${filename}-wal`, `${filename}-shm`]
   return Effect.forEach(
     files,
     (path) =>
-      fileSystem.exists(path).pipe(
-        Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.exists" })),
+      verifyPathIdentity(path, fileSystem, paths, "sqlite.secure.path-identity").pipe(
+        Effect.flatMap(() =>
+          fileSystem.exists(path).pipe(
+            Effect.mapError((cause) => new OrchestratorStorageError({ cause, operation: "sqlite.secure.exists" }))
+          )
+        ),
         Effect.flatMap((exists) =>
           exists
             ? fileSystem.chmod(path, 0o600).pipe(
@@ -245,6 +284,71 @@ const makeOrchestrator: Effect.Effect<
     return yield* Effect.forEach(decodedRows, decodeEvent)
   })
 
+  const validateLifecycleChain = Effect.fn("Orchestrator.validateLifecycleChain")(function*(
+    dispatch: DispatchRow,
+    events: ReadonlyArray<OrchestratorEventType>
+  ) {
+    const dispatchActivityIdempotencyKey = yield* Schema.decodeUnknownEffect(ActivityIdempotencyKey)(
+      dispatch.activityIdempotencyKey
+    ).pipe(
+      Effect.mapError(() =>
+        new OrchestratorStorageError({
+          cause: dispatch.activityIdempotencyKey,
+          operation: "transition.lifecycle-chain-mismatch"
+        })
+      )
+    )
+    const dispatchCommand = yield* decodeCommand(dispatch.command)
+    const first = events[0]
+    if (
+      first === undefined ||
+      first.sequence !== 0 ||
+      first.type !== "accepted" ||
+      first.occurredAt !== dispatch.acceptedAt
+    ) {
+      return yield* new OrchestratorStorageError({
+        cause: { dispatch, event: first },
+        operation: "transition.lifecycle-chain-mismatch"
+      })
+    }
+    if (
+      first.dispatchRequestId !== dispatch.dispatchRequestId ||
+      first.activityIdempotencyKey !== dispatchActivityIdempotencyKey ||
+      first.activityIdempotencyKey !== dispatchCommand.activityIdempotencyKey
+    ) {
+      return yield* new OrchestratorStorageError({
+        cause: { dispatch, event: first },
+        operation: "transition.activity-idempotency-mismatch"
+      })
+    }
+    let previousType: CurrentStatus = first.type
+    let previousOccurredAt = first.occurredAt
+    for (const [index, event] of events.entries()) {
+      if (
+        event.dispatchRequestId !== dispatch.dispatchRequestId ||
+        event.activityIdempotencyKey !== dispatchActivityIdempotencyKey ||
+        event.activityIdempotencyKey !== dispatchCommand.activityIdempotencyKey
+      ) {
+        return yield* new OrchestratorStorageError({
+          cause: { dispatchRequestId: dispatch.dispatchRequestId, event, index, previousType },
+          operation: "transition.activity-idempotency-mismatch"
+        })
+      }
+      if (
+        event.sequence !== index ||
+        event.occurredAt < previousOccurredAt ||
+        (index > 0 && !validEventTransition(previousType, event.type))
+      ) {
+        return yield* new OrchestratorStorageError({
+          cause: { dispatchRequestId: dispatch.dispatchRequestId, event, index, previousType },
+          operation: "transition.lifecycle-chain-mismatch"
+        })
+      }
+      previousType = event.type
+      previousOccurredAt = event.occurredAt
+    }
+  })
+
   const listPending = Effect.fn("Orchestrator.listPending")(
     function*(query: typeof OrchestratorPendingQuery.Type = {}) {
       const decodedQuery = yield* Schema.decodeUnknownEffect(OrchestratorPendingQuery)(query).pipe(
@@ -328,35 +432,11 @@ const makeOrchestrator: Effect.Effect<
             operation: "transition.missing-event"
           })
         }
+        yield* validateLifecycleChain(dispatch, events)
         if (last.type !== dispatch.status) {
           return yield* new OrchestratorStorageError({
             cause: { dispatchRequestId: decodedDispatchRequestId, eventType: last.type, status: dispatch.status },
             operation: "transition.status-event-mismatch"
-          })
-        }
-        const dispatchActivityIdempotencyKey = yield* Schema.decodeUnknownEffect(ActivityIdempotencyKey)(
-          dispatch.activityIdempotencyKey
-        ).pipe(
-          Effect.mapError(() =>
-            new OrchestratorStorageError({
-              cause: dispatch.activityIdempotencyKey,
-              operation: "transition.activity-idempotency-mismatch"
-            })
-          )
-        )
-        const dispatchCommand = yield* decodeCommand(dispatch.command)
-        if (
-          last.activityIdempotencyKey !== dispatchActivityIdempotencyKey ||
-          last.activityIdempotencyKey !== dispatchCommand.activityIdempotencyKey
-        ) {
-          return yield* new OrchestratorStorageError({
-            cause: {
-              commandActivityIdempotencyKey: dispatchCommand.activityIdempotencyKey,
-              dispatchActivityIdempotencyKey,
-              dispatchRequestId: decodedDispatchRequestId,
-              eventActivityIdempotencyKey: last.activityIdempotencyKey
-            },
-            operation: "transition.activity-idempotency-mismatch"
           })
         }
         const timestamp = yield* now
@@ -621,7 +701,13 @@ export const sqliteLayer = (filename: string) =>
           operation: "sqlite.secure.directory.private"
         })
       }
-      const security = secureSqliteFiles(filename, fileSystem)
+      yield* verifyPathIdentity(directory, fileSystem, paths, "sqlite.secure.directory.path-identity")
+      yield* Effect.forEach(
+        [filename, `${filename}-wal`, `${filename}-shm`],
+        (path) => verifyPathIdentity(path, fileSystem, paths, "sqlite.secure.path-identity"),
+        { discard: true }
+      )
+      const security = secureSqliteFiles(filename, fileSystem, paths)
       return Layer.mergeAll(
         SqliteClient.layer({ filename }),
         NodeCrypto.layer,

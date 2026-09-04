@@ -486,6 +486,66 @@ describe("durable Work projection", () => {
       completeStore.close()
     }).pipe(provideNodeServices))
 
+  it.effect("revalidates legacy compact transaction denormalized identities", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-compact-transaction-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const store = yield* WorkStore.open(path)
+      store.close()
+
+      const legacyEvents = history.slice(0, 2)
+      const secondEvent = legacyEvents[1]
+      if (secondEvent === undefined) return yield* Effect.die("legacy fixture missing its second event")
+      const database = new DatabaseSync(path)
+      const insertEvent = database.prepare(
+        `INSERT INTO work_goal_events
+           (event_id, goal_id, occurred_at, record, transaction_id)
+         VALUES (?, ?, ?, ?, ?)`
+      )
+      for (const event of legacyEvents) {
+        insertEvent.run(
+          event.eventId,
+          event.goal.id,
+          event.occurredAt,
+          JSON.stringify(event),
+          "transaction-legacy-compact"
+        )
+      }
+      database.prepare(
+        "INSERT INTO work_goal_transactions (transaction_id, record) VALUES (?, ?)"
+      ).run(
+        "transaction-legacy-compact",
+        JSON.stringify({
+          events: legacyEvents.map(({ eventId, goal, occurredAt }) => ({ eventId, goalId: goal.id, occurredAt })),
+          version: "herdr.work.transaction.v1"
+        })
+      )
+      database.prepare(
+        "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
+      ).run("goal-denormalized-drift", 99, secondEvent.eventId)
+      database.close()
+
+      const corruptedStore = yield* WorkStore.open(path)
+      const corruptedService = yield* makeWorkService(corruptedStore)
+      expect(yield* Effect.result(corruptedService.recordMany("transaction-legacy-compact", legacyEvents)))
+        .toMatchObject({
+          failure: { _tag: "WorkTransactionConflictError", transactionId: "transaction-legacy-compact" }
+        })
+      corruptedStore.close()
+
+      const restored = new DatabaseSync(path)
+      restored.prepare(
+        "UPDATE work_goal_events SET goal_id = ?, occurred_at = ? WHERE event_id = ?"
+      ).run(secondEvent.goal.id, secondEvent.occurredAt, secondEvent.eventId)
+      restored.close()
+
+      const completeStore = yield* WorkStore.open(path)
+      const completeService = yield* makeWorkService(completeStore)
+      expect(yield* completeService.recordMany("transaction-legacy-compact", legacyEvents)).toEqual(legacyEvents)
+      completeStore.close()
+    }).pipe(provideNodeServices))
+
   it.effect("rejects a transaction extension after an exact replay prefix", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-transaction-prefix-"))

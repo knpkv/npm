@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema, Stream } from "effect"
 import { ClusterSchema, Entity, MessageStorage, RunnerAddress, SingleRunner } from "effect/unstable/cluster"
 import { Rpc } from "effect/unstable/rpc"
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs"
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { DatabaseSync } from "node:sqlite"
@@ -198,6 +198,53 @@ describe("durable coordinator orchestrator", () => {
         remaining.close()
         expect(dispatch).toEqual({ status: "queued" })
         expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(eventCount).count).toBe(2)
+      })
+    }))
+
+  it.effect("validates the complete lifecycle chain before appending a transition", () =>
+    withTemporaryRoot("herdr-orchestrator-lifecycle-chain-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submit(
+              { ...command, activityIdempotencyKey: "activity:lifecycle-chain" },
+              "dispatch:lifecycle-chain"
+            )
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            yield* orchestrator.run(receipt.dispatchRequestId)
+            return receipt
+          })
+        )
+        const database = new DatabaseSync(path)
+        database.prepare(
+          "UPDATE orchestrator_events SET type = 'running' WHERE dispatch_request_id = ? AND sequence = 1"
+        ).run(receipt.dispatchRequestId)
+        database.close()
+
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(orchestrator.settle(receipt.dispatchRequestId, "settled"))
+          })
+        )
+        expect(result).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "transition.lifecycle-chain-mismatch" }
+        })
+
+        const remaining = new DatabaseSync(path)
+        const status = remaining.prepare(
+          "SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?"
+        ).get(receipt.dispatchRequestId)
+        const eventCount = remaining.prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_events WHERE dispatch_request_id = ?"
+        ).get(receipt.dispatchRequestId)
+        remaining.close()
+        expect(status).toEqual({ status: "running" })
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(eventCount).count).toBe(3)
       })
     }))
 
@@ -717,6 +764,33 @@ describe("durable coordinator orchestrator", () => {
           failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.directory.private" }
         })
         expect(statSync(callerDirectory).mode & 0o777).toBe(0o755)
+      })))
+
+  it.effect("rejects SQLite database and journal path substitutions", () =>
+    withTemporaryRoot("herdr-orchestrator-path-identity-", (root) =>
+      Effect.gen(function*() {
+        const stateDirectory = join(root, "state")
+        mkdirSync(stateDirectory, { mode: 0o700 })
+        const realDatabase = join(stateDirectory, "real.sqlite")
+        yield* withDatabase(realDatabase, Effect.void)
+
+        const linkedDatabase = join(stateDirectory, "linked.sqlite")
+        symlinkSync(realDatabase, linkedDatabase)
+        const databaseResult = yield* Effect.result(withDatabase(linkedDatabase, Effect.void))
+        expect(databaseResult).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.path-identity" }
+        })
+
+        const journalTarget = join(stateDirectory, "journal-target")
+        writeFileSync(journalTarget, "journal target")
+        const journal = `${realDatabase}-wal`
+        symlinkSync(journalTarget, journal)
+        const journalResult = yield* Effect.result(withDatabase(realDatabase, Effect.void))
+        expect(journalResult).toMatchObject({
+          _tag: "Failure",
+          failure: { _tag: "OrchestratorStorageError", operation: "sqlite.secure.path-identity" }
+        })
       })))
 
   it.effect("runs a durable entity through SingleRunner with SQL storage", () =>

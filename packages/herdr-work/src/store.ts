@@ -517,6 +517,24 @@ export class WorkStore implements WorkStoreService {
             JSON.stringify([row.goalId, row.occurredAt]),
             row
           ]))
+          if (legacyCompactTransaction !== undefined) {
+            const denormalizedMismatch = legacyCompactTransaction.events.some((identity, index) => {
+              const event = decoded[index]
+              const row = rowsByEventId.get(identity.eventId)
+              return row === undefined ||
+                event === undefined ||
+                row.goalId !== event.goal.id ||
+                row.occurredAt !== event.occurredAt
+            })
+            if (denormalizedMismatch) {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkTransactionConflictError({ transactionId: transaction })
+              } satisfies AppendManyDecision
+            }
+          }
           if (legacyTransaction !== undefined) {
             if (!Equal.equals(legacyTransaction, decoded)) {
               this.#database.exec("ROLLBACK")
