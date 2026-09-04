@@ -965,4 +965,71 @@ describe("durable Work projection", () => {
       const orphanSnapshot = { ...valid.now, families: [orphanCanonical] }
       expect(Schema.decodeUnknownResult(WorkSnapshot)(orphanSnapshot)._tag).toBe("Failure")
     }))
+
+  it("rejects snapshot families that exceed the distinct goal union bound", () => {
+    const canonicalBase = checkpointForGoal("goal-canonical-union", "event-canonical-union-base", 0, 0)
+    const canonicalGoal: WorkGoal = {
+      ...canonicalBase.goal,
+      goalFamily: { canonicalGoalId: canonicalBase.goal.id, role: "canonical" }
+    }
+    const makeSuperseded = (index: number): WorkGoal => {
+      const base = checkpointForGoal(`goal-superseded-${index}`, `event-superseded-${index}`, 0, 0)
+      return {
+        ...base.goal,
+        goalFamily: { canonicalGoalId: canonicalGoal.id, role: "superseded" }
+      }
+    }
+    const supersededMax = Array.from({ length: workSnapshotMaxGoals }, (_, index) => makeSuperseded(index))
+    const snapshotTooLarge = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalGoal],
+      families: [{ canonicalGoalId: canonicalGoal.id, canonical: canonicalGoal, superseded: supersededMax }]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(snapshotTooLarge)._tag).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshots)({
+        observedAt: 0,
+        now: snapshotTooLarge,
+        day: { window: "day", observedAt: 0, asOf: 0, goals: [canonicalGoal] },
+        week: { window: "week", observedAt: 0, asOf: 0, goals: [canonicalGoal] },
+        month: { window: "month", observedAt: 0, asOf: 0, goals: [canonicalGoal] }
+      })._tag
+    ).toBe("Failure")
+
+    const supersededWithin = Array.from(
+      { length: workSnapshotMaxGoals - 1 },
+      (_, index) => makeSuperseded(index)
+    )
+    const snapshotWithin = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalGoal],
+      families: [{ canonicalGoalId: canonicalGoal.id, canonical: canonicalGoal, superseded: supersededWithin }]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(snapshotWithin)._tag).toBe("Success")
+
+    const legacyGoals = Array.from({ length: workSnapshotMaxGoals }, (_, index) => {
+      const base = checkpointForGoal(`goal-legacy-${index}`, `event-legacy-${index}`, index, index)
+      return base.goal
+    })
+    const legacySnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: legacyGoals
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(legacySnapshot)._tag).toBe("Success")
+
+    const emptyFamiliesSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalGoal],
+      families: []
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(emptyFamiliesSnapshot)._tag).toBe("Success")
+  })
 })

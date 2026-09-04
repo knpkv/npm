@@ -291,9 +291,13 @@ export const WorkSnapshot = Schema.Struct({
           if (goalById.has(member.id)) return false
         }
       }
+      if (snapshot.goals.length + seenMember.size > workSnapshotMaxGoals) return false
       return true
     },
-    { expected: "families consistent with active goals and without duplicated members" }
+    {
+      expected:
+        "families consistent with active goals, without duplicated members, and within total distinct goal limit"
+    }
   )
 )
 export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
