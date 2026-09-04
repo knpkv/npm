@@ -276,7 +276,10 @@ export const WorkSnapshot = Schema.Struct({
     (snapshot) => {
       const families = snapshot.families ?? []
       const goalById = new Map<string, WorkGoal>()
-      for (const goal of snapshot.goals) goalById.set(goal.id, goal)
+      for (const goal of snapshot.goals) {
+        if (goalById.has(goal.id)) return false
+        goalById.set(goal.id, goal)
+      }
       const seenCanonical = new Set<string>()
       const seenMember = new Set<string>()
       for (const group of families) {
@@ -296,7 +299,7 @@ export const WorkSnapshot = Schema.Struct({
     },
     {
       expected:
-        "families consistent with active goals, without duplicated members, and within total distinct goal limit"
+        "families consistent with active goals, without duplicated active or superseded members, and within total distinct goal limit"
     }
   )
 )

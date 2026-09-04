@@ -1032,4 +1032,52 @@ describe("durable Work projection", () => {
     }
     expect(Schema.decodeUnknownResult(WorkSnapshot)(emptyFamiliesSnapshot)._tag).toBe("Success")
   })
+
+  it("rejects duplicate active goal IDs in snapshot", () => {
+    const base = checkpointForGoal("goal-dup", "event-dup-base", 0, 0)
+    const goalA: WorkGoal = { ...base.goal, title: "Alpha" }
+    const goalB: WorkGoal = { ...base.goal, title: "Beta" }
+    const duplicateSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [goalA, goalB]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(duplicateSnapshot)._tag).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshots)({
+        observedAt: 0,
+        now: duplicateSnapshot,
+        day: { window: "day", observedAt: 0, asOf: 0, goals: [goalA] },
+        week: { window: "week", observedAt: 0, asOf: 0, goals: [goalA] },
+        month: { window: "month", observedAt: 0, asOf: 0, goals: [goalA] }
+      })._tag
+    ).toBe("Failure")
+
+    const canonicalBase = checkpointForGoal("goal-canonical-dup", "event-canonical-dup-base", 0, 0)
+    const canonicalGoal: WorkGoal = {
+      ...canonicalBase.goal,
+      goalFamily: { canonicalGoalId: canonicalBase.goal.id, role: "canonical" }
+    }
+    const canonicalDupA: WorkGoal = { ...canonicalGoal, title: "Canonical Alpha" }
+    const canonicalDupB: WorkGoal = { ...canonicalGoal, title: "Canonical Beta" }
+    const duplicateCanonicalSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalDupA, canonicalDupB],
+      families: [{ canonicalGoalId: canonicalGoal.id, canonical: canonicalDupB, superseded: [] }]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(duplicateCanonicalSnapshot)._tag).toBe("Failure")
+
+    const distinctBase = checkpointForGoal("goal-distinct", "event-distinct-base", 0, 0)
+    const distinctGoal: WorkGoal = { ...distinctBase.goal }
+    const validSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [goalA, distinctGoal]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(validSnapshot)._tag).toBe("Success")
+  })
 })
