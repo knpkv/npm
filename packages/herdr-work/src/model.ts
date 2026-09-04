@@ -1,5 +1,5 @@
 import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
-import { Schema } from "effect"
+import { Equal, Schema } from "effect"
 
 const Identifier = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))
 // Approval hosts are bounded identifiers, not DNS names; the approvals app also
@@ -228,6 +228,28 @@ export const WorkGoal = Schema.Struct({
 )
 export interface WorkGoal extends Schema.Schema.Type<typeof WorkGoal> {}
 
+export const WorkGoalFamilyGroup = Schema.Struct({
+  canonicalGoalId: WorkGoalId,
+  canonical: WorkGoal,
+  superseded: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals))
+}).check(
+  Schema.makeFilter(
+    (group) =>
+      group.superseded.length > 0 &&
+      group.canonical.goalFamily?.role === "canonical" &&
+      group.canonical.goalFamily.canonicalGoalId === group.canonicalGoalId &&
+      group.superseded.every(
+        (goal) =>
+          goal.goalFamily?.role === "superseded" &&
+          goal.goalFamily.canonicalGoalId === group.canonicalGoalId
+      ) &&
+      new Set(group.superseded.map(({ id }) => id)).size === group.superseded.length &&
+      !group.superseded.some(({ id }) => id === group.canonicalGoalId),
+    { expected: "consistent goal-family history group" }
+  )
+)
+export interface WorkGoalFamilyGroup extends Schema.Schema.Type<typeof WorkGoalFamilyGroup> {}
+
 export const WorkGoalCheckpoint = Schema.Struct({
   version: Schema.Literal("herdr.work.event.v1"),
   eventId: Identifier,
@@ -248,8 +270,40 @@ export const WorkSnapshot = Schema.Struct({
   window: WorkSnapshotWindow,
   observedAt: Timestamp,
   asOf: Timestamp,
-  goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals))
-})
+  goals: Schema.Array(WorkGoal).check(Schema.isMaxLength(workSnapshotMaxGoals)),
+  families: Schema.optionalKey(Schema.Array(WorkGoalFamilyGroup).check(Schema.isMaxLength(workSnapshotMaxGoals)))
+}).check(
+  Schema.makeFilter(
+    (snapshot) => {
+      const families = snapshot.families ?? []
+      const goalById = new Map<string, WorkGoal>()
+      for (const goal of snapshot.goals) {
+        if (goalById.has(goal.id)) return false
+        goalById.set(goal.id, goal)
+      }
+      const seenCanonical = new Set<string>()
+      const seenMember = new Set<string>()
+      for (const group of families) {
+        if (seenCanonical.has(group.canonicalGoalId)) return false
+        seenCanonical.add(group.canonicalGoalId)
+        const active = goalById.get(group.canonicalGoalId)
+        if (active === undefined) return false
+        if (!Equal.equals(active, group.canonical)) return false
+        for (const member of group.superseded) {
+          if (seenMember.has(member.id)) return false
+          seenMember.add(member.id)
+          if (goalById.has(member.id)) return false
+        }
+      }
+      if (snapshot.goals.length + seenMember.size > workSnapshotMaxGoals) return false
+      return true
+    },
+    {
+      expected:
+        "families consistent with active goals, without duplicated active or superseded members, and within total distinct goal limit"
+    }
+  )
+)
 export interface WorkSnapshot extends Schema.Schema.Type<typeof WorkSnapshot> {}
 
 export const WorkSnapshots = Schema.Struct({

@@ -13,10 +13,18 @@ import {
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
   type WorkGoalFamily,
+  WorkGoalFamilyGroup,
   workHistoryMaxEvents,
+  WorkSnapshot,
   workSnapshotMaxGoals,
+  WorkSnapshots,
   WorkStore
 } from "../src/index.js"
+import {
+  __herdrWorkEncodedBytesForTest,
+  __herdrWorkMaximumSnapshotBytesForTest,
+  __herdrWorkSnapshotEnvelopeMaxBytesForTest
+} from "../src/store.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
 // @effect-diagnostics-next-line strictEffectProvide:off
@@ -502,5 +510,618 @@ describe("durable Work projection", () => {
           rmSync(root, { force: true, recursive: true })
         })
     ).pipe(provideNodeServices)
+  })
+
+  it.effect("groups superseded goals under their canonical while preserving blockers, review, and activity", () =>
+    Effect.gen(function*() {
+      const original: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-connect-v1", "event-v1-created", 0, 0),
+        goal: {
+          ...checkpointForGoal("goal-connect-v1", "event-v1-created", 0, 0).goal,
+          blocker: { since: 0, summary: "Original blocker" },
+          review: { state: "changes_requested", summary: "Original review", updatedAt: 0, url: null },
+          activity: [{ id: "activity-original", kind: "note", occurredAt: 0, summary: "Original activity" }],
+          state: "blocked",
+          title: "Connect terminal special keys v1"
+        }
+      }
+      const v2: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-connect-v2", "event-v2-created", 0, 0),
+        goal: {
+          ...checkpointForGoal("goal-connect-v2", "event-v2-created", 0, 0).goal,
+          blocker: { since: 0, summary: "V2 blocker" },
+          review: { state: "requested", summary: "V2 review", updatedAt: 0, url: null },
+          state: "blocked",
+          title: "Connect terminal special keys v2"
+        }
+      }
+      const v3 = checkpointForGoal("goal-connect-v3", "event-v3-created", 0, 0)
+      const relationAt = 5 * day
+      const canonicalV3 = familyCheckpoint(v3, "event-v3-canonical", relationAt, "goal-connect-v3", "canonical")
+      const supersededV1 = familyCheckpoint(
+        original,
+        "event-v1-superseded",
+        relationAt,
+        "goal-connect-v3",
+        "superseded"
+      )
+      const supersededV2 = familyCheckpoint(v2, "event-v2-superseded", relationAt, "goal-connect-v3", "superseded")
+      const events = [original, v2, v3, canonicalV3, supersededV1, supersededV2]
+      const snapshots = yield* projectWorkSnapshots(events, relationAt + 1)
+      expect(snapshots.now.goals.map(({ id }) => id)).toEqual(["goal-connect-v3"])
+      expect(snapshots.now.families).toHaveLength(1)
+      const group = snapshots.now.families?.[0]
+      expect(group?.canonicalGoalId).toBe("goal-connect-v3")
+      expect(group?.canonical.id).toBe("goal-connect-v3")
+      expect(group?.superseded.map(({ id }) => id).toSorted()).toEqual([
+        "goal-connect-v1",
+        "goal-connect-v2"
+      ])
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v1")?.blocker?.summary).toBe(
+        "Original blocker"
+      )
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v1")?.review?.summary).toBe(
+        "Original review"
+      )
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v1")?.activity).toEqual(
+        [{ id: "activity-original", kind: "note", occurredAt: 0, summary: "Original activity" }]
+      )
+      expect(group?.superseded.find(({ id }) => id === "goal-connect-v2")?.blocker?.summary).toBe(
+        "V2 blocker"
+      )
+      expect(snapshots.now.goals.some(({ id }) => id === "goal-connect-v1")).toBe(false)
+      expect(snapshots.day.goals.map(({ id }) => id).toSorted()).toEqual([
+        "goal-connect-v1",
+        "goal-connect-v2",
+        "goal-connect-v3"
+      ])
+      expect(snapshots.now.goals[0]?.id).toBe("goal-connect-v3")
+    }))
+
+  it.effect("orders superseded and canonical ties deterministically", () =>
+    Effect.gen(function*() {
+      const canonical = familyCheckpoint(
+        checkpointForGoal("goal-canonical", "event-canonical-created", 0, 0),
+        "event-canonical",
+        10,
+        "goal-canonical",
+        "canonical"
+      )
+      const a = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-alpha", "event-alpha-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-alpha", "event-alpha-created", 0, 0).goal, title: "Alpha" }
+        },
+        "event-alpha-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const b = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-beta", "event-beta-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-beta", "event-beta-created", 0, 0).goal, title: "Beta" }
+        },
+        "event-beta-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const c = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-alpha-2", "event-alpha-2-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-alpha-2", "event-alpha-2-created", 0, 0).goal, title: "Alpha" }
+        },
+        "event-alpha-2-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const reversed = [canonical, c, b, a]
+      const snapshots = yield* projectWorkSnapshots(
+        [
+          checkpointForGoal("goal-canonical", "event-canonical-created", 0, 0),
+          checkpointForGoal("goal-alpha", "event-alpha-created", 0, 0),
+          checkpointForGoal("goal-beta", "event-beta-created", 0, 0),
+          checkpointForGoal("goal-alpha-2", "event-alpha-2-created", 0, 0),
+          ...reversed
+        ],
+        11
+      )
+      const supersededIds = snapshots.now.families?.[0]?.superseded.map(({ id }) => id)
+      expect(supersededIds).toEqual(["goal-alpha", "goal-alpha-2", "goal-beta"])
+
+      const unrelatedA: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-unrelated-b", "event-unrelated-b", 5, 5),
+        goal: {
+          ...checkpointForGoal("goal-unrelated-b", "event-unrelated-b", 5, 5).goal,
+          title: "Unrelated B",
+          updatedAt: 5
+        }
+      }
+      const unrelatedB: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-unrelated-a", "event-unrelated-a", 5, 5),
+        goal: {
+          ...checkpointForGoal("goal-unrelated-a", "event-unrelated-a", 5, 5).goal,
+          title: "Unrelated A",
+          updatedAt: 5
+        }
+      }
+      const snapshotsTie = yield* projectWorkSnapshots([unrelatedA, unrelatedB], 6)
+      expect(snapshotsTie.now.goals.map(({ id }) => id)).toEqual(["goal-unrelated-a", "goal-unrelated-b"])
+    }))
+
+  it.effect("leaves unrelated goals unchanged when family grouping applies elsewhere", () =>
+    Effect.gen(function*() {
+      const unrelated = checkpointForGoal("goal-unrelated", "event-unrelated", 1, 1)
+      const canonical = familyCheckpoint(
+        checkpointForGoal("goal-canonical-2", "event-canonical-2-created", 0, 0),
+        "event-canonical-2",
+        2,
+        "goal-canonical-2",
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        checkpointForGoal("goal-old", "event-old-created", 0, 0),
+        "event-old-superseded",
+        2,
+        "goal-canonical-2",
+        "superseded"
+      )
+      const events = [
+        checkpointForGoal("goal-canonical-2", "event-canonical-2-created", 0, 0),
+        checkpointForGoal("goal-old", "event-old-created", 0, 0),
+        unrelated,
+        canonical,
+        superseded
+      ]
+      const snapshots = yield* projectWorkSnapshots(events, 3)
+      expect(snapshots.now.goals.map(({ id }) => id).toSorted()).toEqual(
+        ["goal-canonical-2", "goal-unrelated"]
+      )
+      expect(snapshots.now.families).toHaveLength(1)
+      expect(snapshots.now.families?.[0]?.canonicalGoalId).toBe("goal-canonical-2")
+      expect(snapshots.now.goals.some(({ id }) => id === "goal-old")).toBe(false)
+      expect(snapshots.now.goals.some(({ id }) => id === "goal-unrelated")).toBe(true)
+      expect(snapshots.now.goals.find(({ id }) => id === "goal-unrelated")?.title).toBe("goal-unrelated")
+    }))
+
+  it.effect("orders active goals, families, and superseded members by code-point rather than locale", () =>
+    Effect.gen(function*() {
+      const canonical = familyCheckpoint(
+        checkpointForGoal("goal-canonical", "event-canonical-created", 0, 0),
+        "event-canonical",
+        10,
+        "goal-canonical",
+        "canonical"
+      )
+      const supersededZ = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-z", "event-z-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-z", "event-z-created", 0, 0).goal, title: "z", updatedAt: 10 }
+        },
+        "event-z-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const supersededAuml = familyCheckpoint(
+        {
+          ...checkpointForGoal("goal-auml", "event-auml-created", 0, 0),
+          goal: { ...checkpointForGoal("goal-auml", "event-auml-created", 0, 0).goal, title: "ä", updatedAt: 10 }
+        },
+        "event-auml-superseded",
+        10,
+        "goal-canonical",
+        "superseded"
+      )
+      const snapshots = yield* projectWorkSnapshots(
+        [
+          checkpointForGoal("goal-canonical", "event-canonical-created", 0, 0),
+          checkpointForGoal("goal-z", "event-z-created", 0, 0),
+          checkpointForGoal("goal-auml", "event-auml-created", 0, 0),
+          canonical,
+          supersededAuml,
+          supersededZ
+        ],
+        11
+      )
+      expect(snapshots.now.families?.[0]?.superseded.map(({ title }) => title)).toEqual(["z", "ä"])
+      expect(snapshots.now.families?.[0]?.superseded.map(({ id }) => id)).toEqual(["goal-z", "goal-auml"])
+
+      // Family groups ordered by canonical title code-point
+      const familyOrderingEvents = [
+        checkpointForGoal("goal-canonical-z", "event-canonical-z-created", 0, 0),
+        checkpointForGoal("goal-canonical-auml", "event-canonical-auml-created", 0, 0),
+        checkpointForGoal("goal-old-z", "event-old-z-created", 0, 0),
+        checkpointForGoal("goal-old-auml", "event-old-auml-created", 0, 0),
+        familyCheckpoint(
+          {
+            ...checkpointForGoal("goal-canonical-z", "event-canonical-z-created", 0, 0),
+            goal: {
+              ...checkpointForGoal("goal-canonical-z", "event-canonical-z-created", 0, 0).goal,
+              title: "z",
+              updatedAt: 20
+            }
+          },
+          "event-canonical-z",
+          20,
+          "goal-canonical-z",
+          "canonical"
+        ),
+        familyCheckpoint(
+          {
+            ...checkpointForGoal("goal-canonical-auml", "event-canonical-auml-created", 0, 0),
+            goal: {
+              ...checkpointForGoal("goal-canonical-auml", "event-canonical-auml-created", 0, 0).goal,
+              title: "ä",
+              updatedAt: 20
+            }
+          },
+          "event-canonical-auml",
+          20,
+          "goal-canonical-auml",
+          "canonical"
+        ),
+        familyCheckpoint(
+          checkpointForGoal("goal-old-z", "event-old-z-created", 0, 0),
+          "event-old-z-superseded",
+          20,
+          "goal-canonical-z",
+          "superseded"
+        ),
+        familyCheckpoint(
+          checkpointForGoal("goal-old-auml", "event-old-auml-created", 0, 0),
+          "event-old-auml-superseded",
+          20,
+          "goal-canonical-auml",
+          "superseded"
+        )
+      ]
+      const familyOrderingSnapshots = yield* projectWorkSnapshots(familyOrderingEvents, 21)
+      expect(familyOrderingSnapshots.now.families?.map(({ canonical }) => canonical.title)).toEqual(["z", "ä"])
+
+      const activeZ: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-active-z", "event-active-z", 5, 5),
+        goal: { ...checkpointForGoal("goal-active-z", "event-active-z", 5, 5).goal, title: "z", updatedAt: 5 }
+      }
+      const activeAuml: WorkGoalCheckpointType = {
+        ...checkpointForGoal("goal-active-auml", "event-active-auml", 5, 5),
+        goal: { ...checkpointForGoal("goal-active-auml", "event-active-auml", 5, 5).goal, title: "ä", updatedAt: 5 }
+      }
+      const activeSnapshots = yield* projectWorkSnapshots([activeAuml, activeZ], 6)
+      expect(activeSnapshots.now.goals.map(({ title }) => title)).toEqual(["z", "ä"])
+    }))
+
+  it.effect("maximumSnapshotBytes covers encoded family overhead including escaped canonicalGoalId", () =>
+    Effect.gen(function*() {
+      const escapedId = "\u0001".repeat(256)
+      const canonicalBaseRaw = checkpointForGoal(escapedId, "event-canonical-max-created", 0, 0)
+      const canonicalBase: WorkGoalCheckpointType = {
+        ...canonicalBaseRaw,
+        goal: {
+          ...canonicalBaseRaw.goal,
+          title: "Canonical max goal",
+          summary: "Canonical max summary",
+          detail: "Canonical max detail"
+        }
+      }
+      const canonical: WorkGoalCheckpointType = {
+        ...canonicalBase,
+        eventId: "event-canonical-max",
+        occurredAt: 10,
+        goal: { ...canonicalBase.goal, goalFamily: { canonicalGoalId: escapedId, role: "canonical" }, updatedAt: 10 }
+      }
+      const supersededBase = checkpointForGoal("goal-superseded", "event-superseded-created", 0, 0)
+      const superseded: WorkGoalCheckpointType = {
+        ...supersededBase,
+        eventId: "event-superseded",
+        occurredAt: 10,
+        goal: { ...supersededBase.goal, goalFamily: { canonicalGoalId: escapedId, role: "superseded" }, updatedAt: 10 }
+      }
+      const events = [canonicalBase, supersededBase, canonical, superseded]
+      const snapshots = yield* projectWorkSnapshots(events, 11)
+      const actualBytes = Buffer.byteLength(JSON.stringify(snapshots))
+      const history = events.slice(0, -1)
+      const candidate = events[events.length - 1]!
+      const estimated = __herdrWorkMaximumSnapshotBytesForTest(history, candidate)
+      expect(estimated).toBeGreaterThanOrEqual(actualBytes)
+      const encodedIdBytes = __herdrWorkEncodedBytesForTest(escapedId)
+      expect(encodedIdBytes).toBe(1_538)
+      // Fixed 64-byte overhead would undercount this family: prove estimate includes escaped id bound
+      const fixedOverheadEstimate = 64
+      expect(encodedIdBytes + 64).toBeGreaterThan(fixedOverheadEstimate)
+      expect(estimated).toBeGreaterThan(actualBytes - 1)
+
+      const unrelatedEvents = Array.from(
+        { length: 3 },
+        (_, index) => checkpointForGoal(`goal-unrelated-${index}`, `event-unrelated-${index}`, index, index)
+      )
+      const unrelatedSnapshots = yield* projectWorkSnapshots(unrelatedEvents, 10)
+      const unrelatedActual = Buffer.byteLength(JSON.stringify(unrelatedSnapshots))
+      const unrelatedEstimated = __herdrWorkMaximumSnapshotBytesForTest(
+        unrelatedEvents.slice(0, -1),
+        unrelatedEvents[unrelatedEvents.length - 1]!
+      )
+      expect(unrelatedEstimated).toBeGreaterThanOrEqual(unrelatedActual)
+    }))
+
+  it.effect("allows valid append with long unrelated ID and small family groups", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-long-unrelated-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const store = yield* WorkStore.open(join(directory, "work.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const service = yield* makeWorkService(store)
+
+      const escapedId = "\u0001".repeat(256)
+      const longUnrelated: WorkGoalCheckpointType = {
+        ...checkpointForGoal(escapedId, "event-long-created", 0, 0),
+        goal: {
+          ...checkpointForGoal(escapedId, "event-long-created", 0, 0).goal,
+          title: "long unrelated",
+          summary: "long unrelated summary",
+          detail: "long unrelated detail"
+        }
+      }
+      const smallCount = 138
+      const smallGoals = Array.from(
+        { length: smallCount },
+        (_, index) => checkpointForGoal(`goal-small-${index}`, `event-small-${index}`, index + 1, index + 1)
+      )
+      const canonicalBase = checkpointForGoal("goal-family-canonical", "event-canonical-base", 0, 0)
+      const supersededBase = checkpointForGoal("goal-family-superseded", "event-superseded-base", 0, 0)
+      const canonical = familyCheckpoint(
+        canonicalBase,
+        "event-canonical",
+        10_000,
+        "goal-family-canonical",
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        supersededBase,
+        "event-superseded",
+        10_000,
+        "goal-family-canonical",
+        "superseded"
+      )
+
+      const history = [...smallGoals, longUnrelated, canonicalBase, supersededBase, canonical]
+      for (const event of history) yield* store.append(event)
+
+      const snapshotsBefore = yield* service.snapshots(20_000)
+      expect(Buffer.byteLength(JSON.stringify(snapshotsBefore))).toBeLessThanOrEqual(
+        fleetResponseBodyMaxBytes
+      )
+
+      const estimated = __herdrWorkMaximumSnapshotBytesForTest(history, superseded)
+      const snapshotsAfter = yield* projectWorkSnapshots([...history, superseded], 20_001)
+      const actualAfter = Buffer.byteLength(JSON.stringify(snapshotsAfter))
+      expect(estimated).toBeGreaterThanOrEqual(actualAfter)
+      expect(estimated).toBeLessThanOrEqual(fleetResponseBodyMaxBytes)
+
+      // Must remain appendable despite long unrelated ID inflating previous max*size bound
+      yield* store.append(superseded)
+      expect(yield* store.list()).toHaveLength(history.length + 1)
+
+      // Prove previous max*size amplification would have rejected this valid history
+      const maximumGoalBytes = new Map<string, number>()
+      for (const { goal } of [...history, superseded]) {
+        const bytes = __herdrWorkEncodedBytesForTest(goal)
+        maximumGoalBytes.set(goal.id, Math.max(maximumGoalBytes.get(goal.id) ?? 0, bytes))
+      }
+      const encodedGoals = [...maximumGoalBytes.values()].reduce((total, bytes) => total + bytes, 0)
+      const separators = Math.max(0, maximumGoalBytes.size - 1)
+      const maxEncodedId = Math.max(
+        0,
+        ...Array.from(maximumGoalBytes.keys(), (id) => __herdrWorkEncodedBytesForTest(id))
+      )
+      const oldFamiliesPerWindow = 2 * encodedGoals + separators +
+        (maxEncodedId + 64) * Math.max(1, maximumGoalBytes.size)
+      const oldEstimated = __herdrWorkSnapshotEnvelopeMaxBytesForTest +
+        4 * Math.max(encodedGoals + separators, oldFamiliesPerWindow)
+      expect(oldEstimated).toBeGreaterThan(fleetResponseBodyMaxBytes)
+      expect(oldEstimated).toBeGreaterThan(estimated)
+    }).pipe(provideNodeServices), 30_000)
+
+  it.effect("rejects family snapshots where the canonical payload diverges from the active goal", () =>
+    Effect.gen(function*() {
+      const base = checkpointForGoal("goal-canonical-diverge", "event-base-diverge", 0, 0)
+      const old = checkpointForGoal("goal-old-diverge", "event-old-diverge", 0, 0)
+      const canonical = familyCheckpoint(
+        base,
+        "event-canonical-diverge",
+        10,
+        "goal-canonical-diverge",
+        "canonical"
+      )
+      const superseded = familyCheckpoint(
+        old,
+        "event-superseded-diverge",
+        10,
+        "goal-canonical-diverge",
+        "superseded"
+      )
+      const valid = yield* projectWorkSnapshots([base, old, canonical, superseded], 11)
+      expect(Schema.decodeUnknownResult(WorkSnapshots)(valid)._tag).toBe("Success")
+      // Legacy snapshot without families remains valid
+      const { families: _legacyFamilies, ...legacyNow } = valid.now
+      expect(Schema.decodeUnknownResult(WorkSnapshot)(legacyNow)._tag).toBe("Success")
+      // Invalid: same id but different canonical payload (title) must be rejected
+      const divergentCanonical = { ...valid.now.families![0]!.canonical, title: "stale title" }
+      const divergentSnapshot = {
+        ...valid.now,
+        families: [{ ...valid.now.families![0]!, canonical: divergentCanonical }]
+      }
+      expect(Schema.decodeUnknownResult(WorkSnapshot)(divergentSnapshot)._tag).toBe("Failure")
+      expect(
+        Schema.decodeUnknownResult(WorkSnapshots)({ ...valid, now: divergentSnapshot })._tag
+      ).toBe("Failure")
+      // Invalid: family canonical id not in goals must also be rejected (id-only check)
+      const orphanCanonical = {
+        ...valid.now.families![0]!,
+        canonicalGoalId: "goal-missing",
+        canonical: { ...valid.now.families![0]!.canonical, id: "goal-missing", title: "goal-missing" }
+      }
+      const orphanSnapshot = { ...valid.now, families: [orphanCanonical] }
+      expect(Schema.decodeUnknownResult(WorkSnapshot)(orphanSnapshot)._tag).toBe("Failure")
+    }))
+
+  it("rejects snapshot families that exceed the distinct goal union bound", () => {
+    const canonicalBase = checkpointForGoal("goal-canonical-union", "event-canonical-union-base", 0, 0)
+    const canonicalGoal: WorkGoal = {
+      ...canonicalBase.goal,
+      goalFamily: { canonicalGoalId: canonicalBase.goal.id, role: "canonical" }
+    }
+    const makeSuperseded = (index: number): WorkGoal => {
+      const base = checkpointForGoal(`goal-superseded-${index}`, `event-superseded-${index}`, 0, 0)
+      return {
+        ...base.goal,
+        goalFamily: { canonicalGoalId: canonicalGoal.id, role: "superseded" }
+      }
+    }
+    const supersededMax = Array.from({ length: workSnapshotMaxGoals }, (_, index) => makeSuperseded(index))
+    const snapshotTooLarge = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalGoal],
+      families: [{ canonicalGoalId: canonicalGoal.id, canonical: canonicalGoal, superseded: supersededMax }]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(snapshotTooLarge)._tag).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshots)({
+        observedAt: 0,
+        now: snapshotTooLarge,
+        day: { window: "day", observedAt: 0, asOf: 0, goals: [canonicalGoal] },
+        week: { window: "week", observedAt: 0, asOf: 0, goals: [canonicalGoal] },
+        month: { window: "month", observedAt: 0, asOf: 0, goals: [canonicalGoal] }
+      })._tag
+    ).toBe("Failure")
+
+    const supersededWithin = Array.from(
+      { length: workSnapshotMaxGoals - 1 },
+      (_, index) => makeSuperseded(index)
+    )
+    const snapshotWithin = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalGoal],
+      families: [{ canonicalGoalId: canonicalGoal.id, canonical: canonicalGoal, superseded: supersededWithin }]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(snapshotWithin)._tag).toBe("Success")
+
+    const legacyGoals = Array.from({ length: workSnapshotMaxGoals }, (_, index) => {
+      const base = checkpointForGoal(`goal-legacy-${index}`, `event-legacy-${index}`, index, index)
+      return base.goal
+    })
+    const legacySnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: legacyGoals
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(legacySnapshot)._tag).toBe("Success")
+
+    const emptyFamiliesSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalGoal],
+      families: []
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(emptyFamiliesSnapshot)._tag).toBe("Success")
+  })
+
+  it("rejects duplicate active goal IDs in snapshot", () => {
+    const base = checkpointForGoal("goal-dup", "event-dup-base", 0, 0)
+    const goalA: WorkGoal = { ...base.goal, title: "Alpha" }
+    const goalB: WorkGoal = { ...base.goal, title: "Beta" }
+    const duplicateSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [goalA, goalB]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(duplicateSnapshot)._tag).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshots)({
+        observedAt: 0,
+        now: duplicateSnapshot,
+        day: { window: "day", observedAt: 0, asOf: 0, goals: [goalA] },
+        week: { window: "week", observedAt: 0, asOf: 0, goals: [goalA] },
+        month: { window: "month", observedAt: 0, asOf: 0, goals: [goalA] }
+      })._tag
+    ).toBe("Failure")
+
+    const canonicalBase = checkpointForGoal("goal-canonical-dup", "event-canonical-dup-base", 0, 0)
+    const canonicalGoal: WorkGoal = {
+      ...canonicalBase.goal,
+      goalFamily: { canonicalGoalId: canonicalBase.goal.id, role: "canonical" }
+    }
+    const canonicalDupA: WorkGoal = { ...canonicalGoal, title: "Canonical Alpha" }
+    const canonicalDupB: WorkGoal = { ...canonicalGoal, title: "Canonical Beta" }
+    const duplicateCanonicalSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [canonicalDupA, canonicalDupB],
+      families: [{ canonicalGoalId: canonicalGoal.id, canonical: canonicalDupB, superseded: [] }]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(duplicateCanonicalSnapshot)._tag).toBe("Failure")
+
+    const distinctBase = checkpointForGoal("goal-distinct", "event-distinct-base", 0, 0)
+    const distinctGoal: WorkGoal = { ...distinctBase.goal }
+    const validSnapshot = {
+      window: "now",
+      observedAt: 0,
+      asOf: 0,
+      goals: [goalA, distinctGoal]
+    }
+    expect(Schema.decodeUnknownResult(WorkSnapshot)(validSnapshot)._tag).toBe("Success")
+  })
+
+  it("rejects empty superseded family groups", () => {
+    const canonicalBase = checkpointForGoal("goal-canonical-empty", "event-canonical-empty-base", 0, 0)
+    const canonicalGoal: WorkGoal = {
+      ...canonicalBase.goal,
+      goalFamily: { canonicalGoalId: canonicalBase.goal.id, role: "canonical" }
+    }
+    const emptyGroup = {
+      canonicalGoalId: canonicalGoal.id,
+      canonical: canonicalGoal,
+      superseded: []
+    }
+    expect(Schema.decodeUnknownResult(WorkGoalFamilyGroup)(emptyGroup)._tag).toBe("Failure")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshot)({
+        window: "now",
+        observedAt: 0,
+        asOf: 0,
+        goals: [canonicalGoal],
+        families: [emptyGroup]
+      })._tag
+    ).toBe("Failure")
+    const supersededBase = checkpointForGoal("goal-superseded-empty", "event-superseded-empty-base", 0, 0)
+    const supersededGoal: WorkGoal = {
+      ...supersededBase.goal,
+      goalFamily: { canonicalGoalId: canonicalGoal.id, role: "superseded" }
+    }
+    const validGroup = {
+      canonicalGoalId: canonicalGoal.id,
+      canonical: canonicalGoal,
+      superseded: [supersededGoal]
+    }
+    expect(Schema.decodeUnknownResult(WorkGoalFamilyGroup)(validGroup)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(WorkSnapshot)({
+        window: "now",
+        observedAt: 0,
+        asOf: 0,
+        goals: [canonicalGoal],
+        families: [validGroup]
+      })._tag
+    ).toBe("Success")
   })
 })

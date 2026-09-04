@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Schema } from "effect"
+import { Effect, Schema } from "effect"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import {
@@ -7,9 +7,11 @@ import {
   type WorkApprovalTarget,
   WorkBoard,
   WorkGoal,
+  type WorkGoalCheckpoint as WorkGoalCheckpointType,
   type WorkSnapshot,
   type WorkSnapshots
 } from "../src/index.js"
+import { projectWorkSnapshots } from "../src/projection.js"
 
 const workGoalInput = {
   blocker: null,
@@ -378,5 +380,87 @@ describe("Work control app", () => {
     expect(markup).toContain(
       "href=\"https://ser8.example.test/?tab=approvals&amp;approvalHost=SER8&amp;approvalJob=approval-job-42\""
     )
+  })
+
+  it("renders a compact superseded history affordance for the canonical Work goal", async () => {
+    const makeGoal = (
+      id: string,
+      title: string,
+      state: "blocked" | "working",
+      blockerSummary: string | null
+    ): WorkGoalCheckpointType => ({
+      eventId: `event-${id}`,
+      occurredAt: 0,
+      version: "herdr.work.event.v1",
+      goal: {
+        blocker: blockerSummary === null ? null : { since: 0, summary: blockerSummary },
+        connectTarget: null,
+        createdAt: 0,
+        delivery: "local",
+        detail: `Durable ${title}`,
+        id,
+        owner: { id: "owner-connect", name: "Coordinator" },
+        repository: { branch: "feat/connect-terminal-special-keys", repository: "npm" },
+        spend: null,
+        state,
+        summary: title,
+        title,
+        updatedAt: 0
+      }
+    })
+    const v1 = makeGoal("goal-connect-v1", "Connect terminal special keys v1", "blocked", "V1 blocker")
+    const v2 = makeGoal("goal-connect-v2", "Connect terminal special keys v2", "blocked", "V2 blocker")
+    const v3 = makeGoal("goal-connect-v3", "Connect terminal special keys v3", "working", null)
+    const relationAt = 1_000
+    const events = [
+      v1,
+      v2,
+      v3,
+      {
+        ...v3,
+        eventId: "event-v3-canonical",
+        occurredAt: relationAt,
+        goal: {
+          ...v3.goal,
+          goalFamily: { canonicalGoalId: "goal-connect-v3", role: "canonical" },
+          updatedAt: relationAt
+        }
+      },
+      {
+        ...v1,
+        eventId: "event-v1-superseded",
+        occurredAt: relationAt,
+        goal: {
+          ...v1.goal,
+          goalFamily: { canonicalGoalId: "goal-connect-v3", role: "superseded" },
+          updatedAt: relationAt
+        }
+      },
+      {
+        ...v2,
+        eventId: "event-v2-superseded",
+        occurredAt: relationAt,
+        goal: {
+          ...v2.goal,
+          goalFamily: { canonicalGoalId: "goal-connect-v3", role: "superseded" },
+          updatedAt: relationAt
+        }
+      }
+    ]
+    const snapshotsValue = await Effect.runPromise(
+      projectWorkSnapshots(events, relationAt + 1)
+    )
+    const markup = renderToStaticMarkup(createElement(WorkBoard, { snapshots: snapshotsValue }))
+    expect(snapshotsValue.now.goals.map(({ id }) => id)).toEqual(["goal-connect-v3"])
+    expect(snapshotsValue.now.families?.[0]?.superseded).toHaveLength(2)
+    expect(markup).toContain("goal-connect-v3")
+    expect(markup).not.toContain("goal-connect-v1\"")
+    expect(markup).toContain("2 superseded")
+    expect(markup).toContain("Superseded history")
+    expect(markup).toContain("Show 2 superseded")
+    expect(markup).toContain("V1 blocker")
+    expect(markup).toContain("V2 blocker")
+    expect(markup).toContain("Connect terminal special keys v1")
+    expect(markup).toContain("Connect terminal special keys v2")
   })
 })

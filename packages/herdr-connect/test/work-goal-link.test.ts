@@ -110,10 +110,15 @@ describe("Connect Work goal association", () => {
       ...workGoal,
       title: "Duplicated review goal"
     })
-    expect(resolveConnectWorkGoal(connectAgent, snapshot([workGoal, duplicate]))).toEqual({
-      _tag: "ambiguous",
-      goalIds: ["goal-review", "goal-review"]
+    const duplicateResult = Schema.decodeUnknownResult(WorkSnapshots)({
+      day: { asOf: 1_000, goals: [], observedAt: 1_000, window: "day" },
+      month: { asOf: 1_000, goals: [], observedAt: 1_000, window: "month" },
+      now: { asOf: 1_000, goals: [workGoal, duplicate], observedAt: 1_000, window: "now" },
+      observedAt: 1_000,
+      week: { asOf: 1_000, goals: [], observedAt: 1_000, window: "week" }
     })
+    expect(duplicateResult._tag).toBe("Failure")
+    expect(() => snapshot([workGoal, duplicate])).toThrow()
   })
 
   it("requires both stable host and agent identity", () => {
