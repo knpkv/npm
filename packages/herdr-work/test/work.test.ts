@@ -2774,6 +2774,41 @@ database.close()`,
       expect(JSON.parse(retainedNullMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
       expect(retainedNullMetadata.workLink).toBeNull()
 
+      const orphanMetadataPath = join(directory, "orphan-metadata.sqlite")
+      copyFileSync(path, orphanMetadataPath)
+      const orphanMetadata = new DatabaseSync(orphanMetadataPath)
+      orphanMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      orphanMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      orphanMetadata.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify({ handoff: previousHandoff, lineage }), "dispatch:current-migration")
+      orphanMetadata.close()
+      expect(yield* safelyOpenResult(orphanMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          operation: "open.database"
+        }
+      })
+      const orphanMetadataRolledBack = new DatabaseSync(orphanMetadataPath)
+      const retainedOrphanMetadata = Schema.decodeUnknownSync(Schema.Struct({
+        record: Schema.String,
+        workLink: Schema.String
+      }))(
+        orphanMetadataRolledBack.prepare(
+          `SELECT decision.record, metadata.work_link AS workLink
+           FROM work_decision_handoffs decision
+           JOIN orchestrator_dispatch_metadata metadata
+           WHERE decision.handoff_id = ? AND metadata.dispatch_request_id = ?`
+        ).get(previousHandoff.id, "dispatch:current-migration")
+      )
+      orphanMetadataRolledBack.close()
+      expect(JSON.parse(retainedOrphanMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      expect(JSON.parse(retainedOrphanMetadata.workLink)).toMatchObject({
+        handoff: { version: "herdr.work.decision.v1" }
+      })
+
       const malformed = new DatabaseSync(path)
       malformed.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)

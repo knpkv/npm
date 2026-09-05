@@ -550,6 +550,29 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             return yield* new WorkStoreError({ cause: row, operation: "sql-work.initialize.handoff-lane" })
           }
           const handoffDispatches = legacyDispatches.filter(({ handoffId }) => handoffId === row.handoffId)
+          const linkedMetadata = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
+            ? yield* sql`
+              SELECT dispatch_request_id AS "dispatchRequestId", work_link AS "workLink"
+              FROM orchestrator_dispatch_metadata
+              WHERE work_link IS NOT NULL
+                AND CASE WHEN json_valid(work_link)
+                  THEN json_extract(work_link, '$.handoff.id') END = ${row.handoffId}
+            `.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MetadataWorkLinkRow))),
+              Effect.mapError(storeError("sql-work.initialize.metadata-authority"))
+            )
+            : []
+          if (
+            linkedMetadata.length !== handoffDispatches.length ||
+            linkedMetadata.some((metadata) =>
+              !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
+            )
+          ) {
+            return yield* new WorkStoreError({
+              cause: { handoffDispatches, linkedMetadata, row },
+              operation: "sql-work.initialize.metadata-authority"
+            })
+          }
           const bindingRevisions = tables.some(({ name }) => name === "work_agent_bindings")
             ? yield* sql`
               SELECT DISTINCT binding.expected_revision AS "expectedRevision"
@@ -588,19 +611,13 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
                 })
               }
               if (tables.some(({ name }) => name === "orchestrator_dispatch_metadata")) {
-                const metadataRows = yield* sql`
-                  SELECT dispatch_request_id AS "dispatchRequestId", work_link AS "workLink"
-                  FROM orchestrator_dispatch_metadata
-                  WHERE dispatch_request_id = ${dispatch.dispatchRequestId}
-                `.pipe(
-                  Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MetadataWorkLinkRow))),
-                  Effect.mapError(storeError("sql-work.initialize.metadata-authority"))
+                const metadata = linkedMetadata.find(({ dispatchRequestId }) =>
+                  dispatchRequestId === dispatch.dispatchRequestId
                 )
-                const metadata = metadataRows[0]
                 const encodedWorkLink = metadata?.workLink
-                if (metadataRows.length !== 1 || encodedWorkLink === null || encodedWorkLink === undefined) {
+                if (encodedWorkLink === null || encodedWorkLink === undefined) {
                   return yield* new WorkStoreError({
-                    cause: { dispatch, metadataRows },
+                    cause: { dispatch, linkedMetadata },
                     operation: "sql-work.initialize.metadata-authority"
                   })
                 }

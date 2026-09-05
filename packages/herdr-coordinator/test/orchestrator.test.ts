@@ -1689,6 +1689,51 @@ database.close()`,
         missingMetadataRolledBack.close()
         expect(JSON.parse(retainedMissingMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
+        const orphanMetadataPath = join(root, "orphan-metadata.sqlite")
+        copyFileSync(path, orphanMetadataPath)
+        const orphanMetadata = new DatabaseSync(orphanMetadataPath)
+        orphanMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        orphanMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        orphanMetadata.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage }),
+            activation.event.dispatchRequestId
+          )
+        expect(
+          orphanMetadata.prepare(
+            `SELECT json_extract(work_link, '$.handoff.id') AS handoffId,
+               (SELECT COUNT(*) FROM work_dispatch_handoffs) AS dispatchCount
+             FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?`
+          ).get(activation.event.dispatchRequestId)
+        ).toEqual({ dispatchCount: 0, handoffId: previousHandoff.id })
+        orphanMetadata.close()
+        expect(yield* Effect.result(withDatabase(orphanMetadataPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
+            operation: "initialize.work"
+          }
+        })
+        const orphanMetadataRolledBack = new DatabaseSync(orphanMetadataPath)
+        const retainedOrphanMetadata = Schema.decodeUnknownSync(Schema.Struct({
+          record: Schema.String,
+          workLink: Schema.String
+        }))(
+          orphanMetadataRolledBack.prepare(
+            `SELECT decision.record, metadata.work_link AS workLink
+             FROM work_decision_handoffs decision
+             JOIN orchestrator_dispatch_metadata metadata
+             WHERE decision.handoff_id = ? AND metadata.dispatch_request_id = ?`
+          ).get(previousHandoff.id, activation.event.dispatchRequestId)
+        )
+        orphanMetadataRolledBack.close()
+        expect(JSON.parse(retainedOrphanMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+        expect(JSON.parse(retainedOrphanMetadata.workLink)).toMatchObject({
+          handoff: { version: "herdr.work.decision.v1" }
+        })
+
         const divergent = new DatabaseSync(path)
         divergent.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
           .run(JSON.stringify(previousHandoff), previousHandoff.id)
