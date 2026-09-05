@@ -5,7 +5,7 @@ import { AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { Effect, Option, Schema } from "effect"
 import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs"
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs"
 import { platform, tmpdir } from "node:os"
 import { join } from "node:path"
 import { execPath } from "node:process"
@@ -2364,6 +2364,10 @@ database.close()`,
           dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL UNIQUE, lane_id TEXT NOT NULL,
           occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL
         );
+        CREATE TABLE work_agent_bindings (
+          dispatch_request_id TEXT PRIMARY KEY, lane_id TEXT NOT NULL, expected_revision INTEGER NOT NULL,
+          revision INTEGER NOT NULL, agent_id TEXT NOT NULL, host TEXT NOT NULL, record TEXT NOT NULL
+        );
         CREATE TABLE orchestrator_dispatch_metadata (
           dispatch_request_id TEXT PRIMARY KEY, route TEXT NOT NULL, work_link TEXT
         );
@@ -2382,9 +2386,32 @@ database.close()`,
           JSON.stringify(lineage),
           JSON.stringify(legacyHandoff)
         )
+      database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        "dispatch:legacy-sol",
+        legacyHandoff.laneId,
+        legacyClaim.revision,
+        legacyClaim.revision + 1,
+        "agent:legacy",
+        "host:legacy",
+        "{}"
+      )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
         .run("dispatch:legacy-sol", "{}", JSON.stringify({ handoff: legacyHandoff, lineage }))
       database.close()
+
+      const unboundLegacyPath = join(directory, "unbound-legacy.sqlite")
+      copyFileSync(path, unboundLegacyPath)
+      const unboundLegacy = new DatabaseSync(unboundLegacyPath)
+      const advancedLegacyClaim = {
+        ...legacyClaim,
+        expectedRevision: legacyClaim.revision,
+        revision: legacyClaim.revision + 1
+      }
+      unboundLegacy.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+        .run("dispatch:legacy-sol")
+      unboundLegacy.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
+        .run(advancedLegacyClaim.revision, JSON.stringify(advancedLegacyClaim), advancedLegacyClaim.laneId)
+      unboundLegacy.close()
 
       const concurrentHandoff = {
         ...legacyHandoff,
@@ -2460,6 +2487,27 @@ database.close()`,
         .toContain(lineage[0])
       expect(Schema.decodeUnknownSync(Schema.Struct({ workLink: Schema.String }))(metadataRecord).workLink)
         .toContain(lineage[0])
+
+      expect(yield* safelyOpenResult(unboundLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-handoff-revision" },
+          operation: "open.database"
+        }
+      })
+      const unboundLegacyRolledBack = new DatabaseSync(unboundLegacyPath)
+      const retainedLegacy = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        unboundLegacyRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(legacyHandoff.id)
+      )
+      const retainedLegacyColumns = unboundLegacyRolledBack.prepare(
+        "PRAGMA table_info(work_decision_handoffs)"
+      ).all()
+      unboundLegacyRolledBack.close()
+      expect(JSON.parse(retainedLegacy.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      expect(retainedLegacyColumns.some((column) =>
+        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+      )).toBe(false)
 
       const corruptedPath = join(directory, "corrupted.sqlite")
       const corrupted = new DatabaseSync(corruptedPath)
@@ -2617,6 +2665,80 @@ database.close()`,
         handoff: { expectedRevision: 1, version: "herdr.work.decision.v2" },
         lineage
       })
+
+      const divergentPath = join(directory, "divergent.sqlite")
+      copyFileSync(path, divergentPath)
+      const divergent = new DatabaseSync(divergentPath)
+      divergent.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      divergent.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify({ ...previousHandoff, summary: "Divergent replica" }), "dispatch:current-migration")
+      divergent.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify({ handoff: previousHandoff, lineage }), "dispatch:current-migration")
+      divergent.close()
+      expect(yield* safelyOpenResult(divergentPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.dispatch-authority" },
+          operation: "open.database"
+        }
+      })
+      const divergentRolledBack = new DatabaseSync(divergentPath)
+      const retainedReplicas = Schema.decodeUnknownSync(Schema.Struct({
+        decision: Schema.String,
+        dispatch: Schema.String,
+        workLink: Schema.String
+      }))(
+        divergentRolledBack.prepare(
+          `SELECT decision.record AS decision, dispatch.record AS dispatch,
+             metadata.work_link AS workLink
+           FROM work_decision_handoffs decision
+           JOIN work_dispatch_handoffs dispatch USING (handoff_id)
+           JOIN orchestrator_dispatch_metadata metadata USING (dispatch_request_id)
+           WHERE decision.handoff_id = ?`
+        ).get(previousHandoff.id)
+      )
+      divergentRolledBack.close()
+      expect(JSON.parse(retainedReplicas.decision)).toMatchObject({
+        summary: previousHandoff.summary,
+        version: "herdr.work.decision.v1"
+      })
+      expect(JSON.parse(retainedReplicas.dispatch)).toMatchObject({
+        summary: "Divergent replica",
+        version: "herdr.work.decision.v1"
+      })
+      expect(JSON.parse(retainedReplicas.workLink)).toMatchObject({
+        handoff: { version: "herdr.work.decision.v1" }
+      })
+
+      const unboundPath = join(directory, "unbound.sqlite")
+      copyFileSync(path, unboundPath)
+      const unbound = new DatabaseSync(unboundPath)
+      unbound.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      unbound.prepare("UPDATE work_lane_claims SET revision = ? WHERE lane_id = ?")
+        .run(lane.revision + 1, lane.laneId)
+      unbound.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      unbound.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify(previousHandoff), "dispatch:current-migration")
+      unbound.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify({ handoff: previousHandoff, lineage }), "dispatch:current-migration")
+      unbound.close()
+      expect(yield* safelyOpenResult(unboundPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.handoff-revision" },
+          operation: "open.database"
+        }
+      })
+      const unboundRolledBack = new DatabaseSync(unboundPath)
+      const retainedUnbound = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        unboundRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      unboundRolledBack.close()
+      expect(JSON.parse(retainedUnbound.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
       const malformed = new DatabaseSync(path)
       malformed.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")

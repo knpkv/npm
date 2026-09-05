@@ -1411,6 +1411,15 @@ describe("durable coordinator orchestrator", () => {
             lineage TEXT NOT NULL,
             record TEXT NOT NULL
           );
+          CREATE TABLE work_agent_bindings (
+            dispatch_request_id TEXT PRIMARY KEY,
+            lane_id TEXT NOT NULL,
+            expected_revision INTEGER NOT NULL,
+            revision INTEGER NOT NULL,
+            agent_id TEXT NOT NULL,
+            host TEXT NOT NULL,
+            record TEXT NOT NULL
+          );
           CREATE TABLE orchestrator_dispatch_metadata (
             dispatch_request_id TEXT PRIMARY KEY,
             route TEXT NOT NULL,
@@ -1431,6 +1440,15 @@ describe("durable coordinator orchestrator", () => {
             JSON.stringify(lineage),
             JSON.stringify(legacy)
           )
+        database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+          "dispatch:legacy-sol",
+          legacy.laneId,
+          lane.revision,
+          lane.revision + 1,
+          "agent:legacy",
+          "host:legacy",
+          "{}"
+        )
         database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
           .run(
             "dispatch:legacy-sol",
@@ -1595,6 +1613,104 @@ database.close()`,
           expectedRevision: activation.binding.request.expectedRevision,
           version: "herdr.work.decision.v2"
         })
+
+        const divergent = new DatabaseSync(path)
+        divergent.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        divergent.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ ...previousHandoff, summary: "Divergent SQL replica" }),
+            activation.event.dispatchRequestId
+          )
+        divergent.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage }),
+            activation.event.dispatchRequestId
+          )
+        divergent.close()
+        expect(yield* Effect.result(withDatabase(path, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.dispatch-authority" },
+            operation: "initialize.work"
+          }
+        })
+        const rolledBack = new DatabaseSync(path)
+        const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        rolledBack.close()
+        expect(JSON.parse(retained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      })
+    }))
+
+  it.effect("fails closed instead of re-authorizing an unbound queued v1 handoff", () =>
+    withTemporaryRoot("herdr-orchestrator-unbound-handoff-migration-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const workLink = makeWorkLink([])
+      const submission = {
+        ...makeSolSubmission(null, "dispatch:unbound-handoff-migration"),
+        workLink
+      }
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const previousHandoff = {
+          blockers: workLink.handoff.blockers,
+          decision: workLink.handoff.decision,
+          dispatchIds: workLink.handoff.dispatchIds,
+          evidenceRefs: workLink.handoff.evidenceRefs,
+          goalId: workLink.handoff.goalId,
+          id: workLink.handoff.id,
+          laneId: workLink.handoff.laneId,
+          occurredAt: workLink.handoff.occurredAt,
+          owner: workLink.handoff.owner,
+          sessionId: workLink.handoff.sessionId,
+          summary: workLink.handoff.summary,
+          version: "herdr.work.decision.v1"
+        }
+        const advancedLane = {
+          ...lane,
+          expectedRevision: lane.revision,
+          revision: lane.revision + 1
+        }
+        const database = new DatabaseSync(path)
+        database.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
+          .run(advancedLane.revision, JSON.stringify(advancedLane), advancedLane.laneId)
+        database.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        database.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(previousHandoff), receipt.dispatchRequestId)
+        database.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage }),
+            receipt.dispatchRequestId
+          )
+        database.close()
+
+        expect(yield* Effect.result(withDatabase(path, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.handoff-revision" },
+            operation: "initialize.work"
+          }
+        })
+        const rolledBack = new DatabaseSync(path)
+        const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        rolledBack.close()
+        expect(JSON.parse(retained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
       })
     }))
 

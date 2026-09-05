@@ -1,7 +1,7 @@
 import { Schema } from "effect"
 import { WorkDecisionHandoff, type WorkDecisionHandoff as WorkDecisionHandoffType } from "../model.js"
 
-const PreviousWorkDecisionHandoff = Schema.Struct({
+export const PreviousWorkDecisionHandoff = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
   id: WorkDecisionHandoff.fields.id,
   sessionId: WorkDecisionHandoff.fields.sessionId,
@@ -16,6 +16,9 @@ const PreviousWorkDecisionHandoff = Schema.Struct({
   occurredAt: WorkDecisionHandoff.fields.occurredAt
 })
 type PreviousWorkDecisionHandoff = typeof PreviousWorkDecisionHandoff.Type
+
+export const previousDecisionHandoffEquivalent = Schema.toEquivalence(PreviousWorkDecisionHandoff)
+export const workDispatchLineageEquivalent = Schema.toEquivalence(WorkDecisionHandoff.fields.dispatchIds)
 
 export const decodePreviousDecisionHandoff = Schema.decodeUnknownOption(PreviousWorkDecisionHandoff)
 
