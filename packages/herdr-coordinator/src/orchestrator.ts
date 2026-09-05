@@ -703,6 +703,7 @@ const makeOrchestrator: Effect.Effect<
               : Effect.fail(error))
         )
         const dispatch = snapshot.dispatch
+        yield* validateDurableReadback(dispatch, "transition.work-link")
         if (decodedTarget === "running" && dispatch.route?.model === "gpt-5.6-sol") {
           return yield* new OrchestratorValidationError({
             detail: "routed Sol dispatches require workerStarted with Work lane authority"
@@ -1169,7 +1170,17 @@ const makeOrchestrator: Effect.Effect<
               Stream.concat(
                 Stream.fromSchedule(Schedule.spaced("100 millis")).pipe(Stream.map(() => undefined))
               ),
-              Stream.mapEffect(() => loadValidatedEvents(decodedDispatchRequestId)),
+              Stream.mapEffect(() =>
+                sql.withTransaction(
+                  Effect.gen(function*() {
+                    const snapshot = yield* loadValidatedEvents(decodedDispatchRequestId)
+                    yield* validateDurableReadback(snapshot.dispatch, "events.work-link")
+                    return snapshot
+                  })
+                ).pipe(
+                  Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("events.transaction")(cause)))
+                )
+              ),
               Stream.mapAccum(
                 () => -1,
                 (lastSequence, snapshot): readonly [number, ReadonlyArray<OrchestratorEventType>] => {

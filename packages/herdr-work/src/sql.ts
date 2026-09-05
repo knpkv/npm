@@ -133,6 +133,10 @@ const MetadataWorkLinkRow = Schema.Struct({
   route: Schema.String,
   workLink: Schema.NullOr(Schema.String)
 })
+const MetadataHandoffIdentityRow = Schema.Struct({
+  dispatchRequestId: Schema.String,
+  handoffId: Schema.NullOr(Schema.String)
+})
 const PreviousMetadataWorkLink = Schema.Struct({
   handoff: PreviousWorkDecisionHandoff,
   lineage: WorkDispatchHandoff.fields.lineage
@@ -902,6 +906,52 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         })
       }
       yield* requireCoordinatorSchema("sql-work.initialize")
+      if (metadataTablePresent) {
+        const linkedMetadata = yield* sql`
+          SELECT dispatch_request_id AS "dispatchRequestId",
+            CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
+              THEN json_extract(work_link, '$.handoff.id') END AS "handoffId"
+          FROM orchestrator_dispatch_metadata
+          WHERE work_link IS NOT NULL
+          LIMIT ${workDecisionMaxRecords + 1}
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MetadataHandoffIdentityRow))),
+          Effect.mapError(storeError("sql-work.initialize.metadata-decision"))
+        )
+        if (linkedMetadata.length > workDecisionMaxRecords) {
+          return yield* new WorkStoreError({
+            cause: linkedMetadata.length,
+            operation: "sql-work.initialize.metadata-capacity"
+          })
+        }
+        const metadataCounts = new Map<string, number>()
+        const dispatchCounts = new Map<string, number>()
+        const decisionCounts = new Map<string, number>()
+        for (const metadata of linkedMetadata) {
+          metadataCounts.set(
+            metadata.dispatchRequestId,
+            (metadataCounts.get(metadata.dispatchRequestId) ?? 0) + 1
+          )
+        }
+        for (const dispatch of legacyDispatches) {
+          const identity = JSON.stringify([dispatch.dispatchRequestId, dispatch.handoffId])
+          dispatchCounts.set(identity, (dispatchCounts.get(identity) ?? 0) + 1)
+        }
+        for (const decision of storedDecisions) {
+          decisionCounts.set(decision.handoffId, (decisionCounts.get(decision.handoffId) ?? 0) + 1)
+        }
+        const invalidMetadata = linkedMetadata.find((metadata) => {
+          const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
+          return metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
+            dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
+        })
+        if (invalidMetadata !== undefined) {
+          return yield* new WorkStoreError({
+            cause: { dispatches: legacyDispatches, linkedMetadata, metadata: invalidMetadata, storedDecisions },
+            operation: "sql-work.initialize.metadata-decision"
+          })
+        }
+      }
       const migrationResults = yield* Effect.forEach(storedDecisions, (row) =>
         Effect.gen(function*() {
           const input = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(row.record).pipe(
@@ -1063,6 +1113,12 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             "sql-work.initialize.agent-binding"
           )
           if (bindingDecision._tag === "invalid") return yield* bindingDecision.error
+          if (laneRevision.revision < bindingDecision.binding.lane.revision) {
+            return yield* new WorkStoreError({
+              cause: { binding: bindingDecision.binding, laneRevision, previous: previous.value },
+              operation: "sql-work.initialize.handoff-lane-revision"
+            })
+          }
           if (bindingDecision.binding.lane.goalId !== previous.value.goalId) {
             return yield* new WorkStoreError({
               cause: { binding: bindingDecision.binding, previous: previous.value },

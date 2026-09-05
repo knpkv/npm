@@ -1519,6 +1519,58 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("rejects lifecycle reads and transitions after accepted Work authority disappears", () =>
+    withTemporaryRoot("herdr-orchestrator-work-readback-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* recordWorkAuthority(path, makeWorkLink([]))
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: makeLunaCommand("consult", "activity:readback-luna"),
+              idempotencyKey: "dispatch:readback-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
+            const sol = yield* orchestrator.submitRouted(
+              makeSolSubmission(luna.dispatchRequestId, "dispatch:readback-sol")
+            )
+            const database = new DatabaseSync(path)
+            database.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+              .run(sol.dispatchRequestId)
+            database.close()
+            return {
+              dispatchRequestId: sol.dispatchRequestId,
+              events: yield* Effect.result(
+                orchestrator.events(sol.dispatchRequestId).pipe(Stream.take(1), Stream.runCollect)
+              ),
+              queue: yield* Effect.result(orchestrator.queue(sol.dispatchRequestId))
+            }
+          })
+        )
+        expect(result.events).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "events.work-link" }
+        })
+        expect(result.queue).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "transition.work-link" }
+        })
+        const database = new DatabaseSync(path)
+        expect(
+          database.prepare(
+            `SELECT status,
+             (SELECT COUNT(*) FROM orchestrator_events WHERE dispatch_request_id = ?) AS eventCount
+           FROM orchestrator_dispatches WHERE dispatch_request_id = ?`
+          ).get(result.dispatchRequestId, result.dispatchRequestId)
+        ).toEqual({ eventCount: 1, status: "accepted" })
+        database.close()
+      })
+    }))
+
   it.effect("surfaces stale Work authority without partially accepting a Sol dispatch", () =>
     withTemporaryRoot("herdr-orchestrator-stale-sol-authority-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -1900,6 +1952,36 @@ describe("durable coordinator orchestrator", () => {
           "work"
         )
         database.close()
+
+        const duplicateMetadataPath = join(root, "duplicate-legacy-metadata.sqlite")
+        copyFileSync(path, duplicateMetadataPath)
+        const duplicateMetadata = new DatabaseSync(duplicateMetadataPath)
+        duplicateMetadata.exec(`
+          ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
+          CREATE TABLE orchestrator_dispatch_metadata (
+            dispatch_request_id TEXT NOT NULL, route TEXT NOT NULL, work_link TEXT
+          );
+          INSERT INTO orchestrator_dispatch_metadata
+            SELECT * FROM orchestrator_dispatch_metadata_unique;
+          INSERT INTO orchestrator_dispatch_metadata
+            SELECT * FROM orchestrator_dispatch_metadata_unique;
+          DROP TABLE orchestrator_dispatch_metadata_unique;
+        `)
+        duplicateMetadata.close()
+        expect(yield* Effect.result(withDatabase(duplicateMetadataPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.migrate.legacy-metadata-authority" },
+            operation: "initialize.work"
+          }
+        })
+        const duplicateMetadataRolledBack = new DatabaseSync(duplicateMetadataPath)
+        expect(
+          duplicateMetadataRolledBack.prepare(
+            "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
+          ).get()
+        ).toEqual({ count: 2 })
+        duplicateMetadataRolledBack.close()
 
         const missingMetadataLegacyPath = join(root, "missing-metadata-legacy.sqlite")
         copyFileSync(path, missingMetadataLegacyPath)
@@ -2329,6 +2411,76 @@ database.close()`,
           )
         database.close()
 
+        const rewoundLanePath = join(root, "rewound-v1-lane.sqlite")
+        copyFileSync(path, rewoundLanePath)
+        const rewoundLane = new DatabaseSync(rewoundLanePath)
+        rewoundLane.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?").run(
+          activation.binding.lane.revision - 1,
+          JSON.stringify({
+            ...activation.binding.lane,
+            expectedRevision: activation.binding.lane.expectedRevision - 1,
+            revision: activation.binding.lane.revision - 1
+          }),
+          activation.binding.lane.laneId
+        )
+        expect(
+          rewoundLane.prepare(
+            `SELECT lane.revision AS currentRevision, binding.revision AS bindingRevision,
+             json_extract(decision.record, '$.version') AS handoffVersion
+           FROM work_lane_claims lane
+           JOIN work_agent_bindings binding USING (lane_id)
+           JOIN work_dispatch_handoffs dispatch USING (dispatch_request_id)
+           JOIN work_decision_handoffs decision USING (handoff_id)`
+          ).get()
+        ).toEqual({ bindingRevision: 2, currentRevision: 1, handoffVersion: "herdr.work.decision.v1" })
+        rewoundLane.close()
+        expect(
+          yield* Effect.result(withDatabase(
+            rewoundLanePath,
+            Orchestrator
+          ))
+        ).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.handoff-lane-revision" },
+            operation: "initialize.work"
+          }
+        })
+        const rewoundLaneRolledBack = new DatabaseSync(rewoundLanePath)
+        expect(
+          rewoundLaneRolledBack.prepare(
+            "SELECT revision FROM work_lane_claims WHERE lane_id = ?"
+          ).get(activation.binding.lane.laneId)
+        ).toEqual({ revision: activation.binding.lane.revision - 1 })
+        rewoundLaneRolledBack.close()
+
+        const advancedLanePath = join(root, "advanced-v1-lane.sqlite")
+        copyFileSync(path, advancedLanePath)
+        const advancedLaneDatabase = new DatabaseSync(advancedLanePath)
+        const forwardLane = {
+          ...activation.binding.lane,
+          expectedRevision: activation.binding.lane.revision,
+          revision: activation.binding.lane.revision + 1
+        }
+        advancedLaneDatabase.prepare(
+          "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
+        ).run(forwardLane.revision, JSON.stringify(forwardLane), forwardLane.laneId)
+        advancedLaneDatabase.close()
+        yield* withDatabase(
+          advancedLanePath,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.request(activation.event.dispatchRequestId)
+          })
+        )
+        const advancedLaneMigrated = new DatabaseSync(advancedLanePath)
+        expect(
+          advancedLaneMigrated.prepare(
+            "SELECT revision FROM work_lane_claims WHERE lane_id = ?"
+          ).get(forwardLane.laneId)
+        ).toEqual({ revision: forwardLane.revision })
+        advancedLaneMigrated.close()
+
         const v2OnlyPartialSchemaPath = join(root, "v2-only-partial-coordinator-schema.sqlite")
         copyFileSync(path, v2OnlyPartialSchemaPath)
         yield* withDatabase(v2OnlyPartialSchemaPath, Effect.void)
@@ -2738,6 +2890,31 @@ database.close()`,
           })
         }
 
+        const currentOrphanMetadataPath = join(root, "current-orphan-metadata.sqlite")
+        copyFileSync(path, currentOrphanMetadataPath)
+        yield* withDatabase(
+          currentOrphanMetadataPath,
+          Orchestrator
+        )
+        const currentOrphanMetadata = new DatabaseSync(currentOrphanMetadataPath)
+        currentOrphanMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        currentOrphanMetadata.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
+          .run(previousHandoff.id)
+        currentOrphanMetadata.close()
+        expect(
+          yield* Effect.result(withDatabase(
+            currentOrphanMetadataPath,
+            Orchestrator
+          ))
+        ).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-decision" },
+            operation: "initialize.work"
+          }
+        })
+
         for (
           const terminal of ["queued", "delivery_failed"] satisfies ReadonlyArray<
             "queued" | "delivery_failed"
@@ -3021,7 +3198,7 @@ database.close()`,
         expect(yield* Effect.result(withDatabase(orphanMetadataPath, Effect.void))).toMatchObject({
           failure: {
             _tag: "OrchestratorStorageError",
-            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-decision" },
             operation: "initialize.work"
           }
         })

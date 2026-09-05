@@ -161,6 +161,10 @@ const MetadataWorkLinkRow = Schema.Struct({
   route: Schema.String,
   workLink: Schema.NullOr(Schema.String)
 })
+const MetadataHandoffIdentityRow = Schema.Struct({
+  dispatchRequestId: Schema.String,
+  handoffId: Schema.NullOr(Schema.String)
+})
 const LegacyDecisionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
   id: Schema.String,
@@ -409,6 +413,48 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         operation: "open.migrate.dispatch-decision"
       })
     }
+    if (tables.includes("orchestrator_dispatch_metadata")) {
+      const linkedMetadata = Schema.decodeUnknownSync(Schema.Array(MetadataHandoffIdentityRow))(
+        database.prepare(
+          `SELECT dispatch_request_id AS dispatchRequestId,
+             CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
+               THEN json_extract(work_link, '$.handoff.id') END AS handoffId
+           FROM orchestrator_dispatch_metadata
+           WHERE work_link IS NOT NULL
+           LIMIT ${workDecisionMaxRecords + 1}`
+        ).all()
+      )
+      if (linkedMetadata.length > workDecisionMaxRecords) {
+        throw new WorkStoreError({ cause: linkedMetadata.length, operation: "open.migrate.metadata-capacity" })
+      }
+      const metadataCounts = new Map<string, number>()
+      const dispatchCounts = new Map<string, number>()
+      const decisionCounts = new Map<string, number>()
+      for (const metadata of linkedMetadata) {
+        metadataCounts.set(
+          metadata.dispatchRequestId,
+          (metadataCounts.get(metadata.dispatchRequestId) ?? 0) + 1
+        )
+      }
+      for (const dispatch of dispatches) {
+        const identity = JSON.stringify([dispatch.dispatchRequestId, dispatch.handoffId])
+        dispatchCounts.set(identity, (dispatchCounts.get(identity) ?? 0) + 1)
+      }
+      for (const decision of decisionIdentities) {
+        decisionCounts.set(decision.handoffId, (decisionCounts.get(decision.handoffId) ?? 0) + 1)
+      }
+      const invalidMetadata = linkedMetadata.find((metadata) => {
+        const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
+        return metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
+          dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
+      })
+      if (invalidMetadata !== undefined) {
+        throw new WorkStoreError({
+          cause: { decisionIdentities, dispatches, linkedMetadata, metadata: invalidMetadata },
+          operation: "open.migrate.metadata-decision"
+        })
+      }
+    }
     const lanes = laneColumns.length > 0 && !laneColumns.includes("goal_id")
       ? Schema.decodeUnknownSync(Schema.Array(LegacyLaneStoredRow))(
         database.prepare("SELECT lane_id AS laneId, revision, record FROM work_lane_claims").all()
@@ -458,17 +504,19 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           })
         }
         if (tables.includes("orchestrator_dispatch_metadata")) {
-          const metadataInput = database.prepare(
-            `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
-             FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?`
-          ).get(dispatch.dispatchRequestId)
-          if (metadataInput === undefined) {
+          const metadataRows = Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
+            database.prepare(
+              `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
+             FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ? LIMIT 2`
+            ).all(dispatch.dispatchRequestId)
+          )
+          const metadata = metadataRows[0]
+          if (metadataRows.length !== 1 || metadata === undefined) {
             throw new WorkStoreError({
-              cause: dispatch,
+              cause: { dispatch, metadataRows },
               operation: "open.migrate.legacy-metadata-authority"
             })
           }
-          const metadata = Schema.decodeUnknownSync(MetadataWorkLinkRow)(metadataInput)
           if (metadata.workLink === null) {
             throw new WorkStoreError({
               cause: { dispatch, metadata },
@@ -718,7 +766,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         }
       })
       for (const { previous, row } of previousDecisions) {
-        Schema.decodeUnknownSync(LaneRevisionRow)(
+        const laneRevision = Schema.decodeUnknownSync(LaneRevisionRow)(
           database.prepare("SELECT revision FROM work_lane_claims WHERE lane_id = ?").get(row.laneId)
         )
         const handoffDispatches = tables.includes("work_dispatch_handoffs")
@@ -784,6 +832,12 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           "open.migrate.agent-binding"
         )
         if (bindingDecision._tag === "invalid") throw bindingDecision.error
+        if (laneRevision.revision < bindingDecision.binding.lane.revision) {
+          throw new WorkStoreError({
+            cause: { binding: bindingDecision.binding, laneRevision, previous },
+            operation: "open.migrate.handoff-lane-revision"
+          })
+        }
         if (bindingDecision.binding.lane.goalId !== previous.goalId) {
           throw new WorkStoreError({
             cause: { binding: bindingDecision.binding, previous },

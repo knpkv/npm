@@ -2554,6 +2554,36 @@ database.close()`,
       )
       database.close()
 
+      const duplicateMetadataPath = join(directory, "duplicate-legacy-metadata.sqlite")
+      copyFileSync(path, duplicateMetadataPath)
+      const duplicateMetadata = new DatabaseSync(duplicateMetadataPath)
+      duplicateMetadata.exec(`
+        ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
+        CREATE TABLE orchestrator_dispatch_metadata (
+          dispatch_request_id TEXT NOT NULL, route TEXT NOT NULL, work_link TEXT
+        );
+        INSERT INTO orchestrator_dispatch_metadata
+          SELECT * FROM orchestrator_dispatch_metadata_unique;
+        INSERT INTO orchestrator_dispatch_metadata
+          SELECT * FROM orchestrator_dispatch_metadata_unique;
+        DROP TABLE orchestrator_dispatch_metadata_unique;
+      `)
+      duplicateMetadata.close()
+      expect(yield* safelyOpenResult(duplicateMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
+          operation: "open.database"
+        }
+      })
+      const duplicateMetadataRolledBack = new DatabaseSync(duplicateMetadataPath)
+      expect(
+        duplicateMetadataRolledBack.prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
+        ).get()
+      ).toEqual({ count: 2 })
+      duplicateMetadataRolledBack.close()
+
       const queuedLegacyPath = join(directory, "queued-legacy-lifecycle.sqlite")
       copyFileSync(path, queuedLegacyPath)
       const queuedLegacy = new DatabaseSync(queuedLegacyPath)
@@ -3059,6 +3089,48 @@ database.close()`,
       )
       database.close()
 
+      const rewoundLanePath = join(directory, "rewound-v1-lane.sqlite")
+      copyFileSync(path, rewoundLanePath)
+      const rewoundLane = new DatabaseSync(rewoundLanePath)
+      rewoundLane.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?").run(
+        lane.revision - 1,
+        JSON.stringify({ ...lane, expectedRevision: lane.expectedRevision - 1, revision: lane.revision - 1 }),
+        lane.laneId
+      )
+      rewoundLane.close()
+      expect(yield* safelyOpenResult(rewoundLanePath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.handoff-lane-revision" },
+          operation: "open.database"
+        }
+      })
+      const rewoundLaneRolledBack = new DatabaseSync(rewoundLanePath)
+      expect(
+        rewoundLaneRolledBack.prepare(
+          "SELECT revision FROM work_lane_claims WHERE lane_id = ?"
+        ).get(lane.laneId)
+      ).toEqual({ revision: lane.revision - 1 })
+      rewoundLaneRolledBack.close()
+
+      const advancedLanePath = join(directory, "advanced-v1-lane.sqlite")
+      copyFileSync(path, advancedLanePath)
+      const advancedLaneDatabase = new DatabaseSync(advancedLanePath)
+      const forwardLane = { ...lane, expectedRevision: lane.revision, revision: lane.revision + 1 }
+      advancedLaneDatabase.prepare(
+        "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
+      ).run(forwardLane.revision, JSON.stringify(forwardLane), lane.laneId)
+      advancedLaneDatabase.close()
+      const advancedOpened = yield* openScopedStore(advancedLanePath)
+      const advancedService = yield* makeWorkService(advancedOpened.store)
+      expect(yield* advancedService.currentClaim(lane.laneId)).toMatchObject({
+        value: { revision: forwardLane.revision }
+      })
+      expect(yield* advancedService.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
+        value: { version: "herdr.work.decision.v2" }
+      })
+      advancedOpened.close()
+
       const queuedLifecyclePath = join(directory, "queued-lifecycle.sqlite")
       copyFileSync(path, queuedLifecyclePath)
       const queuedLifecycle = new DatabaseSync(queuedLifecyclePath)
@@ -3196,6 +3268,16 @@ database.close()`,
             mutate: (candidate: DatabaseSync) =>
               candidate.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
                 .run(previousHandoff.id)
+          },
+          {
+            expectedOperation: "open.migrate.metadata-decision",
+            name: "v2-orphan-metadata",
+            mutate: (candidate: DatabaseSync) => {
+              candidate.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+                .run("dispatch:current-migration")
+              candidate.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
+                .run(previousHandoff.id)
+            }
           }
         ]
       ) {
@@ -3795,7 +3877,7 @@ database.close()`,
       expect(yield* safelyOpenResult(orphanMetadataPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
           operation: "open.database"
         }
       })
