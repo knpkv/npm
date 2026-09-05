@@ -433,6 +433,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SqliteTableRow))),
         Effect.mapError(storeError("sql-work.initialize.tables"))
       )
+      const hasLegacyDecisionTable = !decisionColumns.some(({ name }) => name === "session_id")
       const legacyLanes = !laneColumns.some(({ name }) => name === "goal_id")
         ? yield* sql`SELECT lane_id AS "laneId", revision, record FROM work_lane_claims`.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LegacyLaneRow))),
@@ -458,20 +459,44 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           Effect.mapError(storeError("sql-work.initialize.legacy-binding-rows"))
         )
         : []
-      const legacyBindingLaneRows = tables.some(({ name }) => name === "work_lane_operations")
+      const legacyBindings = yield* Effect.forEach(
+        hasLegacyDecisionTable ? legacyBindingRows : [],
+        (row) =>
+          Effect.gen(function*() {
+            const decision = decodeAgentBindingRow(
+              row,
+              { dispatchRequestId: row.dispatchRequestId, laneId: row.laneId },
+              "sql-work.initialize.legacy-agent-binding"
+            )
+            return decision._tag === "invalid" ? yield* decision.error : decision.binding
+          })
+      )
+      const legacyBindingOperationIds = Array.from(
+        new Set(legacyBindings.map(({ lane }) => lane.operationId))
+      )
+      const legacyBindingEventIds = Array.from(
+        new Set(legacyBindings.map(({ checkpoint }) => checkpoint.eventId))
+      )
+      const legacyBindingLaneRows = tables.some(({ name }) =>
+          name === "work_lane_operations"
+        ) && legacyBindingOperationIds.length > 0
         ? yield* sql`
           SELECT operation_id AS "operationId", lane_id AS "laneId", goal_id AS "goalId",
             phase, revision, record
           FROM work_lane_operations
+          WHERE operation_id IN ${sql.in(legacyBindingOperationIds)}
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingLaneOperationRow))),
           Effect.mapError(storeError("sql-work.initialize.legacy-binding-lane-rows"))
         )
         : []
-      const legacyBindingCheckpointRows = tables.some(({ name }) => name === "work_goal_events")
+      const legacyBindingCheckpointRows = tables.some(({ name }) =>
+          name === "work_goal_events"
+        ) && legacyBindingEventIds.length > 0
         ? yield* sql`
           SELECT event_id AS "eventId", goal_id AS "goalId", occurred_at AS "occurredAt", record
           FROM work_goal_events
+          WHERE event_id IN ${sql.in(legacyBindingEventIds)}
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingGoalEventRow))),
           Effect.mapError(storeError("sql-work.initialize.legacy-binding-checkpoint-rows"))
@@ -487,7 +512,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         )
         : []
       const metadataTablePresent = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
-      const legacyDecisions = !decisionColumns.some(({ name }) => name === "session_id")
+      const legacyDecisions = hasLegacyDecisionTable
         ? yield* sql`
         SELECT handoff_id AS "handoffId", lane_id AS "laneId", occurred_at AS "occurredAt", record
         FROM work_decision_handoffs
@@ -564,11 +589,13 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             Effect.mapError(storeError("sql-work.initialize.parse-handoff"))
           )
           const previous = decodePreviousDecisionHandoff(input)
-          if (previous._tag === "not_previous") return false
+          if (previous._tag === "current") {
+            return false
+          }
           if (previous._tag === "invalid") {
             return yield* new WorkStoreError({
               cause: previous.cause,
-              operation: "sql-work.initialize.invalid-v1-handoff"
+              operation: "sql-work.initialize.invalid-handoff"
             })
           }
           const laneRows = yield* sql`SELECT revision FROM work_lane_claims WHERE lane_id = ${row.laneId}`.pipe(
@@ -618,7 +645,11 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             )
             : []
           const bindingRow = bindingRows[0]
-          const handoffDispatch = handoffDispatches[0]
+          const handoffDispatch = bindingRow === undefined
+            ? undefined
+            : handoffDispatches.find(
+              ({ dispatchRequestId }) => dispatchRequestId === bindingRow.dispatchRequestId
+            )
           if (bindingRows.length !== 1 || bindingRow === undefined || handoffDispatch === undefined) {
             return yield* new WorkStoreError({
               cause: { bindingRows, row },

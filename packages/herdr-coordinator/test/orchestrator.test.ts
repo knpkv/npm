@@ -1593,7 +1593,7 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
-  it.effect("migrates the previous populated Work handoff table before indexing sessions", () =>
+  it.effect("migrates the previous Work handoff table with bounded companion loading", () =>
     withTemporaryRoot("herdr-orchestrator-work-schema-migration-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
@@ -1672,6 +1672,17 @@ describe("durable coordinator orchestrator", () => {
           legacy.occurredAt
         )
         persistMigrationBindingCompanions(database, legacyBinding)
+        database.prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)")
+          .run("event:unreferenced", legacy.goalId, "not-a-timestamp", "not-json")
+        database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
+          .run(
+            "operation:unreferenced",
+            legacy.laneId,
+            legacy.goalId,
+            legacyBinding.lane.phase,
+            "not-a-revision",
+            "not-json"
+          )
         database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
           .run(
             "dispatch:legacy-sol",
@@ -1886,6 +1897,119 @@ database.close()`,
           version: "herdr.work.decision.v2"
         })
 
+        const multipleDispatchPath = join(root, "multiple-dispatches.sqlite")
+        copyFileSync(path, multipleDispatchPath)
+        const multipleDispatches = new DatabaseSync(multipleDispatchPath)
+        multipleDispatches.exec(`
+          ALTER TABLE work_dispatch_handoffs RENAME TO previous_work_dispatch_handoffs;
+          CREATE TABLE work_dispatch_handoffs (
+            dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL, lane_id TEXT NOT NULL,
+            occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL,
+            FOREIGN KEY (handoff_id) REFERENCES work_decision_handoffs(handoff_id)
+          );
+        `)
+        multipleDispatches.prepare(
+          `INSERT INTO orchestrator_dispatches
+             (dispatch_request_id, idempotency_key, activity_idempotency_key, command, accepted_at, is_routed, status)
+           SELECT ?, idempotency_key || ':unbound', activity_idempotency_key || ':unbound', command,
+             accepted_at, is_routed, status
+           FROM orchestrator_dispatches WHERE dispatch_request_id = ?`
+        ).run("dispatch:unbound-current-handoff", activation.event.dispatchRequestId)
+        multipleDispatches.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
+          "dispatch:unbound-current-handoff",
+          previousHandoff.id,
+          previousHandoff.laneId,
+          previousHandoff.occurredAt,
+          JSON.stringify(workLink.lineage),
+          JSON.stringify(previousHandoff)
+        )
+        multipleDispatches.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
+          "dispatch:unbound-current-handoff",
+          JSON.stringify(submission.route),
+          JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage })
+        )
+        multipleDispatches.prepare(
+          `INSERT INTO work_dispatch_handoffs
+           SELECT dispatch_request_id, handoff_id, lane_id, occurred_at, lineage, ?
+           FROM previous_work_dispatch_handoffs`
+        ).run(JSON.stringify(previousHandoff))
+        multipleDispatches.exec("DROP TABLE previous_work_dispatch_handoffs")
+        multipleDispatches.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        multipleDispatches.prepare(
+          "UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?"
+        )
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage }),
+            activation.event.dispatchRequestId
+          )
+        multipleDispatches.close()
+
+        const multipleReplay = yield* withDatabase(
+          multipleDispatchPath,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* orchestrator.workerStarted(activation.binding.request)
+          })
+        )
+        expect(multipleReplay).toEqual(activation)
+
+        const upgradedHandoff = {
+          ...previousHandoff,
+          contextDelta: previousHandoff.summary,
+          expectedRevision: activation.binding.request.expectedRevision,
+          version: "herdr.work.decision.v2"
+        }
+        const current = new DatabaseSync(path)
+        const retainedBeforeReopen = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          current.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        current.close()
+        yield* withDatabase(path, Effect.void)
+        const reopened = new DatabaseSync(path)
+        const retainedAfterReopen = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          reopened.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        reopened.close()
+        expect(retainedAfterReopen.record).toBe(retainedBeforeReopen.record)
+
+        for (
+          const invalid of [
+            {
+              name: "unknown-handoff-version",
+              record: JSON.stringify({ ...upgradedHandoff, version: "herdr.work.decision.v3" })
+            },
+            {
+              name: "malformed-current-handoff",
+              record: JSON.stringify({ ...upgradedHandoff, expectedRevision: "not-a-revision" })
+            }
+          ]
+        ) {
+          const invalidPath = join(root, `${invalid.name}.sqlite`)
+          copyFileSync(path, invalidPath)
+          const candidate = new DatabaseSync(invalidPath)
+          candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+            .run(invalid.record, previousHandoff.id)
+          candidate.close()
+
+          expect(yield* Effect.result(withDatabase(invalidPath, Effect.void))).toMatchObject({
+            failure: {
+              _tag: "OrchestratorStorageError",
+              cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.invalid-handoff" },
+              operation: "initialize.work"
+            }
+          })
+          const rolledBack = new DatabaseSync(invalidPath)
+          const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+            rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+              .get(previousHandoff.id)
+          )
+          rolledBack.close()
+          expect(retained.record).toBe(invalid.record)
+        }
+
         const malformedPath = join(root, "malformed-v1-handoff.sqlite")
         copyFileSync(path, malformedPath)
         const malformed = new DatabaseSync(malformedPath)
@@ -1895,7 +2019,7 @@ database.close()`,
         expect(yield* Effect.result(withDatabase(malformedPath, Effect.void))).toMatchObject({
           failure: {
             _tag: "OrchestratorStorageError",
-            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.invalid-v1-handoff" },
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.invalid-handoff" },
             operation: "initialize.work"
           }
         })
@@ -2393,16 +2517,16 @@ database.close()`,
           })
         )
         const database = new DatabaseSync(path)
-        database.exec(`
+        database.prepare(`
           WITH RECURSIVE capacity(value) AS (
             VALUES(1)
             UNION ALL
             SELECT value + 1 FROM capacity WHERE value < 16384
           )
           INSERT INTO work_decision_handoffs (handoff_id, session_id, lane_id, occurred_at, record)
-          SELECT 'capacity:' || value, 'session:capacity:' || value, 'lane:capacity', value, '{}'
+          SELECT 'capacity:' || value, 'session:capacity:' || value, 'lane:capacity', value, ?
           FROM capacity
-        `)
+        `).run(JSON.stringify(makeWorkLink([]).handoff))
         database.close()
         const result = yield* withDatabase(
           path,

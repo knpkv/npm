@@ -2749,6 +2749,46 @@ database.close()`,
       )
       database.close()
 
+      const multipleDispatchPath = join(directory, "multiple-dispatches.sqlite")
+      copyFileSync(path, multipleDispatchPath)
+      const multipleDispatches = new DatabaseSync(multipleDispatchPath)
+      multipleDispatches.exec(`
+        ALTER TABLE work_dispatch_handoffs RENAME TO previous_work_dispatch_handoffs;
+        CREATE TABLE work_dispatch_handoffs (
+          dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL, lane_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL
+        );
+      `)
+      multipleDispatches.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
+        "dispatch:unbound-current-migration",
+        previousHandoff.id,
+        previousHandoff.laneId,
+        previousHandoff.occurredAt,
+        JSON.stringify(lineage),
+        JSON.stringify(previousHandoff)
+      )
+      multipleDispatches.exec(`
+        INSERT INTO work_dispatch_handoffs
+        SELECT * FROM previous_work_dispatch_handoffs;
+        DROP TABLE previous_work_dispatch_handoffs;
+      `)
+      multipleDispatches.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
+        "dispatch:unbound-current-migration",
+        "{}",
+        JSON.stringify({ handoff: previousHandoff, lineage })
+      )
+      multipleDispatches.close()
+
+      const multipleOpened = yield* openScopedStore(multipleDispatchPath)
+      const multipleService = yield* makeWorkService(multipleOpened.store)
+      expect(yield* multipleService.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
+        value: {
+          expectedRevision: binding.request.expectedRevision,
+          version: "herdr.work.decision.v2"
+        }
+      })
+      multipleOpened.close()
+
       const opened = yield* openScopedStore(path)
       const service = yield* makeWorkService(opened.store)
       expect(yield* service.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
@@ -2769,15 +2809,56 @@ database.close()`,
         migrated.prepare(
           `SELECT dispatch.record, metadata.work_link AS workLink
          FROM work_dispatch_handoffs dispatch
-         JOIN orchestrator_dispatch_metadata metadata USING (dispatch_request_id)`
-        ).get()
+         JOIN orchestrator_dispatch_metadata metadata USING (dispatch_request_id)
+         WHERE dispatch.handoff_id = ?`
+        ).get(previousHandoff.id)
+      )
+      const retainedCurrent = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        migrated.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(currentHandoff.id)
       )
       migrated.close()
+      expect(retainedCurrent.record).toBe(JSON.stringify(currentHandoff))
       expect(JSON.parse(copies.record)).toMatchObject({ expectedRevision: 1, version: "herdr.work.decision.v2" })
       expect(JSON.parse(copies.workLink)).toMatchObject({
         handoff: { expectedRevision: 1, version: "herdr.work.decision.v2" },
         lineage
       })
+
+      for (
+        const invalid of [
+          {
+            name: "unknown-handoff-version",
+            record: JSON.stringify({ ...currentHandoff, version: "herdr.work.decision.v3" })
+          },
+          {
+            name: "malformed-current-handoff",
+            record: JSON.stringify({ ...currentHandoff, expectedRevision: "not-a-revision" })
+          }
+        ]
+      ) {
+        const invalidPath = join(directory, `${invalid.name}.sqlite`)
+        copyFileSync(path, invalidPath)
+        const candidate = new DatabaseSync(invalidPath)
+        candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(invalid.record, currentHandoff.id)
+        candidate.close()
+
+        expect(yield* safelyOpenResult(invalidPath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.invalid-handoff" },
+            operation: "open.database"
+          }
+        })
+        const rolledBack = new DatabaseSync(invalidPath)
+        const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(currentHandoff.id)
+        )
+        rolledBack.close()
+        expect(retained.record).toBe(invalid.record)
+      }
 
       const malformedPath = join(directory, "malformed-v1-handoff.sqlite")
       copyFileSync(path, malformedPath)
@@ -2788,7 +2869,7 @@ database.close()`,
       expect(yield* safelyOpenResult(malformedPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: { _tag: "WorkStoreError", operation: "open.migrate.invalid-v1-handoff" },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.invalid-handoff" },
           operation: "open.database"
         }
       })

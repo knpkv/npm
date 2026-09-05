@@ -23,7 +23,7 @@ const PreviousWorkDecisionHandoffVersion = Schema.Struct({
 })
 
 type PreviousDecisionHandoffDecodeResult =
-  | { readonly _tag: "not_previous" }
+  | { readonly _tag: "current"; readonly value: WorkDecisionHandoffType }
   | { readonly _tag: "invalid"; readonly cause: Schema.SchemaError }
   | { readonly _tag: "previous"; readonly value: PreviousWorkDecisionHandoff }
 
@@ -36,12 +36,15 @@ export const workDispatchLineageContainedBy = (
   dispatchIds: ReadonlyArray<string>
 ): boolean => lineage.every((dispatchId) => dispatchIds.includes(dispatchId))
 
-/** Distinguishes unrelated versions from a corrupt row that claims the v1 contract. */
+/** Accepts only the current or immediately previous persisted handoff contract. */
 export const decodePreviousDecisionHandoff = (
   input: PersistedDecisionHandoffJson
 ): PreviousDecisionHandoffDecodeResult => {
   if (Option.isNone(Schema.decodeUnknownOption(PreviousWorkDecisionHandoffVersion)(input))) {
-    return { _tag: "not_previous" }
+    const current = Schema.decodeUnknownResult(WorkDecisionHandoff)(input)
+    return Result.isFailure(current)
+      ? { _tag: "invalid", cause: current.failure }
+      : { _tag: "current", value: current.success }
   }
   const decoded = Schema.decodeUnknownResult(PreviousWorkDecisionHandoff)(input)
   return Result.isFailure(decoded)

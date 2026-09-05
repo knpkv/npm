@@ -390,12 +390,12 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(row.record)
         const previous = decodePreviousDecisionHandoff(input)
         switch (previous._tag) {
-          case "not_previous":
+          case "current":
             return []
           case "invalid":
             throw new WorkStoreError({
               cause: previous.cause,
-              operation: "open.migrate.invalid-v1-handoff"
+              operation: "open.migrate.invalid-handoff"
             })
           case "previous":
             return [{ previous: previous.value, row }]
@@ -442,7 +442,9 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           )
           : []
         const bindingRow = bindingRows[0]
-        const handoffDispatch = handoffDispatches[0]
+        const handoffDispatch = bindingRow === undefined
+          ? undefined
+          : handoffDispatches.find(({ dispatchRequestId }) => dispatchRequestId === bindingRow.dispatchRequestId)
         if (bindingRows.length !== 1 || bindingRow === undefined || handoffDispatch === undefined) {
           throw new WorkStoreError({ cause: { bindingRows, row }, operation: "open.migrate.handoff-revision" })
         }
