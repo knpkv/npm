@@ -3246,6 +3246,43 @@ database.close()`,
       })
       runningOpened.close()
 
+      const rewoundCurrentLanePath = join(directory, "rewound-current-v2-lane.sqlite")
+      copyFileSync(runningLifecyclePath, rewoundCurrentLanePath)
+      const rewoundCurrentLane = new DatabaseSync(rewoundCurrentLanePath)
+      rewoundCurrentLane.prepare(
+        "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
+      ).run(
+        lane.revision - 1,
+        JSON.stringify({ ...lane, expectedRevision: lane.expectedRevision - 1, revision: lane.revision - 1 }),
+        lane.laneId
+      )
+      rewoundCurrentLane.close()
+      expect(yield* safelyOpenResult(rewoundCurrentLanePath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: {
+            _tag: "WorkStoreError",
+            operation: "open.migrate.current-agent-binding.lane-revision"
+          },
+          operation: "open.database"
+        }
+      })
+
+      const advancedCurrentLanePath = join(directory, "advanced-current-v2-lane.sqlite")
+      copyFileSync(runningLifecyclePath, advancedCurrentLanePath)
+      const advancedCurrentLane = new DatabaseSync(advancedCurrentLanePath)
+      const advancedCurrentClaim = { ...lane, expectedRevision: lane.revision, revision: lane.revision + 1 }
+      advancedCurrentLane.prepare(
+        "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
+      ).run(
+        advancedCurrentClaim.revision,
+        JSON.stringify(advancedCurrentClaim),
+        advancedCurrentClaim.laneId
+      )
+      advancedCurrentLane.close()
+      const advancedCurrentOpened = yield* openScopedStore(advancedCurrentLanePath)
+      advancedCurrentOpened.close()
+
       const mixedDuplicateMetadataPath = join(directory, "mixed-duplicate-current-metadata.sqlite")
       copyFileSync(runningLifecyclePath, mixedDuplicateMetadataPath)
       const mixedDuplicateMetadata = new DatabaseSync(mixedDuplicateMetadataPath)
@@ -3306,6 +3343,74 @@ database.close()`,
       lunaNullWorkLink.close()
       const lunaNullOpened = yield* openScopedStore(lunaNullWorkLinkPath)
       lunaNullOpened.close()
+
+      for (
+        const { name, workLink } of [
+          { name: "object", workLink: "{}" },
+          { name: "invalid-json", workLink: "{" }
+        ]
+      ) {
+        const malformedLunaWorkLinkPath = join(directory, `luna-${name}-work-link.sqlite`)
+        copyFileSync(lunaNullWorkLinkPath, malformedLunaWorkLinkPath)
+        const malformedLunaWorkLink = new DatabaseSync(malformedLunaWorkLinkPath)
+        malformedLunaWorkLink.prepare(
+          "UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?"
+        ).run(workLink, "dispatch:luna-null-work-link")
+        malformedLunaWorkLink.close()
+        expect(yield* safelyOpenResult(malformedLunaWorkLinkPath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
+            operation: "open.database"
+          }
+        })
+      }
+
+      const lunaHistoryPath = join(directory, "luna-history-above-work-cap.sqlite")
+      copyFileSync(runningLifecyclePath, lunaHistoryPath)
+      const lunaHistory = new DatabaseSync(lunaHistoryPath)
+      lunaHistory.prepare(
+        `WITH RECURSIVE history(value) AS (
+           VALUES(1) UNION ALL SELECT value + 1 FROM history WHERE value < 16385
+         )
+         INSERT INTO orchestrator_dispatches
+           (dispatch_request_id, idempotency_key, activity_idempotency_key, command,
+            accepted_at, is_routed, status)
+         SELECT 'dispatch:luna-history:' || value, 'idempotency:luna-history:' || value,
+           'activity:luna-history:' || value, '{}', 20, 1, 'queued'
+         FROM history`
+      ).run()
+      lunaHistory.prepare(
+        `WITH RECURSIVE history(value) AS (
+           VALUES(1) UNION ALL SELECT value + 1 FROM history WHERE value < 16385
+         )
+         INSERT INTO orchestrator_dispatch_metadata
+         SELECT 'dispatch:luna-history:' || value, ?, NULL FROM history`
+      ).run(JSON.stringify(migrationLunaRoute))
+      lunaHistory.close()
+      const lunaHistoryOpened = yield* openScopedStore(lunaHistoryPath)
+      lunaHistoryOpened.close()
+
+      const routedWithoutMetadataPath = join(directory, "routed-without-metadata.sqlite")
+      copyFileSync(runningLifecyclePath, routedWithoutMetadataPath)
+      const routedWithoutMetadata = new DatabaseSync(routedWithoutMetadataPath)
+      routedWithoutMetadata.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      routedWithoutMetadata.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      routedWithoutMetadata.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
+        .run(previousHandoff.id)
+      routedWithoutMetadata.prepare(
+        "DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
+      ).run("dispatch:current-migration")
+      routedWithoutMetadata.close()
+      expect(yield* safelyOpenResult(routedWithoutMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.routed-metadata" },
+          operation: "open.database"
+        }
+      })
 
       const v2OnlyPartialSchemaPath = join(directory, "v2-only-partial-coordinator-schema.sqlite")
       copyFileSync(runningLifecyclePath, v2OnlyPartialSchemaPath)
@@ -3581,6 +3686,7 @@ database.close()`,
       for (
         const invalidRoute of [
           {
+            expectedOperation: "open.migrate.metadata-decision",
             name: "luna-route",
             route: {
               action: "dispatch",
@@ -3591,7 +3697,11 @@ database.close()`,
               reasoningEffort: "medium"
             }
           },
-          { name: "outsider-sol-route", route: migrationSolRoute("dispatch:outsider") }
+          {
+            expectedOperation: "open.migrate.metadata-authority",
+            name: "outsider-sol-route",
+            route: migrationSolRoute("dispatch:outsider")
+          }
         ]
       ) {
         const invalidRoutePath = join(directory, `${invalidRoute.name}.sqlite`)
@@ -3603,7 +3713,7 @@ database.close()`,
         expect(yield* safelyOpenResult(invalidRoutePath)).toMatchObject({
           failure: {
             _tag: "WorkStoreError",
-            cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+            cause: { _tag: "WorkStoreError", operation: invalidRoute.expectedOperation },
             operation: "open.database"
           }
         })
