@@ -45,7 +45,8 @@ Both the previous pre-session table and v1 records already stored in the current
 table migrate explicitly: their bounded summary becomes the v2 context delta.
 Migration requires exactly one persisted dispatch binding and keeps that
 binding's expected revision; an unbound v1 handoff cannot borrow the current
-lane revision. The complete `WorkAgentBinding` record must decode and match its
+lane revision, and the persisted lane head cannot trail the binding's activated
+revision. The complete `WorkAgentBinding` record must decode and match its
 indexed dispatch, lane, revision, worker, and host, plus its exact immutable
 lane-operation and checkpoint ledger companions, before migration uses that
 authority. A dispatch lineage may remain a strict subset of the decision's
@@ -62,7 +63,9 @@ binding. A non-null Sol link must remain in lineage and identify an exact
 terminally failed Luna parent with its own complete lifecycle. Duplicate
 pre-session dispatch replicas fail closed. Standalone Work databases with no
 coordinator tables remain valid; a partial coordinator table set fails before
-either v1 migration or v2 handoff readback. Current v2 dispatch and metadata
+either v1 migration or v2 handoff readback. The SQL adapter creates or upgrades
+Work tables in that same fail-closed transaction and ignores unrelated legacy
+binding or unrouted metadata rows. Current v2 dispatch and metadata
 replicas must decode and agree exactly with the authoritative decision handoff;
 dispatch lineage may remain a strict subset of the decision's dispatch set.
 Changed content for the same session

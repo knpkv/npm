@@ -28,6 +28,7 @@ import {
   CoordinatorLifecycleEventRow,
   coordinatorLifecycleRunningAt,
   CoordinatorRouteDiscriminatorRow,
+  coordinatorRouteRequiresWorkLink,
   type CoordinatorRouteStorageAuthority,
   requireCoordinatorFailedLunaAuthority,
   requireCoordinatorLifecycleAuthority,
@@ -135,7 +136,8 @@ const MetadataWorkLinkRow = Schema.Struct({
 })
 const MetadataHandoffIdentityRow = Schema.Struct({
   dispatchRequestId: Schema.String,
-  handoffId: Schema.NullOr(Schema.String)
+  handoffId: Schema.NullOr(Schema.String),
+  route: Schema.NullOr(Schema.String)
 })
 const PreviousMetadataWorkLink = Schema.Struct({
   handoff: PreviousWorkDecisionHandoff,
@@ -253,6 +255,12 @@ const decodeLegacyDecision = (
         throw new WorkStoreError({
           cause: { binding: bindingDecision.binding, legacy },
           operation: "sql-work.migrate.legacy-agent-binding.goal"
+        })
+      }
+      if (lane.revision < bindingDecision.binding.lane.revision) {
+        throw new WorkStoreError({
+          cause: { binding: bindingDecision.binding, lane, legacy },
+          operation: "sql-work.migrate.legacy-handoff-lane-revision"
         })
       }
       const readbackError = agentBindingReadbackError(
@@ -392,7 +400,8 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         operation: "sql-work.initialize.schema"
       })
     }
-    yield* sql`
+    yield* sql.withTransaction(Effect.gen(function*() {
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_goal_events (
         event_id TEXT PRIMARY KEY,
         goal_id TEXT NOT NULL,
@@ -402,7 +411,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         UNIQUE (goal_id, occurred_at)
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.goal-events")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_agent_bindings (
         dispatch_request_id TEXT PRIMARY KEY,
         lane_id TEXT NOT NULL,
@@ -413,7 +422,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         record TEXT NOT NULL
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.agent-bindings")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_lane_claims (
         lane_id TEXT PRIMARY KEY,
         goal_id TEXT NOT NULL,
@@ -423,7 +432,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         record TEXT NOT NULL
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-claims")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_lane_operations (
         operation_id TEXT PRIMARY KEY,
         lane_id TEXT NOT NULL,
@@ -433,14 +442,14 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         record TEXT NOT NULL
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operations")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_lane_operation_totals (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         operation_count INTEGER NOT NULL CHECK (operation_count >= 0),
         operation_bytes INTEGER NOT NULL CHECK (operation_bytes >= 0)
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.lane-operation-totals")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_decision_handoffs (
         handoff_id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL UNIQUE,
@@ -449,7 +458,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         record TEXT NOT NULL
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.handoffs")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_dispatch_handoffs (
         dispatch_request_id TEXT PRIMARY KEY,
         handoff_id TEXT NOT NULL UNIQUE,
@@ -460,14 +469,13 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         FOREIGN KEY (handoff_id) REFERENCES work_decision_handoffs(handoff_id)
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.dispatch-links")))
-    yield* sql`
+      yield* sql`
       CREATE TABLE IF NOT EXISTS work_decision_totals (
         singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
         decision_count INTEGER NOT NULL CHECK (decision_count >= 0),
         decision_bytes INTEGER NOT NULL CHECK (decision_bytes >= 0)
       )
     `.pipe(Effect.mapError(storeError("sql-work.initialize.totals")))
-    yield* sql.withTransaction(Effect.gen(function*() {
       const laneColumns = yield* sql`PRAGMA table_info(work_lane_claims)`.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SqliteColumnRow))),
         Effect.mapError(storeError("sql-work.initialize.lane-columns"))
@@ -715,11 +723,17 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LegacyDispatchRow))),
         Effect.mapError(storeError("sql-work.initialize.legacy-dispatches"))
       )
-      const legacyBindingRows = tables.some(({ name }) => name === "work_agent_bindings")
+      const legacyDispatchRequestIds = Array.from(
+        new Set(legacyDispatches.map(({ dispatchRequestId }) => dispatchRequestId))
+      )
+      const legacyBindingRows = hasLegacyDecisionTable &&
+          tables.some(({ name }) => name === "work_agent_bindings") &&
+          legacyDispatchRequestIds.length > 0
         ? yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId", lane_id AS "laneId",
             expected_revision AS "expectedRevision", revision, agent_id AS "agentId", host, record
           FROM work_agent_bindings
+          WHERE dispatch_request_id IN ${sql.in(legacyDispatchRequestIds)}
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingRow))),
           Effect.mapError(storeError("sql-work.initialize.legacy-binding-rows"))
@@ -768,10 +782,13 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           Effect.mapError(storeError("sql-work.initialize.legacy-binding-checkpoint-rows"))
         )
         : []
-      const legacyMetadata = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
+      const legacyMetadata = hasLegacyDecisionTable &&
+          tables.some(({ name }) => name === "orchestrator_dispatch_metadata") &&
+          legacyDispatchRequestIds.length > 0
         ? yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId", route, work_link AS "workLink"
           FROM orchestrator_dispatch_metadata
+          WHERE dispatch_request_id IN ${sql.in(legacyDispatchRequestIds)}
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MetadataWorkLinkRow))),
           Effect.mapError(storeError("sql-work.initialize.legacy-metadata"))
@@ -910,9 +927,10 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         const linkedMetadata = yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId",
             CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
-              THEN json_extract(work_link, '$.handoff.id') END AS "handoffId"
+              THEN json_extract(work_link, '$.handoff.id') END AS "handoffId",
+            route
           FROM orchestrator_dispatch_metadata AS metadata
-          WHERE EXISTS (
+          WHERE route IS NOT NULL OR work_link IS NOT NULL OR EXISTS (
             SELECT 1 FROM orchestrator_dispatch_metadata AS linked
             WHERE linked.dispatch_request_id = metadata.dispatch_request_id
               AND linked.work_link IS NOT NULL
@@ -944,11 +962,35 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         for (const decision of storedDecisions) {
           decisionCounts.set(decision.handoffId, (decisionCounts.get(decision.handoffId) ?? 0) + 1)
         }
-        const invalidMetadata = linkedMetadata.find((metadata) => {
-          const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
-          return metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
-            dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
-        })
+        const invalidMetadataFlags = yield* Effect.forEach(linkedMetadata, (metadata) =>
+          Effect.gen(function*() {
+            if (metadata.route === null) return true
+            const routeText = metadata.route
+            const storageAuthority = yield* routeStorageAuthority(
+              metadata.dispatchRequestId,
+              "sql-work.initialize.metadata-decision"
+            )
+            const requiresWorkLink = yield* Effect.try({
+              try: () =>
+                coordinatorRouteRequiresWorkLink(
+                  routeText,
+                  storageAuthority,
+                  "sql-work.initialize.metadata-decision"
+                ),
+              catch: (cause) =>
+                Schema.is(WorkStoreError)(cause)
+                  ? cause
+                  : new WorkStoreError({ cause, operation: "sql-work.initialize.metadata-decision" })
+            })
+            if (!requiresWorkLink && metadata.handoffId === null) return false
+            const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
+            return metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
+              dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
+          }))
+        const invalidMetadataIndex = invalidMetadataFlags.findIndex(Boolean)
+        const invalidMetadata = invalidMetadataIndex === -1
+          ? undefined
+          : linkedMetadata[invalidMetadataIndex]
         if (invalidMetadata !== undefined) {
           return yield* new WorkStoreError({
             cause: { dispatches: legacyDispatches, linkedMetadata, metadata: invalidMetadata, storedDecisions },

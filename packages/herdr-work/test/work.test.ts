@@ -2500,7 +2500,7 @@ database.close()`,
           revision INTEGER NOT NULL, agent_id TEXT NOT NULL, host TEXT NOT NULL, record TEXT NOT NULL
         );
         CREATE TABLE orchestrator_dispatch_metadata (
-          dispatch_request_id TEXT PRIMARY KEY, route TEXT NOT NULL, work_link TEXT
+          dispatch_request_id TEXT PRIMARY KEY, route TEXT, work_link TEXT
         );
       `)
       database.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?)")
@@ -2513,10 +2513,10 @@ database.close()`,
         "dispatch:legacy-sol",
         Schema.decodeUnknownSync(WorkLaneClaimed)({
           ...legacyClaim,
-          expectedRevision: legacyClaim.revision,
+          expectedRevision: legacyClaim.expectedRevision,
           goalId: legacyHandoff.goalId,
           operationId: "dispatch:legacy-sol",
-          revision: legacyClaim.revision + 1
+          revision: legacyClaim.revision
         }),
         legacyHandoff.occurredAt
       )
@@ -2539,12 +2539,23 @@ database.close()`,
         legacyBinding.request.worker.host,
         JSON.stringify(legacyBinding)
       )
+      database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        "dispatch:unrelated-binding",
+        legacyHandoff.laneId,
+        0,
+        1,
+        "agent:unrelated",
+        "SER8",
+        "not-json"
+      )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
         .run(
           "dispatch:legacy-sol",
           JSON.stringify(migrationSolRoute(null)),
           JSON.stringify({ handoff: legacyHandoff, lineage })
         )
+      database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, NULL, NULL)")
+        .run("dispatch:unrelated-metadata")
       persistCoordinatorLifecycle(
         database,
         "dispatch:legacy-sol",
@@ -2554,13 +2565,68 @@ database.close()`,
       )
       database.close()
 
+      const rewoundLegacyPath = join(directory, "rewound-legacy-lane.sqlite")
+      copyFileSync(path, rewoundLegacyPath)
+      const rewoundLegacy = new DatabaseSync(rewoundLegacyPath)
+      const rewoundBinding = migrationBinding(
+        "dispatch:legacy-sol",
+        Schema.decodeUnknownSync(WorkLaneClaimed)({
+          ...legacyClaim,
+          expectedRevision: legacyClaim.revision,
+          goalId: legacyHandoff.goalId,
+          operationId: "dispatch:legacy-sol",
+          revision: legacyClaim.revision + 1
+        }),
+        legacyHandoff.occurredAt
+      )
+      rewoundLegacy.prepare(
+        `UPDATE work_agent_bindings
+         SET expected_revision = ?, revision = ?, agent_id = ?, host = ?, record = ?
+         WHERE dispatch_request_id = ?`
+      ).run(
+        rewoundBinding.request.expectedRevision,
+        rewoundBinding.lane.revision,
+        rewoundBinding.request.worker.agentId,
+        rewoundBinding.request.worker.host,
+        JSON.stringify(rewoundBinding),
+        rewoundBinding.request.dispatchRequestId
+      )
+      rewoundLegacy.prepare(
+        `UPDATE work_lane_operations
+         SET lane_id = ?, goal_id = ?, phase = ?, revision = ?, record = ?
+         WHERE operation_id = ?`
+      ).run(
+        rewoundBinding.lane.laneId,
+        rewoundBinding.lane.goalId,
+        rewoundBinding.lane.phase,
+        rewoundBinding.lane.revision,
+        JSON.stringify(rewoundBinding.lane),
+        rewoundBinding.lane.operationId
+      )
+      rewoundLegacy.close()
+      expect(yield* safelyOpenResult(rewoundLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-handoff-lane-revision" },
+          operation: "open.database"
+        }
+      })
+      const rewoundLegacyRolledBack = new DatabaseSync(rewoundLegacyPath)
+      expect(
+        rewoundLegacyRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
+          .some((column) =>
+            Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+          )
+      ).toBe(false)
+      rewoundLegacyRolledBack.close()
+
       const duplicateMetadataPath = join(directory, "duplicate-legacy-metadata.sqlite")
       copyFileSync(path, duplicateMetadataPath)
       const duplicateMetadata = new DatabaseSync(duplicateMetadataPath)
       duplicateMetadata.exec(`
         ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
-        CREATE TABLE orchestrator_dispatch_metadata (
-          dispatch_request_id TEXT NOT NULL, route TEXT NOT NULL, work_link TEXT
+          CREATE TABLE orchestrator_dispatch_metadata (
+          dispatch_request_id TEXT NOT NULL, route TEXT, work_link TEXT
         );
         INSERT INTO orchestrator_dispatch_metadata
           SELECT * FROM orchestrator_dispatch_metadata_unique;
@@ -2579,7 +2645,8 @@ database.close()`,
       const duplicateMetadataRolledBack = new DatabaseSync(duplicateMetadataPath)
       expect(
         duplicateMetadataRolledBack.prepare(
-          "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
+          `SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata
+           WHERE dispatch_request_id = 'dispatch:legacy-sol'`
         ).get()
       ).toEqual({ count: 2 })
       duplicateMetadataRolledBack.close()
@@ -2634,7 +2701,7 @@ database.close()`,
       expect(yield* safelyOpenResult(unroutedLegacyPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-metadata-authority" },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
           operation: "open.database"
         }
       })
@@ -2652,8 +2719,9 @@ database.close()`,
       const missingParentLegacyPath = join(directory, "missing-parent-legacy.sqlite")
       copyFileSync(path, missingParentLegacyPath)
       const missingParentLegacy = new DatabaseSync(missingParentLegacyPath)
-      missingParentLegacy.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
-        .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
+      missingParentLegacy.prepare(
+        "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
+      ).run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)), "dispatch:legacy-sol")
       missingParentLegacy.close()
       expect(yield* safelyOpenResult(missingParentLegacyPath)).toMatchObject({
         failure: {
@@ -2667,8 +2735,9 @@ database.close()`,
       copyFileSync(path, failedParentLegacyPath)
       const failedParentLegacy = new DatabaseSync(failedParentLegacyPath)
       persistCoordinatorLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed", "consult")
-      failedParentLegacy.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
-        .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
+      failedParentLegacy.prepare(
+        "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
+      ).run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)), "dispatch:legacy-sol")
       failedParentLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
         .run(parentDispatchRequestId, JSON.stringify(migrationLunaRoute))
       failedParentLegacy.close()
@@ -2727,10 +2796,10 @@ database.close()`,
           dispatchRequestId,
           Schema.decodeUnknownSync(WorkLaneClaimed)({
             ...legacyClaim,
-            expectedRevision: legacyClaim.revision,
+            expectedRevision: legacyClaim.expectedRevision,
             goalId: handoff.goalId,
             operationId: dispatchRequestId,
-            revision: legacyClaim.revision + 1
+            revision: legacyClaim.revision
           }),
           occurredAt
         )
@@ -2814,10 +2883,10 @@ database.close()`,
         concurrentDispatchRequestId,
         Schema.decodeUnknownSync(WorkLaneClaimed)({
           ...legacyClaim,
-          expectedRevision: legacyClaim.revision,
+          expectedRevision: legacyClaim.expectedRevision,
           goalId: concurrentHandoff.goalId,
           operationId: concurrentDispatchRequestId,
-          revision: legacyClaim.revision + 1
+          revision: legacyClaim.revision
         }),
         concurrentHandoff.occurredAt
       )
@@ -2871,7 +2940,7 @@ database.exec("COMMIT")
 database.close()`,
           path,
           JSON.stringify(concurrentHandoff),
-          String(legacyClaim.revision),
+          String(legacyClaim.expectedRevision),
           JSON.stringify(concurrentBinding)
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
@@ -2904,7 +2973,7 @@ database.close()`,
         value: {
           contextDelta: legacyHandoff.summary,
           dispatchIds: lineage,
-          expectedRevision: legacyClaim.revision,
+          expectedRevision: legacyClaim.expectedRevision,
           id: legacyHandoff.id,
           sessionId: legacyHandoff.id,
           version: "herdr.work.decision.v2"
@@ -3207,6 +3276,37 @@ database.close()`,
       ).toEqual({ count: 2 })
       mixedDuplicateMetadataRolledBack.close()
 
+      const missingSolWorkLinkPath = join(directory, "missing-sol-work-link.sqlite")
+      copyFileSync(runningLifecyclePath, missingSolWorkLinkPath)
+      const missingSolWorkLink = new DatabaseSync(missingSolWorkLinkPath)
+      missingSolWorkLink.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      missingSolWorkLink.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      missingSolWorkLink.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
+        .run(previousHandoff.id)
+      missingSolWorkLink.prepare(
+        "UPDATE orchestrator_dispatch_metadata SET work_link = NULL WHERE dispatch_request_id = ?"
+      ).run("dispatch:current-migration")
+      missingSolWorkLink.close()
+      expect(yield* safelyOpenResult(missingSolWorkLinkPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
+          operation: "open.database"
+        }
+      })
+
+      const lunaNullWorkLinkPath = join(directory, "luna-null-work-link.sqlite")
+      copyFileSync(runningLifecyclePath, lunaNullWorkLinkPath)
+      const lunaNullWorkLink = new DatabaseSync(lunaNullWorkLinkPath)
+      persistCoordinatorLifecycle(lunaNullWorkLink, "dispatch:luna-null-work-link", 20, "queued", "consult")
+      lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
+        .run("dispatch:luna-null-work-link", JSON.stringify(migrationLunaRoute))
+      lunaNullWorkLink.close()
+      const lunaNullOpened = yield* openScopedStore(lunaNullWorkLinkPath)
+      lunaNullOpened.close()
+
       const v2OnlyPartialSchemaPath = join(directory, "v2-only-partial-coordinator-schema.sqlite")
       copyFileSync(runningLifecyclePath, v2OnlyPartialSchemaPath)
       const v2OnlyPartialSchema = new DatabaseSync(v2OnlyPartialSchemaPath)
@@ -3387,7 +3487,7 @@ database.close()`,
       expect(yield* safelyOpenResult(unroutedPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
           operation: "open.database"
         }
       })
@@ -3536,6 +3636,13 @@ database.close()`,
         "dispatch:unbound-current-migration",
         JSON.stringify(migrationSolRoute("dispatch:failed-luna")),
         JSON.stringify({ handoff: previousHandoff, lineage })
+      )
+      persistCoordinatorLifecycle(
+        multipleDispatches,
+        "dispatch:unbound-current-migration",
+        previousHandoff.occurredAt,
+        "running",
+        "work"
       )
       multipleDispatches.close()
 
@@ -3889,7 +3996,7 @@ database.close()`,
       expect(yield* safelyOpenResult(nullMetadataPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
           operation: "open.database"
         }
       })

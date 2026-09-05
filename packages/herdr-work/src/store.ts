@@ -40,6 +40,7 @@ import {
   CoordinatorLifecycleEventRow,
   coordinatorLifecycleRunningAt,
   CoordinatorRouteDiscriminatorRow,
+  coordinatorRouteRequiresWorkLink,
   type CoordinatorRouteStorageAuthority,
   requireCoordinatorFailedLunaAuthority,
   requireCoordinatorLifecycleAuthority,
@@ -163,7 +164,8 @@ const MetadataWorkLinkRow = Schema.Struct({
 })
 const MetadataHandoffIdentityRow = Schema.Struct({
   dispatchRequestId: Schema.String,
-  handoffId: Schema.NullOr(Schema.String)
+  handoffId: Schema.NullOr(Schema.String),
+  route: Schema.NullOr(Schema.String)
 })
 const LegacyDecisionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
@@ -418,9 +420,10 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         database.prepare(
           `SELECT dispatch_request_id AS dispatchRequestId,
              CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
-               THEN json_extract(work_link, '$.handoff.id') END AS handoffId
+               THEN json_extract(work_link, '$.handoff.id') END AS handoffId,
+             route
            FROM orchestrator_dispatch_metadata AS metadata
-           WHERE EXISTS (
+           WHERE route IS NOT NULL OR work_link IS NOT NULL OR EXISTS (
              SELECT 1 FROM orchestrator_dispatch_metadata AS linked
              WHERE linked.dispatch_request_id = metadata.dispatch_request_id
                AND linked.work_link IS NOT NULL
@@ -448,6 +451,13 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         decisionCounts.set(decision.handoffId, (decisionCounts.get(decision.handoffId) ?? 0) + 1)
       }
       const invalidMetadata = linkedMetadata.find((metadata) => {
+        if (metadata.route === null) return true
+        const requiresWorkLink = coordinatorRouteRequiresWorkLink(
+          metadata.route,
+          routeStorageAuthority(metadata.dispatchRequestId, "open.migrate.metadata-decision"),
+          "open.migrate.metadata-decision"
+        )
+        if (!requiresWorkLink && metadata.handoffId === null) return false
         const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
         return metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
           dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
@@ -571,6 +581,12 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           throw new WorkStoreError({
             cause: { binding: bindingDecision.binding, legacy },
             operation: "open.migrate.legacy-agent-binding.goal"
+          })
+        }
+        if (lane.revision < bindingDecision.binding.lane.revision) {
+          throw new WorkStoreError({
+            cause: { binding: bindingDecision.binding, lane, legacy },
+            operation: "open.migrate.legacy-handoff-lane-revision"
           })
         }
         requireBindingCompanions(bindingDecision.binding, "open.migrate.legacy-agent-binding")

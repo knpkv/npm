@@ -226,6 +226,13 @@ const decodeCoordinatorRouteAuthority = (
   }
 }
 
+/** Reports whether a persisted routed dispatch must carry a Work link. */
+export const coordinatorRouteRequiresWorkLink = (
+  routeText: string,
+  storageAuthority: CoordinatorRouteStorageAuthority,
+  operation: string
+): boolean => decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation).model === "gpt-5.6-sol"
+
 /** Validates persisted route authority before a Work-link replica is upgraded. */
 export const requireCoordinatorRouteAuthority = (
   commandText: string,
