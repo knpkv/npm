@@ -787,6 +787,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(DecisionRow))),
         Effect.mapError(storeError("sql-work.initialize.persisted-handoffs"))
       )
+      yield* requireCoordinatorSchema("sql-work.initialize")
       const migrationResults = yield* Effect.forEach(storedDecisions, (row) =>
         Effect.gen(function*() {
           const input = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(row.record).pipe(

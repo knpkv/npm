@@ -58,9 +58,9 @@ the exact running checkpoint, status/tail agreement, a matching handoff goal, an
 a schema-valid Sol route whose metadata agrees with the persisted routed
 discriminator. A non-null Sol link must remain in lineage and identify an exact
 terminally failed Luna parent with its own complete lifecycle. Duplicate
-pre-session dispatch replicas fail closed. Standalone Work databases with neither
-coordinator lifecycle table remain valid; a partial coordinator table set does
-not.
+pre-session dispatch replicas fail closed. Standalone Work databases with no
+coordinator tables remain valid; a partial coordinator table set fails before
+either v1 migration or v2 handoff readback.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
 unbounded transcript. Replay aliases retain fixed-size canonical SHA-256

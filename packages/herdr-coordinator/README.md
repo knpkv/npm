@@ -64,8 +64,9 @@ restart; a changed worker, refreshed accepted revision, or stale lane authority
 is a typed conflict, never a sequential repair.
 Work v1 migration uses the same authority: routed metadata must agree with the
 persisted dispatch discriminator, and a linked Sol route must name an exact
-terminally failed Luna parent with a complete lifecycle. Partial coordinator
-table sets fail closed; older dispatch tables without the discriminator retain
+terminally failed Luna parent with a complete lifecycle. Work preflights partial
+coordinator table sets before coordinator schema creation and before either v1
+or v2 handoff readback; older dispatch tables without the discriminator retain
 their explicit backfill-compatible path.
 
 `PullRequestEvidenceProvider.exactHeadGateEvidence` accepts no caller-built

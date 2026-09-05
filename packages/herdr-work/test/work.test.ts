@@ -3041,6 +3041,19 @@ database.close()`,
       })
       runningOpened.close()
 
+      const v2OnlyPartialSchemaPath = join(directory, "v2-only-partial-coordinator-schema.sqlite")
+      copyFileSync(runningLifecyclePath, v2OnlyPartialSchemaPath)
+      const v2OnlyPartialSchema = new DatabaseSync(v2OnlyPartialSchemaPath)
+      v2OnlyPartialSchema.exec("DROP TABLE orchestrator_dispatch_metadata")
+      v2OnlyPartialSchema.close()
+      expect(yield* safelyOpenResult(v2OnlyPartialSchemaPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.schema" },
+          operation: "open.database"
+        }
+      })
+
       const missingMetadataPath = join(directory, "missing-metadata-current.sqlite")
       copyFileSync(path, missingMetadataPath)
       const missingMetadata = new DatabaseSync(missingMetadataPath)
@@ -3049,7 +3062,7 @@ database.close()`,
       expect(yield* safelyOpenResult(missingMetadataPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.schema" },
           operation: "open.database"
         }
       })

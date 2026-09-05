@@ -345,6 +345,7 @@ const makeOrchestrator: Effect.Effect<
   })
   const now = Clock.currentTimeMillis
 
+  yield* workSql.initialize.pipe(Effect.mapError(storageError("initialize.work")))
   yield* sql`
     CREATE TABLE IF NOT EXISTS orchestrator_dispatches (
       dispatch_request_id TEXT PRIMARY KEY,
@@ -398,7 +399,6 @@ const makeOrchestrator: Effect.Effect<
       `.pipe(Effect.mapError(storageError("initialize.backfill-routed-discriminator")))
     })
   ).pipe(Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("initialize.route-migration")(cause))))
-  yield* workSql.initialize.pipe(Effect.mapError(storageError("initialize.work")))
   yield* sql`
     CREATE INDEX IF NOT EXISTS orchestrator_pending_dispatches_order
     ON orchestrator_dispatches (accepted_at ASC, dispatch_request_id ASC)

@@ -1788,7 +1788,7 @@ describe("durable coordinator orchestrator", () => {
             _tag: "OrchestratorStorageError",
             cause: {
               _tag: "WorkStoreError",
-              operation: "sql-work.migrate.legacy-metadata-authority"
+              operation: "sql-work.initialize.legacy-agent-binding.lifecycle.schema"
             },
             operation: "initialize.work"
           }
@@ -2178,6 +2178,20 @@ database.close()`,
           )
         database.close()
 
+        const v2OnlyPartialSchemaPath = join(root, "v2-only-partial-coordinator-schema.sqlite")
+        copyFileSync(path, v2OnlyPartialSchemaPath)
+        yield* withDatabase(v2OnlyPartialSchemaPath, Effect.void)
+        const v2OnlyPartialSchema = new DatabaseSync(v2OnlyPartialSchemaPath)
+        v2OnlyPartialSchema.exec("DROP TABLE orchestrator_dispatch_metadata")
+        v2OnlyPartialSchema.close()
+        expect(yield* Effect.result(withDatabase(v2OnlyPartialSchemaPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.schema" },
+            operation: "initialize.work"
+          }
+        })
+
         const missingAuthorityMetadataPath = join(root, "missing-metadata-current.sqlite")
         copyFileSync(path, missingAuthorityMetadataPath)
         const missingAuthorityMetadata = new DatabaseSync(missingAuthorityMetadataPath)
@@ -2186,7 +2200,7 @@ database.close()`,
         expect(yield* Effect.result(withDatabase(missingAuthorityMetadataPath, Effect.void))).toMatchObject({
           failure: {
             _tag: "OrchestratorStorageError",
-            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.schema" },
             operation: "initialize.work"
           }
         })

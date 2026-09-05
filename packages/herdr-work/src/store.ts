@@ -510,6 +510,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
            FROM work_decision_handoffs`
         ).all()
       )
+      requireCoordinatorSchema("open.migrate")
       const updateDecision = database.prepare(
         "UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?"
       )
