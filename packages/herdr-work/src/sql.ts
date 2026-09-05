@@ -1,4 +1,4 @@
-import { Effect, Equal, Option, Schema } from "effect"
+import { Effect, Equal, Schema } from "effect"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { makeWorkAgentBinding } from "./agent-binding.js"
@@ -154,6 +154,8 @@ const decodeLegacyLane = (row: typeof LegacyLaneRow.Type) =>
 
 const decodeLegacyDecision = (
   bindingRows: ReadonlyArray<typeof AgentBindingRow.Type>,
+  bindingLaneRows: ReadonlyArray<typeof AgentBindingLaneOperationRow.Type>,
+  bindingCheckpointRows: ReadonlyArray<typeof AgentBindingGoalEventRow.Type>,
   dispatches: ReadonlyArray<typeof LegacyDispatchRow.Type>,
   lanes: ReadonlyArray<WorkLaneClaimed>,
   metadataTablePresent: boolean,
@@ -225,6 +227,13 @@ const decodeLegacyDecision = (
         "sql-work.migrate.legacy-agent-binding"
       )
       if (bindingDecision._tag === "invalid") throw bindingDecision.error
+      const readbackError = agentBindingReadbackError(
+        bindingDecision.binding,
+        bindingLaneRows.find(({ operationId }) => operationId === bindingDecision.binding.lane.operationId),
+        bindingCheckpointRows.find(({ eventId }) => eventId === bindingDecision.binding.checkpoint.eventId),
+        "sql-work.migrate.legacy-agent-binding"
+      )
+      if (readbackError !== undefined) throw readbackError
       return Schema.decodeUnknownSync(WorkDecisionHandoff)({
         ...legacy,
         contextDelta: legacy.summary,
@@ -449,6 +458,25 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           Effect.mapError(storeError("sql-work.initialize.legacy-binding-rows"))
         )
         : []
+      const legacyBindingLaneRows = tables.some(({ name }) => name === "work_lane_operations")
+        ? yield* sql`
+          SELECT operation_id AS "operationId", lane_id AS "laneId", goal_id AS "goalId",
+            phase, revision, record
+          FROM work_lane_operations
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingLaneOperationRow))),
+          Effect.mapError(storeError("sql-work.initialize.legacy-binding-lane-rows"))
+        )
+        : []
+      const legacyBindingCheckpointRows = tables.some(({ name }) => name === "work_goal_events")
+        ? yield* sql`
+          SELECT event_id AS "eventId", goal_id AS "goalId", occurred_at AS "occurredAt", record
+          FROM work_goal_events
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingGoalEventRow))),
+          Effect.mapError(storeError("sql-work.initialize.legacy-binding-checkpoint-rows"))
+        )
+        : []
       const legacyMetadata = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
         ? yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId", work_link AS "workLink"
@@ -471,6 +499,8 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
               (row) =>
                 decodeLegacyDecision(
                   legacyBindingRows,
+                  legacyBindingLaneRows,
+                  legacyBindingCheckpointRows,
                   legacyDispatches,
                   legacyLanes,
                   metadataTablePresent,
@@ -530,12 +560,17 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
       )
       const migrationResults = yield* Effect.forEach(storedDecisions, (row) =>
         Effect.gen(function*() {
-          const input = yield* Effect.try({
-            try: () => JSON.parse(row.record),
-            catch: storeError("sql-work.initialize.parse-handoff")
-          })
+          const input = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Json))(row.record).pipe(
+            Effect.mapError(storeError("sql-work.initialize.parse-handoff"))
+          )
           const previous = decodePreviousDecisionHandoff(input)
-          if (Option.isNone(previous)) return false
+          if (previous._tag === "not_previous") return false
+          if (previous._tag === "invalid") {
+            return yield* new WorkStoreError({
+              cause: previous.cause,
+              operation: "sql-work.initialize.invalid-v1-handoff"
+            })
+          }
           const laneRows = yield* sql`SELECT revision FROM work_lane_claims WHERE lane_id = ${row.laneId}`.pipe(
             Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LaneRevisionRow))),
             Effect.mapError(storeError("sql-work.initialize.handoff-lane-revision"))
@@ -596,6 +631,30 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             "sql-work.initialize.agent-binding"
           )
           if (bindingDecision._tag === "invalid") return yield* bindingDecision.error
+          const bindingCompanions = yield* Effect.all({
+            checkpointRows: sql`
+              SELECT event_id AS "eventId", goal_id AS "goalId", occurred_at AS "occurredAt", record
+              FROM work_goal_events WHERE event_id = ${bindingDecision.binding.checkpoint.eventId}
+            `.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingGoalEventRow))),
+              Effect.mapError(storeError("sql-work.initialize.agent-binding.checkpoint-companion"))
+            ),
+            laneRows: sql`
+              SELECT operation_id AS "operationId", lane_id AS "laneId", goal_id AS "goalId",
+                phase, revision, record
+              FROM work_lane_operations WHERE operation_id = ${bindingDecision.binding.lane.operationId}
+            `.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingLaneOperationRow))),
+              Effect.mapError(storeError("sql-work.initialize.agent-binding.lane-companion"))
+            )
+          })
+          const bindingReadbackError = agentBindingReadbackError(
+            bindingDecision.binding,
+            bindingCompanions.laneRows[0],
+            bindingCompanions.checkpointRows[0],
+            "sql-work.initialize.agent-binding"
+          )
+          if (bindingReadbackError !== undefined) return yield* bindingReadbackError
           const verifiedDispatches = yield* Effect.forEach(handoffDispatches, (dispatch) =>
             Effect.gen(function*() {
               const decoded = yield* Effect.try({

@@ -186,6 +186,33 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
     const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
       database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
     ).map(({ name }) => name)
+    const requireBindingCompanions = (
+      binding: WorkAgentBindingType,
+      operation: string
+    ): void => {
+      const laneInput = tables.includes("work_lane_operations")
+        ? database.prepare(
+          `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
+             phase, revision, record
+           FROM work_lane_operations WHERE operation_id = ?`
+        ).get(binding.lane.operationId)
+        : undefined
+      const checkpointInput = tables.includes("work_goal_events")
+        ? database.prepare(
+          `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+           FROM work_goal_events WHERE event_id = ?`
+        ).get(binding.checkpoint.eventId)
+        : undefined
+      const error = agentBindingReadbackError(
+        binding,
+        laneInput === undefined ? undefined : Schema.decodeUnknownSync(AgentBindingLaneOperationRow)(laneInput),
+        checkpointInput === undefined
+          ? undefined
+          : Schema.decodeUnknownSync(AgentBindingGoalEventRow)(checkpointInput),
+        operation
+      )
+      if (error !== undefined) throw error
+    }
     const dispatches = tables.includes("work_dispatch_handoffs")
       ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
         database.prepare(
@@ -291,6 +318,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           "open.migrate.legacy-agent-binding"
         )
         if (bindingDecision._tag === "invalid") throw bindingDecision.error
+        requireBindingCompanions(bindingDecision.binding, "open.migrate.legacy-agent-binding")
         return Schema.decodeUnknownSync(WorkDecisionHandoff)({
           ...legacy,
           contextDelta: legacy.summary,
@@ -359,9 +387,19 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         )
         : null
       const previousDecisions = storedDecisions.flatMap((row) => {
-        const input = JSON.parse(row.record)
+        const input = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(row.record)
         const previous = decodePreviousDecisionHandoff(input)
-        return Option.isNone(previous) ? [] : [{ previous: previous.value, row }]
+        switch (previous._tag) {
+          case "not_previous":
+            return []
+          case "invalid":
+            throw new WorkStoreError({
+              cause: previous.cause,
+              operation: "open.migrate.invalid-v1-handoff"
+            })
+          case "previous":
+            return [{ previous: previous.value, row }]
+        }
       })
       for (const { previous, row } of previousDecisions) {
         Schema.decodeUnknownSync(LaneRevisionRow)(
@@ -414,6 +452,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           "open.migrate.agent-binding"
         )
         if (bindingDecision._tag === "invalid") throw bindingDecision.error
+        requireBindingCompanions(bindingDecision.binding, "open.migrate.agent-binding")
         const verifiedDispatches = handoffDispatches.map((dispatch) => {
           const dispatchHandoff = Schema.decodeUnknownSync(PreviousWorkDecisionHandoff)(JSON.parse(dispatch.record))
           const lineage = Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))

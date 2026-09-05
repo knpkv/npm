@@ -136,6 +136,17 @@ describe("sanitized approval requests", () => {
     })
   })
 
+  it("labels the explicit transition-summary delegate without prompt inference", () => {
+    const request = approvalRequestFor({
+      kind: "agent.delegate",
+      mode: "transition_summary",
+      prompt: "internal transition context",
+      repository: "/srv/npm"
+    })
+    expect(request).toMatchObject({ kind: "agent.delegate", title: "Summarize a transition" })
+    expect(request.fields[0]).toMatchObject({ key: "mode", value: "transition_summary" })
+  })
+
   it("removes approval secrets and terminal output from the browser projection", () => {
     const sanitized = sanitizeJobRecord(recordFor("pending_approval"))
     expect("hash" in sanitized).toBe(false)

@@ -393,6 +393,20 @@ const program = Effect.scoped(
       }
     }
 
+    const fleetArchive = archives.get("@knpkv/herdr-fleet")
+    if (fleetArchive === undefined) {
+      return yield* new HerdrPackContractError({ reason: "Fleet archive was not packed" })
+    }
+    const fleetDelegateEntries = yield* Effect.all([
+      run(spawner, "tar", ["-xOf", fleetArchive, "package/dist/model.js"], workspaceRoot),
+      run(spawner, "tar", ["-xOf", fleetArchive, "package/dist/model.d.ts"], workspaceRoot)
+    ])
+    if (fleetDelegateEntries.some((entry) => entry.includes("transition_summary") === false)) {
+      return yield* new HerdrPackContractError({
+        reason: "Packed Fleet runtime or declarations omit the transition-summary delegate mode"
+      })
+    }
+
     const approvalsArchive = archives.get("@knpkv/herdr-approvals")
     if (approvalsArchive === undefined) {
       return yield* new HerdrPackContractError({ reason: "Approval archive was not packed" })
@@ -433,7 +447,7 @@ const program = Effect.scoped(
     }
 
     yield* Console.log(
-      "six Herdr pnpm packs are reproducible, exact, dependency-clean, and export both executables plus hostd composition"
+      "six Herdr pnpm packs are reproducible, exact, dependency-clean, and export transition summaries plus both executables and hostd composition"
     )
   }).pipe(
     // The packed-package verifier owns one Node runtime for the complete check.

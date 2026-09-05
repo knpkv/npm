@@ -26,6 +26,7 @@ import {
   JobStore,
   jobTextMaxLength,
   makeFleetService,
+  requiresApproval,
   summarizeHostOperationTerminalDetail,
   type WorkerStarted
 } from "../src/index.js"
@@ -885,6 +886,35 @@ describe("fleet local authority", () => {
       })
     )).toBe(true)
   })
+
+  it.effect("keeps transition summaries distinct from bounded consultation", () =>
+    Effect.gen(function*() {
+      const consult = Schema.decodeUnknownSync(JobPayload)({
+        kind: "agent.delegate",
+        mode: "consult",
+        prompt: "inspect the bounded state",
+        repository: "/repo"
+      })
+      const transitionSummary = Schema.decodeUnknownSync(JobPayload)({
+        kind: "agent.delegate",
+        mode: "transition_summary",
+        prompt: "summarize the state transition",
+        repository: "/repo"
+      })
+      expect(requiresApproval(consult)).toBe(false)
+      expect(requiresApproval(transitionSummary)).toBe(false)
+      expect(yield* jobHash("SER8", "owner", consult)).not.toBe(
+        yield* jobHash("SER8", "owner", transitionSummary)
+      )
+      for (const mode of ["status", "wait"]) {
+        expect(Result.isFailure(
+          Schema.decodeUnknownResult(JobPayload)({
+            ...transitionSummary,
+            mode
+          })
+        )).toBe(true)
+      }
+    }).pipe(provideNodeServices))
 
   it("keeps browser recovery a zero-field typed local payload", () => {
     expect(

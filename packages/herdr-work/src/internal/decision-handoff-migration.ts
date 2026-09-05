@@ -1,4 +1,4 @@
-import { Schema } from "effect"
+import { Option, Result, Schema } from "effect"
 import { WorkDecisionHandoff, type WorkDecisionHandoff as WorkDecisionHandoffType } from "../model.js"
 
 export const PreviousWorkDecisionHandoff = Schema.Struct({
@@ -16,6 +16,16 @@ export const PreviousWorkDecisionHandoff = Schema.Struct({
   occurredAt: WorkDecisionHandoff.fields.occurredAt
 })
 type PreviousWorkDecisionHandoff = typeof PreviousWorkDecisionHandoff.Type
+type PersistedDecisionHandoffJson = typeof Schema.Json.Type
+
+const PreviousWorkDecisionHandoffVersion = Schema.Struct({
+  version: PreviousWorkDecisionHandoff.fields.version
+})
+
+type PreviousDecisionHandoffDecodeResult =
+  | { readonly _tag: "not_previous" }
+  | { readonly _tag: "invalid"; readonly cause: Schema.SchemaError }
+  | { readonly _tag: "previous"; readonly value: PreviousWorkDecisionHandoff }
 
 export const previousDecisionHandoffEquivalent = Schema.toEquivalence(PreviousWorkDecisionHandoff)
 export const workDispatchLineageEquivalent = Schema.toEquivalence(WorkDecisionHandoff.fields.dispatchIds)
@@ -26,7 +36,18 @@ export const workDispatchLineageContainedBy = (
   dispatchIds: ReadonlyArray<string>
 ): boolean => lineage.every((dispatchId) => dispatchIds.includes(dispatchId))
 
-export const decodePreviousDecisionHandoff = Schema.decodeUnknownOption(PreviousWorkDecisionHandoff)
+/** Distinguishes unrelated versions from a corrupt row that claims the v1 contract. */
+export const decodePreviousDecisionHandoff = (
+  input: PersistedDecisionHandoffJson
+): PreviousDecisionHandoffDecodeResult => {
+  if (Option.isNone(Schema.decodeUnknownOption(PreviousWorkDecisionHandoffVersion)(input))) {
+    return { _tag: "not_previous" }
+  }
+  const decoded = Schema.decodeUnknownResult(PreviousWorkDecisionHandoff)(input)
+  return Result.isFailure(decoded)
+    ? { _tag: "invalid", cause: decoded.failure }
+    : { _tag: "previous", value: decoded.success }
+}
 
 /** Upgrades the immediately previous persisted handoff shape without accepting unknown versions. */
 export const upgradePreviousDecisionHandoff = (

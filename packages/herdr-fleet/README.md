@@ -6,6 +6,8 @@ The host that receives a job owns its durable SQLite record and every state tran
 
 `JobRecord.hash` persists a lowercase hex SHA-256 digest. Its canonical JSON input contains the host, actor, payload discriminant, and every identity field for that variant: `ref` for `nix.apply`; `repository`, `prompt`, `mode`, and the optional `channel` for `agent.delegate`; `session` and `message` for `agent.message`; no extra field for `nix.check` or `browser.mcp.recover`. Raw credentials and provider secrets never enter this hash or the persisted job payload.
 
+`AgentDelegate.mode` is the explicit model-dispatch intent. `consult` is a bounded Luna consultation at medium reasoning effort; `transition_summary` is a Luna summary at low effort. `review` and `work`, including coding, recovery, escalation, mutation, and public-contract changes, remain Sol work at high effort. Status and wait use their non-delegating operations and never become model dispatches. Adapters must switch on this required discriminator; prompt inference and a default route are invalid.
+
 The package exports:
 
 - Schema contracts for configuration, jobs, status, and agent inventory

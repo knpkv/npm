@@ -270,6 +270,38 @@ const migrationBinding = (
     version: "herdr.work.agent-binding.v1"
   })
 
+const persistMigrationBindingCompanions = (
+  database: DatabaseSync,
+  binding: WorkAgentBinding
+): void => {
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS work_goal_events (
+      event_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, occurred_at INTEGER NOT NULL,
+      record TEXT NOT NULL, transaction_id TEXT, UNIQUE (goal_id, occurred_at)
+    );
+    CREATE TABLE IF NOT EXISTS work_lane_operations (
+      operation_id TEXT PRIMARY KEY, lane_id TEXT NOT NULL, goal_id TEXT NOT NULL,
+      phase TEXT NOT NULL, revision INTEGER NOT NULL, record TEXT NOT NULL
+    );
+  `)
+  database.prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)")
+    .run(
+      binding.checkpoint.eventId,
+      binding.checkpoint.goal.id,
+      binding.checkpoint.occurredAt,
+      JSON.stringify(binding.checkpoint)
+    )
+  database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
+    .run(
+      binding.lane.operationId,
+      binding.lane.laneId,
+      binding.lane.goalId,
+      binding.lane.phase,
+      binding.lane.revision,
+      JSON.stringify(binding.lane)
+    )
+}
+
 describe("durable Work projection", () => {
   it("exports an exact typed dispatch, lane revision, and worker binding contract", () => {
     const request = {
@@ -2424,6 +2456,7 @@ database.close()`,
         }),
         legacyHandoff.occurredAt
       )
+      persistMigrationBindingCompanions(database, legacyBinding)
       database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
         .run(
           "dispatch:legacy-sol",
@@ -2498,6 +2531,12 @@ database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
 database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)")
   .run(dispatchRequestId, handoff.laneId, expectedRevision, expectedRevision + 1,
     binding.request.worker.agentId, binding.request.worker.host, JSON.stringify(binding))
+database.prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)")
+  .run(binding.checkpoint.eventId, binding.checkpoint.goal.id, binding.checkpoint.occurredAt,
+    JSON.stringify(binding.checkpoint))
+database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
+  .run(binding.lane.operationId, binding.lane.laneId, binding.lane.goalId, binding.lane.phase,
+    binding.lane.revision, JSON.stringify(binding.lane))
 database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
   .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage }))
 process.stdout.write("locked\\n")
@@ -2685,6 +2724,7 @@ database.close()`,
       )
       const lineage = ["dispatch:failed-luna"]
       const binding = migrationBinding("dispatch:current-migration", lane, 2)
+      persistMigrationBindingCompanions(database, binding)
       database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
         "dispatch:current-migration",
         previousHandoff.id,
@@ -2737,6 +2777,30 @@ database.close()`,
       expect(JSON.parse(copies.workLink)).toMatchObject({
         handoff: { expectedRevision: 1, version: "herdr.work.decision.v2" },
         lineage
+      })
+
+      const malformedPath = join(directory, "malformed-v1-handoff.sqlite")
+      copyFileSync(path, malformedPath)
+      const malformedV1 = new DatabaseSync(malformedPath)
+      malformedV1.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify({ ...previousHandoff, dispatchIds: "not-an-array" }), previousHandoff.id)
+      malformedV1.close()
+      expect(yield* safelyOpenResult(malformedPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.invalid-v1-handoff" },
+          operation: "open.database"
+        }
+      })
+      const malformedRolledBack = new DatabaseSync(malformedPath)
+      const retainedMalformed = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        malformedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      malformedRolledBack.close()
+      expect(JSON.parse(retainedMalformed.record)).toMatchObject({
+        dispatchIds: "not-an-array",
+        version: "herdr.work.decision.v1"
       })
 
       const outsiderPath = join(directory, "outsider-lineage.sqlite")
@@ -2793,6 +2857,52 @@ database.close()`,
       )
       corruptBindingRolledBack.close()
       expect(JSON.parse(retainedCorruptBinding.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+      for (
+        const companion of [
+          {
+            expectedOperation: "open.migrate.agent-binding.missing-companion",
+            name: "missing-lane-companion",
+            mutate: (candidate: DatabaseSync) =>
+              candidate.prepare("DELETE FROM work_lane_operations WHERE operation_id = ?")
+                .run(binding.lane.operationId)
+          },
+          {
+            expectedOperation: "open.migrate.agent-binding.companion-identity-mismatch",
+            name: "mismatched-checkpoint-companion",
+            mutate: (candidate: DatabaseSync) =>
+              candidate.prepare("UPDATE work_goal_events SET goal_id = ? WHERE event_id = ?")
+                .run("goal:outsider", binding.checkpoint.eventId)
+          }
+        ]
+      ) {
+        const companionPath = join(directory, `${companion.name}.sqlite`)
+        copyFileSync(path, companionPath)
+        const candidate = new DatabaseSync(companionPath)
+        candidate.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        candidate.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(previousHandoff), "dispatch:current-migration")
+        candidate.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify({ handoff: previousHandoff, lineage }), "dispatch:current-migration")
+        companion.mutate(candidate)
+        candidate.close()
+
+        expect(yield* safelyOpenResult(companionPath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: companion.expectedOperation },
+            operation: "open.database"
+          }
+        })
+        const rolledBack = new DatabaseSync(companionPath)
+        const retained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        rolledBack.close()
+        expect(JSON.parse(retained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      }
 
       const unboundDecisionPath = join(directory, "unbound-decision.sqlite")
       copyFileSync(path, unboundDecisionPath)

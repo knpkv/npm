@@ -24,7 +24,7 @@ export const JobHash = Schema.String.check(
 )
 export type JobHash = typeof JobHash.Type
 
-export const DelegateMode = Schema.Literals(["consult", "review", "work"])
+export const DelegateMode = Schema.Literals(["consult", "review", "transition_summary", "work"])
 export type DelegateMode = typeof DelegateMode.Type
 
 export const AgentStableId = Schema.String.check(
