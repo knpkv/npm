@@ -25,7 +25,8 @@ import {
   OrchestratorTransitionError,
   OrchestratorValidationError,
   OrchestratorWorkerBindingConflictError,
-  OrchestratorWorkerStartAuthorityError
+  OrchestratorWorkerStartAuthorityError,
+  OrchestratorWorkRevisionConflictError
 } from "./orchestrator-errors.js"
 import {
   ActivityIdempotencyKey,
@@ -52,6 +53,8 @@ import {
   type OrchestratorRoute as OrchestratorRouteType,
   OrchestratorRoutedSubmission,
   type OrchestratorRoutedSubmission as OrchestratorRoutedSubmissionType,
+  OrchestratorSolEscalationSubmission,
+  type OrchestratorSolEscalationSubmission as OrchestratorSolEscalationSubmissionType,
   OrchestratorWorkLink,
   type OrchestratorWorkLink as OrchestratorWorkLinkType
 } from "./orchestrator-model.js"
@@ -232,7 +235,7 @@ type TransitionTarget = typeof transitionTarget.Type
 
 const validTransition = (from: CurrentStatus, to: TransitionTarget): boolean =>
   (from === "accepted" && to === "queued") ||
-  (from === "queued" && to === "running") ||
+  (from === "queued" && (to === "running" || to === "delivery_failed")) ||
   (from === "running" &&
     (to === "settled" || to === "delivery_failed" || to === "task_failed"))
 
@@ -250,6 +253,10 @@ export interface OrchestratorService {
   /** Submits with durable route metadata; Sol requires an atomic Work link. */
   readonly submitRouted: (
     input: OrchestratorRoutedSubmissionType
+  ) => Effect.Effect<OrchestratorReceiptType, OrchestratorError>
+  /** Submits Sol only through a typed failed-Luna reference and its accepted Work authority. */
+  readonly submitSolEscalation: (
+    input: OrchestratorSolEscalationSubmissionType
   ) => Effect.Effect<OrchestratorReceiptType, OrchestratorError>
   /** Loads and validates the complete durable request projection. */
   readonly request: (
@@ -338,6 +345,7 @@ const makeOrchestrator: Effect.Effect<
   })
   const now = Clock.currentTimeMillis
 
+  yield* workSql.initialize.pipe(Effect.mapError(storageError("initialize.work")))
   yield* sql`
     CREATE TABLE IF NOT EXISTS orchestrator_dispatches (
       dispatch_request_id TEXT PRIMARY KEY,
@@ -391,7 +399,6 @@ const makeOrchestrator: Effect.Effect<
       `.pipe(Effect.mapError(storageError("initialize.backfill-routed-discriminator")))
     })
   ).pipe(Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("initialize.route-migration")(cause))))
-  yield* workSql.initialize.pipe(Effect.mapError(storageError("initialize.work")))
   yield* sql`
     CREATE INDEX IF NOT EXISTS orchestrator_pending_dispatches_order
     ON orchestrator_dispatches (accepted_at ASC, dispatch_request_id ASC)
@@ -548,6 +555,11 @@ const makeOrchestrator: Effect.Effect<
         operation: "events.status-event-mismatch"
       })
     }
+    const command = yield* decodeCommand(dispatch.command)
+    yield* Schema.decodeUnknownEffect(OrchestratorRequest)({
+      ...dispatch,
+      command
+    }).pipe(Effect.mapError(storageError("events.decode-authority")))
     return { dispatch, events }
   })
 
@@ -691,6 +703,7 @@ const makeOrchestrator: Effect.Effect<
               : Effect.fail(error))
         )
         const dispatch = snapshot.dispatch
+        yield* validateDurableReadback(dispatch, "transition.work-link")
         if (decodedTarget === "running" && dispatch.route?.model === "gpt-5.6-sol") {
           return yield* new OrchestratorValidationError({
             detail: "routed Sol dispatches require workerStarted with Work lane authority"
@@ -792,6 +805,14 @@ const makeOrchestrator: Effect.Effect<
             detail: "worker start must match the routed dispatch Work lane"
           })
         }
+        if (decoded.expectedRevision !== dispatch.workLink.handoff.expectedRevision) {
+          return yield* new OrchestratorWorkerStartAuthorityError({
+            actualRevision: decoded.expectedRevision,
+            expectedRevision: dispatch.workLink.handoff.expectedRevision,
+            laneId: decoded.laneId,
+            reason: "accepted_revision_mismatch"
+          })
+        }
         yield* validateDurableReadback(dispatch, "worker-start.work-link")
         if (dispatch.status !== "queued") {
           if (
@@ -806,6 +827,14 @@ const makeOrchestrator: Effect.Effect<
               to: "running"
             })
           }
+          const event = snapshot.events.find(({ type }) => type === "running")
+          if (event === undefined) {
+            return yield* new OrchestratorTransitionError({
+              dispatchRequestId: decoded.dispatchRequestId,
+              from: dispatch.status,
+              to: "running"
+            })
+          }
           const binding = yield* workSql.requireAgentBinding(decoded).pipe(
             Effect.mapError((error): OrchestratorError =>
               error._tag === "WorkAgentBindingConflictError"
@@ -813,8 +842,7 @@ const makeOrchestrator: Effect.Effect<
                 : storageError("worker-start.work-binding")(error)
             )
           )
-          const event = snapshot.events.find(({ type }) => type === "running")
-          if (event === undefined || event.occurredAt !== binding.checkpoint.occurredAt) {
+          if (event.occurredAt !== binding.checkpoint.occurredAt) {
             return yield* new OrchestratorStorageError({
               cause: { binding, events: snapshot.events },
               operation: "worker-start.replay-boundary-mismatch"
@@ -1032,7 +1060,17 @@ const makeOrchestrator: Effect.Effect<
             dispatchRequestId,
             handoff: workLink.handoff,
             lineage: workLink.lineage
-          }).pipe(Effect.mapError(storageError("submit.work-link")))
+          }).pipe(
+            Effect.mapError((error): OrchestratorError =>
+              error._tag === "WorkDecisionRevisionConflictError"
+                ? new OrchestratorWorkRevisionConflictError({
+                  actualRevision: error.actualRevision,
+                  expectedRevision: error.expectedRevision,
+                  laneId: error.laneId
+                })
+                : storageError("submit.work-link")(error)
+            )
+          )
         }
         if (route !== null) {
           yield* sql`
@@ -1075,6 +1113,9 @@ const makeOrchestrator: Effect.Effect<
     const decoded = yield* Schema.decodeUnknownEffect(OrchestratorRoutedSubmission)(input).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "routed submission is invalid" }))
     )
+    const command = yield* Schema.decodeUnknownEffect(OrchestratorCommand)(decoded.command).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "routed command is invalid" }))
+    )
     if (
       decoded.route.model === "gpt-5.6-sol" &&
       decoded.route.linkedRequestId !== null &&
@@ -1085,7 +1126,38 @@ const makeOrchestrator: Effect.Effect<
         detail: "Work lineage must include the linked Luna request"
       })
     }
-    return yield* submitInternal(decoded.command, decoded.idempotencyKey, decoded.route, decoded.workLink)
+    return yield* submitInternal(command, decoded.idempotencyKey, decoded.route, decoded.workLink)
+  })
+
+  const submitSolEscalation: OrchestratorService["submitSolEscalation"] = Effect.fn(
+    "Orchestrator.submitSolEscalation"
+  )(function*(input) {
+    const decoded = yield* Schema.decodeUnknownEffect(OrchestratorSolEscalationSubmission)(input).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "Sol escalation submission is invalid" }))
+    )
+    return yield* submitInternal(
+      {
+        activityIdempotencyKey: decoded.command.activityIdempotencyKey,
+        actor: decoded.command.actor,
+        kind: decoded.command.kind,
+        payload: {
+          kind: decoded.command.payload.kind,
+          mode: decoded.command.payload.mode,
+          prompt: decoded.command.payload.prompt,
+          repository: decoded.command.payload.repository
+        }
+      },
+      decoded.idempotencyKey,
+      {
+        action: "dispatch",
+        linkedRequestId: decoded.reference.failedLunaRequestId,
+        model: "gpt-5.6-sol",
+        protocol: "hostd.coordinator.route.v1",
+        reason: decoded.reason,
+        reasoningEffort: "high"
+      },
+      decoded.reference.workLink
+    )
   })
 
   const service: OrchestratorService = {
@@ -1098,7 +1170,17 @@ const makeOrchestrator: Effect.Effect<
               Stream.concat(
                 Stream.fromSchedule(Schedule.spaced("100 millis")).pipe(Stream.map(() => undefined))
               ),
-              Stream.mapEffect(() => loadValidatedEvents(decodedDispatchRequestId)),
+              Stream.mapEffect(() =>
+                sql.withTransaction(
+                  Effect.gen(function*() {
+                    const snapshot = yield* loadValidatedEvents(decodedDispatchRequestId)
+                    yield* validateDurableReadback(snapshot.dispatch, "events.work-link")
+                    return snapshot
+                  })
+                ).pipe(
+                  Effect.catchTag("SqlError", (cause) => Effect.fail(storageError("events.transaction")(cause)))
+                )
+              ),
               Stream.mapAccum(
                 () => -1,
                 (lastSequence, snapshot): readonly [number, ReadonlyArray<OrchestratorEventType>] => {
@@ -1169,6 +1251,7 @@ const makeOrchestrator: Effect.Effect<
     ),
     submit,
     submitRouted,
+    submitSolEscalation,
     workerStarted,
     request: Effect.fn("Orchestrator.request")((dispatchRequestId) =>
       Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(

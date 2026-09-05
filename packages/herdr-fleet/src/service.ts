@@ -88,7 +88,8 @@ export type ResumeHostOperation = (
   jobId: string,
   actor: JobActor,
   receipt: string | null,
-  lifecycle: HostOperationLifecycle
+  lifecycle: HostOperationLifecycle,
+  persistedWorker: AgentWorkerIdentity | null
 ) => Effect.Effect<void, FleetOperationError>
 
 export type HostOperationRecovery = {
@@ -96,6 +97,7 @@ export type HostOperationRecovery = {
   readonly matches: (payload: CoreJobPayload) => boolean
   /**
    * Rejoins or idempotently completes submission, including before Fleet persisted a receipt.
+   * A running job's exact persisted worker is supplied for authoritative replay without discovery.
    * It must attach observation in its owning scope and return without waiting for terminal work.
    */
   readonly resume: ResumeHostOperation
@@ -348,6 +350,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
   ) {
     const current = yield* Ref.make(initial)
     const accepted = yield* Ref.make(acceptedAtStart)
+    const workerReplayed = yield* Ref.make(!recovering || initial.worker === undefined)
     const transitions = yield* Semaphore.make(1)
     const workerStarted: WorkerStarted = Effect.fn("FleetService.workerStarted")(
       (identity: AgentWorkerIdentity) =>
@@ -368,7 +371,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             })
           }
           const coordinatorHandled = record.payload.mode === "consult" ||
-            record.payload.channel === "coordinator_chat"
+            record.payload.mode === "transition_summary"
           if (!coordinatorHandled && identity.relationship === undefined) {
             return yield* new FleetOperationError({
               cause: identity,
@@ -377,7 +380,10 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             })
           }
           if (record.worker !== undefined) {
-            if (recovering && sameWorkerIdentity(record.worker, identity)) return
+            if (recovering && sameWorkerIdentity(record.worker, identity)) {
+              yield* Ref.set(workerReplayed, true)
+              return
+            }
             return yield* new FleetOperationError({
               cause: identity,
               detail: "coordinator reported more than one worker identity",
@@ -465,6 +471,13 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
               cause: decodedEvent,
               detail: "host operation reported a terminal event before acceptance",
               operation: "fleet.operation_terminal"
+            })
+          }
+          if (!(yield* Ref.get(workerReplayed))) {
+            return yield* new FleetOperationError({
+              cause: decodedEvent,
+              detail: "recovered worker identity must be replayed before terminal completion",
+              operation: "fleet.operation_terminal.worker_replay"
             })
           }
           const record = yield* Ref.get(current)
@@ -830,7 +843,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             record.id,
             record.actor,
             receipt,
-            resumed.lifecycle
+            resumed.lifecycle,
+            record.worker ?? null
           )
           continue
         }

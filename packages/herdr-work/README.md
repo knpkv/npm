@@ -36,9 +36,46 @@ lane, checkpoint, or binding write.
 
 `handoff` stores a compact, credential-free decision record keyed by coordinator
 session ID for later recovery under a 16,384-row and 2 MiB encoded-byte ledger.
-It includes the active goal and lane, dispatch IDs, blocker details, and evidence
-references. A new handoff requires the same active, non-shipped lane and
-authoritative goal; exact replay remains available after that lane advances.
+It includes the active goal and lane, dispatch IDs, blocker details, evidence
+references, and a nonempty credential-free context delta bounded to 4,096
+characters. A new v2 handoff captures the active lane's exact expected revision
+and rejects a stale revision with `WorkDecisionRevisionConflictError`; exact
+replay remains available after that lane advances.
+Both the previous pre-session table and v1 records already stored in the current
+table migrate explicitly: their bounded summary becomes the v2 context delta.
+Migration requires exactly one persisted dispatch binding and keeps that
+binding's expected revision; an unbound v1 handoff cannot borrow the current
+lane revision, and the persisted lane head cannot trail the binding's activated
+revision. The complete `WorkAgentBinding` record must decode and match its
+indexed dispatch, lane, revision, worker, and host, plus its exact immutable
+lane-operation and checkpoint ledger companions, before migration uses that
+authority. A dispatch lineage may remain a strict subset of the decision's
+complete dispatch IDs, while the dispatch and coordinator-metadata lineage
+replicas must agree exactly. Missing lanes, bindings, dispatch replicas, or
+coordinator metadata, malformed records that claim the v1 contract, and contradictory replicas, fail startup with a named
+`WorkStoreError`; no context or revision authority is invented.
+Coordinator-backed migration and current v2 readback additionally require a complete bounded lifecycle,
+the exact running checkpoint, status/tail agreement, a matching handoff goal, and
+a schema-valid Sol route whose metadata agrees with the persisted routed
+discriminator. A Sol route also requires a persisted `agent.delegate` command in
+`review` or `work` mode; the command, route, and Work link are one authority
+binding. A non-null Sol link must remain in lineage and identify an exact
+terminally failed Luna parent with its own complete lifecycle. Duplicate
+pre-session dispatch replicas fail closed. Current v2 readback also decodes the
+authoritative lane claim, requires its goal to remain fixed, requires an exact
+immutable operation-ledger replica, and rejects a lane head older than the
+activated binding; at the binding revision the whole claim must still be exact.
+Luna metadata must retain a null Work link and does not consume the bounded
+Work-decision scan; malformed or non-null Luna links fail closed. Every modern
+dispatch/metadata pair must bind its persisted activity key and command to the
+exact route, routed discriminator, and Work-link form; routed metadata without
+its dispatch fails closed, and every modern routed dispatch must retain exactly one metadata row. Standalone Work
+databases with no coordinator tables remain valid; a partial coordinator table set fails before
+either v1 migration or v2 handoff readback. The SQL adapter creates or upgrades
+Work tables in that same fail-closed transaction and ignores unrelated legacy
+binding or null-route orphan metadata rows. Current v2 dispatch and metadata
+replicas must decode and agree exactly with the authoritative decision handoff;
+dispatch lineage may remain a strict subset of the decision's dispatch set.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
 unbounded transcript. Replay aliases retain fixed-size canonical SHA-256
@@ -50,8 +87,8 @@ subpath, provides the SQLite-specific dispatch binding used by a coordinator's
 transaction. It inserts the decoded Work handoff and its
 bounded dispatch lineage together, and verifies exact replay without repairing
 an incomplete dispatch, including the referenced decision row. Every lineage
-request must appear in the handoff's dispatch IDs. New bindings
-require the handoff's active, non-shipped lane and authoritative goal; exact
+request must appear in the handoff's dispatch IDs. New bindings require the
+handoff's active, non-shipped lane, authoritative goal, and accepted expected revision; exact
 binding replay remains available after the lane advances. The coordinator must call it inside the same
 transaction as acceptance; `WorkStore.decisions` then recovers the handoff from
 the same database. The server-private durable `AgentWorkerIdentity` record stays

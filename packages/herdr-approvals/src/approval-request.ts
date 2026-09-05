@@ -6,12 +6,24 @@ import {
   JobPayload,
   JobStatus
 } from "@knpkv/herdr-fleet/model"
-import type { JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
+import type { AgentDelegate, JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const requestTextMaxLength = 16 * 1_024
 const redactedInternalPrompt = "[redacted internal prompt]"
 const redactedCredential = "[redacted credential]"
+
+const agentDelegateTitle = (mode: AgentDelegate["mode"]): string => {
+  switch (mode) {
+    case "consult":
+      return "Ask the coordinator"
+    case "transition_summary":
+      return "Summarize a transition"
+    case "review":
+    case "work":
+      return "Delegate agent work"
+  }
+}
 
 const requestText = Schema.String.check(
   Schema.isNonEmpty(),
@@ -447,7 +459,7 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("prompt", "Prompt", redactedInternalPrompt, true)
         ],
         kind: payload.kind,
-        title: payload.mode === "consult" ? "Ask the coordinator" : "Delegate agent work"
+        title: agentDelegateTitle(payload.mode)
       }
     case "agent.message":
       return {

@@ -2,9 +2,9 @@
 
 Persistent chat contracts over the Herdr fleet job protocol.
 
-Ask mode submits an `agent.delegate` consult job. Work mode submits a locally authorized work job and therefore follows the fleet approval policy. Chat turns persist beside their job IDs and history derives current state from the owning host's durable job record. The browser-facing history contains the newest 32 turns in chronological order; older turns remain durable and addressable by job ID.
+Ask mode submits an `agent.delegate` `consult` job, which adapters project to Luna at medium reasoning effort. Direct Fleet callers use the distinct required `transition_summary` mode for Luna at low effort; coordinator chat never infers that intent from prompt text. Work mode submits a locally authorized `work` job projected to Sol at high effort and therefore follows the fleet approval policy. Status and wait remain non-dispatch operations. Chat turns persist beside their job IDs and history derives current state from the owning host's durable job record. The browser-facing history contains the newest 32 turns in chronological order; older turns remain durable and addressable by job ID.
 
-Coordinator output is newline-delimited `herdr.coordinator.child.v1` lifecycle events. Both events carry the exact fleet job ID and request ID. A `started` event with the exact sanitized worker identity must arrive before the matching `completed` event. Root coordinator identities omit `relationship` and are valid only for coordinator-handled consult or chat jobs. Delegated child identities carry their exact `parentAgentId` and `relation`; ordinary work without that relationship is rejected. Missing, malformed, duplicate, reordered, job-mismatched, or request-mismatched events fail with named lifecycle errors. Terminal transcripts are never accepted as chat replies. Chat history exposes the same persisted worker and canonical Connect target after restart.
+Coordinator output is newline-delimited `herdr.coordinator.child.v1` lifecycle events. Both events carry the exact fleet job ID and request ID. A `started` event with the exact sanitized worker identity must arrive before the matching `completed` event. Root coordinator identities omit `relationship` and are valid only for `consult` and `transition_summary` jobs, including coordinator chat only when it uses one of those modes. Review and ordinary `work` identities must be delegated children carrying their exact `parentAgentId` and `relation`. Missing, malformed, duplicate, reordered, job-mismatched, or request-mismatched events fail with named lifecycle errors. Terminal transcripts are never accepted as chat replies. Chat history exposes the same persisted worker and canonical Connect target after restart.
 
 Browser-safe schemas, including the orchestration command, receipt, and event
 contracts, are exported from `@knpkv/herdr-coordinator/model` without loading
@@ -35,22 +35,40 @@ route-aware `submitRouted` operation durably records the executable Luna/Sol
 route. A Sol submission requires a typed Work handoff and lineage in the same
 SQLite transaction; a linked Sol escalation is accepted only when its parent
 request lookup proves a terminal Luna failure. Every lineage request must also
-appear in the persisted handoff's dispatch IDs. `request` returns that complete
+appear in the persisted handoff's dispatch IDs. Consumers use
+`submitSolEscalation` with `OrchestratorLinkedSolDispatchReference`; the package
+fixes the Sol model, high reasoning effort, route protocol, and failed-Luna link
+instead of making the adapter rebuild generic route metadata. It accepts only
+`review` and `work` agent-delegate commands; consultation and transition-summary
+commands remain Luna-only. Coordinator-chat authority is invalid on Sol escalation commands. If the accepted
+Work handoff's lane revision becomes stale before Sol acceptance,
+`submitSolEscalation` returns `OrchestratorWorkRevisionConflictError` and commits
+no dispatch, metadata, or accepted event. `request` returns that complete
 validated projection for escalation decisions and revalidates its referenced
 Work decision. The package deliberately uses this SQLite journal/outbox seam,
 not Effect Cluster. It schedules no automatic activity retry: after restart,
 ambiguous running work becomes `delivery_failed` and the caller must reconcile
 any external side effect before resubmission. The package does not claim
-exactly-once external execution.
+exactly-once external execution. A queued pre-worker executor failure may call
+`failDelivery`; it records the typed terminal `delivery_failed` event without a
+synthetic running transition.
 
 Routed Sol work cannot enter `running` through the plain `run` transition.
 The Nix consumer calls the exported typed `workerStarted` operation with the
-dispatch request ID, Work lane, lane expected revision, and full
+dispatch request ID, Work lane, the exact expected revision persisted in the
+accepted handoff, and full
 `AgentWorkerIdentity`. That boundary commits the running event together with
 the Work lane compare-and-set, `agentHierarchy.agent`, canonical Connect
 target, and goal checkpoint in one SQLite transaction. Exact replay survives a
-restart; a changed worker or stale lane authority is a typed conflict, never a
-sequential repair.
+restart; a changed worker, refreshed accepted revision, or stale lane authority
+is a typed conflict, never a sequential repair.
+Work v1 migration uses the same authority: routed metadata must bind its
+persisted activity key and command to the exact route, discriminator, and
+Work-link form; routed metadata without its dispatch fails closed. A linked Sol route must name an exact
+terminally failed Luna parent with a complete lifecycle. Work preflights partial
+coordinator table sets before coordinator schema creation and before either v1
+or v2 handoff readback; older dispatch tables without the discriminator retain
+their explicit backfill-compatible path.
 
 `PullRequestEvidenceProvider.exactHeadGateEvidence` accepts no caller-built
 evidence object. Its source performs one bounded provider observation, samples

@@ -26,6 +26,7 @@ import {
   JobStore,
   jobTextMaxLength,
   makeFleetService,
+  requiresApproval,
   summarizeHostOperationTerminalDetail,
   type WorkerStarted
 } from "../src/index.js"
@@ -43,6 +44,12 @@ const remoteWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
     parentAgentId: "agent-coordinator",
     relation: "delegated"
   }
+})
+const coordinatorWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
+  agentId: "agent-coordinator",
+  host: "SER8",
+  name: "Coordinator",
+  paneId: "w1:p1"
 })
 
 const operations: HostOperations = {
@@ -250,6 +257,7 @@ describe("fleet local authority", () => {
     return Effect.gen(function*() {
       const resumed = yield* Deferred.make<{
         readonly lifecycle: HostOperationLifecycle
+        readonly persistedWorker: AgentWorkerIdentity | null
         readonly workerStarted: WorkerStarted
       }>()
       const firstStore = yield* JobStore.open(databasePath)
@@ -297,9 +305,9 @@ describe("fleet local authority", () => {
           ...operations,
           recovery: {
             matches: () => true,
-            resume: (_payload, workerStarted, _jobId, _actor, receipt, lifecycle) =>
+            resume: (_payload, workerStarted, _jobId, _actor, receipt, lifecycle, persistedWorker) =>
               receipt === "durable-receipt"
-                ? Deferred.succeed(resumed, { lifecycle, workerStarted }).pipe(Effect.asVoid)
+                ? Deferred.succeed(resumed, { lifecycle, persistedWorker, workerStarted }).pipe(Effect.asVoid)
                 : Effect.fail(
                   new FleetOperationError({
                     cause: receipt,
@@ -313,12 +321,15 @@ describe("fleet local authority", () => {
       })
       expect(yield* second.recover()).toEqual([])
       const callbacks = yield* Deferred.await(resumed)
-      yield* callbacks.workerStarted(
-        Schema.decodeUnknownSync(AgentWorkerIdentity)({
-          ...remoteWorker,
-          host: "pi"
-        })
-      )
+      expect(callbacks.persistedWorker).toEqual(remoteWorker)
+      if (callbacks.persistedWorker === null) return yield* Effect.die("persisted worker missing")
+      expect(
+        yield* Effect.result(callbacks.lifecycle.terminal({ type: "settled", detail: "out of order" }))
+      ).toMatchObject({
+        failure: { _tag: "FleetOperationError", operation: "fleet.operation_terminal.worker_replay" }
+      })
+      expect(yield* second.get(queued.id)).toMatchObject({ status: "running" })
+      yield* callbacks.workerStarted(callbacks.persistedWorker)
       expect(
         yield* Effect.result(callbacks.workerStarted({
           ...remoteWorker,
@@ -888,6 +899,35 @@ describe("fleet local authority", () => {
     )).toBe(true)
   })
 
+  it.effect("keeps transition summaries distinct from bounded consultation", () =>
+    Effect.gen(function*() {
+      const consult = Schema.decodeUnknownSync(JobPayload)({
+        kind: "agent.delegate",
+        mode: "consult",
+        prompt: "inspect the bounded state",
+        repository: "/repo"
+      })
+      const transitionSummary = Schema.decodeUnknownSync(JobPayload)({
+        kind: "agent.delegate",
+        mode: "transition_summary",
+        prompt: "summarize the state transition",
+        repository: "/repo"
+      })
+      expect(requiresApproval(consult)).toBe(false)
+      expect(requiresApproval(transitionSummary)).toBe(false)
+      expect(yield* jobHash("SER8", "owner", consult)).not.toBe(
+        yield* jobHash("SER8", "owner", transitionSummary)
+      )
+      for (const mode of ["status", "wait"]) {
+        expect(Result.isFailure(
+          Schema.decodeUnknownResult(JobPayload)({
+            ...transitionSummary,
+            mode
+          })
+        )).toBe(true)
+      }
+    }).pipe(provideNodeServices))
+
   it("keeps browser recovery a zero-field typed local payload", () => {
     expect(
       Schema.decodeUnknownSync(BrowserMcpRecover)({
@@ -999,6 +1039,61 @@ describe("fleet local authority", () => {
             status: "succeeded"
           })
           expect(coordinatorRuns).toBe(1)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("accepts coordinator roots only for consult and transition summary", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-coordinator-root-policy-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          for (const [index, mode] of ["consult", "transition_summary", "review", "work"].entries()) {
+            const service = yield* makeFleetService({
+              approvalEnabled: true,
+              host: "SER8",
+              id: Effect.succeed(`job-coordinator-root-${String(index)}`),
+              nonce: Effect.succeed(`nonce-coordinator-root-${String(index)}`),
+              now: Effect.succeed(1_000 + index),
+              operations: {
+                ...operations,
+                runCoordinatorChat: (_payload, workerStarted) =>
+                  workerStarted(coordinatorWorker).pipe(Effect.as("coordinator: ok"))
+              },
+              store
+            })
+            const payload = Schema.decodeUnknownSync(JobPayload)({
+              channel: "coordinator_chat",
+              kind: "agent.delegate",
+              mode,
+              prompt: `coordinator ${mode}`,
+              repository: "/repo"
+            })
+            const job = yield* service.submit({ payload }, "owner")
+            if (mode === "work") {
+              yield* service.approve(job.id, {
+                hash: job.hash,
+                nonce: `nonce-coordinator-root-${String(index)}`
+              }, "owner")
+            }
+            const result = yield* Effect.result(service.runCoordinatorChat(job.id))
+            if (mode === "consult" || mode === "transition_summary") {
+              expect(result).toMatchObject({ success: { status: "succeeded", worker: coordinatorWorker } })
+            } else {
+              expect(result).toMatchObject({
+                success: {
+                  error: "delegated worker identity is missing its exact relationship",
+                  status: "failed"
+                }
+              })
+            }
+          }
         }),
       (store) =>
         Effect.sync(() => {

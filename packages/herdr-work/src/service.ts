@@ -7,6 +7,7 @@ import type {
   WorkCoordinatorHandoffConflictError,
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
+  WorkDecisionRevisionConflictError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -77,6 +78,7 @@ export interface WorkService {
     | WorkCoordinatorHandoffConflictError
     | WorkDecisionAuthorityConflictError
     | WorkDecisionHandoffConflictError
+    | WorkDecisionRevisionConflictError
     | WorkProjectionError
     | WorkStoreError
   >
