@@ -820,6 +820,14 @@ const makeOrchestrator: Effect.Effect<
               to: "running"
             })
           }
+          const event = snapshot.events.find(({ type }) => type === "running")
+          if (event === undefined) {
+            return yield* new OrchestratorTransitionError({
+              dispatchRequestId: decoded.dispatchRequestId,
+              from: dispatch.status,
+              to: "running"
+            })
+          }
           const binding = yield* workSql.requireAgentBinding(decoded).pipe(
             Effect.mapError((error): OrchestratorError =>
               error._tag === "WorkAgentBindingConflictError"
@@ -827,8 +835,7 @@ const makeOrchestrator: Effect.Effect<
                 : storageError("worker-start.work-binding")(error)
             )
           )
-          const event = snapshot.events.find(({ type }) => type === "running")
-          if (event === undefined || event.occurredAt !== binding.checkpoint.occurredAt) {
+          if (event.occurredAt !== binding.checkpoint.occurredAt) {
             return yield* new OrchestratorStorageError({
               cause: { binding, events: snapshot.events },
               operation: "worker-start.replay-boundary-mismatch"

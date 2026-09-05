@@ -218,6 +218,27 @@ describe("durable coordinator orchestrator", () => {
         )
         expect(replay).toEqual(first)
 
+        const terminalReplay = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const terminal = yield* orchestrator.failDelivery(
+              first.event.dispatchRequestId,
+              "delivery failed after worker start"
+            )
+            return {
+              activation: yield* orchestrator.workerStarted(first.binding.request),
+              terminal
+            }
+          })
+        )
+        expect(terminalReplay).toEqual({
+          activation: first,
+          terminal: expect.objectContaining({
+            type: "delivery_failed"
+          })
+        })
+
         const store = yield* Effect.acquireRelease(
           WorkStore.open(path).pipe(provideNodeServices),
           (store) => Effect.sync(() => store.close())
@@ -1072,27 +1093,46 @@ describe("durable coordinator orchestrator", () => {
       )))
 
   it.effect("records pre-worker executor failure as queued delivery failure", () =>
-    withTemporaryRoot("herdr-orchestrator-queued-delivery-failure-", (root) =>
-      withDatabase(
-        join(root, "orchestrator.sqlite"),
-        Effect.gen(function*() {
-          const orchestrator = yield* Orchestrator
-          const receipt = yield* orchestrator.submit(
-            { ...command, activityIdempotencyKey: "activity:queued-delivery-failure" },
-            "dispatch:queued-delivery-failure"
-          )
-          yield* orchestrator.queue(receipt.dispatchRequestId)
-          expect(
-            yield* orchestrator.failDelivery(receipt.dispatchRequestId, "executor failed before worker start")
-          ).toMatchObject({
-            detail: "executor failed before worker start",
-            type: "delivery_failed"
+    withTemporaryRoot("herdr-orchestrator-queued-delivery-failure-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:queued-delivery-failure")
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            expect(
+              yield* orchestrator.failDelivery(receipt.dispatchRequestId, "executor failed before worker start")
+            ).toMatchObject({
+              detail: "executor failed before worker start",
+              type: "delivery_failed"
+            })
+            expect(
+              yield* Effect.result(orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: lane.revision,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              }))
+            ).toMatchObject({
+              failure: {
+                _tag: "OrchestratorTransitionError",
+                dispatchRequestId: receipt.dispatchRequestId,
+                from: "delivery_failed",
+                to: "running"
+              }
+            })
+            expect(
+              (yield* Stream.runCollect(orchestrator.events(receipt.dispatchRequestId))).map(({ type }) => type)
+            ).toEqual(["accepted", "queued", "delivery_failed"])
           })
-          expect(
-            (yield* Stream.runCollect(orchestrator.events(receipt.dispatchRequestId))).map(({ type }) => type)
-          ).toEqual(["accepted", "queued", "delivery_failed"])
-        })
-      )))
+        )
+      })
+    }))
 
   it.effect("persists executable route metadata for typed request lookup", () =>
     withTemporaryRoot("herdr-orchestrator-route-", (root) => {
