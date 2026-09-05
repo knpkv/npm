@@ -1521,15 +1521,25 @@ describe("durable coordinator orchestrator", () => {
             `import { DatabaseSync } from "node:sqlite"
 const database = new DatabaseSync(process.argv[1])
 const handoff = JSON.parse(process.argv[2])
+const expectedRevision = Number(process.argv[3])
+const dispatchRequestId = "dispatch:" + handoff.id
+const lineage = ["dispatch:lineage:" + handoff.id]
 database.exec("BEGIN IMMEDIATE")
 database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
   .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
+  .run(dispatchRequestId, handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(lineage), JSON.stringify(handoff))
+database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)")
+  .run(dispatchRequestId, handoff.laneId, expectedRevision, expectedRevision + 1, "agent:concurrent", "host:concurrent", "{}")
+database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
+  .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage }))
 process.stdout.write("locked\\n")
 await new Promise((resolve) => setTimeout(resolve, 250))
 database.exec("COMMIT")
 database.close()`,
             path,
-            JSON.stringify(concurrent)
+            JSON.stringify(concurrent),
+            String(lane.revision)
           ],
           { stdio: ["ignore", "pipe", "pipe"] }
         )
@@ -1688,6 +1698,40 @@ database.close()`,
         )
         missingMetadataRolledBack.close()
         expect(JSON.parse(retainedMissingMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+        const unboundDecisionPath = join(root, "unbound-decision.sqlite")
+        copyFileSync(path, unboundDecisionPath)
+        const unboundDecision = new DatabaseSync(unboundDecisionPath)
+        const advancedLane = {
+          ...activation.binding.lane,
+          expectedRevision: activation.binding.lane.revision,
+          revision: activation.binding.lane.revision + 1
+        }
+        unboundDecision.prepare("UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?")
+          .run(advancedLane.revision, JSON.stringify(advancedLane), advancedLane.laneId)
+        unboundDecision.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        unboundDecision.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        unboundDecision.prepare("DELETE FROM work_dispatch_handoffs WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        unboundDecision.prepare("DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        unboundDecision.close()
+        expect(yield* Effect.result(withDatabase(unboundDecisionPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.handoff-revision" },
+            operation: "initialize.work"
+          }
+        })
+        const unboundDecisionRolledBack = new DatabaseSync(unboundDecisionPath)
+        const retainedUnboundDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          unboundDecisionRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        unboundDecisionRolledBack.close()
+        expect(JSON.parse(retainedUnboundDecision.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
         const orphanMetadataPath = join(root, "orphan-metadata.sqlite")
         copyFileSync(path, orphanMetadataPath)

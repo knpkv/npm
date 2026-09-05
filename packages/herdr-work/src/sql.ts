@@ -185,56 +185,55 @@ const decodeLegacyDecision = (
       if (lane === undefined) {
         throw new WorkStoreError({ cause: legacy, operation: "sql-work.migrate.handoff-lane" })
       }
-      let expectedRevision = lane.revision
-      if (dispatch !== undefined) {
-        const dispatchHandoff = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(dispatch.record))
-        if (
-          dispatch.laneId !== legacy.laneId || dispatch.occurredAt !== legacy.occurredAt ||
-          !legacyDecisionEquivalent(dispatchHandoff, legacy)
-        ) {
-          throw new WorkStoreError({
-            cause: { dispatch, dispatchHandoff, legacy },
-            operation: "sql-work.migrate.legacy-dispatch-authority"
-          })
-        }
-        if (metadataTablePresent) {
-          const matchingMetadata = metadataRows.filter(({ dispatchRequestId }) =>
-            dispatchRequestId === dispatch.dispatchRequestId
-          )
-          const metadata = matchingMetadata[0]
-          if (matchingMetadata.length !== 1 || metadata?.workLink === null || metadata?.workLink === undefined) {
-            throw new WorkStoreError({
-              cause: { dispatch, matchingMetadata },
-              operation: "sql-work.migrate.legacy-metadata-authority"
-            })
-          }
-          const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
-          if (
-            !legacyDecisionEquivalent(workLink.handoff, legacy) ||
-            !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
-          ) {
-            throw new WorkStoreError({
-              cause: { legacy, workLink },
-              operation: "sql-work.migrate.legacy-metadata-authority"
-            })
-          }
-        }
-        const revisions = bindingRevisions.filter(({ dispatchRequestId }) =>
+      if (dispatch === undefined) {
+        throw new WorkStoreError({ cause: legacy, operation: "sql-work.migrate.legacy-handoff-revision" })
+      }
+      const dispatchHandoff = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(dispatch.record))
+      if (
+        dispatch.laneId !== legacy.laneId || dispatch.occurredAt !== legacy.occurredAt ||
+        !legacyDecisionEquivalent(dispatchHandoff, legacy)
+      ) {
+        throw new WorkStoreError({
+          cause: { dispatch, dispatchHandoff, legacy },
+          operation: "sql-work.migrate.legacy-dispatch-authority"
+        })
+      }
+      if (metadataTablePresent) {
+        const matchingMetadata = metadataRows.filter(({ dispatchRequestId }) =>
           dispatchRequestId === dispatch.dispatchRequestId
         )
-        const revision = revisions[0]
-        if (revisions.length !== 1 || revision === undefined) {
+        const metadata = matchingMetadata[0]
+        if (matchingMetadata.length !== 1 || metadata?.workLink === null || metadata?.workLink === undefined) {
           throw new WorkStoreError({
-            cause: { dispatch, legacy, revisions },
-            operation: "sql-work.migrate.legacy-handoff-revision"
+            cause: { dispatch, matchingMetadata },
+            operation: "sql-work.migrate.legacy-metadata-authority"
           })
         }
-        expectedRevision = revision.expectedRevision
+        const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
+        if (
+          !legacyDecisionEquivalent(workLink.handoff, legacy) ||
+          !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
+        ) {
+          throw new WorkStoreError({
+            cause: { legacy, workLink },
+            operation: "sql-work.migrate.legacy-metadata-authority"
+          })
+        }
+      }
+      const revisions = bindingRevisions.filter(({ dispatchRequestId }) =>
+        dispatchRequestId === dispatch.dispatchRequestId
+      )
+      const revision = revisions[0]
+      if (revisions.length !== 1 || revision === undefined) {
+        throw new WorkStoreError({
+          cause: { dispatch, legacy, revisions },
+          operation: "sql-work.migrate.legacy-handoff-revision"
+        })
       }
       return Schema.decodeUnknownSync(WorkDecisionHandoff)({
         ...legacy,
         contextDelta: legacy.summary,
-        expectedRevision,
+        expectedRevision: revision.expectedRevision,
         sessionId: legacy.id,
         dispatchIds,
         blockers: [],
@@ -585,7 +584,8 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
               Effect.mapError(storeError("sql-work.initialize.handoff-binding-revision"))
             )
             : []
-          if (bindingRevisions.length > 1 || (handoffDispatches.length > 0 && bindingRevisions.length !== 1)) {
+          const bindingRevision = bindingRevisions[0]
+          if (bindingRevisions.length !== 1 || bindingRevision === undefined) {
             return yield* new WorkStoreError({
               cause: { bindingRevisions, row },
               operation: "sql-work.initialize.handoff-revision"
@@ -641,7 +641,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             try: () =>
               upgradePreviousDecisionHandoff(
                 previous.value,
-                bindingRevisions[0]?.expectedRevision ?? laneRevision.revision
+                bindingRevision.expectedRevision
               ),
             catch: storeError("sql-work.initialize.upgrade-handoff")
           })

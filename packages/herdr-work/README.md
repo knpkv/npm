@@ -43,10 +43,11 @@ and rejects a stale revision with `WorkDecisionRevisionConflictError`; exact
 replay remains available after that lane advances.
 Both the previous pre-session table and v1 records already stored in the current
 table migrate explicitly: their bounded summary becomes the v2 context delta.
-A running dispatch keeps its persisted binding's expected revision; otherwise
-the matching active lane revision becomes the accepted revision. A missing
-matching lane or contradictory binding revisions fail startup with a named
-`WorkStoreError`; no empty context or revision is invented.
+Migration requires exactly one persisted dispatch binding and keeps that
+binding's expected revision; an unbound v1 handoff cannot borrow the current
+lane revision. Missing lanes, bindings, dispatch replicas, or coordinator
+metadata, and contradictory replicas, fail startup with a named
+`WorkStoreError`; no context or revision authority is invented.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
 unbounded transcript. Replay aliases retain fixed-size canonical SHA-256
