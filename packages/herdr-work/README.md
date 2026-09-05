@@ -53,6 +53,11 @@ complete dispatch IDs, while the dispatch and coordinator-metadata lineage
 replicas must agree exactly. Missing lanes, bindings, dispatch replicas, or
 coordinator metadata, malformed records that claim the v1 contract, and contradictory replicas, fail startup with a named
 `WorkStoreError`; no context or revision authority is invented.
+Coordinator-backed migration additionally requires a complete bounded lifecycle,
+the exact running checkpoint, status/tail agreement, a matching handoff goal, and
+a schema-valid Sol route whose linked request remains in lineage. Duplicate
+pre-session dispatch replicas fail closed. Standalone Work databases with neither
+coordinator lifecycle table remain valid.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
 unbounded transcript. Replay aliases retain fixed-size canonical SHA-256

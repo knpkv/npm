@@ -33,3 +33,5 @@ The receipt is client-visible: Fleet stores it in both `acceptedReceipt` and `re
 When an `agent.delegate` worker starts, `JobRecord` persists its exact identity and matching `AgentConnectTarget` in the same transition. Records before start, including pending, rejected, expired, and failed-before-start jobs, contain neither field. Terminal observation time remains separate and appears only after that exact started job succeeds or fails.
 
 `agent.delegate.prompt` and `agent.message.message` are capped at the exported `jobTextMaxLength` (16 KiB). Repository, session, and ref fields have smaller identifier/path bounds. These limits keep every schema-valid payload executable through the host command adapter without crossing the operating system's single-argument limit after JSON escaping and UTF-8 encoding.
+
+Recovery with a persisted worker rejects `terminal` until the adapter has replayed that exact worker through `workerStarted`. Relationship-free coordinator roots are valid only for consultation and transition summaries; review and work still require an exact delegated-child relationship even when the job uses the coordinator-chat channel.

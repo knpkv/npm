@@ -152,14 +152,13 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
             hash: chatJob.hash,
             nonce: "nonce-chat"
           }, "owner")
-          expect(yield* chat.runCoordinatorChat(chatJob.id)).toMatchObject({
-            error: null,
-            result: "fleet healthy",
-            status: "succeeded",
-            worker: {
-              agentId: "agent-host-coordinator"
-            }
+          const completedChatWork = yield* chat.runCoordinatorChat(chatJob.id)
+          expect(completedChatWork).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
           })
+          expect(completedChatWork.worker).toBeUndefined()
 
           const delegatedReview = yield* makeFleetService({
             approvalEnabled: true,

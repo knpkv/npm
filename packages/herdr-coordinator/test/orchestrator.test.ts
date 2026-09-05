@@ -127,6 +127,48 @@ const persistMigrationBindingCompanions = (
     )
 }
 
+const persistMigrationLifecycle = (
+  database: DatabaseSync,
+  dispatchRequestId: string,
+  runningAt: number,
+  status: "queued" | "running" | "settled" = "running"
+): void => {
+  const activityIdempotencyKey = `activity:${dispatchRequestId}`
+  const acceptedAt = Math.max(0, runningAt - 2)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS orchestrator_dispatches (
+      dispatch_request_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL UNIQUE,
+      activity_idempotency_key TEXT NOT NULL, command TEXT NOT NULL,
+      accepted_at INTEGER NOT NULL, is_routed INTEGER NOT NULL, status TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS orchestrator_events (
+      dispatch_request_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL,
+      activity_idempotency_key TEXT NOT NULL, occurred_at INTEGER NOT NULL,
+      detail TEXT, result TEXT, PRIMARY KEY (dispatch_request_id, sequence)
+    );
+  `)
+  database.prepare("INSERT INTO orchestrator_dispatches VALUES (?, ?, ?, ?, ?, 1, ?)").run(
+    dispatchRequestId,
+    `idempotency:${dispatchRequestId}`,
+    activityIdempotencyKey,
+    JSON.stringify({
+      activityIdempotencyKey,
+      actor: "coordinator",
+      kind: "fleet.job",
+      payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+    }),
+    acceptedAt,
+    status
+  )
+  const insert = database.prepare("INSERT INTO orchestrator_events VALUES (?, ?, ?, ?, ?, ?, ?)")
+  insert.run(dispatchRequestId, 0, "accepted", activityIdempotencyKey, acceptedAt, null, null)
+  insert.run(dispatchRequestId, 1, "queued", activityIdempotencyKey, Math.max(acceptedAt, runningAt - 1), null, null)
+  if (status !== "queued") insert.run(dispatchRequestId, 2, "running", activityIdempotencyKey, runningAt, null, null)
+  if (status === "settled") {
+    insert.run(dispatchRequestId, 3, "settled", activityIdempotencyKey, runningAt + 1, null, "done")
+  }
+}
+
 const lunaRoute = {
   action: "dispatch",
   linkedRequestId: null,
@@ -1730,7 +1772,72 @@ describe("durable coordinator orchestrator", () => {
             }),
             JSON.stringify({ handoff: legacy, lineage })
           )
+        persistMigrationLifecycle(database, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt)
         database.close()
+
+        const queuedLegacyPath = join(root, "queued-legacy-lifecycle.sqlite")
+        copyFileSync(path, queuedLegacyPath)
+        const queuedLegacy = new DatabaseSync(queuedLegacyPath)
+        queuedLegacy.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
+        queuedLegacy.prepare("UPDATE orchestrator_dispatches SET status = 'queued'").run()
+        queuedLegacy.close()
+        expect(yield* Effect.result(withDatabase(queuedLegacyPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: {
+              _tag: "WorkStoreError",
+              operation: "sql-work.initialize.legacy-agent-binding.lifecycle"
+            },
+            operation: "initialize.work"
+          }
+        })
+        const queuedLegacyRolledBack = new DatabaseSync(queuedLegacyPath)
+        const retainedQueuedLegacyColumns = queuedLegacyRolledBack.prepare(
+          "PRAGMA table_info(work_decision_handoffs)"
+        ).all()
+        queuedLegacyRolledBack.close()
+        expect(
+          retainedQueuedLegacyColumns.some((column) =>
+            Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+          )
+        ).toBe(false)
+
+        const duplicateLegacyPath = join(root, "duplicate-legacy-dispatch.sqlite")
+        copyFileSync(path, duplicateLegacyPath)
+        const duplicateLegacy = new DatabaseSync(duplicateLegacyPath)
+        duplicateLegacy.exec(`
+          ALTER TABLE work_dispatch_handoffs RENAME TO unique_work_dispatch_handoffs;
+          CREATE TABLE work_dispatch_handoffs (
+            dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL, lane_id TEXT NOT NULL,
+            occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL
+          );
+          INSERT INTO work_dispatch_handoffs SELECT * FROM unique_work_dispatch_handoffs;
+          DROP TABLE unique_work_dispatch_handoffs;
+        `)
+        duplicateLegacy.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
+          "dispatch:legacy-duplicate",
+          legacy.id,
+          legacy.laneId,
+          legacy.occurredAt,
+          JSON.stringify(lineage),
+          JSON.stringify(legacy)
+        )
+        duplicateLegacy.close()
+        const duplicateFailure = yield* Effect.flip(withDatabase(duplicateLegacyPath, Effect.void))
+        expect(duplicateFailure).toMatchObject({
+          _tag: "OrchestratorStorageError",
+          operation: "initialize.work"
+        })
+        expect(duplicateFailure.cause).toMatchObject({
+          _tag: "WorkStoreError",
+          operation: "sql-work.migrate.legacy-dispatch-cardinality"
+        })
+        const duplicateLegacyRolledBack = new DatabaseSync(duplicateLegacyPath)
+        const retainedDuplicateLegacy = duplicateLegacyRolledBack.prepare(
+          "SELECT record FROM work_dispatch_handoffs WHERE handoff_id = ?"
+        ).all(legacy.id)
+        duplicateLegacyRolledBack.close()
+        expect(retainedDuplicateLegacy).toHaveLength(2)
 
         const oversizedLegacyPath = join(root, "oversized-legacy.sqlite")
         copyFileSync(path, oversizedLegacyPath)
@@ -1778,7 +1885,17 @@ describe("durable coordinator orchestrator", () => {
             JSON.stringify(binding)
           )
           oversizedLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
-            .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage: dispatchLineage }))
+            .run(
+              dispatchRequestId,
+              JSON.stringify({
+                ...lunaRoute,
+                linkedRequestId: dispatchLineage[0],
+                model: "gpt-5.6-sol",
+                reasoningEffort: "high"
+              }),
+              JSON.stringify({ handoff, lineage: dispatchLineage })
+            )
+          persistMigrationLifecycle(oversizedLegacy, dispatchRequestId, binding.checkpoint.occurredAt)
         }
         oversizedLegacy.close()
         expect(yield* Effect.result(withDatabase(oversizedLegacyPath, Effect.void))).toMatchObject({
@@ -1842,7 +1959,22 @@ database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
   .run(binding.lane.operationId, binding.lane.laneId, binding.lane.goalId, binding.lane.phase,
     binding.lane.revision, JSON.stringify(binding.lane))
 database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
-  .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage }))
+  .run(dispatchRequestId, JSON.stringify({
+    action: "dispatch", linkedRequestId: lineage[0], model: "gpt-5.6-sol",
+    protocol: "hostd.coordinator.route.v1", reason: "Migrate durable Work authority",
+    reasoningEffort: "high"
+  }), JSON.stringify({ handoff, lineage }))
+const activityIdempotencyKey = "activity:" + dispatchRequestId
+database.prepare("INSERT INTO orchestrator_dispatches VALUES (?, ?, ?, ?, ?, 1, 'running')")
+  .run(dispatchRequestId, "idempotency:" + dispatchRequestId, activityIdempotencyKey,
+    JSON.stringify({ activityIdempotencyKey, actor: "coordinator", kind: "fleet.job",
+      payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" } }), 0)
+database.prepare("INSERT INTO orchestrator_events VALUES (?, 0, 'accepted', ?, 0, NULL, NULL)")
+  .run(dispatchRequestId, activityIdempotencyKey)
+database.prepare("INSERT INTO orchestrator_events VALUES (?, 1, 'queued', ?, 1, NULL, NULL)")
+  .run(dispatchRequestId, activityIdempotencyKey)
+database.prepare("INSERT INTO orchestrator_events VALUES (?, 2, 'running', ?, ?, NULL, NULL)")
+  .run(dispatchRequestId, activityIdempotencyKey, binding.checkpoint.occurredAt)
 process.stdout.write("locked\\n")
 await new Promise((resolve) => setTimeout(resolve, 250))
 database.exec("COMMIT")
@@ -1990,6 +2122,85 @@ database.close()`,
         )
         queuedBindingRolledBack.close()
         expect(JSON.parse(retainedQueuedBinding.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+        const incompleteTerminalPath = join(root, "incomplete-terminal-current-handoff.sqlite")
+        copyFileSync(path, incompleteTerminalPath)
+        const incompleteTerminal = new DatabaseSync(incompleteTerminalPath)
+        incompleteTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
+        incompleteTerminal.close()
+        expect(yield* Effect.result(withDatabase(incompleteTerminalPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.agent-binding.lifecycle" },
+            operation: "initialize.work"
+          }
+        })
+        const incompleteTerminalRolledBack = new DatabaseSync(incompleteTerminalPath)
+        const retainedIncompleteTerminal = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          incompleteTerminalRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        incompleteTerminalRolledBack.close()
+        expect(JSON.parse(retainedIncompleteTerminal.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+        const completeTerminalPath = join(root, "complete-terminal-current-handoff.sqlite")
+        copyFileSync(path, completeTerminalPath)
+        const completeTerminal = new DatabaseSync(completeTerminalPath)
+        completeTerminal.prepare(
+          `INSERT INTO orchestrator_events
+             (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+           SELECT dispatch_request_id, 3, 'settled', activity_idempotency_key, ? + 1, NULL, 'done'
+           FROM orchestrator_dispatches WHERE dispatch_request_id = ?`
+        ).run(activation.event.occurredAt, activation.event.dispatchRequestId)
+        completeTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
+        completeTerminal.close()
+        yield* withDatabase(completeTerminalPath, Effect.void)
+
+        const mismatchedGoalPath = join(root, "mismatched-binding-goal-current-handoff.sqlite")
+        copyFileSync(path, mismatchedGoalPath)
+        const mismatchedGoal = new DatabaseSync(mismatchedGoalPath)
+        const otherGoalHandoff = { ...previousHandoff, goalId: "goal:other" }
+        mismatchedGoal.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(otherGoalHandoff), previousHandoff.id)
+        mismatchedGoal.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(otherGoalHandoff), activation.event.dispatchRequestId)
+        mismatchedGoal.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: otherGoalHandoff, lineage: workLink.lineage }),
+            activation.event.dispatchRequestId
+          )
+        mismatchedGoal.close()
+        expect(yield* Effect.result(withDatabase(mismatchedGoalPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.agent-binding.goal" },
+            operation: "initialize.work"
+          }
+        })
+
+        for (
+          const invalidRoute of [
+            { name: "work-linked-luna", route: lunaRoute },
+            {
+              name: "outsider-sol-link",
+              route: { ...submission.route, linkedRequestId: "dispatch:outsider" }
+            }
+          ]
+        ) {
+          const invalidRoutePath = join(root, `${invalidRoute.name}.sqlite`)
+          copyFileSync(path, invalidRoutePath)
+          const candidate = new DatabaseSync(invalidRoutePath)
+          candidate.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
+            .run(JSON.stringify(invalidRoute.route), activation.event.dispatchRequestId)
+          candidate.close()
+          expect(yield* Effect.result(withDatabase(invalidRoutePath, Effect.void))).toMatchObject({
+            failure: {
+              _tag: "OrchestratorStorageError",
+              cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
+              operation: "initialize.work"
+            }
+          })
+        }
 
         const replay = yield* withDatabase(
           path,

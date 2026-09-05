@@ -302,6 +302,57 @@ const persistMigrationBindingCompanions = (
     )
 }
 
+const migrationSolRoute = (linkedRequestId: string) => ({
+  action: "dispatch",
+  linkedRequestId,
+  model: "gpt-5.6-sol",
+  protocol: "hostd.coordinator.route.v1",
+  reason: "Migrate durable Work authority",
+  reasoningEffort: "high"
+})
+
+const persistCoordinatorLifecycle = (
+  database: DatabaseSync,
+  dispatchRequestId: string,
+  runningAt: number,
+  status: "queued" | "running" | "settled" = "running"
+): void => {
+  const activityIdempotencyKey = `activity:${dispatchRequestId}`
+  const acceptedAt = Math.max(0, runningAt - 2)
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS orchestrator_dispatches (
+      dispatch_request_id TEXT PRIMARY KEY, idempotency_key TEXT NOT NULL,
+      activity_idempotency_key TEXT NOT NULL, command TEXT NOT NULL,
+      accepted_at INTEGER NOT NULL, is_routed INTEGER NOT NULL, status TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS orchestrator_events (
+      dispatch_request_id TEXT NOT NULL, sequence INTEGER NOT NULL, type TEXT NOT NULL,
+      activity_idempotency_key TEXT NOT NULL, occurred_at INTEGER NOT NULL,
+      detail TEXT, result TEXT, PRIMARY KEY (dispatch_request_id, sequence)
+    );
+  `)
+  database.prepare("INSERT INTO orchestrator_dispatches VALUES (?, ?, ?, ?, ?, 1, ?)").run(
+    dispatchRequestId,
+    `idempotency:${dispatchRequestId}`,
+    activityIdempotencyKey,
+    JSON.stringify({
+      activityIdempotencyKey,
+      actor: "coordinator",
+      kind: "fleet.job",
+      payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+    }),
+    acceptedAt,
+    status
+  )
+  const insert = database.prepare("INSERT INTO orchestrator_events VALUES (?, ?, ?, ?, ?, ?, ?)")
+  insert.run(dispatchRequestId, 0, "accepted", activityIdempotencyKey, acceptedAt, null, null)
+  insert.run(dispatchRequestId, 1, "queued", activityIdempotencyKey, Math.max(acceptedAt, runningAt - 1), null, null)
+  if (status !== "queued") insert.run(dispatchRequestId, 2, "running", activityIdempotencyKey, runningAt, null, null)
+  if (status === "settled") {
+    insert.run(dispatchRequestId, 3, "settled", activityIdempotencyKey, runningAt + 1, null, "done")
+  }
+}
+
 describe("durable Work projection", () => {
   it("exports an exact typed dispatch, lane revision, and worker binding contract", () => {
     const request = {
@@ -778,6 +829,7 @@ describe("durable Work projection", () => {
           state: "blocked"
         }
       }
+
       const versionThree = checkpointForGoal("goal-connect-v3", "v3-created", 0, 0)
       const relationAt = 2 * day
       const canonical = familyCheckpoint(
@@ -2442,8 +2494,76 @@ database.close()`,
         JSON.stringify(legacyBinding)
       )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
-        .run("dispatch:legacy-sol", "{}", JSON.stringify({ handoff: legacyHandoff, lineage }))
+        .run(
+          "dispatch:legacy-sol",
+          JSON.stringify(migrationSolRoute("dispatch:legacy-luna")),
+          JSON.stringify({ handoff: legacyHandoff, lineage })
+        )
       database.close()
+
+      const queuedLegacyPath = join(directory, "queued-legacy-lifecycle.sqlite")
+      copyFileSync(path, queuedLegacyPath)
+      const queuedLegacy = new DatabaseSync(queuedLegacyPath)
+      persistCoordinatorLifecycle(queuedLegacy, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt, "queued")
+      queuedLegacy.close()
+      expect(yield* safelyOpenResult(queuedLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-agent-binding.lifecycle" },
+          operation: "open.database"
+        }
+      })
+      const queuedLegacyRolledBack = new DatabaseSync(queuedLegacyPath)
+      const retainedQueuedLegacyColumns = queuedLegacyRolledBack.prepare(
+        "PRAGMA table_info(work_decision_handoffs)"
+      ).all()
+      queuedLegacyRolledBack.close()
+      expect(retainedQueuedLegacyColumns.some((column) =>
+        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+      )).toBe(false)
+
+      const runningLegacyPath = join(directory, "running-legacy-lifecycle.sqlite")
+      copyFileSync(path, runningLegacyPath)
+      const runningLegacy = new DatabaseSync(runningLegacyPath)
+      persistCoordinatorLifecycle(runningLegacy, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt)
+      runningLegacy.close()
+      const runningLegacyOpened = yield* openScopedStore(runningLegacyPath)
+      runningLegacyOpened.close()
+
+      const duplicateLegacyPath = join(directory, "duplicate-legacy-dispatch.sqlite")
+      copyFileSync(path, duplicateLegacyPath)
+      const duplicateLegacy = new DatabaseSync(duplicateLegacyPath)
+      duplicateLegacy.exec(`
+        ALTER TABLE work_dispatch_handoffs RENAME TO unique_work_dispatch_handoffs;
+        CREATE TABLE work_dispatch_handoffs (
+          dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL, lane_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL
+        );
+        INSERT INTO work_dispatch_handoffs SELECT * FROM unique_work_dispatch_handoffs;
+        DROP TABLE unique_work_dispatch_handoffs;
+      `)
+      duplicateLegacy.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
+        "dispatch:legacy-duplicate",
+        legacyHandoff.id,
+        legacyHandoff.laneId,
+        legacyHandoff.occurredAt,
+        JSON.stringify(lineage),
+        JSON.stringify(legacyHandoff)
+      )
+      duplicateLegacy.close()
+      expect(yield* safelyOpenResult(duplicateLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-dispatch-cardinality" },
+          operation: "open.database"
+        }
+      })
+      const duplicateLegacyRolledBack = new DatabaseSync(duplicateLegacyPath)
+      const retainedDuplicateLegacy = duplicateLegacyRolledBack.prepare(
+        "SELECT record FROM work_dispatch_handoffs WHERE handoff_id = ?"
+      ).all(legacyHandoff.id)
+      duplicateLegacyRolledBack.close()
+      expect(retainedDuplicateLegacy).toHaveLength(2)
 
       const oversizedLegacyPath = join(directory, "oversized-legacy.sqlite")
       copyFileSync(path, oversizedLegacyPath)
@@ -2491,7 +2611,11 @@ database.close()`,
           JSON.stringify(binding)
         )
         oversizedLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
-          .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage: dispatchLineage }))
+          .run(
+            dispatchRequestId,
+            JSON.stringify(migrationSolRoute(`dispatch:legacy-luna:${String(index)}`)),
+            JSON.stringify({ handoff, lineage: dispatchLineage })
+          )
       }
       oversizedLegacy.close()
       expect(yield* safelyOpenResult(oversizedLegacyPath)).toMatchObject({
@@ -2572,7 +2696,11 @@ database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
   .run(binding.lane.operationId, binding.lane.laneId, binding.lane.goalId, binding.lane.phase,
     binding.lane.revision, JSON.stringify(binding.lane))
 database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
-  .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage }))
+  .run(dispatchRequestId, JSON.stringify({
+    action: "dispatch", linkedRequestId: lineage[0], model: "gpt-5.6-sol",
+    protocol: "hostd.coordinator.route.v1", reason: "Migrate durable Work authority",
+    reasoningEffort: "high"
+  }), JSON.stringify({ handoff, lineage }))
 process.stdout.write("locked\\n")
 await new Promise((resolve) => setTimeout(resolve, 250))
 database.exec("COMMIT")
@@ -2585,7 +2713,9 @@ database.close()`,
         { stdio: ["ignore", "pipe", "pipe"] }
       )
       yield* Effect.addFinalizer(() =>
-        Effect.sync(() => writer.kill())
+        Effect.sync(() =>
+          writer.kill()
+        )
       )
       yield* Effect.callback<void, LockHolderError>((resume) => {
         let completed = false
@@ -2780,7 +2910,7 @@ database.close()`,
       )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
         "dispatch:current-migration",
-        "{}",
+        JSON.stringify(migrationSolRoute("dispatch:failed-luna")),
         JSON.stringify({ handoff: previousHandoff, lineage })
       )
       database.close()
@@ -2788,16 +2918,12 @@ database.close()`,
       const queuedLifecyclePath = join(directory, "queued-lifecycle.sqlite")
       copyFileSync(path, queuedLifecyclePath)
       const queuedLifecycle = new DatabaseSync(queuedLifecyclePath)
-      queuedLifecycle.exec(`
-        CREATE TABLE orchestrator_dispatches (
-          dispatch_request_id TEXT PRIMARY KEY, status TEXT NOT NULL
-        );
-        CREATE TABLE orchestrator_events (
-          dispatch_request_id TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER NOT NULL
-        );
-      `)
-      queuedLifecycle.prepare("INSERT INTO orchestrator_dispatches VALUES (?, 'queued')")
-        .run("dispatch:current-migration")
+      persistCoordinatorLifecycle(
+        queuedLifecycle,
+        "dispatch:current-migration",
+        binding.checkpoint.occurredAt,
+        "queued"
+      )
       queuedLifecycle.close()
       expect(yield* safelyOpenResult(queuedLifecyclePath)).toMatchObject({
         failure: {
@@ -2817,18 +2943,7 @@ database.close()`,
       const runningLifecyclePath = join(directory, "running-lifecycle.sqlite")
       copyFileSync(path, runningLifecyclePath)
       const runningLifecycle = new DatabaseSync(runningLifecyclePath)
-      runningLifecycle.exec(`
-        CREATE TABLE orchestrator_dispatches (
-          dispatch_request_id TEXT PRIMARY KEY, status TEXT NOT NULL
-        );
-        CREATE TABLE orchestrator_events (
-          dispatch_request_id TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER NOT NULL
-        );
-      `)
-      runningLifecycle.prepare("INSERT INTO orchestrator_dispatches VALUES (?, 'running')")
-        .run("dispatch:current-migration")
-      runningLifecycle.prepare("INSERT INTO orchestrator_events VALUES (?, 'running', ?)")
-        .run("dispatch:current-migration", binding.checkpoint.occurredAt)
+      persistCoordinatorLifecycle(runningLifecycle, "dispatch:current-migration", binding.checkpoint.occurredAt)
       runningLifecycle.close()
       const runningOpened = yield* openScopedStore(runningLifecyclePath)
       const runningService = yield* makeWorkService(runningOpened.store)
@@ -2836,6 +2951,94 @@ database.close()`,
         value: { expectedRevision: 1, version: "herdr.work.decision.v2" }
       })
       runningOpened.close()
+
+      const incompleteTerminalPath = join(directory, "incomplete-terminal-lifecycle.sqlite")
+      copyFileSync(path, incompleteTerminalPath)
+      const incompleteTerminal = new DatabaseSync(incompleteTerminalPath)
+      persistCoordinatorLifecycle(
+        incompleteTerminal,
+        "dispatch:current-migration",
+        binding.checkpoint.occurredAt
+      )
+      incompleteTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
+      incompleteTerminal.close()
+      expect(yield* safelyOpenResult(incompleteTerminalPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.agent-binding.lifecycle" },
+          operation: "open.database"
+        }
+      })
+      const incompleteTerminalRolledBack = new DatabaseSync(incompleteTerminalPath)
+      const retainedIncompleteTerminal = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        incompleteTerminalRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      incompleteTerminalRolledBack.close()
+      expect(JSON.parse(retainedIncompleteTerminal.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+      const completeTerminalPath = join(directory, "complete-terminal-lifecycle.sqlite")
+      copyFileSync(path, completeTerminalPath)
+      const completeTerminal = new DatabaseSync(completeTerminalPath)
+      persistCoordinatorLifecycle(
+        completeTerminal,
+        "dispatch:current-migration",
+        binding.checkpoint.occurredAt,
+        "settled"
+      )
+      completeTerminal.close()
+      const completeTerminalOpened = yield* openScopedStore(completeTerminalPath)
+      completeTerminalOpened.close()
+
+      const mismatchedGoalPath = join(directory, "mismatched-binding-goal.sqlite")
+      copyFileSync(path, mismatchedGoalPath)
+      const mismatchedGoal = new DatabaseSync(mismatchedGoalPath)
+      const otherGoalHandoff = { ...previousHandoff, goalId: "goal:other" }
+      mismatchedGoal.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(otherGoalHandoff), previousHandoff.id)
+      mismatchedGoal.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify(otherGoalHandoff), "dispatch:current-migration")
+      mismatchedGoal.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify({ handoff: otherGoalHandoff, lineage }), "dispatch:current-migration")
+      mismatchedGoal.close()
+      expect(yield* safelyOpenResult(mismatchedGoalPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.agent-binding.goal" },
+          operation: "open.database"
+        }
+      })
+
+      for (
+        const invalidRoute of [
+          {
+            name: "luna-route",
+            route: {
+              action: "dispatch",
+              linkedRequestId: null,
+              model: "gpt-5.6-luna",
+              protocol: "hostd.coordinator.route.v1",
+              reason: "Invalid Work-linked Luna route",
+              reasoningEffort: "medium"
+            }
+          },
+          { name: "outsider-sol-route", route: migrationSolRoute("dispatch:outsider") }
+        ]
+      ) {
+        const invalidRoutePath = join(directory, `${invalidRoute.name}.sqlite`)
+        copyFileSync(path, invalidRoutePath)
+        const candidate = new DatabaseSync(invalidRoutePath)
+        candidate.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(invalidRoute.route), "dispatch:current-migration")
+        candidate.close()
+        expect(yield* safelyOpenResult(invalidRoutePath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+            operation: "open.database"
+          }
+        })
+      }
 
       const multipleDispatchPath = join(directory, "multiple-dispatches.sqlite")
       copyFileSync(path, multipleDispatchPath)
@@ -2862,7 +3065,7 @@ database.close()`,
       `)
       multipleDispatches.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
         "dispatch:unbound-current-migration",
-        "{}",
+        JSON.stringify(migrationSolRoute("dispatch:failed-luna")),
         JSON.stringify({ handoff: previousHandoff, lineage })
       )
       multipleDispatches.close()

@@ -45,6 +45,12 @@ const remoteWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
     relation: "delegated"
   }
 })
+const coordinatorWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
+  agentId: "agent-coordinator",
+  host: "SER8",
+  name: "Coordinator",
+  paneId: "w1:p1"
+})
 
 const operations: HostOperations = {
   inspect: () =>
@@ -317,6 +323,12 @@ describe("fleet local authority", () => {
       const callbacks = yield* Deferred.await(resumed)
       expect(callbacks.persistedWorker).toEqual(remoteWorker)
       if (callbacks.persistedWorker === null) return yield* Effect.die("persisted worker missing")
+      expect(
+        yield* Effect.result(callbacks.lifecycle.terminal({ type: "settled", detail: "out of order" }))
+      ).toMatchObject({
+        failure: { _tag: "FleetOperationError", operation: "fleet.operation_terminal.worker_replay" }
+      })
+      expect(yield* second.get(queued.id)).toMatchObject({ status: "running" })
       yield* callbacks.workerStarted(callbacks.persistedWorker)
       expect(
         yield* Effect.result(callbacks.workerStarted({
@@ -1027,6 +1039,61 @@ describe("fleet local authority", () => {
             status: "succeeded"
           })
           expect(coordinatorRuns).toBe(1)
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("accepts coordinator roots only for consult and transition summary", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-coordinator-root-policy-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          for (const [index, mode] of ["consult", "transition_summary", "review", "work"].entries()) {
+            const service = yield* makeFleetService({
+              approvalEnabled: true,
+              host: "SER8",
+              id: Effect.succeed(`job-coordinator-root-${String(index)}`),
+              nonce: Effect.succeed(`nonce-coordinator-root-${String(index)}`),
+              now: Effect.succeed(1_000 + index),
+              operations: {
+                ...operations,
+                runCoordinatorChat: (_payload, workerStarted) =>
+                  workerStarted(coordinatorWorker).pipe(Effect.as("coordinator: ok"))
+              },
+              store
+            })
+            const payload = Schema.decodeUnknownSync(JobPayload)({
+              channel: "coordinator_chat",
+              kind: "agent.delegate",
+              mode,
+              prompt: `coordinator ${mode}`,
+              repository: "/repo"
+            })
+            const job = yield* service.submit({ payload }, "owner")
+            if (mode === "work") {
+              yield* service.approve(job.id, {
+                hash: job.hash,
+                nonce: `nonce-coordinator-root-${String(index)}`
+              }, "owner")
+            }
+            const result = yield* Effect.result(service.runCoordinatorChat(job.id))
+            if (mode === "consult" || mode === "transition_summary") {
+              expect(result).toMatchObject({ success: { status: "succeeded", worker: coordinatorWorker } })
+            } else {
+              expect(result).toMatchObject({
+                success: {
+                  error: "delegated worker identity is missing its exact relationship",
+                  status: "failed"
+                }
+              })
+            }
+          }
         }),
       (store) =>
         Effect.sync(() => {

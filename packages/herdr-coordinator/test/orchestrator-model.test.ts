@@ -192,6 +192,15 @@ describe("orchestrator event model", () => {
           command: { ...submission.command, payload: { ...submission.command.payload, mode } }
         })._tag
       ).toBe("Success")
+      expect(
+        Schema.decodeUnknownResult(OrchestratorSolEscalationSubmission)({
+          ...submission,
+          command: {
+            ...submission.command,
+            payload: { ...submission.command.payload, channel: "coordinator_chat", mode }
+          }
+        })._tag
+      ).toBe("Failure")
     }
     for (
       const payload of [

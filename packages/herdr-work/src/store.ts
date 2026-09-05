@@ -35,6 +35,12 @@ import {
   decodeAgentBindingRow
 } from "./internal/agent-binding-readback.js"
 import {
+  CoordinatorLifecycleDispatchRow,
+  CoordinatorLifecycleEventRow,
+  requireCoordinatorLifecycleAuthority,
+  requireCoordinatorRouteAuthority
+} from "./internal/coordinator-authority.js"
+import {
   decodePreviousDecisionHandoff,
   previousDecisionHandoffEquivalent,
   PreviousWorkDecisionHandoff,
@@ -144,11 +150,8 @@ const LegacyDispatchStoredRow = Schema.Struct({
 const LaneRevisionRow = Schema.Struct({ revision: Schema.Number })
 const MetadataWorkLinkRow = Schema.Struct({
   dispatchRequestId: Schema.String,
+  route: Schema.String,
   workLink: Schema.NullOr(Schema.String)
-})
-const AgentBindingLifecycleRow = Schema.Struct({
-  occurredAt: Schema.Number,
-  status: Schema.Literals(["running", "settled", "delivery_failed", "task_failed"])
 })
 const LegacyDecisionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
@@ -217,6 +220,39 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       )
       if (error !== undefined) throw error
     }
+    const requireLifecycleAuthority = (
+      dispatchRequestId: string,
+      expectedRunningAt: number,
+      operation: string
+    ): void => {
+      const dispatchTablePresent = tables.includes("orchestrator_dispatches")
+      const eventTablePresent = tables.includes("orchestrator_events")
+      if (dispatchTablePresent !== eventTablePresent) {
+        throw new WorkStoreError({
+          cause: { dispatchTablePresent, eventTablePresent },
+          operation: `${operation}.schema`
+        })
+      }
+      if (!dispatchTablePresent) return
+      const dispatchRows = Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleDispatchRow))(
+        database.prepare(
+          `SELECT dispatch_request_id AS dispatchRequestId,
+           activity_idempotency_key AS activityIdempotencyKey, command,
+           accepted_at AS acceptedAt, status
+         FROM orchestrator_dispatches WHERE dispatch_request_id = ?`
+        ).all(dispatchRequestId)
+      )
+      const eventRows = Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleEventRow))(
+        database.prepare(
+          `SELECT dispatch_request_id AS dispatchRequestId, sequence, type,
+           activity_idempotency_key AS activityIdempotencyKey,
+           occurred_at AS occurredAt, detail, result
+         FROM orchestrator_events WHERE dispatch_request_id = ?
+         ORDER BY sequence ASC LIMIT 5`
+        ).all(dispatchRequestId)
+      )
+      requireCoordinatorLifecycleAuthority(dispatchRows, eventRows, expectedRunningAt, operation)
+    }
     const dispatches = tables.includes("work_dispatch_handoffs")
       ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
         database.prepare(
@@ -249,7 +285,8 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         if (legacy.id !== row.handoffId) {
           throw new WorkStoreError({ cause: { legacy, row }, operation: "open.migrate.handoff-identity" })
         }
-        const dispatch = dispatches.find(({ handoffId }) => handoffId === legacy.id)
+        const matchingDispatches = dispatches.filter(({ handoffId }) => handoffId === legacy.id)
+        const dispatch = matchingDispatches[0]
         const lane = lanes.find(({ laneId }) => laneId === legacy.laneId)
         if (lane === undefined) {
           throw new WorkStoreError({ cause: legacy, operation: "open.migrate.handoff-lane" })
@@ -257,8 +294,11 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         const dispatchIds = dispatch === undefined
           ? []
           : Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
-        if (dispatch === undefined) {
-          throw new WorkStoreError({ cause: legacy, operation: "open.migrate.legacy-handoff-revision" })
+        if (matchingDispatches.length !== 1 || dispatch === undefined) {
+          throw new WorkStoreError({
+            cause: { legacy, matchingDispatches },
+            operation: "open.migrate.legacy-dispatch-cardinality"
+          })
         }
         const dispatchHandoff = Schema.decodeUnknownSync(LegacyDecisionRecord)(JSON.parse(dispatch.record))
         if (
@@ -272,7 +312,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         }
         if (tables.includes("orchestrator_dispatch_metadata")) {
           const metadataInput = database.prepare(
-            `SELECT dispatch_request_id AS dispatchRequestId, work_link AS workLink
+            `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
              FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?`
           ).get(dispatch.dispatchRequestId)
           if (metadataInput === undefined) {
@@ -289,6 +329,11 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
             })
           }
           const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
+          requireCoordinatorRouteAuthority(
+            metadata.route,
+            workLink.lineage,
+            "open.migrate.legacy-metadata-authority"
+          )
           if (
             !legacyDecisionEquivalent(workLink.handoff, legacy) ||
             !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
@@ -322,7 +367,18 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           "open.migrate.legacy-agent-binding"
         )
         if (bindingDecision._tag === "invalid") throw bindingDecision.error
+        if (bindingDecision.binding.lane.goalId !== legacy.goalId) {
+          throw new WorkStoreError({
+            cause: { binding: bindingDecision.binding, legacy },
+            operation: "open.migrate.legacy-agent-binding.goal"
+          })
+        }
         requireBindingCompanions(bindingDecision.binding, "open.migrate.legacy-agent-binding")
+        requireLifecycleAuthority(
+          bindingDecision.binding.request.dispatchRequestId,
+          bindingDecision.binding.checkpoint.occurredAt,
+          "open.migrate.legacy-agent-binding.lifecycle"
+        )
         return Schema.decodeUnknownSync(WorkDecisionHandoff)({
           ...legacy,
           contextDelta: legacy.summary,
@@ -428,7 +484,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         const linkedMetadata = tables.includes("orchestrator_dispatch_metadata")
           ? Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
             database.prepare(
-              `SELECT dispatch_request_id AS dispatchRequestId, work_link AS workLink
+              `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
                FROM orchestrator_dispatch_metadata
                WHERE work_link IS NOT NULL
                  AND CASE WHEN json_valid(work_link)
@@ -473,42 +529,18 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           "open.migrate.agent-binding"
         )
         if (bindingDecision._tag === "invalid") throw bindingDecision.error
-        requireBindingCompanions(bindingDecision.binding, "open.migrate.agent-binding")
-        const dispatchTablePresent = tables.includes("orchestrator_dispatches")
-        const eventTablePresent = tables.includes("orchestrator_events")
-        if (dispatchTablePresent !== eventTablePresent) {
+        if (bindingDecision.binding.lane.goalId !== previous.goalId) {
           throw new WorkStoreError({
-            cause: { dispatchTablePresent, eventTablePresent },
-            operation: "open.migrate.agent-binding.lifecycle-schema"
+            cause: { binding: bindingDecision.binding, previous },
+            operation: "open.migrate.agent-binding.goal"
           })
         }
-        if (dispatchTablePresent) {
-          let lifecycleRows: ReadonlyArray<typeof AgentBindingLifecycleRow.Type>
-          try {
-            lifecycleRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingLifecycleRow))(
-              database.prepare(
-                `SELECT dispatch.status, event.occurred_at AS occurredAt
-                 FROM orchestrator_dispatches dispatch
-                 JOIN orchestrator_events event
-                   ON event.dispatch_request_id = dispatch.dispatch_request_id
-                  AND event.type = 'running'
-                 WHERE dispatch.dispatch_request_id = ?`
-              ).all(bindingDecision.binding.request.dispatchRequestId)
-            )
-          } catch (cause) {
-            throw new WorkStoreError({ cause, operation: "open.migrate.agent-binding.lifecycle-read" })
-          }
-          const lifecycle = lifecycleRows[0]
-          if (
-            lifecycleRows.length !== 1 || lifecycle === undefined ||
-            lifecycle.occurredAt !== bindingDecision.binding.checkpoint.occurredAt
-          ) {
-            throw new WorkStoreError({
-              cause: { binding: bindingDecision.binding, lifecycleRows },
-              operation: "open.migrate.agent-binding.lifecycle"
-            })
-          }
-        }
+        requireBindingCompanions(bindingDecision.binding, "open.migrate.agent-binding")
+        requireLifecycleAuthority(
+          bindingDecision.binding.request.dispatchRequestId,
+          bindingDecision.binding.checkpoint.occurredAt,
+          "open.migrate.agent-binding.lifecycle"
+        )
         const verifiedDispatches = handoffDispatches.map((dispatch) => {
           const dispatchHandoff = Schema.decodeUnknownSync(PreviousWorkDecisionHandoff)(JSON.parse(dispatch.record))
           const lineage = Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
@@ -533,6 +565,11 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
               })
             }
             const workLink = Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(metadata.workLink))
+            requireCoordinatorRouteAuthority(
+              metadata.route,
+              workLink.lineage,
+              "open.migrate.metadata-authority"
+            )
             if (
               !previousDecisionHandoffEquivalent(workLink.handoff, previous) ||
               !workDispatchLineageEquivalent(workLink.lineage, lineage)

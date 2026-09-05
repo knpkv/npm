@@ -40,7 +40,7 @@ appear in the persisted handoff's dispatch IDs. Consumers use
 fixes the Sol model, high reasoning effort, route protocol, and failed-Luna link
 instead of making the adapter rebuild generic route metadata. It accepts only
 `review` and `work` agent-delegate commands; consultation and transition-summary
-commands remain Luna-only. If the accepted
+commands remain Luna-only. Coordinator-chat authority is invalid on Sol escalation commands. If the accepted
 Work handoff's lane revision becomes stale before Sol acceptance,
 `submitSolEscalation` returns `OrchestratorWorkRevisionConflictError` and commits
 no dispatch, metadata, or accepted event. `request` returns that complete

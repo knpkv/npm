@@ -1127,7 +1127,17 @@ const makeOrchestrator: Effect.Effect<
       Effect.mapError(() => new OrchestratorValidationError({ detail: "Sol escalation submission is invalid" }))
     )
     return yield* submitInternal(
-      decoded.command,
+      {
+        activityIdempotencyKey: decoded.command.activityIdempotencyKey,
+        actor: decoded.command.actor,
+        kind: decoded.command.kind,
+        payload: {
+          kind: decoded.command.payload.kind,
+          mode: decoded.command.payload.mode,
+          prompt: decoded.command.payload.prompt,
+          repository: decoded.command.payload.repository
+        }
+      },
       decoded.idempotencyKey,
       {
         action: "dispatch",
