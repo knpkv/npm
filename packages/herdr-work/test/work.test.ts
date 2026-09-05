@@ -2785,6 +2785,58 @@ database.close()`,
       )
       database.close()
 
+      const queuedLifecyclePath = join(directory, "queued-lifecycle.sqlite")
+      copyFileSync(path, queuedLifecyclePath)
+      const queuedLifecycle = new DatabaseSync(queuedLifecyclePath)
+      queuedLifecycle.exec(`
+        CREATE TABLE orchestrator_dispatches (
+          dispatch_request_id TEXT PRIMARY KEY, status TEXT NOT NULL
+        );
+        CREATE TABLE orchestrator_events (
+          dispatch_request_id TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER NOT NULL
+        );
+      `)
+      queuedLifecycle.prepare("INSERT INTO orchestrator_dispatches VALUES (?, 'queued')")
+        .run("dispatch:current-migration")
+      queuedLifecycle.close()
+      expect(yield* safelyOpenResult(queuedLifecyclePath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.agent-binding.lifecycle" },
+          operation: "open.database"
+        }
+      })
+      const queuedLifecycleRolledBack = new DatabaseSync(queuedLifecyclePath)
+      const retainedQueuedLifecycle = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        queuedLifecycleRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      queuedLifecycleRolledBack.close()
+      expect(JSON.parse(retainedQueuedLifecycle.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+      const runningLifecyclePath = join(directory, "running-lifecycle.sqlite")
+      copyFileSync(path, runningLifecyclePath)
+      const runningLifecycle = new DatabaseSync(runningLifecyclePath)
+      runningLifecycle.exec(`
+        CREATE TABLE orchestrator_dispatches (
+          dispatch_request_id TEXT PRIMARY KEY, status TEXT NOT NULL
+        );
+        CREATE TABLE orchestrator_events (
+          dispatch_request_id TEXT NOT NULL, type TEXT NOT NULL, occurred_at INTEGER NOT NULL
+        );
+      `)
+      runningLifecycle.prepare("INSERT INTO orchestrator_dispatches VALUES (?, 'running')")
+        .run("dispatch:current-migration")
+      runningLifecycle.prepare("INSERT INTO orchestrator_events VALUES (?, 'running', ?)")
+        .run("dispatch:current-migration", binding.checkpoint.occurredAt)
+      runningLifecycle.close()
+      const runningOpened = yield* openScopedStore(runningLifecyclePath)
+      const runningService = yield* makeWorkService(runningOpened.store)
+      expect(yield* runningService.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
+        value: { expectedRevision: 1, version: "herdr.work.decision.v2" }
+      })
+      runningOpened.close()
+
       const multipleDispatchPath = join(directory, "multiple-dispatches.sqlite")
       copyFileSync(path, multipleDispatchPath)
       const multipleDispatches = new DatabaseSync(multipleDispatchPath)

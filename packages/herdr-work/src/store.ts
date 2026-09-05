@@ -146,6 +146,10 @@ const MetadataWorkLinkRow = Schema.Struct({
   dispatchRequestId: Schema.String,
   workLink: Schema.NullOr(Schema.String)
 })
+const AgentBindingLifecycleRow = Schema.Struct({
+  occurredAt: Schema.Number,
+  status: Schema.Literals(["running", "settled", "delivery_failed", "task_failed"])
+})
 const LegacyDecisionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
   id: Schema.String,
@@ -470,6 +474,41 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         )
         if (bindingDecision._tag === "invalid") throw bindingDecision.error
         requireBindingCompanions(bindingDecision.binding, "open.migrate.agent-binding")
+        const dispatchTablePresent = tables.includes("orchestrator_dispatches")
+        const eventTablePresent = tables.includes("orchestrator_events")
+        if (dispatchTablePresent !== eventTablePresent) {
+          throw new WorkStoreError({
+            cause: { dispatchTablePresent, eventTablePresent },
+            operation: "open.migrate.agent-binding.lifecycle-schema"
+          })
+        }
+        if (dispatchTablePresent) {
+          let lifecycleRows: ReadonlyArray<typeof AgentBindingLifecycleRow.Type>
+          try {
+            lifecycleRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingLifecycleRow))(
+              database.prepare(
+                `SELECT dispatch.status, event.occurred_at AS occurredAt
+                 FROM orchestrator_dispatches dispatch
+                 JOIN orchestrator_events event
+                   ON event.dispatch_request_id = dispatch.dispatch_request_id
+                  AND event.type = 'running'
+                 WHERE dispatch.dispatch_request_id = ?`
+              ).all(bindingDecision.binding.request.dispatchRequestId)
+            )
+          } catch (cause) {
+            throw new WorkStoreError({ cause, operation: "open.migrate.agent-binding.lifecycle-read" })
+          }
+          const lifecycle = lifecycleRows[0]
+          if (
+            lifecycleRows.length !== 1 || lifecycle === undefined ||
+            lifecycle.occurredAt !== bindingDecision.binding.checkpoint.occurredAt
+          ) {
+            throw new WorkStoreError({
+              cause: { binding: bindingDecision.binding, lifecycleRows },
+              operation: "open.migrate.agent-binding.lifecycle"
+            })
+          }
+        }
         const verifiedDispatches = handoffDispatches.map((dispatch) => {
           const dispatchHandoff = Schema.decodeUnknownSync(PreviousWorkDecisionHandoff)(JSON.parse(dispatch.record))
           const lineage = Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
