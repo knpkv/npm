@@ -283,6 +283,23 @@ export interface OrchestratorDispatchActivated extends
   >
 {}
 
+const routedCommandBindingIsValid = (
+  command: OrchestratorCommand,
+  route: OrchestratorRoute | null,
+  workLink: OrchestratorWorkLink | null
+): boolean => {
+  if (route === null) return workLink === null
+  if (command.payload.kind !== "agent.delegate") return false
+  if (route.model === "gpt-5.6-luna") {
+    return workLink === null &&
+      ((command.payload.mode === "consult" && route.reasoningEffort === "medium") ||
+        (command.payload.mode === "transition_summary" && route.reasoningEffort === "low"))
+  }
+  return workLink !== null &&
+    (command.payload.mode === "review" || command.payload.mode === "work") &&
+    (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId))
+}
+
 const requestBindings = Schema.makeFilter(
   ({ activityIdempotencyKey, command, route, workLink }: {
     readonly activityIdempotencyKey: ActivityIdempotencyKey
@@ -291,11 +308,7 @@ const requestBindings = Schema.makeFilter(
     readonly workLink: OrchestratorWorkLink | null
   }) =>
     activityIdempotencyKey === command.activityIdempotencyKey &&
-    ((route === null && workLink === null) ||
-      (route?.model === "gpt-5.6-luna" && workLink === null) ||
-      (route?.model === "gpt-5.6-sol" &&
-        workLink !== null &&
-        (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId)))),
+    routedCommandBindingIsValid(command, route, workLink),
   { expected: "activity key and route/Work link form valid durable dispatch bindings" }
 )
 
@@ -345,12 +358,7 @@ export const OrchestratorPendingDispatch = Schema.Struct({
     ({ activityIdempotencyKey, command, route, workLink }) =>
       activityIdempotencyKey === command.activityIdempotencyKey &&
       ((route === undefined && workLink === undefined) ||
-        (route === null && workLink === null) ||
-        (route?.model === "gpt-5.6-luna" && workLink === null) ||
-        (route?.model === "gpt-5.6-sol" &&
-          workLink !== undefined &&
-          workLink !== null &&
-          (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId)))),
+        (route !== undefined && workLink !== undefined && routedCommandBindingIsValid(command, route, workLink))),
     { expected: "pending activity key and route/Work link form valid durable bindings" }
   )
 )

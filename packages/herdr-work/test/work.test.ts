@@ -324,7 +324,8 @@ const persistCoordinatorLifecycle = (
   database: DatabaseSync,
   dispatchRequestId: string,
   runningAt: number,
-  status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed" = "running"
+  status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed",
+  mode: "consult" | "work"
 ): void => {
   const activityIdempotencyKey = `activity:${dispatchRequestId}`
   const acceptedAt = Math.max(0, runningAt - 2)
@@ -348,7 +349,7 @@ const persistCoordinatorLifecycle = (
       activityIdempotencyKey,
       actor: "coordinator",
       kind: "fleet.job",
-      payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+      payload: { kind: "agent.delegate", mode, prompt: "Migrate", repository: "/repo" }
     }),
     acceptedAt,
     status
@@ -2544,7 +2545,13 @@ database.close()`,
           JSON.stringify(migrationSolRoute(null)),
           JSON.stringify({ handoff: legacyHandoff, lineage })
         )
-      persistCoordinatorLifecycle(database, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt)
+      persistCoordinatorLifecycle(
+        database,
+        "dispatch:legacy-sol",
+        legacyBinding.checkpoint.occurredAt,
+        "running",
+        "work"
+      )
       database.close()
 
       const queuedLegacyPath = join(directory, "queued-legacy-lifecycle.sqlite")
@@ -2565,9 +2572,11 @@ database.close()`,
         "PRAGMA table_info(work_decision_handoffs)"
       ).all()
       queuedLegacyRolledBack.close()
-      expect(retainedQueuedLegacyColumns.some((column) =>
-        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
-      )).toBe(false)
+      expect(
+        retainedQueuedLegacyColumns.some((column) =>
+          Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+        )
+      ).toBe(false)
 
       const runningLegacyPath = join(directory, "running-legacy-lifecycle.sqlite")
       copyFileSync(path, runningLegacyPath)
@@ -2604,9 +2613,11 @@ database.close()`,
         "PRAGMA table_info(work_decision_handoffs)"
       ).all()
       unroutedLegacyRolledBack.close()
-      expect(unroutedLegacyColumns.some((column) =>
-        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
-      )).toBe(false)
+      expect(
+        unroutedLegacyColumns.some((column) =>
+          Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+        )
+      ).toBe(false)
 
       const missingParentLegacyPath = join(directory, "missing-parent-legacy.sqlite")
       copyFileSync(path, missingParentLegacyPath)
@@ -2625,7 +2636,7 @@ database.close()`,
       const failedParentLegacyPath = join(directory, "failed-parent-legacy.sqlite")
       copyFileSync(path, failedParentLegacyPath)
       const failedParentLegacy = new DatabaseSync(failedParentLegacyPath)
-      persistCoordinatorLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed")
+      persistCoordinatorLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed", "consult")
       failedParentLegacy.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
         .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
       failedParentLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
@@ -2741,9 +2752,11 @@ database.close()`,
           .get(legacyHandoff.id)
       )
       oversizedRolledBack.close()
-      expect(oversizedColumns.some((column) =>
-        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
-      )).toBe(false)
+      expect(
+        oversizedColumns.some((column) =>
+          Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+        )
+      ).toBe(false)
       expect(JSON.parse(oversizedRetained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
       const unboundLegacyPath = join(directory, "unbound-legacy.sqlite")
@@ -2833,11 +2846,7 @@ database.close()`,
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
       )
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() =>
-          writer.kill()
-        )
-      )
+      yield* Effect.addFinalizer(() => Effect.sync(() => writer.kill()))
       yield* Effect.callback<void, LockHolderError>((resume) => {
         let completed = false
         const complete = (result: Effect.Effect<void, LockHolderError>) => {
@@ -2848,8 +2857,7 @@ database.close()`,
           resume(result)
         }
         writer.stdout.setEncoding("utf8")
-        writer.stdout.once("data", () =>
-          complete(Effect.void))
+        writer.stdout.once("data", () => complete(Effect.void))
         writer.once("error", (cause) => complete(Effect.fail(new LockHolderError({ cause: String(cause) }))))
         writer.once("exit", (code, signal) =>
           complete(
@@ -2906,9 +2914,11 @@ database.close()`,
       ).all()
       unboundLegacyRolledBack.close()
       expect(JSON.parse(retainedLegacy.record)).toMatchObject({ version: "herdr.work.decision.v1" })
-      expect(retainedLegacyColumns.some((column) =>
-        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
-      )).toBe(false)
+      expect(
+        retainedLegacyColumns.some((column) =>
+          Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+        )
+      ).toBe(false)
 
       const corruptedPath = join(directory, "corrupted.sqlite")
       const corrupted = new DatabaseSync(corruptedPath)
@@ -2919,9 +2929,11 @@ database.close()`,
       const unchanged = new DatabaseSync(corruptedPath)
       const columns = unchanged.prepare("PRAGMA table_info(work_lane_claims)").all()
       unchanged.close()
-      expect(columns.some((column) =>
-        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "goal_id"
-      ))
+      expect(
+        columns.some((column) =>
+          Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "goal_id"
+        )
+      )
         .toBe(false)
     }).pipe(provideNodeServices))
 
@@ -3038,7 +3050,13 @@ database.close()`,
         JSON.stringify(migrationSolRoute(null)),
         JSON.stringify({ handoff: previousHandoff, lineage })
       )
-      persistCoordinatorLifecycle(database, "dispatch:current-migration", binding.checkpoint.occurredAt)
+      persistCoordinatorLifecycle(
+        database,
+        "dispatch:current-migration",
+        binding.checkpoint.occurredAt,
+        "running",
+        "work"
+      )
       database.close()
 
       const queuedLifecyclePath = join(directory, "queued-lifecycle.sqlite")
@@ -3099,6 +3117,50 @@ database.close()`,
         }
       })
 
+      const v2CommandModeMismatchPath = join(directory, "v2-command-mode-mismatch.sqlite")
+      copyFileSync(runningLifecyclePath, v2CommandModeMismatchPath)
+      const v2CommandModeMismatch = new DatabaseSync(v2CommandModeMismatchPath)
+      v2CommandModeMismatch.prepare(
+        `UPDATE orchestrator_dispatches
+         SET command = json_set(command, '$.payload.mode', 'transition_summary')
+         WHERE dispatch_request_id = ?`
+      ).run("dispatch:current-migration")
+      const mismatchedCommandBefore = Schema.decodeUnknownSync(Schema.Struct({
+        command: Schema.String,
+        record: Schema.String
+      }))(
+        v2CommandModeMismatch.prepare(
+          `SELECT dispatch.command, decision.record
+           FROM orchestrator_dispatches dispatch
+           JOIN work_dispatch_handoffs handoff USING (dispatch_request_id)
+           JOIN work_decision_handoffs decision USING (handoff_id)
+           WHERE dispatch.dispatch_request_id = ?`
+        ).get("dispatch:current-migration")
+      )
+      v2CommandModeMismatch.close()
+      expect(yield* safelyOpenResult(v2CommandModeMismatchPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          operation: "open.database"
+        }
+      })
+      const v2CommandModeMismatchRolledBack = new DatabaseSync(v2CommandModeMismatchPath)
+      const mismatchedCommandAfter = Schema.decodeUnknownSync(Schema.Struct({
+        command: Schema.String,
+        record: Schema.String
+      }))(
+        v2CommandModeMismatchRolledBack.prepare(
+          `SELECT dispatch.command, decision.record
+           FROM orchestrator_dispatches dispatch
+           JOIN work_dispatch_handoffs handoff USING (dispatch_request_id)
+           JOIN work_decision_handoffs decision USING (handoff_id)
+           WHERE dispatch.dispatch_request_id = ?`
+        ).get("dispatch:current-migration")
+      )
+      v2CommandModeMismatchRolledBack.close()
+      expect(mismatchedCommandAfter).toEqual(mismatchedCommandBefore)
+
       const missingMetadataPath = join(directory, "missing-metadata-current.sqlite")
       copyFileSync(path, missingMetadataPath)
       const missingMetadata = new DatabaseSync(missingMetadataPath)
@@ -3149,7 +3211,7 @@ database.close()`,
       const failedParentPath = join(directory, "failed-parent-current.sqlite")
       copyFileSync(path, failedParentPath)
       const failedParent = new DatabaseSync(failedParentPath)
-      persistCoordinatorLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed")
+      persistCoordinatorLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed", "consult")
       failedParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
         .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
       failedParent.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")

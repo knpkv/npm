@@ -309,7 +309,18 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       lineage: ReadonlyArray<string>,
       operation: string
     ): void => {
+      const commandRows = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ command: Schema.String })))(
+        database.prepare(
+          `SELECT command FROM orchestrator_dispatches
+           WHERE dispatch_request_id = ? LIMIT 2`
+        ).all(dispatchRequestId)
+      )
+      const commandRow = commandRows[0]
+      if (commandRows.length !== 1 || commandRow === undefined) {
+        throw new WorkStoreError({ cause: { commandRows, dispatchRequestId }, operation })
+      }
       const route = requireCoordinatorRouteAuthority(
+        commandRow.command,
         routeText,
         lineage,
         routeStorageAuthority(dispatchRequestId, operation),

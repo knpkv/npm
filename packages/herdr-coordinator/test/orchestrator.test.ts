@@ -131,7 +131,8 @@ const persistMigrationLifecycle = (
   database: DatabaseSync,
   dispatchRequestId: string,
   runningAt: number,
-  status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed" = "running"
+  status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed",
+  mode: "consult" | "work"
 ): void => {
   const activityIdempotencyKey = `activity:${dispatchRequestId}`
   const acceptedAt = Math.max(0, runningAt - 2)
@@ -155,7 +156,7 @@ const persistMigrationLifecycle = (
       activityIdempotencyKey,
       actor: "coordinator",
       kind: "fleet.job",
-      payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+      payload: { kind: "agent.delegate", mode, prompt: "Migrate", repository: "/repo" }
     }),
     acceptedAt,
     status
@@ -1344,6 +1345,39 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("rejects a persisted command whose mode no longer matches its route", () =>
+    withTemporaryRoot("herdr-orchestrator-route-command-mismatch-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const submission = makeSolSubmission(null, "dispatch:route-command-mismatch")
+        yield* recordWorkAuthority(path, submission.workLink)
+        const results = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            const database = new DatabaseSync(path)
+            database.prepare(
+              `UPDATE orchestrator_dispatches
+               SET command = json_set(command, '$.payload.mode', 'transition_summary')
+               WHERE dispatch_request_id = ?`
+            ).run(receipt.dispatchRequestId)
+            database.close()
+            return {
+              pending: yield* Effect.result(orchestrator.pending()),
+              request: yield* Effect.result(orchestrator.request(receipt.dispatchRequestId))
+            }
+          })
+        )
+        expect(results.request).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "request.decode" }
+        })
+        expect(results.pending).toMatchObject({
+          failure: { _tag: "OrchestratorStorageError", operation: "pending.decode" }
+        })
+      })
+    }))
+
   it.effect("atomically binds a failed-Luna Sol dispatch to its Work lineage", () =>
     withTemporaryRoot("herdr-orchestrator-work-link-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -1651,7 +1685,7 @@ describe("durable coordinator orchestrator", () => {
           "dispatch:migrated-route",
           "idempotency:migrated-route",
           "activity:migrated-route",
-          JSON.stringify({ ...command, activityIdempotencyKey: "activity:migrated-route" })
+          JSON.stringify(makeLunaCommand("consult", "activity:migrated-route"))
         )
         database.prepare(
           `INSERT INTO orchestrator_events
@@ -1801,7 +1835,13 @@ describe("durable coordinator orchestrator", () => {
             }),
             JSON.stringify({ handoff: legacy, lineage })
           )
-        persistMigrationLifecycle(database, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt)
+        persistMigrationLifecycle(
+          database,
+          "dispatch:legacy-sol",
+          legacyBinding.checkpoint.occurredAt,
+          "running",
+          "work"
+        )
         database.close()
 
         const missingMetadataLegacyPath = join(root, "missing-metadata-legacy.sqlite")
@@ -1865,7 +1905,7 @@ describe("durable coordinator orchestrator", () => {
         const failedParentLegacyPath = join(root, "failed-parent-legacy.sqlite")
         copyFileSync(path, failedParentLegacyPath)
         const failedParentLegacy = new DatabaseSync(failedParentLegacyPath)
-        persistMigrationLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed")
+        persistMigrationLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed", "consult")
         failedParentLegacy.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
           .run(JSON.stringify({
             ...lunaRoute,
@@ -1998,7 +2038,13 @@ describe("durable coordinator orchestrator", () => {
               }),
               JSON.stringify({ handoff, lineage: dispatchLineage })
             )
-          persistMigrationLifecycle(oversizedLegacy, dispatchRequestId, binding.checkpoint.occurredAt)
+          persistMigrationLifecycle(
+            oversizedLegacy,
+            dispatchRequestId,
+            binding.checkpoint.occurredAt,
+            "running",
+            "work"
+          )
         }
         oversizedLegacy.close()
         expect(yield* Effect.result(withDatabase(oversizedLegacyPath, Effect.void))).toMatchObject({
@@ -2290,7 +2336,7 @@ database.close()`,
         const failedParentPath = join(root, "failed-parent-current.sqlite")
         copyFileSync(path, failedParentPath)
         const failedParent = new DatabaseSync(failedParentPath)
-        persistMigrationLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed")
+        persistMigrationLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed", "consult")
         failedParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?")
           .run(
             JSON.stringify({ ...submission.route, linkedRequestId: parentDispatchRequestId }),
@@ -2514,6 +2560,50 @@ database.close()`,
         )
         reopened.close()
         expect(retainedAfterReopen.record).toBe(retainedBeforeReopen.record)
+
+        const currentCommandModeMismatchPath = join(root, "current-command-mode-mismatch.sqlite")
+        copyFileSync(path, currentCommandModeMismatchPath)
+        const currentCommandModeMismatch = new DatabaseSync(currentCommandModeMismatchPath)
+        currentCommandModeMismatch.prepare(
+          `UPDATE orchestrator_dispatches
+           SET command = json_set(command, '$.payload.mode', 'transition_summary')
+           WHERE dispatch_request_id = ?`
+        ).run(activation.event.dispatchRequestId)
+        const currentCommandModeMismatchBefore = Schema.decodeUnknownSync(Schema.Struct({
+          command: Schema.String,
+          record: Schema.String
+        }))(
+          currentCommandModeMismatch.prepare(
+            `SELECT dispatch.command, decision.record
+             FROM orchestrator_dispatches dispatch
+             JOIN work_dispatch_handoffs handoff USING (dispatch_request_id)
+             JOIN work_decision_handoffs decision USING (handoff_id)
+             WHERE dispatch.dispatch_request_id = ?`
+          ).get(activation.event.dispatchRequestId)
+        )
+        currentCommandModeMismatch.close()
+        expect(yield* Effect.result(withDatabase(currentCommandModeMismatchPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
+            operation: "initialize.work"
+          }
+        })
+        const currentCommandModeMismatchRolledBack = new DatabaseSync(currentCommandModeMismatchPath)
+        const currentCommandModeMismatchAfter = Schema.decodeUnknownSync(Schema.Struct({
+          command: Schema.String,
+          record: Schema.String
+        }))(
+          currentCommandModeMismatchRolledBack.prepare(
+            `SELECT dispatch.command, decision.record
+             FROM orchestrator_dispatches dispatch
+             JOIN work_dispatch_handoffs handoff USING (dispatch_request_id)
+             JOIN work_decision_handoffs decision USING (handoff_id)
+             WHERE dispatch.dispatch_request_id = ?`
+          ).get(activation.event.dispatchRequestId)
+        )
+        currentCommandModeMismatchRolledBack.close()
+        expect(currentCommandModeMismatchAfter).toEqual(currentCommandModeMismatchBefore)
 
         for (
           const invalid of [
@@ -2937,12 +3027,13 @@ database.close()`,
 
   it.effect("rejects invalid public route and Work-link combinations", () =>
     Effect.gen(function*() {
-      const solRoute = makeSolSubmission(null, "dispatch:schema").route
+      const solSubmission = makeSolSubmission(null, "dispatch:schema")
+      const solRoute = solSubmission.route
       const workLink = makeWorkLink([])
       const request = {
         acceptedAt: 0,
-        activityIdempotencyKey: command.activityIdempotencyKey,
-        command,
+        activityIdempotencyKey: solSubmission.command.activityIdempotencyKey,
+        command: solSubmission.command,
         dispatchRequestId: "dispatch:schema",
         idempotencyKey: "idempotency:schema",
         route: solRoute,

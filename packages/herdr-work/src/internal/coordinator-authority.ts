@@ -119,6 +119,7 @@ export type CoordinatorRouteStorageAuthority = typeof CoordinatorRouteStorageAut
 
 type CoordinatorLifecycleAuthority = {
   readonly dispatch: CoordinatorLifecycleDispatchRow
+  readonly command: typeof CoordinatorCommand.Type
   readonly events: ReadonlyArray<typeof CoordinatorEvent.Type>
 }
 
@@ -165,7 +166,7 @@ const decodeCoordinatorLifecycleAuthority = (
     if (last === undefined || last.type !== dispatch.status) {
       throw new WorkStoreError({ cause: { dispatch, events }, operation })
     }
-    return { dispatch, events }
+    return { command, dispatch, events }
   } catch (cause) {
     if (Schema.is(WorkStoreError)(cause)) throw cause
     throw new WorkStoreError({ cause, operation })
@@ -207,17 +208,26 @@ const decodeCoordinatorRouteAuthority = (
 
 /** Validates persisted route authority before a Work-link replica is upgraded. */
 export const requireCoordinatorRouteAuthority = (
+  commandText: string,
   routeText: string,
   lineage: ReadonlyArray<string>,
   storageAuthority: CoordinatorRouteStorageAuthority,
   operation: string
 ): CoordinatorRoute => {
   const route = decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation)
-  if (
-    route.model !== "gpt-5.6-sol" ||
-    (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId))
-  ) {
-    throw new WorkStoreError({ cause: { lineage, route }, operation })
+  try {
+    const command = Schema.decodeUnknownSync(CoordinatorCommand)(JSON.parse(commandText))
+    if (
+      command.payload.kind !== "agent.delegate" ||
+      (command.payload.mode !== "review" && command.payload.mode !== "work") ||
+      route.model !== "gpt-5.6-sol" ||
+      (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId))
+    ) {
+      throw new WorkStoreError({ cause: { command, lineage, route }, operation })
+    }
+  } catch (cause) {
+    if (Schema.is(WorkStoreError)(cause)) throw cause
+    throw new WorkStoreError({ cause, operation })
   }
   return route
 }
@@ -234,6 +244,9 @@ export const requireCoordinatorFailedLunaAuthority = (
   const route = decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation)
   if (
     route.model !== "gpt-5.6-luna" ||
+    authority.command.payload.kind !== "agent.delegate" ||
+    (route.reasoningEffort === "medium" && authority.command.payload.mode !== "consult") ||
+    (route.reasoningEffort === "low" && authority.command.payload.mode !== "transition_summary") ||
     (authority.dispatch.status !== "delivery_failed" && authority.dispatch.status !== "task_failed")
   ) {
     throw new WorkStoreError({ cause: { ...authority, route }, operation })

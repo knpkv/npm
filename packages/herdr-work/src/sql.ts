@@ -567,9 +567,21 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         lineage: ReadonlyArray<string>,
         operation: string
       ) {
+        const commandRows = yield* sql`
+          SELECT command FROM orchestrator_dispatches
+          WHERE dispatch_request_id = ${dispatchRequestId} LIMIT 2
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ command: Schema.String })))),
+          Effect.mapError(storeError(operation))
+        )
+        const commandRow = commandRows[0]
+        if (commandRows.length !== 1 || commandRow === undefined) {
+          return yield* new WorkStoreError({ cause: { commandRows, dispatchRequestId }, operation })
+        }
         const storageAuthority = yield* routeStorageAuthority(dispatchRequestId, operation)
         const route = yield* Effect.try({
-          try: () => requireCoordinatorRouteAuthority(routeText, lineage, storageAuthority, operation),
+          try: () =>
+            requireCoordinatorRouteAuthority(commandRow.command, routeText, lineage, storageAuthority, operation),
           catch: (cause) => Schema.is(WorkStoreError)(cause) ? cause : new WorkStoreError({ cause, operation })
         })
         yield* requireLinkedParentAuthority(route.linkedRequestId, `${operation}.parent`)
