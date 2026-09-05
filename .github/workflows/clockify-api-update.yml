@@ -47,6 +47,12 @@ jobs:
         if: steps.check.outputs.updated == 'true'
         run: pnpm --filter @knpkv/jira-clockify... build
 
+      # @knpkv/jira-clockify ships an nvim plugin whose specs run under
+      # `nvim --headless`; its test suite fails in CI when the binary is absent.
+      - name: Install neovim for nvim plugin specs
+        if: steps.check.outputs.updated == 'true'
+        run: sudo apt-get update && sudo apt-get install -y neovim
+
       - name: Run generated-client tests
         if: steps.check.outputs.updated == 'true'
         run: |
@@ -69,6 +75,10 @@ jobs:
       - name: Create pull request
         if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        # The husky pre-commit gate needs the effect-upstream remote and a full
+        # local toolchain; this workflow already ran the focused build and tests.
+        env:
+          HUSKY: "0"
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(clockify-api-client): update OpenAPI client"
