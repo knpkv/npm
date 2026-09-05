@@ -38,7 +38,9 @@ request lookup proves a terminal Luna failure. Every lineage request must also
 appear in the persisted handoff's dispatch IDs. Consumers use
 `submitSolEscalation` with `OrchestratorLinkedSolDispatchReference`; the package
 fixes the Sol model, high reasoning effort, route protocol, and failed-Luna link
-instead of making the adapter rebuild generic route metadata. If the accepted
+instead of making the adapter rebuild generic route metadata. It accepts only
+`review` and `work` agent-delegate commands; consultation and transition-summary
+commands remain Luna-only. If the accepted
 Work handoff's lane revision becomes stale before Sol acceptance,
 `submitSolEscalation` returns `OrchestratorWorkRevisionConflictError` and commits
 no dispatch, metadata, or accepted event. `request` returns that complete

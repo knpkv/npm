@@ -1293,7 +1293,16 @@ describe("durable coordinator orchestrator", () => {
             yield* orchestrator.run(luna.dispatchRequestId)
             yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
             const sol = yield* orchestrator.submitSolEscalation({
-              command: { ...command, activityIdempotencyKey: "activity:dispatch:route-sol" },
+              command: {
+                ...command,
+                activityIdempotencyKey: "activity:dispatch:route-sol",
+                payload: {
+                  kind: "agent.delegate",
+                  mode: "work",
+                  prompt: "Continue failed Luna work with Sol",
+                  repository: "/repo"
+                }
+              },
               idempotencyKey: "dispatch:route-sol",
               reason: "failed Luna work requires an explicit linked Sol escalation",
               reference: {
@@ -1398,7 +1407,16 @@ describe("durable coordinator orchestrator", () => {
             Effect.gen(function*() {
               const orchestrator = yield* Orchestrator
               return yield* Effect.result(orchestrator.submitSolEscalation({
-                command: { ...command, activityIdempotencyKey: "activity:stale-sol" },
+                command: {
+                  ...command,
+                  activityIdempotencyKey: "activity:stale-sol",
+                  payload: {
+                    kind: "agent.delegate",
+                    mode: "work",
+                    prompt: "Continue failed Luna work with Sol",
+                    repository: "/repo"
+                  }
+                },
                 idempotencyKey: "dispatch:stale-sol",
                 reason: "failed Luna work requires an explicit linked Sol escalation",
                 reference: { failedLunaRequestId: luna.dispatchRequestId, workLink }
@@ -1714,6 +1732,76 @@ describe("durable coordinator orchestrator", () => {
           )
         database.close()
 
+        const oversizedLegacyPath = join(root, "oversized-legacy.sqlite")
+        copyFileSync(path, oversizedLegacyPath)
+        const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+        for (let index = 0; index < 260; index++) {
+          const occurredAt = index + 10
+          const handoff = {
+            ...legacy,
+            id: `handoff:legacy-capacity:${String(index)}`,
+            occurredAt,
+            summary: "x".repeat(4_096)
+          }
+          const dispatchRequestId = `dispatch:legacy-capacity:${String(index)}`
+          const dispatchLineage = [`dispatch:legacy-luna:${String(index)}`]
+          const binding = migrationBinding(
+            dispatchRequestId,
+            Schema.decodeUnknownSync(WorkLaneClaimed)({
+              ...lane,
+              expectedRevision: lane.revision,
+              goalId: handoff.goalId,
+              operationId: dispatchRequestId,
+              revision: lane.revision + 1
+            }),
+            occurredAt
+          )
+          persistMigrationBindingCompanions(oversizedLegacy, binding)
+          oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
+            .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+          oversizedLegacy.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
+            .run(
+              dispatchRequestId,
+              handoff.id,
+              handoff.laneId,
+              handoff.occurredAt,
+              JSON.stringify(dispatchLineage),
+              JSON.stringify(handoff)
+            )
+          oversizedLegacy.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+            dispatchRequestId,
+            handoff.laneId,
+            binding.request.expectedRevision,
+            binding.lane.revision,
+            binding.request.worker.agentId,
+            binding.request.worker.host,
+            JSON.stringify(binding)
+          )
+          oversizedLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
+            .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage: dispatchLineage }))
+        }
+        oversizedLegacy.close()
+        expect(yield* Effect.result(withDatabase(oversizedLegacyPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.handoff-capacity" },
+            operation: "initialize.work"
+          }
+        })
+        const oversizedRolledBack = new DatabaseSync(oversizedLegacyPath)
+        const oversizedColumns = oversizedRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
+        const oversizedRetained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          oversizedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(legacy.id)
+        )
+        oversizedRolledBack.close()
+        expect(
+          oversizedColumns.some((column) =>
+            Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+          )
+        ).toBe(false)
+        expect(JSON.parse(oversizedRetained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
         const concurrent = { ...legacy, id: "handoff:legacy-concurrent", occurredAt: 2 }
         const concurrentDispatchRequestId = `dispatch:${concurrent.id}`
         const concurrentBinding = migrationBinding(
@@ -1880,6 +1968,29 @@ database.close()`,
           )
         database.close()
 
+        const queuedBindingPath = join(root, "queued-binding-current-handoff.sqlite")
+        copyFileSync(path, queuedBindingPath)
+        const queuedBinding = new DatabaseSync(queuedBindingPath)
+        queuedBinding.prepare("DELETE FROM orchestrator_events WHERE dispatch_request_id = ? AND type = 'running'")
+          .run(activation.event.dispatchRequestId)
+        queuedBinding.prepare("UPDATE orchestrator_dispatches SET status = 'queued' WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        queuedBinding.close()
+        expect(yield* Effect.result(withDatabase(queuedBindingPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.agent-binding.lifecycle" },
+            operation: "initialize.work"
+          }
+        })
+        const queuedBindingRolledBack = new DatabaseSync(queuedBindingPath)
+        const retainedQueuedBinding = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          queuedBindingRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        queuedBindingRolledBack.close()
+        expect(JSON.parse(retainedQueuedBinding.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
         const replay = yield* withDatabase(
           path,
           Effect.gen(function*() {
@@ -1996,11 +2107,18 @@ database.close()`,
           const invalid of [
             {
               name: "unknown-handoff-version",
+              operation: "sql-work.initialize.invalid-handoff",
               record: JSON.stringify({ ...upgradedHandoff, version: "herdr.work.decision.v3" })
             },
             {
               name: "malformed-current-handoff",
+              operation: "sql-work.initialize.invalid-handoff",
               record: JSON.stringify({ ...upgradedHandoff, expectedRevision: "not-a-revision" })
+            },
+            {
+              name: "current-handoff-indexed-lane-mismatch",
+              operation: "sql-work.initialize.handoff-identity",
+              record: JSON.stringify({ ...upgradedHandoff, laneId: "lane:other" })
             }
           ]
         ) {
@@ -2014,7 +2132,7 @@ database.close()`,
           expect(yield* Effect.result(withDatabase(invalidPath, Effect.void))).toMatchObject({
             failure: {
               _tag: "OrchestratorStorageError",
-              cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.invalid-handoff" },
+              cause: { _tag: "WorkStoreError", operation: invalid.operation },
               operation: "initialize.work"
             }
           })
@@ -2541,7 +2659,11 @@ database.close()`,
             SELECT value + 1 FROM capacity WHERE value < 16384
           )
           INSERT INTO work_decision_handoffs (handoff_id, session_id, lane_id, occurred_at, record)
-          SELECT 'capacity:' || value, 'session:capacity:' || value, 'lane:capacity', value, ?
+          SELECT 'capacity:' || value, 'session:capacity:' || value, 'lane:capacity', value,
+            json_set(
+              ?, '$.id', 'capacity:' || value, '$.sessionId', 'session:capacity:' || value,
+              '$.laneId', 'lane:capacity', '$.goalId', 'lane:capacity', '$.occurredAt', value
+            )
           FROM capacity
         `).run(JSON.stringify(makeWorkLink([]).handoff))
         database.close()

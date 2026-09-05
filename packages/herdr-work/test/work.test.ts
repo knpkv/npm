@@ -1939,12 +1939,18 @@ database.close()`,
       ).run("handoff-row-1", first.sessionId, first.laneId, 2, JSON.stringify(first))
       database.close()
 
-      const mismatchedStore = yield* openScopedStore(path)
-      const mismatchedService = yield* makeWorkService(mismatchedStore.store)
-      expect(yield* Effect.result(mismatchedService.decisions(first.laneId))).toMatchObject({
-        failure: { _tag: "WorkStoreError", operation: "decisions.decode.identity-mismatch" }
+      expect(yield* safelyOpenResult(path)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.handoff-identity" },
+          operation: "open.database"
+        }
       })
-      mismatchedStore.close()
+      const repairedFirst = new DatabaseSync(path)
+      repairedFirst.prepare(
+        "UPDATE work_decision_handoffs SET handoff_id = ?, occurred_at = ? WHERE handoff_id = ?"
+      ).run(first.id, first.occurredAt, "handoff-row-1")
+      repairedFirst.close()
 
       const replay = {
         ...first,
@@ -1961,12 +1967,13 @@ database.close()`,
          VALUES (?, ?, ?, ?, ?)`
       ).run(replay.id, replay.sessionId, "foreign-lane", 4, JSON.stringify(replay))
       replaySeed.close()
-      const replayStore = yield* openScopedStore(path)
-      const replayService = yield* makeWorkService(replayStore.store)
-      expect(yield* Effect.result(replayService.handoff(replay))).toMatchObject({
-        failure: { _tag: "WorkStoreError", operation: "decision.decode.identity-mismatch" }
+      expect(yield* safelyOpenResult(path)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.handoff-identity" },
+          operation: "open.database"
+        }
       })
-      replayStore.close()
 
       const repairedReplay = new DatabaseSync(path)
       repairedReplay.prepare(
@@ -1979,9 +1986,6 @@ database.close()`,
       expect(yield* replayedService.handoff(replay)).toEqual(replay)
 
       const repaired = new DatabaseSync(path)
-      repaired.prepare(
-        "UPDATE work_decision_handoffs SET handoff_id = ?, occurred_at = ? WHERE handoff_id = ?"
-      ).run(first.id, first.occurredAt, "handoff-row-1")
       const second = {
         ...first,
         id: "handoff-record-2",
@@ -2307,33 +2311,6 @@ database.close()`,
         1,
         "not-json"
       )
-      const mismatchedHandoff: WorkDecisionHandoff = {
-        blockers: [],
-        contextDelta: "Mismatched lane fixture",
-        decision: "handoff",
-        dispatchIds: [],
-        evidenceRefs: [],
-        expectedRevision: 1,
-        goalId: "goal-record",
-        id: "handoff-mismatched-lane",
-        laneId: "goal-record",
-        occurredAt: 2,
-        owner: claim.owner,
-        sessionId: "session-mismatched-lane",
-        summary: "Mismatched lane fixture",
-        version: "herdr.work.decision.v2"
-      }
-      database.prepare(
-        `INSERT INTO work_decision_handoffs
-           (handoff_id, session_id, lane_id, occurred_at, record)
-         VALUES (?, ?, ?, ?, ?)`
-      ).run(
-        mismatchedHandoff.id,
-        mismatchedHandoff.sessionId,
-        "goal-key",
-        mismatchedHandoff.occurredAt,
-        JSON.stringify(mismatchedHandoff)
-      )
       database.close()
       const mismatch = yield* Effect.scoped(
         Effect.gen(function*() {
@@ -2381,17 +2358,6 @@ database.close()`,
         { failure: { _tag: "WorkStoreError" } },
         { failure: { _tag: "WorkStoreError" } }
       ])
-      const decisionMismatch = yield* Effect.scoped(
-        Effect.gen(function*() {
-          const store = yield* WorkStore.open(path)
-          yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
-          const service = yield* makeWorkService(store)
-          return yield* Effect.result(service.decisions("goal-key"))
-        })
-      )
-      expect(decisionMismatch).toMatchObject({
-        failure: { _tag: "WorkStoreError", operation: "decisions.decode.lane-mismatch" }
-      })
     }).pipe(provideNodeServices))
 
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
@@ -2479,6 +2445,74 @@ database.close()`,
         .run("dispatch:legacy-sol", "{}", JSON.stringify({ handoff: legacyHandoff, lineage }))
       database.close()
 
+      const oversizedLegacyPath = join(directory, "oversized-legacy.sqlite")
+      copyFileSync(path, oversizedLegacyPath)
+      const oversizedLegacy = new DatabaseSync(oversizedLegacyPath)
+      for (let index = 0; index < 260; index++) {
+        const occurredAt = index + 10
+        const handoff = {
+          ...legacyHandoff,
+          id: `handoff:legacy-capacity:${String(index)}`,
+          occurredAt,
+          summary: "x".repeat(4_096)
+        }
+        const dispatchRequestId = `dispatch:legacy-capacity:${String(index)}`
+        const dispatchLineage = [`dispatch:legacy-luna:${String(index)}`]
+        const binding = migrationBinding(
+          dispatchRequestId,
+          Schema.decodeUnknownSync(WorkLaneClaimed)({
+            ...legacyClaim,
+            expectedRevision: legacyClaim.revision,
+            goalId: handoff.goalId,
+            operationId: dispatchRequestId,
+            revision: legacyClaim.revision + 1
+          }),
+          occurredAt
+        )
+        persistMigrationBindingCompanions(oversizedLegacy, binding)
+        oversizedLegacy.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
+          .run(handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+        oversizedLegacy.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
+          .run(
+            dispatchRequestId,
+            handoff.id,
+            handoff.laneId,
+            handoff.occurredAt,
+            JSON.stringify(dispatchLineage),
+            JSON.stringify(handoff)
+          )
+        oversizedLegacy.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+          dispatchRequestId,
+          handoff.laneId,
+          binding.request.expectedRevision,
+          binding.lane.revision,
+          binding.request.worker.agentId,
+          binding.request.worker.host,
+          JSON.stringify(binding)
+        )
+        oversizedLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
+          .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage: dispatchLineage }))
+      }
+      oversizedLegacy.close()
+      expect(yield* safelyOpenResult(oversizedLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.handoff-capacity" },
+          operation: "open.database"
+        }
+      })
+      const oversizedRolledBack = new DatabaseSync(oversizedLegacyPath)
+      const oversizedColumns = oversizedRolledBack.prepare("PRAGMA table_info(work_decision_handoffs)").all()
+      const oversizedRetained = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        oversizedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(legacyHandoff.id)
+      )
+      oversizedRolledBack.close()
+      expect(oversizedColumns.some((column) =>
+        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+      )).toBe(false)
+      expect(JSON.parse(oversizedRetained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
       const unboundLegacyPath = join(directory, "unbound-legacy.sqlite")
       copyFileSync(path, unboundLegacyPath)
       const unboundLegacy = new DatabaseSync(unboundLegacyPath)
@@ -2550,7 +2584,9 @@ database.close()`,
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
       )
-      yield* Effect.addFinalizer(() => Effect.sync(() => writer.kill()))
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => writer.kill())
+      )
       yield* Effect.callback<void, LockHolderError>((resume) => {
         let completed = false
         const complete = (result: Effect.Effect<void, LockHolderError>) => {
@@ -2845,11 +2881,18 @@ database.close()`,
         const invalid of [
           {
             name: "unknown-handoff-version",
+            operation: "open.migrate.invalid-handoff",
             record: JSON.stringify({ ...currentHandoff, version: "herdr.work.decision.v3" })
           },
           {
             name: "malformed-current-handoff",
+            operation: "open.migrate.invalid-handoff",
             record: JSON.stringify({ ...currentHandoff, expectedRevision: "not-a-revision" })
+          },
+          {
+            name: "current-handoff-indexed-lane-mismatch",
+            operation: "open.migrate.handoff-identity",
+            record: JSON.stringify({ ...currentHandoff, laneId: "lane:other" })
           }
         ]
       ) {
@@ -2863,7 +2906,7 @@ database.close()`,
         expect(yield* safelyOpenResult(invalidPath)).toMatchObject({
           failure: {
             _tag: "WorkStoreError",
-            cause: { _tag: "WorkStoreError", operation: "open.migrate.invalid-handoff" },
+            cause: { _tag: "WorkStoreError", operation: invalid.operation },
             operation: "open.database"
           }
         })

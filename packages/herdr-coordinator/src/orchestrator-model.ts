@@ -1,4 +1,4 @@
-import { JobActor, JobIdentifier, JobPayload } from "@knpkv/herdr-fleet/model"
+import { AgentDelegate, JobActor, JobIdentifier, JobPayload } from "@knpkv/herdr-fleet/model"
 import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet/response"
 import { WorkAgentBinding, WorkAgentBindingRequest, WorkDecisionHandoff } from "@knpkv/herdr-work/model"
 import { Schema } from "effect"
@@ -95,6 +95,19 @@ export const OrchestratorCommand = Schema.Struct({
 })
 export interface OrchestratorCommand extends Schema.Schema.Type<typeof OrchestratorCommand> {}
 
+const OrchestratorSolEscalationCommand = Schema.Struct({
+  kind: Schema.Literal("fleet.job"),
+  actor: JobActor,
+  activityIdempotencyKey: ActivityIdempotencyKey,
+  payload: Schema.Struct({
+    kind: AgentDelegate.fields.kind,
+    repository: AgentDelegate.fields.repository,
+    prompt: AgentDelegate.fields.prompt,
+    mode: Schema.Literals(["review", "work"]),
+    channel: AgentDelegate.fields.channel
+  })
+})
+
 /** Failed Luna request and accepted Work authority required for one linked Sol dispatch. */
 export const OrchestratorLinkedSolDispatchReference = Schema.Struct({
   failedLunaRequestId: DispatchRequestId,
@@ -113,7 +126,7 @@ export interface OrchestratorLinkedSolDispatchReference extends
 
 /** Narrow consumer input for a high-effort Sol escalation linked to failed Luna work. */
 export const OrchestratorSolEscalationSubmission = Schema.Struct({
-  command: OrchestratorCommand,
+  command: OrchestratorSolEscalationCommand,
   idempotencyKey: OrchestratorIdempotencyKey,
   reason: RouteReason,
   reference: OrchestratorLinkedSolDispatchReference

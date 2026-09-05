@@ -119,6 +119,10 @@ const MetadataWorkLinkRow = Schema.Struct({
   dispatchRequestId: Schema.String,
   workLink: Schema.NullOr(Schema.String)
 })
+const AgentBindingLifecycleRow = Schema.Struct({
+  occurredAt: Schema.Number,
+  status: Schema.Literals(["running", "settled", "delivery_failed", "task_failed"])
+})
 const PreviousMetadataWorkLink = Schema.Struct({
   handoff: PreviousWorkDecisionHandoff,
   lineage: WorkDispatchHandoff.fields.lineage
@@ -590,6 +594,15 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           )
           const previous = decodePreviousDecisionHandoff(input)
           if (previous._tag === "current") {
+            if (
+              previous.value.id !== row.handoffId || previous.value.sessionId !== row.sessionId ||
+              previous.value.laneId !== row.laneId || previous.value.occurredAt !== row.occurredAt
+            ) {
+              return yield* new WorkStoreError({
+                cause: { handoff: previous.value, row },
+                operation: "sql-work.initialize.handoff-identity"
+              })
+            }
             return false
           }
           if (previous._tag === "invalid") {
@@ -692,6 +705,37 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             "sql-work.initialize.agent-binding"
           )
           if (bindingReadbackError !== undefined) return yield* bindingReadbackError
+          const dispatchTablePresent = tables.some(({ name }) => name === "orchestrator_dispatches")
+          const eventTablePresent = tables.some(({ name }) => name === "orchestrator_events")
+          if (dispatchTablePresent !== eventTablePresent) {
+            return yield* new WorkStoreError({
+              cause: { dispatchTablePresent, eventTablePresent },
+              operation: "sql-work.initialize.agent-binding.lifecycle-schema"
+            })
+          }
+          if (dispatchTablePresent) {
+            const lifecycleRows = yield* sql`
+              SELECT dispatch.status, event.occurred_at AS "occurredAt"
+              FROM orchestrator_dispatches dispatch
+              JOIN orchestrator_events event
+                ON event.dispatch_request_id = dispatch.dispatch_request_id
+               AND event.type = 'running'
+              WHERE dispatch.dispatch_request_id = ${bindingDecision.binding.request.dispatchRequestId}
+            `.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingLifecycleRow))),
+              Effect.mapError(storeError("sql-work.initialize.agent-binding.lifecycle-read"))
+            )
+            const lifecycle = lifecycleRows[0]
+            if (
+              lifecycleRows.length !== 1 || lifecycle === undefined ||
+              lifecycle.occurredAt !== bindingDecision.binding.checkpoint.occurredAt
+            ) {
+              return yield* new WorkStoreError({
+                cause: { binding: bindingDecision.binding, lifecycleRows },
+                operation: "sql-work.initialize.agent-binding.lifecycle"
+              })
+            }
+          }
           const verifiedDispatches = yield* Effect.forEach(handoffDispatches, (dispatch) =>
             Effect.gen(function*() {
               const decoded = yield* Effect.try({
@@ -766,7 +810,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           }
           return true
         }))
-      if (migrationResults.includes(true)) {
+      if (legacyDecisions.length > 0 || migrationResults.includes(true)) {
         const migratedLedger = yield* sql`
           SELECT COALESCE(SUM(
             length(CAST(handoff_id AS BLOB)) + length(CAST(record AS BLOB))

@@ -391,6 +391,15 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         const previous = decodePreviousDecisionHandoff(input)
         switch (previous._tag) {
           case "current":
+            if (
+              previous.value.id !== row.handoffId || previous.value.sessionId !== row.sessionId ||
+              previous.value.laneId !== row.laneId || previous.value.occurredAt !== row.occurredAt
+            ) {
+              throw new WorkStoreError({
+                cause: { handoff: previous.value, row },
+                operation: "open.migrate.handoff-identity"
+              })
+            }
             return []
           case "invalid":
             throw new WorkStoreError({
@@ -517,7 +526,7 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           )
         }
       }
-      if (previousDecisions.length > 0) {
+      if (decisions.length > 0 || previousDecisions.length > 0) {
         const migratedLedger = Schema.decodeUnknownSync(LedgerBytesRow)(
           database.prepare(
             `SELECT COALESCE(SUM(

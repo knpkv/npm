@@ -8,6 +8,7 @@ import {
   OrchestratorPendingDispatch,
   OrchestratorPendingQuery,
   OrchestratorRequest,
+  OrchestratorSolEscalationSubmission,
   OrchestratorWorkLink
 } from "../src/orchestrator-model.js"
 
@@ -142,5 +143,70 @@ describe("orchestrator event model", () => {
     expect(
       Schema.decodeUnknownResult(OrchestratorWorkLink)({ ...link, lineage: ["dispatch:unrelated"] })._tag
     ).toBe("Failure")
+  })
+
+  it("accepts only review and work commands for linked Sol escalation", () => {
+    const reference = {
+      failedLunaRequestId: "dispatch:parent",
+      workLink: {
+        handoff: {
+          blockers: [],
+          contextDelta: "Escalate failed work",
+          decision: "handoff",
+          dispatchIds: ["dispatch:parent"],
+          evidenceRefs: [],
+          expectedRevision: 1,
+          goalId: "goal:model",
+          id: "handoff:model",
+          laneId: "lane:model",
+          occurredAt: 1,
+          owner: { id: "owner:model", name: "Coordinator" },
+          sessionId: "session:model",
+          summary: "Escalate failed work",
+          version: "herdr.work.decision.v2"
+        },
+        lineage: ["dispatch:parent"]
+      }
+    }
+    const submission = {
+      command: {
+        activityIdempotencyKey: "activity:sol",
+        actor: "coordinator",
+        kind: "fleet.job",
+        payload: {
+          kind: "agent.delegate",
+          mode: "work",
+          prompt: "Continue with Sol",
+          repository: "/repo"
+        }
+      },
+      idempotencyKey: "dispatch:sol",
+      reason: "Escalate failed Luna work",
+      reference
+    }
+
+    for (const mode of ["review", "work"]) {
+      expect(
+        Schema.decodeUnknownResult(OrchestratorSolEscalationSubmission)({
+          ...submission,
+          command: { ...submission.command, payload: { ...submission.command.payload, mode } }
+        })._tag
+      ).toBe("Success")
+    }
+    for (
+      const payload of [
+        { kind: "nix.check" },
+        { kind: "agent.delegate", mode: "consult", prompt: "consult", repository: "/repo" },
+        { kind: "agent.delegate", mode: "transition_summary", prompt: "summarize", repository: "/repo" }
+      ]
+    ) {
+      expect(
+        Schema.decodeUnknownResult(OrchestratorSolEscalationSubmission)({
+          ...submission,
+          command: { ...submission.command, payload }
+        })._tag
+      )
+        .toBe("Failure")
+    }
   })
 })

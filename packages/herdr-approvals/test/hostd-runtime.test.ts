@@ -210,7 +210,7 @@ describe("hostd runtime operations injection", () => {
                           ),
                         onSome: (reference) =>
                           orchestrator.submitSolEscalation({
-                            command: durableCommand,
+                            command: { ...durableCommand, payload },
                             idempotencyKey: `dispatch:${jobId}`,
                             reason: "failed Luna work requires an explicit linked Sol escalation",
                             reference
