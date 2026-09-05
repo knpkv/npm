@@ -370,6 +370,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             })
           }
           const coordinatorHandled = record.payload.mode === "consult" ||
+            record.payload.mode === "transition_summary" ||
             record.payload.channel === "coordinator_chat"
           if (!coordinatorHandled && identity.relationship === undefined) {
             return yield* new FleetOperationError({
