@@ -2740,6 +2740,40 @@ database.close()`,
       unboundRolledBack.close()
       expect(JSON.parse(retainedUnbound.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
+      const nullMetadataPath = join(directory, "null-metadata.sqlite")
+      copyFileSync(path, nullMetadataPath)
+      const nullMetadata = new DatabaseSync(nullMetadataPath)
+      nullMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      nullMetadata.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify(previousHandoff), "dispatch:current-migration")
+      nullMetadata.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = NULL WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      nullMetadata.close()
+      expect(yield* safelyOpenResult(nullMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          operation: "open.database"
+        }
+      })
+      const nullMetadataRolledBack = new DatabaseSync(nullMetadataPath)
+      const retainedNullMetadata = Schema.decodeUnknownSync(Schema.Struct({
+        record: Schema.String,
+        workLink: Schema.Null
+      }))(
+        nullMetadataRolledBack.prepare(
+          `SELECT decision.record, metadata.work_link AS workLink
+           FROM work_decision_handoffs decision
+           JOIN work_dispatch_handoffs dispatch USING (handoff_id)
+           JOIN orchestrator_dispatch_metadata metadata USING (dispatch_request_id)
+           WHERE decision.handoff_id = ?`
+        ).get(previousHandoff.id)
+      )
+      nullMetadataRolledBack.close()
+      expect(JSON.parse(retainedNullMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      expect(retainedNullMetadata.workLink).toBeNull()
+
       const malformed = new DatabaseSync(path)
       malformed.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
         .run(JSON.stringify(previousHandoff), previousHandoff.id)

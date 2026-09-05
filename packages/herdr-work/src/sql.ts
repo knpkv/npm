@@ -167,6 +167,7 @@ const decodeLegacyDecision = (
   bindingRevisions: ReadonlyArray<typeof ExpectedRevisionByDispatchRow.Type>,
   dispatches: ReadonlyArray<typeof LegacyDispatchRow.Type>,
   lanes: ReadonlyArray<WorkLaneClaimed>,
+  metadataTablePresent: boolean,
   metadataRows: ReadonlyArray<typeof MetadataWorkLinkRow.Type>,
   row: typeof LegacyDecisionRow.Type
 ) =>
@@ -196,8 +197,17 @@ const decodeLegacyDecision = (
             operation: "sql-work.migrate.legacy-dispatch-authority"
           })
         }
-        const metadata = metadataRows.find(({ dispatchRequestId }) => dispatchRequestId === dispatch.dispatchRequestId)
-        if (metadata?.workLink !== null && metadata?.workLink !== undefined) {
+        if (metadataTablePresent) {
+          const matchingMetadata = metadataRows.filter(({ dispatchRequestId }) =>
+            dispatchRequestId === dispatch.dispatchRequestId
+          )
+          const metadata = matchingMetadata[0]
+          if (matchingMetadata.length !== 1 || metadata?.workLink === null || metadata?.workLink === undefined) {
+            throw new WorkStoreError({
+              cause: { dispatch, matchingMetadata },
+              operation: "sql-work.migrate.legacy-metadata-authority"
+            })
+          }
           const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
           if (
             !legacyDecisionEquivalent(workLink.handoff, legacy) ||
@@ -453,6 +463,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           Effect.mapError(storeError("sql-work.initialize.legacy-metadata"))
         )
         : []
+      const metadataTablePresent = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
       const legacyDecisions = !decisionColumns.some(({ name }) => name === "session_id")
         ? yield* sql`
         SELECT handoff_id AS "handoffId", lane_id AS "laneId", occurred_at AS "occurredAt", record
@@ -462,7 +473,15 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           Effect.flatMap((rows) =>
             Effect.forEach(
               rows,
-              (row) => decodeLegacyDecision(legacyBindingRevisions, legacyDispatches, legacyLanes, legacyMetadata, row)
+              (row) =>
+                decodeLegacyDecision(
+                  legacyBindingRevisions,
+                  legacyDispatches,
+                  legacyLanes,
+                  metadataTablePresent,
+                  legacyMetadata,
+                  row
+                )
             )
           ),
           Effect.mapError(storeError("sql-work.initialize.legacy-handoffs"))
@@ -579,20 +598,24 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
                 )
                 const metadata = metadataRows[0]
                 const encodedWorkLink = metadata?.workLink
-                if (encodedWorkLink !== null && encodedWorkLink !== undefined) {
-                  const workLink = yield* Effect.try({
-                    try: () => Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(encodedWorkLink)),
-                    catch: storeError("sql-work.initialize.decode-metadata-authority")
+                if (metadataRows.length !== 1 || encodedWorkLink === null || encodedWorkLink === undefined) {
+                  return yield* new WorkStoreError({
+                    cause: { dispatch, metadataRows },
+                    operation: "sql-work.initialize.metadata-authority"
                   })
-                  if (
-                    !previousDecisionHandoffEquivalent(workLink.handoff, previous.value) ||
-                    !workDispatchLineageEquivalent(workLink.lineage, decoded.lineage)
-                  ) {
-                    return yield* new WorkStoreError({
-                      cause: { previous: previous.value, workLink },
-                      operation: "sql-work.initialize.metadata-authority"
-                    })
-                  }
+                }
+                const workLink = yield* Effect.try({
+                  try: () => Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(encodedWorkLink)),
+                  catch: storeError("sql-work.initialize.decode-metadata-authority")
+                })
+                if (
+                  !previousDecisionHandoffEquivalent(workLink.handoff, previous.value) ||
+                  !workDispatchLineageEquivalent(workLink.lineage, decoded.lineage)
+                ) {
+                  return yield* new WorkStoreError({
+                    cause: { previous: previous.value, workLink },
+                    operation: "sql-work.initialize.metadata-authority"
+                  })
                 }
               }
               return { dispatch, lineage: decoded.lineage }

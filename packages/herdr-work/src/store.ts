@@ -246,20 +246,28 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
             const metadataInput = database.prepare(
               "SELECT work_link AS workLink FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
             ).get(dispatch.dispatchRequestId)
-            if (metadataInput !== undefined) {
-              const metadata = Schema.decodeUnknownSync(MetadataWorkLinkRow)(metadataInput)
-              if (metadata.workLink !== null) {
-                const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
-                if (
-                  !legacyDecisionEquivalent(workLink.handoff, legacy) ||
-                  !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
-                ) {
-                  throw new WorkStoreError({
-                    cause: { legacy, workLink },
-                    operation: "open.migrate.legacy-metadata-authority"
-                  })
-                }
-              }
+            if (metadataInput === undefined) {
+              throw new WorkStoreError({
+                cause: dispatch,
+                operation: "open.migrate.legacy-metadata-authority"
+              })
+            }
+            const metadata = Schema.decodeUnknownSync(MetadataWorkLinkRow)(metadataInput)
+            if (metadata.workLink === null) {
+              throw new WorkStoreError({
+                cause: { dispatch, metadata },
+                operation: "open.migrate.legacy-metadata-authority"
+              })
+            }
+            const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
+            if (
+              !legacyDecisionEquivalent(workLink.handoff, legacy) ||
+              !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
+            ) {
+              throw new WorkStoreError({
+                cause: { legacy, workLink },
+                operation: "open.migrate.legacy-metadata-authority"
+              })
             }
           }
           const bindingRevisions = tables.includes("work_agent_bindings")
@@ -387,20 +395,28 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
             const metadataInput = database.prepare(
               "SELECT work_link AS workLink FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
             ).get(dispatch.dispatchRequestId)
-            if (metadataInput !== undefined) {
-              const metadata = Schema.decodeUnknownSync(MetadataWorkLinkRow)(metadataInput)
-              if (metadata.workLink !== null) {
-                const workLink = Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(metadata.workLink))
-                if (
-                  !previousDecisionHandoffEquivalent(workLink.handoff, previous) ||
-                  !workDispatchLineageEquivalent(workLink.lineage, lineage)
-                ) {
-                  throw new WorkStoreError({
-                    cause: { previous, workLink },
-                    operation: "open.migrate.metadata-authority"
-                  })
-                }
-              }
+            if (metadataInput === undefined) {
+              throw new WorkStoreError({
+                cause: dispatch,
+                operation: "open.migrate.metadata-authority"
+              })
+            }
+            const metadata = Schema.decodeUnknownSync(MetadataWorkLinkRow)(metadataInput)
+            if (metadata.workLink === null) {
+              throw new WorkStoreError({
+                cause: { dispatch, metadata },
+                operation: "open.migrate.metadata-authority"
+              })
+            }
+            const workLink = Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(metadata.workLink))
+            if (
+              !previousDecisionHandoffEquivalent(workLink.handoff, previous) ||
+              !workDispatchLineageEquivalent(workLink.lineage, lineage)
+            ) {
+              throw new WorkStoreError({
+                cause: { previous, workLink },
+                operation: "open.migrate.metadata-authority"
+              })
             }
           }
           return { dispatch, lineage }

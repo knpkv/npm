@@ -5,7 +5,17 @@ import { makeWorkService, WorkGoalCheckpoint, WorkStore } from "@knpkv/herdr-wor
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { execPath } from "node:process"
@@ -1653,6 +1663,31 @@ database.close()`,
           expectedRevision: activation.binding.request.expectedRevision,
           version: "herdr.work.decision.v2"
         })
+
+        const missingMetadataPath = join(root, "missing-metadata.sqlite")
+        copyFileSync(path, missingMetadataPath)
+        const missingMetadata = new DatabaseSync(missingMetadataPath)
+        missingMetadata.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        missingMetadata.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(previousHandoff), activation.event.dispatchRequestId)
+        missingMetadata.prepare("DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?")
+          .run(activation.event.dispatchRequestId)
+        missingMetadata.close()
+        expect(yield* Effect.result(withDatabase(missingMetadataPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
+            operation: "initialize.work"
+          }
+        })
+        const missingMetadataRolledBack = new DatabaseSync(missingMetadataPath)
+        const retainedMissingMetadata = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          missingMetadataRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        missingMetadataRolledBack.close()
+        expect(JSON.parse(retainedMissingMetadata.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
         const divergent = new DatabaseSync(path)
         divergent.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
