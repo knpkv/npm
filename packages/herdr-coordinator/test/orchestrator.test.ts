@@ -628,7 +628,7 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
-  it.effect("rejects a queued dispatch when its Work binding was committed independently", () =>
+  it.effect("rejects an independently committed queued Work binding before readiness", () =>
     withTemporaryRoot("herdr-orchestrator-worker-start-independent-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       const submission = makeSolSubmission(null, "dispatch:worker-start-independent")
@@ -666,7 +666,7 @@ describe("durable coordinator orchestrator", () => {
               return yield* orchestrator.workerStarted(request)
             })
           ))
-        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError", operation: "worker-start.partial-binding" } })
+        ).toMatchObject({ failure: { _tag: "OrchestratorStorageError", operation: "initialize.work" } })
         const readback = new DatabaseSync(path)
         expect(
           readback.prepare("SELECT status FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
@@ -1350,12 +1350,13 @@ describe("durable coordinator orchestrator", () => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         const submission = makeSolSubmission(null, "dispatch:route-command-mismatch")
-        yield* recordWorkAuthority(path, submission.workLink)
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
         const results = yield* withDatabase(
           path,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
             const database = new DatabaseSync(path)
             database.prepare(
               `UPDATE orchestrator_dispatches
@@ -1365,16 +1366,24 @@ describe("durable coordinator orchestrator", () => {
             database.close()
             return {
               pending: yield* Effect.result(orchestrator.pending()),
-              request: yield* Effect.result(orchestrator.request(receipt.dispatchRequestId))
+              request: yield* Effect.result(orchestrator.request(receipt.dispatchRequestId)),
+              workerStarted: yield* Effect.result(orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: lane.revision,
+                laneId: lane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              }))
             }
           })
         )
         expect(results.request).toMatchObject({
-          failure: { _tag: "OrchestratorStorageError", operation: "request.decode" }
+          failure: { _tag: "OrchestratorStorageError", operation: "events.decode-authority" }
         })
         expect(results.pending).toMatchObject({
-          failure: { _tag: "OrchestratorStorageError", operation: "pending.decode" }
+          failure: { _tag: "OrchestratorStorageError", operation: "events.decode-authority" }
         })
+        expect(results.workerStarted).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
       })
     }))
 
@@ -1459,6 +1468,54 @@ describe("durable coordinator orchestrator", () => {
           id: "handoff:escalation",
           laneId: "lane:escalation"
         })
+      })
+    }))
+
+  it.effect("rejects a linked Sol child after its persisted Luna parent command changes", () =>
+    withTemporaryRoot("herdr-orchestrator-linked-parent-command-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        yield* recordWorkAuthority(path, makeWorkLink([]))
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const luna = yield* orchestrator.submitRouted({
+              command: makeLunaCommand("consult", "activity:linked-parent-command"),
+              idempotencyKey: "dispatch:linked-parent-command",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(luna.dispatchRequestId)
+            yield* orchestrator.run(luna.dispatchRequestId)
+            yield* orchestrator.failTask(luna.dispatchRequestId, "Luna failed")
+            const sol = yield* orchestrator.submitSolEscalation({
+              command: {
+                ...command,
+                activityIdempotencyKey: "activity:linked-parent-child",
+                payload: {
+                  kind: "agent.delegate",
+                  mode: "work",
+                  prompt: "Continue failed Luna work with Sol",
+                  repository: "/repo"
+                }
+              },
+              idempotencyKey: "dispatch:linked-parent-child",
+              reason: "failed Luna work requires an explicit linked Sol escalation",
+              reference: {
+                failedLunaRequestId: luna.dispatchRequestId,
+                workLink: makeWorkLink([luna.dispatchRequestId])
+              }
+            })
+            const database = new DatabaseSync(path)
+            database.prepare(
+              "UPDATE orchestrator_dispatches SET command = json_set(command, '$.payload.mode', 'work') WHERE dispatch_request_id = ?"
+            ).run(luna.dispatchRequestId)
+            database.close()
+            return yield* Effect.result(orchestrator.request(sol.dispatchRequestId))
+          })
+        )
+        expect(result).toMatchObject({ failure: { _tag: "OrchestratorStorageError" } })
       })
     }))
 
@@ -1852,10 +1909,6 @@ describe("durable coordinator orchestrator", () => {
         expect(yield* Effect.result(withDatabase(missingMetadataLegacyPath, Effect.void))).toMatchObject({
           failure: {
             _tag: "OrchestratorStorageError",
-            cause: {
-              _tag: "WorkStoreError",
-              operation: "sql-work.initialize.legacy-agent-binding.lifecycle.schema"
-            },
             operation: "initialize.work"
           }
         })
@@ -2195,6 +2248,32 @@ database.close()`,
           .toContain("dispatch:legacy-luna")
         expect(Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String }))(concurrentDecision).sessionId)
           .toBe(concurrent.id)
+      })
+    }))
+
+  it.effect("rejects a partial coordinator schema before SQL Work DDL", () =>
+    withTemporaryRoot("herdr-orchestrator-partial-schema-preflight-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const database = new DatabaseSync(path)
+        database.exec("CREATE TABLE orchestrator_dispatches (id TEXT)")
+        database.close()
+
+        expect(yield* Effect.result(withDatabase(path, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.schema" },
+            operation: "initialize.work"
+          }
+        })
+        const unchanged = new DatabaseSync(path)
+        const workTables = Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(
+          unchanged.prepare(
+            "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name LIKE 'work_%'"
+          ).get()
+        )
+        unchanged.close()
+        expect(workTables.count).toBe(0)
       })
     }))
 
@@ -2604,6 +2683,84 @@ database.close()`,
         )
         currentCommandModeMismatchRolledBack.close()
         expect(currentCommandModeMismatchAfter).toEqual(currentCommandModeMismatchBefore)
+
+        for (
+          const integrityCase of [
+            {
+              name: "current-channelled-sol-command",
+              operation: "sql-work.initialize.metadata-authority",
+              mutate: (candidate: DatabaseSync) =>
+                candidate.prepare(
+                  `UPDATE orchestrator_dispatches
+                   SET command = json_set(command, '$.payload.channel', 'coordinator_chat')
+                   WHERE dispatch_request_id = ?`
+                ).run(activation.event.dispatchRequestId)
+            },
+            {
+              name: "current-command-activity-key-mismatch",
+              operation: "sql-work.initialize.metadata-authority",
+              mutate: (candidate: DatabaseSync) =>
+                candidate.prepare(
+                  `UPDATE orchestrator_dispatches
+                   SET command = json_set(command, '$.activityIdempotencyKey', 'activity:outsider')
+                   WHERE dispatch_request_id = ?`
+                ).run(activation.event.dispatchRequestId)
+            },
+            {
+              name: "current-missing-running-binding",
+              operation: "sql-work.initialize.current-agent-binding",
+              mutate: (candidate: DatabaseSync) =>
+                candidate.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+                  .run(activation.event.dispatchRequestId)
+            },
+            {
+              name: "current-orphan-dispatch",
+              operation: "sql-work.initialize.dispatch-decision",
+              mutate: (candidate: DatabaseSync) => {
+                candidate.exec("PRAGMA foreign_keys = OFF")
+                candidate.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
+                  .run(previousHandoff.id)
+              }
+            }
+          ]
+        ) {
+          const integrityPath = join(root, `${integrityCase.name}.sqlite`)
+          copyFileSync(path, integrityPath)
+          const candidate = new DatabaseSync(integrityPath)
+          integrityCase.mutate(candidate)
+          candidate.close()
+          expect(yield* Effect.result(withDatabase(integrityPath, Effect.void))).toMatchObject({
+            failure: {
+              _tag: "OrchestratorStorageError",
+              cause: { _tag: "WorkStoreError", operation: integrityCase.operation },
+              operation: "initialize.work"
+            }
+          })
+        }
+
+        for (
+          const terminal of ["queued", "delivery_failed"] satisfies ReadonlyArray<
+            "queued" | "delivery_failed"
+          >
+        ) {
+          const bindingFreePath = join(root, `current-binding-free-${terminal}.sqlite`)
+          copyFileSync(path, bindingFreePath)
+          const bindingFree = new DatabaseSync(bindingFreePath)
+          bindingFree.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+            .run(activation.event.dispatchRequestId)
+          bindingFree.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
+          if (terminal === "delivery_failed") {
+            bindingFree.prepare(
+              `INSERT INTO orchestrator_events
+                 (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+               VALUES (?, 2, 'delivery_failed', ?, 2, 'delivery failed before worker start', NULL)`
+            ).run(activation.event.dispatchRequestId, activation.event.activityIdempotencyKey)
+          }
+          bindingFree.prepare("UPDATE orchestrator_dispatches SET status = ? WHERE dispatch_request_id = ?")
+            .run(terminal, activation.event.dispatchRequestId)
+          bindingFree.close()
+          yield* withDatabase(bindingFreePath, Effect.void)
+        }
 
         for (
           const invalid of [

@@ -3161,6 +3161,83 @@ database.close()`,
       v2CommandModeMismatchRolledBack.close()
       expect(mismatchedCommandAfter).toEqual(mismatchedCommandBefore)
 
+      for (
+        const integrityCase of [
+          {
+            expectedOperation: "open.migrate.metadata-authority",
+            name: "v2-channelled-sol-command",
+            mutate: (candidate: DatabaseSync) =>
+              candidate.prepare(
+                `UPDATE orchestrator_dispatches
+                 SET command = json_set(command, '$.payload.channel', 'coordinator_chat')
+                 WHERE dispatch_request_id = ?`
+              ).run("dispatch:current-migration")
+          },
+          {
+            expectedOperation: "open.migrate.metadata-authority",
+            name: "v2-command-activity-key-mismatch",
+            mutate: (candidate: DatabaseSync) =>
+              candidate.prepare(
+                `UPDATE orchestrator_dispatches
+                 SET command = json_set(command, '$.activityIdempotencyKey', 'activity:outsider')
+                 WHERE dispatch_request_id = ?`
+              ).run("dispatch:current-migration")
+          },
+          {
+            expectedOperation: "open.migrate.current-agent-binding",
+            name: "v2-missing-running-binding",
+            mutate: (candidate: DatabaseSync) =>
+              candidate.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+                .run("dispatch:current-migration")
+          },
+          {
+            expectedOperation: "open.migrate.dispatch-decision",
+            name: "v2-orphan-dispatch",
+            mutate: (candidate: DatabaseSync) =>
+              candidate.prepare("DELETE FROM work_decision_handoffs WHERE handoff_id = ?")
+                .run(previousHandoff.id)
+          }
+        ]
+      ) {
+        const integrityPath = join(directory, `${integrityCase.name}.sqlite`)
+        copyFileSync(runningLifecyclePath, integrityPath)
+        const candidate = new DatabaseSync(integrityPath)
+        integrityCase.mutate(candidate)
+        candidate.close()
+        expect(yield* safelyOpenResult(integrityPath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: integrityCase.expectedOperation },
+            operation: "open.database"
+          }
+        })
+      }
+
+      for (
+        const terminal of ["queued", "delivery_failed"] satisfies ReadonlyArray<
+          "queued" | "delivery_failed"
+        >
+      ) {
+        const bindingFreePath = join(directory, `v2-binding-free-${terminal}.sqlite`)
+        copyFileSync(runningLifecyclePath, bindingFreePath)
+        const bindingFree = new DatabaseSync(bindingFreePath)
+        bindingFree.prepare("DELETE FROM work_agent_bindings WHERE dispatch_request_id = ?")
+          .run("dispatch:current-migration")
+        bindingFree.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
+        if (terminal === "delivery_failed") {
+          bindingFree.prepare(
+            `INSERT INTO orchestrator_events
+               (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+             VALUES (?, 2, 'delivery_failed', ?, 2, 'delivery failed before worker start', NULL)`
+          ).run("dispatch:current-migration", "activity:dispatch:current-migration")
+        }
+        bindingFree.prepare("UPDATE orchestrator_dispatches SET status = ? WHERE dispatch_request_id = ?")
+          .run(terminal, "dispatch:current-migration")
+        bindingFree.close()
+        const opened = yield* openScopedStore(bindingFreePath)
+        opened.close()
+      }
+
       const missingMetadataPath = join(directory, "missing-metadata-current.sqlite")
       copyFileSync(path, missingMetadataPath)
       const missingMetadata = new DatabaseSync(missingMetadataPath)

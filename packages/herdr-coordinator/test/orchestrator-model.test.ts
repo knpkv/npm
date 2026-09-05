@@ -288,14 +288,31 @@ describe("orchestrator event model", () => {
       expect(Schema.decodeUnknownResult(OrchestratorRoutedSubmission)(invalid)._tag).toBe("Failure")
     }
     for (const mode of ["review", "work"]) {
-      expect(
-        Schema.decodeUnknownResult(OrchestratorRoutedSubmission)({
-          ...submission,
-          command: { ...command, payload: { ...command.payload, mode } },
-          route: sol,
-          workLink
-        })._tag
-      ).toBe("Success")
+      const routed = {
+        ...submission,
+        command: { ...command, payload: { ...command.payload, mode } },
+        route: sol,
+        workLink
+      }
+      expect(Schema.decodeUnknownResult(OrchestratorRoutedSubmission)(routed)._tag).toBe("Success")
+      const persisted = {
+        ...routed,
+        acceptedAt: 1,
+        activityIdempotencyKey: command.activityIdempotencyKey,
+        dispatchRequestId: "dispatch:routed-model",
+        status: "queued"
+      }
+      expect(Schema.decodeUnknownResult(OrchestratorRequest)(persisted)._tag).toBe("Success")
+      expect(Schema.decodeUnknownResult(OrchestratorPendingDispatch)(persisted)._tag).toBe("Success")
+      const channelled = {
+        ...persisted,
+        command: {
+          ...persisted.command,
+          payload: { ...persisted.command.payload, channel: "coordinator_chat" }
+        }
+      }
+      expect(Schema.decodeUnknownResult(OrchestratorRequest)(channelled)._tag).toBe("Failure")
+      expect(Schema.decodeUnknownResult(OrchestratorPendingDispatch)(channelled)._tag).toBe("Failure")
     }
   })
 })

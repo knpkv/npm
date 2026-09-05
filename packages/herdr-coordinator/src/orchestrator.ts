@@ -555,6 +555,11 @@ const makeOrchestrator: Effect.Effect<
         operation: "events.status-event-mismatch"
       })
     }
+    const command = yield* decodeCommand(dispatch.command)
+    yield* Schema.decodeUnknownEffect(OrchestratorRequest)({
+      ...dispatch,
+      command
+    }).pipe(Effect.mapError(storageError("events.decode-authority")))
     return { dispatch, events }
   })
 

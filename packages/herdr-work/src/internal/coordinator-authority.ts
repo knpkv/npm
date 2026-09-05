@@ -41,6 +41,12 @@ const CoordinatorCommand = Schema.Struct({
   payload: JobPayload
 })
 
+export const CoordinatorCommandRow = Schema.Struct({
+  activityIdempotencyKey: Identifier,
+  command: Schema.String
+})
+export type CoordinatorCommandRow = typeof CoordinatorCommandRow.Type
+
 export const CoordinatorLifecycleDispatchRow = Schema.Struct({
   activityIdempotencyKey: Identifier,
   acceptedAt: Timestamp,
@@ -188,6 +194,20 @@ export const requireCoordinatorLifecycleAuthority = (
   }
 }
 
+/** Returns the single persisted running timestamp, or null when no worker was activated. */
+export const coordinatorLifecycleRunningAt = (
+  dispatchRows: ReadonlyArray<CoordinatorLifecycleDispatchRow>,
+  eventRows: ReadonlyArray<CoordinatorLifecycleEventRow>,
+  operation: string
+): number | null => {
+  const authority = decodeCoordinatorLifecycleAuthority(dispatchRows, eventRows, operation)
+  const running = authority.events.filter((event) => event.type === "running")
+  if (running.length > 1) {
+    throw new WorkStoreError({ cause: { ...authority, running }, operation })
+  }
+  return running[0]?.occurredAt ?? null
+}
+
 const decodeCoordinatorRouteAuthority = (
   routeText: string,
   storageAuthority: CoordinatorRouteStorageAuthority,
@@ -209,6 +229,7 @@ const decodeCoordinatorRouteAuthority = (
 /** Validates persisted route authority before a Work-link replica is upgraded. */
 export const requireCoordinatorRouteAuthority = (
   commandText: string,
+  expectedActivityIdempotencyKey: string,
   routeText: string,
   lineage: ReadonlyArray<string>,
   storageAuthority: CoordinatorRouteStorageAuthority,
@@ -218,8 +239,10 @@ export const requireCoordinatorRouteAuthority = (
   try {
     const command = Schema.decodeUnknownSync(CoordinatorCommand)(JSON.parse(commandText))
     if (
+      command.activityIdempotencyKey !== expectedActivityIdempotencyKey ||
       command.payload.kind !== "agent.delegate" ||
       (command.payload.mode !== "review" && command.payload.mode !== "work") ||
+      command.payload.channel !== undefined ||
       route.model !== "gpt-5.6-sol" ||
       (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId))
     ) {

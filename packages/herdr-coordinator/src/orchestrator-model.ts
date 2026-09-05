@@ -297,6 +297,7 @@ const routedCommandBindingIsValid = (
   }
   return workLink !== null &&
     (command.payload.mode === "review" || command.payload.mode === "work") &&
+    command.payload.channel === undefined &&
     (route.linkedRequestId === null || workLink.lineage.includes(route.linkedRequestId))
 }
 
