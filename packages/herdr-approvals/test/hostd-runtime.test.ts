@@ -4,9 +4,9 @@ import { resolveConnectWorkGoal } from "@knpkv/herdr-connect"
 import {
   Orchestrator,
   type OrchestratorCommand,
+  type OrchestratorLinkedSolDispatchReference,
   OrchestratorReceipt,
   type OrchestratorService,
-  type OrchestratorWorkLink,
   sqliteLayer
 } from "@knpkv/herdr-coordinator"
 import {
@@ -19,13 +19,7 @@ import {
   JobStore,
   makeFleetService
 } from "@knpkv/herdr-fleet"
-import {
-  makeWorkService,
-  type WorkGoalCheckpoint,
-  type WorkLaneClaimed,
-  type WorkService,
-  WorkStore
-} from "@knpkv/herdr-work"
+import { makeWorkService, type WorkGoalCheckpoint, type WorkService, WorkStore } from "@knpkv/herdr-work"
 import { Deferred, Effect, Exit, Option, Queue, Ref, Result, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
@@ -94,12 +88,6 @@ const checkpoint = (occurredAt: number): WorkGoalCheckpoint => ({
   }
 })
 
-interface SolAuthority {
-  readonly failedLunaRequestId: string
-  readonly lane: WorkLaneClaimed
-  readonly workLink: OrchestratorWorkLink
-}
-
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
 
@@ -162,7 +150,7 @@ describe("hostd runtime operations injection", () => {
           const completions = yield* Queue.unbounded<Exit.Exit<void, unknown>>()
           const submitCalls = yield* Ref.make(0)
           const fleetWorkerStarts = yield* Ref.make(0)
-          const solAuthority = yield* Ref.make(Option.none<SolAuthority>())
+          const solAuthority = yield* Ref.make(Option.none<OrchestratorLinkedSolDispatchReference>())
 
           const composeOperations: HostdOperationsComposer = ({ defaultOperations, fork }) =>
             Effect.succeed({
@@ -191,19 +179,12 @@ describe("hostd runtime operations injection", () => {
                           operation: "hostd.orchestrator.submit"
                         })
                       ),
-                    onSome: ({ failedLunaRequestId, workLink }) =>
-                      orchestrator.submitRouted({
+                    onSome: (reference) =>
+                      orchestrator.submitSolEscalation({
                         command: durableCommand,
                         idempotencyKey: `dispatch:${jobId}`,
-                        route: {
-                          protocol: "hostd.coordinator.route.v1",
-                          action: "dispatch",
-                          model: "gpt-5.6-sol",
-                          reasoningEffort: "high",
-                          reason: "failed Luna work requires an explicit linked Sol escalation",
-                          linkedRequestId: failedLunaRequestId
-                        },
-                        workLink
+                        reason: "failed Luna work requires an explicit linked Sol escalation",
+                        reference
                       }).pipe(Effect.mapError(operationError("hostd.orchestrator.submit")))
                   })
                   : orchestrator.submitRouted({
@@ -238,8 +219,8 @@ describe("hostd runtime operations injection", () => {
                     yield* orchestrator.workerStarted({
                       version: "herdr.work.agent-binding-request.v1",
                       dispatchRequestId: receipt.dispatchRequestId,
-                      laneId: currentAuthority.value.lane.laneId,
-                      expectedRevision: currentAuthority.value.lane.revision,
+                      laneId: currentAuthority.value.workLink.handoff.laneId,
+                      expectedRevision: currentAuthority.value.workLink.handoff.expectedRevision,
                       worker
                     })
                     yield* workerStarted(worker)
@@ -321,13 +302,15 @@ describe("hostd runtime operations injection", () => {
             expectedRevision: 0
           })
           const handoff = yield* work.handoff({
-            version: "herdr.work.decision.v1",
+            version: "herdr.work.decision.v2",
             id: "handoff-1",
             sessionId: "session-1",
             laneId: lane.laneId,
             goalId: lane.goalId,
+            expectedRevision: lane.revision,
             decision: "continue",
             summary: "Escalate the failed Luna request to Sol",
+            contextDelta: "Preserve the failed Luna failure evidence for the Sol worker",
             owner: lane.owner,
             dispatchIds: [luna.dispatchRequestId],
             blockers: [],
@@ -338,7 +321,6 @@ describe("hostd runtime operations injection", () => {
             solAuthority,
             Option.some({
               failedLunaRequestId: luna.dispatchRequestId,
-              lane,
               workLink: { handoff, lineage: [luna.dispatchRequestId] }
             })
           )

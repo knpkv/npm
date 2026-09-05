@@ -95,6 +95,35 @@ export const OrchestratorCommand = Schema.Struct({
 })
 export interface OrchestratorCommand extends Schema.Schema.Type<typeof OrchestratorCommand> {}
 
+/** Failed Luna request and accepted Work authority required for one linked Sol dispatch. */
+export const OrchestratorLinkedSolDispatchReference = Schema.Struct({
+  failedLunaRequestId: DispatchRequestId,
+  workLink: OrchestratorWorkLink
+}).check(
+  Schema.makeFilter(
+    ({ failedLunaRequestId, workLink }) => workLink.lineage.includes(failedLunaRequestId),
+    { expected: "the linked failed Luna request in Work lineage" }
+  )
+)
+export interface OrchestratorLinkedSolDispatchReference extends
+  Schema.Schema.Type<
+    typeof OrchestratorLinkedSolDispatchReference
+  >
+{}
+
+/** Narrow consumer input for a high-effort Sol escalation linked to failed Luna work. */
+export const OrchestratorSolEscalationSubmission = Schema.Struct({
+  command: OrchestratorCommand,
+  idempotencyKey: OrchestratorIdempotencyKey,
+  reason: RouteReason,
+  reference: OrchestratorLinkedSolDispatchReference
+})
+export interface OrchestratorSolEscalationSubmission extends
+  Schema.Schema.Type<
+    typeof OrchestratorSolEscalationSubmission
+  >
+{}
+
 const LunaRoutedSubmission = Schema.Struct({
   command: OrchestratorCommand,
   idempotencyKey: OrchestratorIdempotencyKey,

@@ -250,6 +250,7 @@ describe("fleet local authority", () => {
     return Effect.gen(function*() {
       const resumed = yield* Deferred.make<{
         readonly lifecycle: HostOperationLifecycle
+        readonly persistedWorker: AgentWorkerIdentity | null
         readonly workerStarted: WorkerStarted
       }>()
       const firstStore = yield* JobStore.open(databasePath)
@@ -297,9 +298,9 @@ describe("fleet local authority", () => {
           ...operations,
           recovery: {
             matches: () => true,
-            resume: (_payload, workerStarted, _jobId, _actor, receipt, lifecycle) =>
+            resume: (_payload, workerStarted, _jobId, _actor, receipt, lifecycle, persistedWorker) =>
               receipt === "durable-receipt"
-                ? Deferred.succeed(resumed, { lifecycle, workerStarted }).pipe(Effect.asVoid)
+                ? Deferred.succeed(resumed, { lifecycle, persistedWorker, workerStarted }).pipe(Effect.asVoid)
                 : Effect.fail(
                   new FleetOperationError({
                     cause: receipt,
@@ -313,12 +314,9 @@ describe("fleet local authority", () => {
       })
       expect(yield* second.recover()).toEqual([])
       const callbacks = yield* Deferred.await(resumed)
-      yield* callbacks.workerStarted(
-        Schema.decodeUnknownSync(AgentWorkerIdentity)({
-          ...remoteWorker,
-          host: "pi"
-        })
-      )
+      expect(callbacks.persistedWorker).toEqual(remoteWorker)
+      if (callbacks.persistedWorker === null) return yield* Effect.die("persisted worker missing")
+      yield* callbacks.workerStarted(callbacks.persistedWorker)
       expect(
         yield* Effect.result(callbacks.workerStarted({
           ...remoteWorker,

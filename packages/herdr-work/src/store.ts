@@ -9,6 +9,7 @@ import {
   WorkCoordinatorHandoffConflictError,
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
+  WorkDecisionRevisionConflictError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -31,11 +32,13 @@ import {
   agentBindingReadbackError,
   decodeAgentBindingGoalEvent
 } from "./internal/agent-binding-readback.js"
+import { decodePreviousDecisionHandoff, upgradePreviousDecisionHandoff } from "./internal/decision-handoff-migration.js"
 import {
   WorkAgentBinding,
   WorkAgentBindingRequest,
   WorkCoordinatorSessionId,
   WorkDecisionHandoff,
+  WorkDispatchHandoff,
   WorkGoalCheckpoint,
   WorkGoalId,
   workHistoryMaxEvents,
@@ -135,6 +138,8 @@ const LegacyDispatchStoredRow = Schema.Struct({
   handoffId: Schema.String,
   lineage: Schema.String
 })
+const ExpectedRevisionRow = Schema.Struct({ expectedRevision: Schema.Number })
+const LaneRevisionRow = Schema.Struct({ revision: Schema.Number })
 const LegacyDecisionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
   id: Schema.String,
@@ -198,26 +203,24 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           throw new WorkStoreError({ cause: { legacy, row }, operation: "open.migrate.handoff-identity" })
         }
         const dispatch = dispatches.find(({ handoffId }) => handoffId === legacy.id)
+        const lane = lanes.find(({ laneId }) => laneId === legacy.laneId)
+        if (lane === undefined) {
+          throw new WorkStoreError({ cause: legacy, operation: "open.migrate.handoff-lane" })
+        }
         return Schema.decodeUnknownSync(WorkDecisionHandoff)({
           ...legacy,
+          contextDelta: legacy.summary,
+          expectedRevision: lane.revision,
           sessionId: legacy.id,
           dispatchIds: dispatch === undefined
             ? []
-            : Schema.decodeUnknownSync(Schema.Array(Schema.String))(JSON.parse(dispatch.lineage)),
+            : Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage)),
           blockers: [],
-          evidenceRefs: []
+          evidenceRefs: [],
+          version: "herdr.work.decision.v2"
         })
       })
       : []
-    if (
-      lanes.length === 0 && decisions.length === 0 &&
-      (laneColumns.length === 0 || laneColumns.includes("goal_id")) &&
-      (decisionColumns.length === 0 || decisionColumns.includes("session_id"))
-    ) {
-      database.exec("COMMIT")
-      transaction = false
-      return
-    }
     if (laneColumns.length > 0 && !laneColumns.includes("goal_id")) {
       database.exec("ALTER TABLE work_lane_claims ADD COLUMN goal_id TEXT")
       database.exec("ALTER TABLE work_lane_claims ADD COLUMN operation_id TEXT")
@@ -250,6 +253,87 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
             JSON.stringify({ handoff: decision, lineage: decision.dispatchIds }),
             dispatch.dispatchRequestId
           )
+        }
+      }
+    }
+    if (decisionColumns.length > 0) {
+      const storedDecisions = Schema.decodeUnknownSync(Schema.Array(DecisionRow))(
+        database.prepare(
+          `SELECT handoff_id AS handoffId, session_id AS sessionId, lane_id AS laneId,
+             occurred_at AS occurredAt, record
+           FROM work_decision_handoffs`
+        ).all()
+      )
+      const updateDecision = database.prepare(
+        "UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?"
+      )
+      const updateDispatch = tables.includes("work_dispatch_handoffs")
+        ? database.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE handoff_id = ?")
+        : null
+      const updateMetadata = tables.includes("orchestrator_dispatch_metadata")
+        ? database.prepare(
+          `UPDATE orchestrator_dispatch_metadata SET work_link = ?
+           WHERE dispatch_request_id = ?`
+        )
+        : null
+      const previousDecisions = storedDecisions.flatMap((row) => {
+        const input = JSON.parse(row.record)
+        const previous = decodePreviousDecisionHandoff(input)
+        return Option.isNone(previous) ? [] : [{ previous: previous.value, row }]
+      })
+      for (const { previous, row } of previousDecisions) {
+        const laneRevision = Schema.decodeUnknownSync(LaneRevisionRow)(
+          database.prepare("SELECT revision FROM work_lane_claims WHERE lane_id = ?").get(row.laneId)
+        ).revision
+        const bindingRevisions = tables.includes("work_agent_bindings") && tables.includes("work_dispatch_handoffs")
+          ? Schema.decodeUnknownSync(Schema.Array(ExpectedRevisionRow))(
+            database.prepare(
+              `SELECT DISTINCT binding.expected_revision AS expectedRevision
+               FROM work_agent_bindings binding
+               JOIN work_dispatch_handoffs dispatch
+                 ON dispatch.dispatch_request_id = binding.dispatch_request_id
+               WHERE dispatch.handoff_id = ?`
+            ).all(row.handoffId)
+          )
+          : []
+        if (bindingRevisions.length > 1) {
+          throw new WorkStoreError({ cause: { bindingRevisions, row }, operation: "open.migrate.handoff-revision" })
+        }
+        const migrated = upgradePreviousDecisionHandoff(
+          previous,
+          bindingRevisions[0]?.expectedRevision ?? laneRevision
+        )
+        if (
+          migrated.id !== row.handoffId || migrated.sessionId !== row.sessionId ||
+          migrated.laneId !== row.laneId || migrated.occurredAt !== row.occurredAt
+        ) {
+          throw new WorkStoreError({ cause: { migrated, row }, operation: "open.migrate.handoff-identity" })
+        }
+        const encoded = JSON.stringify(migrated)
+        updateDecision.run(encoded, row.handoffId)
+        updateDispatch?.run(encoded, row.handoffId)
+        for (const dispatch of dispatches.filter(({ handoffId }) => handoffId === row.handoffId)) {
+          const lineage = Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+          updateMetadata?.run(
+            JSON.stringify({ handoff: migrated, lineage }),
+            dispatch.dispatchRequestId
+          )
+        }
+      }
+      if (previousDecisions.length > 0) {
+        const migratedLedger = Schema.decodeUnknownSync(LedgerBytesRow)(
+          database.prepare(
+            `SELECT COALESCE(SUM(
+               length(CAST(handoff_id AS BLOB)) + length(CAST(record AS BLOB))
+             ), 0) AS bytes
+             FROM work_decision_handoffs`
+          ).get()
+        )
+        if (migratedLedger.bytes > workDecisionMaxBytes) {
+          throw new WorkStoreError({
+            cause: migratedLedger,
+            operation: "open.migrate.handoff-capacity"
+          })
         }
       }
     }
@@ -353,7 +437,11 @@ type HandoffDecision =
   | { readonly _tag: "inserted"; readonly value: WorkDecisionHandoffType }
   | {
     readonly _tag: "rejected"
-    readonly error: WorkDecisionAuthorityConflictError | WorkProjectionError | WorkStoreError
+    readonly error:
+      | WorkDecisionAuthorityConflictError
+      | WorkDecisionRevisionConflictError
+      | WorkProjectionError
+      | WorkStoreError
   }
 
 const utf8 = new TextEncoder()
@@ -500,6 +588,7 @@ export interface WorkStoreService {
     | WorkCoordinatorHandoffConflictError
     | WorkDecisionAuthorityConflictError
     | WorkDecisionHandoffConflictError
+    | WorkDecisionRevisionConflictError
     | WorkProjectionError
     | WorkStoreError
   >
@@ -1982,6 +2071,19 @@ export class WorkStore implements WorkStoreService {
             return {
               _tag: "rejected",
               error: new WorkDecisionAuthorityConflictError({ goalId: decoded.goalId, laneId: decoded.laneId })
+            } satisfies HandoffDecision
+          }
+          const activeClaim = activeGoalClaims[0].claim
+          if (activeClaim.revision !== decoded.expectedRevision) {
+            this.#database.exec("ROLLBACK")
+            inTransaction = false
+            return {
+              _tag: "rejected",
+              error: new WorkDecisionRevisionConflictError({
+                actualRevision: activeClaim.revision,
+                expectedRevision: decoded.expectedRevision,
+                laneId: decoded.laneId
+              })
             } satisfies HandoffDecision
           }
           const decisionLedgerTotals = readDecisionLedgerTotals(this.#database)

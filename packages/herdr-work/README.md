@@ -36,9 +36,17 @@ lane, checkpoint, or binding write.
 
 `handoff` stores a compact, credential-free decision record keyed by coordinator
 session ID for later recovery under a 16,384-row and 2 MiB encoded-byte ledger.
-It includes the active goal and lane, dispatch IDs, blocker details, and evidence
-references. A new handoff requires the same active, non-shipped lane and
-authoritative goal; exact replay remains available after that lane advances.
+It includes the active goal and lane, dispatch IDs, blocker details, evidence
+references, and a nonempty credential-free context delta bounded to 4,096
+characters. A new v2 handoff captures the active lane's exact expected revision
+and rejects a stale revision with `WorkDecisionRevisionConflictError`; exact
+replay remains available after that lane advances.
+Both the previous pre-session table and v1 records already stored in the current
+table migrate explicitly: their bounded summary becomes the v2 context delta.
+A running dispatch keeps its persisted binding's expected revision; otherwise
+the matching active lane revision becomes the accepted revision. A missing
+matching lane or contradictory binding revisions fail startup with a named
+`WorkStoreError`; no empty context or revision is invented.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
 unbounded transcript. Replay aliases retain fixed-size canonical SHA-256
@@ -50,8 +58,8 @@ subpath, provides the SQLite-specific dispatch binding used by a coordinator's
 transaction. It inserts the decoded Work handoff and its
 bounded dispatch lineage together, and verifies exact replay without repairing
 an incomplete dispatch, including the referenced decision row. Every lineage
-request must appear in the handoff's dispatch IDs. New bindings
-require the handoff's active, non-shipped lane and authoritative goal; exact
+request must appear in the handoff's dispatch IDs. New bindings require the
+handoff's active, non-shipped lane, authoritative goal, and accepted expected revision; exact
 binding replay remains available after the lane advances. The coordinator must call it inside the same
 transaction as acceptance; `WorkStore.decisions` then recovers the handoff from
 the same database. The server-private durable `AgentWorkerIdentity` record stays

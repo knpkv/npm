@@ -35,22 +35,28 @@ route-aware `submitRouted` operation durably records the executable Luna/Sol
 route. A Sol submission requires a typed Work handoff and lineage in the same
 SQLite transaction; a linked Sol escalation is accepted only when its parent
 request lookup proves a terminal Luna failure. Every lineage request must also
-appear in the persisted handoff's dispatch IDs. `request` returns that complete
+appear in the persisted handoff's dispatch IDs. Consumers use
+`submitSolEscalation` with `OrchestratorLinkedSolDispatchReference`; the package
+fixes the Sol model, high reasoning effort, route protocol, and failed-Luna link
+instead of making the adapter rebuild generic route metadata. `request` returns that complete
 validated projection for escalation decisions and revalidates its referenced
 Work decision. The package deliberately uses this SQLite journal/outbox seam,
 not Effect Cluster. It schedules no automatic activity retry: after restart,
 ambiguous running work becomes `delivery_failed` and the caller must reconcile
 any external side effect before resubmission. The package does not claim
-exactly-once external execution.
+exactly-once external execution. A queued pre-worker executor failure may call
+`failDelivery`; it records the typed terminal `delivery_failed` event without a
+synthetic running transition.
 
 Routed Sol work cannot enter `running` through the plain `run` transition.
 The Nix consumer calls the exported typed `workerStarted` operation with the
-dispatch request ID, Work lane, lane expected revision, and full
+dispatch request ID, Work lane, the exact expected revision persisted in the
+accepted handoff, and full
 `AgentWorkerIdentity`. That boundary commits the running event together with
 the Work lane compare-and-set, `agentHierarchy.agent`, canonical Connect
 target, and goal checkpoint in one SQLite transaction. Exact replay survives a
-restart; a changed worker or stale lane authority is a typed conflict, never a
-sequential repair.
+restart; a changed worker, refreshed accepted revision, or stale lane authority
+is a typed conflict, never a sequential repair.
 
 `PullRequestEvidenceProvider.exactHeadGateEvidence` accepts no caller-built
 evidence object. Its source performs one bounded provider observation, samples

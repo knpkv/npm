@@ -44,7 +44,14 @@ export class OrchestratorWorkerStartAuthorityError extends Schema.TaggedError<Or
     laneId: Identifier,
     expectedRevision: Schema.Number,
     actualRevision: Schema.Number,
-    reason: Schema.Literals(["missing_lane", "stale_revision", "shipped_lane", "missing_goal", "terminal_goal"])
+    reason: Schema.Literals([
+      "accepted_revision_mismatch",
+      "missing_lane",
+      "stale_revision",
+      "shipped_lane",
+      "missing_goal",
+      "terminal_goal"
+    ])
   }
 ) {}
 

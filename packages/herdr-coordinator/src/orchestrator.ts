@@ -52,6 +52,8 @@ import {
   type OrchestratorRoute as OrchestratorRouteType,
   OrchestratorRoutedSubmission,
   type OrchestratorRoutedSubmission as OrchestratorRoutedSubmissionType,
+  OrchestratorSolEscalationSubmission,
+  type OrchestratorSolEscalationSubmission as OrchestratorSolEscalationSubmissionType,
   OrchestratorWorkLink,
   type OrchestratorWorkLink as OrchestratorWorkLinkType
 } from "./orchestrator-model.js"
@@ -232,7 +234,7 @@ type TransitionTarget = typeof transitionTarget.Type
 
 const validTransition = (from: CurrentStatus, to: TransitionTarget): boolean =>
   (from === "accepted" && to === "queued") ||
-  (from === "queued" && to === "running") ||
+  (from === "queued" && (to === "running" || to === "delivery_failed")) ||
   (from === "running" &&
     (to === "settled" || to === "delivery_failed" || to === "task_failed"))
 
@@ -250,6 +252,10 @@ export interface OrchestratorService {
   /** Submits with durable route metadata; Sol requires an atomic Work link. */
   readonly submitRouted: (
     input: OrchestratorRoutedSubmissionType
+  ) => Effect.Effect<OrchestratorReceiptType, OrchestratorError>
+  /** Submits Sol only through a typed failed-Luna reference and its accepted Work authority. */
+  readonly submitSolEscalation: (
+    input: OrchestratorSolEscalationSubmissionType
   ) => Effect.Effect<OrchestratorReceiptType, OrchestratorError>
   /** Loads and validates the complete durable request projection. */
   readonly request: (
@@ -792,6 +798,14 @@ const makeOrchestrator: Effect.Effect<
             detail: "worker start must match the routed dispatch Work lane"
           })
         }
+        if (decoded.expectedRevision !== dispatch.workLink.handoff.expectedRevision) {
+          return yield* new OrchestratorWorkerStartAuthorityError({
+            actualRevision: decoded.expectedRevision,
+            expectedRevision: dispatch.workLink.handoff.expectedRevision,
+            laneId: decoded.laneId,
+            reason: "accepted_revision_mismatch"
+          })
+        }
         yield* validateDurableReadback(dispatch, "worker-start.work-link")
         if (dispatch.status !== "queued") {
           if (
@@ -1088,6 +1102,27 @@ const makeOrchestrator: Effect.Effect<
     return yield* submitInternal(decoded.command, decoded.idempotencyKey, decoded.route, decoded.workLink)
   })
 
+  const submitSolEscalation: OrchestratorService["submitSolEscalation"] = Effect.fn(
+    "Orchestrator.submitSolEscalation"
+  )(function*(input) {
+    const decoded = yield* Schema.decodeUnknownEffect(OrchestratorSolEscalationSubmission)(input).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "Sol escalation submission is invalid" }))
+    )
+    return yield* submitInternal(
+      decoded.command,
+      decoded.idempotencyKey,
+      {
+        action: "dispatch",
+        linkedRequestId: decoded.reference.failedLunaRequestId,
+        model: "gpt-5.6-sol",
+        protocol: "hostd.coordinator.route.v1",
+        reason: decoded.reason,
+        reasoningEffort: "high"
+      },
+      decoded.reference.workLink
+    )
+  })
+
   const service: OrchestratorService = {
     events: (dispatchRequestId) =>
       Stream.unwrap(
@@ -1169,6 +1204,7 @@ const makeOrchestrator: Effect.Effect<
     ),
     submit,
     submitRouted,
+    submitSolEscalation,
     workerStarted,
     request: Effect.fn("Orchestrator.request")((dispatchRequestId) =>
       Schema.decodeUnknownEffect(DispatchRequestId)(dispatchRequestId).pipe(

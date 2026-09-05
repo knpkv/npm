@@ -446,9 +446,11 @@ describe("durable Work projection", () => {
 
         const handoff: WorkDecisionHandoff = {
           blockers: [],
+          contextDelta: "Must have one active lane authority",
           decision: "handoff",
           dispatchIds: ["dispatch:ambiguous-decision"],
           evidenceRefs: [],
+          expectedRevision: lane.revision,
           goalId: lane.goalId,
           id: "handoff:ambiguous-decision",
           laneId: lane.laneId,
@@ -456,7 +458,7 @@ describe("durable Work projection", () => {
           owner: lane.owner,
           sessionId: "session:ambiguous-decision",
           summary: "Must have one active lane authority",
-          version: "herdr.work.decision.v1"
+          version: "herdr.work.decision.v2"
         }
         expect(yield* Effect.result(service.handoff(handoff))).toMatchObject({
           failure: {
@@ -559,9 +561,11 @@ describe("durable Work projection", () => {
       dispatchRequestId: "dispatch:sol",
       handoff: {
         blockers: [],
+        contextDelta: "Escalate failed work",
         decision: "handoff",
         dispatchIds: ["dispatch:luna"],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "goal:package",
         id: "handoff:package",
         laneId: "lane:package",
@@ -569,7 +573,7 @@ describe("durable Work projection", () => {
         owner: { id: "owner:package", name: "Package owner" },
         sessionId: "session:package",
         summary: "Escalate failed work",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       },
       lineage: ["dispatch:luna"]
     }
@@ -1408,9 +1412,11 @@ database.close()`,
 
       const handoff: WorkDecisionHandoff = {
         blockers: [],
+        contextDelta: "Decision ledger capacity fixture",
         decision: "handoff",
         dispatchIds: [],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "goal-decision-cap",
         id: "handoff-overflow",
         laneId: "goal-decision-cap",
@@ -1418,7 +1424,7 @@ database.close()`,
         owner: { id: "owner-packages", name: "Package owner" },
         sessionId: "session-overflow",
         summary: "x".repeat(4_096),
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       const database = new DatabaseSync(path)
       database.exec("BEGIN IMMEDIATE")
@@ -1457,9 +1463,11 @@ database.close()`,
       const service = yield* makeWorkService(store)
       const handoff: WorkDecisionHandoff = {
         blockers: [],
+        contextDelta: "Replacement character remains a valid distinct lane",
         decision: "handoff",
         dispatchIds: [],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "lane-\uFFFD",
         id: "handoff-replacement-lane",
         laneId: "lane-\uFFFD",
@@ -1467,7 +1475,7 @@ database.close()`,
         owner: { id: "owner-packages", name: "Package owner" },
         sessionId: "session-replacement-lane",
         summary: "Replacement character remains a valid distinct lane",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       yield* service.claim(laneClaim(handoff.laneId, handoff.goalId))
       yield* service.handoff(handoff)
@@ -1562,9 +1570,11 @@ database.close()`,
       })
       const handoff: WorkDecisionHandoff = {
         blockers: [{ id: "review", detail: "Fresh exact-head review required" }],
+        contextDelta: "Coordinator owns release verification",
         decision: "handoff",
         dispatchIds: ["dispatch-1", "dispatch-2"],
         evidenceRefs: [{ id: "test", kind: "test", reference: "pnpm --filter @knpkv/herdr-work test" }],
+        expectedRevision: next.revision,
         goalId: "goal-packages",
         id: "handoff-1",
         laneId: "goal-packages",
@@ -1572,7 +1582,7 @@ database.close()`,
         owner: claim.owner,
         sessionId: "session-package-coordinator",
         summary: "Coordinator owns release verification",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       expect(yield* service.handoff(handoff)).toEqual(handoff)
       expect(yield* service.handoff(handoff)).toEqual(handoff)
@@ -1715,9 +1725,11 @@ database.close()`,
       const first = yield* openScopedStore(path)
       const handoff: WorkDecisionHandoff = {
         blockers: [{ id: "review", detail: "Fresh exact-head review required" }],
+        contextDelta: "Continue from the durable package checkpoint",
         decision: "handoff",
         dispatchIds: ["dispatch-417"],
         evidenceRefs: [{ id: "head", kind: "commit", reference: "a".repeat(40) }],
+        expectedRevision: 1,
         goalId: "goal-package",
         id: "handoff-restart",
         laneId: "lane-package",
@@ -1725,7 +1737,7 @@ database.close()`,
         owner: { id: "owner-packages", name: "Package owner" },
         sessionId: "session-restart",
         summary: "Continue from the durable package checkpoint",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       const firstService = yield* makeWorkService(first.store)
       yield* firstService.claim(laneClaim(handoff.laneId, handoff.goalId))
@@ -1741,13 +1753,68 @@ database.close()`,
       })
     }).pipe(provideNodeServices))
 
+  it.effect("persists bounded handoff context at the accepted lane revision", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-handoff-context-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const first = yield* openScopedStore(path)
+      const service = yield* makeWorkService(first.store)
+      const lane = yield* service.claim(laneClaim("lane:handoff-context", "goal:handoff-context"))
+      const input = {
+        blockers: [],
+        contextDelta: "Carry the failed Luna evidence into the Sol worker.",
+        decision: "handoff",
+        dispatchIds: ["dispatch:luna-context"],
+        evidenceRefs: [{ id: "luna-failure", kind: "review", reference: "dispatch:luna-context" }],
+        expectedRevision: lane.revision,
+        goalId: lane.goalId,
+        id: "handoff:context",
+        laneId: lane.laneId,
+        occurredAt: 1,
+        owner: lane.owner,
+        sessionId: "session:context",
+        summary: "Escalate with bounded recovered context",
+        version: "herdr.work.decision.v2"
+      }
+      const handoff = yield* Schema.decodeUnknownEffect(WorkDecisionHandoff)(input)
+      expect(handoff).toMatchObject({
+        contextDelta: input.contextDelta,
+        expectedRevision: lane.revision,
+        version: "herdr.work.decision.v2"
+      })
+      for (const contextDelta of ["", "x".repeat(4_097)]) {
+        expect(
+          yield* Effect.result(Schema.decodeUnknownEffect(WorkDecisionHandoff)({ ...input, contextDelta }))
+        ).toMatchObject({ failure: {} })
+      }
+      expect(
+        yield* Effect.result(service.handoff({ ...handoff, expectedRevision: lane.revision - 1 }))
+      ).toMatchObject({
+        failure: {
+          _tag: "WorkDecisionRevisionConflictError",
+          actualRevision: lane.revision,
+          expectedRevision: lane.revision - 1,
+          laneId: lane.laneId
+        }
+      })
+      expect(yield* service.handoff(handoff)).toEqual(handoff)
+      first.close()
+
+      const reopened = yield* openScopedStore(path)
+      const restarted = yield* makeWorkService(reopened.store)
+      expect(yield* restarted.coordinatorHandoff(handoff.sessionId)).toEqual(Option.some(handoff))
+    }).pipe(provideNodeServices))
+
   it.effect("rejects malformed surrogate text in coordinator handoffs", () =>
     Effect.gen(function*() {
       const handoff: WorkDecisionHandoff = {
         blockers: [],
+        contextDelta: "Valid text \uFFFD",
         decision: "handoff",
         dispatchIds: [],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "goal-text",
         id: "handoff-text",
         laneId: "lane-text",
@@ -1755,7 +1822,7 @@ database.close()`,
         owner: { id: "owner-packages", name: "Package owner" },
         sessionId: "session-text",
         summary: "Valid text \uFFFD",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       expect(yield* Schema.decodeUnknownEffect(WorkDecisionHandoff)(handoff)).toEqual(handoff)
       for (const malformed of ["\uD800", "\uDC00"]) {
@@ -1782,9 +1849,11 @@ database.close()`,
       store.close()
       const first: WorkDecisionHandoff = {
         blockers: [],
+        contextDelta: "First handoff",
         decision: "handoff",
         dispatchIds: [],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "goal-decision-identity",
         id: "handoff-record-1",
         laneId: "goal-decision-identity",
@@ -1792,7 +1861,7 @@ database.close()`,
         owner: { id: "owner-packages", name: "Package owner" },
         sessionId: "session-record-1",
         summary: "First handoff",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       const database = new DatabaseSync(path)
       database.prepare(
@@ -2172,9 +2241,11 @@ database.close()`,
       )
       const mismatchedHandoff: WorkDecisionHandoff = {
         blockers: [],
+        contextDelta: "Mismatched lane fixture",
         decision: "handoff",
         dispatchIds: [],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "goal-record",
         id: "handoff-mismatched-lane",
         laneId: "goal-record",
@@ -2182,7 +2253,7 @@ database.close()`,
         owner: claim.owner,
         sessionId: "session-mismatched-lane",
         summary: "Mismatched lane fixture",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       }
       database.prepare(
         `INSERT INTO work_decision_handoffs
@@ -2364,7 +2435,14 @@ database.close()`,
         value: { goalId: legacyClaim.laneId, operationId: legacyClaim.laneId, revision: 1 }
       })
       expect(yield* service.coordinatorHandoff(legacyHandoff.id)).toMatchObject({
-        value: { dispatchIds: lineage, id: legacyHandoff.id, sessionId: legacyHandoff.id }
+        value: {
+          contextDelta: legacyHandoff.summary,
+          dispatchIds: lineage,
+          expectedRevision: legacyClaim.revision,
+          id: legacyHandoff.id,
+          sessionId: legacyHandoff.id,
+          version: "herdr.work.decision.v2"
+        }
       })
       expect(yield* service.coordinatorHandoff(concurrentHandoff.id)).toMatchObject({
         value: { id: concurrentHandoff.id, sessionId: concurrentHandoff.id }
@@ -2396,6 +2474,205 @@ database.close()`,
         Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "goal_id"
       ))
         .toBe(false)
+    }).pipe(provideNodeServices))
+
+  it.effect("migrates v1 handoffs already stored in the current schema", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-current-handoff-migration-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const path = join(directory, "work.sqlite")
+      const owner = { id: "owner:current-migration", name: "Current migration owner" }
+      const lane = {
+        branch: "feat/current-migration",
+        expectedRevision: 1,
+        goalId: "goal:current-migration",
+        head: "0123456789012345678901234567890123456789",
+        laneId: "goal:current-migration",
+        operationId: "dispatch:current-migration",
+        owner,
+        parent: null,
+        phase: "implementation",
+        revision: 2,
+        worktree: "/worktrees/current-migration"
+      }
+      const previousHandoff = {
+        blockers: [],
+        decision: "handoff",
+        dispatchIds: ["dispatch:failed-luna"],
+        evidenceRefs: [],
+        goalId: lane.goalId,
+        id: "handoff:current-migration",
+        laneId: lane.laneId,
+        occurredAt: 1,
+        owner,
+        sessionId: "session:current-migration",
+        summary: "Current schema decision",
+        version: "herdr.work.decision.v1"
+      }
+      const currentHandoff = {
+        ...previousHandoff,
+        contextDelta: "Already current",
+        expectedRevision: lane.revision,
+        id: "handoff:already-current",
+        occurredAt: 2,
+        sessionId: "session:already-current",
+        version: "herdr.work.decision.v2"
+      }
+      const database = new DatabaseSync(path)
+      database.exec(`
+        CREATE TABLE work_lane_claims (
+          lane_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
+          phase TEXT NOT NULL, revision INTEGER NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE work_decision_handoffs (
+          handoff_id TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE, lane_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE work_dispatch_handoffs (
+          dispatch_request_id TEXT PRIMARY KEY, handoff_id TEXT NOT NULL UNIQUE, lane_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL, lineage TEXT NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE work_agent_bindings (
+          dispatch_request_id TEXT PRIMARY KEY, lane_id TEXT NOT NULL, expected_revision INTEGER NOT NULL,
+          revision INTEGER NOT NULL, agent_id TEXT NOT NULL, host TEXT NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE orchestrator_dispatch_metadata (
+          dispatch_request_id TEXT PRIMARY KEY, route TEXT NOT NULL, work_link TEXT
+        );
+      `)
+      database.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?, ?, ?, ?)").run(
+        lane.laneId,
+        lane.goalId,
+        lane.operationId,
+        lane.phase,
+        lane.revision,
+        JSON.stringify(lane)
+      )
+      const insertDecision = database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?, ?)")
+      insertDecision.run(
+        previousHandoff.id,
+        previousHandoff.sessionId,
+        previousHandoff.laneId,
+        previousHandoff.occurredAt,
+        JSON.stringify(previousHandoff)
+      )
+      insertDecision.run(
+        currentHandoff.id,
+        currentHandoff.sessionId,
+        currentHandoff.laneId,
+        currentHandoff.occurredAt,
+        JSON.stringify(currentHandoff)
+      )
+      const lineage = ["dispatch:failed-luna"]
+      database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
+        "dispatch:current-migration",
+        previousHandoff.id,
+        previousHandoff.laneId,
+        previousHandoff.occurredAt,
+        JSON.stringify(lineage),
+        JSON.stringify(previousHandoff)
+      )
+      database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+        "dispatch:current-migration",
+        lane.laneId,
+        1,
+        2,
+        "agent:migrated",
+        "host:migrated",
+        "{}"
+      )
+      database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
+        "dispatch:current-migration",
+        "{}",
+        JSON.stringify({ handoff: previousHandoff, lineage })
+      )
+      database.close()
+
+      const opened = yield* openScopedStore(path)
+      const service = yield* makeWorkService(opened.store)
+      expect(yield* service.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
+        value: {
+          contextDelta: previousHandoff.summary,
+          expectedRevision: 1,
+          version: "herdr.work.decision.v2"
+        }
+      })
+      expect(yield* service.coordinatorHandoff(currentHandoff.sessionId)).toMatchObject({ value: currentHandoff })
+      opened.close()
+
+      const migrated = new DatabaseSync(path)
+      const copies = Schema.decodeUnknownSync(Schema.Struct({
+        record: Schema.String,
+        workLink: Schema.String
+      }))(
+        migrated.prepare(
+          `SELECT dispatch.record, metadata.work_link AS workLink
+         FROM work_dispatch_handoffs dispatch
+         JOIN orchestrator_dispatch_metadata metadata USING (dispatch_request_id)`
+        ).get()
+      )
+      migrated.close()
+      expect(JSON.parse(copies.record)).toMatchObject({ expectedRevision: 1, version: "herdr.work.decision.v2" })
+      expect(JSON.parse(copies.workLink)).toMatchObject({
+        handoff: { expectedRevision: 1, version: "herdr.work.decision.v2" },
+        lineage
+      })
+
+      const malformed = new DatabaseSync(path)
+      malformed.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      malformed.prepare("UPDATE work_dispatch_handoffs SET lineage = '{}' WHERE dispatch_request_id = ?")
+        .run("dispatch:current-migration")
+      malformed.close()
+      expect(yield* safelyOpenResult(path)).toMatchObject({ failure: { _tag: "WorkStoreError" } })
+      const rolledBack = new DatabaseSync(path)
+      const rolledBackDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        rolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      rolledBack.close()
+      expect(JSON.parse(rolledBackDecision.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+      const oversizedPath = join(directory, "oversized.sqlite")
+      const oversized = new DatabaseSync(oversizedPath)
+      oversized.exec(`
+        CREATE TABLE work_lane_claims (
+          lane_id TEXT PRIMARY KEY, goal_id TEXT NOT NULL, operation_id TEXT NOT NULL UNIQUE,
+          phase TEXT NOT NULL, revision INTEGER NOT NULL, record TEXT NOT NULL
+        );
+        CREATE TABLE work_decision_handoffs (
+          handoff_id TEXT PRIMARY KEY, session_id TEXT NOT NULL UNIQUE, lane_id TEXT NOT NULL,
+          occurred_at INTEGER NOT NULL, record TEXT NOT NULL
+        );
+      `)
+      oversized.prepare("INSERT INTO work_lane_claims VALUES (?, ?, ?, ?, ?, ?)").run(
+        lane.laneId,
+        lane.goalId,
+        lane.operationId,
+        lane.phase,
+        lane.revision,
+        JSON.stringify(lane)
+      )
+      const insertOversized = oversized.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?, ?)")
+      for (let index = 0; index < 400; index += 1) {
+        const handoff = {
+          ...previousHandoff,
+          dispatchIds: [],
+          id: `handoff:oversized:${index}`,
+          occurredAt: index,
+          sessionId: `session:oversized:${index}`,
+          summary: "x".repeat(4_096)
+        }
+        insertOversized.run(handoff.id, handoff.sessionId, handoff.laneId, handoff.occurredAt, JSON.stringify(handoff))
+      }
+      oversized.close()
+      expect(yield* safelyOpenResult(oversizedPath)).toMatchObject({ failure: { _tag: "WorkStoreError" } })
+      const overflowRolledBack = new DatabaseSync(oversizedPath)
+      const retainedV1 = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        overflowRolledBack.prepare("SELECT record FROM work_decision_handoffs LIMIT 1").get()
+      )
+      overflowRolledBack.close()
+      expect(JSON.parse(retainedV1.record)).toMatchObject({ version: "herdr.work.decision.v1" })
     }).pipe(provideNodeServices))
 
   it.effect("fails closed when denormalized lane authority hides an active claim", () =>

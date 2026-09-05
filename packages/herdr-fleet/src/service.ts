@@ -88,7 +88,8 @@ export type ResumeHostOperation = (
   jobId: string,
   actor: JobActor,
   receipt: string | null,
-  lifecycle: HostOperationLifecycle
+  lifecycle: HostOperationLifecycle,
+  persistedWorker: AgentWorkerIdentity | null
 ) => Effect.Effect<void, FleetOperationError>
 
 export type HostOperationRecovery = {
@@ -96,6 +97,7 @@ export type HostOperationRecovery = {
   readonly matches: (payload: CoreJobPayload) => boolean
   /**
    * Rejoins or idempotently completes submission, including before Fleet persisted a receipt.
+   * A running job's exact persisted worker is supplied for authoritative replay without discovery.
    * It must attach observation in its owning scope and return without waiting for terminal work.
    */
   readonly resume: ResumeHostOperation
@@ -830,7 +832,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
             record.id,
             record.actor,
             receipt,
-            resumed.lifecycle
+            resumed.lifecycle,
+            record.worker ?? null
           )
           continue
         }

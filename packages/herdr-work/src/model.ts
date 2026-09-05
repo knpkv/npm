@@ -423,14 +423,20 @@ export const WorkEvidenceReference = Schema.Struct({
 })
 export interface WorkEvidenceReference extends Schema.Schema.Type<typeof WorkEvidenceReference> {}
 
+/** Bounded credential-free context carried from the accepted Work handoff into execution. */
+export const WorkContextDelta = Text
+export type WorkContextDelta = typeof WorkContextDelta.Type
+
 export const WorkDecisionHandoff = Schema.Struct({
-  version: Schema.Literal("herdr.work.decision.v1"),
+  version: Schema.Literal("herdr.work.decision.v2"),
   id: Identifier,
   sessionId: WorkCoordinatorSessionId,
   laneId: WorkGoalId,
   goalId: WorkGoalId,
+  expectedRevision: ExpectedRevision,
   decision: Schema.Literals(["continue", "blocked", "handoff", "complete"]),
   summary: Text,
+  contextDelta: WorkContextDelta,
   owner: WorkOwner,
   dispatchIds: Schema.Array(WorkDispatchRequestId).check(
     Schema.isMaxLength(32),

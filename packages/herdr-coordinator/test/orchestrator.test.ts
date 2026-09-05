@@ -55,9 +55,11 @@ const lunaRoute = {
 const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => ({
   handoff: {
     blockers: [{ id: "luna-failed", detail: "The linked Luna request failed" }],
+    contextDelta: "Preserve the failed Luna evidence for the Sol worker",
     decision: "handoff",
     dispatchIds: lineage,
     evidenceRefs: [{ id: "linked-request", kind: "review", reference: "linked Luna terminal event" }],
+    expectedRevision: 1,
     goalId: "goal:escalation",
     id: "handoff:escalation",
     laneId: "lane:escalation",
@@ -65,7 +67,7 @@ const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => (
     owner: { id: "agent:coordinator", name: "Coordinator" },
     sessionId: "session:escalation",
     summary: "Escalate the failed Luna request to Sol",
-    version: "herdr.work.decision.v1"
+    version: "herdr.work.decision.v2"
   },
   lineage
 })
@@ -237,6 +239,64 @@ describe("durable coordinator orchestrator", () => {
           failure: {
             _tag: "OrchestratorWorkerBindingConflictError",
             dispatchRequestId: first.event.dispatchRequestId
+          }
+        })
+      })
+    }))
+
+  it.effect("rejects activation that refreshes the accepted Work lane revision", () =>
+    withTemporaryRoot("herdr-orchestrator-worker-start-revision-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:accepted-revision")
+      return Effect.gen(function*() {
+        const acceptedLane = yield* recordWorkAuthority(path, submission.workLink)
+        const receipt = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            return accepted
+          })
+        )
+        const store = yield* Effect.acquireRelease(
+          WorkStore.open(path).pipe(provideNodeServices),
+          (opened) => Effect.sync(() => opened.close())
+        )
+        const work = yield* makeWorkService(store)
+        const advancedLane = yield* work.claim({
+          branch: acceptedLane.branch,
+          expectedRevision: acceptedLane.revision,
+          goalId: acceptedLane.goalId,
+          head: acceptedLane.head,
+          laneId: acceptedLane.laneId,
+          operationId: "claim:advanced-after-acceptance",
+          owner: acceptedLane.owner,
+          parent: acceptedLane.parent,
+          phase: "validation",
+          worktree: acceptedLane.worktree
+        })
+        expect(
+          yield* Effect.result(withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* orchestrator.workerStarted({
+                dispatchRequestId: receipt.dispatchRequestId,
+                expectedRevision: advancedLane.revision,
+                laneId: advancedLane.laneId,
+                version: "herdr.work.agent-binding-request.v1",
+                worker: startedWorker
+              })
+            })
+          ))
+        ).toMatchObject({
+          failure: {
+            _tag: "OrchestratorWorkerStartAuthorityError",
+            actualRevision: advancedLane.revision,
+            expectedRevision: acceptedLane.revision,
+            laneId: acceptedLane.laneId,
+            reason: "accepted_revision_mismatch"
           }
         })
       })
@@ -488,7 +548,7 @@ describe("durable coordinator orchestrator", () => {
             })
           ))
         ).toMatchObject({
-          failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "shipped_lane" }
+          failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "accepted_revision_mismatch" }
         })
         expect(
           yield* Effect.result(withDatabase(
@@ -536,7 +596,7 @@ describe("durable coordinator orchestrator", () => {
                 worker: startedWorker
               }))
             ).toMatchObject({
-              failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "stale_revision" }
+              failure: { _tag: "OrchestratorWorkerStartAuthorityError", reason: "accepted_revision_mismatch" }
             })
             return accepted
           })
@@ -1011,6 +1071,29 @@ describe("durable coordinator orchestrator", () => {
         })
       )))
 
+  it.effect("records pre-worker executor failure as queued delivery failure", () =>
+    withTemporaryRoot("herdr-orchestrator-queued-delivery-failure-", (root) =>
+      withDatabase(
+        join(root, "orchestrator.sqlite"),
+        Effect.gen(function*() {
+          const orchestrator = yield* Orchestrator
+          const receipt = yield* orchestrator.submit(
+            { ...command, activityIdempotencyKey: "activity:queued-delivery-failure" },
+            "dispatch:queued-delivery-failure"
+          )
+          yield* orchestrator.queue(receipt.dispatchRequestId)
+          expect(
+            yield* orchestrator.failDelivery(receipt.dispatchRequestId, "executor failed before worker start")
+          ).toMatchObject({
+            detail: "executor failed before worker start",
+            type: "delivery_failed"
+          })
+          expect(
+            (yield* Stream.runCollect(orchestrator.events(receipt.dispatchRequestId))).map(({ type }) => type)
+          ).toEqual(["accepted", "queued", "delivery_failed"])
+        })
+      )))
+
   it.effect("persists executable route metadata for typed request lookup", () =>
     withTemporaryRoot("herdr-orchestrator-route-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -1063,10 +1146,15 @@ describe("durable coordinator orchestrator", () => {
             yield* orchestrator.queue(luna.dispatchRequestId)
             yield* orchestrator.run(luna.dispatchRequestId)
             yield* orchestrator.failTask(luna.dispatchRequestId, "Luna task failed")
-            const sol = yield* orchestrator.submitRouted(makeSolSubmission(
-              luna.dispatchRequestId,
-              "dispatch:route-sol"
-            ))
+            const sol = yield* orchestrator.submitSolEscalation({
+              command: { ...command, activityIdempotencyKey: "activity:dispatch:route-sol" },
+              idempotencyKey: "dispatch:route-sol",
+              reason: "failed Luna work requires an explicit linked Sol escalation",
+              reference: {
+                failedLunaRequestId: luna.dispatchRequestId,
+                workLink: makeWorkLink([luna.dispatchRequestId])
+              }
+            })
             return yield* orchestrator.request(sol.dispatchRequestId)
           })
         )
@@ -1437,6 +1525,76 @@ database.close()`,
           .toContain("dispatch:legacy-luna")
         expect(Schema.decodeUnknownSync(Schema.Struct({ sessionId: Schema.String }))(concurrentDecision).sessionId)
           .toBe(concurrent.id)
+      })
+    }))
+
+  it.effect("migrates current-schema v1 handoffs and replays the exact running worker", () =>
+    withTemporaryRoot("herdr-orchestrator-current-handoff-migration-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const workLink = makeWorkLink([])
+      const submission = {
+        ...makeSolSubmission(null, "dispatch:current-handoff-migration"),
+        workLink
+      }
+      return Effect.gen(function*() {
+        const lane = yield* recordWorkAuthority(path, submission.workLink)
+        const activation = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const receipt = yield* orchestrator.submitRouted(submission)
+            yield* orchestrator.queue(receipt.dispatchRequestId)
+            return yield* orchestrator.workerStarted({
+              dispatchRequestId: receipt.dispatchRequestId,
+              expectedRevision: lane.revision,
+              laneId: lane.laneId,
+              version: "herdr.work.agent-binding-request.v1",
+              worker: startedWorker
+            })
+          })
+        )
+        const previousHandoff = {
+          blockers: workLink.handoff.blockers,
+          decision: workLink.handoff.decision,
+          dispatchIds: workLink.handoff.dispatchIds,
+          evidenceRefs: workLink.handoff.evidenceRefs,
+          goalId: workLink.handoff.goalId,
+          id: workLink.handoff.id,
+          laneId: workLink.handoff.laneId,
+          occurredAt: workLink.handoff.occurredAt,
+          owner: workLink.handoff.owner,
+          sessionId: workLink.handoff.sessionId,
+          summary: workLink.handoff.summary,
+          version: "herdr.work.decision.v1"
+        }
+        const database = new DatabaseSync(path)
+        database.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        database.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(previousHandoff), activation.event.dispatchRequestId)
+        database.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage }),
+            activation.event.dispatchRequestId
+          )
+        database.close()
+
+        const replay = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return {
+              activation: yield* orchestrator.workerStarted(activation.binding.request),
+              request: yield* orchestrator.request(activation.event.dispatchRequestId)
+            }
+          })
+        )
+        expect(replay.activation).toEqual(activation)
+        expect(replay.request.workLink?.handoff).toMatchObject({
+          contextDelta: previousHandoff.summary,
+          expectedRevision: activation.binding.request.expectedRevision,
+          version: "herdr.work.decision.v2"
+        })
       })
     }))
 

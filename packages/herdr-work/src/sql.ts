@@ -1,4 +1,4 @@
-import { Effect, Equal, Schema } from "effect"
+import { Effect, Equal, Option, Schema } from "effect"
 import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
 import type { SqlError } from "effect/unstable/sql/SqlError"
 import { makeWorkAgentBinding } from "./agent-binding.js"
@@ -8,6 +8,7 @@ import {
   WorkCoordinatorHandoffConflictError,
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
+  WorkDecisionRevisionConflictError,
   WorkDispatchHandoffConflictError,
   WorkProjectionError,
   WorkStoreError
@@ -19,6 +20,7 @@ import {
   agentBindingReadbackError,
   decodeAgentBindingGoalEvent
 } from "./internal/agent-binding-readback.js"
+import { decodePreviousDecisionHandoff, upgradePreviousDecisionHandoff } from "./internal/decision-handoff-migration.js"
 import {
   WorkAgentBinding,
   type WorkAgentBinding as WorkAgentBindingType,
@@ -109,6 +111,8 @@ const LegacyDispatchRow = Schema.Struct({
   lineage: Schema.String
 })
 const SqliteTableRow = Schema.Struct({ name: Schema.String })
+const ExpectedRevisionRow = Schema.Struct({ expectedRevision: Schema.Number })
+const LaneRevisionRow = Schema.Struct({ revision: Schema.Number })
 
 const workDecisionMaxRecords = 16_384
 const workDecisionMaxBytes = 2 * 1024 * 1024
@@ -135,6 +139,7 @@ const decodeLegacyLane = (row: typeof LegacyLaneRow.Type) =>
 
 const decodeLegacyDecision = (
   dispatches: ReadonlyArray<typeof LegacyDispatchRow.Type>,
+  lanes: ReadonlyArray<WorkLaneClaimed>,
   row: typeof LegacyDecisionRow.Type
 ) =>
   Effect.try({
@@ -146,13 +151,20 @@ const decodeLegacyDecision = (
       const dispatch = dispatches.find(({ handoffId }) => handoffId === legacy.id)
       const dispatchIds = dispatch === undefined
         ? []
-        : Schema.decodeUnknownSync(Schema.Array(Schema.String))(JSON.parse(dispatch.lineage))
+        : Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+      const lane = lanes.find(({ laneId }) => laneId === legacy.laneId)
+      if (lane === undefined) {
+        throw new WorkStoreError({ cause: legacy, operation: "sql-work.migrate.handoff-lane" })
+      }
       return Schema.decodeUnknownSync(WorkDecisionHandoff)({
         ...legacy,
+        contextDelta: legacy.summary,
+        expectedRevision: lane.revision,
         sessionId: legacy.id,
         dispatchIds,
         blockers: [],
-        evidenceRefs: []
+        evidenceRefs: [],
+        version: "herdr.work.decision.v2"
       })
     },
     catch: storeError("sql-work.initialize.decode-legacy-handoff")
@@ -233,6 +245,7 @@ export interface SqliteWorkBridge {
     | WorkCoordinatorHandoffConflictError
     | WorkDecisionAuthorityConflictError
     | WorkDecisionHandoffConflictError
+    | WorkDecisionRevisionConflictError
     | WorkDispatchHandoffConflictError
     | WorkProjectionError
     | WorkStoreError
@@ -358,7 +371,9 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         FROM work_decision_handoffs
       `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LegacyDecisionRow))),
-          Effect.flatMap((rows) => Effect.forEach(rows, (row) => decodeLegacyDecision(legacyDispatches, row))),
+          Effect.flatMap((rows) =>
+            Effect.forEach(rows, (row) => decodeLegacyDecision(legacyDispatches, legacyLanes, row))
+          ),
           Effect.mapError(storeError("sql-work.initialize.legacy-handoffs"))
         )
         : []
@@ -403,6 +418,112 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
               : Effect.void
           ], { discard: true })
         }, { discard: true })
+      }
+      const storedDecisions = yield* sql`
+        SELECT handoff_id AS "handoffId", session_id AS "sessionId", lane_id AS "laneId",
+          occurred_at AS "occurredAt", record
+        FROM work_decision_handoffs
+      `.pipe(
+        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(DecisionRow))),
+        Effect.mapError(storeError("sql-work.initialize.persisted-handoffs"))
+      )
+      const migrationResults = yield* Effect.forEach(storedDecisions, (row) =>
+        Effect.gen(function*() {
+          const input = yield* Effect.try({
+            try: () => JSON.parse(row.record),
+            catch: storeError("sql-work.initialize.parse-handoff")
+          })
+          const previous = decodePreviousDecisionHandoff(input)
+          if (Option.isNone(previous)) return false
+          const laneRows = yield* sql`SELECT revision FROM work_lane_claims WHERE lane_id = ${row.laneId}`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LaneRevisionRow))),
+            Effect.mapError(storeError("sql-work.initialize.handoff-lane-revision"))
+          )
+          const laneRevision = laneRows[0]
+          if (laneRevision === undefined) {
+            return yield* new WorkStoreError({ cause: row, operation: "sql-work.initialize.handoff-lane" })
+          }
+          const bindingRevisions = tables.some(({ name }) => name === "work_agent_bindings")
+            ? yield* sql`
+              SELECT DISTINCT binding.expected_revision AS "expectedRevision"
+              FROM work_agent_bindings binding
+              JOIN work_dispatch_handoffs dispatch
+                ON dispatch.dispatch_request_id = binding.dispatch_request_id
+              WHERE dispatch.handoff_id = ${row.handoffId}
+            `.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExpectedRevisionRow))),
+              Effect.mapError(storeError("sql-work.initialize.handoff-binding-revision"))
+            )
+            : []
+          if (bindingRevisions.length > 1) {
+            return yield* new WorkStoreError({
+              cause: { bindingRevisions, row },
+              operation: "sql-work.initialize.handoff-revision"
+            })
+          }
+          const migrated = yield* Effect.try({
+            try: () =>
+              upgradePreviousDecisionHandoff(
+                previous.value,
+                bindingRevisions[0]?.expectedRevision ?? laneRevision.revision
+              ),
+            catch: storeError("sql-work.initialize.upgrade-handoff")
+          })
+          if (
+            migrated.id !== row.handoffId || migrated.sessionId !== row.sessionId ||
+            migrated.laneId !== row.laneId || migrated.occurredAt !== row.occurredAt
+          ) {
+            return yield* new WorkStoreError({
+              cause: { migrated, row },
+              operation: "sql-work.initialize.handoff-identity"
+            })
+          }
+          const encoded = JSON.stringify(migrated)
+          yield* sql`UPDATE work_decision_handoffs SET record = ${encoded} WHERE handoff_id = ${row.handoffId}`
+          yield* sql`UPDATE work_dispatch_handoffs SET record = ${encoded} WHERE handoff_id = ${row.handoffId}`
+          const migratedDispatches = legacyDispatches.filter(({ handoffId }) => handoffId === row.handoffId)
+          if (tables.some(({ name }) => name === "orchestrator_dispatch_metadata")) {
+            yield* Effect.forEach(migratedDispatches, (dispatch) =>
+              Effect.gen(function*() {
+                const lineage = yield* Effect.try({
+                  try: () =>
+                    Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(
+                      JSON.parse(dispatch.lineage)
+                    ),
+                  catch: storeError("sql-work.initialize.decode-handoff-lineage")
+                })
+                yield* sql`UPDATE orchestrator_dispatch_metadata
+                SET work_link = ${JSON.stringify({ handoff: migrated, lineage })}
+                WHERE dispatch_request_id = ${dispatch.dispatchRequestId}`
+              }), { discard: true })
+          }
+          return true
+        }))
+      if (migrationResults.includes(true)) {
+        const migratedLedger = yield* sql`
+          SELECT COALESCE(SUM(
+            length(CAST(handoff_id AS BLOB)) + length(CAST(record AS BLOB))
+          ), 0) AS "decisionBytes"
+          FROM work_decision_handoffs
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(
+            Schema.Struct({ decisionBytes: Schema.Number })
+          ))),
+          Effect.mapError(storeError("sql-work.initialize.handoff-capacity"))
+        )
+        const migratedDecisionBytes = migratedLedger[0]
+        if (migratedDecisionBytes === undefined) {
+          return yield* new WorkStoreError({
+            cause: migratedLedger,
+            operation: "sql-work.initialize.missing-handoff-capacity"
+          })
+        }
+        if (migratedDecisionBytes.decisionBytes > workDecisionMaxBytes) {
+          return yield* new WorkStoreError({
+            cause: migratedLedger,
+            operation: "sql-work.initialize.handoff-capacity"
+          })
+        }
       }
       yield* sql`CREATE UNIQUE INDEX IF NOT EXISTS work_lane_claims_one_active_goal
       ON work_lane_claims (goal_id) WHERE phase <> 'shipped'`
@@ -642,8 +763,17 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
   ) {
     const claims = yield* readValidatedLaneClaims()
     const activeGoalClaims = claims.filter((claim) => claim.goalId === handoff.goalId && claim.phase !== "shipped")
-    if (activeGoalClaims.length === 1 && activeGoalClaims[0]?.laneId === handoff.laneId) return
-    return yield* new WorkDecisionAuthorityConflictError({ goalId: handoff.goalId, laneId: handoff.laneId })
+    const activeClaim = activeGoalClaims[0]
+    if (activeGoalClaims.length !== 1 || activeClaim?.laneId !== handoff.laneId) {
+      return yield* new WorkDecisionAuthorityConflictError({ goalId: handoff.goalId, laneId: handoff.laneId })
+    }
+    if (activeClaim.revision !== handoff.expectedRevision) {
+      return yield* new WorkDecisionRevisionConflictError({
+        actualRevision: activeClaim.revision,
+        expectedRevision: handoff.expectedRevision,
+        laneId: handoff.laneId
+      })
+    }
   })
 
   const acceptAgentBinding: SqliteWorkBridge["acceptAgentBinding"] = Effect.fn(

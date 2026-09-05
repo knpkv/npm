@@ -63,6 +63,11 @@ export class WorkDecisionAuthorityConflictError extends Schema.TaggedError<WorkD
   { goalId: Schema.String, laneId: Schema.String }
 ) {}
 
+export class WorkDecisionRevisionConflictError extends Schema.TaggedError<WorkDecisionRevisionConflictError>()(
+  "WorkDecisionRevisionConflictError",
+  { laneId: Schema.String, expectedRevision: Schema.Number, actualRevision: Schema.Number }
+) {}
+
 export class WorkCoordinatorHandoffConflictError extends Schema.TaggedError<WorkCoordinatorHandoffConflictError>()(
   "WorkCoordinatorHandoffConflictError",
   { sessionId: Schema.String }

@@ -4,6 +4,7 @@ import {
   ActivityIdempotencyKey,
   OrchestratorEvent,
   OrchestratorIdempotencyKey,
+  OrchestratorLinkedSolDispatchReference,
   OrchestratorPendingDispatch,
   OrchestratorPendingQuery,
   OrchestratorRequest,
@@ -109,9 +110,11 @@ describe("orchestrator event model", () => {
     const link = {
       handoff: {
         blockers: [],
+        contextDelta: "Escalate failed work",
         decision: "handoff",
         dispatchIds: ["dispatch:parent", "dispatch:earlier"],
         evidenceRefs: [],
+        expectedRevision: 1,
         goalId: "goal:model",
         id: "handoff:model",
         laneId: "lane:model",
@@ -119,11 +122,23 @@ describe("orchestrator event model", () => {
         owner: { id: "owner:model", name: "Coordinator" },
         sessionId: "session:model",
         summary: "Escalate failed work",
-        version: "herdr.work.decision.v1"
+        version: "herdr.work.decision.v2"
       },
       lineage: ["dispatch:parent"]
     }
     expect(Schema.decodeUnknownResult(OrchestratorWorkLink)(link)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(OrchestratorLinkedSolDispatchReference)({
+        failedLunaRequestId: "dispatch:parent",
+        workLink: link
+      })._tag
+    ).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(OrchestratorLinkedSolDispatchReference)({
+        failedLunaRequestId: "dispatch:unrelated",
+        workLink: link
+      })._tag
+    ).toBe("Failure")
     expect(
       Schema.decodeUnknownResult(OrchestratorWorkLink)({ ...link, lineage: ["dispatch:unrelated"] })._tag
     ).toBe("Failure")
