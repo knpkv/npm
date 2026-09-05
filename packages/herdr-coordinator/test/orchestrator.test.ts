@@ -1,9 +1,12 @@
 import { NodeServices } from "@effect/platform-node"
+import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { makeWorkService, WorkAgentBinding, WorkGoalCheckpoint, WorkLaneClaimed, WorkStore } from "@knpkv/herdr-work"
+import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
+import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawn } from "node:child_process"
 import {
   copyFileSync,
@@ -294,6 +297,16 @@ const withDatabase = <A, E, R>(
   effect.pipe(
     // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(sqliteLayer(path)),
+    Effect.scoped
+  )
+
+const initializeStandaloneWork = (path: string) =>
+  Effect.gen(function*() {
+    const sql = yield* SqlClient.SqlClient
+    yield* makeSqliteWorkBridge(sql).initialize
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(SqliteClient.layer({ filename: path })),
     Effect.scoped
   )
 
@@ -2411,6 +2424,28 @@ database.close()`,
           )
         database.close()
 
+        const standalonePath = join(root, "standalone-v1.sqlite")
+        copyFileSync(path, standalonePath)
+        const standalone = new DatabaseSync(standalonePath)
+        standalone.exec(`
+          DROP TABLE orchestrator_dispatch_metadata;
+          DROP TABLE orchestrator_events;
+          DROP TABLE orchestrator_dispatches;
+        `)
+        standalone.close()
+        yield* initializeStandaloneWork(standalonePath)
+        const standaloneMigrated = new DatabaseSync(standalonePath)
+        const standaloneRecord = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          standaloneMigrated.prepare(
+            "SELECT record FROM work_decision_handoffs WHERE handoff_id = ?"
+          ).get(previousHandoff.id)
+        )
+        standaloneMigrated.close()
+        expect(JSON.parse(standaloneRecord.record)).toMatchObject({
+          expectedRevision: activation.binding.request.expectedRevision,
+          version: "herdr.work.decision.v2"
+        })
+
         const rewoundLanePath = join(root, "rewound-v1-lane.sqlite")
         copyFileSync(path, rewoundLanePath)
         const rewoundLane = new DatabaseSync(rewoundLanePath)
@@ -2480,6 +2515,37 @@ database.close()`,
           ).get(forwardLane.laneId)
         ).toEqual({ revision: forwardLane.revision })
         advancedLaneMigrated.close()
+
+        const mixedDuplicateMetadataPath = join(root, "mixed-duplicate-current-metadata.sqlite")
+        copyFileSync(path, mixedDuplicateMetadataPath)
+        yield* withDatabase(mixedDuplicateMetadataPath, Orchestrator)
+        const mixedDuplicateMetadata = new DatabaseSync(mixedDuplicateMetadataPath)
+        mixedDuplicateMetadata.exec(`
+          ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
+          CREATE TABLE orchestrator_dispatch_metadata (
+            dispatch_request_id TEXT NOT NULL, route TEXT NOT NULL, work_link TEXT
+          );
+          INSERT INTO orchestrator_dispatch_metadata
+            SELECT * FROM orchestrator_dispatch_metadata_unique;
+          INSERT INTO orchestrator_dispatch_metadata
+            SELECT dispatch_request_id, route, NULL FROM orchestrator_dispatch_metadata_unique;
+          DROP TABLE orchestrator_dispatch_metadata_unique;
+        `)
+        mixedDuplicateMetadata.close()
+        expect(yield* Effect.result(withDatabase(mixedDuplicateMetadataPath, Orchestrator))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-decision" },
+            operation: "initialize.work"
+          }
+        })
+        const mixedDuplicateMetadataRolledBack = new DatabaseSync(mixedDuplicateMetadataPath)
+        expect(
+          mixedDuplicateMetadataRolledBack.prepare(
+            "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
+          ).get()
+        ).toEqual({ count: 2 })
+        mixedDuplicateMetadataRolledBack.close()
 
         const v2OnlyPartialSchemaPath = join(root, "v2-only-partial-coordinator-schema.sqlite")
         copyFileSync(path, v2OnlyPartialSchemaPath)

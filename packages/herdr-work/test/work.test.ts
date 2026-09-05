@@ -3089,6 +3089,22 @@ database.close()`,
       )
       database.close()
 
+      const standalonePath = join(directory, "standalone-v1.sqlite")
+      copyFileSync(path, standalonePath)
+      const standalone = new DatabaseSync(standalonePath)
+      standalone.exec(`
+        DROP TABLE orchestrator_dispatch_metadata;
+        DROP TABLE orchestrator_events;
+        DROP TABLE orchestrator_dispatches;
+      `)
+      standalone.close()
+      const standaloneOpened = yield* openScopedStore(standalonePath)
+      const standaloneService = yield* makeWorkService(standaloneOpened.store)
+      expect(yield* standaloneService.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
+        value: { expectedRevision: 1, version: "herdr.work.decision.v2" }
+      })
+      standaloneOpened.close()
+
       const rewoundLanePath = join(directory, "rewound-v1-lane.sqlite")
       copyFileSync(path, rewoundLanePath)
       const rewoundLane = new DatabaseSync(rewoundLanePath)
@@ -3160,6 +3176,36 @@ database.close()`,
         value: { expectedRevision: 1, version: "herdr.work.decision.v2" }
       })
       runningOpened.close()
+
+      const mixedDuplicateMetadataPath = join(directory, "mixed-duplicate-current-metadata.sqlite")
+      copyFileSync(runningLifecyclePath, mixedDuplicateMetadataPath)
+      const mixedDuplicateMetadata = new DatabaseSync(mixedDuplicateMetadataPath)
+      mixedDuplicateMetadata.exec(`
+        ALTER TABLE orchestrator_dispatch_metadata RENAME TO orchestrator_dispatch_metadata_unique;
+        CREATE TABLE orchestrator_dispatch_metadata (
+          dispatch_request_id TEXT NOT NULL, route TEXT NOT NULL, work_link TEXT
+        );
+        INSERT INTO orchestrator_dispatch_metadata
+          SELECT * FROM orchestrator_dispatch_metadata_unique;
+        INSERT INTO orchestrator_dispatch_metadata
+          SELECT dispatch_request_id, route, NULL FROM orchestrator_dispatch_metadata_unique;
+        DROP TABLE orchestrator_dispatch_metadata_unique;
+      `)
+      mixedDuplicateMetadata.close()
+      expect(yield* safelyOpenResult(mixedDuplicateMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-decision" },
+          operation: "open.database"
+        }
+      })
+      const mixedDuplicateMetadataRolledBack = new DatabaseSync(mixedDuplicateMetadataPath)
+      expect(
+        mixedDuplicateMetadataRolledBack.prepare(
+          "SELECT COUNT(*) AS count FROM orchestrator_dispatch_metadata"
+        ).get()
+      ).toEqual({ count: 2 })
+      mixedDuplicateMetadataRolledBack.close()
 
       const v2OnlyPartialSchemaPath = join(directory, "v2-only-partial-coordinator-schema.sqlite")
       copyFileSync(runningLifecyclePath, v2OnlyPartialSchemaPath)

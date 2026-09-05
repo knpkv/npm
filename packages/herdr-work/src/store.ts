@@ -419,8 +419,12 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           `SELECT dispatch_request_id AS dispatchRequestId,
              CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
                THEN json_extract(work_link, '$.handoff.id') END AS handoffId
-           FROM orchestrator_dispatch_metadata
-           WHERE work_link IS NOT NULL
+           FROM orchestrator_dispatch_metadata AS metadata
+           WHERE EXISTS (
+             SELECT 1 FROM orchestrator_dispatch_metadata AS linked
+             WHERE linked.dispatch_request_id = metadata.dispatch_request_id
+               AND linked.work_link IS NOT NULL
+           )
            LIMIT ${workDecisionMaxRecords + 1}`
         ).all()
       )
@@ -796,10 +800,11 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           )
           : []
         if (
-          linkedMetadata.length !== handoffDispatches.length ||
-          linkedMetadata.some((metadata) =>
-            !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
-          )
+          tables.includes("orchestrator_dispatch_metadata") &&
+          (linkedMetadata.length !== handoffDispatches.length ||
+            linkedMetadata.some((metadata) =>
+              !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
+            ))
         ) {
           throw new WorkStoreError({
             cause: { handoffDispatches, linkedMetadata, row },

@@ -911,8 +911,12 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           SELECT dispatch_request_id AS "dispatchRequestId",
             CASE WHEN json_valid(work_link) AND json_type(work_link, '$.handoff.id') = 'text'
               THEN json_extract(work_link, '$.handoff.id') END AS "handoffId"
-          FROM orchestrator_dispatch_metadata
-          WHERE work_link IS NOT NULL
+          FROM orchestrator_dispatch_metadata AS metadata
+          WHERE EXISTS (
+            SELECT 1 FROM orchestrator_dispatch_metadata AS linked
+            WHERE linked.dispatch_request_id = metadata.dispatch_request_id
+              AND linked.work_link IS NOT NULL
+          )
           LIMIT ${workDecisionMaxRecords + 1}
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MetadataHandoffIdentityRow))),
