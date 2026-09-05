@@ -1945,14 +1945,31 @@ database.close()`,
           )
         multipleDispatches.close()
 
-        const multipleReplay = yield* withDatabase(
-          multipleDispatchPath,
-          Effect.gen(function*() {
-            const orchestrator = yield* Orchestrator
-            return yield* orchestrator.workerStarted(activation.binding.request)
-          })
+        expect(yield* Effect.result(withDatabase(multipleDispatchPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.dispatch-cardinality" },
+            operation: "initialize.work"
+          }
+        })
+        const multipleRolledBack = new DatabaseSync(multipleDispatchPath)
+        const retainedMultipleDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          multipleRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
         )
-        expect(multipleReplay).toEqual(activation)
+        const retainedMultipleDispatches = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+          record: Schema.String
+        })))(
+          multipleRolledBack.prepare(
+            "SELECT record FROM work_dispatch_handoffs WHERE handoff_id = ? ORDER BY dispatch_request_id"
+          ).all(previousHandoff.id)
+        )
+        multipleRolledBack.close()
+        expect(JSON.parse(retainedMultipleDecision.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+        expect(retainedMultipleDispatches).toHaveLength(2)
+        for (const retained of retainedMultipleDispatches) {
+          expect(JSON.parse(retained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+        }
 
         const upgradedHandoff = {
           ...previousHandoff,

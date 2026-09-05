@@ -406,6 +406,12 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           database.prepare("SELECT revision FROM work_lane_claims WHERE lane_id = ?").get(row.laneId)
         )
         const handoffDispatches = dispatches.filter(({ handoffId }) => handoffId === row.handoffId)
+        if (handoffDispatches.length > 1) {
+          throw new WorkStoreError({
+            cause: { handoffDispatches, row },
+            operation: "open.migrate.dispatch-cardinality"
+          })
+        }
         const linkedMetadata = tables.includes("orchestrator_dispatch_metadata")
           ? Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
             database.prepare(

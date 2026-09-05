@@ -2779,15 +2779,31 @@ database.close()`,
       )
       multipleDispatches.close()
 
-      const multipleOpened = yield* openScopedStore(multipleDispatchPath)
-      const multipleService = yield* makeWorkService(multipleOpened.store)
-      expect(yield* multipleService.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
-        value: {
-          expectedRevision: binding.request.expectedRevision,
-          version: "herdr.work.decision.v2"
+      expect(yield* safelyOpenResult(multipleDispatchPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.dispatch-cardinality" },
+          operation: "open.database"
         }
       })
-      multipleOpened.close()
+      const multipleRolledBack = new DatabaseSync(multipleDispatchPath)
+      const retainedMultipleDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        multipleRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      const retainedMultipleDispatches = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({
+        record: Schema.String
+      })))(
+        multipleRolledBack.prepare(
+          "SELECT record FROM work_dispatch_handoffs WHERE handoff_id = ? ORDER BY dispatch_request_id"
+        ).all(previousHandoff.id)
+      )
+      multipleRolledBack.close()
+      expect(JSON.parse(retainedMultipleDecision.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      expect(retainedMultipleDispatches).toHaveLength(2)
+      for (const retained of retainedMultipleDispatches) {
+        expect(JSON.parse(retained.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+      }
 
       const opened = yield* openScopedStore(path)
       const service = yield* makeWorkService(opened.store)

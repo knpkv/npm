@@ -607,6 +607,12 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             return yield* new WorkStoreError({ cause: row, operation: "sql-work.initialize.handoff-lane" })
           }
           const handoffDispatches = legacyDispatches.filter(({ handoffId }) => handoffId === row.handoffId)
+          if (handoffDispatches.length > 1) {
+            return yield* new WorkStoreError({
+              cause: { handoffDispatches, row },
+              operation: "sql-work.initialize.dispatch-cardinality"
+            })
+          }
           const linkedMetadata = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
             ? yield* sql`
               SELECT dispatch_request_id AS "dispatchRequestId", work_link AS "workLink"
