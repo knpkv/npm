@@ -20,7 +20,8 @@ import {
   agentBindingReadbackError,
   AgentBindingRow,
   decodeAgentBindingGoalEvent,
-  decodeAgentBindingRow
+  decodeAgentBindingRow,
+  laneOperationReadbackError
 } from "./internal/agent-binding-readback.js"
 import {
   CoordinatorCommandRow,
@@ -143,6 +144,12 @@ const MetadataHandoffIdentityRow = Schema.Struct({
 const RoutedMetadataCardinalityRow = Schema.Struct({
   dispatchRequestId: Schema.String,
   metadataCount: Schema.Number
+})
+const CoordinatorMetadataRouteRow = Schema.Struct({
+  dispatchRequestId: Schema.String,
+  isRouted: Schema.NullOr(Schema.Literals([0, 1])),
+  route: Schema.NullOr(Schema.String),
+  rowId: Schema.String
 })
 const PreviousMetadataWorkLink = Schema.Struct({
   handoff: PreviousWorkDecisionHandoff,
@@ -730,6 +737,24 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           try: () => Schema.decodeUnknownSync(WorkLaneClaimed)(JSON.parse(currentLaneRow.record)),
           catch: storeError(`${operation}.lane-revision`)
         })
+        const currentLaneSchema = laneColumns.some(({ name }) => name === "goal_id")
+        const currentOperationRows = currentLaneSchema
+          ? yield* sql`
+            SELECT operation_id AS "operationId", lane_id AS "laneId", goal_id AS "goalId",
+              phase, revision, record
+            FROM work_lane_operations WHERE operation_id = ${currentLane.operationId} LIMIT 2
+          `.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingLaneOperationRow))),
+            Effect.mapError(storeError(`${operation}.lane-revision`))
+          )
+          : []
+        const currentOperationError = currentLaneSchema
+          ? laneOperationReadbackError(
+            currentLane,
+            currentOperationRows.length === 1 ? currentOperationRows[0] : undefined,
+            `${operation}.lane-revision`
+          )
+          : undefined
         if (
           currentLane.laneId !== currentLaneRow.laneId ||
           currentLane.goalId !== currentLaneRow.goalId ||
@@ -737,10 +762,14 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           currentLane.phase !== currentLaneRow.phase ||
           currentLane.revision !== currentLaneRow.revision ||
           currentLane.laneId !== decoded.binding.lane.laneId ||
-          currentLane.revision < decoded.binding.lane.revision
+          currentLane.goalId !== decoded.binding.lane.goalId ||
+          currentLane.revision < decoded.binding.lane.revision ||
+          (currentLaneSchema && currentLane.revision === decoded.binding.lane.revision &&
+            !Equal.equals(currentLane, decoded.binding.lane)) ||
+          currentOperationError !== undefined
         ) {
           return yield* new WorkStoreError({
-            cause: { binding: decoded.binding, currentLane, currentLaneRow },
+            cause: { binding: decoded.binding, currentLane, currentLaneRow, currentOperationError },
             operation: `${operation}.lane-revision`
           })
         }
@@ -1350,6 +1379,59 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         metadataTablePresent &&
         coordinatorDispatchColumns.some(({ name }) => name === "is_routed")
       ) {
+        const pageSize = 512
+        let cursor: string | null = null
+        while (true) {
+          const rows: ReadonlyArray<typeof CoordinatorMetadataRouteRow.Type> = yield* (cursor === null
+            ? sql`
+              SELECT CAST(metadata.rowid AS TEXT) AS "rowId",
+                metadata.dispatch_request_id AS "dispatchRequestId",
+                dispatch.is_routed AS "isRouted", metadata.route
+              FROM orchestrator_dispatch_metadata AS metadata
+              JOIN orchestrator_dispatches AS dispatch
+                ON dispatch.dispatch_request_id = metadata.dispatch_request_id
+              ORDER BY metadata.rowid ASC LIMIT ${pageSize}
+            `
+            : sql`
+              SELECT CAST(metadata.rowid AS TEXT) AS "rowId",
+                metadata.dispatch_request_id AS "dispatchRequestId",
+                dispatch.is_routed AS "isRouted", metadata.route
+              FROM orchestrator_dispatch_metadata AS metadata
+              JOIN orchestrator_dispatches AS dispatch
+                ON dispatch.dispatch_request_id = metadata.dispatch_request_id
+              WHERE metadata.rowid > CAST(${cursor} AS INTEGER)
+              ORDER BY metadata.rowid ASC LIMIT ${pageSize}
+            `).pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(CoordinatorMetadataRouteRow))),
+              Effect.mapError(storeError("sql-work.initialize.metadata-route"))
+            )
+          yield* Effect.forEach(rows, (row) =>
+            Effect.gen(function*() {
+              if (row.route === null || row.isRouted === null) {
+                return yield* new WorkStoreError({
+                  cause: row,
+                  operation: "sql-work.initialize.metadata-route"
+                })
+              }
+              const route = row.route
+              const isRouted = row.isRouted
+              yield* Effect.try({
+                try: () =>
+                  coordinatorRouteRequiresWorkLink(
+                    route,
+                    { _tag: "routed_discriminator", isRouted },
+                    "sql-work.initialize.metadata-route"
+                  ),
+                catch: (cause) =>
+                  Schema.is(WorkStoreError)(cause)
+                    ? cause
+                    : new WorkStoreError({ cause, operation: "sql-work.initialize.metadata-route" })
+              })
+            }), { discard: true })
+          const last: typeof CoordinatorMetadataRouteRow.Type | undefined = rows.at(-1)
+          if (rows.length < pageSize || last === undefined) break
+          cursor = last.rowId
+        }
         const invalidRoutedMetadataRows = yield* sql`
           SELECT dispatch.dispatch_request_id AS "dispatchRequestId",
             COUNT(metadata.dispatch_request_id) AS "metadataCount"

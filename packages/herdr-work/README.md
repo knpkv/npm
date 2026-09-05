@@ -62,10 +62,13 @@ discriminator. A Sol route also requires a persisted `agent.delegate` command in
 binding. A non-null Sol link must remain in lineage and identify an exact
 terminally failed Luna parent with its own complete lifecycle. Duplicate
 pre-session dispatch replicas fail closed. Current v2 readback also decodes the
-authoritative lane claim and rejects a lane head older than the activated
-binding. Luna metadata must retain a null Work link and does not consume the
-bounded Work-decision scan; malformed or non-null Luna links fail closed. Every
-modern routed dispatch must retain exactly one metadata row. Standalone Work
+authoritative lane claim, requires its goal to remain fixed, requires an exact
+immutable operation-ledger replica, and rejects a lane head older than the
+activated binding; at the binding revision the whole claim must still be exact.
+Luna metadata must retain a null Work link and does not consume the bounded
+Work-decision scan; malformed or non-null Luna links fail closed. Every modern
+dispatch/metadata pair must carry a schema-valid route and the routed
+discriminator, and every modern routed dispatch must retain exactly one metadata row. Standalone Work
 databases with no coordinator tables remain valid; a partial coordinator table set fails before
 either v1 migration or v2 handoff readback. The SQL adapter creates or upgrades
 Work tables in that same fail-closed transaction and ignores unrelated legacy

@@ -32,7 +32,8 @@ import {
   agentBindingReadbackError,
   AgentBindingRow,
   decodeAgentBindingGoalEvent,
-  decodeAgentBindingRow
+  decodeAgentBindingRow,
+  laneOperationReadbackError
 } from "./internal/agent-binding-readback.js"
 import {
   CoordinatorCommandRow,
@@ -171,6 +172,12 @@ const MetadataHandoffIdentityRow = Schema.Struct({
 const RoutedMetadataCardinalityRow = Schema.Struct({
   dispatchRequestId: Schema.String,
   metadataCount: Schema.Number
+})
+const CoordinatorMetadataRouteRow = Schema.Struct({
+  dispatchRequestId: Schema.String,
+  isRouted: Schema.NullOr(Schema.Literals([0, 1])),
+  route: Schema.NullOr(Schema.String),
+  rowId: Schema.String
 })
 const LegacyDecisionRecord = Schema.Struct({
   version: Schema.Literal("herdr.work.decision.v1"),
@@ -416,6 +423,23 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       } catch (cause) {
         throw new WorkStoreError({ cause, operation: `${operation}.lane-revision` })
       }
+      const currentLaneSchema = laneColumns.includes("goal_id")
+      const currentOperationRows = currentLaneSchema
+        ? Schema.decodeUnknownSync(Schema.Array(AgentBindingLaneOperationRow))(
+          database.prepare(
+            `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
+               phase, revision, record
+             FROM work_lane_operations WHERE operation_id = ? LIMIT 2`
+          ).all(currentLane.operationId)
+        )
+        : []
+      const currentOperationError = currentLaneSchema
+        ? laneOperationReadbackError(
+          currentLane,
+          currentOperationRows.length === 1 ? currentOperationRows[0] : undefined,
+          `${operation}.lane-revision`
+        )
+        : undefined
       if (
         currentLane.laneId !== currentLaneRow.laneId ||
         currentLane.goalId !== currentLaneRow.goalId ||
@@ -423,10 +447,14 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         currentLane.phase !== currentLaneRow.phase ||
         currentLane.revision !== currentLaneRow.revision ||
         currentLane.laneId !== decoded.binding.lane.laneId ||
-        currentLane.revision < decoded.binding.lane.revision
+        currentLane.goalId !== decoded.binding.lane.goalId ||
+        currentLane.revision < decoded.binding.lane.revision ||
+        (currentLaneSchema && currentLane.revision === decoded.binding.lane.revision &&
+          !Equal.equals(currentLane, decoded.binding.lane)) ||
+        currentOperationError !== undefined
       ) {
         throw new WorkStoreError({
-          cause: { binding: decoded.binding, currentLane, currentLaneRow },
+          cause: { binding: decoded.binding, currentLane, currentLaneRow, currentOperationError },
           operation: `${operation}.lane-revision`
         })
       }
@@ -990,6 +1018,49 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         }
       }
       if (tables.includes("orchestrator_dispatch_metadata") && coordinatorDispatchColumns.includes("is_routed")) {
+        const pageSize = 512
+        let cursor: string | null = null
+        while (true) {
+          const input = cursor === null
+            ? database.prepare(
+              `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
+                 metadata.dispatch_request_id AS dispatchRequestId,
+                 dispatch.is_routed AS isRouted, metadata.route
+               FROM orchestrator_dispatch_metadata AS metadata
+               JOIN orchestrator_dispatches AS dispatch
+                 ON dispatch.dispatch_request_id = metadata.dispatch_request_id
+               ORDER BY metadata.rowid ASC LIMIT ?`
+            ).all(pageSize)
+            : database.prepare(
+              `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
+                 metadata.dispatch_request_id AS dispatchRequestId,
+                 dispatch.is_routed AS isRouted, metadata.route
+               FROM orchestrator_dispatch_metadata AS metadata
+               JOIN orchestrator_dispatches AS dispatch
+                 ON dispatch.dispatch_request_id = metadata.dispatch_request_id
+               WHERE metadata.rowid > CAST(? AS INTEGER)
+               ORDER BY metadata.rowid ASC LIMIT ?`
+            ).all(cursor, pageSize)
+          const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorMetadataRouteRow))(input)
+          for (const row of rows) {
+            try {
+              if (row.route === null || row.isRouted === null) {
+                throw new WorkStoreError({ cause: row, operation: "open.migrate.metadata-route" })
+              }
+              coordinatorRouteRequiresWorkLink(
+                row.route,
+                { _tag: "routed_discriminator", isRouted: row.isRouted },
+                "open.migrate.metadata-route"
+              )
+            } catch (cause) {
+              if (Schema.is(WorkStoreError)(cause)) throw cause
+              throw new WorkStoreError({ cause, operation: "open.migrate.metadata-route" })
+            }
+          }
+          const last = rows.at(-1)
+          if (rows.length < pageSize || last === undefined) break
+          cursor = last.rowId
+        }
         const invalidRoutedMetadata = Schema.decodeUnknownSync(Schema.Array(RoutedMetadataCardinalityRow))(
           database.prepare(
             `SELECT dispatch.dispatch_request_id AS dispatchRequestId,

@@ -83,6 +83,30 @@ export const decodeAgentBindingGoalEvent = (
   }
 }
 
+/** Validates a lane claim against its immutable operation-ledger replica. */
+export const laneOperationReadbackError = (
+  lane: WorkLaneClaimed,
+  row: typeof AgentBindingLaneOperationRow.Type | undefined,
+  operation: string
+): WorkStoreError | undefined => {
+  if (row === undefined) {
+    return new WorkStoreError({ cause: { lane, laneOperation: "missing" }, operation })
+  }
+  try {
+    const replica = Schema.decodeUnknownSync(WorkLaneClaimed)(JSON.parse(row.record))
+    return row.operationId === replica.operationId &&
+        row.laneId === replica.laneId &&
+        row.goalId === replica.goalId &&
+        row.phase === replica.phase &&
+        row.revision === replica.revision &&
+        Equal.equals(replica, lane)
+      ? undefined
+      : new WorkStoreError({ cause: { lane, replica, row }, operation })
+  } catch (cause) {
+    return new WorkStoreError({ cause, operation })
+  }
+}
+
 /** Validates the two immutable ledger rows committed beside an agent binding. */
 export const agentBindingReadbackError = (
   binding: WorkAgentBindingType,

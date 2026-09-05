@@ -291,14 +291,21 @@ const persistMigrationBindingCompanions = (
       binding.checkpoint.occurredAt,
       JSON.stringify(binding.checkpoint)
     )
+  persistMigrationLaneOperation(database, binding.lane)
+}
+
+const persistMigrationLaneOperation = (
+  database: DatabaseSync,
+  lane: WorkLaneClaimed
+): void => {
   database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
     .run(
-      binding.lane.operationId,
-      binding.lane.laneId,
-      binding.lane.goalId,
-      binding.lane.phase,
-      binding.lane.revision,
-      JSON.stringify(binding.lane)
+      lane.operationId,
+      lane.laneId,
+      lane.goalId,
+      lane.phase,
+      lane.revision,
+      JSON.stringify(lane)
     )
 }
 
@@ -3271,17 +3278,66 @@ database.close()`,
       const advancedCurrentLanePath = join(directory, "advanced-current-v2-lane.sqlite")
       copyFileSync(runningLifecyclePath, advancedCurrentLanePath)
       const advancedCurrentLane = new DatabaseSync(advancedCurrentLanePath)
-      const advancedCurrentClaim = { ...lane, expectedRevision: lane.revision, revision: lane.revision + 1 }
+      const advancedCurrentClaim = {
+        ...lane,
+        expectedRevision: lane.revision,
+        operationId: "operation:advanced-current-v2",
+        revision: lane.revision + 1
+      }
       advancedCurrentLane.prepare(
-        "UPDATE work_lane_claims SET revision = ?, record = ? WHERE lane_id = ?"
+        "UPDATE work_lane_claims SET operation_id = ?, revision = ?, record = ? WHERE lane_id = ?"
       ).run(
+        advancedCurrentClaim.operationId,
         advancedCurrentClaim.revision,
         JSON.stringify(advancedCurrentClaim),
         advancedCurrentClaim.laneId
       )
+      persistMigrationLaneOperation(advancedCurrentLane, advancedCurrentClaim)
       advancedCurrentLane.close()
       const advancedCurrentOpened = yield* openScopedStore(advancedCurrentLanePath)
       advancedCurrentOpened.close()
+
+      for (
+        const { claim: invalidClaim, name } of [
+          {
+            claim: {
+              ...lane,
+              goalId: "goal:foreign-current-v2",
+              operationId: "operation:foreign-goal-current-v2"
+            },
+            name: "foreign-goal"
+          },
+          {
+            claim: { ...lane, operationId: "operation:forged-equal-current-v2" },
+            name: "equal-revision-operation"
+          }
+        ]
+      ) {
+        const invalidCurrentLanePath = join(directory, `${name}-current-v2-lane.sqlite`)
+        copyFileSync(runningLifecyclePath, invalidCurrentLanePath)
+        const invalidCurrentLane = new DatabaseSync(invalidCurrentLanePath)
+        invalidCurrentLane.prepare(
+          `UPDATE work_lane_claims
+           SET goal_id = ?, operation_id = ?, record = ? WHERE lane_id = ?`
+        ).run(
+          invalidClaim.goalId,
+          invalidClaim.operationId,
+          JSON.stringify(invalidClaim),
+          invalidClaim.laneId
+        )
+        persistMigrationLaneOperation(invalidCurrentLane, invalidClaim)
+        invalidCurrentLane.close()
+        expect(yield* safelyOpenResult(invalidCurrentLanePath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: {
+              _tag: "WorkStoreError",
+              operation: "open.migrate.current-agent-binding.lane-revision"
+            },
+            operation: "open.database"
+          }
+        })
+      }
 
       const mixedDuplicateMetadataPath = join(directory, "mixed-duplicate-current-metadata.sqlite")
       copyFileSync(runningLifecyclePath, mixedDuplicateMetadataPath)
@@ -3343,6 +3399,36 @@ database.close()`,
       lunaNullWorkLink.close()
       const lunaNullOpened = yield* openScopedStore(lunaNullWorkLinkPath)
       lunaNullOpened.close()
+
+      for (
+        const { name, route, routed } of [
+          { name: "malformed-route", route: "{", routed: 1 },
+          {
+            name: "unsupported-route",
+            route: JSON.stringify({ ...migrationLunaRoute, model: "gpt-unknown" }),
+            routed: 1
+          },
+          { name: "unrouted-luna", route: JSON.stringify(migrationLunaRoute), routed: 0 }
+        ]
+      ) {
+        const invalidRoutePath = join(directory, `${name}.sqlite`)
+        copyFileSync(lunaNullWorkLinkPath, invalidRoutePath)
+        const invalidRoute = new DatabaseSync(invalidRoutePath)
+        invalidRoute.prepare(
+          "UPDATE orchestrator_dispatch_metadata SET route = ? WHERE dispatch_request_id = ?"
+        ).run(route, "dispatch:luna-null-work-link")
+        invalidRoute.prepare(
+          "UPDATE orchestrator_dispatches SET is_routed = ? WHERE dispatch_request_id = ?"
+        ).run(routed, "dispatch:luna-null-work-link")
+        invalidRoute.close()
+        expect(yield* safelyOpenResult(invalidRoutePath)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-route" },
+            operation: "open.database"
+          }
+        })
+      }
 
       for (
         const { name, workLink } of [
