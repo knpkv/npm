@@ -25,6 +25,9 @@ import {
 import {
   CoordinatorLifecycleDispatchRow,
   CoordinatorLifecycleEventRow,
+  CoordinatorRouteDiscriminatorRow,
+  type CoordinatorRouteStorageAuthority,
+  requireCoordinatorFailedLunaAuthority,
   requireCoordinatorLifecycleAuthority,
   requireCoordinatorRouteAuthority
 } from "./internal/coordinator-authority.js"
@@ -212,11 +215,6 @@ const decodeLegacyDecision = (
           })
         }
         const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
-        requireCoordinatorRouteAuthority(
-          metadata.route,
-          workLink.lineage,
-          "sql-work.migrate.legacy-metadata-authority"
-        )
         if (
           !legacyDecisionEquivalent(workLink.handoff, legacy) ||
           !workDispatchLineageEquivalent(workLink.lineage, dispatchIds)
@@ -458,25 +456,38 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SqliteTableRow))),
         Effect.mapError(storeError("sql-work.initialize.tables"))
       )
-      const requireLifecycleAuthority = Effect.fn("SqlWork.requireLifecycleAuthority")(function*(
-        dispatchRequestId: string,
-        expectedRunningAt: number,
+      const coordinatorTablesPresent = {
+        dispatch: tables.some(({ name }) => name === "orchestrator_dispatches"),
+        event: tables.some(({ name }) => name === "orchestrator_events"),
+        metadata: tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
+      }
+      const coordinatorDispatchColumns = coordinatorTablesPresent.dispatch
+        ? yield* sql`PRAGMA table_info(orchestrator_dispatches)`.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SqliteColumnRow))),
+          Effect.mapError(storeError("sql-work.initialize.coordinator-dispatch-columns"))
+        )
+        : []
+      const requireCoordinatorSchema = Effect.fn("SqlWork.requireCoordinatorSchema")(function*(
         operation: string
       ) {
-        const dispatchTablePresent = tables.some(({ name }) => name === "orchestrator_dispatches")
-        const eventTablePresent = tables.some(({ name }) => name === "orchestrator_events")
-        if (dispatchTablePresent !== eventTablePresent) {
+        const present = Object.values(coordinatorTablesPresent).filter(Boolean).length
+        if (present !== 0 && present !== 3) {
           return yield* new WorkStoreError({
-            cause: { dispatchTablePresent, eventTablePresent },
+            cause: coordinatorTablesPresent,
             operation: `${operation}.schema`
           })
         }
-        if (!dispatchTablePresent) return
+        return present === 3
+      })
+      const readCoordinatorLifecycle = Effect.fn("SqlWork.readCoordinatorLifecycle")(function*(
+        dispatchRequestId: string,
+        operation: string
+      ) {
         const dispatchRows = yield* sql`
           SELECT dispatch_request_id AS "dispatchRequestId",
             activity_idempotency_key AS "activityIdempotencyKey", command,
             accepted_at AS "acceptedAt", status
-          FROM orchestrator_dispatches WHERE dispatch_request_id = ${dispatchRequestId}
+          FROM orchestrator_dispatches WHERE dispatch_request_id = ${dispatchRequestId} LIMIT 2
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(CoordinatorLifecycleDispatchRow))),
           Effect.mapError(storeError(`${operation}.read-dispatch`))
@@ -491,9 +502,92 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(CoordinatorLifecycleEventRow))),
           Effect.mapError(storeError(`${operation}.read-events`))
         )
+        return { dispatchRows, eventRows }
+      })
+      const routeStorageAuthority = Effect.fn("SqlWork.routeStorageAuthority")(function*(
+        dispatchRequestId: string,
+        operation: string
+      ) {
+        if (!coordinatorDispatchColumns.some(({ name }) => name === "is_routed")) {
+          return {
+            _tag: "legacy_without_routed_discriminator"
+          } satisfies CoordinatorRouteStorageAuthority
+        }
+        const rows = yield* sql`
+          SELECT is_routed AS "isRouted" FROM orchestrator_dispatches
+          WHERE dispatch_request_id = ${dispatchRequestId} LIMIT 2
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(CoordinatorRouteDiscriminatorRow))),
+          Effect.mapError(storeError(operation))
+        )
+        const row = rows[0]
+        if (rows.length !== 1 || row === undefined) {
+          return yield* new WorkStoreError({ cause: { dispatchRequestId, rows }, operation })
+        }
+        return {
+          _tag: "routed_discriminator",
+          isRouted: row.isRouted
+        } satisfies CoordinatorRouteStorageAuthority
+      })
+      const requireLinkedParentAuthority = Effect.fn("SqlWork.requireLinkedParentAuthority")(function*(
+        linkedRequestId: string | null,
+        operation: string
+      ) {
+        if (linkedRequestId === null) return
+        const metadataRows = yield* sql`
+          SELECT dispatch_request_id AS "dispatchRequestId", route, work_link AS "workLink"
+          FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ${linkedRequestId} LIMIT 2
+        `.pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(MetadataWorkLinkRow))),
+          Effect.mapError(storeError(operation))
+        )
+        const metadata = metadataRows[0]
+        if (metadataRows.length !== 1 || metadata === undefined || metadata.workLink !== null) {
+          return yield* new WorkStoreError({ cause: { linkedRequestId, metadataRows }, operation })
+        }
+        const lifecycle = yield* readCoordinatorLifecycle(linkedRequestId, operation)
+        const storageAuthority = yield* routeStorageAuthority(linkedRequestId, operation)
         yield* Effect.try({
-          try: () => requireCoordinatorLifecycleAuthority(dispatchRows, eventRows, expectedRunningAt, operation),
-          catch: storeError(operation)
+          try: () =>
+            requireCoordinatorFailedLunaAuthority(
+              lifecycle.dispatchRows,
+              lifecycle.eventRows,
+              metadata.route,
+              storageAuthority,
+              operation
+            ),
+          catch: (cause) => Schema.is(WorkStoreError)(cause) ? cause : new WorkStoreError({ cause, operation })
+        })
+      })
+      const requireMetadataAuthority = Effect.fn("SqlWork.requireMetadataAuthority")(function*(
+        dispatchRequestId: string,
+        routeText: string,
+        lineage: ReadonlyArray<string>,
+        operation: string
+      ) {
+        const storageAuthority = yield* routeStorageAuthority(dispatchRequestId, operation)
+        const route = yield* Effect.try({
+          try: () => requireCoordinatorRouteAuthority(routeText, lineage, storageAuthority, operation),
+          catch: (cause) => Schema.is(WorkStoreError)(cause) ? cause : new WorkStoreError({ cause, operation })
+        })
+        yield* requireLinkedParentAuthority(route.linkedRequestId, `${operation}.parent`)
+      })
+      const requireLifecycleAuthority = Effect.fn("SqlWork.requireLifecycleAuthority")(function*(
+        dispatchRequestId: string,
+        expectedRunningAt: number,
+        operation: string
+      ) {
+        if (!(yield* requireCoordinatorSchema(operation))) return
+        const lifecycle = yield* readCoordinatorLifecycle(dispatchRequestId, operation)
+        yield* Effect.try({
+          try: () =>
+            requireCoordinatorLifecycleAuthority(
+              lifecycle.dispatchRows,
+              lifecycle.eventRows,
+              expectedRunningAt,
+              operation
+            ),
+          catch: (cause) => Schema.is(WorkStoreError)(cause) ? cause : new WorkStoreError({ cause, operation })
         })
       })
       const hasLegacyDecisionTable = !decisionColumns.some(({ name }) => name === "session_id")
@@ -613,11 +707,39 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             })
           )
         }
-        return requireLifecycleAuthority(
-          dispatch.dispatchRequestId,
-          binding.checkpoint.occurredAt,
-          "sql-work.initialize.legacy-agent-binding.lifecycle"
-        )
+        return Effect.gen(function*() {
+          yield* requireLifecycleAuthority(
+            dispatch.dispatchRequestId,
+            binding.checkpoint.occurredAt,
+            "sql-work.initialize.legacy-agent-binding.lifecycle"
+          )
+          if (!metadataTablePresent) return
+          const matchingMetadata = legacyMetadata.filter(({ dispatchRequestId }) =>
+            dispatchRequestId === dispatch.dispatchRequestId
+          )
+          const metadata = matchingMetadata[0]
+          const encodedWorkLink = metadata?.workLink
+          const encodedRoute = metadata?.route
+          if (
+            matchingMetadata.length !== 1 || encodedWorkLink === null || encodedWorkLink === undefined ||
+            encodedRoute === undefined
+          ) {
+            return yield* new WorkStoreError({
+              cause: { dispatch, matchingMetadata },
+              operation: "sql-work.migrate.legacy-metadata-authority"
+            })
+          }
+          const workLink = yield* Effect.try({
+            try: () => Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(encodedWorkLink)),
+            catch: storeError("sql-work.migrate.legacy-metadata-authority")
+          })
+          yield* requireMetadataAuthority(
+            dispatch.dispatchRequestId,
+            encodedRoute,
+            workLink.lineage,
+            "sql-work.migrate.legacy-metadata-authority"
+          )
+        })
       }, { discard: true })
       if (
         legacyLanes.length > 0 || legacyDecisions.length > 0 ||
@@ -829,15 +951,12 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
                   try: () => Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(encodedWorkLink)),
                   catch: storeError("sql-work.initialize.decode-metadata-authority")
                 })
-                yield* Effect.try({
-                  try: () =>
-                    requireCoordinatorRouteAuthority(
-                      encodedRoute,
-                      workLink.lineage,
-                      "sql-work.initialize.metadata-authority"
-                    ),
-                  catch: storeError("sql-work.initialize.metadata-authority")
-                })
+                yield* requireMetadataAuthority(
+                  dispatch.dispatchRequestId,
+                  encodedRoute,
+                  workLink.lineage,
+                  "sql-work.initialize.metadata-authority"
+                )
                 if (
                   !previousDecisionHandoffEquivalent(workLink.handoff, previous.value) ||
                   !workDispatchLineageEquivalent(workLink.lineage, decoded.lineage)

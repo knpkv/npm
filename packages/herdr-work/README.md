@@ -55,9 +55,12 @@ coordinator metadata, malformed records that claim the v1 contract, and contradi
 `WorkStoreError`; no context or revision authority is invented.
 Coordinator-backed migration additionally requires a complete bounded lifecycle,
 the exact running checkpoint, status/tail agreement, a matching handoff goal, and
-a schema-valid Sol route whose linked request remains in lineage. Duplicate
+a schema-valid Sol route whose metadata agrees with the persisted routed
+discriminator. A non-null Sol link must remain in lineage and identify an exact
+terminally failed Luna parent with its own complete lifecycle. Duplicate
 pre-session dispatch replicas fail closed. Standalone Work databases with neither
-coordinator lifecycle table remain valid.
+coordinator lifecycle table remain valid; a partial coordinator table set does
+not.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
 unbounded transcript. Replay aliases retain fixed-size canonical SHA-256

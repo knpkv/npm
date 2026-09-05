@@ -37,6 +37,9 @@ import {
 import {
   CoordinatorLifecycleDispatchRow,
   CoordinatorLifecycleEventRow,
+  CoordinatorRouteDiscriminatorRow,
+  type CoordinatorRouteStorageAuthority,
+  requireCoordinatorFailedLunaAuthority,
   requireCoordinatorLifecycleAuthority,
   requireCoordinatorRouteAuthority
 } from "./internal/coordinator-authority.js"
@@ -193,6 +196,9 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
     const tables = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
       database.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all()
     ).map(({ name }) => name)
+    const coordinatorDispatchColumns = tables.includes("orchestrator_dispatches")
+      ? columns("orchestrator_dispatches")
+      : []
     const requireBindingCompanions = (
       binding: WorkAgentBindingType,
       operation: string
@@ -220,29 +226,28 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
       )
       if (error !== undefined) throw error
     }
-    const requireLifecycleAuthority = (
-      dispatchRequestId: string,
-      expectedRunningAt: number,
-      operation: string
-    ): void => {
-      const dispatchTablePresent = tables.includes("orchestrator_dispatches")
-      const eventTablePresent = tables.includes("orchestrator_events")
-      if (dispatchTablePresent !== eventTablePresent) {
-        throw new WorkStoreError({
-          cause: { dispatchTablePresent, eventTablePresent },
-          operation: `${operation}.schema`
-        })
+    const coordinatorTablesPresent = {
+      dispatch: tables.includes("orchestrator_dispatches"),
+      event: tables.includes("orchestrator_events"),
+      metadata: tables.includes("orchestrator_dispatch_metadata")
+    }
+    const requireCoordinatorSchema = (operation: string): boolean => {
+      const present = Object.values(coordinatorTablesPresent).filter(Boolean).length
+      if (present !== 0 && present !== 3) {
+        throw new WorkStoreError({ cause: coordinatorTablesPresent, operation: `${operation}.schema` })
       }
-      if (!dispatchTablePresent) return
-      const dispatchRows = Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleDispatchRow))(
+      return present === 3
+    }
+    const readCoordinatorLifecycle = (dispatchRequestId: string) => ({
+      dispatchRows: Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleDispatchRow))(
         database.prepare(
           `SELECT dispatch_request_id AS dispatchRequestId,
            activity_idempotency_key AS activityIdempotencyKey, command,
            accepted_at AS acceptedAt, status
-         FROM orchestrator_dispatches WHERE dispatch_request_id = ?`
+         FROM orchestrator_dispatches WHERE dispatch_request_id = ? LIMIT 2`
         ).all(dispatchRequestId)
-      )
-      const eventRows = Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleEventRow))(
+      ),
+      eventRows: Schema.decodeUnknownSync(Schema.Array(CoordinatorLifecycleEventRow))(
         database.prepare(
           `SELECT dispatch_request_id AS dispatchRequestId, sequence, type,
            activity_idempotency_key AS activityIdempotencyKey,
@@ -251,7 +256,77 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
          ORDER BY sequence ASC LIMIT 5`
         ).all(dispatchRequestId)
       )
-      requireCoordinatorLifecycleAuthority(dispatchRows, eventRows, expectedRunningAt, operation)
+    })
+    const routeStorageAuthority = (
+      dispatchRequestId: string,
+      operation: string
+    ): CoordinatorRouteStorageAuthority => {
+      if (!coordinatorDispatchColumns.includes("is_routed")) {
+        return { _tag: "legacy_without_routed_discriminator" }
+      }
+      const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorRouteDiscriminatorRow))(
+        database.prepare(
+          `SELECT is_routed AS isRouted FROM orchestrator_dispatches
+           WHERE dispatch_request_id = ? LIMIT 2`
+        ).all(dispatchRequestId)
+      )
+      const row = rows[0]
+      if (rows.length !== 1 || row === undefined) {
+        throw new WorkStoreError({ cause: { dispatchRequestId, rows }, operation })
+      }
+      return { _tag: "routed_discriminator", isRouted: row.isRouted }
+    }
+    const requireLinkedParentAuthority = (
+      linkedRequestId: string | null,
+      operation: string
+    ): void => {
+      if (linkedRequestId === null) return
+      const metadataRows = Schema.decodeUnknownSync(Schema.Array(MetadataWorkLinkRow))(
+        database.prepare(
+          `SELECT dispatch_request_id AS dispatchRequestId, route, work_link AS workLink
+           FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ? LIMIT 2`
+        ).all(linkedRequestId)
+      )
+      const metadata = metadataRows[0]
+      if (metadataRows.length !== 1 || metadata === undefined || metadata.workLink !== null) {
+        throw new WorkStoreError({ cause: { linkedRequestId, metadataRows }, operation })
+      }
+      const lifecycle = readCoordinatorLifecycle(linkedRequestId)
+      requireCoordinatorFailedLunaAuthority(
+        lifecycle.dispatchRows,
+        lifecycle.eventRows,
+        metadata.route,
+        routeStorageAuthority(linkedRequestId, operation),
+        operation
+      )
+    }
+    const requireMetadataAuthority = (
+      dispatchRequestId: string,
+      routeText: string,
+      lineage: ReadonlyArray<string>,
+      operation: string
+    ): void => {
+      const route = requireCoordinatorRouteAuthority(
+        routeText,
+        lineage,
+        routeStorageAuthority(dispatchRequestId, operation),
+        operation
+      )
+      requireLinkedParentAuthority(route.linkedRequestId, `${operation}.parent`)
+    }
+    const requireLifecycleAuthority = (
+      dispatchRequestId: string,
+      expectedRunningAt: number,
+      operation: string
+    ): void => {
+      if (!requireCoordinatorSchema(operation)) return
+      const lifecycle = readCoordinatorLifecycle(dispatchRequestId)
+      requireCoordinatorLifecycleAuthority(
+        lifecycle.dispatchRows,
+        lifecycle.eventRows,
+        expectedRunningAt,
+        operation
+      )
     }
     const dispatches = tables.includes("work_dispatch_handoffs")
       ? Schema.decodeUnknownSync(Schema.Array(LegacyDispatchStoredRow))(
@@ -329,7 +404,8 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
             })
           }
           const workLink = Schema.decodeUnknownSync(LegacyMetadataWorkLink)(JSON.parse(metadata.workLink))
-          requireCoordinatorRouteAuthority(
+          requireMetadataAuthority(
+            dispatch.dispatchRequestId,
             metadata.route,
             workLink.lineage,
             "open.migrate.legacy-metadata-authority"
@@ -565,7 +641,8 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
               })
             }
             const workLink = Schema.decodeUnknownSync(PreviousMetadataWorkLink)(JSON.parse(metadata.workLink))
-            requireCoordinatorRouteAuthority(
+            requireMetadataAuthority(
+              dispatch.dispatchRequestId,
               metadata.route,
               workLink.lineage,
               "open.migrate.metadata-authority"

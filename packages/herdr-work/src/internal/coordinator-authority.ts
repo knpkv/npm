@@ -102,19 +102,36 @@ const CoordinatorRoute = Schema.Union([
     linkedRequestId: Schema.NullOr(JobIdentifier)
   })
 ])
+type CoordinatorRoute = typeof CoordinatorRoute.Type
+
+export const CoordinatorRouteDiscriminatorRow = Schema.Struct({
+  isRouted: Schema.Literals([0, 1])
+})
+export type CoordinatorRouteDiscriminatorRow = typeof CoordinatorRouteDiscriminatorRow.Type
+
+export const CoordinatorRouteStorageAuthority = Schema.Union([
+  Schema.TaggedStruct("legacy_without_routed_discriminator", {}),
+  Schema.TaggedStruct("routed_discriminator", {
+    isRouted: Schema.Literals([0, 1])
+  })
+])
+export type CoordinatorRouteStorageAuthority = typeof CoordinatorRouteStorageAuthority.Type
+
+type CoordinatorLifecycleAuthority = {
+  readonly dispatch: CoordinatorLifecycleDispatchRow
+  readonly events: ReadonlyArray<typeof CoordinatorEvent.Type>
+}
 
 const validTransition = (from: Status, to: Status): boolean =>
   (from === "accepted" && to === "queued") ||
   (from === "queued" && (to === "running" || to === "delivery_failed")) ||
   (from === "running" && (to === "settled" || to === "delivery_failed" || to === "task_failed"))
 
-/** Validates the bounded coordinator history that authorizes restoring a persisted Work revision. */
-export const requireCoordinatorLifecycleAuthority = (
+const decodeCoordinatorLifecycleAuthority = (
   dispatchRows: ReadonlyArray<CoordinatorLifecycleDispatchRow>,
   eventRows: ReadonlyArray<CoordinatorLifecycleEventRow>,
-  expectedRunningAt: number,
   operation: string
-): void => {
+): CoordinatorLifecycleAuthority => {
   try {
     const dispatch = dispatchRows[0]
     if (dispatchRows.length !== 1 || dispatch === undefined) {
@@ -131,7 +148,6 @@ export const requireCoordinatorLifecycleAuthority = (
     }
     let previousType: Status = first.type
     let previousOccurredAt = first.occurredAt
-    let runningAtMatches = 0
     for (const [index, event] of events.entries()) {
       if (
         event.dispatchRequestId !== dispatch.dispatchRequestId ||
@@ -142,14 +158,47 @@ export const requireCoordinatorLifecycleAuthority = (
       ) {
         throw new WorkStoreError({ cause: { dispatch, event, index, previousType }, operation })
       }
-      if (event.type === "running" && event.occurredAt === expectedRunningAt) runningAtMatches += 1
       previousType = event.type
       previousOccurredAt = event.occurredAt
     }
     const last = events.at(-1)
-    if (last === undefined || last.type !== dispatch.status || runningAtMatches !== 1) {
-      throw new WorkStoreError({ cause: { dispatch, events, expectedRunningAt }, operation })
+    if (last === undefined || last.type !== dispatch.status) {
+      throw new WorkStoreError({ cause: { dispatch, events }, operation })
     }
+    return { dispatch, events }
+  } catch (cause) {
+    if (Schema.is(WorkStoreError)(cause)) throw cause
+    throw new WorkStoreError({ cause, operation })
+  }
+}
+
+/** Validates the bounded coordinator history that authorizes restoring a persisted Work revision. */
+export const requireCoordinatorLifecycleAuthority = (
+  dispatchRows: ReadonlyArray<CoordinatorLifecycleDispatchRow>,
+  eventRows: ReadonlyArray<CoordinatorLifecycleEventRow>,
+  expectedRunningAt: number,
+  operation: string
+): void => {
+  const authority = decodeCoordinatorLifecycleAuthority(dispatchRows, eventRows, operation)
+  const runningAtMatches =
+    authority.events.filter((event) => event.type === "running" && event.occurredAt === expectedRunningAt).length
+  if (runningAtMatches !== 1) {
+    throw new WorkStoreError({ cause: { ...authority, expectedRunningAt }, operation })
+  }
+}
+
+const decodeCoordinatorRouteAuthority = (
+  routeText: string,
+  storageAuthority: CoordinatorRouteStorageAuthority,
+  operation: string
+): CoordinatorRoute => {
+  try {
+    const authority = Schema.decodeUnknownSync(CoordinatorRouteStorageAuthority)(storageAuthority)
+    const route = Schema.decodeUnknownSync(CoordinatorRoute)(JSON.parse(routeText))
+    if (authority._tag === "routed_discriminator" && authority.isRouted !== 1) {
+      throw new WorkStoreError({ cause: { authority, route }, operation })
+    }
+    return route
   } catch (cause) {
     if (Schema.is(WorkStoreError)(cause)) throw cause
     throw new WorkStoreError({ cause, operation })
@@ -160,18 +209,33 @@ export const requireCoordinatorLifecycleAuthority = (
 export const requireCoordinatorRouteAuthority = (
   routeText: string,
   lineage: ReadonlyArray<string>,
+  storageAuthority: CoordinatorRouteStorageAuthority,
+  operation: string
+): CoordinatorRoute => {
+  const route = decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation)
+  if (
+    route.model !== "gpt-5.6-sol" ||
+    (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId))
+  ) {
+    throw new WorkStoreError({ cause: { lineage, route }, operation })
+  }
+  return route
+}
+
+/** Validates the exact failed Luna dispatch that authorizes a linked Sol route. */
+export const requireCoordinatorFailedLunaAuthority = (
+  dispatchRows: ReadonlyArray<CoordinatorLifecycleDispatchRow>,
+  eventRows: ReadonlyArray<CoordinatorLifecycleEventRow>,
+  routeText: string,
+  storageAuthority: CoordinatorRouteStorageAuthority,
   operation: string
 ): void => {
-  try {
-    const route = Schema.decodeUnknownSync(CoordinatorRoute)(JSON.parse(routeText))
-    if (
-      route.model !== "gpt-5.6-sol" ||
-      (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId))
-    ) {
-      throw new WorkStoreError({ cause: { lineage, route }, operation })
-    }
-  } catch (cause) {
-    if (Schema.is(WorkStoreError)(cause)) throw cause
-    throw new WorkStoreError({ cause, operation })
+  const authority = decodeCoordinatorLifecycleAuthority(dispatchRows, eventRows, operation)
+  const route = decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation)
+  if (
+    route.model !== "gpt-5.6-luna" ||
+    (authority.dispatch.status !== "delivery_failed" && authority.dispatch.status !== "task_failed")
+  ) {
+    throw new WorkStoreError({ cause: { ...authority, route }, operation })
   }
 }

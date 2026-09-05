@@ -302,7 +302,7 @@ const persistMigrationBindingCompanions = (
     )
 }
 
-const migrationSolRoute = (linkedRequestId: string) => ({
+const migrationSolRoute = (linkedRequestId: string | null) => ({
   action: "dispatch",
   linkedRequestId,
   model: "gpt-5.6-sol",
@@ -311,11 +311,20 @@ const migrationSolRoute = (linkedRequestId: string) => ({
   reasoningEffort: "high"
 })
 
+const migrationLunaRoute = {
+  action: "dispatch",
+  linkedRequestId: null,
+  model: "gpt-5.6-luna",
+  protocol: "hostd.coordinator.route.v1",
+  reason: "Persist failed bounded coordination",
+  reasoningEffort: "medium"
+}
+
 const persistCoordinatorLifecycle = (
   database: DatabaseSync,
   dispatchRequestId: string,
   runningAt: number,
-  status: "queued" | "running" | "settled" = "running"
+  status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed" = "running"
 ): void => {
   const activityIdempotencyKey = `activity:${dispatchRequestId}`
   const acceptedAt = Math.max(0, runningAt - 2)
@@ -349,7 +358,9 @@ const persistCoordinatorLifecycle = (
   insert.run(dispatchRequestId, 1, "queued", activityIdempotencyKey, Math.max(acceptedAt, runningAt - 1), null, null)
   if (status !== "queued") insert.run(dispatchRequestId, 2, "running", activityIdempotencyKey, runningAt, null, null)
   if (status === "settled") {
-    insert.run(dispatchRequestId, 3, "settled", activityIdempotencyKey, runningAt + 1, null, "done")
+    insert.run(dispatchRequestId, 3, status, activityIdempotencyKey, runningAt + 1, null, "done")
+  } else if (status === "delivery_failed" || status === "task_failed") {
+    insert.run(dispatchRequestId, 3, status, activityIdempotencyKey, runningAt + 1, "failed", null)
   }
 }
 
@@ -2462,7 +2473,8 @@ database.close()`,
         .run(legacyClaim.laneId, legacyClaim.revision, JSON.stringify(legacyClaim))
       database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
         .run(legacyHandoff.id, legacyHandoff.laneId, legacyHandoff.occurredAt, JSON.stringify(legacyHandoff))
-      const lineage = ["dispatch:legacy-luna"]
+      const parentDispatchRequestId = "dispatch:legacy-luna"
+      const lineage = [parentDispatchRequestId]
       const legacyBinding = migrationBinding(
         "dispatch:legacy-sol",
         Schema.decodeUnknownSync(WorkLaneClaimed)({
@@ -2496,15 +2508,17 @@ database.close()`,
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
         .run(
           "dispatch:legacy-sol",
-          JSON.stringify(migrationSolRoute("dispatch:legacy-luna")),
+          JSON.stringify(migrationSolRoute(null)),
           JSON.stringify({ handoff: legacyHandoff, lineage })
         )
+      persistCoordinatorLifecycle(database, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt)
       database.close()
 
       const queuedLegacyPath = join(directory, "queued-legacy-lifecycle.sqlite")
       copyFileSync(path, queuedLegacyPath)
       const queuedLegacy = new DatabaseSync(queuedLegacyPath)
-      persistCoordinatorLifecycle(queuedLegacy, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt, "queued")
+      queuedLegacy.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
+      queuedLegacy.prepare("UPDATE orchestrator_dispatches SET status = 'queued'").run()
       queuedLegacy.close()
       expect(yield* safelyOpenResult(queuedLegacyPath)).toMatchObject({
         failure: {
@@ -2524,11 +2538,71 @@ database.close()`,
 
       const runningLegacyPath = join(directory, "running-legacy-lifecycle.sqlite")
       copyFileSync(path, runningLegacyPath)
-      const runningLegacy = new DatabaseSync(runningLegacyPath)
-      persistCoordinatorLifecycle(runningLegacy, "dispatch:legacy-sol", legacyBinding.checkpoint.occurredAt)
-      runningLegacy.close()
       const runningLegacyOpened = yield* openScopedStore(runningLegacyPath)
       runningLegacyOpened.close()
+
+      const missingMetadataLegacyPath = join(directory, "missing-metadata-legacy.sqlite")
+      copyFileSync(path, missingMetadataLegacyPath)
+      const missingMetadataLegacy = new DatabaseSync(missingMetadataLegacyPath)
+      missingMetadataLegacy.exec("DROP TABLE orchestrator_dispatch_metadata")
+      missingMetadataLegacy.close()
+      expect(yield* safelyOpenResult(missingMetadataLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: {
+            _tag: "WorkStoreError",
+            operation: "open.migrate.legacy-agent-binding.lifecycle.schema"
+          },
+          operation: "open.database"
+        }
+      })
+
+      const unroutedLegacyPath = join(directory, "unrouted-legacy.sqlite")
+      copyFileSync(path, unroutedLegacyPath)
+      const unroutedLegacy = new DatabaseSync(unroutedLegacyPath)
+      unroutedLegacy.prepare("UPDATE orchestrator_dispatches SET is_routed = 0").run()
+      unroutedLegacy.close()
+      expect(yield* safelyOpenResult(unroutedLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-metadata-authority" },
+          operation: "open.database"
+        }
+      })
+      const unroutedLegacyRolledBack = new DatabaseSync(unroutedLegacyPath)
+      const unroutedLegacyColumns = unroutedLegacyRolledBack.prepare(
+        "PRAGMA table_info(work_decision_handoffs)"
+      ).all()
+      unroutedLegacyRolledBack.close()
+      expect(unroutedLegacyColumns.some((column) =>
+        Schema.decodeUnknownSync(Schema.Struct({ name: Schema.String }))(column).name === "session_id"
+      )).toBe(false)
+
+      const missingParentLegacyPath = join(directory, "missing-parent-legacy.sqlite")
+      copyFileSync(path, missingParentLegacyPath)
+      const missingParentLegacy = new DatabaseSync(missingParentLegacyPath)
+      missingParentLegacy.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
+        .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
+      missingParentLegacy.close()
+      expect(yield* safelyOpenResult(missingParentLegacyPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.legacy-metadata-authority.parent" },
+          operation: "open.database"
+        }
+      })
+
+      const failedParentLegacyPath = join(directory, "failed-parent-legacy.sqlite")
+      copyFileSync(path, failedParentLegacyPath)
+      const failedParentLegacy = new DatabaseSync(failedParentLegacyPath)
+      persistCoordinatorLifecycle(failedParentLegacy, parentDispatchRequestId, 10, "task_failed")
+      failedParentLegacy.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
+        .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
+      failedParentLegacy.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
+        .run(parentDispatchRequestId, JSON.stringify(migrationLunaRoute))
+      failedParentLegacy.close()
+      const failedParentLegacyOpened = yield* openScopedStore(failedParentLegacyPath)
+      failedParentLegacyOpened.close()
 
       const duplicateLegacyPath = join(directory, "duplicate-legacy-dispatch.sqlite")
       copyFileSync(path, duplicateLegacyPath)
@@ -2617,6 +2691,11 @@ database.close()`,
             JSON.stringify({ handoff, lineage: dispatchLineage })
           )
       }
+      oversizedLegacy.exec(`
+        DROP TABLE orchestrator_dispatch_metadata;
+        DROP TABLE orchestrator_events;
+        DROP TABLE orchestrator_dispatches;
+      `)
       oversizedLegacy.close()
       expect(yield* safelyOpenResult(oversizedLegacyPath)).toMatchObject({
         failure: {
@@ -2697,10 +2776,22 @@ database.prepare("INSERT INTO work_lane_operations VALUES (?, ?, ?, ?, ?, ?)")
     binding.lane.revision, JSON.stringify(binding.lane))
 database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
   .run(dispatchRequestId, JSON.stringify({
-    action: "dispatch", linkedRequestId: lineage[0], model: "gpt-5.6-sol",
+    action: "dispatch", linkedRequestId: null, model: "gpt-5.6-sol",
     protocol: "hostd.coordinator.route.v1", reason: "Migrate durable Work authority",
     reasoningEffort: "high"
   }), JSON.stringify({ handoff, lineage }))
+const activityIdempotencyKey = "activity:" + dispatchRequestId
+database.prepare("INSERT INTO orchestrator_dispatches VALUES (?, ?, ?, ?, ?, 1, 'running')")
+  .run(dispatchRequestId, "idempotency:" + dispatchRequestId, activityIdempotencyKey, JSON.stringify({
+    activityIdempotencyKey, actor: "coordinator", kind: "fleet.job",
+    payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+  }), Math.max(0, handoff.occurredAt - 2))
+const insertEvent = database.prepare("INSERT INTO orchestrator_events VALUES (?, ?, ?, ?, ?, ?, ?)")
+insertEvent.run(dispatchRequestId, 0, "accepted", activityIdempotencyKey,
+  Math.max(0, handoff.occurredAt - 2), null, null)
+insertEvent.run(dispatchRequestId, 1, "queued", activityIdempotencyKey,
+  Math.max(0, handoff.occurredAt - 1), null, null)
+insertEvent.run(dispatchRequestId, 2, "running", activityIdempotencyKey, handoff.occurredAt, null, null)
 process.stdout.write("locked\\n")
 await new Promise((resolve) => setTimeout(resolve, 250))
 database.exec("COMMIT")
@@ -2720,12 +2811,15 @@ database.close()`,
       yield* Effect.callback<void, LockHolderError>((resume) => {
         let completed = false
         const complete = (result: Effect.Effect<void, LockHolderError>) => {
-          if (completed) return
+          if (completed) {
+            return
+          }
           completed = true
           resume(result)
         }
         writer.stdout.setEncoding("utf8")
-        writer.stdout.once("data", () => complete(Effect.void))
+        writer.stdout.once("data", () =>
+          complete(Effect.void))
         writer.once("error", (cause) => complete(Effect.fail(new LockHolderError({ cause: String(cause) }))))
         writer.once("exit", (code, signal) =>
           complete(
@@ -2888,7 +2982,8 @@ database.close()`,
         currentHandoff.occurredAt,
         JSON.stringify(currentHandoff)
       )
-      const lineage = ["dispatch:failed-luna"]
+      const parentDispatchRequestId = "dispatch:failed-luna"
+      const lineage = [parentDispatchRequestId]
       const binding = migrationBinding("dispatch:current-migration", lane, 2)
       persistMigrationBindingCompanions(database, binding)
       database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
@@ -2910,20 +3005,17 @@ database.close()`,
       )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
         "dispatch:current-migration",
-        JSON.stringify(migrationSolRoute("dispatch:failed-luna")),
+        JSON.stringify(migrationSolRoute(null)),
         JSON.stringify({ handoff: previousHandoff, lineage })
       )
+      persistCoordinatorLifecycle(database, "dispatch:current-migration", binding.checkpoint.occurredAt)
       database.close()
 
       const queuedLifecyclePath = join(directory, "queued-lifecycle.sqlite")
       copyFileSync(path, queuedLifecyclePath)
       const queuedLifecycle = new DatabaseSync(queuedLifecyclePath)
-      persistCoordinatorLifecycle(
-        queuedLifecycle,
-        "dispatch:current-migration",
-        binding.checkpoint.occurredAt,
-        "queued"
-      )
+      queuedLifecycle.prepare("DELETE FROM orchestrator_events WHERE type = 'running'").run()
+      queuedLifecycle.prepare("UPDATE orchestrator_dispatches SET status = 'queued'").run()
       queuedLifecycle.close()
       expect(yield* safelyOpenResult(queuedLifecyclePath)).toMatchObject({
         failure: {
@@ -2942,9 +3034,6 @@ database.close()`,
 
       const runningLifecyclePath = join(directory, "running-lifecycle.sqlite")
       copyFileSync(path, runningLifecyclePath)
-      const runningLifecycle = new DatabaseSync(runningLifecyclePath)
-      persistCoordinatorLifecycle(runningLifecycle, "dispatch:current-migration", binding.checkpoint.occurredAt)
-      runningLifecycle.close()
       const runningOpened = yield* openScopedStore(runningLifecyclePath)
       const runningService = yield* makeWorkService(runningOpened.store)
       expect(yield* runningService.coordinatorHandoff(previousHandoff.sessionId)).toMatchObject({
@@ -2952,14 +3041,68 @@ database.close()`,
       })
       runningOpened.close()
 
+      const missingMetadataPath = join(directory, "missing-metadata-current.sqlite")
+      copyFileSync(path, missingMetadataPath)
+      const missingMetadata = new DatabaseSync(missingMetadataPath)
+      missingMetadata.exec("DROP TABLE orchestrator_dispatch_metadata")
+      missingMetadata.close()
+      expect(yield* safelyOpenResult(missingMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          operation: "open.database"
+        }
+      })
+
+      const unroutedPath = join(directory, "unrouted-current.sqlite")
+      copyFileSync(path, unroutedPath)
+      const unrouted = new DatabaseSync(unroutedPath)
+      unrouted.prepare("UPDATE orchestrator_dispatches SET is_routed = 0").run()
+      unrouted.close()
+      expect(yield* safelyOpenResult(unroutedPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
+          operation: "open.database"
+        }
+      })
+      const unroutedRolledBack = new DatabaseSync(unroutedPath)
+      const unroutedDecision = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        unroutedRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      unroutedRolledBack.close()
+      expect(JSON.parse(unroutedDecision.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+      const missingParentPath = join(directory, "missing-parent-current.sqlite")
+      copyFileSync(path, missingParentPath)
+      const missingParent = new DatabaseSync(missingParentPath)
+      missingParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
+        .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
+      missingParent.close()
+      expect(yield* safelyOpenResult(missingParentPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority.parent" },
+          operation: "open.database"
+        }
+      })
+
+      const failedParentPath = join(directory, "failed-parent-current.sqlite")
+      copyFileSync(path, failedParentPath)
+      const failedParent = new DatabaseSync(failedParentPath)
+      persistCoordinatorLifecycle(failedParent, parentDispatchRequestId, 10, "delivery_failed")
+      failedParent.prepare("UPDATE orchestrator_dispatch_metadata SET route = ?")
+        .run(JSON.stringify(migrationSolRoute(parentDispatchRequestId)))
+      failedParent.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
+        .run(parentDispatchRequestId, JSON.stringify(migrationLunaRoute))
+      failedParent.close()
+      const failedParentOpened = yield* openScopedStore(failedParentPath)
+      failedParentOpened.close()
+
       const incompleteTerminalPath = join(directory, "incomplete-terminal-lifecycle.sqlite")
       copyFileSync(path, incompleteTerminalPath)
       const incompleteTerminal = new DatabaseSync(incompleteTerminalPath)
-      persistCoordinatorLifecycle(
-        incompleteTerminal,
-        "dispatch:current-migration",
-        binding.checkpoint.occurredAt
-      )
       incompleteTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
       incompleteTerminal.close()
       expect(yield* safelyOpenResult(incompleteTerminalPath)).toMatchObject({
@@ -2980,12 +3123,13 @@ database.close()`,
       const completeTerminalPath = join(directory, "complete-terminal-lifecycle.sqlite")
       copyFileSync(path, completeTerminalPath)
       const completeTerminal = new DatabaseSync(completeTerminalPath)
-      persistCoordinatorLifecycle(
-        completeTerminal,
-        "dispatch:current-migration",
-        binding.checkpoint.occurredAt,
-        "settled"
-      )
+      completeTerminal.prepare(
+        `INSERT INTO orchestrator_events
+           (dispatch_request_id, sequence, type, activity_idempotency_key, occurred_at, detail, result)
+         SELECT dispatch_request_id, 3, 'settled', activity_idempotency_key, ? + 1, NULL, 'done'
+         FROM orchestrator_dispatches WHERE dispatch_request_id = ?`
+      ).run(binding.checkpoint.occurredAt, "dispatch:current-migration")
+      completeTerminal.prepare("UPDATE orchestrator_dispatches SET status = 'settled'").run()
       completeTerminal.close()
       const completeTerminalOpened = yield* openScopedStore(completeTerminalPath)
       completeTerminalOpened.close()

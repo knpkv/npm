@@ -62,6 +62,11 @@ the Work lane compare-and-set, `agentHierarchy.agent`, canonical Connect
 target, and goal checkpoint in one SQLite transaction. Exact replay survives a
 restart; a changed worker, refreshed accepted revision, or stale lane authority
 is a typed conflict, never a sequential repair.
+Work v1 migration uses the same authority: routed metadata must agree with the
+persisted dispatch discriminator, and a linked Sol route must name an exact
+terminally failed Luna parent with a complete lifecycle. Partial coordinator
+table sets fail closed; older dispatch tables without the discriminator retain
+their explicit backfill-compatible path.
 
 `PullRequestEvidenceProvider.exactHeadGateEvidence` accepts no caller-built
 evidence object. Its source performs one bounded provider observation, samples
