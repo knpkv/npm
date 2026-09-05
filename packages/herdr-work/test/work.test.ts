@@ -2423,6 +2423,39 @@ database.close()`,
       ])
     }).pipe(provideNodeServices))
 
+  it.effect("rejects every incomplete coordinator schema before creating Work tables", () =>
+    Effect.gen(function*() {
+      const directory = mkdtempSync(join(tmpdir(), "herdr-work-partial-coordinator-schema-"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+      const coordinatorTables = [
+        "orchestrator_dispatches",
+        "orchestrator_events",
+        "orchestrator_dispatch_metadata"
+      ]
+      for (let mask = 1; mask < 7; mask += 1) {
+        const path = join(directory, `partial-${mask}.sqlite`)
+        const database = new DatabaseSync(path)
+        for (const [index, table] of coordinatorTables.entries()) {
+          if ((mask & (1 << index)) !== 0) database.exec(`CREATE TABLE ${table} (id TEXT)`)
+        }
+        database.close()
+
+        expect(yield* safelyOpenResult(path)).toMatchObject({
+          failure: {
+            _tag: "WorkStoreError",
+            cause: { _tag: "WorkStoreError", operation: "open.migrate.schema" },
+            operation: "open.database"
+          }
+        })
+        const unchanged = new DatabaseSync(path)
+        const createdWorkTable = unchanged.prepare(
+          "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'work_decision_handoffs'"
+        ).get()
+        unchanged.close()
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(createdWorkTable).count).toBe(0)
+      }
+    }).pipe(provideNodeServices))
+
   it.effect("transactionally migrates the previous lane and handoff schema", () =>
     Effect.gen(function*() {
       const directory = mkdtempSync(join(tmpdir(), "herdr-work-legacy-authority-"))
@@ -2549,10 +2582,7 @@ database.close()`,
       expect(yield* safelyOpenResult(missingMetadataLegacyPath)).toMatchObject({
         failure: {
           _tag: "WorkStoreError",
-          cause: {
-            _tag: "WorkStoreError",
-            operation: "open.migrate.legacy-agent-binding.lifecycle.schema"
-          },
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.schema" },
           operation: "open.database"
         }
       })
@@ -3050,6 +3080,21 @@ database.close()`,
         failure: {
           _tag: "WorkStoreError",
           cause: { _tag: "WorkStoreError", operation: "open.migrate.schema" },
+          operation: "open.database"
+        }
+      })
+
+      const v2OnlyMissingMetadataPath = join(directory, "v2-only-missing-metadata.sqlite")
+      copyFileSync(runningLifecyclePath, v2OnlyMissingMetadataPath)
+      const v2OnlyMissingMetadata = new DatabaseSync(v2OnlyMissingMetadataPath)
+      v2OnlyMissingMetadata.prepare(
+        "DELETE FROM orchestrator_dispatch_metadata WHERE dispatch_request_id = ?"
+      ).run("dispatch:current-migration")
+      v2OnlyMissingMetadata.close()
+      expect(yield* safelyOpenResult(v2OnlyMissingMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-authority" },
           operation: "open.database"
         }
       })

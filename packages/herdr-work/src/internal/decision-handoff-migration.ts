@@ -28,7 +28,12 @@ type PreviousDecisionHandoffDecodeResult =
   | { readonly _tag: "previous"; readonly value: PreviousWorkDecisionHandoff }
 
 export const previousDecisionHandoffEquivalent = Schema.toEquivalence(PreviousWorkDecisionHandoff)
+export const currentDecisionHandoffEquivalent = Schema.toEquivalence(WorkDecisionHandoff)
 export const workDispatchLineageEquivalent = Schema.toEquivalence(WorkDecisionHandoff.fields.dispatchIds)
+export const CurrentMetadataWorkLink = Schema.Struct({
+  handoff: WorkDecisionHandoff,
+  lineage: WorkDecisionHandoff.fields.dispatchIds
+})
 
 /** Keeps a dispatch's ordered lineage narrower than the decision's complete dispatch set. */
 export const workDispatchLineageContainedBy = (

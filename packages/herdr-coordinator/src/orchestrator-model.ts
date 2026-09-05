@@ -46,13 +46,18 @@ const RouteReason = UnicodeScalarText.check(
 )
 const RouteProtocol = Schema.Literal("hostd.coordinator.route.v1")
 
-const LunaRoute = Schema.Struct({
+const LunaMediumRoute = Schema.Struct({
   protocol: RouteProtocol,
   action: Schema.Literal("dispatch"),
   model: Schema.Literal("gpt-5.6-luna"),
-  reasoningEffort: Schema.Literals(["low", "medium"]),
+  reasoningEffort: Schema.Literal("medium"),
   reason: RouteReason,
   linkedRequestId: Schema.Null
+})
+
+const LunaLowRoute = Schema.Struct({
+  ...LunaMediumRoute.fields,
+  reasoningEffort: Schema.Literal("low")
 })
 
 const SolRoute = Schema.Struct({
@@ -65,7 +70,7 @@ const SolRoute = Schema.Struct({
 })
 
 /** Executable model metadata derived by the host coordinator policy. */
-export const OrchestratorRoute = Schema.Union([LunaRoute, SolRoute])
+export const OrchestratorRoute = Schema.Union([LunaMediumRoute, LunaLowRoute, SolRoute])
 export type OrchestratorRoute = typeof OrchestratorRoute.Type
 
 /** Durable Work handoff and dispatch ancestry bound to one routed request. */
@@ -108,6 +113,26 @@ const OrchestratorSolEscalationCommand = Schema.Struct({
   })
 })
 
+const OrchestratorConsultCommand = Schema.Struct({
+  kind: Schema.Literal("fleet.job"),
+  actor: JobActor,
+  activityIdempotencyKey: ActivityIdempotencyKey,
+  payload: Schema.Struct({
+    ...AgentDelegate.fields,
+    mode: Schema.Literal("consult")
+  })
+})
+
+const OrchestratorTransitionSummaryCommand = Schema.Struct({
+  kind: Schema.Literal("fleet.job"),
+  actor: JobActor,
+  activityIdempotencyKey: ActivityIdempotencyKey,
+  payload: Schema.Struct({
+    ...AgentDelegate.fields,
+    mode: Schema.Literal("transition_summary")
+  })
+})
+
 /** Failed Luna request and accepted Work authority required for one linked Sol dispatch. */
 export const OrchestratorLinkedSolDispatchReference = Schema.Struct({
   failedLunaRequestId: DispatchRequestId,
@@ -137,15 +162,22 @@ export interface OrchestratorSolEscalationSubmission extends
   >
 {}
 
-const LunaRoutedSubmission = Schema.Struct({
-  command: OrchestratorCommand,
+const LunaConsultSubmission = Schema.Struct({
+  command: OrchestratorConsultCommand,
   idempotencyKey: OrchestratorIdempotencyKey,
-  route: LunaRoute,
+  route: LunaMediumRoute,
+  workLink: Schema.Null
+})
+
+const LunaTransitionSummarySubmission = Schema.Struct({
+  command: OrchestratorTransitionSummaryCommand,
+  idempotencyKey: OrchestratorIdempotencyKey,
+  route: LunaLowRoute,
   workLink: Schema.Null
 })
 
 const SolRoutedSubmission = Schema.Struct({
-  command: OrchestratorCommand,
+  command: OrchestratorSolEscalationCommand,
   idempotencyKey: OrchestratorIdempotencyKey,
   route: SolRoute,
   workLink: OrchestratorWorkLink
@@ -153,7 +185,8 @@ const SolRoutedSubmission = Schema.Struct({
 
 /** A route-aware submission. Sol is accepted only with a durable Work link. */
 export const OrchestratorRoutedSubmission = Schema.Union([
-  LunaRoutedSubmission,
+  LunaConsultSubmission,
+  LunaTransitionSummarySubmission,
   SolRoutedSubmission
 ])
 export type OrchestratorRoutedSubmission = typeof OrchestratorRoutedSubmission.Type

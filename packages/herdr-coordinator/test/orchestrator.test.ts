@@ -26,7 +26,7 @@ import {
   OrchestratorDispatchActivation,
   OrchestratorPendingDispatch,
   OrchestratorRequest,
-  type OrchestratorRoutedSubmission,
+  OrchestratorRoutedSubmission,
   type OrchestratorWorkLink,
   sqliteLayer
 } from "../src/index.js"
@@ -180,6 +180,22 @@ const lunaRoute = {
   reasoningEffort: "medium"
 } satisfies OrchestratorRoutedSubmission["route"]
 
+const makeLunaCommand = <Mode extends "consult" | "transition_summary">(
+  mode: Mode,
+  activityIdempotencyKey: string
+) =>
+  ({
+    activityIdempotencyKey,
+    actor: command.actor,
+    kind: "fleet.job",
+    payload: {
+      kind: "agent.delegate",
+      mode,
+      prompt: "Run bounded coordination",
+      repository: "npm"
+    }
+  }) satisfies OrchestratorRoutedSubmission["command"]
+
 const makeWorkLink = (lineage: ReadonlyArray<string>): OrchestratorWorkLink => ({
   handoff: {
     blockers: [{ id: "luna-failed", detail: "The linked Luna request failed" }],
@@ -204,7 +220,17 @@ const makeSolSubmission = (
   parentDispatchRequestId: string | null,
   idempotencyKey: string
 ): OrchestratorRoutedSubmission => ({
-  command: { ...command, activityIdempotencyKey: `activity:${idempotencyKey}` },
+  command: {
+    activityIdempotencyKey: `activity:${idempotencyKey}`,
+    actor: command.actor,
+    kind: "fleet.job",
+    payload: {
+      kind: "agent.delegate",
+      mode: "work",
+      prompt: "Execute the accepted Work handoff",
+      repository: "npm"
+    }
+  },
   idempotencyKey,
   route: {
     action: "dispatch",
@@ -1272,13 +1298,13 @@ describe("durable coordinator orchestrator", () => {
             const orchestrator = yield* Orchestrator
             return yield* Effect.all({
               consult: orchestrator.submitRouted({
-                command: { ...command, activityIdempotencyKey: "activity:route-luna" },
+                command: makeLunaCommand("consult", "activity:route-luna"),
                 idempotencyKey: "dispatch:route-luna",
                 route: lunaRoute,
                 workLink: null
               }),
               transitionSummary: orchestrator.submitRouted({
-                command: { ...command, activityIdempotencyKey: "activity:route-transition-summary" },
+                command: makeLunaCommand("transition_summary", "activity:route-transition-summary"),
                 idempotencyKey: "dispatch:route-transition-summary",
                 route: {
                   ...lunaRoute,
@@ -1328,7 +1354,7 @@ describe("durable coordinator orchestrator", () => {
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:route-failed-luna" },
+              command: makeLunaCommand("consult", "activity:route-failed-luna"),
               idempotencyKey: "dispatch:route-failed-luna",
               route: lunaRoute,
               workLink: null
@@ -1411,7 +1437,7 @@ describe("durable coordinator orchestrator", () => {
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const accepted = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:stale-sol-luna" },
+              command: makeLunaCommand("consult", "activity:stale-sol-luna"),
               idempotencyKey: "dispatch:stale-sol-luna",
               route: lunaRoute,
               workLink: null
@@ -1504,7 +1530,7 @@ describe("durable coordinator orchestrator", () => {
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:replay-shipped-luna" },
+              command: makeLunaCommand("consult", "activity:replay-shipped-luna"),
               idempotencyKey: "dispatch:replay-shipped-luna",
               route: lunaRoute,
               workLink: null
@@ -1561,7 +1587,7 @@ describe("durable coordinator orchestrator", () => {
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             return yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:route-presence" },
+              command: makeLunaCommand("consult", "activity:route-presence"),
               idempotencyKey: "dispatch:route-presence",
               route: lunaRoute,
               workLink: null
@@ -2188,6 +2214,25 @@ database.close()`,
           failure: {
             _tag: "OrchestratorStorageError",
             cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.schema" },
+            operation: "initialize.work"
+          }
+        })
+
+        const v2OnlyMissingMetadataPath = join(root, "v2-only-missing-metadata.sqlite")
+        copyFileSync(v2OnlyPartialSchemaPath, v2OnlyMissingMetadataPath)
+        const v2OnlyMissingMetadata = new DatabaseSync(v2OnlyMissingMetadataPath)
+        v2OnlyMissingMetadata.exec(`
+          CREATE TABLE orchestrator_dispatch_metadata (
+            dispatch_request_id TEXT PRIMARY KEY,
+            route TEXT NOT NULL,
+            work_link TEXT
+          )
+        `)
+        v2OnlyMissingMetadata.close()
+        expect(yield* Effect.result(withDatabase(v2OnlyMissingMetadataPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-authority" },
             operation: "initialize.work"
           }
         })
@@ -2851,17 +2896,17 @@ database.close()`,
       })
     }))
 
-  it.effect("revalidates the referenced Work decision during request readback", () =>
+  it.effect("rejects a mutated referenced Work decision during initialization", () =>
     withTemporaryRoot("herdr-orchestrator-work-readback-", (root) => {
       const path = join(root, "orchestrator.sqlite")
       return Effect.gen(function*() {
         yield* recordWorkAuthority(path, makeWorkLink([]))
-        const sol = yield* withDatabase(
+        yield* withDatabase(
           path,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:readback-luna" },
+              command: makeLunaCommand("consult", "activity:readback-luna"),
               idempotencyKey: "dispatch:readback-luna",
               route: lunaRoute,
               workLink: null
@@ -2880,21 +2925,12 @@ database.close()`,
         ).run("handoff:escalation")
         database.close()
 
-        const result = yield* withDatabase(
-          path,
-          Effect.gen(function*() {
-            const orchestrator = yield* Orchestrator
-            return {
-              pending: yield* Effect.result(orchestrator.pending()),
-              request: yield* Effect.result(orchestrator.request(sol.dispatchRequestId))
-            }
-          })
-        )
-        expect(result.request).toMatchObject({
-          failure: { _tag: "OrchestratorStorageError", operation: "request.work-link" }
-        })
-        expect(result.pending).toMatchObject({
-          failure: { _tag: "OrchestratorStorageError", operation: "pending.work-link" }
+        expect(yield* Effect.result(withDatabase(path, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.dispatch-authority" },
+            operation: "initialize.work"
+          }
         })
       })
     }))
@@ -2949,7 +2985,7 @@ database.close()`,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:route-live-luna" },
+              command: makeLunaCommand("consult", "activity:route-live-luna"),
               idempotencyKey: "dispatch:route-live-luna",
               route: lunaRoute,
               workLink: null
@@ -2998,6 +3034,37 @@ database.close()`,
       })
     }))
 
+  it.effect("rejects a transition summary Sol route before persistence", () =>
+    withTemporaryRoot("herdr-orchestrator-transition-summary-sol-reject-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      const submission = makeSolSubmission(null, "dispatch:transition-summary-sol")
+      const invalid = {
+        ...submission,
+        command: {
+          ...submission.command,
+          payload: { ...submission.command.payload, mode: "transition_summary" }
+        }
+      }
+      return Effect.gen(function*() {
+        const result = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            return yield* Effect.result(
+              Schema.decodeUnknownEffect(OrchestratorRoutedSubmission)(invalid).pipe(
+                Effect.flatMap((decoded) => orchestrator.submitRouted(decoded))
+              )
+            )
+          })
+        )
+        expect(result).toMatchObject({ failure: { _tag: "SchemaError" } })
+        const database = new DatabaseSync(path)
+        const count = database.prepare("SELECT COUNT(*) AS count FROM orchestrator_dispatches").get()
+        database.close()
+        expect(Schema.decodeUnknownSync(Schema.Struct({ count: Schema.Number }))(count).count).toBe(0)
+      })
+    }))
+
   it.effect("rolls back Sol acceptance when the Work handoff cannot be recorded", () =>
     withTemporaryRoot("herdr-orchestrator-work-atomicity-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -3008,7 +3075,7 @@ database.close()`,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:atomicity-luna" },
+              command: makeLunaCommand("consult", "activity:atomicity-luna"),
               idempotencyKey: "dispatch:atomicity-luna",
               route: lunaRoute,
               workLink: null
@@ -3077,7 +3144,7 @@ database.close()`,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:authority-luna" },
+              command: makeLunaCommand("consult", "activity:authority-luna"),
               idempotencyKey: "dispatch:authority-luna",
               route: lunaRoute,
               workLink: null
@@ -3143,7 +3210,7 @@ database.close()`,
           Effect.gen(function*() {
             const orchestrator = yield* Orchestrator
             const luna = yield* orchestrator.submitRouted({
-              command: { ...command, activityIdempotencyKey: "activity:ambiguous-authority-luna" },
+              command: makeLunaCommand("consult", "activity:ambiguous-authority-luna"),
               idempotencyKey: "dispatch:ambiguous-authority-luna",
               route: lunaRoute,
               workLink: null

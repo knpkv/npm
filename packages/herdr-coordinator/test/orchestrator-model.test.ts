@@ -8,6 +8,7 @@ import {
   OrchestratorPendingDispatch,
   OrchestratorPendingQuery,
   OrchestratorRequest,
+  OrchestratorRoutedSubmission,
   OrchestratorSolEscalationSubmission,
   OrchestratorWorkLink
 } from "../src/orchestrator-model.js"
@@ -216,6 +217,85 @@ describe("orchestrator event model", () => {
         })._tag
       )
         .toBe("Failure")
+    }
+  })
+
+  it("binds every delegate mode to its exact model route", () => {
+    const workLink = {
+      handoff: {
+        blockers: [],
+        contextDelta: "Route the bounded operation",
+        decision: "handoff",
+        dispatchIds: [],
+        evidenceRefs: [],
+        expectedRevision: 1,
+        goalId: "goal:routed-model",
+        id: "handoff:routed-model",
+        laneId: "lane:routed-model",
+        occurredAt: 1,
+        owner: { id: "owner:routed-model", name: "Coordinator" },
+        sessionId: "session:routed-model",
+        summary: "Route the bounded operation",
+        version: "herdr.work.decision.v2"
+      },
+      lineage: []
+    }
+    const command = {
+      activityIdempotencyKey: "activity:routed-model",
+      actor: "coordinator",
+      kind: "fleet.job",
+      payload: { kind: "agent.delegate", mode: "consult", prompt: "Route", repository: "/repo" }
+    }
+    const luna = {
+      action: "dispatch",
+      linkedRequestId: null,
+      model: "gpt-5.6-luna",
+      protocol: "hostd.coordinator.route.v1",
+      reason: "Bounded operation",
+      reasoningEffort: "medium"
+    }
+    const sol = {
+      ...luna,
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high"
+    }
+    const submission = { command, idempotencyKey: "dispatch:routed-model", route: luna, workLink: null }
+
+    expect(Schema.decodeUnknownResult(OrchestratorRoutedSubmission)(submission)._tag).toBe("Success")
+    expect(
+      Schema.decodeUnknownResult(OrchestratorRoutedSubmission)({
+        ...submission,
+        command: { ...command, payload: { ...command.payload, mode: "transition_summary" } },
+        route: { ...luna, reasoningEffort: "low" }
+      })._tag
+    ).toBe("Success")
+    for (
+      const invalid of [
+        { ...submission, route: { ...luna, reasoningEffort: "low" } },
+        {
+          ...submission,
+          command: { ...command, payload: { ...command.payload, mode: "transition_summary" } },
+          route: luna
+        },
+        {
+          ...submission,
+          command: { ...command, payload: { ...command.payload, mode: "transition_summary" } },
+          route: sol,
+          workLink
+        }
+      ]
+    ) {
+      expect(Schema.decodeUnknownResult(OrchestratorRoutedSubmission)(invalid)._tag).toBe("Failure")
+    }
+    for (const mode of ["review", "work"]) {
+      expect(
+        Schema.decodeUnknownResult(OrchestratorRoutedSubmission)({
+          ...submission,
+          command: { ...command, payload: { ...command.payload, mode } },
+          route: sol,
+          workLink
+        })._tag
+      ).toBe("Success")
     }
   })
 })

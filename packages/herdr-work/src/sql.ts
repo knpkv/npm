@@ -32,6 +32,8 @@ import {
   requireCoordinatorRouteAuthority
 } from "./internal/coordinator-authority.js"
 import {
+  currentDecisionHandoffEquivalent,
+  CurrentMetadataWorkLink,
   decodePreviousDecisionHandoff,
   previousDecisionHandoffEquivalent,
   PreviousWorkDecisionHandoff,
@@ -794,33 +796,16 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             Effect.mapError(storeError("sql-work.initialize.parse-handoff"))
           )
           const previous = decodePreviousDecisionHandoff(input)
-          if (previous._tag === "current") {
-            if (
-              previous.value.id !== row.handoffId || previous.value.sessionId !== row.sessionId ||
-              previous.value.laneId !== row.laneId || previous.value.occurredAt !== row.occurredAt
-            ) {
-              return yield* new WorkStoreError({
-                cause: { handoff: previous.value, row },
-                operation: "sql-work.initialize.handoff-identity"
-              })
-            }
-            return false
-          }
-          if (previous._tag === "invalid") {
-            return yield* new WorkStoreError({
-              cause: previous.cause,
-              operation: "sql-work.initialize.invalid-handoff"
-            })
-          }
-          const laneRows = yield* sql`SELECT revision FROM work_lane_claims WHERE lane_id = ${row.laneId}`.pipe(
-            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LaneRevisionRow))),
-            Effect.mapError(storeError("sql-work.initialize.handoff-lane-revision"))
-          )
-          const laneRevision = laneRows[0]
-          if (laneRevision === undefined) {
-            return yield* new WorkStoreError({ cause: row, operation: "sql-work.initialize.handoff-lane" })
-          }
-          const handoffDispatches = legacyDispatches.filter(({ handoffId }) => handoffId === row.handoffId)
+          const handoffDispatches = tables.some(({ name }) => name === "work_dispatch_handoffs")
+            ? yield* sql`
+              SELECT dispatch_request_id AS "dispatchRequestId", handoff_id AS "handoffId",
+                lane_id AS "laneId", occurred_at AS "occurredAt", lineage, record
+              FROM work_dispatch_handoffs WHERE handoff_id = ${row.handoffId}
+            `.pipe(
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LegacyDispatchRow))),
+              Effect.mapError(storeError("sql-work.initialize.handoff-dispatches"))
+            )
+            : []
           if (handoffDispatches.length > 1) {
             return yield* new WorkStoreError({
               cause: { handoffDispatches, row },
@@ -840,15 +825,94 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             )
             : []
           if (
-            linkedMetadata.length !== handoffDispatches.length ||
-            linkedMetadata.some((metadata) =>
-              !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
-            )
+            tables.some(({ name }) => name === "orchestrator_dispatch_metadata") &&
+            (linkedMetadata.length !== handoffDispatches.length ||
+              linkedMetadata.some((metadata) =>
+                !handoffDispatches.some(({ dispatchRequestId }) => dispatchRequestId === metadata.dispatchRequestId)
+              ))
           ) {
             return yield* new WorkStoreError({
               cause: { handoffDispatches, linkedMetadata, row },
               operation: "sql-work.initialize.metadata-authority"
             })
+          }
+          if (previous._tag === "current") {
+            if (
+              previous.value.id !== row.handoffId || previous.value.sessionId !== row.sessionId ||
+              previous.value.laneId !== row.laneId || previous.value.occurredAt !== row.occurredAt
+            ) {
+              return yield* new WorkStoreError({
+                cause: { handoff: previous.value, row },
+                operation: "sql-work.initialize.handoff-identity"
+              })
+            }
+            yield* Effect.forEach(handoffDispatches, (dispatch) =>
+              Effect.gen(function*() {
+                const decoded = yield* Effect.try({
+                  try: () => ({
+                    handoff: Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(dispatch.record)),
+                    lineage: Schema.decodeUnknownSync(WorkDispatchHandoff.fields.lineage)(JSON.parse(dispatch.lineage))
+                  }),
+                  catch: storeError("sql-work.initialize.decode-dispatch-authority")
+                })
+                if (
+                  dispatch.laneId !== previous.value.laneId ||
+                  dispatch.occurredAt !== previous.value.occurredAt ||
+                  !currentDecisionHandoffEquivalent(decoded.handoff, previous.value) ||
+                  !workDispatchLineageContainedBy(decoded.lineage, previous.value.dispatchIds)
+                ) {
+                  return yield* new WorkStoreError({
+                    cause: { decoded, dispatch, handoff: previous.value },
+                    operation: "sql-work.initialize.dispatch-authority"
+                  })
+                }
+                if (!tables.some(({ name }) => name === "orchestrator_dispatch_metadata")) return
+                const metadata = linkedMetadata.find(({ dispatchRequestId }) =>
+                  dispatchRequestId === dispatch.dispatchRequestId
+                )
+                const encodedWorkLink = metadata?.workLink
+                const encodedRoute = metadata?.route
+                if (encodedWorkLink === null || encodedWorkLink === undefined || encodedRoute === undefined) {
+                  return yield* new WorkStoreError({
+                    cause: { dispatch, linkedMetadata },
+                    operation: "sql-work.initialize.metadata-authority"
+                  })
+                }
+                const workLink = yield* Effect.try({
+                  try: () => Schema.decodeUnknownSync(CurrentMetadataWorkLink)(JSON.parse(encodedWorkLink)),
+                  catch: storeError("sql-work.initialize.decode-metadata-authority")
+                })
+                yield* requireMetadataAuthority(
+                  dispatch.dispatchRequestId,
+                  encodedRoute,
+                  workLink.lineage,
+                  "sql-work.initialize.metadata-authority"
+                )
+                if (
+                  !currentDecisionHandoffEquivalent(workLink.handoff, previous.value) ||
+                  !workDispatchLineageEquivalent(workLink.lineage, decoded.lineage)
+                ) {
+                  return yield* new WorkStoreError({
+                    cause: { handoff: previous.value, workLink },
+                    operation: "sql-work.initialize.metadata-authority"
+                  })
+                }
+              }), { discard: true })
+            return false
+          }
+          if (previous._tag === "invalid") {
+            return yield* new WorkStoreError({
+              cause: previous.cause,
+              operation: "sql-work.initialize.invalid-handoff"
+            })
+          }
+          const laneRows = yield* sql`SELECT revision FROM work_lane_claims WHERE lane_id = ${row.laneId}`.pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LaneRevisionRow))),
+            Effect.mapError(storeError("sql-work.initialize.handoff-lane-revision"))
+          )
+          const laneRevision = laneRows[0]
+          if (laneRevision === undefined) {
+            return yield* new WorkStoreError({ cause: row, operation: "sql-work.initialize.handoff-lane" })
           }
           const bindingRows = tables.some(({ name }) => name === "work_agent_bindings")
             ? yield* sql`

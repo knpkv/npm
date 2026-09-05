@@ -1107,6 +1107,9 @@ const makeOrchestrator: Effect.Effect<
     const decoded = yield* Schema.decodeUnknownEffect(OrchestratorRoutedSubmission)(input).pipe(
       Effect.mapError(() => new OrchestratorValidationError({ detail: "routed submission is invalid" }))
     )
+    const command = yield* Schema.decodeUnknownEffect(OrchestratorCommand)(decoded.command).pipe(
+      Effect.mapError(() => new OrchestratorValidationError({ detail: "routed command is invalid" }))
+    )
     if (
       decoded.route.model === "gpt-5.6-sol" &&
       decoded.route.linkedRequestId !== null &&
@@ -1117,7 +1120,7 @@ const makeOrchestrator: Effect.Effect<
         detail: "Work lineage must include the linked Luna request"
       })
     }
-    return yield* submitInternal(decoded.command, decoded.idempotencyKey, decoded.route, decoded.workLink)
+    return yield* submitInternal(command, decoded.idempotencyKey, decoded.route, decoded.workLink)
   })
 
   const submitSolEscalation: OrchestratorService["submitSolEscalation"] = Effect.fn(
