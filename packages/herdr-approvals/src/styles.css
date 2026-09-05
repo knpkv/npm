@@ -53,6 +53,10 @@
     max-inline-size: 100rem;
     padding: var(--rly-space-24) var(--rly-space-32) var(--rly-space-96);
   }
+  .fleet-shell-main [aria-label="Fleet applications"][role="tablist"] {
+    position: relative;
+    z-index: 101;
+  }
   .fleet-key-rail {
     align-items: center;
     border-block-end: 1px solid var(--rly-color-border-1);

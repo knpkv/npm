@@ -11,6 +11,7 @@ const connectorCss = readCss(resolve(packageRoot, "src/styles.css")).replace(
   "@import \"@knpkv/rly/styles.css\";",
   ""
 )
+const approvalsCss = readCss(resolve(workspaceRoot, "packages/herdr-approvals/src/styles.css"))
 const terminalRailNavigationSource = transpileModule(
   readFileSync(resolve(packageRoot, "src/terminal-rail-navigation.ts"), "utf8"),
   {
@@ -31,6 +32,7 @@ const fixtureCss = [
   readCss(resolve(workspaceRoot, "packages/rly/src/styles/base.css")),
   readCss(resolve(workspaceRoot, "packages/rly/src/primitives/Text.module.css")),
   connectorCss,
+  approvalsCss,
   `
     html, body { margin: 0; }
     *, *::before, *::after { box-sizing: border-box; }
@@ -168,6 +170,41 @@ const setTerminal = (page: Page): Promise<void> =>
       </body>
     </html>`)
 
+const setEmbeddedTerminal = async (page: Page): Promise<void> => {
+  await page.setContent(`
+    <!doctype html>
+    <html data-rly-root data-rly-theme="dark">
+      <head><style>${fixtureCss}</style></head>
+      <body>
+        <main class="fleet-shell-main">
+          <div aria-label="Fleet applications" class="fixture-fleet-tabs" role="tablist">
+            <button aria-selected="false" role="tab" type="button">Approvals</button>
+            <button aria-selected="true" role="tab" type="button">Connect</button>
+            <button aria-selected="false" data-work-tab role="tab" type="button">Work</button>
+          </div>
+          <div class="connect-shell connect-shell-embedded">
+            <div class="connect-workspace" data-mode="terminal">
+              <div aria-hidden="true" class="connect-directory-screen" inert></div>
+              <div aria-label="Agent terminal" class="connect-terminal-screen">
+                <section class="terminal-stage">
+                  <div class="terminal-bar"><button class="terminal-back" type="button">Agents</button><div><strong>agent-01</strong><small>SER8 · codex</small></div><span class="fixture-state">connected</span></div>
+                  ${terminalRail}
+                  <div aria-label="Agent terminal" class="ghostty-terminal"><textarea aria-label="Terminal input"></textarea></div>
+                </section>
+              </div>
+            </div>
+          </div>
+        </main>
+      </body>
+    </html>`)
+  await page.locator("[data-work-tab]").evaluate((element) => {
+    element.addEventListener("click", () => {
+      element.setAttribute("aria-selected", "true")
+      document.body.dataset.selectedFleetTab = "work"
+    })
+  })
+}
+
 test("390x844 keeps directory chrome dense and the full list reachable without an inner clipped scroller", async ({ page }) => {
   await setEmbeddedDirectory(page)
 
@@ -298,6 +335,33 @@ test("desktop terminal rail preserves the three-row stage and accessible key lab
   expect(await page.locator(".terminal-key").count()).toBe(8)
   await expect(page.locator(".terminal-key-error")).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
+})
+
+test("an active embedded terminal does not intercept a Work tab click", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await setEmbeddedTerminal(page)
+
+  const terminalInput = page.getByRole("textbox", { name: "Terminal input" })
+  const workTab = page.getByRole("tab", { name: "Work" })
+  await terminalInput.focus()
+  await expect(terminalInput).toBeFocused()
+
+  await workTab.click()
+
+  await expect(workTab).toHaveAttribute("aria-selected", "true")
+  await expect(page.locator("body")).toHaveAttribute("data-selected-fleet-tab", "work")
+})
+
+test("an embedded mobile terminal keeps visual viewport coordinates", async ({ page }) => {
+  await setEmbeddedTerminal(page)
+  await page.locator(".connect-workspace").evaluate((element) => {
+    element.style.setProperty("--connect-visual-viewport-height", "493px")
+    element.style.setProperty("--connect-visual-viewport-offset", "51px")
+  })
+
+  const terminal = await page.locator(".connect-terminal-screen").boundingBox()
+  expect(terminal?.y).toBe(51)
+  expect(terminal?.height).toBe(493)
 })
 
 test("mobile connected identity exposes a keyboard-focusable Work goal link", async ({ page }) => {
