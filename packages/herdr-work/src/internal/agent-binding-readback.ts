@@ -19,6 +19,46 @@ export const AgentBindingGoalEventRow = Schema.Struct({
   record: Schema.String
 })
 
+export const AgentBindingRow = Schema.Struct({
+  dispatchRequestId: Schema.String,
+  laneId: Schema.String,
+  expectedRevision: Schema.Number,
+  revision: Schema.Number,
+  agentId: Schema.String,
+  host: Schema.String,
+  record: Schema.String
+})
+
+export type AgentBindingRowDecision =
+  | { readonly _tag: "valid"; readonly binding: WorkAgentBindingType }
+  | { readonly _tag: "invalid"; readonly error: WorkStoreError }
+
+/** Decodes a binding only when its indexed identity and expected dispatch authority agree. */
+export const decodeAgentBindingRow = (
+  row: typeof AgentBindingRow.Type,
+  expected: { readonly dispatchRequestId: string; readonly laneId: string },
+  operation: string
+): AgentBindingRowDecision => {
+  try {
+    const binding = Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record))
+    return row.dispatchRequestId === expected.dispatchRequestId &&
+        row.laneId === expected.laneId &&
+        row.dispatchRequestId === binding.request.dispatchRequestId &&
+        row.laneId === binding.request.laneId &&
+        row.expectedRevision === binding.request.expectedRevision &&
+        row.revision === binding.lane.revision &&
+        row.agentId === binding.request.worker.agentId &&
+        row.host.toLowerCase() === binding.request.worker.host.toLowerCase()
+      ? { _tag: "valid", binding }
+      : {
+        _tag: "invalid",
+        error: new WorkStoreError({ cause: { binding, expected, row }, operation: `${operation}.identity-mismatch` })
+      }
+  } catch (cause) {
+    return { _tag: "invalid", error: new WorkStoreError({ cause, operation: `${operation}.decode` }) }
+  }
+}
+
 export type AgentBindingGoalEventDecision =
   | { readonly _tag: "valid"; readonly checkpoint: WorkGoalCheckpoint }
   | { readonly _tag: "invalid"; readonly error: WorkStoreError }

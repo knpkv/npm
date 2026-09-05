@@ -38,6 +38,16 @@ export class OrchestratorWorkerBindingConflictError
   )
 {}
 
+/** The accepted Work handoff no longer owns the lane revision needed for dispatch. */
+export class OrchestratorWorkRevisionConflictError extends Schema.TaggedError<OrchestratorWorkRevisionConflictError>()(
+  "OrchestratorWorkRevisionConflictError",
+  {
+    laneId: Identifier,
+    expectedRevision: Schema.Number,
+    actualRevision: Schema.Number
+  }
+) {}
+
 export class OrchestratorWorkerStartAuthorityError extends Schema.TaggedError<OrchestratorWorkerStartAuthorityError>()(
   "OrchestratorWorkerStartAuthorityError",
   {
@@ -61,5 +71,6 @@ export type OrchestratorError =
   | OrchestratorConflictError
   | OrchestratorNotFoundError
   | OrchestratorTransitionError
+  | OrchestratorWorkRevisionConflictError
   | OrchestratorWorkerBindingConflictError
   | OrchestratorWorkerStartAuthorityError

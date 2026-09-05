@@ -18,13 +18,16 @@ import {
   AgentBindingGoalEventRow,
   AgentBindingLaneOperationRow,
   agentBindingReadbackError,
-  decodeAgentBindingGoalEvent
+  AgentBindingRow,
+  decodeAgentBindingGoalEvent,
+  decodeAgentBindingRow
 } from "./internal/agent-binding-readback.js"
 import {
   decodePreviousDecisionHandoff,
   previousDecisionHandoffEquivalent,
   PreviousWorkDecisionHandoff,
   upgradePreviousDecisionHandoff,
+  workDispatchLineageContainedBy,
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
 import {
@@ -55,15 +58,6 @@ const DispatchHandoffRow = Schema.Struct({
   laneId: Schema.String,
   occurredAt: Schema.Number,
   lineage: Schema.String,
-  record: Schema.String
-})
-const AgentBindingRow = Schema.Struct({
-  dispatchRequestId: Schema.String,
-  laneId: Schema.String,
-  expectedRevision: Schema.Number,
-  revision: Schema.Number,
-  agentId: Schema.String,
-  host: Schema.String,
   record: Schema.String
 })
 const LaneOperationLedgerTotalsRow = Schema.Struct({
@@ -120,12 +114,7 @@ const LegacyDispatchRow = Schema.Struct({
   record: Schema.String
 })
 const SqliteTableRow = Schema.Struct({ name: Schema.String })
-const ExpectedRevisionRow = Schema.Struct({ expectedRevision: Schema.Number })
 const LaneRevisionRow = Schema.Struct({ revision: Schema.Number })
-const ExpectedRevisionByDispatchRow = Schema.Struct({
-  dispatchRequestId: Schema.String,
-  expectedRevision: Schema.Number
-})
 const MetadataWorkLinkRow = Schema.Struct({
   dispatchRequestId: Schema.String,
   workLink: Schema.NullOr(Schema.String)
@@ -164,7 +153,7 @@ const decodeLegacyLane = (row: typeof LegacyLaneRow.Type) =>
   })
 
 const decodeLegacyDecision = (
-  bindingRevisions: ReadonlyArray<typeof ExpectedRevisionByDispatchRow.Type>,
+  bindingRows: ReadonlyArray<typeof AgentBindingRow.Type>,
   dispatches: ReadonlyArray<typeof LegacyDispatchRow.Type>,
   lanes: ReadonlyArray<WorkLaneClaimed>,
   metadataTablePresent: boolean,
@@ -220,20 +209,26 @@ const decodeLegacyDecision = (
           })
         }
       }
-      const revisions = bindingRevisions.filter(({ dispatchRequestId }) =>
+      const matchingBindings = bindingRows.filter(({ dispatchRequestId }) =>
         dispatchRequestId === dispatch.dispatchRequestId
       )
-      const revision = revisions[0]
-      if (revisions.length !== 1 || revision === undefined) {
+      const bindingRow = matchingBindings[0]
+      if (matchingBindings.length !== 1 || bindingRow === undefined) {
         throw new WorkStoreError({
-          cause: { dispatch, legacy, revisions },
+          cause: { dispatch, legacy, matchingBindings },
           operation: "sql-work.migrate.legacy-handoff-revision"
         })
       }
+      const bindingDecision = decodeAgentBindingRow(
+        bindingRow,
+        { dispatchRequestId: dispatch.dispatchRequestId, laneId: legacy.laneId },
+        "sql-work.migrate.legacy-agent-binding"
+      )
+      if (bindingDecision._tag === "invalid") throw bindingDecision.error
       return Schema.decodeUnknownSync(WorkDecisionHandoff)({
         ...legacy,
         contextDelta: legacy.summary,
-        expectedRevision: revision.expectedRevision,
+        expectedRevision: bindingDecision.binding.request.expectedRevision,
         sessionId: legacy.id,
         dispatchIds,
         blockers: [],
@@ -444,13 +439,14 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(LegacyDispatchRow))),
         Effect.mapError(storeError("sql-work.initialize.legacy-dispatches"))
       )
-      const legacyBindingRevisions = tables.some(({ name }) => name === "work_agent_bindings")
+      const legacyBindingRows = tables.some(({ name }) => name === "work_agent_bindings")
         ? yield* sql`
-          SELECT dispatch_request_id AS "dispatchRequestId", expected_revision AS "expectedRevision"
+          SELECT dispatch_request_id AS "dispatchRequestId", lane_id AS "laneId",
+            expected_revision AS "expectedRevision", revision, agent_id AS "agentId", host, record
           FROM work_agent_bindings
         `.pipe(
-          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExpectedRevisionByDispatchRow))),
-          Effect.mapError(storeError("sql-work.initialize.legacy-binding-revisions"))
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingRow))),
+          Effect.mapError(storeError("sql-work.initialize.legacy-binding-rows"))
         )
         : []
       const legacyMetadata = tables.some(({ name }) => name === "orchestrator_dispatch_metadata")
@@ -474,7 +470,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
               rows,
               (row) =>
                 decodeLegacyDecision(
-                  legacyBindingRevisions,
+                  legacyBindingRows,
                   legacyDispatches,
                   legacyLanes,
                   metadataTablePresent,
@@ -572,25 +568,34 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
               operation: "sql-work.initialize.metadata-authority"
             })
           }
-          const bindingRevisions = tables.some(({ name }) => name === "work_agent_bindings")
+          const bindingRows = tables.some(({ name }) => name === "work_agent_bindings")
             ? yield* sql`
-              SELECT DISTINCT binding.expected_revision AS "expectedRevision"
+              SELECT binding.dispatch_request_id AS "dispatchRequestId", binding.lane_id AS "laneId",
+                binding.expected_revision AS "expectedRevision", binding.revision,
+                binding.agent_id AS "agentId", binding.host, binding.record
               FROM work_agent_bindings binding
               JOIN work_dispatch_handoffs dispatch
                 ON dispatch.dispatch_request_id = binding.dispatch_request_id
               WHERE dispatch.handoff_id = ${row.handoffId}
             `.pipe(
-              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(ExpectedRevisionRow))),
-              Effect.mapError(storeError("sql-work.initialize.handoff-binding-revision"))
+              Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(AgentBindingRow))),
+              Effect.mapError(storeError("sql-work.initialize.handoff-binding-row"))
             )
             : []
-          const bindingRevision = bindingRevisions[0]
-          if (bindingRevisions.length !== 1 || bindingRevision === undefined) {
+          const bindingRow = bindingRows[0]
+          const handoffDispatch = handoffDispatches[0]
+          if (bindingRows.length !== 1 || bindingRow === undefined || handoffDispatch === undefined) {
             return yield* new WorkStoreError({
-              cause: { bindingRevisions, row },
+              cause: { bindingRows, row },
               operation: "sql-work.initialize.handoff-revision"
             })
           }
+          const bindingDecision = decodeAgentBindingRow(
+            bindingRow,
+            { dispatchRequestId: handoffDispatch.dispatchRequestId, laneId: previous.value.laneId },
+            "sql-work.initialize.agent-binding"
+          )
+          if (bindingDecision._tag === "invalid") return yield* bindingDecision.error
           const verifiedDispatches = yield* Effect.forEach(handoffDispatches, (dispatch) =>
             Effect.gen(function*() {
               const decoded = yield* Effect.try({
@@ -603,7 +608,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
               if (
                 dispatch.laneId !== previous.value.laneId || dispatch.occurredAt !== previous.value.occurredAt ||
                 !previousDecisionHandoffEquivalent(decoded.handoff, previous.value) ||
-                !workDispatchLineageEquivalent(decoded.lineage, previous.value.dispatchIds)
+                !workDispatchLineageContainedBy(decoded.lineage, previous.value.dispatchIds)
               ) {
                 return yield* new WorkStoreError({
                   cause: { decoded, dispatch, previous: previous.value },
@@ -641,7 +646,7 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             try: () =>
               upgradePreviousDecisionHandoff(
                 previous.value,
-                bindingRevision.expectedRevision
+                bindingDecision.binding.request.expectedRevision
               ),
             catch: storeError("sql-work.initialize.upgrade-handoff")
           })

@@ -234,6 +234,42 @@ const startedWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
   paneId: "wE:p3"
 })
 
+const migrationBinding = (
+  dispatchRequestId: string,
+  lane: WorkLaneClaimed,
+  occurredAt: number,
+  worker: typeof startedWorker = startedWorker
+): WorkAgentBinding =>
+  Schema.decodeUnknownSync(WorkAgentBinding)({
+    checkpoint: {
+      eventId: dispatchRequestId,
+      goal: {
+        ...goal(occurredAt, "working", "local"),
+        agentHierarchy: { agent: worker },
+        connectTarget: {
+          agentId: worker.agentId,
+          host: worker.host,
+          url: `/connect/?agent=${worker.agentId}&host=${worker.host}`
+        },
+        id: lane.goalId,
+        owner: lane.owner,
+        title: lane.goalId,
+        updatedAt: occurredAt
+      },
+      occurredAt,
+      version: "herdr.work.event.v1"
+    },
+    lane,
+    request: {
+      dispatchRequestId,
+      expectedRevision: lane.expectedRevision,
+      laneId: lane.laneId,
+      version: "herdr.work.agent-binding-request.v1",
+      worker
+    },
+    version: "herdr.work.agent-binding.v1"
+  })
+
 describe("durable Work projection", () => {
   it("exports an exact typed dispatch, lane revision, and worker binding contract", () => {
     const request = {
@@ -2377,6 +2413,17 @@ database.close()`,
       database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
         .run(legacyHandoff.id, legacyHandoff.laneId, legacyHandoff.occurredAt, JSON.stringify(legacyHandoff))
       const lineage = ["dispatch:legacy-luna"]
+      const legacyBinding = migrationBinding(
+        "dispatch:legacy-sol",
+        Schema.decodeUnknownSync(WorkLaneClaimed)({
+          ...legacyClaim,
+          expectedRevision: legacyClaim.revision,
+          goalId: legacyHandoff.goalId,
+          operationId: "dispatch:legacy-sol",
+          revision: legacyClaim.revision + 1
+        }),
+        legacyHandoff.occurredAt
+      )
       database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
         .run(
           "dispatch:legacy-sol",
@@ -2389,11 +2436,11 @@ database.close()`,
       database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
         "dispatch:legacy-sol",
         legacyHandoff.laneId,
-        legacyClaim.revision,
-        legacyClaim.revision + 1,
-        "agent:legacy",
-        "host:legacy",
-        "{}"
+        legacyBinding.request.expectedRevision,
+        legacyBinding.lane.revision,
+        legacyBinding.request.worker.agentId,
+        legacyBinding.request.worker.host,
+        JSON.stringify(legacyBinding)
       )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
         .run("dispatch:legacy-sol", "{}", JSON.stringify({ handoff: legacyHandoff, lineage }))
@@ -2419,6 +2466,18 @@ database.close()`,
         occurredAt: 2,
         summary: "Concurrent legacy decision"
       }
+      const concurrentDispatchRequestId = `dispatch:${concurrentHandoff.id}`
+      const concurrentBinding = migrationBinding(
+        concurrentDispatchRequestId,
+        Schema.decodeUnknownSync(WorkLaneClaimed)({
+          ...legacyClaim,
+          expectedRevision: legacyClaim.revision,
+          goalId: concurrentHandoff.goalId,
+          operationId: concurrentDispatchRequestId,
+          revision: legacyClaim.revision + 1
+        }),
+        concurrentHandoff.occurredAt
+      )
       const writer = spawn(
         execPath,
         [
@@ -2428,6 +2487,7 @@ database.close()`,
 const database = new DatabaseSync(process.argv[1])
 const handoff = JSON.parse(process.argv[2])
 const expectedRevision = Number(process.argv[3])
+const binding = JSON.parse(process.argv[4])
 const dispatchRequestId = "dispatch:" + handoff.id
 const lineage = ["dispatch:lineage:" + handoff.id]
 database.exec("BEGIN IMMEDIATE")
@@ -2436,7 +2496,8 @@ database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
 database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
   .run(dispatchRequestId, handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(lineage), JSON.stringify(handoff))
 database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)")
-  .run(dispatchRequestId, handoff.laneId, expectedRevision, expectedRevision + 1, "agent:concurrent", "host:concurrent", "{}")
+  .run(dispatchRequestId, handoff.laneId, expectedRevision, expectedRevision + 1,
+    binding.request.worker.agentId, binding.request.worker.host, JSON.stringify(binding))
 database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
   .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage }))
 process.stdout.write("locked\\n")
@@ -2445,7 +2506,8 @@ database.exec("COMMIT")
 database.close()`,
           path,
           JSON.stringify(concurrentHandoff),
-          String(legacyClaim.revision)
+          String(legacyClaim.revision),
+          JSON.stringify(concurrentBinding)
         ],
         { stdio: ["ignore", "pipe", "pipe"] }
       )
@@ -2556,7 +2618,7 @@ database.close()`,
       const previousHandoff = {
         blockers: [],
         decision: "handoff",
-        dispatchIds: ["dispatch:failed-luna"],
+        dispatchIds: ["dispatch:failed-luna", "dispatch:earlier"],
         evidenceRefs: [],
         goalId: lane.goalId,
         id: "handoff:current-migration",
@@ -2622,6 +2684,7 @@ database.close()`,
         JSON.stringify(currentHandoff)
       )
       const lineage = ["dispatch:failed-luna"]
+      const binding = migrationBinding("dispatch:current-migration", lane, 2)
       database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)").run(
         "dispatch:current-migration",
         previousHandoff.id,
@@ -2633,11 +2696,11 @@ database.close()`,
       database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
         "dispatch:current-migration",
         lane.laneId,
-        1,
-        2,
-        "agent:migrated",
-        "host:migrated",
-        "{}"
+        binding.request.expectedRevision,
+        binding.lane.revision,
+        binding.request.worker.agentId,
+        binding.request.worker.host,
+        JSON.stringify(binding)
       )
       database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)").run(
         "dispatch:current-migration",
@@ -2675,6 +2738,61 @@ database.close()`,
         handoff: { expectedRevision: 1, version: "herdr.work.decision.v2" },
         lineage
       })
+
+      const outsiderPath = join(directory, "outsider-lineage.sqlite")
+      copyFileSync(path, outsiderPath)
+      const outsider = new DatabaseSync(outsiderPath)
+      outsider.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      outsider.prepare("UPDATE work_dispatch_handoffs SET lineage = ?, record = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify(["dispatch:outsider"]), JSON.stringify(previousHandoff), "dispatch:current-migration")
+      outsider.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+        .run(
+          JSON.stringify({ handoff: previousHandoff, lineage: ["dispatch:outsider"] }),
+          "dispatch:current-migration"
+        )
+      outsider.close()
+      expect(yield* safelyOpenResult(outsiderPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.dispatch-authority" },
+          operation: "open.database"
+        }
+      })
+      const outsiderRolledBack = new DatabaseSync(outsiderPath)
+      const retainedOutsider = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        outsiderRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      outsiderRolledBack.close()
+      expect(JSON.parse(retainedOutsider.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+      const corruptBindingPath = join(directory, "corrupt-binding.sqlite")
+      copyFileSync(path, corruptBindingPath)
+      const corruptBinding = new DatabaseSync(corruptBindingPath)
+      corruptBinding.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+        .run(JSON.stringify(previousHandoff), previousHandoff.id)
+      corruptBinding.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify(previousHandoff), "dispatch:current-migration")
+      corruptBinding.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+        .run(JSON.stringify({ handoff: previousHandoff, lineage }), "dispatch:current-migration")
+      corruptBinding.prepare("UPDATE work_agent_bindings SET expected_revision = ? WHERE dispatch_request_id = ?")
+        .run(binding.request.expectedRevision + 1, "dispatch:current-migration")
+      corruptBinding.close()
+      expect(yield* safelyOpenResult(corruptBindingPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.agent-binding.identity-mismatch" },
+          operation: "open.database"
+        }
+      })
+      const corruptBindingRolledBack = new DatabaseSync(corruptBindingPath)
+      const retainedCorruptBinding = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+        corruptBindingRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+          .get(previousHandoff.id)
+      )
+      corruptBindingRolledBack.close()
+      expect(JSON.parse(retainedCorruptBinding.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
       const unboundDecisionPath = join(directory, "unbound-decision.sqlite")
       copyFileSync(path, unboundDecisionPath)

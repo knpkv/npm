@@ -25,7 +25,8 @@ import {
   OrchestratorTransitionError,
   OrchestratorValidationError,
   OrchestratorWorkerBindingConflictError,
-  OrchestratorWorkerStartAuthorityError
+  OrchestratorWorkerStartAuthorityError,
+  OrchestratorWorkRevisionConflictError
 } from "./orchestrator-errors.js"
 import {
   ActivityIdempotencyKey,
@@ -1053,7 +1054,17 @@ const makeOrchestrator: Effect.Effect<
             dispatchRequestId,
             handoff: workLink.handoff,
             lineage: workLink.lineage
-          }).pipe(Effect.mapError(storageError("submit.work-link")))
+          }).pipe(
+            Effect.mapError((error): OrchestratorError =>
+              error._tag === "WorkDecisionRevisionConflictError"
+                ? new OrchestratorWorkRevisionConflictError({
+                  actualRevision: error.actualRevision,
+                  expectedRevision: error.expectedRevision,
+                  laneId: error.laneId
+                })
+                : storageError("submit.work-link")(error)
+            )
+          )
         }
         if (route !== null) {
           yield* sql`

@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
-import { makeWorkService, WorkGoalCheckpoint, WorkStore } from "@knpkv/herdr-work"
+import { makeWorkService, WorkAgentBinding, WorkGoalCheckpoint, WorkLaneClaimed, WorkStore } from "@knpkv/herdr-work"
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
 import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
@@ -52,6 +52,48 @@ const startedWorker = Schema.decodeUnknownSync(AgentWorkerIdentity)({
   name: "Package worker",
   paneId: "wE:p3"
 })
+
+const migrationBinding = (
+  dispatchRequestId: string,
+  lane: WorkLaneClaimed,
+  occurredAt: number
+): WorkAgentBinding =>
+  Schema.decodeUnknownSync(WorkAgentBinding)({
+    checkpoint: {
+      eventId: dispatchRequestId,
+      goal: {
+        agentHierarchy: { agent: startedWorker },
+        blocker: null,
+        connectTarget: {
+          agentId: startedWorker.agentId,
+          host: startedWorker.host,
+          url: `/connect/?agent=${startedWorker.agentId}&host=${startedWorker.host}`
+        },
+        createdAt: 0,
+        delivery: "local",
+        detail: "Migration authority",
+        id: lane.goalId,
+        owner: lane.owner,
+        repository: { branch: lane.branch, repository: "npm" },
+        spend: null,
+        state: "working",
+        summary: "Migration authority",
+        title: lane.goalId,
+        updatedAt: occurredAt
+      },
+      occurredAt,
+      version: "herdr.work.event.v1"
+    },
+    lane,
+    request: {
+      dispatchRequestId,
+      expectedRevision: lane.expectedRevision,
+      laneId: lane.laneId,
+      version: "herdr.work.agent-binding-request.v1",
+      worker: startedWorker
+    },
+    version: "herdr.work.agent-binding.v1"
+  })
 
 const lunaRoute = {
   action: "dispatch",
@@ -1253,6 +1295,89 @@ describe("durable coordinator orchestrator", () => {
       })
     }))
 
+  it.effect("surfaces stale Work authority without partially accepting a Sol dispatch", () =>
+    withTemporaryRoot("herdr-orchestrator-stale-sol-authority-", (root) => {
+      const path = join(root, "orchestrator.sqlite")
+      return Effect.gen(function*() {
+        const luna = yield* withDatabase(
+          path,
+          Effect.gen(function*() {
+            const orchestrator = yield* Orchestrator
+            const accepted = yield* orchestrator.submitRouted({
+              command: { ...command, activityIdempotencyKey: "activity:stale-sol-luna" },
+              idempotencyKey: "dispatch:stale-sol-luna",
+              route: lunaRoute,
+              workLink: null
+            })
+            yield* orchestrator.queue(accepted.dispatchRequestId)
+            yield* orchestrator.run(accepted.dispatchRequestId)
+            yield* orchestrator.failTask(accepted.dispatchRequestId, "Luna task failed")
+            return accepted
+          })
+        )
+        const workLink = makeWorkLink([luna.dispatchRequestId])
+        const lane = yield* recordWorkAuthority(path, workLink)
+        yield* Effect.scoped(
+          Effect.gen(function*() {
+            const store = yield* WorkStore.open(path)
+            yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+            const work = yield* makeWorkService(store)
+            yield* work.handoff(workLink.handoff)
+            yield* work.claim({
+              branch: lane.branch,
+              expectedRevision: lane.revision,
+              goalId: lane.goalId,
+              head: lane.head,
+              laneId: lane.laneId,
+              operationId: "operation:stale-sol-authority",
+              owner: lane.owner,
+              parent: lane.parent,
+              phase: lane.phase,
+              worktree: lane.worktree
+            })
+          }).pipe(provideNodeServices)
+        )
+
+        expect(
+          yield* withDatabase(
+            path,
+            Effect.gen(function*() {
+              const orchestrator = yield* Orchestrator
+              return yield* Effect.result(orchestrator.submitSolEscalation({
+                command: { ...command, activityIdempotencyKey: "activity:stale-sol" },
+                idempotencyKey: "dispatch:stale-sol",
+                reason: "failed Luna work requires an explicit linked Sol escalation",
+                reference: { failedLunaRequestId: luna.dispatchRequestId, workLink }
+              }))
+            })
+          )
+        ).toMatchObject({
+          failure: {
+            _tag: "OrchestratorWorkRevisionConflictError",
+            actualRevision: lane.revision + 1,
+            expectedRevision: lane.revision,
+            laneId: lane.laneId
+          }
+        })
+
+        const database = new DatabaseSync(path)
+        const counts = Schema.decodeUnknownSync(Schema.Struct({
+          accepted: Schema.Number,
+          dispatches: Schema.Number,
+          metadata: Schema.Number
+        }))(
+          database.prepare(
+            `SELECT
+               (SELECT COUNT(*) FROM orchestrator_dispatches) AS dispatches,
+               (SELECT COUNT(*) FROM orchestrator_dispatch_metadata) AS metadata,
+               (SELECT COUNT(*) FROM orchestrator_events WHERE type = 'accepted') AS accepted`
+          ).get()
+        )
+        database.close()
+        expect(counts).toEqual({ accepted: 1, dispatches: 1, metadata: 1 })
+      })
+    }))
+
   it.effect("replays an accepted Sol binding after its Work lane ships", () =>
     withTemporaryRoot("herdr-orchestrator-work-replay-shipped-", (root) => {
       const path = join(root, "orchestrator.sqlite")
@@ -1481,6 +1606,17 @@ describe("durable coordinator orchestrator", () => {
         database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
           .run(legacy.id, legacy.laneId, legacy.occurredAt, JSON.stringify(legacy))
         const lineage = ["dispatch:legacy-luna"]
+        const legacyBinding = migrationBinding(
+          "dispatch:legacy-sol",
+          Schema.decodeUnknownSync(WorkLaneClaimed)({
+            ...lane,
+            expectedRevision: lane.revision,
+            goalId: legacy.goalId,
+            operationId: "dispatch:legacy-sol",
+            revision: lane.revision + 1
+          }),
+          legacy.occurredAt
+        )
         database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
           .run(
             "dispatch:legacy-sol",
@@ -1493,11 +1629,11 @@ describe("durable coordinator orchestrator", () => {
         database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)").run(
           "dispatch:legacy-sol",
           legacy.laneId,
-          lane.revision,
-          lane.revision + 1,
-          "agent:legacy",
-          "host:legacy",
-          "{}"
+          legacyBinding.request.expectedRevision,
+          legacyBinding.lane.revision,
+          legacyBinding.request.worker.agentId,
+          legacyBinding.request.worker.host,
+          JSON.stringify(legacyBinding)
         )
         database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
           .run(
@@ -1513,6 +1649,18 @@ describe("durable coordinator orchestrator", () => {
         database.close()
 
         const concurrent = { ...legacy, id: "handoff:legacy-concurrent", occurredAt: 2 }
+        const concurrentDispatchRequestId = `dispatch:${concurrent.id}`
+        const concurrentBinding = migrationBinding(
+          concurrentDispatchRequestId,
+          Schema.decodeUnknownSync(WorkLaneClaimed)({
+            ...lane,
+            expectedRevision: lane.revision,
+            goalId: concurrent.goalId,
+            operationId: concurrentDispatchRequestId,
+            revision: lane.revision + 1
+          }),
+          concurrent.occurredAt
+        )
         const writer = spawn(
           execPath,
           [
@@ -1522,6 +1670,7 @@ describe("durable coordinator orchestrator", () => {
 const database = new DatabaseSync(process.argv[1])
 const handoff = JSON.parse(process.argv[2])
 const expectedRevision = Number(process.argv[3])
+const binding = JSON.parse(process.argv[4])
 const dispatchRequestId = "dispatch:" + handoff.id
 const lineage = ["dispatch:lineage:" + handoff.id]
 database.exec("BEGIN IMMEDIATE")
@@ -1530,7 +1679,8 @@ database.prepare("INSERT INTO work_decision_handoffs VALUES (?, ?, ?, ?)")
 database.prepare("INSERT INTO work_dispatch_handoffs VALUES (?, ?, ?, ?, ?, ?)")
   .run(dispatchRequestId, handoff.id, handoff.laneId, handoff.occurredAt, JSON.stringify(lineage), JSON.stringify(handoff))
 database.prepare("INSERT INTO work_agent_bindings VALUES (?, ?, ?, ?, ?, ?, ?)")
-  .run(dispatchRequestId, handoff.laneId, expectedRevision, expectedRevision + 1, "agent:concurrent", "host:concurrent", "{}")
+  .run(dispatchRequestId, handoff.laneId, expectedRevision, expectedRevision + 1,
+    binding.request.worker.agentId, binding.request.worker.host, JSON.stringify(binding))
 database.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, ?)")
   .run(dispatchRequestId, "{}", JSON.stringify({ handoff, lineage }))
 process.stdout.write("locked\\n")
@@ -1539,7 +1689,8 @@ database.exec("COMMIT")
 database.close()`,
             path,
             JSON.stringify(concurrent),
-            String(lane.revision)
+            String(lane.revision),
+            JSON.stringify(concurrentBinding)
           ],
           { stdio: ["ignore", "pipe", "pipe"] }
         )
@@ -1609,7 +1760,7 @@ database.close()`,
   it.effect("migrates current-schema v1 handoffs and replays the exact running worker", () =>
     withTemporaryRoot("herdr-orchestrator-current-handoff-migration-", (root) => {
       const path = join(root, "orchestrator.sqlite")
-      const workLink = makeWorkLink([])
+      const workLink = makeWorkLink(["dispatch:failed-luna"])
       const submission = {
         ...makeSolSubmission(null, "dispatch:current-handoff-migration"),
         workLink
@@ -1634,7 +1785,7 @@ database.close()`,
         const previousHandoff = {
           blockers: workLink.handoff.blockers,
           decision: workLink.handoff.decision,
-          dispatchIds: workLink.handoff.dispatchIds,
+          dispatchIds: [...workLink.handoff.dispatchIds, "dispatch:earlier"],
           evidenceRefs: workLink.handoff.evidenceRefs,
           goalId: workLink.handoff.goalId,
           id: workLink.handoff.id,
@@ -1673,6 +1824,68 @@ database.close()`,
           expectedRevision: activation.binding.request.expectedRevision,
           version: "herdr.work.decision.v2"
         })
+
+        const outsiderPath = join(root, "outsider-lineage.sqlite")
+        copyFileSync(path, outsiderPath)
+        const outsider = new DatabaseSync(outsiderPath)
+        outsider.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        outsider.prepare("UPDATE work_dispatch_handoffs SET lineage = ?, record = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify(["dispatch:outsider"]),
+            JSON.stringify(previousHandoff),
+            activation.event.dispatchRequestId
+          )
+        outsider.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: ["dispatch:outsider"] }),
+            activation.event.dispatchRequestId
+          )
+        outsider.close()
+        expect(yield* Effect.result(withDatabase(outsiderPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.dispatch-authority" },
+            operation: "initialize.work"
+          }
+        })
+        const outsiderRolledBack = new DatabaseSync(outsiderPath)
+        const retainedOutsider = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          outsiderRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        outsiderRolledBack.close()
+        expect(JSON.parse(retainedOutsider.record)).toMatchObject({ version: "herdr.work.decision.v1" })
+
+        const corruptBindingPath = join(root, "corrupt-binding.sqlite")
+        copyFileSync(path, corruptBindingPath)
+        const corruptBinding = new DatabaseSync(corruptBindingPath)
+        corruptBinding.prepare("UPDATE work_decision_handoffs SET record = ? WHERE handoff_id = ?")
+          .run(JSON.stringify(previousHandoff), previousHandoff.id)
+        corruptBinding.prepare("UPDATE work_dispatch_handoffs SET record = ? WHERE dispatch_request_id = ?")
+          .run(JSON.stringify(previousHandoff), activation.event.dispatchRequestId)
+        corruptBinding.prepare("UPDATE orchestrator_dispatch_metadata SET work_link = ? WHERE dispatch_request_id = ?")
+          .run(
+            JSON.stringify({ handoff: previousHandoff, lineage: workLink.lineage }),
+            activation.event.dispatchRequestId
+          )
+        corruptBinding.prepare("UPDATE work_agent_bindings SET expected_revision = expected_revision + 1")
+          .run()
+        corruptBinding.close()
+        expect(yield* Effect.result(withDatabase(corruptBindingPath, Effect.void))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.agent-binding.identity-mismatch" },
+            operation: "initialize.work"
+          }
+        })
+        const corruptBindingRolledBack = new DatabaseSync(corruptBindingPath)
+        const retainedCorruptBinding = Schema.decodeUnknownSync(Schema.Struct({ record: Schema.String }))(
+          corruptBindingRolledBack.prepare("SELECT record FROM work_decision_handoffs WHERE handoff_id = ?")
+            .get(previousHandoff.id)
+        )
+        corruptBindingRolledBack.close()
+        expect(JSON.parse(retainedCorruptBinding.record)).toMatchObject({ version: "herdr.work.decision.v1" })
 
         const missingMetadataPath = join(root, "missing-metadata.sqlite")
         copyFileSync(path, missingMetadataPath)

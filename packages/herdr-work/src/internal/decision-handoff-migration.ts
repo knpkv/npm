@@ -20,6 +20,12 @@ type PreviousWorkDecisionHandoff = typeof PreviousWorkDecisionHandoff.Type
 export const previousDecisionHandoffEquivalent = Schema.toEquivalence(PreviousWorkDecisionHandoff)
 export const workDispatchLineageEquivalent = Schema.toEquivalence(WorkDecisionHandoff.fields.dispatchIds)
 
+/** Keeps a dispatch's ordered lineage narrower than the decision's complete dispatch set. */
+export const workDispatchLineageContainedBy = (
+  lineage: ReadonlyArray<string>,
+  dispatchIds: ReadonlyArray<string>
+): boolean => lineage.every((dispatchId) => dispatchIds.includes(dispatchId))
+
 export const decodePreviousDecisionHandoff = Schema.decodeUnknownOption(PreviousWorkDecisionHandoff)
 
 /** Upgrades the immediately previous persisted handoff shape without accepting unknown versions. */

@@ -38,7 +38,10 @@ request lookup proves a terminal Luna failure. Every lineage request must also
 appear in the persisted handoff's dispatch IDs. Consumers use
 `submitSolEscalation` with `OrchestratorLinkedSolDispatchReference`; the package
 fixes the Sol model, high reasoning effort, route protocol, and failed-Luna link
-instead of making the adapter rebuild generic route metadata. `request` returns that complete
+instead of making the adapter rebuild generic route metadata. If the accepted
+Work handoff's lane revision becomes stale before Sol acceptance,
+`submitSolEscalation` returns `OrchestratorWorkRevisionConflictError` and commits
+no dispatch, metadata, or accepted event. `request` returns that complete
 validated projection for escalation decisions and revalidates its referenced
 Work decision. The package deliberately uses this SQLite journal/outbox seam,
 not Effect Cluster. It schedules no automatic activity retry: after restart,

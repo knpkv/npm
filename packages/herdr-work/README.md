@@ -45,8 +45,12 @@ Both the previous pre-session table and v1 records already stored in the current
 table migrate explicitly: their bounded summary becomes the v2 context delta.
 Migration requires exactly one persisted dispatch binding and keeps that
 binding's expected revision; an unbound v1 handoff cannot borrow the current
-lane revision. Missing lanes, bindings, dispatch replicas, or coordinator
-metadata, and contradictory replicas, fail startup with a named
+lane revision. The complete `WorkAgentBinding` record must decode and match its
+indexed dispatch, lane, revision, worker, and host before migration uses that
+authority. A dispatch lineage may remain a strict subset of the decision's
+complete dispatch IDs, while the dispatch and coordinator-metadata lineage
+replicas must agree exactly. Missing lanes, bindings, dispatch replicas, or
+coordinator metadata, and contradictory replicas, fail startup with a named
 `WorkStoreError`; no context or revision authority is invented.
 Changed content for the same session
 conflicts, and `coordinatorHandoff` proves restart readback without retaining an
