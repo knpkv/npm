@@ -45,7 +45,8 @@ import {
   type CoordinatorRouteStorageAuthority,
   requireCoordinatorFailedLunaAuthority,
   requireCoordinatorLifecycleAuthority,
-  requireCoordinatorRouteAuthority
+  requireCoordinatorRouteAuthority,
+  requireCoordinatorRouteBinding
 } from "./internal/coordinator-authority.js"
 import {
   currentDecisionHandoffEquivalent,
@@ -174,7 +175,10 @@ const RoutedMetadataCardinalityRow = Schema.Struct({
   metadataCount: Schema.Number
 })
 const CoordinatorMetadataRouteRow = Schema.Struct({
+  activityIdempotencyKey: Schema.NullOr(Schema.String),
+  command: Schema.NullOr(Schema.String),
   dispatchRequestId: Schema.String,
+  hasWorkLink: Schema.Literals([0, 1]),
   isRouted: Schema.NullOr(Schema.Literals([0, 1])),
   route: Schema.NullOr(Schema.String),
   rowId: Schema.String
@@ -1017,53 +1021,69 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
           })
         }
       }
-      if (tables.includes("orchestrator_dispatch_metadata") && coordinatorDispatchColumns.includes("is_routed")) {
-        const pageSize = 512
-        let cursor: string | null = null
-        while (true) {
-          const input = cursor === null
-            ? database.prepare(
-              `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
+    }
+    if (tables.includes("orchestrator_dispatch_metadata") && coordinatorDispatchColumns.includes("is_routed")) {
+      const pageSize = 512
+      let cursor: string | null = null
+      while (true) {
+        const input = cursor === null
+          ? database.prepare(
+            `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
                  metadata.dispatch_request_id AS dispatchRequestId,
-                 dispatch.is_routed AS isRouted, metadata.route
+                 dispatch.activity_idempotency_key AS activityIdempotencyKey,
+                 dispatch.command, dispatch.is_routed AS isRouted,
+                 CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
+                 metadata.route
                FROM orchestrator_dispatch_metadata AS metadata
-               JOIN orchestrator_dispatches AS dispatch
+               LEFT JOIN orchestrator_dispatches AS dispatch
                  ON dispatch.dispatch_request_id = metadata.dispatch_request_id
                ORDER BY metadata.rowid ASC LIMIT ?`
-            ).all(pageSize)
-            : database.prepare(
-              `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
+          ).all(pageSize)
+          : database.prepare(
+            `SELECT CAST(metadata.rowid AS TEXT) AS rowId,
                  metadata.dispatch_request_id AS dispatchRequestId,
-                 dispatch.is_routed AS isRouted, metadata.route
+                 dispatch.activity_idempotency_key AS activityIdempotencyKey,
+                 dispatch.command, dispatch.is_routed AS isRouted,
+                 CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS hasWorkLink,
+                 metadata.route
                FROM orchestrator_dispatch_metadata AS metadata
-               JOIN orchestrator_dispatches AS dispatch
+               LEFT JOIN orchestrator_dispatches AS dispatch
                  ON dispatch.dispatch_request_id = metadata.dispatch_request_id
                WHERE metadata.rowid > CAST(? AS INTEGER)
                ORDER BY metadata.rowid ASC LIMIT ?`
-            ).all(cursor, pageSize)
-          const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorMetadataRouteRow))(input)
-          for (const row of rows) {
-            try {
-              if (row.route === null || row.isRouted === null) {
-                throw new WorkStoreError({ cause: row, operation: "open.migrate.metadata-route" })
-              }
-              coordinatorRouteRequiresWorkLink(
-                row.route,
-                { _tag: "routed_discriminator", isRouted: row.isRouted },
-                "open.migrate.metadata-route"
-              )
-            } catch (cause) {
-              if (Schema.is(WorkStoreError)(cause)) throw cause
-              throw new WorkStoreError({ cause, operation: "open.migrate.metadata-route" })
+          ).all(cursor, pageSize)
+        const rows = Schema.decodeUnknownSync(Schema.Array(CoordinatorMetadataRouteRow))(input)
+        for (const row of rows) {
+          try {
+            const isLegacyUnroutedOrphan = row.activityIdempotencyKey === null && row.command === null &&
+              row.isRouted === null && row.route === null && row.hasWorkLink === 0
+            if (isLegacyUnroutedOrphan) continue
+            if (
+              row.activityIdempotencyKey === null || row.command === null ||
+              row.route === null || row.isRouted === null
+            ) {
+              throw new WorkStoreError({ cause: row, operation: "open.migrate.metadata-route" })
             }
+            requireCoordinatorRouteBinding(
+              row.command,
+              row.activityIdempotencyKey,
+              row.route,
+              row.hasWorkLink === 1,
+              { _tag: "routed_discriminator", isRouted: row.isRouted },
+              "open.migrate.metadata-route"
+            )
+          } catch (cause) {
+            if (Schema.is(WorkStoreError)(cause)) throw cause
+            throw new WorkStoreError({ cause, operation: "open.migrate.metadata-route" })
           }
-          const last = rows.at(-1)
-          if (rows.length < pageSize || last === undefined) break
-          cursor = last.rowId
         }
-        const invalidRoutedMetadata = Schema.decodeUnknownSync(Schema.Array(RoutedMetadataCardinalityRow))(
-          database.prepare(
-            `SELECT dispatch.dispatch_request_id AS dispatchRequestId,
+        const last = rows.at(-1)
+        if (rows.length < pageSize || last === undefined) break
+        cursor = last.rowId
+      }
+      const invalidRoutedMetadata = Schema.decodeUnknownSync(Schema.Array(RoutedMetadataCardinalityRow))(
+        database.prepare(
+          `SELECT dispatch.dispatch_request_id AS dispatchRequestId,
                COUNT(metadata.dispatch_request_id) AS metadataCount
              FROM orchestrator_dispatches AS dispatch
              LEFT JOIN orchestrator_dispatch_metadata AS metadata
@@ -1072,14 +1092,13 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
              GROUP BY dispatch.dispatch_request_id
              HAVING COUNT(metadata.dispatch_request_id) <> 1
              LIMIT 1`
-          ).all()
-        )[0]
-        if (invalidRoutedMetadata !== undefined) {
-          throw new WorkStoreError({
-            cause: invalidRoutedMetadata,
-            operation: "open.migrate.routed-metadata"
-          })
-        }
+        ).all()
+      )[0]
+      if (invalidRoutedMetadata !== undefined) {
+        throw new WorkStoreError({
+          cause: invalidRoutedMetadata,
+          operation: "open.migrate.routed-metadata"
+        })
       }
     }
     database.exec("COMMIT")

@@ -233,6 +233,37 @@ export const coordinatorRouteRequiresWorkLink = (
   operation: string
 ): boolean => decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation).model === "gpt-5.6-sol"
 
+/** Validates the persisted command, route, and Work-link form as one durable dispatch binding. */
+export const requireCoordinatorRouteBinding = (
+  commandText: string,
+  expectedActivityIdempotencyKey: string,
+  routeText: string,
+  hasWorkLink: boolean,
+  storageAuthority: CoordinatorRouteStorageAuthority,
+  operation: string
+): CoordinatorRoute => {
+  const route = decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation)
+  try {
+    const command = Schema.decodeUnknownSync(CoordinatorCommand)(JSON.parse(commandText))
+    const validBinding = command.activityIdempotencyKey === expectedActivityIdempotencyKey &&
+      command.payload.kind === "agent.delegate" &&
+      (route.model === "gpt-5.6-luna"
+        ? !hasWorkLink &&
+          ((command.payload.mode === "consult" && route.reasoningEffort === "medium") ||
+            (command.payload.mode === "transition_summary" && route.reasoningEffort === "low"))
+        : hasWorkLink &&
+          (command.payload.mode === "review" || command.payload.mode === "work") &&
+          command.payload.channel === undefined)
+    if (!validBinding) {
+      throw new WorkStoreError({ cause: { command, hasWorkLink, route }, operation })
+    }
+  } catch (cause) {
+    if (Schema.is(WorkStoreError)(cause)) throw cause
+    throw new WorkStoreError({ cause, operation })
+  }
+  return route
+}
+
 /** Validates persisted route authority before a Work-link replica is upgraded. */
 export const requireCoordinatorRouteAuthority = (
   commandText: string,
@@ -242,22 +273,16 @@ export const requireCoordinatorRouteAuthority = (
   storageAuthority: CoordinatorRouteStorageAuthority,
   operation: string
 ): CoordinatorRoute => {
-  const route = decodeCoordinatorRouteAuthority(routeText, storageAuthority, operation)
-  try {
-    const command = Schema.decodeUnknownSync(CoordinatorCommand)(JSON.parse(commandText))
-    if (
-      command.activityIdempotencyKey !== expectedActivityIdempotencyKey ||
-      command.payload.kind !== "agent.delegate" ||
-      (command.payload.mode !== "review" && command.payload.mode !== "work") ||
-      command.payload.channel !== undefined ||
-      route.model !== "gpt-5.6-sol" ||
-      (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId))
-    ) {
-      throw new WorkStoreError({ cause: { command, lineage, route }, operation })
-    }
-  } catch (cause) {
-    if (Schema.is(WorkStoreError)(cause)) throw cause
-    throw new WorkStoreError({ cause, operation })
+  const route = requireCoordinatorRouteBinding(
+    commandText,
+    expectedActivityIdempotencyKey,
+    routeText,
+    true,
+    storageAuthority,
+    operation
+  )
+  if (route.linkedRequestId !== null && !lineage.includes(route.linkedRequestId)) {
+    throw new WorkStoreError({ cause: { lineage, route }, operation })
   }
   return route
 }

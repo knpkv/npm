@@ -33,7 +33,8 @@ import {
   type CoordinatorRouteStorageAuthority,
   requireCoordinatorFailedLunaAuthority,
   requireCoordinatorLifecycleAuthority,
-  requireCoordinatorRouteAuthority
+  requireCoordinatorRouteAuthority,
+  requireCoordinatorRouteBinding
 } from "./internal/coordinator-authority.js"
 import {
   currentDecisionHandoffEquivalent,
@@ -146,7 +147,10 @@ const RoutedMetadataCardinalityRow = Schema.Struct({
   metadataCount: Schema.Number
 })
 const CoordinatorMetadataRouteRow = Schema.Struct({
+  activityIdempotencyKey: Schema.NullOr(Schema.String),
+  command: Schema.NullOr(Schema.String),
   dispatchRequestId: Schema.String,
+  hasWorkLink: Schema.Literals([0, 1]),
   isRouted: Schema.NullOr(Schema.Literals([0, 1])),
   route: Schema.NullOr(Schema.String),
   rowId: Schema.String
@@ -1386,18 +1390,24 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             ? sql`
               SELECT CAST(metadata.rowid AS TEXT) AS "rowId",
                 metadata.dispatch_request_id AS "dispatchRequestId",
-                dispatch.is_routed AS "isRouted", metadata.route
+                dispatch.activity_idempotency_key AS "activityIdempotencyKey",
+                dispatch.command, dispatch.is_routed AS "isRouted",
+                CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS "hasWorkLink",
+                metadata.route
               FROM orchestrator_dispatch_metadata AS metadata
-              JOIN orchestrator_dispatches AS dispatch
+              LEFT JOIN orchestrator_dispatches AS dispatch
                 ON dispatch.dispatch_request_id = metadata.dispatch_request_id
               ORDER BY metadata.rowid ASC LIMIT ${pageSize}
             `
             : sql`
               SELECT CAST(metadata.rowid AS TEXT) AS "rowId",
                 metadata.dispatch_request_id AS "dispatchRequestId",
-                dispatch.is_routed AS "isRouted", metadata.route
+                dispatch.activity_idempotency_key AS "activityIdempotencyKey",
+                dispatch.command, dispatch.is_routed AS "isRouted",
+                CASE WHEN metadata.work_link IS NULL THEN 0 ELSE 1 END AS "hasWorkLink",
+                metadata.route
               FROM orchestrator_dispatch_metadata AS metadata
-              JOIN orchestrator_dispatches AS dispatch
+              LEFT JOIN orchestrator_dispatches AS dispatch
                 ON dispatch.dispatch_request_id = metadata.dispatch_request_id
               WHERE metadata.rowid > CAST(${cursor} AS INTEGER)
               ORDER BY metadata.rowid ASC LIMIT ${pageSize}
@@ -1407,18 +1417,29 @@ export const makeSqliteWorkBridge = (sql: SqlClientService): SqliteWorkBridge =>
             )
           yield* Effect.forEach(rows, (row) =>
             Effect.gen(function*() {
-              if (row.route === null || row.isRouted === null) {
+              const isLegacyUnroutedOrphan = row.activityIdempotencyKey === null && row.command === null &&
+                row.isRouted === null && row.route === null && row.hasWorkLink === 0
+              if (isLegacyUnroutedOrphan) return
+              if (
+                row.activityIdempotencyKey === null || row.command === null ||
+                row.route === null || row.isRouted === null
+              ) {
                 return yield* new WorkStoreError({
                   cause: row,
                   operation: "sql-work.initialize.metadata-route"
                 })
               }
+              const activityIdempotencyKey = row.activityIdempotencyKey
+              const command = row.command
               const route = row.route
               const isRouted = row.isRouted
               yield* Effect.try({
                 try: () =>
-                  coordinatorRouteRequiresWorkLink(
+                  requireCoordinatorRouteBinding(
+                    command,
+                    activityIdempotencyKey,
                     route,
+                    row.hasWorkLink === 1,
                     { _tag: "routed_discriminator", isRouted },
                     "sql-work.initialize.metadata-route"
                   ),

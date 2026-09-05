@@ -62,8 +62,9 @@ the Work lane compare-and-set, `agentHierarchy.agent`, canonical Connect
 target, and goal checkpoint in one SQLite transaction. Exact replay survives a
 restart; a changed worker, refreshed accepted revision, or stale lane authority
 is a typed conflict, never a sequential repair.
-Work v1 migration uses the same authority: routed metadata must agree with the
-persisted dispatch discriminator, and a linked Sol route must name an exact
+Work v1 migration uses the same authority: routed metadata must bind its
+persisted activity key and command to the exact route, discriminator, and
+Work-link form; routed metadata without its dispatch fails closed. A linked Sol route must name an exact
 terminally failed Luna parent with a complete lifecycle. Work preflights partial
 coordinator table sets before coordinator schema creation and before either v1
 or v2 handoff readback; older dispatch tables without the discriminator retain

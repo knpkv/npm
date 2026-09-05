@@ -142,7 +142,7 @@ const persistMigrationLifecycle = (
   dispatchRequestId: string,
   runningAt: number,
   status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed",
-  mode: "consult" | "work"
+  mode: "consult" | "transition_summary" | "work"
 ): void => {
   const activityIdempotencyKey = `activity:${dispatchRequestId}`
   const acceptedAt = Math.max(0, runningAt - 2)
@@ -2811,6 +2811,18 @@ database.close()`,
         persistMigrationLifecycle(lunaNullWorkLink, "dispatch:luna-null-work-link", 20, "queued", "consult")
         lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
           .run("dispatch:luna-null-work-link", JSON.stringify(lunaRoute))
+        persistMigrationLifecycle(
+          lunaNullWorkLink,
+          "dispatch:transition-summary-null-work-link",
+          20,
+          "queued",
+          "transition_summary"
+        )
+        lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
+          .run(
+            "dispatch:transition-summary-null-work-link",
+            JSON.stringify({ ...lunaRoute, reasoningEffort: "low" })
+          )
         lunaNullWorkLink.close()
         yield* withDatabase(lunaNullWorkLinkPath, Orchestrator)
 
@@ -2843,6 +2855,44 @@ database.close()`,
             }
           })
         }
+
+        const mismatchedLunaCommandPath = join(root, "mismatched-luna-command.sqlite")
+        copyFileSync(lunaNullWorkLinkPath, mismatchedLunaCommandPath)
+        const mismatchedLunaCommand = new DatabaseSync(mismatchedLunaCommandPath)
+        mismatchedLunaCommand.prepare(
+          "UPDATE orchestrator_dispatches SET command = ? WHERE dispatch_request_id = ?"
+        ).run(
+          JSON.stringify({
+            activityIdempotencyKey: "activity:dispatch:luna-null-work-link",
+            actor: "coordinator",
+            kind: "fleet.job",
+            payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+          }),
+          "dispatch:luna-null-work-link"
+        )
+        mismatchedLunaCommand.close()
+        expect(yield* Effect.result(withDatabase(mismatchedLunaCommandPath, Orchestrator))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-route" },
+            operation: "initialize.work"
+          }
+        })
+
+        const orphanLunaMetadataPath = join(root, "orphan-luna-metadata.sqlite")
+        copyFileSync(lunaNullWorkLinkPath, orphanLunaMetadataPath)
+        const orphanLunaMetadata = new DatabaseSync(orphanLunaMetadataPath)
+        orphanLunaMetadata.exec("PRAGMA foreign_keys = OFF")
+        orphanLunaMetadata.prepare("DELETE FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
+          .run("dispatch:luna-null-work-link")
+        orphanLunaMetadata.close()
+        expect(yield* Effect.result(withDatabase(orphanLunaMetadataPath, Orchestrator))).toMatchObject({
+          failure: {
+            _tag: "OrchestratorStorageError",
+            cause: { _tag: "WorkStoreError", operation: "sql-work.initialize.metadata-route" },
+            operation: "initialize.work"
+          }
+        })
 
         for (
           const { name, workLink } of [
@@ -2877,7 +2927,15 @@ database.close()`,
              (dispatch_request_id, idempotency_key, activity_idempotency_key, command,
               accepted_at, is_routed, status)
            SELECT 'dispatch:luna-history:' || value, 'idempotency:luna-history:' || value,
-             'activity:luna-history:' || value, '{}', 20, 1, 'queued'
+             'activity:luna-history:' || value,
+             json_object(
+               'kind', 'fleet.job', 'actor', 'coordinator',
+               'activityIdempotencyKey', 'activity:luna-history:' || value,
+               'payload', json_object(
+                 'kind', 'agent.delegate', 'mode', 'consult',
+                 'prompt', 'Migrate', 'repository', '/repo'
+               )
+             ), 20, 1, 'queued'
            FROM history`
         ).run()
         lunaHistory.prepare(

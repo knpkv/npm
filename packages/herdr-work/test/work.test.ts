@@ -332,7 +332,7 @@ const persistCoordinatorLifecycle = (
   dispatchRequestId: string,
   runningAt: number,
   status: "queued" | "running" | "settled" | "delivery_failed" | "task_failed",
-  mode: "consult" | "work"
+  mode: "consult" | "transition_summary" | "work"
 ): void => {
   const activityIdempotencyKey = `activity:${dispatchRequestId}`
   const acceptedAt = Math.max(0, runningAt - 2)
@@ -3396,6 +3396,18 @@ database.close()`,
       persistCoordinatorLifecycle(lunaNullWorkLink, "dispatch:luna-null-work-link", 20, "queued", "consult")
       lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
         .run("dispatch:luna-null-work-link", JSON.stringify(migrationLunaRoute))
+      persistCoordinatorLifecycle(
+        lunaNullWorkLink,
+        "dispatch:transition-summary-null-work-link",
+        20,
+        "queued",
+        "transition_summary"
+      )
+      lunaNullWorkLink.prepare("INSERT INTO orchestrator_dispatch_metadata VALUES (?, ?, NULL)")
+        .run(
+          "dispatch:transition-summary-null-work-link",
+          JSON.stringify({ ...migrationLunaRoute, reasoningEffort: "low" })
+        )
       lunaNullWorkLink.close()
       const lunaNullOpened = yield* openScopedStore(lunaNullWorkLinkPath)
       lunaNullOpened.close()
@@ -3430,6 +3442,69 @@ database.close()`,
         })
       }
 
+      const mismatchedLunaCommandPath = join(directory, "mismatched-luna-command.sqlite")
+      copyFileSync(lunaNullWorkLinkPath, mismatchedLunaCommandPath)
+      const mismatchedLunaCommand = new DatabaseSync(mismatchedLunaCommandPath)
+      mismatchedLunaCommand.prepare(
+        "UPDATE orchestrator_dispatches SET command = ? WHERE dispatch_request_id = ?"
+      ).run(
+        JSON.stringify({
+          activityIdempotencyKey: "activity:dispatch:luna-null-work-link",
+          actor: "coordinator",
+          kind: "fleet.job",
+          payload: { kind: "agent.delegate", mode: "work", prompt: "Migrate", repository: "/repo" }
+        }),
+        "dispatch:luna-null-work-link"
+      )
+      mismatchedLunaCommand.close()
+      expect(yield* safelyOpenResult(mismatchedLunaCommandPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-route" },
+          operation: "open.database"
+        }
+      })
+
+      const orphanLunaMetadataPath = join(directory, "orphan-luna-metadata.sqlite")
+      copyFileSync(lunaNullWorkLinkPath, orphanLunaMetadataPath)
+      const orphanLunaMetadata = new DatabaseSync(orphanLunaMetadataPath)
+      orphanLunaMetadata.exec("PRAGMA foreign_keys = OFF")
+      orphanLunaMetadata.prepare("DELETE FROM orchestrator_dispatches WHERE dispatch_request_id = ?")
+        .run("dispatch:luna-null-work-link")
+      orphanLunaMetadata.close()
+      expect(yield* safelyOpenResult(orphanLunaMetadataPath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-route" },
+          operation: "open.database"
+        }
+      })
+
+      const coordinatorOnlyRoutePath = join(directory, "coordinator-only-malformed-route.sqlite")
+      copyFileSync(lunaNullWorkLinkPath, coordinatorOnlyRoutePath)
+      const coordinatorOnlyRoute = new DatabaseSync(coordinatorOnlyRoutePath)
+      coordinatorOnlyRoute.exec(`
+        DELETE FROM work_agent_bindings;
+        DELETE FROM work_dispatch_handoffs;
+        DELETE FROM orchestrator_dispatch_metadata
+          WHERE dispatch_request_id <> 'dispatch:luna-null-work-link';
+        DELETE FROM orchestrator_events
+          WHERE dispatch_request_id <> 'dispatch:luna-null-work-link';
+        DELETE FROM orchestrator_dispatches
+          WHERE dispatch_request_id <> 'dispatch:luna-null-work-link';
+        DROP TABLE work_decision_handoffs;
+        UPDATE orchestrator_dispatch_metadata SET route = '{'
+          WHERE dispatch_request_id = 'dispatch:luna-null-work-link';
+      `)
+      coordinatorOnlyRoute.close()
+      expect(yield* safelyOpenResult(coordinatorOnlyRoutePath)).toMatchObject({
+        failure: {
+          _tag: "WorkStoreError",
+          cause: { _tag: "WorkStoreError", operation: "open.migrate.metadata-route" },
+          operation: "open.database"
+        }
+      })
+
       for (
         const { name, workLink } of [
           { name: "object", workLink: "{}" },
@@ -3463,7 +3538,15 @@ database.close()`,
            (dispatch_request_id, idempotency_key, activity_idempotency_key, command,
             accepted_at, is_routed, status)
          SELECT 'dispatch:luna-history:' || value, 'idempotency:luna-history:' || value,
-           'activity:luna-history:' || value, '{}', 20, 1, 'queued'
+           'activity:luna-history:' || value,
+           json_object(
+             'kind', 'fleet.job', 'actor', 'coordinator',
+             'activityIdempotencyKey', 'activity:luna-history:' || value,
+             'payload', json_object(
+               'kind', 'agent.delegate', 'mode', 'consult',
+               'prompt', 'Migrate', 'repository', '/repo'
+             )
+           ), 20, 1, 'queued'
          FROM history`
       ).run()
       lunaHistory.prepare(

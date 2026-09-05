@@ -67,12 +67,13 @@ immutable operation-ledger replica, and rejects a lane head older than the
 activated binding; at the binding revision the whole claim must still be exact.
 Luna metadata must retain a null Work link and does not consume the bounded
 Work-decision scan; malformed or non-null Luna links fail closed. Every modern
-dispatch/metadata pair must carry a schema-valid route and the routed
-discriminator, and every modern routed dispatch must retain exactly one metadata row. Standalone Work
+dispatch/metadata pair must bind its persisted activity key and command to the
+exact route, routed discriminator, and Work-link form; routed metadata without
+its dispatch fails closed, and every modern routed dispatch must retain exactly one metadata row. Standalone Work
 databases with no coordinator tables remain valid; a partial coordinator table set fails before
 either v1 migration or v2 handoff readback. The SQL adapter creates or upgrades
 Work tables in that same fail-closed transaction and ignores unrelated legacy
-binding or unrouted metadata rows. Current v2 dispatch and metadata
+binding or null-route orphan metadata rows. Current v2 dispatch and metadata
 replicas must decode and agree exactly with the authoritative decision handoff;
 dispatch lineage may remain a strict subset of the decision's dispatch set.
 Changed content for the same session
