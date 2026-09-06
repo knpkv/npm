@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-work",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Durable fleet work checkpoints and departure-board projections",
   "license": "MIT",
   "author": "knpkv",

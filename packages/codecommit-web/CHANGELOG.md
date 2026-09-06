@@ -1,5 +1,19 @@
 # @knpkv/codecommit-web
 
+## 0.17.0
+
+### Minor Changes
+
+- [#408](https://github.com/knpkv/npm/pull/408) [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e) Thanks [@konopkov](https://github.com/konopkov)! - Share typed, redacted browser-pairing credentials and transport primitives between Control Center and CodeCommit.
+
+### Patch Changes
+
+- Updated dependencies [[`adfad78`](https://github.com/knpkv/npm/commit/adfad78662f20b698a2c6d76a70e824c52e22029), [`fa695f0`](https://github.com/knpkv/npm/commit/fa695f0179c67701e468fcedcd07c4b738c9734a), [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e)]:
+  - @knpkv/rly@0.6.0
+  - @knpkv/browser-pairing@0.2.0
+  - @knpkv/relay-product@0.1.1
+  - @knpkv/review@0.2.2
+
 ## 0.16.0
 
 ### Minor Changes
