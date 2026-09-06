@@ -74,8 +74,8 @@ const directory = `
   <section class="connect-agents" aria-label="Herdr agents">
     <label class="connect-search"><span>Find agent</span><input placeholder="Name, host, state…" type="search"></label>
     <div class="connect-filter-row">
-      <div class="connect-group-filter"><button aria-pressed="true">All hosts</button><button>SER8</button></div>
-      <div class="connect-status-filter"><button aria-pressed="true">All</button><button>Working</button><button>Attention</button><button>Ready</button><button>Finished</button></div>
+      <div class="connect-filter-set"><span class="connect-filter-label" id="host-filter-label">Host</span><div aria-labelledby="host-filter-label" class="connect-group-filter" role="group"><button aria-pressed="true">All hosts</button><button>SER8</button></div></div>
+      <div class="connect-filter-set"><span class="connect-filter-label" id="status-filter-label">Status</span><div aria-labelledby="status-filter-label" class="connect-status-filter" role="group"><button aria-pressed="true">All</button><button>Working</button><button>Attention</button><button>Ready</button><button>Finished</button></div></div>
     </div>
     <div class="connect-agent-tree">
       <div>
@@ -220,7 +220,7 @@ test("390x844 keeps directory chrome dense and the full list reachable without a
   expect((await header.boundingBox())?.height).toBeLessThanOrEqual(48)
   expect((await navigation.boundingBox())?.height).toBeLessThanOrEqual(32)
   expect((await intro.boundingBox())?.height).toBeLessThanOrEqual(64)
-  expect((await filters.boundingBox())?.height).toBeLessThanOrEqual(38)
+  expect((await filters.boundingBox())?.height).toBeLessThanOrEqual(128)
   expect(await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)).toBe(0)
   await expect
     .poll(() => agents.evaluate((element) => element.scrollHeight - element.clientHeight))

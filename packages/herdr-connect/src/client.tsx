@@ -8,7 +8,7 @@ import * as Atom from "effect/unstable/reactivity/Atom"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { FitAddon, init, Terminal } from "ghostty-web"
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
 import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
 import {
@@ -50,6 +50,14 @@ import { WorkSnapshots } from "@knpkv/herdr-work/model"
 import { ConnectAgentIdentity } from "./work-goal-link-view.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoalResolution } from "./work-goal-link.js"
 import { WorkPollMount } from "./work-poll.js"
+import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
+import {
+  enterTerminalWorkspace,
+  returnToDirectoryWorkspace,
+  type ConnectWorkspaceElements,
+  type ConnectWorkspaceFocusFailureReason,
+  type ConnectWorkspaceFocusTransition
+} from "./workspace-focus.js"
 
 class ConnectNetworkError extends Schema.TaggedError<ConnectNetworkError>()("ConnectNetworkError", {
   detail: Schema.String
@@ -246,7 +254,7 @@ type TerminalInputCommand = Extract<TerminalClientCommand, { readonly type: "ter
 type TerminalKeyboardCallbacks = {
   readonly getModifier: () => TerminalModifier | null
   readonly setModifier: (modifier: TerminalModifier | null) => void
-  readonly setTerminalFocus: (focus: () => void) => () => void
+  readonly setTerminalFocus: (target: HTMLElement, focus: () => void) => () => void
   readonly reportError: (error: TerminalInputApplication) => void
   readonly setInputSender: (sendInput: (command: TerminalInputCommand) => boolean) => () => void
   readonly setCursorModeReader: (read: () => TerminalCursorMode) => () => void
@@ -325,7 +333,7 @@ const terminalWorker = (
         })
       }
       applyTerminalInputIdentity(textarea)
-      const releaseTerminalFocus = keyboard.setTerminalFocus(() => terminal.terminal.focus())
+      const releaseTerminalFocus = keyboard.setTerminalFocus(textarea, () => terminal.terminal.focus())
       yield* Effect.addFinalizer(() => Effect.sync(releaseTerminalFocus))
       let ready = false
       let socket: WebSocket | null = null
@@ -519,9 +527,6 @@ const terminalWorker = (
               })
               pendingResize = null
             }
-            if (window.matchMedia("(pointer: fine)").matches) {
-              terminal.terminal.focus()
-            }
             update({ _tag: "connected", agent })
           }
         }
@@ -567,9 +572,17 @@ export const ConnectSurface = ({
   const [selectedKey, setSelectedKey] = useAtom(atoms.selectedKey)
   const work = useAtomValue(atoms.work)
   const preferenceApplied = useRef(false)
-  const requestId = useRef(0)
+  const requestId = useRef(connectionRequest?.id ?? 0)
+  const directorySearchRef = useRef<HTMLInputElement>(null)
+  const directoryViewportRef = useRef<HTMLDivElement>(null)
+  const shellRef = useRef<HTMLDivElement>(null)
+  const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null)
+  const terminalActiveRequestRef = useRef<number | null>(null)
+  const terminalBackRef = useRef<HTMLButtonElement>(null)
   const terminalRef = useRef<HTMLDivElement>(null)
+  const terminalFocusTargetRef = useRef<HTMLElement>(null)
   const terminalViewportRef = useRef<HTMLDivElement>(null)
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const terminalInputRef = useRef<(command: TerminalInputCommand) => boolean>(() => false)
   const terminalInputOwnerRef = useRef<symbol | null>(null)
   const terminalFocusRef = useRef<() => void>(() => {})
@@ -578,60 +591,166 @@ export const ConnectSurface = ({
   const terminalModifierRef = useRef<TerminalModifier | null>(null)
   const [terminalModifier, setTerminalModifier] = useState<TerminalModifier | null>(null)
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
+  const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
+
+  const attachShell = useCallback((element: HTMLDivElement | null): void => {
+    shellRef.current = element
+    setShellElement(element)
+  }, [])
+
+  const workspaceElements = (): ConnectWorkspaceElements | null => {
+    const directoryScreen = directoryViewportRef.current
+    const terminalScreen = terminalViewportRef.current
+    const workspace = workspaceRef.current
+    return directoryScreen === null || terminalScreen === null || workspace === null
+      ? null
+      : { directory: directoryScreen, terminal: terminalScreen, workspace }
+  }
+
+  const directoryFocusTarget = (agent: ConnectAgent): HTMLElement | null => {
+    const directoryScreen = directoryViewportRef.current
+    if (directoryScreen === null) return null
+    const key = connectAgentKey(agent)
+    return (
+      [...directoryScreen.querySelectorAll<HTMLButtonElement>(".connect-agent")].find(
+        (button) => button.dataset.agentKey === key
+      ) ??
+      directorySearchRef.current ??
+      directoryScreen
+    )
+  }
+
+  const restoreDirectoryFocus = (agent: ConnectAgent): ConnectWorkspaceFocusTransition => {
+    const elements = workspaceElements()
+    const focusTarget = directoryFocusTarget(agent)
+    if (elements !== null && focusTarget !== null) return returnToDirectoryWorkspace(elements, focusTarget)
+    const terminalScreen = terminalViewportRef.current
+    const activeElement = Schema.decodeUnknownResult(Schema.instanceOf(HTMLElement))(window.document.activeElement)
+    if (terminalScreen !== null && Result.isSuccess(activeElement) && terminalScreen.contains(activeElement.success)) {
+      activeElement.success.blur()
+    }
+    return { _tag: "failed", reason: "detached_element" }
+  }
 
   useEffect(() => {
     const container = terminalRef.current
     if (connectionRequest === null || container === null) return
+    const terminalRequestId = connectionRequest.id
+    const workerGuard = makeTerminalWorkerGuard(terminalRequestId)
+    const releaseTerminalFocus = (): void => {
+      workerGuard.release()
+      terminalFocusRef.current = () => {}
+      terminalFocusTargetRef.current = null
+      terminalActiveRequestRef.current = null
+    }
+    const invalidateTerminalRequest = (): void => {
+      if (requestId.current === terminalRequestId) requestId.current += 1
+      setConnectionRequest(null)
+    }
     const fiber = Effect.runFork(
-      terminalWorker(container, connectionRequest.agent, setConnection, {
-        getModifier: () => terminalModifierRef.current,
-        setTerminalFocus: (focus) => {
-          terminalFocusRef.current = focus
-          return () => {
-            if (terminalFocusRef.current === focus) terminalFocusRef.current = () => {}
+      terminalWorker(
+        container,
+        connectionRequest.agent,
+        (state) => {
+          if (!workerGuard.accepts(requestId.current)) return
+          if (state._tag === "connected") {
+            const elements = workspaceElements()
+            const focusTarget = window.matchMedia("(pointer: fine)").matches
+              ? terminalFocusTargetRef.current
+              : terminalBackRef.current
+            if (elements === null || focusTarget === null) {
+              releaseTerminalFocus()
+              invalidateTerminalRequest()
+              setConnection({
+                _tag: "failed",
+                agent: state.agent,
+                detail: "terminal focus transition failed: detached_element"
+              })
+              return
+            }
+            const transition = enterTerminalWorkspace(elements, focusTarget)
+            if (transition._tag === "failed") {
+              releaseTerminalFocus()
+              invalidateTerminalRequest()
+              setConnection({
+                _tag: "failed",
+                agent: state.agent,
+                detail: `terminal focus transition failed: ${transition.reason}`
+              })
+              return
+            }
+            setWorkspaceFocusFailure(null)
+            terminalActiveRequestRef.current = terminalRequestId
+          } else if (state._tag === "closed" || state._tag === "failed") {
+            if (terminalActiveRequestRef.current === terminalRequestId) {
+              const transition = restoreDirectoryFocus(state.agent)
+              if (transition._tag === "failed") {
+                setWorkspaceFocusFailure(transition.reason)
+              } else {
+                setWorkspaceFocusFailure(null)
+              }
+              terminalActiveRequestRef.current = null
+            }
+            invalidateTerminalRequest()
           }
+          setConnection(state)
         },
-        reportError: () => setTerminalKeyError("That modifier combination is not supported."),
-        setInputSender: (sendInput) => {
-          const owner = Symbol("terminal-input-sender")
-          terminalInputOwnerRef.current = owner
-          terminalInputRef.current = sendInput
-          return () => {
-            if (terminalInputOwnerRef.current !== owner) return
-            terminalInputOwnerRef.current = null
-            terminalInputRef.current = () => false
+        {
+          getModifier: () => terminalModifierRef.current,
+          setTerminalFocus: (target, focus) => {
+            terminalFocusTargetRef.current = target
+            terminalFocusRef.current = focus
+            return () => {
+              if (terminalFocusRef.current === focus) terminalFocusRef.current = () => {}
+              if (terminalFocusTargetRef.current === target) terminalFocusTargetRef.current = null
+            }
+          },
+          reportError: () => setTerminalKeyError("That modifier combination is not supported."),
+          setInputSender: (sendInput) => {
+            const owner = Symbol("terminal-input-sender")
+            terminalInputOwnerRef.current = owner
+            terminalInputRef.current = sendInput
+            return () => {
+              if (terminalInputOwnerRef.current !== owner) return
+              terminalInputOwnerRef.current = null
+              terminalInputRef.current = () => false
+            }
+          },
+          setCursorModeReader: (read) => {
+            const owner = Symbol("terminal-cursor-mode-reader")
+            terminalCursorModeOwnerRef.current = owner
+            terminalCursorModeReaderRef.current = read
+            return () => {
+              if (terminalCursorModeOwnerRef.current !== owner) return
+              terminalCursorModeOwnerRef.current = null
+              terminalCursorModeReaderRef.current = () => "normal"
+            }
+          },
+          setModifier: (modifier) => {
+            terminalModifierRef.current = modifier
+            setTerminalModifier((current) => (current === modifier ? current : modifier))
+            setTerminalKeyError(null)
           }
-        },
-        setCursorModeReader: (read) => {
-          const owner = Symbol("terminal-cursor-mode-reader")
-          terminalCursorModeOwnerRef.current = owner
-          terminalCursorModeReaderRef.current = read
-          return () => {
-            if (terminalCursorModeOwnerRef.current !== owner) return
-            terminalCursorModeOwnerRef.current = null
-            terminalCursorModeReaderRef.current = () => "normal"
-          }
-        },
-        setModifier: (modifier) => {
-          terminalModifierRef.current = modifier
-          setTerminalModifier((current) => (current === modifier ? current : modifier))
-          setTerminalKeyError(null)
         }
-      })
+      )
     )
     return () => {
+      workerGuard.release()
       Effect.runFork(Fiber.interrupt(fiber))
       container.replaceChildren()
     }
   }, [connectionRequest, setConnection])
 
-  const terminalConnected = connection._tag === "connected"
-  useEffect(() => {
+  // Size the hidden terminal before its first visible frame so Fleet navigation never overlaps it.
+  useLayoutEffect(() => {
     const room = terminalViewportRef.current
-    if (!terminalConnected || room === null) return
-    return bindTerminalViewport(room, window)
-  }, [terminalConnected])
+    if (connectionRequest === null || room === null) return
+    if (embedded && shellElement === null && shellRef.current === null) return
+    const topBoundary = embedded ? (shellElement ?? shellRef.current) : undefined
+    if (topBoundary === null) return
+    return bindTerminalViewport(room, window, topBoundary)
+  }, [connectionRequest, embedded, shellElement])
 
   const current = AsyncResult.isSuccess(directory)
     ? directory.value
@@ -657,11 +776,14 @@ export const ConnectSurface = ({
     terminalInputOwnerRef.current = null
     terminalInputRef.current = () => false
     terminalFocusRef.current = () => {}
+    terminalFocusTargetRef.current = null
     terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
+    terminalActiveRequestRef.current = null
     setTerminalModifier(null)
     setTerminalKeyError(null)
+    setWorkspaceFocusFailure(null)
     setSelectedKey(key)
     setConnection({ _tag: "connecting", agent })
     requestId.current += 1
@@ -715,16 +837,33 @@ export const ConnectSurface = ({
   }
 
   const disconnect = (): void => {
+    let nextConnection: ConnectionState = { _tag: "idle" }
+    let nextFocusFailure: ConnectWorkspaceFocusFailureReason | null = null
+    if (connection._tag !== "idle" && (connection._tag === "connected" || workspaceFocusFailure === "focus_rejected")) {
+      const transition = restoreDirectoryFocus(connection.agent)
+      if (transition._tag === "failed") {
+        nextConnection = {
+          _tag: "failed",
+          agent: connection.agent,
+          detail: `terminal focus transition failed: ${transition.reason}`
+        }
+        nextFocusFailure = transition.reason
+      }
+    }
+    requestId.current += 1
+    terminalActiveRequestRef.current = null
+    setConnection(nextConnection)
     setConnectionRequest(null)
-    setConnection({ _tag: "idle" })
     terminalInputOwnerRef.current = null
     terminalInputRef.current = () => false
     terminalFocusRef.current = () => {}
+    terminalFocusTargetRef.current = null
     terminalCursorModeOwnerRef.current = null
     terminalCursorModeReaderRef.current = () => "normal"
     terminalModifierRef.current = null
     setTerminalModifier(null)
     setTerminalKeyError(null)
+    setWorkspaceFocusFailure(nextFocusFailure)
   }
 
   const changeTerminalModifier = (modifier: TerminalModifier): void => {
@@ -810,6 +949,7 @@ export const ConnectSurface = ({
               firstAgent.focus()
             }}
             placeholder="Name, host, state…"
+            ref={directorySearchRef}
             type="search"
             value={query}
           />
@@ -848,6 +988,11 @@ export const ConnectSurface = ({
         ) : preferenceError === null ? null : (
           <small className="connect-preference-error">Selection memory unavailable · {preferenceError}</small>
         )}
+        {workspaceFocusFailure === null || workspaceFocusFailure === "focus_rejected" ? null : (
+          <small className="connect-status-message" data-tone="critical">
+            Terminal focus transition failed · {workspaceFocusFailure}
+          </small>
+        )}
         {(current?.failures.length ?? 0) === 0 ? null : (
           <div className="connect-failures">
             {current?.failures.map((failure) => (
@@ -864,7 +1009,7 @@ export const ConnectSurface = ({
   const terminalScreen = (
     <Surface as="section" padding="none" className="terminal-stage">
       <div className="terminal-bar">
-        <button className="terminal-back" onClick={disconnect} type="button">
+        <button className="terminal-back" onClick={disconnect} ref={terminalBackRef} type="button">
           Agents
         </button>
         <div>
@@ -875,9 +1020,25 @@ export const ConnectSurface = ({
           )}
           <small>{selected === null ? "Herdr terminal" : `${selected.host} · ${selected.kind}`}</small>
         </div>
-        <StateLabel label="connected" tone="positive" size="compact" />
+        <StateLabel
+          label={
+            connection._tag === "connected"
+              ? "connected"
+              : connection._tag === "closed"
+                ? "disconnected"
+                : "unavailable"
+          }
+          tone={connection._tag === "connected" ? "positive" : connection._tag === "failed" ? "critical" : "neutral"}
+          size="compact"
+        />
       </div>
+      {workspaceFocusFailure === "focus_rejected" ? (
+        <small className="connect-status-message" data-tone="critical" role="alert">
+          Terminal focus transition failed · {workspaceFocusFailure}
+        </small>
+      ) : null}
       <TerminalKeyRail
+        disabled={connection._tag !== "connected"}
         error={terminalKeyError}
         modifier={terminalModifier}
         onFocusTerminal={() => terminalFocusRef.current()}
@@ -893,13 +1054,19 @@ export const ConnectSurface = ({
   )
 
   return (
-    <div className={embedded ? "connect-shell connect-shell-embedded" : "connect-shell"}>
+    <div
+      className={embedded ? "connect-shell connect-shell-embedded" : "connect-shell"}
+      ref={attachShell}
+      tabIndex={-1}
+    >
       <WorkPollMount atom={atoms.workPoll} />
       <ConnectWorkspace
         directory={directoryScreen}
-        mode={connection._tag === "connected" ? "terminal" : "directory"}
+        directoryViewportRef={directoryViewportRef}
+        mode={connection._tag === "connected" || workspaceFocusFailure === "focus_rejected" ? "terminal" : "directory"}
         terminal={terminalScreen}
         terminalViewportRef={terminalViewportRef}
+        workspaceRef={workspaceRef}
       />
       {roomFooter}
     </div>
