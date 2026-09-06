@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-fleet",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Typed job protocol and local authority runtime for Herdr fleets",
   "license": "MIT",
   "author": "knpkv",
