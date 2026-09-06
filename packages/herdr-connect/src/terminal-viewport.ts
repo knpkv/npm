@@ -18,8 +18,8 @@ export interface TerminalVisualViewport extends EventTarget {
 
 export interface TerminalViewportHost extends EventTarget {
   readonly document?: {
-    readonly body: { readonly style: Pick<CSSStyleDeclaration, "cssText" | "setProperty"> }
-    readonly documentElement: { readonly style: Pick<CSSStyleDeclaration, "cssText" | "setProperty"> }
+    readonly body: { readonly classList: Pick<DOMTokenList, "add" | "contains" | "remove"> }
+    readonly documentElement: { readonly classList: Pick<DOMTokenList, "add" | "contains" | "remove"> }
   }
   readonly innerHeight?: number
   readonly scrollX?: number
@@ -45,6 +45,7 @@ export const terminalViewportBindingActive = ({
 
 const viewportHeightProperty = "--connect-visual-viewport-height"
 const viewportOffsetProperty = "--connect-visual-viewport-offset"
+const documentLockClass = "connect-terminal-document-lock"
 
 interface TerminalDocumentLock {
   count: number
@@ -88,8 +89,8 @@ const acquireTerminalDocumentLock = (host: TerminalViewportHost): TerminalViewpo
     return bindTerminalDocumentRelease(host, active)
   }
 
-  const bodyStyle = document.body.style.cssText
-  const documentStyle = document.documentElement.style.cssText
+  const bodyWasLocked = document.body.classList.contains(documentLockClass)
+  const documentWasLocked = document.documentElement.classList.contains(documentLockClass)
   const scrollX = host.scrollX ?? 0
   const scrollY = host.scrollY ?? 0
   let restoring = false
@@ -102,16 +103,16 @@ const acquireTerminalDocumentLock = (host: TerminalViewportHost): TerminalViewpo
   const restore = (): void => {
     host.removeEventListener("scroll", retainScroll, true)
     terminalDocumentLocks.delete(document)
-    document.documentElement.style.cssText = documentStyle
-    document.body.style.cssText = bodyStyle
+    if (!documentWasLocked) document.documentElement.classList.remove(documentLockClass)
+    if (!bodyWasLocked) document.body.classList.remove(documentLockClass)
     host.scrollTo?.(scrollX, scrollY)
   }
   const lock: TerminalDocumentLock = { count: 1, restore }
   terminalDocumentLocks.set(document, lock)
 
   try {
-    document.documentElement.style.setProperty("overflow", "hidden")
-    document.body.style.setProperty("overflow", "hidden")
+    document.documentElement.classList.add(documentLockClass)
+    document.body.classList.add(documentLockClass)
     host.addEventListener("scroll", retainScroll, true)
   } catch (error) {
     restore()

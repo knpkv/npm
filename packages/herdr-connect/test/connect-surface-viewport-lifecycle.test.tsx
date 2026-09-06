@@ -129,8 +129,8 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
 
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-height")).toBe("248px")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-offset")).toBe("252px")
-    expect(document.documentElement.style.overflow).toBe("hidden")
-    expect(document.body.style.overflow).toBe("hidden")
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(true)
 
     agentButton.focus = () => undefined
     directory.focus = () => undefined
@@ -142,8 +142,8 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     expect(workspace.dataset.mode).toBe("terminal")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-height")).toBe("248px")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-offset")).toBe("252px")
-    expect(document.documentElement.style.overflow).toBe("hidden")
-    expect(document.body.style.overflow).toBe("hidden")
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(true)
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("focus_rejected")
 
     agentButton.focus = HTMLElement.prototype.focus
@@ -154,6 +154,8 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-height")).toBe("")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-offset")).toBe("")
     expect(document.activeElement).toBe(agentButton)
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(false)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(false)
     expect(document.documentElement.style.cssText).toBe("color: red;")
     expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
   })
@@ -182,12 +184,14 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
       for (let index = 0; index < 12; index += 1) await Promise.resolve()
     })
 
-    expect(document.documentElement.style.overflow).toBe("hidden")
-    expect(document.body.style.overflow).toBe("hidden")
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(true)
 
     await act(async () => root.unmount())
     roots.splice(roots.indexOf(root), 1)
 
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(false)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(false)
     expect(document.documentElement.style.cssText).toBe("color: red;")
     expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
   })

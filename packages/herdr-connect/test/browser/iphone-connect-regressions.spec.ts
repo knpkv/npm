@@ -156,12 +156,16 @@ test("393x500 terminal blocks iPhone focus scrolling and restores the document",
   expect(
     await page.evaluate(() => ({
       bodyStyle: document.body.style.cssText,
+      bodyUnlocked: !document.body.classList.contains("connect-terminal-document-lock"),
       documentStyle: document.documentElement.style.cssText,
+      documentUnlocked: !document.documentElement.classList.contains("connect-terminal-document-lock"),
       scrollY: window.scrollY
     }))
   ).toEqual({
     bodyStyle: "min-height: 1933px; overflow: visible; touch-action: pan-x;",
+    bodyUnlocked: true,
     documentStyle: "",
+    documentUnlocked: true,
     scrollY: before.scrollY
   })
 })
