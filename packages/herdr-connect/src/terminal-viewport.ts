@@ -23,6 +23,19 @@ export interface TerminalViewportHost extends EventTarget {
 
 export type TerminalViewportCleanup = () => void
 
+export interface TerminalViewportBindingState {
+  readonly connectionRequested: boolean
+  readonly focusRejected: boolean
+  readonly terminalConnected: boolean
+}
+
+/** Keeps geometry installed for every state that can render the fixed terminal. */
+export const terminalViewportBindingActive = ({
+  connectionRequested,
+  focusRejected,
+  terminalConnected
+}: TerminalViewportBindingState): boolean => connectionRequested || focusRejected || terminalConnected
+
 const viewportHeightProperty = "--connect-visual-viewport-height"
 const viewportOffsetProperty = "--connect-visual-viewport-offset"
 

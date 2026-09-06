@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   bindTerminalViewport,
+  terminalViewportBindingActive,
   type TerminalViewportHost,
   type TerminalVisualViewport
 } from "../src/terminal-viewport.js"
@@ -50,6 +51,15 @@ const viewportHeightProperty = "--connect-visual-viewport-height"
 const viewportOffsetProperty = "--connect-visual-viewport-offset"
 
 describe("terminal visual viewport", () => {
+  it("retains geometry while focus rejection keeps the terminal visible", () => {
+    expect(
+      terminalViewportBindingActive({ connectionRequested: false, focusRejected: true, terminalConnected: false })
+    ).toBe(true)
+    expect(
+      terminalViewportBindingActive({ connectionRequested: false, focusRejected: false, terminalConnected: false })
+    ).toBe(false)
+  })
+
   it("keeps an embedded terminal between Fleet navigation and the keyboard", () => {
     const style = new FakeStyle()
     const viewport = new FakeVisualViewport({ height: 338, offsetTop: 162 })

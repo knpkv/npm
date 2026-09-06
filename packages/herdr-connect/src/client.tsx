@@ -34,7 +34,7 @@ import {
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
-import { bindTerminalViewport } from "./terminal-viewport.js"
+import { bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
 import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
 import {
@@ -742,15 +742,21 @@ export const ConnectSurface = ({
     }
   }, [connectionRequest, setConnection])
 
+  const terminalViewportActive = terminalViewportBindingActive({
+    connectionRequested: connectionRequest !== null,
+    focusRejected: workspaceFocusFailure === "focus_rejected",
+    terminalConnected: connection._tag === "connected"
+  })
+
   // Size the hidden terminal before its first visible frame so Fleet navigation never overlaps it.
   useLayoutEffect(() => {
     const room = terminalViewportRef.current
-    if (connectionRequest === null || room === null) return
+    if (!terminalViewportActive || room === null) return
     if (embedded && shellElement === null && shellRef.current === null) return
     const topBoundary = embedded ? (shellElement ?? shellRef.current) : undefined
     if (topBoundary === null) return
     return bindTerminalViewport(room, window, topBoundary)
-  }, [connectionRequest, embedded, shellElement])
+  }, [embedded, shellElement, terminalViewportActive])
 
   const current = AsyncResult.isSuccess(directory)
     ? directory.value
