@@ -40,7 +40,7 @@ import {
   pendingApprovalTargetAfterRevalidation,
   withPendingApprovalTarget
 } from "./internal/dashboard-pending-state.js"
-import { FleetShell, FleetWorkPanel, fleetWorkStateFromRequest, type FleetWorkRequestState } from "./shell-view.js"
+import { FleetShell, FleetWorkPanel, fleetWorkRequestStateFromResult, fleetWorkStateFromRequest } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
@@ -620,26 +620,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
         snapshots={current.work}
       />
     )
-  const workFailure = workResult._tag === "Failure" ? Cause.findErrorOption(workResult.cause) : Option.none()
-  const workUnavailable =
-    workResult._tag === "Failure" &&
-    workResult.waiting === false &&
-    Option.isSome(workFailure) &&
-    workFailure.value._tag === "ConnectStatusError" &&
-    workFailure.value.status === 404
-  const workRequestState: FleetWorkRequestState =
-    workResult._tag === "Initial"
-      ? { _tag: "Initial", content: workContent }
-      : workResult._tag === "Failure"
-        ? workUnavailable
-          ? { _tag: "Unavailable" }
-          : {
-              _tag: "Failure",
-              content: workContent,
-              detail: "Work request failed. Refresh to retry.",
-              waiting: workResult.waiting
-            }
-        : { _tag: "Success", content: workContent, waiting: workResult.waiting }
+  const workRequestState = fleetWorkRequestStateFromResult({ content: workContent, result: workResult })
   const workState = fleetWorkStateFromRequest(workRequestState)
   const dashboardView = (
     <DashboardView

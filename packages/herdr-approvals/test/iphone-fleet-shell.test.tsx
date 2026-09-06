@@ -3,7 +3,13 @@
 import { act, useEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { FleetShell, FleetWorkPanel, fleetWorkStateFromRequest } from "../src/shell-view.js"
+import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import {
+  FleetShell,
+  FleetWorkPanel,
+  fleetWorkRequestStateFromResult,
+  fleetWorkStateFromRequest
+} from "../src/shell-view.js"
 
 const roots: Array<Root> = []
 
@@ -73,7 +79,47 @@ describe("iPhone fleet shell regressions", () => {
     expect(document.body.textContent).toContain("Work board")
   })
 
+  it("measures the production tab list on mount and viewport changes", async () => {
+    let tabBottom = 64
+    const frames: Array<FrameRequestCallback> = []
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute("role") === "tablist" ? new DOMRect(0, 0, 390, tabBottom) : new DOMRect()
+    })
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation((callback) => {
+      frames.push(callback)
+      return frames.length
+    })
+    vi.spyOn(window, "cancelAnimationFrame").mockImplementation(() => undefined)
+
+    await render(
+      <FleetShell
+        approvals={<section>Approvals</section>}
+        connect={<section>Connect</section>}
+        hostCount={1}
+        work={null}
+      />
+    )
+    await act(async () => {
+      for (const frame of frames.splice(0)) frame(0)
+    })
+    const shell = document.querySelector<HTMLElement>(".fleet-shell")
+    expect(shell?.style.getPropertyValue("--fleet-shell-tab-bottom")).toBe("64px")
+
+    tabBottom = 72
+    await act(async () => window.dispatchEvent(new Event("resize")))
+    if (frames.length === 0) throw new Error("Fleet tab measurement did not schedule a frame")
+    await act(async () => {
+      for (const frame of frames.splice(0)) frame(0)
+    })
+
+    expect(shell?.style.getPropertyValue("--fleet-shell-tab-bottom")).toBe("72px")
+  })
+
   it("keeps loading, absence, and failure as distinct Work presentations", async () => {
+    const unavailableRefresh = fleetWorkRequestStateFromResult({
+      content: null,
+      result: AsyncResult.fail({ _tag: "ConnectStatusError", status: 404 }, { waiting: true })
+    })
     const initial = fleetWorkStateFromRequest({ _tag: "Initial", content: null })
     const initialWithContent = fleetWorkStateFromRequest({
       _tag: "Initial",
@@ -116,6 +162,7 @@ describe("iPhone fleet shell regressions", () => {
     )
 
     expect(initial._tag).toBe("Loading")
+    expect(unavailableRefresh._tag).toBe("Unavailable")
     expect(initialWithContent._tag).toBe("Ready")
     expect(retryingFailure._tag).toBe("Loading")
     expect(revalidating._tag).toBe("Ready")

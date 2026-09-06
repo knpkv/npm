@@ -1,5 +1,6 @@
 import { StateLabel, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
-import { Predicate } from "effect"
+import { Cause, Option, Predicate } from "effect"
+import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
 
 export type FleetShellTab = "approvals" | "connect" | "work"
@@ -18,6 +19,35 @@ export type FleetWorkRequestState =
   | { readonly _tag: "Initial"; readonly content: ReactNode | null }
   | { readonly _tag: "Success"; readonly content: ReactNode | null; readonly waiting: boolean }
   | { readonly _tag: "Unavailable" }
+
+type FleetWorkRequestError = { readonly _tag: string; readonly status?: number }
+
+/** Classify the typed Work request result without losing a known 404 during revalidation. */
+export const fleetWorkRequestStateFromResult = <A, E extends FleetWorkRequestError>({
+  content,
+  result
+}: {
+  readonly content: ReactNode | null
+  readonly result: AsyncResult.AsyncResult<A, E>
+}): FleetWorkRequestState => {
+  switch (result._tag) {
+    case "Initial":
+      return { _tag: "Initial", content }
+    case "Failure": {
+      const failure = Cause.findErrorOption(result.cause)
+      return Option.isSome(failure) && failure.value._tag === "ConnectStatusError" && failure.value.status === 404
+        ? { _tag: "Unavailable" }
+        : {
+            _tag: "Failure",
+            content,
+            detail: "Work request failed. Refresh to retry.",
+            waiting: result.waiting
+          }
+    }
+    case "Success":
+      return { _tag: "Success", content, waiting: result.waiting }
+  }
+}
 
 /** Preserve Work request failure, loading, and absence as separate presentation states. */
 export const fleetWorkStateFromRequest = (request: FleetWorkRequestState): FleetWorkState => {
