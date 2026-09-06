@@ -9,6 +9,7 @@ import { pageStyle, stackStyle } from "./storyStyles.js"
 
 const narrowStyle: CSSProperties = { maxWidth: "20rem" }
 const fleetStyle: CSSProperties = { ...pageStyle, maxWidth: "24.5rem", padding: "var(--rly-space-16)" }
+const stackedMobileStyle: CSSProperties = { inlineSize: "20.5625rem" }
 
 const panel = (title: string, detail: string) => (
   <Surface padding="compact" tone="secondary">
@@ -97,6 +98,14 @@ const FleetMobileTabs = () => (
   </main>
 )
 
+const StackedMobileTabs = () => (
+  <main style={fleetStyle}>
+    <div style={stackedMobileStyle}>
+      <Tabs aria-label="Stacked sections" defaultValue="connect" items={fleetItems} size="large" />
+    </div>
+  </main>
+)
+
 const meta = { component: Tabs, tags: ["autodocs"], title: "Primitives/Tabs" } satisfies Meta<typeof Tabs>
 export default meta
 type Story = StoryObj<typeof meta>
@@ -141,4 +150,9 @@ export const FleetMobile: Story = {
     await expect(getComputedStyle(list).flexWrap).toBe("nowrap")
   },
   render: () => <FleetMobileTabs />
+}
+
+export const StackedMobile: Story = {
+  args: { "aria-label": "Stacked sections", items: fleetItems },
+  render: () => <StackedMobileTabs />
 }

@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url"
 
 const story =
   "/iframe.html?id=primitives-tabs--fleet-mobile&viewMode=story&globals=theme:dark;forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable"
+const stackedStory =
+  "/iframe.html?id=primitives-tabs--stacked-mobile&viewMode=story&globals=theme:dark;forcedColors:auto;reducedMotion:reduce;locale:en;density:comfortable"
+const stackedForcedColorsStory =
+  "/iframe.html?id=primitives-tabs--stacked-mobile&viewMode=story&globals=theme:dark;forcedColors:active;reducedMotion:reduce;locale:en;density:comfortable"
 
 const packageRoot = resolve(fileURLToPath(new URL("..", import.meta.url)))
 const workspaceRoot = resolve(packageRoot, "../..")
@@ -18,6 +22,71 @@ const mobileViewports = [
   { height: 844, width: 390 },
   { height: 500, width: 393 }
 ] satisfies ReadonlyArray<{ readonly height: number; readonly width: number }>
+
+test("393x500 stacked selection has no scrollbar-like line", async ({ page }) => {
+  await page.setViewportSize({ height: 500, width: 393 })
+  await page.goto(stackedStory)
+
+  const list = page.getByRole("tablist", { name: "Stacked sections" })
+  const tabs = list.getByRole("tab")
+  const selected = list.getByRole("tab", { name: "Connect", selected: true })
+  await expect(tabs).toHaveCount(3)
+  await expect(list).toHaveCSS("width", "329px")
+
+  const rows = await tabs.evaluateAll((elements) =>
+    elements.map((element) => Math.round(element.getBoundingClientRect().y))
+  )
+  expect(new Set(rows).size).toBe(3)
+  const [listBackground, selectedBackground] = await Promise.all([
+    list.evaluate((element) => getComputedStyle(element).backgroundColor),
+    selected.evaluate((element) => getComputedStyle(element).backgroundColor)
+  ])
+  expect(selectedBackground).not.toBe(listBackground)
+
+  const indicator = await selected.evaluate((element) => {
+    const style = getComputedStyle(element, "::after")
+    return { content: style.content, height: style.height, position: style.position, width: style.width }
+  })
+  expect(indicator.content).toBe("none")
+
+  await page.keyboard.press("Tab")
+  await expect(selected).toBeFocused()
+  await expect(selected).toHaveCSS("outline-style", "solid")
+  await expect(selected).toHaveCSS("outline-width", "3px")
+  await expect(page.getByRole("tabpanel", { name: "Connect" })).toContainText("Connected terminal")
+})
+
+test("desktop stacked selection keeps its indicator", async ({ page }) => {
+  await page.setViewportSize({ height: 800, width: 1280 })
+  await page.goto(stackedStory)
+
+  const selected = page.getByRole("tablist", { name: "Stacked sections" }).getByRole("tab", {
+    name: "Connect",
+    selected: true
+  })
+  const indicator = await selected.evaluate((element) => {
+    const style = getComputedStyle(element, "::after")
+    return { content: style.content, height: style.height, position: style.position, width: style.width }
+  })
+
+  expect(indicator).toEqual({ content: "\"\"", height: "2px", position: "absolute", width: "297px" })
+})
+
+test("393x500 stacked selection keeps its forced-colors cue", async ({ page }) => {
+  await page.setViewportSize({ height: 500, width: 393 })
+  const selected = page.getByRole("tablist", { name: "Stacked sections" }).getByRole("tab", {
+    name: "Connect",
+    selected: true
+  })
+  const indicatorContent = () => selected.evaluate((element) => getComputedStyle(element, "::after").content)
+
+  await page.goto(stackedForcedColorsStory)
+  expect(await indicatorContent()).toBe("\"\"")
+
+  await page.emulateMedia({ forcedColors: "active" })
+  await page.goto(stackedStory)
+  expect(await indicatorContent()).toBe("\"\"")
+})
 
 for (const viewport of mobileViewports) {
   test(`${String(viewport.width)}x${String(viewport.height)} keeps application tabs in one pointer-navigable row`, async ({ page }) => {
