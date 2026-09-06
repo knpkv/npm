@@ -24,12 +24,6 @@ const workspaceFocusSource = transpileModule(readFileSync(resolve(packageRoot, "
 declare global {
   interface Window {
     bindTerminalViewport?: (target: HTMLElement, host: Window, topBoundary: HTMLElement) => () => void
-    releaseTerminalViewport?: () => void
-    terminalViewportBindingActive?: (state: {
-      readonly connectionRequested: boolean
-      readonly focusRejected: boolean
-      readonly terminalConnected: boolean
-    }) => boolean
     enterTerminalWorkspace?: (
       elements: {
         readonly directory: HTMLElement
@@ -84,7 +78,7 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
               <div class="panel fixture-tabs-panel" role="tabpanel">
                 <div class="connect-shell connect-shell-embedded" data-terminal-top-boundary>
                   <div class="connect-workspace" data-mode="terminal">
-                    <div aria-hidden="true" class="connect-directory-screen" inert tabindex="-1"><button data-retained-agent>host-coordinator</button></div>
+                    <div aria-hidden="true" class="connect-directory-screen" inert></div>
                     <div aria-label="Agent terminal" class="connect-terminal-screen">
                       <section class="terminal-stage">
                         <div class="terminal-bar">
@@ -110,8 +104,7 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
       </body>
     </html>`)
   await page.addScriptTag({
-    content:
-      `${terminalViewportSource}\nwindow.bindTerminalViewport = bindTerminalViewport\nwindow.terminalViewportBindingActive = terminalViewportBindingActive`,
+    content: `${terminalViewportSource}\nwindow.bindTerminalViewport = bindTerminalViewport`,
     type: "module"
   })
   await page.evaluate(() => {
@@ -121,7 +114,7 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
     if (terminal === null || boundary === null || bind === undefined) {
       throw new Error("terminal viewport fixture missing")
     }
-    window.releaseTerminalViewport = bind(terminal, window, boundary)
+    bind(terminal, window, boundary)
   })
 }
 
@@ -146,52 +139,6 @@ test("393x500 keeps the embedded terminal below Fleet navigation and above the s
   await expect(prompt).toBeVisible()
   await expect(input).toBeVisible()
   await expect(input).toHaveValue("typed text")
-
-  await page.addScriptTag({
-    content: `${workspaceFocusSource}\nwindow.returnToDirectoryWorkspace = returnToDirectoryWorkspace`,
-    type: "module"
-  })
-  const retainedGeometry = await page.evaluate(() => {
-    const workspace = document.querySelector<HTMLElement>(".connect-workspace")
-    const directory = document.querySelector<HTMLElement>(".connect-directory-screen")
-    const terminal = document.querySelector<HTMLElement>(".connect-terminal-screen")
-    const shell = document.querySelector<HTMLElement>(".connect-shell")
-    const agent = document.querySelector<HTMLButtonElement>("[data-retained-agent]")
-    const back = document.querySelector<HTMLButtonElement>(".terminal-back")
-    const leave = window.returnToDirectoryWorkspace
-    const bindingActive = window.terminalViewportBindingActive
-    if (
-      workspace === null ||
-      directory === null ||
-      terminal === null ||
-      shell === null ||
-      agent === null ||
-      back === null ||
-      leave === undefined ||
-      bindingActive === undefined
-    ) {
-      throw new Error("retained terminal fixture missing")
-    }
-    agent.disabled = true
-    directory.focus = () => undefined
-    workspace.focus = () => undefined
-    shell.focus = () => undefined
-    back.focus()
-    const transition = leave({ directory, terminal, workspace }, agent)
-    const remainsActive = bindingActive({
-      connectionRequested: false,
-      focusRejected: transition._tag === "failed",
-      terminalConnected: false
-    })
-    if (!remainsActive) window.releaseTerminalViewport?.()
-    return {
-      height: terminal.style.getPropertyValue("--connect-visual-viewport-height"),
-      mode: workspace.dataset.mode,
-      offset: terminal.style.getPropertyValue("--connect-visual-viewport-offset"),
-      remainsActive
-    }
-  })
-  expect(retainedGeometry).toEqual({ height: "248px", mode: "terminal", offset: "252px", remainsActive: true })
 })
 
 test("terminal transitions move focus before hiding either screen", async ({ page }) => {

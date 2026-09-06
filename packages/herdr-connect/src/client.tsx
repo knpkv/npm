@@ -752,8 +752,8 @@ export const ConnectSurface = ({
   useLayoutEffect(() => {
     const room = terminalViewportRef.current
     if (!terminalViewportActive || room === null) return
-    if (embedded && shellElement === null && shellRef.current === null) return
-    const topBoundary = embedded ? (shellElement ?? shellRef.current) : undefined
+    const attachedShell = shellElement ?? shellRef.current
+    const topBoundary = embedded ? attachedShell : undefined
     if (topBoundary === null) return
     return bindTerminalViewport(room, window, topBoundary)
   }, [embedded, shellElement, terminalViewportActive])

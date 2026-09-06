@@ -1,6 +1,6 @@
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
-import { useState, type ReactNode, type Ref } from "react"
+import { useId, useState, type ReactNode, type Ref } from "react"
 import type { ConnectAgent } from "./model.js"
 import {
   serializeTerminalKey,
@@ -286,6 +286,8 @@ export const AgentDirectory = ({
   selectedKey,
   timeZone
 }: AgentDirectoryProps) => {
+  const hostFilterLabelId = useId()
+  const statusFilterLabelId = useId()
   const hosts = connectAgentHosts(agents)
   const rows = connectLineageRows(agents).filter(({ agent }) => {
     const activity = activityFor(agent.state)
@@ -299,10 +301,10 @@ export const AgentDirectory = ({
     <>
       <div className="connect-filter-row">
         <div className="connect-filter-set">
-          <span className="connect-filter-label" id="connect-host-filter-label">
+          <span className="connect-filter-label" id={hostFilterLabelId}>
             Host
           </span>
-          <div aria-labelledby="connect-host-filter-label" className="connect-group-filter" role="group">
+          <div aria-labelledby={hostFilterLabelId} className="connect-group-filter" role="group">
             <button aria-pressed={hostFilter === null} onClick={() => onHostFilter(null)} type="button">
               All hosts
             </button>
@@ -314,10 +316,10 @@ export const AgentDirectory = ({
           </div>
         </div>
         <div className="connect-filter-set">
-          <span className="connect-filter-label" id="connect-status-filter-label">
+          <span className="connect-filter-label" id={statusFilterLabelId}>
             Status
           </span>
-          <div aria-labelledby="connect-status-filter-label" className="connect-status-filter" role="group">
+          <div aria-labelledby={statusFilterLabelId} className="connect-status-filter" role="group">
             {activityFilters.map((activity) => (
               <button
                 aria-pressed={activityFilter === activity}
