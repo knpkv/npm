@@ -1,6 +1,11 @@
 @import "@knpkv/rly/styles.css";
 
 @layer connect {
+  html.connect-terminal-document-lock,
+  body.connect-terminal-document-lock {
+    overflow: hidden !important;
+  }
+
   html,
   body.connect-body,
   #fleet-connect-root {

@@ -46,6 +46,8 @@ const workSnapshots = {
 }
 
 beforeEach(() => {
+  document.documentElement.style.cssText = "color: red;"
+  document.body.style.cssText = "overflow: visible; touch-action: pan-x;"
   Object.defineProperty(window, "innerHeight", { configurable: true, value: 500 })
   window.fetch = async (input) => {
     const url = new URL("href" in input ? input.href : "url" in input ? input.url : input, "http://localhost")
@@ -63,6 +65,8 @@ afterEach(async () => {
   })
   roots.length = 0
   document.body.replaceChildren()
+  document.documentElement.style.cssText = ""
+  document.body.style.cssText = ""
   vi.restoreAllMocks()
 })
 
@@ -125,6 +129,8 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
 
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-height")).toBe("248px")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-offset")).toBe("252px")
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(true)
 
     agentButton.focus = () => undefined
     directory.focus = () => undefined
@@ -136,6 +142,8 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     expect(workspace.dataset.mode).toBe("terminal")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-height")).toBe("248px")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-offset")).toBe("252px")
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(true)
     expect(host.querySelector('[role="alert"]')?.textContent).toContain("focus_rejected")
 
     agentButton.focus = HTMLElement.prototype.focus
@@ -146,5 +154,45 @@ describe("ConnectSurface terminal viewport lifecycle", () => {
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-height")).toBe("")
     expect(terminal.style.getPropertyValue("--connect-visual-viewport-offset")).toBe("")
     expect(document.activeElement).toBe(agentButton)
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(false)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(false)
+    expect(document.documentElement.style.cssText).toBe("color: red;")
+    expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
+  })
+
+  it("restores the exact document styles when a connected terminal unmounts", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    roots.push(root)
+    const atoms = makeConnectAtoms()
+
+    await act(async () => {
+      root.render(
+        <RegistryProvider
+          initialValues={[
+            [atoms.agents, AsyncResult.success(agentPage)],
+            [atoms.connection, { _tag: "connected", agent }],
+            [atoms.preference, AsyncResult.success(null)],
+            [atoms.selectedKey, "SER8:agent-reviewer"],
+            [atoms.work, AsyncResult.success(workSnapshots)]
+          ]}
+        >
+          <ConnectSurface atoms={atoms} embedded />
+        </RegistryProvider>
+      )
+      for (let index = 0; index < 12; index += 1) await Promise.resolve()
+    })
+
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(true)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(true)
+
+    await act(async () => root.unmount())
+    roots.splice(roots.indexOf(root), 1)
+
+    expect(document.documentElement.classList.contains("connect-terminal-document-lock")).toBe(false)
+    expect(document.body.classList.contains("connect-terminal-document-lock")).toBe(false)
+    expect(document.documentElement.style.cssText).toBe("color: red;")
+    expect(document.body.style.cssText).toBe("overflow: visible; touch-action: pan-x;")
   })
 })
