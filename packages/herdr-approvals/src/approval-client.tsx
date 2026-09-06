@@ -1,7 +1,6 @@
 import { RegistryProvider, useAtom, useAtomMount, useAtomRefresh, useAtomSet, useAtomValue } from "@effect/atom-react"
 import { BrowserHttpClient } from "@effect/platform-browser"
 import { ConnectSurface, makeConnectAtoms } from "@knpkv/herdr-connect/surface"
-import { StatePanel } from "@knpkv/rly/primitives"
 import { Cause, Effect, Exit, Option, Result, Schedule, Schema } from "effect"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import * as Atom from "effect/unstable/reactivity/Atom"
@@ -41,7 +40,7 @@ import {
   pendingApprovalTargetAfterRevalidation,
   withPendingApprovalTarget
 } from "./internal/dashboard-pending-state.js"
-import { FleetShell } from "./shell-view.js"
+import { FleetShell, FleetWorkPanel, fleetWorkStateFromRequest, type FleetWorkRequestState } from "./shell-view.js"
 import { matchesApprovalDeepLink, readApprovalDeepLink } from "./pwa.js"
 import { SanitizedJobRecord } from "./approval-request.js"
 import { DashboardWorkPollOwner } from "./work-poll-owner.js"
@@ -612,6 +611,36 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
   }
   const current = currentSnapshot
   const workSelection = decodeWorkNavigationSelection(window.location.search)
+  const workContent =
+    current.work === null ? null : (
+      <WorkBoard
+        {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
+        initialWindow={workSelection.window}
+        navigation={workNavigationHref}
+        snapshots={current.work}
+      />
+    )
+  const workFailure = workResult._tag === "Failure" ? Cause.findErrorOption(workResult.cause) : Option.none()
+  const workUnavailable =
+    workResult._tag === "Failure" &&
+    workResult.waiting === false &&
+    Option.isSome(workFailure) &&
+    workFailure.value._tag === "ConnectStatusError" &&
+    workFailure.value.status === 404
+  const workRequestState: FleetWorkRequestState =
+    workResult._tag === "Initial"
+      ? { _tag: "Initial", content: workContent }
+      : workResult._tag === "Failure"
+        ? workUnavailable
+          ? { _tag: "Unavailable" }
+          : {
+              _tag: "Failure",
+              content: workContent,
+              detail: "Work request failed. Refresh to retry.",
+              waiting: workResult.waiting
+            }
+        : { _tag: "Success", content: workContent, waiting: workResult.waiting }
+  const workState = fleetWorkStateFromRequest(workRequestState)
   const dashboardView = (
     <DashboardView
       approvalOnly={canonical}
@@ -659,20 +688,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
             hostCount={current.directory === null ? 1 : current.directory.links.length + 1}
             work={
               <section className="fleet-workspace">
-                {current.work === null ? (
-                  <StatePanel
-                    description="No durable goal projection is configured on this host. Live agent and job activity remain available below."
-                    title="Goals unavailable"
-                    tone="neutral"
-                  />
-                ) : (
-                  <WorkBoard
-                    {...(workSelection.goalId === null ? {} : { initialGoalId: workSelection.goalId })}
-                    initialWindow={workSelection.window}
-                    navigation={workNavigationHref}
-                    snapshots={current.work}
-                  />
-                )}
+                <FleetWorkPanel state={workState} />
                 <AgentActivity snapshot={current} />
                 <ActivityHistory
                   hasMore={current.historyNextCursor !== null}

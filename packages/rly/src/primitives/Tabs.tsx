@@ -61,7 +61,7 @@ const validateItems = (items: ReadonlyArray<RlyTabItem>): RlyTabItem => {
     requireText(item.label, `Tab label for ${value}`)
     if (values.has(value)) throw new Error(`Tabs item values must be unique: ${value}`)
     values.add(value)
-    if (!item.disabled && firstEnabled === undefined) firstEnabled = item
+    if (Boolean(item.disabled) === false && firstEnabled === undefined) firstEnabled = item
   }
 
   if (firstEnabled === undefined) throw new Error("Tabs items must contain at least one enabled tab")
@@ -76,6 +76,7 @@ export const Tabs = ({
   direction,
   items,
   onValueChange,
+  ref,
   size = "default",
   value,
   ...props
@@ -84,7 +85,7 @@ export const Tabs = ({
   const firstEnabled = validateItems(items)
   const selectedValue = value ?? defaultValue ?? firstEnabled.value
   const selectedItem = items.find((item) => item.value === selectedValue)
-  if (selectedItem === undefined || selectedItem.disabled) {
+  if (selectedItem === undefined || Boolean(selectedItem.disabled) === true) {
     throw new Error(`Tabs selected value must identify an enabled tab: ${selectedValue}`)
   }
 
@@ -104,10 +105,17 @@ export const Tabs = ({
       activationMode="automatic"
       className={classNames(style("root"), RLY_TABS_VARIANTS.size[size].className, className)}
       orientation="horizontal"
+      ref={ref}
     >
       <RadixTabs.List aria-label={accessibleLabel} className={style("list")} loop>
         {items.map((item) => (
-          <RadixTabs.Trigger className={style("trigger")} disabled={item.disabled} key={item.value} value={item.value}>
+          <RadixTabs.Trigger
+            className={style("trigger")}
+            data-tab-value={item.value}
+            disabled={item.disabled}
+            key={item.value}
+            value={item.value}
+          >
             {item.label}
           </RadixTabs.Trigger>
         ))}

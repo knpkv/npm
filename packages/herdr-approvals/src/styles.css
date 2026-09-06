@@ -53,10 +53,6 @@
     max-inline-size: 100rem;
     padding: var(--rly-space-24) var(--rly-space-32) var(--rly-space-96);
   }
-  .fleet-shell-main [aria-label="Fleet applications"][role="tablist"] {
-    position: relative;
-    z-index: 101;
-  }
   .fleet-key-rail {
     align-items: center;
     border-block-end: 1px solid var(--rly-color-border-1);
@@ -99,6 +95,19 @@
   .connect-shell-embedded .connect-directory-screen {
     block-size: auto;
     min-block-size: 38rem;
+  }
+
+  .fleet-shell-main .connect-shell-embedded .connect-terminal-screen {
+    --fleet-shell-terminal-offset: max(
+      0px,
+      calc(var(--fleet-shell-tab-bottom, var(--rly-space-48)) - var(--connect-visual-viewport-offset, 0px))
+    );
+
+    block-size: calc(var(--connect-visual-viewport-height, 100dvh) - var(--fleet-shell-terminal-offset));
+    inset-block-start: max(
+      var(--connect-visual-viewport-offset, 0px),
+      var(--fleet-shell-tab-bottom, var(--rly-space-48))
+    );
   }
   .fleet-workspace {
     display: grid;
