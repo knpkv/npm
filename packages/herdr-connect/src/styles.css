@@ -120,11 +120,22 @@
   }
 
   .connect-filter-row {
-    display: flex;
-    flex-wrap: wrap;
+    display: grid;
     gap: var(--rly-space-8);
-    justify-content: space-between;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     margin-block-end: var(--rly-space-20);
+  }
+
+  .connect-filter-set {
+    display: grid;
+    gap: var(--rly-space-4);
+    min-inline-size: 0;
+  }
+
+  .connect-filter-label {
+    color: var(--rly-color-text-3);
+    font-size: var(--rly-type-meta-size);
+    padding-inline: var(--rly-space-4);
   }
 
   .connect-group-filter,
@@ -133,10 +144,11 @@
     border: 1px solid var(--rly-color-border-1);
     border-radius: var(--rly-radius-control);
     display: flex;
+    flex-wrap: wrap;
     gap: 2px;
-    overflow-x: auto;
+    max-inline-size: 100%;
+    min-inline-size: 0;
     padding: 2px;
-    scrollbar-width: none;
   }
 
   .connect-group-filter button,
@@ -149,8 +161,11 @@
     font: inherit;
     font-size: var(--rly-type-meta-size);
     flex: 0 0 auto;
+    max-inline-size: 100%;
+    min-inline-size: 0;
+    overflow-wrap: anywhere;
     padding: var(--rly-space-6) var(--rly-space-8);
-    white-space: nowrap;
+    white-space: normal;
   }
 
   .connect-group-filter button[aria-pressed="true"],
@@ -158,6 +173,12 @@
     background: var(--rly-color-surface-3);
     box-shadow: 0 0 0 1px var(--rly-color-border-2);
     color: var(--rly-color-text-1);
+  }
+
+  .connect-group-filter button:focus-visible,
+  .connect-status-filter button:focus-visible {
+    outline: 2px solid var(--rly-color-focus);
+    outline-offset: 1px;
   }
 
   .connect-agent-tree {
@@ -544,16 +565,13 @@
     }
 
     .connect-filter-row {
-      flex-wrap: nowrap;
-      justify-content: flex-start;
+      grid-template-columns: minmax(0, 1fr);
       margin-block-end: var(--rly-space-8);
-      overflow-x: auto;
-      scrollbar-width: none;
     }
 
     .connect-group-filter,
     .connect-status-filter {
-      flex: 0 0 auto;
+      inline-size: 100%;
     }
 
     .connect-group-filter button,
