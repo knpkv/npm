@@ -57,6 +57,19 @@ for (const viewport of mobileViewports) {
     const terminalInput = page.getByRole("textbox", { name: "Terminal input" })
     const terminalBox = await terminal.boundingBox()
     expect(terminalBox?.y ?? 0).toBeGreaterThanOrEqual(listBox.y + listBox.height)
+    const nestedTerminalBox = await terminal.evaluate((element) => {
+      const activePanel = document.querySelector<HTMLElement>("[role=tabpanel][data-state=active]")
+      if (activePanel === null) throw new Error("active Fleet tab panel is missing")
+      const connectShell = element.closest<HTMLElement>(".connect-shell")
+      if (connectShell === null) throw new Error("Connect shell is missing")
+      activePanel.append(connectShell)
+      return element.getBoundingClientRect()
+    })
+    const visualViewportBottom = await page.evaluate(
+      () => (window.visualViewport?.offsetTop ?? 0) + (window.visualViewport?.height ?? window.innerHeight)
+    )
+    expect(Math.abs(nestedTerminalBox.y - (listBox.y + listBox.height))).toBeLessThanOrEqual(1)
+    expect(Math.abs(nestedTerminalBox.bottom - visualViewportBottom)).toBeLessThanOrEqual(1)
     expect(await list.evaluate((element) => getComputedStyle(element).zIndex)).toBe("auto")
 
     const work = list.getByRole("tab", { name: "Work" })

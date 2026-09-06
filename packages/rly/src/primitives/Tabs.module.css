@@ -4,10 +4,6 @@
     min-inline-size: var(--rly-space-0);
   }
 
-  .root[data-mobile-layout="single-row"] {
-    container-type: inline-size;
-  }
-
   .list {
     align-items: stretch;
     background: var(--rly-color-surface-2);
@@ -85,16 +81,14 @@
     }
   }
 
-  @container (max-width: 30rem) {
-    .root[data-mobile-layout="single-row"] .list {
-      flex-wrap: nowrap;
-      overflow-x: auto;
-    }
+  .root[data-mobile-layout="single-row"] .list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
 
-    .root[data-mobile-layout="single-row"] .trigger {
-      flex: 1 0 auto;
-      max-inline-size: none;
-      white-space: nowrap;
-    }
+  .root[data-mobile-layout="single-row"] .trigger {
+    flex: 1 0 auto;
+    max-inline-size: none;
+    white-space: nowrap;
   }
 }
