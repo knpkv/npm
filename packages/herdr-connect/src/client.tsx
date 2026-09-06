@@ -34,7 +34,7 @@ import {
 import { AgentDirectory, connectAgentKey, ConnectWorkspace, TerminalKeyRail, type AgentActivityFilter } from "./view.js"
 import { acquireTerminalSetup, ConnectTerminalSetupError } from "./terminal-setup.js"
 import { terminalBackground } from "./terminal-theme.js"
-import { bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
+import { bindTerminalDocumentLock, bindTerminalViewport, terminalViewportBindingActive } from "./terminal-viewport.js"
 import { type RememberedConnectPreference, resolveConnectPreferenceDecision } from "./target.js"
 import { nextConnectAgentIndex } from "./keyboard.js"
 import {
@@ -52,7 +52,7 @@ import { resolveConnectWorkGoal, workSnapshotForAssociation, type ConnectWorkGoa
 import { WorkPollMount } from "./work-poll.js"
 import { makeTerminalWorkerGuard } from "./terminal-worker-guard.js"
 import {
-  enterTerminalWorkspace,
+  enterTerminalWorkspaceWithLock,
   returnToDirectoryWorkspace,
   type ConnectWorkspaceElements,
   type ConnectWorkspaceFocusFailureReason,
@@ -578,6 +578,7 @@ export const ConnectSurface = ({
   const shellRef = useRef<HTMLDivElement>(null)
   const [shellElement, setShellElement] = useState<HTMLDivElement | null>(null)
   const terminalActiveRequestRef = useRef<number | null>(null)
+  const terminalEntryLockRef = useRef<(() => void) | null>(null)
   const terminalBackRef = useRef<HTMLButtonElement>(null)
   const terminalRef = useRef<HTMLDivElement>(null)
   const terminalFocusTargetRef = useRef<HTMLElement>(null)
@@ -593,6 +594,12 @@ export const ConnectSurface = ({
   const [terminalKeyError, setTerminalKeyError] = useState<string | null>(null)
   const [workspaceFocusFailure, setWorkspaceFocusFailure] = useState<ConnectWorkspaceFocusFailureReason | null>(null)
   useAtomMount(atoms.agentsPoll)
+
+  const releaseTerminalEntryLock = useCallback((): void => {
+    const release = terminalEntryLockRef.current
+    terminalEntryLockRef.current = null
+    release?.()
+  }, [])
 
   const attachShell = useCallback((element: HTMLDivElement | null): void => {
     shellRef.current = element
@@ -669,8 +676,14 @@ export const ConnectSurface = ({
               })
               return
             }
-            const transition = enterTerminalWorkspace(elements, focusTarget)
+            releaseTerminalEntryLock()
+            const lockedTransition = enterTerminalWorkspaceWithLock(elements, focusTarget, () =>
+              bindTerminalDocumentLock(window)
+            )
+            terminalEntryLockRef.current = lockedTransition.releaseLock
+            const transition = lockedTransition.transition
             if (transition._tag === "failed") {
+              releaseTerminalEntryLock()
               releaseTerminalFocus()
               invalidateTerminalRequest()
               setConnection({
@@ -736,11 +749,12 @@ export const ConnectSurface = ({
       )
     )
     return () => {
+      releaseTerminalEntryLock()
       workerGuard.release()
       Effect.runFork(Fiber.interrupt(fiber))
       container.replaceChildren()
     }
-  }, [connectionRequest, setConnection])
+  }, [connectionRequest, releaseTerminalEntryLock, setConnection])
 
   const terminalVisible = connection._tag === "connected" || workspaceFocusFailure === "focus_rejected"
   const terminalViewportActive = terminalViewportBindingActive({
@@ -756,8 +770,12 @@ export const ConnectSurface = ({
     const attachedShell = shellElement ?? shellRef.current
     const topBoundary = embedded ? attachedShell : undefined
     if (topBoundary === null) return
-    return bindTerminalViewport(room, window, topBoundary, terminalVisible)
-  }, [embedded, shellElement, terminalViewportActive, terminalVisible])
+    try {
+      return bindTerminalViewport(room, window, topBoundary, terminalVisible)
+    } finally {
+      if (terminalVisible) releaseTerminalEntryLock()
+    }
+  }, [embedded, releaseTerminalEntryLock, shellElement, terminalViewportActive, terminalVisible])
 
   const current = AsyncResult.isSuccess(directory)
     ? directory.value

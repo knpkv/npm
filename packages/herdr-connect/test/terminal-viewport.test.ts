@@ -105,9 +105,9 @@ class FakeDocumentHost extends FakeTerminalViewportHost {
   scrollX = 3
   scrollY = 137
 
-  scrollTo(x: number, y: number): void {
-    this.scrollX = x
-    this.scrollY = y
+  scrollTo(options: ScrollToOptions): void {
+    this.scrollX = options.left ?? 0
+    this.scrollY = options.top ?? 0
   }
 
   moveScrollTo(x: number, y: number): void {

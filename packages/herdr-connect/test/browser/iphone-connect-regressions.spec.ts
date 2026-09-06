@@ -33,6 +33,16 @@ declare global {
       },
       focusTarget: HTMLElement
     ) => { readonly _tag: string }
+    enterTerminalWorkspaceWithLock?: (
+      elements: {
+        readonly directory: HTMLElement
+        readonly terminal: HTMLElement
+        readonly workspace: HTMLElement
+      },
+      focusTarget: HTMLElement,
+      acquireLock: () => () => void
+    ) => { readonly releaseLock: () => void; readonly transition: { readonly _tag: string } }
+    bindTerminalDocumentLock?: (host: Window) => () => void
     returnToDirectoryWorkspace?: (
       elements: {
         readonly directory: HTMLElement
@@ -168,6 +178,74 @@ test("393x500 terminal blocks iPhone focus scrolling and restores the document",
     documentUnlocked: true,
     scrollY: before.scrollY
   })
+})
+
+test("393x500 restores scroll instantly when the embedding page uses smooth scrolling", async ({ page }) => {
+  await setKeyboardTerminal(page)
+
+  const retainedScrollY = await page.evaluate(() => {
+    document.documentElement.style.scrollBehavior = "smooth"
+    window.scrollTo({ behavior: "instant", left: 0, top: 309 })
+    window.dispatchEvent(new Event("scroll"))
+    return window.scrollY
+  })
+  expect(retainedScrollY).toBe(137)
+
+  const restoredScrollY = await page.evaluate(() => {
+    window.scrollTo({ behavior: "instant", left: 0, top: 309 })
+    window.releaseTerminalViewport?.()
+    return window.scrollY
+  })
+  expect(restoredScrollY).toBe(137)
+})
+
+test("393x500 locks document scroll before the initial terminal focus", async ({ page }) => {
+  await page.setViewportSize({ height: 500, width: 393 })
+  await page.setContent(`
+    <style>${fixtureCss}</style>
+    <div class="connect-shell" tabindex="-1">
+      <div class="connect-workspace" data-mode="directory" tabindex="-1">
+        <div aria-hidden="false" class="connect-directory-screen" tabindex="-1"></div>
+        <div aria-hidden="true" class="connect-terminal-screen" inert><button class="terminal-back">Agents</button></div>
+      </div>
+    </div>
+    <div style="block-size: 1933px"></div>`)
+  await page.addScriptTag({
+    content: `${terminalViewportSource}\nwindow.bindTerminalDocumentLock = bindTerminalDocumentLock`,
+    type: "module"
+  })
+  await page.addScriptTag({
+    content: `${workspaceFocusSource}\nwindow.enterTerminalWorkspaceWithLock = enterTerminalWorkspaceWithLock`,
+    type: "module"
+  })
+
+  const result = await page.evaluate(() => {
+    const workspace = document.querySelector<HTMLElement>(".connect-workspace")
+    const directory = document.querySelector<HTMLElement>(".connect-directory-screen")
+    const terminal = document.querySelector<HTMLElement>(".connect-terminal-screen")
+    const back = document.querySelector<HTMLButtonElement>(".terminal-back")
+    const enter = window.enterTerminalWorkspaceWithLock
+    const bindLock = window.bindTerminalDocumentLock
+    if (
+      workspace === null ||
+      directory === null ||
+      terminal === null ||
+      back === null ||
+      enter === undefined ||
+      bindLock === undefined
+    ) {
+      throw new Error("locked workspace focus fixture missing")
+    }
+    window.scrollTo({ behavior: "instant", left: 0, top: 137 })
+    back.addEventListener("focus", () => window.scrollTo({ behavior: "instant", left: 0, top: 309 }))
+    const entered = enter({ directory, terminal, workspace }, back, () => bindLock(window))
+    window.dispatchEvent(new Event("scroll"))
+    const scrollY = window.scrollY
+    entered.releaseLock()
+    return { scrollY, transition: entered.transition._tag }
+  })
+
+  expect(result).toEqual({ scrollY: 137, transition: "moved" })
 })
 
 test("393x500 keeps the embedded terminal below Fleet navigation and above the software keyboard", async ({ page }) => {

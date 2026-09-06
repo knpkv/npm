@@ -11,6 +11,11 @@ export interface ConnectWorkspaceElements {
   readonly workspace: HTMLElement
 }
 
+export interface ConnectLockedWorkspaceFocusTransition {
+  readonly releaseLock: () => void
+  readonly transition: ConnectWorkspaceFocusTransition
+}
+
 const elementsAreAttached = (
   { directory, terminal, workspace }: ConnectWorkspaceElements,
   focusTarget: HTMLElement
@@ -40,6 +45,21 @@ export const enterTerminalWorkspace = (
   elements.directory.setAttribute("aria-hidden", "true")
   elements.directory.inert = true
   return { _tag: "moved" }
+}
+
+/** Acquires the document lock before revealing and focusing a connected terminal. */
+export const enterTerminalWorkspaceWithLock = (
+  elements: ConnectWorkspaceElements,
+  focusTarget: HTMLElement,
+  acquireLock: () => () => void
+): ConnectLockedWorkspaceFocusTransition => {
+  const releaseLock = acquireLock()
+  try {
+    return { releaseLock, transition: enterTerminalWorkspace(elements, focusTarget) }
+  } catch (error) {
+    releaseLock()
+    throw error
+  }
 }
 
 /** Uses the browser's active element as the focusability check before hiding the terminal. */

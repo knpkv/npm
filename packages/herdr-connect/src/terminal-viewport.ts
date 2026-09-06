@@ -25,7 +25,7 @@ export interface TerminalViewportHost extends EventTarget {
   readonly scrollX?: number
   readonly scrollY?: number
   readonly visualViewport?: TerminalVisualViewport | null
-  readonly scrollTo?: (x: number, y: number) => void
+  readonly scrollTo?: (options: ScrollToOptions) => void
 }
 
 export type TerminalViewportCleanup = () => void
@@ -80,7 +80,8 @@ const bindTerminalDocumentRelease = (
   return release
 }
 
-const acquireTerminalDocumentLock = (host: TerminalViewportHost): TerminalViewportCleanup => {
+/** Locks document scrolling without mutating inline styles until cleanup. */
+export const bindTerminalDocumentLock = (host: TerminalViewportHost): TerminalViewportCleanup => {
   const document = host.document
   if (document === undefined) return () => undefined
   const active = terminalDocumentLocks.get(document)
@@ -93,11 +94,12 @@ const acquireTerminalDocumentLock = (host: TerminalViewportHost): TerminalViewpo
   const documentWasLocked = document.documentElement.classList.contains(documentLockClass)
   const scrollX = host.scrollX ?? 0
   const scrollY = host.scrollY ?? 0
+  const restoreScroll = (): void => host.scrollTo?.({ behavior: "instant", left: scrollX, top: scrollY })
   let restoring = false
   const retainScroll = (): void => {
     if (restoring || (host.scrollX === scrollX && host.scrollY === scrollY)) return
     restoring = true
-    host.scrollTo?.(scrollX, scrollY)
+    restoreScroll()
     restoring = false
   }
   const restore = (): void => {
@@ -105,7 +107,7 @@ const acquireTerminalDocumentLock = (host: TerminalViewportHost): TerminalViewpo
     terminalDocumentLocks.delete(document)
     if (!documentWasLocked) document.documentElement.classList.remove(documentLockClass)
     if (!bodyWasLocked) document.body.classList.remove(documentLockClass)
-    host.scrollTo?.(scrollX, scrollY)
+    restoreScroll()
   }
   const lock: TerminalDocumentLock = { count: 1, restore }
   terminalDocumentLocks.set(document, lock)
@@ -129,7 +131,7 @@ export const bindTerminalViewport = (
   topBoundary?: TerminalViewportBoundary,
   lockDocument = true
 ): TerminalViewportCleanup => {
-  const releaseDocumentLock = lockDocument ? acquireTerminalDocumentLock(host) : () => undefined
+  const releaseDocumentLock = lockDocument ? bindTerminalDocumentLock(host) : () => undefined
   const viewport = host.visualViewport
   if ((viewport === undefined || viewport === null) && topBoundary === undefined) return releaseDocumentLock
   const scrollAncestors: Array<TerminalViewportScrollAncestor> = []
