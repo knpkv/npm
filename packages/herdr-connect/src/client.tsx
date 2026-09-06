@@ -742,6 +742,7 @@ export const ConnectSurface = ({
     }
   }, [connectionRequest, setConnection])
 
+  const terminalVisible = connection._tag === "connected" || workspaceFocusFailure === "focus_rejected"
   const terminalViewportActive = terminalViewportBindingActive({
     connectionRequested: connectionRequest !== null,
     focusRejected: workspaceFocusFailure === "focus_rejected",
@@ -755,8 +756,8 @@ export const ConnectSurface = ({
     const attachedShell = shellElement ?? shellRef.current
     const topBoundary = embedded ? attachedShell : undefined
     if (topBoundary === null) return
-    return bindTerminalViewport(room, window, topBoundary)
-  }, [embedded, shellElement, terminalViewportActive])
+    return bindTerminalViewport(room, window, topBoundary, terminalVisible)
+  }, [embedded, shellElement, terminalViewportActive, terminalVisible])
 
   const current = AsyncResult.isSuccess(directory)
     ? directory.value
@@ -1069,7 +1070,7 @@ export const ConnectSurface = ({
       <ConnectWorkspace
         directory={directoryScreen}
         directoryViewportRef={directoryViewportRef}
-        mode={connection._tag === "connected" || workspaceFocusFailure === "focus_rejected" ? "terminal" : "directory"}
+        mode={terminalVisible ? "terminal" : "directory"}
         terminal={terminalScreen}
         terminalViewportRef={terminalViewportRef}
         workspaceRef={workspaceRef}

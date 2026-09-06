@@ -24,6 +24,7 @@ const workspaceFocusSource = transpileModule(readFileSync(resolve(packageRoot, "
 declare global {
   interface Window {
     bindTerminalViewport?: (target: HTMLElement, host: Window, topBoundary: HTMLElement) => () => void
+    releaseTerminalViewport?: () => void
     enterTerminalWorkspace?: (
       elements: {
         readonly directory: HTMLElement
@@ -65,7 +66,7 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
     <!doctype html>
     <html data-rly-root data-rly-theme="dark">
       <head><style>${fixtureCss}</style></head>
-      <body data-rly-root>
+      <body data-rly-root style="min-height: 1933px; overflow: visible; touch-action: pan-x">
         <div class="fleet-shell">
           <header class="fleet-shell-masthead"><strong>Herdr</strong><span>3 configured hosts</span></header>
           <main class="fleet-shell-main">
@@ -114,9 +115,56 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
     if (terminal === null || boundary === null || bind === undefined) {
       throw new Error("terminal viewport fixture missing")
     }
-    bind(terminal, window, boundary)
+    window.scrollTo(0, 137)
+    window.releaseTerminalViewport = bind(terminal, window, boundary)
   })
 }
+
+test("393x500 terminal blocks iPhone focus scrolling and restores the document", async ({ page }) => {
+  await setKeyboardTerminal(page)
+
+  const input = page.getByRole("textbox", { name: "Terminal input" })
+  const keyRail = page.getByRole("toolbar", { name: "Terminal keyboard controls" })
+  const terminalSurface = page.locator(".connect-terminal-screen")
+  const before = await page.evaluate(() => ({
+    scrollHeight: document.documentElement.scrollHeight,
+    scrollY: window.scrollY
+  }))
+
+  expect(before.scrollHeight).toBe(1933)
+  expect(before.scrollY).toBe(137)
+  expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow)).toBe("hidden")
+  expect(await page.evaluate(() => getComputedStyle(document.body).overflow)).toBe("hidden")
+  expect(
+    await terminalSurface.evaluate((element) => {
+      const { backgroundColor, position } = getComputedStyle(element)
+      return { backgroundOpaque: backgroundColor !== "rgba(0, 0, 0, 0)" && backgroundColor !== "transparent", position }
+    })
+  ).toEqual({ backgroundOpaque: true, position: "fixed" })
+
+  await input.focus()
+  await page.evaluate(() => window.scrollTo(0, 309))
+
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(137)
+  await expect(input).toBeVisible()
+  await expect(keyRail).toBeVisible()
+  await expect(input).toBeInViewport()
+  await expect(keyRail).toBeInViewport()
+
+  await page.evaluate(() => window.releaseTerminalViewport?.())
+
+  expect(
+    await page.evaluate(() => ({
+      bodyStyle: document.body.style.cssText,
+      documentStyle: document.documentElement.style.cssText,
+      scrollY: window.scrollY
+    }))
+  ).toEqual({
+    bodyStyle: "min-height: 1933px; overflow: visible; touch-action: pan-x;",
+    documentStyle: "",
+    scrollY: before.scrollY
+  })
+})
 
 test("393x500 keeps the embedded terminal below Fleet navigation and above the software keyboard", async ({ page }) => {
   await setKeyboardTerminal(page)
