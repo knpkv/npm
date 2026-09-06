@@ -11,6 +11,7 @@ import {
   type WorkSnapshot,
   type WorkSnapshots
 } from "../src/index.js"
+import { encodeWorkBoardNavigationGoal, workNavigationHref } from "../src/navigation.js"
 import { projectWorkSnapshots } from "../src/projection.js"
 
 const workGoalInput = {
@@ -103,6 +104,27 @@ const snapshots: WorkSnapshots = {
   now: snapshotFor("now"),
   observedAt: 3_000,
   week: snapshotFor("week")
+}
+
+const crowdedSnapshotFor = (window: WorkSnapshot["window"]): WorkSnapshot => ({
+  asOf: 3_000,
+  goals: Array.from({ length: 47 }, (_, index) => ({
+    ...workGoal,
+    id: `goal-${String(index + 1).padStart(2, "0")}`,
+    state: index % 3 === 0 ? "blocked" : "working",
+    blocker: index % 3 === 0 ? { since: 2_000, summary: "Waiting for review" } : null,
+    title: `Goal ${String(index + 1).padStart(2, "0")}`
+  })),
+  observedAt: 3_000,
+  window
+})
+
+const crowdedSnapshots: WorkSnapshots = {
+  day: crowdedSnapshotFor("day"),
+  month: crowdedSnapshotFor("month"),
+  now: crowdedSnapshotFor("now"),
+  observedAt: 3_000,
+  week: crowdedSnapshotFor("week")
 }
 
 describe("Work control app", () => {
@@ -368,7 +390,9 @@ describe("Work control app", () => {
   })
 
   it("renders activity, requests, review, shipment, and exact links beside the hierarchy", () => {
-    const markup = renderToStaticMarkup(createElement(WorkBoard, { snapshots }))
+    const markup = renderToStaticMarkup(
+      createElement(WorkBoard, { initialGoalId: workGoal.id, snapshots })
+    )
     expect(markup).toContain("Daily fleet Work")
     expect(markup).toContain("SER8 / Work owner")
     expect(markup).toContain("agent-coordinator")
@@ -380,6 +404,49 @@ describe("Work control app", () => {
     expect(markup).toContain(
       "href=\"https://ser8.example.test/?tab=approvals&amp;approvalHost=SER8&amp;approvalJob=approval-job-42\""
     )
+  })
+
+  it("bounds a crowded board while retaining a deep-linked goal", () => {
+    const markup = renderToStaticMarkup(
+      createElement(WorkBoard, { initialGoalId: "goal-47", snapshots: crowdedSnapshots })
+    )
+
+    expect([...markup.matchAll(/class="work-board-row"/g)]).toHaveLength(10)
+    expect(markup).toContain("Showing 10 of 47 goals")
+    expect(markup).toContain("Filter goals by status")
+    expect(markup).toContain("Goal 38")
+    expect(markup).toContain("Goal 47")
+    expect(markup).not.toContain("Goal 1 summary")
+    expect(markup).toContain("Load 10 more")
+  })
+
+  it("renders static navigation for filters, reveal, and detail close", () => {
+    const markup = renderToStaticMarkup(
+      createElement(WorkBoard, {
+        initialGoalId: "goal-47",
+        navigation: workNavigationHref,
+        snapshots: crowdedSnapshots
+      })
+    )
+
+    expect(markup).toMatch(/<a[^>]+>Blocked<\/a>/)
+    expect(markup).toMatch(/<a[^>]+>Load 10 more<\/a>/)
+    expect(markup).toMatch(/<a[^>]+>Close details<\/a>/)
+
+    const filteredMarkup = renderToStaticMarkup(
+      createElement(WorkBoard, {
+        initialGoalId: encodeWorkBoardNavigationGoal({
+          detailsOpen: false,
+          goalId: null,
+          statusFilter: "blocked",
+          visibleGoalCount: 10
+        }),
+        navigation: workNavigationHref,
+        snapshots: crowdedSnapshots
+      })
+    )
+    expect([...filteredMarkup.matchAll(/class="work-board-row"/g)]).toHaveLength(10)
+    expect(filteredMarkup).toContain("Showing 10 of 16 goals")
   })
 
   it("renders a compact superseded history affordance for the canonical Work goal", async () => {
@@ -450,7 +517,9 @@ describe("Work control app", () => {
     const snapshotsValue = await Effect.runPromise(
       projectWorkSnapshots(events, relationAt + 1)
     )
-    const markup = renderToStaticMarkup(createElement(WorkBoard, { snapshots: snapshotsValue }))
+    const markup = renderToStaticMarkup(
+      createElement(WorkBoard, { initialGoalId: "goal-connect-v3", snapshots: snapshotsValue })
+    )
     expect(snapshotsValue.now.goals.map(({ id }) => id)).toEqual(["goal-connect-v3"])
     expect(snapshotsValue.now.families?.[0]?.superseded).toHaveLength(2)
     expect(markup).toContain("goal-connect-v3")

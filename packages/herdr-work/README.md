@@ -109,3 +109,5 @@ previously partial activation during replay.
 Every URL uses the credential-free HTTP(S) `LinkUrl` boundary. Provider credentials and private locators never enter these persisted or browser-visible links.
 
 `WorkBoard` accepts `externalLinks="enabled"` by default. With `externalLinks="disabled"`, it keeps recorded approval, review, and Connect targets visible as metadata without rendering outbound links for read-only LAN Work.
+
+The board shows ten goals initially, filters them by durable status, and reveals ten more per request. A selected or deep-linked goal stays in the active bounded page. Goal details and shipment evidence open on selection and return focus to the selected row when closed. When `navigation` is present, filters, reveal, and close use same-origin links so server-rendered Work remains operable without JavaScript. `WorkNavigationSelection.goalId` may carry an opaque board-state token longer than a persisted `WorkGoalId`; transport callers must decode the selection before validating a goal identity. On narrow screens, rows keep status, title, and summary visible while the detail view owns the remaining metadata.

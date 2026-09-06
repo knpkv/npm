@@ -1,6 +1,6 @@
 import { Button, Divider, StateLabel, Surface, Text, type RlyStateTone } from "@knpkv/rly/primitives"
 import { StageRail, type RlyStage } from "@knpkv/rly/patterns"
-import { useState, type ReactElement } from "react"
+import { useEffect, useRef, useState, type ReactElement } from "react"
 import type {
   DeliveryStage,
   WorkActivity,
@@ -14,9 +14,21 @@ import type {
   WorkSnapshotWindow,
   WorkBlocker
 } from "./model.js"
+import { decodeWorkBoardNavigationGoal, encodeWorkBoardNavigationGoal } from "./navigation.js"
 
 const windows: ReadonlyArray<WorkSnapshotWindow> = ["now", "day", "week", "month"]
 const stageOrder: ReadonlyArray<DeliveryStage> = ["local", "review", "pull_request", "merged", "deployed"]
+const initialVisibleGoalCount = 10
+const selectedGoalFragment = "work-selected-goal"
+const goalStates: ReadonlyArray<WorkGoal["state"]> = [
+  "planned",
+  "working",
+  "blocked",
+  "review",
+  "deployed",
+  "completed"
+]
+const statusFilters: ReadonlyArray<"all" | WorkGoal["state"]> = ["all", ...goalStates]
 
 const windowLabel = {
   now: "Now",
@@ -148,6 +160,11 @@ const familyLabelForGoal = (snapshot: WorkSnapshot, goal: WorkGoal): string | nu
   return `${count} superseded`
 }
 
+const withFragment = (href: string, fragment: string): string => {
+  const fragmentIndex = href.indexOf("#")
+  return `${fragmentIndex === -1 ? href : href.slice(0, fragmentIndex)}#${fragment}`
+}
+
 export const WorkBoard = ({
   externalLinks = "enabled",
   initialGoalId,
@@ -163,8 +180,35 @@ export const WorkBoard = ({
 }): ReactElement => {
   const [window, setWindow] = useState<WorkSnapshotWindow>(initialWindow)
   const snapshot = snapshotFor(snapshots, window)
-  const [selectedId, setSelectedId] = useState<string | null>(initialGoalId ?? snapshot.goals[0]?.id ?? null)
-  const selected = snapshot.goals.find(({ id }) => id === selectedId) ?? null
+  const directInitialGoal = snapshot.goals.find(({ id }) => id === initialGoalId)
+  const boardNavigation = directInitialGoal === undefined ? decodeWorkBoardNavigationGoal(initialGoalId ?? null) : null
+  const requestedInitialSelectedId = boardNavigation === null ? (initialGoalId ?? null) : boardNavigation.goalId
+  const initialStatusFilter = boardNavigation?.statusFilter ?? "all"
+  const requestedInitialSelectedGoal = snapshot.goals.find(({ id }) => id === requestedInitialSelectedId)
+  const initialSelectedGoal =
+    requestedInitialSelectedGoal !== undefined &&
+    (initialStatusFilter === "all" || requestedInitialSelectedGoal.state === initialStatusFilter)
+      ? requestedInitialSelectedGoal
+      : undefined
+  const initialSelectedId = initialSelectedGoal?.id ?? null
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId)
+  const [detailsOpen, setDetailsOpen] = useState(
+    initialSelectedGoal !== undefined &&
+      (initialStatusFilter === "all" || initialSelectedGoal.state === initialStatusFilter) &&
+      (boardNavigation?.detailsOpen ?? (initialGoalId !== undefined && initialGoalId !== null))
+  )
+  const [statusFilter, setStatusFilter] = useState<"all" | WorkGoal["state"]>(initialStatusFilter)
+  const [visibleGoalCount, setVisibleGoalCount] = useState(boardNavigation?.visibleGoalCount ?? initialVisibleGoalCount)
+  const detailsRef = useRef<HTMLElement | null>(null)
+  const selectedLinkRowRef = useRef<HTMLAnchorElement | null>(null)
+  const selectedRowRef = useRef<HTMLButtonElement | null>(null)
+  const filteredGoals =
+    statusFilter === "all" ? snapshot.goals : snapshot.goals.filter(({ state }) => state === statusFilter)
+  const selectedFilteredGoalIndex = filteredGoals.findIndex(({ id }) => id === selectedId)
+  const selected = filteredGoals.find(({ id }) => id === selectedId) ?? null
+  const visibleGoalStart =
+    selectedFilteredGoalIndex < visibleGoalCount ? 0 : selectedFilteredGoalIndex - visibleGoalCount + 1
+  const visibleGoals = filteredGoals.slice(visibleGoalStart, visibleGoalStart + visibleGoalCount)
   const counts = {
     blocked: snapshot.goals.filter(({ state }) => state === "blocked").length,
     deployed: snapshot.goals.filter(({ state }) => state === "deployed").length,
@@ -175,6 +219,25 @@ export const WorkBoard = ({
     review: snapshot.goals.filter(({ state }) => state === "review").length,
     working: snapshot.goals.filter(({ state }) => state === "working").length
   }
+  useEffect(() => {
+    if (detailsOpen) detailsRef.current?.focus()
+  }, [detailsOpen, selectedId])
+  useEffect(() => {
+    if (
+      navigation !== undefined &&
+      !detailsOpen &&
+      selectedId !== null &&
+      document.location.hash === `#${selectedGoalFragment}`
+    ) {
+      selectedLinkRowRef.current?.focus()
+    }
+  }, [detailsOpen, navigation, selectedId])
+  useEffect(() => {
+    if (selectedId === null || selectedFilteredGoalIndex !== -1) return
+    setDetailsOpen(false)
+    setSelectedId(null)
+    setVisibleGoalCount(initialVisibleGoalCount)
+  }, [selectedFilteredGoalIndex, selectedId])
   return (
     <section className="work-page" aria-labelledby="work-board-title">
       <header className="work-page-intro">
@@ -209,27 +272,56 @@ export const WorkBoard = ({
           />
         </div>
         <div aria-label="Choose work snapshot" className="work-time-controls" role="group">
-          {windows.map((option) =>
-            navigation === undefined ? (
-              <Button
-                aria-pressed={window === option}
-                key={option}
-                onClick={() => setWindow(option)}
-                variant={window === option ? "primary" : "secondary"}
-              >
-                {windowLabel[option]}
-              </Button>
-            ) : (
+          {windows.map((option) => {
+            if (navigation === undefined) {
+              return (
+                <Button
+                  aria-pressed={window === option}
+                  key={option}
+                  onClick={() => {
+                    const selectedAtOption = snapshotFor(snapshots, option).goals.find(({ id }) => id === selectedId)
+                    if (
+                      selectedAtOption === undefined ||
+                      (statusFilter !== "all" && selectedAtOption.state !== statusFilter)
+                    ) {
+                      setDetailsOpen(false)
+                    }
+                    setVisibleGoalCount(initialVisibleGoalCount)
+                    setWindow(option)
+                  }}
+                  variant={window === option ? "primary" : "secondary"}
+                >
+                  {windowLabel[option]}
+                </Button>
+              )
+            }
+            const selectedAtOption = snapshotFor(snapshots, option).goals.find(({ id }) => id === selectedId)
+            const hasBoardState =
+              selectedId !== null || statusFilter !== "all" || visibleGoalCount !== initialVisibleGoalCount
+            return (
               <a
                 aria-current={window === option ? "page" : undefined}
                 className="work-time-link"
-                href={navigation({ goalId: null, window: option })}
+                href={navigation({
+                  goalId: hasBoardState
+                    ? encodeWorkBoardNavigationGoal({
+                        detailsOpen:
+                          detailsOpen &&
+                          selectedAtOption !== undefined &&
+                          (statusFilter === "all" || selectedAtOption.state === statusFilter),
+                        goalId: selectedId,
+                        statusFilter,
+                        visibleGoalCount: initialVisibleGoalCount
+                      })
+                    : null,
+                  window: option
+                })}
                 key={option}
               >
                 {windowLabel[option]}
               </a>
             )
-          )}
+          })}
         </div>
       </Surface>
       <div className="work-summary-grid" aria-label="Work summary">
@@ -249,87 +341,223 @@ export const WorkBoard = ({
         </Surface>
       ) : (
         <div className="work-board-layout">
-          <Surface className="work-departure-board" padding="none" tone="secondary">
-            <div className="work-board-head" aria-hidden="true">
-              <span>Status</span>
-              <span>Work</span>
-              <span>Owner</span>
-              <span>Agent / host</span>
-              <span>Repository</span>
-              <span>Shipment</span>
-              <span>Spend</span>
+          <div className="work-board-list">
+            <div className="work-board-toolbar">
+              <div aria-label="Filter goals by status" className="work-status-filters" role="group">
+                {statusFilters.map((state) => {
+                  const label = state === "all" ? "All" : statePresentation[state].label
+                  return navigation === undefined ? (
+                    <button
+                      aria-pressed={statusFilter === state}
+                      className="work-status-filter"
+                      key={state}
+                      onClick={() => {
+                        setDetailsOpen(false)
+                        setSelectedId(null)
+                        setStatusFilter(state)
+                        setVisibleGoalCount(initialVisibleGoalCount)
+                      }}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  ) : (
+                    <a
+                      aria-current={statusFilter === state ? "page" : undefined}
+                      className="work-status-filter"
+                      href={navigation({
+                        goalId: encodeWorkBoardNavigationGoal({
+                          detailsOpen: false,
+                          goalId: null,
+                          statusFilter: state,
+                          visibleGoalCount: initialVisibleGoalCount
+                        }),
+                        window
+                      })}
+                      key={state}
+                    >
+                      {label}
+                    </a>
+                  )
+                })}
+              </div>
+              <Text aria-live="polite" tone="secondary" variant="meta">
+                Showing {visibleGoals.length} of {filteredGoals.length} goals
+              </Text>
             </div>
-            {snapshot.goals.map((goal) => {
-              const row = (
-                <>
-                  <StateLabel
-                    label={statePresentation[goal.state].label}
-                    size="compact"
-                    tone={statePresentation[goal.state].tone}
-                  />
-                  <span className="work-board-copy">
-                    <Text as="strong" variant="label">
-                      {goal.title}
-                    </Text>
-                    <Text tone="secondary" variant="meta">
-                      {goal.summary}
-                    </Text>
-                    {familyLabelForGoal(snapshot, goal) === null ? null : (
-                      <Text tone="secondary" variant="meta">
-                        {familyLabelForGoal(snapshot, goal)}
+            <Surface className="work-departure-board" padding="none" tone="secondary">
+              <div className="work-board-head" aria-hidden="true">
+                <span>Status</span>
+                <span>Work</span>
+                <span>Owner</span>
+                <span>Agent / host</span>
+                <span>Repository</span>
+                <span>Shipment</span>
+                <span>Spend</span>
+              </div>
+              {filteredGoals.length === 0 ? (
+                <div className="work-empty-filter">
+                  <Text tone="secondary">No goals match this status.</Text>
+                </div>
+              ) : null}
+              {visibleGoals.map((goal) => {
+                const row = (
+                  <>
+                    <StateLabel
+                      label={statePresentation[goal.state].label}
+                      size="compact"
+                      tone={statePresentation[goal.state].tone}
+                    />
+                    <span className="work-board-copy">
+                      <Text as="strong" variant="label">
+                        {goal.title}
                       </Text>
-                    )}
-                  </span>
-                  <Text data-label="Owner">{goal.owner.name}</Text>
-                  <span className="work-board-copy" data-label="Agent / host">
-                    <Text>{hierarchyLabel(goal)}</Text>
-                    {goal.agentHierarchy?.agent.relationship === undefined ? null : (
                       <Text tone="secondary" variant="meta">
-                        {goal.agentHierarchy.agent.relationship.relation} ·{" "}
-                        {goal.agentHierarchy.agent.relationship.parentAgentId}
+                        {goal.summary}
                       </Text>
-                    )}
-                  </span>
-                  <span className="work-board-copy" data-label="Repository">
-                    <Text variant="code">{goal.repository.repository}</Text>
-                    <Text tone="secondary" variant="meta">
-                      {goal.repository.branch}
+                      {familyLabelForGoal(snapshot, goal) === null ? null : (
+                        <Text tone="secondary" variant="meta">
+                          {familyLabelForGoal(snapshot, goal)}
+                        </Text>
+                      )}
+                    </span>
+                    <Text data-label="Owner">{goal.owner.name}</Text>
+                    <span className="work-board-copy" data-label="Agent / host">
+                      <Text>{hierarchyLabel(goal)}</Text>
+                      {goal.agentHierarchy?.agent.relationship === undefined ? null : (
+                        <Text tone="secondary" variant="meta">
+                          {goal.agentHierarchy.agent.relationship.relation} ·{" "}
+                          {goal.agentHierarchy.agent.relationship.parentAgentId}
+                        </Text>
+                      )}
+                    </span>
+                    <span className="work-board-copy" data-label="Repository">
+                      <Text variant="code">{goal.repository.repository}</Text>
+                      <Text tone="secondary" variant="meta">
+                        {goal.repository.branch}
+                      </Text>
+                    </span>
+                    <Text data-label="Shipment">{deliveryLabel[goal.delivery]}</Text>
+                    <Text data-label="Spend" variant="code">
+                      {formatSpend(goal)}
                     </Text>
-                  </span>
-                  <Text data-label="Shipment">{deliveryLabel[goal.delivery]}</Text>
-                  <Text data-label="Spend" variant="code">
-                    {formatSpend(goal)}
-                  </Text>
-                </>
-              )
-              return navigation === undefined ? (
-                <button
-                  aria-pressed={selected?.id === goal.id}
-                  className="work-board-row"
-                  key={goal.id}
-                  onClick={() => setSelectedId(goal.id)}
-                  type="button"
+                  </>
+                )
+                return navigation === undefined ? (
+                  <button
+                    aria-controls={detailsOpen && selected?.id === goal.id ? "work-goal-details" : undefined}
+                    aria-expanded={detailsOpen && selected?.id === goal.id}
+                    aria-pressed={selected?.id === goal.id}
+                    className="work-board-row"
+                    id={selected?.id === goal.id ? selectedGoalFragment : undefined}
+                    key={goal.id}
+                    onClick={() => {
+                      setDetailsOpen(true)
+                      setSelectedId(goal.id)
+                    }}
+                    ref={selected?.id === goal.id ? selectedRowRef : undefined}
+                    type="button"
+                  >
+                    {row}
+                  </button>
+                ) : (
+                  <a
+                    aria-current={selected?.id === goal.id ? "true" : undefined}
+                    className="work-board-row"
+                    href={navigation({
+                      goalId:
+                        statusFilter === "all" && visibleGoalCount === initialVisibleGoalCount
+                          ? goal.id
+                          : encodeWorkBoardNavigationGoal({
+                              detailsOpen: true,
+                              goalId: goal.id,
+                              statusFilter,
+                              visibleGoalCount
+                            }),
+                      window
+                    })}
+                    key={goal.id}
+                    id={selected?.id === goal.id ? selectedGoalFragment : undefined}
+                    ref={selected?.id === goal.id ? selectedLinkRowRef : undefined}
+                  >
+                    {row}
+                  </a>
+                )
+              })}
+            </Surface>
+            {visibleGoals.length < filteredGoals.length ? (
+              navigation === undefined ? (
+                <Button
+                  onClick={() =>
+                    setVisibleGoalCount((count) => Math.min(count + initialVisibleGoalCount, filteredGoals.length))
+                  }
                 >
-                  {row}
-                </button>
+                  Load 10 more
+                </Button>
               ) : (
                 <a
-                  aria-current={selected?.id === goal.id ? "true" : undefined}
-                  className="work-board-row"
-                  href={navigation({ goalId: goal.id, window })}
-                  key={goal.id}
+                  className="work-load-more-link"
+                  href={navigation({
+                    goalId: encodeWorkBoardNavigationGoal({
+                      detailsOpen,
+                      goalId: selectedId,
+                      statusFilter,
+                      visibleGoalCount: Math.min(visibleGoalCount + initialVisibleGoalCount, filteredGoals.length)
+                    }),
+                    window
+                  })}
                 >
-                  {row}
+                  Load 10 more
                 </a>
               )
-            })}
-          </Surface>
-          {selected === null ? null : (
-            <Surface as="aside" className="work-inspector" padding="spacious">
-              <StateLabel
-                label={statePresentation[selected.state].label}
-                tone={statePresentation[selected.state].tone}
-              />
+            ) : null}
+          </div>
+          {selected === null || !detailsOpen ? null : (
+            <Surface
+              aria-label="Goal details"
+              as="aside"
+              className="work-inspector"
+              id="work-goal-details"
+              padding="spacious"
+              ref={detailsRef}
+              tabIndex={-1}
+            >
+              <div className="work-inspector-heading">
+                <StateLabel
+                  label={statePresentation[selected.state].label}
+                  tone={statePresentation[selected.state].tone}
+                />
+                {navigation === undefined ? (
+                  <Button
+                    onClick={() => {
+                      setDetailsOpen(false)
+                      const selectedRow = selectedRowRef.current ?? selectedLinkRowRef.current
+                      selectedRow?.focus()
+                    }}
+                    variant="secondary"
+                  >
+                    Close details
+                  </Button>
+                ) : (
+                  <a
+                    className="work-exact-link"
+                    href={withFragment(
+                      navigation({
+                        goalId: encodeWorkBoardNavigationGoal({
+                          detailsOpen: false,
+                          goalId: selectedId,
+                          statusFilter,
+                          visibleGoalCount
+                        }),
+                        window
+                      }),
+                      selectedGoalFragment
+                    )}
+                  >
+                    Close details
+                  </a>
+                )}
+              </div>
               <Text as="h2" variant="section-title">
                 {selected.title}
               </Text>
@@ -558,7 +786,7 @@ export const WorkBoard = ({
           )}
         </div>
       )}
-      {selected === null ? null : (
+      {selected === null || !detailsOpen ? null : (
         <Surface className="work-delivery-evidence" padding="spacious">
           <StageRail heading={`Shipment path · ${selected.title}`} stages={stagesFor(selected)} />
         </Surface>
