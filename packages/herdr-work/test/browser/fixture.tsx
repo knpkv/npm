@@ -47,5 +47,30 @@ const snapshots: WorkSnapshots = {
 const rootElement = document.querySelector<HTMLElement>("#root")
 if (rootElement === null) throw new MissingWorkFixtureRootError({ selector: "#root" })
 
-const selectedGoalId = new URL(window.location.href).searchParams.get("goal")
-createRoot(rootElement).render(<WorkBoard initialGoalId={selectedGoalId} snapshots={snapshots} />)
+const searchParams = new URL(window.location.href).searchParams
+const selectedGoalId = searchParams.get("goal")
+const requestedWindow = searchParams.get("window")
+const initialWindow: WorkSnapshot["window"] =
+  requestedWindow === "day" || requestedWindow === "week" || requestedWindow === "month" ? requestedWindow : "now"
+const navigation = searchParams.has("navigation")
+  ? ({
+      goalId,
+      window: snapshotWindow
+    }: {
+      readonly goalId: string | null
+      readonly window: WorkSnapshot["window"]
+    }) => {
+      const target = new URLSearchParams({ navigation: "", window: snapshotWindow })
+      if (goalId !== null) target.set("goal", goalId)
+      return `?${target.toString()}`
+    }
+  : undefined
+
+createRoot(rootElement).render(
+  <WorkBoard
+    initialGoalId={selectedGoalId}
+    initialWindow={initialWindow}
+    navigation={navigation}
+    snapshots={snapshots}
+  />
+)

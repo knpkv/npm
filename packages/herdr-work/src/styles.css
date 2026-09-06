@@ -42,6 +42,10 @@
   .work-time-controls {
     flex-wrap: wrap;
   }
+  .work-time-link {
+    text-decoration: none;
+    text-underline-offset: 0.2em;
+  }
   .work-summary-grid {
     display: grid;
     gap: var(--rly-space-8);
@@ -142,6 +146,7 @@
     inline-size: 100%;
     min-block-size: 5.5rem;
     text-align: start;
+    text-decoration: none;
   }
   .work-board-row[aria-pressed="true"] {
     background: var(--rly-color-surface-3);
@@ -251,6 +256,9 @@
     overflow-wrap: anywhere;
   }
   @media (hover: hover) {
+    .work-time-link:hover {
+      text-decoration: underline;
+    }
     .work-board-row:hover {
       background: var(--rly-color-surface-2);
     }

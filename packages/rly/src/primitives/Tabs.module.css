@@ -81,6 +81,24 @@
     }
   }
 
+  @media (max-width: 30rem) {
+    .root:not([data-mobile-layout="single-row"]) .trigger[data-state="active"]::after {
+      content: none;
+    }
+
+    :where([data-forced-colors="active"], [data-rly-forced-colors="active"])
+      .root:not([data-mobile-layout="single-row"])
+      .trigger[data-state="active"]::after {
+      content: "";
+    }
+  }
+
+  @media (max-width: 30rem) and (forced-colors: active) {
+    .root:not([data-mobile-layout="single-row"]) .trigger[data-state="active"]::after {
+      content: "";
+    }
+  }
+
   .root[data-mobile-layout="single-row"] .list {
     flex-wrap: nowrap;
     overflow-x: auto;
