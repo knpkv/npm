@@ -80,4 +80,15 @@
       color: var(--rly-color-text-1);
     }
   }
+
+  .root[data-mobile-layout="single-row"] .list {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+  }
+
+  .root[data-mobile-layout="single-row"] .trigger {
+    flex: 1 0 auto;
+    max-inline-size: none;
+    white-space: nowrap;
+  }
 }

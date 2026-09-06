@@ -50,6 +50,7 @@ describe("Tabs", () => {
     expect(tabs).toHaveLength(3)
     expect(tabs[0]?.getAttribute("aria-selected")).toBe("true")
     expect(tabs[1]?.hasAttribute("disabled")).toBe(true)
+    expect(tabs[0]?.dataset.tabValue).toBe("summary")
     expect(tabs[0]?.getAttribute("aria-controls")).toBe(panel?.id)
     expect(panel?.getAttribute("aria-labelledby")).toBe(tabs[0]?.id)
     expect(panel?.textContent).toContain("Decision summary")
