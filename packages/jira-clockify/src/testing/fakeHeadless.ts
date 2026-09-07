@@ -247,7 +247,8 @@ const defaultConfig: JcfConfig = {
   sessionRoots: [],
   sessionTicketMap: {},
   sessionIdleCapSeconds: 300,
-  sessionConfidenceFloor: 0.7
+  sessionConfidenceFloor: 0.7,
+  sessionDwellSeconds: 900
 }
 
 const makeTimeEntry = (entry: ExistingClockifyEntry, id: string): TimeEntry => ({

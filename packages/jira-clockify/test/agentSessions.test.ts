@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   activeWindows,
+  applyDwellFloor,
   attributeSession,
   buildSessionDigest,
   buildSessionProposals,
@@ -239,7 +240,8 @@ describe("activeWindows and sharing", () => {
    */
   const creditFor = (
     events: ReadonlyArray<{ sessionId: string; atMs: number }>,
-    tickets: Readonly<Record<string, string | null>>
+    tickets: Readonly<Record<string, string | null>>,
+    dwellSeconds?: number
   ) => {
     const attributions: ReadonlyArray<SessionAttribution> = Object.entries(tickets).map(([sessionId, ticketKey]) => ({
       sessionId,
@@ -248,7 +250,11 @@ describe("activeWindows and sharing", () => {
       confidence: null,
       belowConfidenceFloor: false
     }))
-    return splitCredits(activeWindows(events, { idleCapSeconds, observedAtMs: OBSERVED_AT }), attributions)
+    // Every case in this block predates the Dwell Floor and is written at minute scale, so the floor
+    // is off by default here and the cases that are about it pass their own.
+    return splitCredits(activeWindows(events, { idleCapSeconds, observedAtMs: OBSERVED_AT }), attributions, {
+      dwellSeconds: dwellSeconds ?? 0
+    })
   }
 
   const ticketSeconds = (split: ReturnType<typeof creditFor>, ticketKey: string, day: string): number =>
@@ -334,6 +340,8 @@ describe("activeWindows and sharing", () => {
     }
   })
 
+  // The Dwell Floor is off here: dividing an overlap is a question about instants, and a
+  // fifteen-minute fixture would say nothing more about it. `applyDwellFloor` has its own cases.
   it("divides only the overlapping part, leaving solo stretches whole", () => {
     const split = creditFor(
       [
@@ -594,6 +602,154 @@ describe("mergeSpansWithinDays", () => {
   it("cuts a multi-day span into one span per day", () => {
     const merged = mergeSpansWithinDays([{ startMs: at(2026, 7, 1, 23, 0), endMs: at(2026, 7, 3, 1, 0) }])
     expect(merged).toHaveLength(3)
+  })
+})
+
+describe("applyDwellFloor", () => {
+  const minutes = (fromMinute: number, toMinute: number, ...bucketIds: ReadonlyArray<string>) => ({
+    bucketIds,
+    endMs: at(2026, 7, 1, 9, 0) + toMinute * 60_000,
+    startMs: at(2026, 7, 1, 9, 0) + fromMinute * 60_000
+  })
+
+  const attributedOnly = (bucketId: string) => bucketId.startsWith("attributed")
+  const floor = (slices: ReadonlyArray<ReturnType<typeof minutes>>, dwellSeconds = 900) =>
+    applyDwellFloor(slices, { attributed: attributedOnly, dwellSeconds })
+
+  const owners = (runs: ReadonlyArray<{ bucketIds: ReadonlyArray<string>; startMs: number; endMs: number }>) =>
+    runs.map((run) => [run.bucketIds.join("+"), (run.endMs - run.startMs) / 60_000])
+
+  /** Time may move between buckets, but the total must not change. */
+  const heldMinutes = (runs: ReadonlyArray<{ startMs: number; endMs: number }>) =>
+    runs.reduce((total, run) => total + (run.endMs - run.startMs), 0) / 60_000
+
+  it("gives a short interruption back to the ticket that was already holding the time", () => {
+    const slices = [
+      minutes(0, 20, "attributed\u0000PROJ-1"),
+      minutes(20, 22, "attributed\u0000PROJ-2"),
+      minutes(22, 40, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([["attributed\u0000PROJ-1", 40]])
+    expect(heldMinutes(floor(slices))).toBe(heldMinutes(slices))
+  })
+
+  it("leaves an alternation alone once each stretch clears the floor", () => {
+    const slices = [
+      minutes(0, 20, "attributed\u0000PROJ-1"),
+      minutes(20, 40, "attributed\u0000PROJ-2"),
+      minutes(40, 60, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 20],
+      ["attributed\u0000PROJ-2", 20],
+      ["attributed\u0000PROJ-1", 20]
+    ])
+  })
+
+  it("keeps a short stretch that touches nothing — there is no incumbent to give it to", () => {
+    const slices = [minutes(0, 4, "attributed\u0000PROJ-1"), minutes(120, 124, "attributed\u0000PROJ-2")]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 4],
+      ["attributed\u0000PROJ-2", 4]
+    ])
+  })
+
+  // The asymmetry. Demoting a sliver of a ticket into unplaced hours writes nothing and is safe;
+  // promoting unplaced hours into a ticket would bill work no transcript placed there.
+  it("never turns unplaced hours into credited time", () => {
+    const slices = [
+      minutes(0, 30, "attributed\u0000PROJ-1"),
+      minutes(30, 33, "unattributed\u0000"),
+      minutes(33, 60, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 30],
+      ["unattributed\u0000", 3],
+      ["attributed\u0000PROJ-1", 27]
+    ])
+  })
+
+  // The other half of the asymmetry: a sliver of a ticket surrounded by unplaced hours keeps its own
+  // time. Handing it to them would discard billable work, which is worse than a short block.
+  it("never turns credited time into unplaced hours", () => {
+    const slices = [
+      minutes(0, 30, "unattributed\u0000"),
+      minutes(30, 33, "attributed\u0000PROJ-1"),
+      minutes(33, 60, "unattributed\u0000")
+    ]
+    expect(owners(floor(slices))).toEqual([
+      ["unattributed\u0000", 30],
+      ["attributed\u0000PROJ-1", 3],
+      ["unattributed\u0000", 27]
+    ])
+  })
+
+  // A short piece of work with nothing after it is work, not an interruption.
+  it("keeps a short stretch that the earlier ticket never resumes after", () => {
+    const slices = [minutes(0, 30, "attributed\u0000PROJ-1"), minutes(30, 38, "attributed\u0000PROJ-2")]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 30],
+      ["attributed\u0000PROJ-2", 8]
+    ])
+  })
+
+  it("absorbs a shared sliver too — the rule is about how often ownership changes", () => {
+    const slices = [
+      minutes(0, 30, "attributed\u0000PROJ-1"),
+      minutes(30, 32, "attributed\u0000PROJ-1", "attributed\u0000PROJ-2"),
+      minutes(32, 60, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([["attributed\u0000PROJ-1", 60]])
+  })
+
+  it("never welds two stretches across a local midnight", () => {
+    const before = {
+      bucketIds: ["attributed\u0000PROJ-1"],
+      endMs: at(2026, 7, 2, 0, 0),
+      startMs: at(2026, 7, 1, 23, 58)
+    }
+    const after = {
+      bucketIds: ["attributed\u0000PROJ-1"],
+      endMs: at(2026, 7, 2, 0, 3),
+      startMs: at(2026, 7, 2, 0, 0)
+    }
+    // Runs are bucketed by the day they start in, so one run over midnight would report the small
+    // hours on the wrong day and leave the next day empty.
+    expect(applyDwellFloor([before, after], { attributed: attributedOnly, dwellSeconds: 900 })).toHaveLength(2)
+  })
+
+  it("reports the raw interleaving when the floor is off", () => {
+    const slices = [
+      minutes(0, 20, "attributed\u0000PROJ-1"),
+      minutes(20, 22, "attributed\u0000PROJ-2"),
+      minutes(22, 40, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices, 0))).toHaveLength(3)
+  })
+})
+
+describe("splitCredits under the Dwell Floor", () => {
+  it("credits an interrupting minute to the stretch around it", () => {
+    const events = [
+      ...Array.from({ length: 21 }, (_, index) => ({ atMs: at(2026, 7, 1, 9, 0) + index * 60_000, sessionId: "s1" })),
+      { atMs: at(2026, 7, 1, 9, 10), sessionId: "s2" }
+    ]
+    const attributions: ReadonlyArray<SessionAttribution> = [
+      { belowConfidenceFloor: false, confidence: null, sessionId: "s1", signal: "branch", ticketKey: "PROJ-1" },
+      { belowConfidenceFloor: false, confidence: null, sessionId: "s2", signal: "branch", ticketKey: "PROJ-2" }
+    ]
+    const windows = activeWindows(events, { idleCapSeconds: 300, observedAtMs: at(2027, 1, 1, 0, 0) })
+    const withFloor = splitCredits(windows, attributions, { dwellSeconds: 900 })
+    const withoutFloor = splitCredits(windows, attributions, { dwellSeconds: 0 })
+
+    // Read literally, the transcripts say the work changed ticket twice in a minute. It did not.
+    expect(withFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1"])
+    expect(withoutFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1", "PROJ-2"])
+    // Time moved rather than vanished: the day still holds what it held.
+    const total = (rows: ReadonlyArray<{ seconds: number }>) => rows.reduce((sum, row) => sum + row.seconds, 0)
+    expect(total(withFloor.attributed)).toBe(total(withoutFloor.attributed))
+    // And one block instead of two, which is the difference on a calendar.
+    expect(withFloor.attributed[0]!.spans).toHaveLength(1)
   })
 })
 

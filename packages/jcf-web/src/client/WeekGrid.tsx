@@ -154,11 +154,13 @@ const Block = (props: {
         props.onOpen(block.rowId)
       }}
       style={style}
-      title={`${block.ticketKey} ${clock} — not logged`}
+      title={`${block.ticketKey} ${clock} — not logged · +${duration(
+        block.deltaSeconds
+      )} proposable on this ticket today`}
       type="button"
     >
       <span className="jcf-block-key">{block.ticketKey}</span>
-      <span className="jcf-block-clock">+{duration(block.deltaSeconds)}</span>
+      <span className="jcf-block-clock">{clock}</span>
       <span className="jcf-signal" data-signal={block.signal}>
         {block.signal}
       </span>

@@ -1392,6 +1392,9 @@ describe("jcf sync reconcile --agent: a session that changes branch", () => {
               ]
             })
           },
+          // About where a stretch's tail ends, at minute scale, so the Dwell Floor is off: with it
+          // on, a one-minute stretch is exactly what gets absorbed, which the next case asserts.
+          config: { sessionDwellSeconds: 0 },
           keep: [true, true]
         })
       )
@@ -1400,6 +1403,39 @@ describe("jcf sync reconcile --agent: a session that changes branch", () => {
       // plus its own capped tail. Nothing is credited twice.
       expect(byKey.get("PROJ-1000")).toBe(60)
       expect(byKey.get("PROJ-2000")).toBe(120 + IDLE_CAP)
+    }))
+
+  // The Dwell Floor at work end to end. Nobody changes ticket every minute; read literally that is
+  // what interleaved transcripts say, and a timesheet built from it is indefensible.
+  it.effect("does not change ticket inside the Dwell Floor, and logs the whole stretch once", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-1000-first",
+              // Chronological, because segments are cut in transcript order: a prompt appended out
+              // of order would bound the earlier segment at it and lose that segment's tail.
+              events: [
+                ...steady(at(DAY.year, DAY.month, DAY.day, 9, 0), 9),
+                // One minute on another branch, in the middle of twenty on this one.
+                { atMs: at(DAY.year, DAY.month, DAY.day, 9, 10), branch: "feat/PROJ-2000-second" },
+                ...steady(at(DAY.year, DAY.month, DAY.day, 9, 11), 9)
+              ]
+            })
+          },
+          keep: [true, true]
+        })
+      )
+      const byKey = new Map(world.jiraWorklogs.map((worklog) => [worklog.issueKey, worklog.timeSpentSeconds]))
+      // One row holding the whole stretch: 09:00–09:20 plus its capped tail, with the interrupting
+      // minute inside it. The minute did not become a second ticket.
+      expect(byKey.get("PROJ-2000")).toBeUndefined()
+      expect(byKey.get("PROJ-1000")).toBe(20 * 60 + IDLE_CAP)
+      expect(world.jiraWorklogs).toHaveLength(1)
     }))
 })
 

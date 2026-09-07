@@ -466,6 +466,191 @@ const overlapSlices = (
   return slices
 }
 
+/**
+ * The shortest stretch that may own time on its own, in seconds.
+ *
+ * Fifteen minutes, because a timeline that changes ticket every three minutes is not a record of how
+ * anyone works — it is an artefact of reading several concurrent transcripts at once. A day of that
+ * is unreadable on a calendar and indefensible on a timesheet.
+ */
+export const DEFAULT_DWELL_SECONDS = 900
+
+/** One stretch of the day and the buckets that own it. */
+export interface OwnedRun {
+  readonly startMs: number
+  readonly endMs: number
+  readonly bucketIds: ReadonlyArray<string>
+}
+
+const sameOwners = (a: ReadonlyArray<string>, b: ReadonlyArray<string>): boolean =>
+  a.length === b.length && a.every((id, index) => id === b[index])
+
+/**
+ * True when two touching stretches may become one: same owners, same local day.
+ *
+ * The day check is load-bearing. Runs are bucketed by the day their start falls in, so welding a
+ * stretch ending at midnight to the one beginning there would move the small hours of Tuesday onto
+ * Monday and report Tuesday as empty. The windows arrive already split at midnight for exactly this
+ * reason; coalescing must not undo it.
+ */
+const joinable = (previous: OwnedRun, next: OwnedRun): boolean =>
+  previous.endMs === next.startMs &&
+  sameOwners(previous.bucketIds, next.bucketIds) &&
+  localDay(new Date(previous.startMs)) === localDay(new Date(next.startMs))
+
+/** Join touching stretches with identical owners. A gap of idle time always separates two runs. */
+const mergeRuns = (runs: ReadonlyArray<OwnedRun>): ReadonlyArray<OwnedRun> => {
+  const merged: Array<OwnedRun> = []
+  for (const run of runs) {
+    const previous = merged[merged.length - 1]
+    if (previous !== undefined && joinable(previous, run)) {
+      merged[merged.length - 1] = { ...previous, endMs: run.endMs }
+      continue
+    }
+    merged.push(run)
+  }
+  return merged
+}
+
+/**
+ * Coalesce ownership so it changes no more often than the Dwell Floor.
+ *
+ * **What this is for.** Three concurrent sessions on three Issue Keys interleave their prompts, and
+ * read literally that says the work changed ticket every few minutes. It did not — that is an
+ * artefact of reading several transcripts at once. A day of it is two dozen slivers on a calendar and
+ * indefensible on a timesheet.
+ *
+ * **Two rules, in order.**
+ *
+ * 1. *A ticket present for less than the floor across the whole day, interrupting work that resumes
+ *    after it, was not a ticket that was worked on.* It was a keystroke inside other work — a branch
+ *    checked, a file opened, a question asked — so its time goes to the work around it. This is what
+ *    actually removes the slivers: they rarely touch anything, because a transcript goes quiet
+ *    between prompts, and they are as often overlapping as adjacent, because concurrent sessions
+ *    overlap by definition. Adjacency and overlap were both tried as the test and both left the
+ *    interleaving as they found it. The requirement for work on *both* sides is what keeps a genuine
+ *    short piece of work — eight minutes on another ticket, and then the day moves on — from being
+ *    swallowed by what came before it.
+ * 2. *Tenancy, not adjacency.* Between tickets that were genuinely worked on, whoever takes the
+ *    timeline holds it for at least the floor: a stretch beginning inside that tenure and owned by
+ *    someone else is credited to the incumbent. This catches two real tickets alternating quickly.
+ *
+ * **What it never does.** It reassigns time and never creates or drops any — idle gaps are not swept
+ * into a tenure — so the inequality that makes a proposal safe to accept survives intact. Nothing is
+ * ever welded across a local midnight, because runs are bucketed by the day they start in.
+ *
+ * **Unplaced hours take no part.** A stretch nothing placed neither holds a tenure nor loses its time
+ * to one: promoting it would bill work no transcript placed on that ticket, and demoting an
+ * attributed sliver into it would quietly discard billable work. An attributed tenure simply
+ * continues across it.
+ *
+ * **A minor ticket with nothing to belong to keeps its own time.** Four minutes alone in an otherwise
+ * empty day has no surrounding work to join, and dropping it would lose work that happened.
+ */
+export const applyDwellFloor = (
+  slices: ReadonlyArray<OwnedRun>,
+  options: {
+    readonly dwellSeconds: number
+    /** True when a bucket's time is eligible to be proposed for an Issue Key. */
+    readonly attributed: (bucketId: string) => boolean
+  }
+): ReadonlyArray<OwnedRun> => {
+  const dwellMs = Math.max(0, options.dwellSeconds) * 1000
+  if (dwellMs === 0) return mergeRuns(slices)
+  const runs = mergeRuns(slices)
+
+  // How long each attributed ticket was present on each day, sharing ignored: the question is
+  // whether it was worked on at all, not how much of a shared minute it would be credited.
+  const presence = new Map<string, number>()
+  const presenceKey = (bucketId: string, day: string) => `${bucketId}\u0000${day}`
+  for (const run of runs) {
+    const day = localDay(new Date(run.startMs))
+    for (const bucketId of run.bucketIds) {
+      const key = presenceKey(bucketId, day)
+      presence.set(key, (presence.get(key) ?? 0) + (run.endMs - run.startMs))
+    }
+  }
+  const major = (bucketId: string, day: string): boolean =>
+    !options.attributed(bucketId) || (presence.get(presenceKey(bucketId, day)) ?? 0) >= dwellMs
+
+  /** The nearest major, attributed owners on the same day, looking one way from `index`. */
+  const majorOwnersToward = (index: number, day: string, step: -1 | 1): ReadonlyArray<string> | undefined => {
+    for (let at = index + step; at >= 0 && at < runs.length; at += step) {
+      const candidate = runs[at]!
+      if (localDay(new Date(candidate.startMs)) !== day) return undefined
+      const owners = candidate.bucketIds.filter((id) => major(id, day) && options.attributed(id))
+      if (owners.length > 0) return owners
+    }
+    return undefined
+  }
+
+  const withoutMinors = runs.map((run, index) => {
+    const day = localDay(new Date(run.startMs))
+    const kept = run.bucketIds.filter((id) => major(id, day))
+    if (kept.length > 0) return { ...run, bucketIds: kept }
+    // Every owner was minor, so this is only an *interruption* if the work it interrupts resumes:
+    // there has to be major work on both sides of it. Eight minutes on another ticket after half an
+    // hour, with nothing after it, is a short piece of work rather than a keystroke inside a longer
+    // one — and swallowing it would lose the change of ticket a person actually made.
+    const before = majorOwnersToward(index, day, -1)
+    const after = majorOwnersToward(index, day, 1)
+    return before === undefined || after === undefined ? run : { ...run, bucketIds: before }
+  })
+
+  // Phase two: between tickets that were genuinely worked on, ownership holds for the floor.
+  let tenant: { readonly bucketIds: ReadonlyArray<string>; readonly sinceMs: number } | null = null
+  const held: Array<OwnedRun> = []
+  for (const run of mergeRuns(withoutMinors)) {
+    const attributedRun = run.bucketIds.every(options.attributed)
+    if (!attributedRun) {
+      held.push(run)
+      continue
+    }
+    const sameDay = tenant !== null && localDay(new Date(tenant.sinceMs)) === localDay(new Date(run.startMs))
+    if (tenant !== null && sameDay && sameOwners(tenant.bucketIds, run.bucketIds)) {
+      held.push(run)
+      continue
+    }
+    const overlapsTenant = tenant !== null && run.bucketIds.some((id) => tenant!.bucketIds.includes(id))
+    if (tenant !== null && sameDay && run.startMs - tenant.sinceMs < dwellMs && !overlapsTenant) {
+      held.push({ ...run, bucketIds: tenant.bucketIds })
+      continue
+    }
+    tenant = { bucketIds: run.bucketIds, sinceMs: run.startMs }
+    held.push(run)
+  }
+  return mergeRuns(held)
+}
+
+/**
+ * Join a bucket's spans that sit closer together than the Dwell Floor.
+ *
+ * For the picture only. Once ownership cannot change inside the floor, two spans of the same ticket
+ * four minutes apart are one stretch of work with a pause in it, and drawing them as two blocks says
+ * something about the day that is not true. The seconds are untouched — a row's total remains the
+ * authority on how much, and its spans on when.
+ */
+const joinSpansWithinDwell = (
+  spans: ReadonlyArray<CreditedSpan>,
+  dwellMs: number
+): ReadonlyArray<CreditedSpan> => {
+  const ordered = [...spans].sort((a, b) => a.startMs - b.startMs)
+  const joined: Array<CreditedSpan> = []
+  for (const span of ordered) {
+    const previous = joined[joined.length - 1]
+    if (
+      previous !== undefined &&
+      span.startMs - previous.endMs < dwellMs &&
+      localDay(new Date(previous.startMs)) === localDay(new Date(span.startMs))
+    ) {
+      joined[joined.length - 1] = { ...previous, endMs: Math.max(previous.endMs, span.endMs) }
+      continue
+    }
+    joined.push(span)
+  }
+  return joined
+}
+
 /** Credited and wall-clock seconds for one bucket on one day. */
 interface BucketDayCredit {
   readonly seconds: number
@@ -486,7 +671,11 @@ interface BucketDayCredit {
  * exceed the wall clock of the day.
  */
 const shareBetweenBuckets = (
-  spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan>>
+  spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan>>,
+  options: {
+    readonly dwellSeconds: number
+    readonly attributed: (bucketId: string) => boolean
+  }
 ): ReadonlyMap<string, ReadonlyMap<string, BucketDayCredit>> => {
   const totals = new Map<string, Map<string, { creditedMs: number; activeMs: number }>>()
   const add = (bucketId: string, day: string, creditedMs: number, activeMs: number) => {
@@ -496,17 +685,25 @@ const shareBetweenBuckets = (
     totals.set(bucketId, byDay)
   }
 
-  for (const slice of overlapSlices(spansByBucket)) {
-    // Windows are already day-bounded, so a slice never straddles two days.
-    const day = localDay(new Date(slice.startMs))
-    const duration = slice.endMs - slice.startMs
-    for (const bucketId of slice.bucketIds) add(bucketId, day, duration / slice.bucketIds.length, duration)
+  // Ownership is coalesced first, so the hours and the picture come from the same timeline. Deriving
+  // the totals from the runs and the spans from the original windows would put a row's seconds and
+  // its blocks at odds — and the blocks are what a person checks the seconds against.
+  const runs = applyDwellFloor(overlapSlices(spansByBucket), options)
+  const runSpans = new Map<string, Array<CreditedSpan>>()
+  for (const run of runs) {
+    // Windows are already day-bounded, so a run never straddles two days.
+    const day = localDay(new Date(run.startMs))
+    const duration = run.endMs - run.startMs
+    for (const bucketId of run.bucketIds) {
+      add(bucketId, day, duration / run.bucketIds.length, duration)
+      runSpans.set(bucketId, [...(runSpans.get(bucketId) ?? []), { endMs: run.endMs, startMs: run.startMs }])
+    }
   }
 
   const result = new Map<string, Map<string, BucketDayCredit>>()
   for (const [bucketId, byDay] of totals) {
     const spansByDay = new Map<string, Array<CreditedSpan>>()
-    for (const span of spansByBucket.get(bucketId) ?? []) {
+    for (const span of runSpans.get(bucketId) ?? []) {
       const day = localDay(new Date(span.startMs))
       spansByDay.set(day, [...(spansByDay.get(day) ?? []), span])
     }
@@ -518,7 +715,10 @@ const shareBetweenBuckets = (
         // the one invariant this shape exists to guarantee. Flooring errs the way the design prefers.
         seconds: Math.floor(sums.creditedMs / 1000),
         activeSeconds: Math.floor(sums.activeMs / 1000),
-        spans: mergeSpansWithinDays(spansByDay.get(day) ?? [])
+        spans: joinSpansWithinDwell(
+          mergeSpansWithinDays(spansByDay.get(day) ?? []),
+          Math.max(0, options.dwellSeconds) * 1000
+        )
       })
     }
     result.set(bucketId, perDay)
@@ -608,6 +808,11 @@ export const splitCredits = (
   options?: {
     /** Where each session ran, so unplaced hours can name the directories behind them. */
     readonly cwdBySession?: ReadonlyMap<string, string> | undefined
+    /**
+     * The Dwell Floor in seconds: how long a stretch must be to own time on its own. Defaults to
+     * {@link DEFAULT_DWELL_SECONDS}; zero turns the rule off and reports the raw interleaving.
+     */
+    readonly dwellSeconds?: number | undefined
   }
 ): CreditSplit => {
   const bySession = new Map(attributions.map((attribution) => [attribution.sessionId, attribution]))
@@ -662,7 +867,11 @@ export const splitCredits = (
   }
 
   const shared = shareBetweenBuckets(
-    new Map([...spansByBucket.entries()].map(([id, spans]) => [id, mergeSpansWithinDays(spans)]))
+    new Map([...spansByBucket.entries()].map(([id, spans]) => [id, mergeSpansWithinDays(spans)])),
+    {
+      attributed: (id) => metaByBucket.get(id)?.kind === "attributed",
+      dwellSeconds: options?.dwellSeconds ?? DEFAULT_DWELL_SECONDS
+    }
   )
 
   const attributed: Array<TicketDayCredit> = []

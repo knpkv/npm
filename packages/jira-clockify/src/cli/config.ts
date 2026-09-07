@@ -29,6 +29,9 @@ const printConfig = (config: JcfConfig) =>
     )
     yield* Console.log(`  Session tickets: ${JSON.stringify(config.sessionTicketMap)}`)
     yield* Console.log(`  Idle cap (sec):  ${config.sessionIdleCapSeconds}`)
+    yield* Console.log(
+      `  Dwell (sec):     ${config.sessionDwellSeconds === 0 ? "off" : config.sessionDwellSeconds}`
+    )
     yield* Console.log(`  Confidence floor:${` ${config.sessionConfidenceFloor}`}`)
   })
 
@@ -208,6 +211,28 @@ const configSetIdleCap = Command.make(
     })
 ).pipe(Command.withDescription("Longest gap between Session Activity events still counted as work"))
 
+const configSetDwell = Command.make(
+  "dwell",
+  { seconds: Args.string("seconds") },
+  ({ seconds }) =>
+    Effect.gen(function*() {
+      const cfg = yield* ConfigService
+      const parsed = Number(seconds)
+      // Zero is allowed here, unlike an idle cap: it turns the floor off and reports the raw
+      // interleaving, which is a legitimate thing to want to look at once.
+      if (!Number.isFinite(parsed) || parsed < 0) {
+        yield* Console.log("Provide a number of seconds, e.g. 900. Zero turns the dwell floor off.")
+        return
+      }
+      yield* cfg.set({ sessionDwellSeconds: parsed })
+      yield* Console.log(
+        parsed === 0
+          ? "Dwell floor: off — ownership may change as often as the transcripts interleave"
+          : `Dwell floor: ${parsed}s`
+      )
+    })
+).pipe(Command.withDescription("Shortest stretch that may own time on its own"))
+
 // ---------------------------------------------------------------------------
 // reset
 // ---------------------------------------------------------------------------
@@ -231,7 +256,8 @@ const configReset = Command.make(
         sessionRoots: defaultJcfConfig.sessionRoots,
         sessionTicketMap: defaultJcfConfig.sessionTicketMap,
         sessionIdleCapSeconds: defaultJcfConfig.sessionIdleCapSeconds,
-        sessionConfidenceFloor: defaultJcfConfig.sessionConfidenceFloor
+        sessionConfidenceFloor: defaultJcfConfig.sessionConfidenceFloor,
+        sessionDwellSeconds: defaultJcfConfig.sessionDwellSeconds
       })
       yield* Console.log("Config reset to defaults, including session roots and standing attributions.")
     })
@@ -240,7 +266,7 @@ const configReset = Command.make(
 const configSet = Command.make(
   "set",
   {},
-  () => Console.log("Config set: project, billable, jql, session-root, session-ticket, idle-cap")
+  () => Console.log("Config set: project, billable, jql, session-root, session-ticket, idle-cap, dwell")
 ).pipe(
   Command.withSubcommands([
     configSetProject,
@@ -248,7 +274,8 @@ const configSet = Command.make(
     configSetJql,
     configSetSessionRoot,
     configSetSessionTicket,
-    configSetIdleCap
+    configSetIdleCap,
+    configSetDwell
   ])
 )
 

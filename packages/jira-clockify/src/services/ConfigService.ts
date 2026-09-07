@@ -49,6 +49,14 @@ export interface JcfConfig {
    * confirmation, so "yes" at the confirm prompt stays usually-correct.
    */
   readonly sessionConfidenceFloor: number
+  /**
+   * Dwell Floor in seconds: the shortest stretch that may own time on its own.
+   *
+   * Concurrent sessions interleave their prompts, and read literally that says the work changed
+   * ticket every few minutes. It did not. Fifteen minutes is a working granularity; zero turns the
+   * rule off and reports the raw interleaving, which is a day of unreadable slivers.
+   */
+  readonly sessionDwellSeconds: number
 }
 
 /** The values every unset field falls back to, and what `jcf config reset` restores. */
@@ -63,7 +71,8 @@ export const defaultJcfConfig: JcfConfig = {
   sessionRoots: [],
   sessionTicketMap: {},
   sessionIdleCapSeconds: 300,
-  sessionConfidenceFloor: 0.7
+  sessionConfidenceFloor: 0.7,
+  sessionDwellSeconds: 900
 }
 
 export interface ConfigServiceContract {
@@ -135,11 +144,17 @@ export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   const sessionRoots = stringArray(parsed.sessionRoots)
   const sessionTicketMap = ticketMap(parsed.sessionTicketMap)
   const sessionIdleCapSeconds = positiveSeconds(parsed.sessionIdleCapSeconds)
+  // Zero is meaningful here, unlike an Idle Cap: it turns the Dwell Floor off.
+  const sessionDwellSeconds = Predicate.isNumber(parsed.sessionDwellSeconds) &&
+      Number.isFinite(parsed.sessionDwellSeconds) && parsed.sessionDwellSeconds >= 0
+    ? parsed.sessionDwellSeconds
+    : undefined
   const sessionConfidenceFloor = confidence(parsed.sessionConfidenceFloor)
   return {
     ...((sessionRoots !== undefined) && { sessionRoots }),
     ...((sessionTicketMap !== undefined) && { sessionTicketMap }),
     ...((sessionIdleCapSeconds !== undefined) && { sessionIdleCapSeconds }),
+    ...((sessionDwellSeconds !== undefined) && { sessionDwellSeconds }),
     ...((sessionConfidenceFloor !== undefined) && { sessionConfidenceFloor }),
     ...((Predicate.isString(parsed.defaultJql)) && { defaultJql: parsed.defaultJql }),
     ...((Predicate.isNumber(parsed.refreshInterval)) && { refreshInterval: parsed.refreshInterval }),

@@ -34,12 +34,12 @@ import {
   activeWindows,
   type AgentChoice,
   attributeSession,
+  bothSides,
   buildSessionProposals,
   deterministicAttribution,
   expandHomePath,
-  type SessionProposal,
-  bothSides,
   type ReconcileSides,
+  type SessionProposal,
   splitCredits,
   type TicketDayCredit,
   type UnattributedDayCredit
@@ -1090,7 +1090,8 @@ export const layer = Layer.effect(
           )
         })
         const split = splitCredits(windows, attributions, {
-          cwdBySession: new Map(sessions.map((session) => [session.sessionId, session.cwd]))
+          cwdBySession: new Map(sessions.map((session) => [session.sessionId, session.cwd])),
+          dwellSeconds: cfg.sessionDwellSeconds
         })
 
         const sides = options?.sides ?? bothSides

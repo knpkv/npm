@@ -43,6 +43,11 @@ Two kinds of block, in one visual language:
   Signal that placed it — a branch name, a working directory, a Standing Attribution, or a Coding
   Agent's reading of the transcript.
 
+Blocks are as long as the work was, not as long as the transcripts interleave. Ownership changes no
+more often than the engine's Dwell Floor — fifteen minutes by default — so a minute on another branch
+in the middle of an hour's work belongs to the hour, and a day reads as a handful of blocks rather
+than two dozen slivers. `jcf config set dwell <seconds>` moves it; zero shows the raw interleaving.
+
 Three lanes sit under the calendar, none of them decoration: hours a Coding Agent placed too weakly
 to offer, hours nothing placed at all, and days withheld because a Timer is still running. Each is
 time that exists and cannot be drawn at a time, so hiding it would make the calendar a lie.

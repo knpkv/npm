@@ -18,8 +18,8 @@
 import * as Effect from "effect/Effect"
 import type { CreditedSpan, SessionProposal } from "../agent/sessions.js"
 import type { ReconcileServiceContract } from "../services/ReconcileService.js"
-import { formatDuration } from "../utils/time.js"
 import { NOT_LOGGED_IN_HINT } from "../utils/hints.js"
+import { formatDuration } from "../utils/time.js"
 
 /** Clip `text` to `width`, marking that something was dropped. */
 export const clip = (text: string, width: number): string =>
