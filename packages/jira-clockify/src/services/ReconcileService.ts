@@ -197,6 +197,15 @@ export type SessionProposalProgress =
 export interface SessionProposalReport {
   /** Proposed Worklogs, ready for row-by-row confirmation. */
   readonly proposals: ReadonlyArray<SessionProposal>
+  /**
+   * What Clockify and Jira already hold over the period, bucketed by Issue Key and day — the same
+   * rows {@link ReconcileServiceContract.compare} returns, including buckets no session evidences.
+   *
+   * On the report because a run already reads both sides to size its proposals: a surface that shows
+   * allocated time beside proposable time would otherwise tally two remote services a second time to
+   * learn what this one already knows.
+   */
+  readonly recorded: ReadonlyArray<ReconcileRow>
   /** Attributed below the confidence floor — reported, never offered. */
   readonly withheld: ReadonlyArray<TicketDayCredit>
   /** Hours no Attribution Signal could place. */
@@ -982,7 +991,9 @@ export const layer = Layer.effect(
             )
           )
         })
-        const split = splitCredits(windows, attributions)
+        const split = splitCredits(windows, attributions, {
+          cwdBySession: new Map(sessions.map((session) => [session.sessionId, session.cwd]))
+        })
 
         const [recorded, excludedDays] = yield* Effect.all([compare(period), runningTimerExclusions(period)])
 
@@ -991,6 +1002,7 @@ export const layer = Layer.effect(
             minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
             excludedDays: excludedDays.map((excluded) => excluded.day)
           }),
+          recorded,
           withheld: split.withheld,
           unattributed: split.unattributed,
           excludedDays,

@@ -560,6 +560,16 @@ export interface UnattributedDayCredit {
   readonly day: string
   readonly seconds: number
   readonly sessionCount: number
+  /**
+   * The distinct working directories the unplaced sessions ran in, sorted.
+   *
+   * Carried because the repair for unplaced hours is a Standing Attribution, and a Standing
+   * Attribution is a *directory* prefix — a report that says only "3h40m unattributed" tells a
+   * reader nothing they can act on. Deliberately no per-directory seconds: the share of a day
+   * belonging to one directory is not something this split computes, and inventing it would be a
+   * number nobody could check. Empty when the caller supplied no working directories.
+   */
+  readonly cwds: ReadonlyArray<string>
 }
 
 /** Session credit sorted into what can be proposed, what is only reported, and what is unplaced. */
@@ -594,7 +604,11 @@ const bucketId = (kind: BucketKind, ticketKey: string | null): string => `${kind
  */
 export const splitCredits = (
   windows: ReadonlyArray<SessionWindows>,
-  attributions: ReadonlyArray<SessionAttribution>
+  attributions: ReadonlyArray<SessionAttribution>,
+  options?: {
+    /** Where each session ran, so unplaced hours can name the directories behind them. */
+    readonly cwdBySession?: ReadonlyMap<string, string> | undefined
+  }
 ): CreditSplit => {
   const bySession = new Map(attributions.map((attribution) => [attribution.sessionId, attribution]))
 
@@ -662,7 +676,15 @@ export const splitCredits = (
       if (credit.seconds <= 0) continue
       const daySessions = sessionsByBucketDay.get(dayKey(id, day)) ?? meta.sessions
       if (meta.kind === "unattributed") {
-        unattributed.push({ day, seconds: credit.seconds, sessionCount: daySessions.size })
+        const cwds = [
+          ...new Set(
+            [...daySessions].flatMap((sessionId) => {
+              const cwd = options?.cwdBySession?.get(sessionId)
+              return cwd === undefined ? [] : [cwd]
+            })
+          )
+        ].sort()
+        unattributed.push({ day, seconds: credit.seconds, sessionCount: daySessions.size, cwds })
         continue
       }
       const row: TicketDayCredit = {

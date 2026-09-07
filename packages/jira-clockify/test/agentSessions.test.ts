@@ -377,7 +377,12 @@ describe("activeWindows and sharing", () => {
       { s1: "PROJ-1", s2: null }
     )
     expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
-    expect(split.unattributed).toEqual([{ day: "2026-07-01", seconds: 120 + idleCapSeconds / 2, sessionCount: 1 }])
+    expect(split.unattributed).toEqual([{
+      cwds: [],
+      day: "2026-07-01",
+      seconds: 120 + idleCapSeconds / 2,
+      sessionCount: 1
+    }])
   })
 
   it("caps a long gap at the Idle Cap, so lunch is not billed", () => {
@@ -523,12 +528,43 @@ describe("splitCredits", () => {
       ],
       [attribution({ sessionId: "s1" }), attribution({ sessionId: "s2" })]
     )
-    expect(split.unattributed).toEqual([{ day: "2026-07-01", seconds: 900, sessionCount: 2 }])
+    expect(split.unattributed).toEqual([{ cwds: [], day: "2026-07-01", seconds: 900, sessionCount: 2 }])
+  })
+
+  it("names the distinct directories behind unplaced hours, deduped and sorted", () => {
+    const split = splitCredits(
+      [
+        credited("s1", "2026-07-01", [[10, 0, 10, 10]]),
+        credited("s2", "2026-07-01", [[11, 0, 11, 5]]),
+        credited("s3", "2026-07-01", [[13, 0, 13, 5]])
+      ],
+      [attribution({ sessionId: "s1" }), attribution({ sessionId: "s2" }), attribution({ sessionId: "s3" })],
+      {
+        cwdBySession: new Map([
+          ["s1", "/dev/docs/releases"],
+          // Two sessions in one directory are one directory to map, not two.
+          ["s2", "/dev/docs/releases"],
+          ["s3", "/dev/docs/interviews"]
+        ])
+      }
+    )
+    expect(split.unattributed[0]!.cwds).toEqual(["/dev/docs/interviews", "/dev/docs/releases"])
+  })
+
+  it("omits a directory for a session the caller did not place", () => {
+    const split = splitCredits(
+      [credited("s1", "2026-07-01", [[10, 0, 10, 10]]), credited("s2", "2026-07-01", [[11, 0, 11, 5]])],
+      [attribution({ sessionId: "s1" }), attribution({ sessionId: "s2" })],
+      { cwdBySession: new Map([["s1", "/dev/docs/releases"]]) }
+    )
+    expect(split.unattributed[0]!.cwds).toEqual(["/dev/docs/releases"])
+    // Still both sessions: a missing directory must not quietly reduce the count behind the hours.
+    expect(split.unattributed[0]!.sessionCount).toBe(2)
   })
 
   it("treats credit for an unknown session as unattributed rather than dropping it", () => {
     const split = splitCredits([credited("ghost", "2026-07-01", [[10, 0, 10, 1]])], [])
-    expect(split.unattributed).toEqual([{ day: "2026-07-01", seconds: 60, sessionCount: 1 }])
+    expect(split.unattributed).toEqual([{ cwds: [], day: "2026-07-01", seconds: 60, sessionCount: 1 }])
   })
 })
 

@@ -42,13 +42,37 @@ export const proposalTargets = (proposal: SessionProposal): string => {
 }
 
 /**
- * How the amount on a written entry was arrived at.
+ * What a written entry claims about itself.
  *
- * The distinction is not decoration. `session` says the number is what a transcript evidences, which
- * is the claim ADR-0006 lets the tool make; the other two say a person chose it. A row whose amount
- * was typed over must not keep claiming a transcript stands behind it.
+ * The distinctions are not decoration. `session` evidence is the claim ADR-0006 lets the tool make —
+ * a transcript recorded that this work happened for this long. Every flag here is a place a person
+ * overruled that, and a row where they did must not keep citing evidence for the part they chose.
+ * Which is why this is three independent facts and not one label: an amount typed over a proposal
+ * still has a transcript behind *when* the work happened, and a proposal moved to another Issue Key
+ * still has a transcript behind *how long* it took.
  */
-export type WriteOrigin = "session" | "session-adjusted" | "manual"
+export interface WriteProvenance {
+  /** `session` when a transcript stands behind the time; `hand` when nothing does. */
+  readonly evidence: "session" | "hand"
+  /** The amount was set by a person rather than taken from the evidence. */
+  readonly amountSetByHand: boolean
+  /** The Issue Key was chosen by a person rather than by an Attribution Signal. */
+  readonly ticketSetByHand: boolean
+}
+
+/** A proposal accepted exactly as it was offered. */
+export const asProposed: WriteProvenance = {
+  amountSetByHand: false,
+  evidence: "session",
+  ticketSetByHand: false
+}
+
+/** Time no session evidences: a meeting, a whiteboard, work away from the keyboard. */
+export const byHand: WriteProvenance = {
+  amountSetByHand: true,
+  evidence: "hand",
+  ticketSetByHand: true
+}
 
 /**
  * Where a written entry says it came from. Provenance for a human reading the row months later,
@@ -57,14 +81,15 @@ export type WriteOrigin = "session" | "session-adjusted" | "manual"
  */
 export const PROVENANCE = "Reconciled from Claude Agent Session"
 
-const PROVENANCE_BY_ORIGIN: Record<WriteOrigin, string> = {
-  manual: "Entered by hand",
-  session: PROVENANCE,
-  "session-adjusted": `${PROVENANCE}, amount set by hand`
+/** What an entry with this provenance says about itself. */
+export const provenanceText = (provenance: WriteProvenance): string => {
+  if (provenance.evidence === "hand") return "Entered by hand"
+  const overrides = [
+    ...(provenance.amountSetByHand ? ["amount"] : []),
+    ...(provenance.ticketSetByHand ? ["ticket"] : [])
+  ]
+  return overrides.length === 0 ? PROVENANCE : `${PROVENANCE}, ${overrides.join(" and ")} set by hand`
 }
-
-/** What an entry of this origin says about itself. */
-export const provenanceOf = (origin: WriteOrigin): string => PROVENANCE_BY_ORIGIN[origin]
 
 /** Keeps the issue title from crowding out the sentence that says what was actually done. */
 const ENTRY_SUMMARY_WIDTH = 80
@@ -85,10 +110,10 @@ const ENTRY_SUMMARY_WIDTH = 80
 export const entryDescription = (options: {
   readonly summary: string | null
   readonly note: string | null
-  /** Defaults to `session` — the only origin the CLI's own commands write. */
-  readonly origin?: WriteOrigin | undefined
+  /** Defaults to a proposal accepted as offered — the only kind the CLI's own commands write. */
+  readonly provenance?: WriteProvenance | undefined
 }): string => {
-  const provenance = provenanceOf(options.origin ?? "session")
+  const provenance = provenanceText(options.provenance ?? asProposed)
   const parts = [
     ...(options.summary === null ? [] : [clip(options.summary, ENTRY_SUMMARY_WIDTH)]),
     ...(options.note === null || options.note.trim() === "" ? [] : [options.note.trim()])

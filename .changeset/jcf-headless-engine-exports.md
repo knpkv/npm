@@ -18,6 +18,16 @@ in a zero.
 Adds `startOfIsoWeek` and `isoWeekPeriod`, both built from local calendar fields, so a Monday-to-Sunday
 week stays a week across a daylight-saving change.
 
-A written entry now says how its amount was arrived at: `WriteOrigin` distinguishes time a transcript
-evidences from an amount a person set or typed, and the provenance text follows. A row whose amount
-was overridden must not keep claiming a transcript stands behind it.
+A written entry now says what it claims about itself. `WriteProvenance` records three independent
+facts — whether a transcript stands behind the time, whether a person set the amount, whether a
+person chose the Issue Key — and the provenance text follows. A row where a person overruled the
+evidence must not keep citing it for the part they chose.
+
+The proposal report now carries `recorded`: what Clockify and Jira already hold over the period. A
+run reads both sides anyway to size its proposals, so a surface that shows allocated time beside
+proposable time no longer has to tally two remote services a second time.
+
+Unplaced hours now name the directories behind them. `UnattributedDayCredit.cwds` lists the distinct
+working directories of the sessions whose time no signal could place — the repair for unplaced hours
+is a Standing Attribution, and a Standing Attribution is a directory prefix, so "3h40m
+unattributed" on its own told a reader nothing they could act on.
