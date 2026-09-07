@@ -12,6 +12,7 @@ export const SandboxRow = Schema.Struct({
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
   repositoryName: Schema.String,
+  region: Schema.optional(Schema.NullOr(Schema.String)),
   sourceBranch: Schema.String,
   accessPassword: Schema.NullOr(Schema.String),
   containerId: Schema.NullOr(Schema.String),
@@ -21,6 +22,7 @@ export const SandboxRow = Schema.Struct({
   statusDetail: Schema.NullOr(Schema.String),
   logs: Schema.NullOr(Schema.String),
   error: Schema.NullOr(Schema.String),
+  legacyRetiredAt: Schema.NullOr(Schema.String),
   createdAt: Schema.String,
   lastActivityAt: Schema.String
 })
@@ -32,6 +34,7 @@ export interface InsertSandbox {
   readonly pullRequestId: string
   readonly awsAccountId: string
   readonly repositoryName: string
+  readonly region: string
   readonly sourceBranch: string
   readonly accessPassword: string
   readonly workspacePath: string
@@ -62,12 +65,54 @@ const makeSandboxRepo = Effect.gen(function*() {
 
   const findByPr_ = SqlSchema.findOneOption({
     Result: SandboxRow,
-    Request: Schema.Struct({ awsAccountId: Schema.String, pullRequestId: Schema.String }),
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String,
+      region: Schema.String
+    }),
     execute: (req) =>
       sql`SELECT * FROM sandboxes
             WHERE aws_account_id = ${req.awsAccountId}
               AND pull_request_id = ${req.pullRequestId}
-              AND status NOT IN ('stopped', 'error')`
+              AND repository_name = ${req.repositoryName}
+            AND region = ${req.region}
+            AND status NOT IN ('stopped', 'error')
+            LIMIT 1`
+  })
+
+  const findRegionlessByPr_ = SqlSchema.findOneOption({
+    Result: SandboxRow,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT * FROM sandboxes
+            WHERE aws_account_id = ${req.awsAccountId}
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name = ${req.repositoryName}
+              AND (region IS NULL OR region = '')
+              AND status NOT IN ('stopped', 'error')
+            ORDER BY created_at DESC
+            LIMIT 1`
+  })
+
+  const findRegionlessByPrAll_ = SqlSchema.findAll({
+    Result: SandboxRow,
+    Request: Schema.Struct({
+      awsAccountId: Schema.String,
+      pullRequestId: Schema.String,
+      repositoryName: Schema.String
+    }),
+    execute: (req) =>
+      sql`SELECT * FROM sandboxes
+            WHERE aws_account_id = ${req.awsAccountId}
+              AND pull_request_id = ${req.pullRequestId}
+              AND repository_name = ${req.repositoryName}
+              AND (region IS NULL OR region = '')
+            ORDER BY created_at DESC`
   })
 
   const findActive_ = SqlSchema.findAll({
@@ -88,8 +133,8 @@ const makeSandboxRepo = Effect.gen(function*() {
 
   const service = {
     insert: (sandbox: InsertSandbox) =>
-      sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, source_branch, access_password, workspace_path, status, created_at, last_activity_at)
-            VALUES (${sandbox.id}, ${sandbox.pullRequestId}, ${sandbox.awsAccountId}, ${sandbox.repositoryName}, ${sandbox.sourceBranch}, ${sandbox.accessPassword}, ${sandbox.workspacePath}, ${sandbox.status}, ${sandbox.createdAt}, ${sandbox.lastActivityAt})`
+      sql`INSERT INTO sandboxes (id, pull_request_id, aws_account_id, repository_name, region, source_branch, access_password, workspace_path, status, created_at, last_activity_at)
+            VALUES (${sandbox.id}, ${sandbox.pullRequestId}, ${sandbox.awsAccountId}, ${sandbox.repositoryName}, ${sandbox.region}, ${sandbox.sourceBranch}, ${sandbox.accessPassword}, ${sandbox.workspacePath}, ${sandbox.status}, ${sandbox.createdAt}, ${sandbox.lastActivityAt})`
         .pipe(
           Effect.tap(() => publish),
           cacheError("insert")
@@ -98,16 +143,21 @@ const makeSandboxRepo = Effect.gen(function*() {
     updateStatus: (
       id: SandboxId,
       status: SandboxStatus,
-      extra?: { containerId?: string; port?: number; error?: string }
+      extra?: { containerId?: string; port?: number; error?: string; legacyRetiredAt?: string }
     ) =>
       isoNow.pipe(
         Effect.flatMap((now) =>
           sql`UPDATE sandboxes SET
                 status = ${status},
                 last_activity_at = ${now}
-                ${extra?.containerId ? sql`, container_id = ${extra.containerId}` : sql``}
-                ${extra?.port ? sql`, port = ${extra.port}` : sql``}
-                ${extra?.error ? sql`, error = ${extra.error}` : sql``}
+                ${
+            extra?.containerId !== undefined && extra.containerId.length > 0
+              ? sql`, container_id = ${extra.containerId}`
+              : sql``
+          }
+                ${extra?.port !== undefined ? sql`, port = ${extra.port}` : sql``}
+                ${extra?.error !== undefined && extra.error.length > 0 ? sql`, error = ${extra.error}` : sql``}
+                ${extra?.legacyRetiredAt !== undefined ? sql`, legacy_retired_at = ${extra.legacyRetiredAt}` : sql``}
                 WHERE id = ${id}`.pipe(
             Effect.tap(() => publish)
           )
@@ -125,8 +175,23 @@ const makeSandboxRepo = Effect.gen(function*() {
         Effect.withSpan("SandboxRepo.findById")
       ),
 
-    findByPr: (awsAccountId: string, pullRequestId: string) =>
-      findByPr_({ awsAccountId, pullRequestId }).pipe(cacheError("findByPr")),
+    findByPr: (awsAccountId: string, pullRequestId: string, repositoryName: string, region: string) =>
+      findByPr_({ awsAccountId, pullRequestId, repositoryName, region }).pipe(cacheError("findByPr")),
+
+    findRegionlessByPr: (awsAccountId: string, pullRequestId: string, repositoryName: string) =>
+      findRegionlessByPr_({ awsAccountId, pullRequestId, repositoryName }).pipe(cacheError("findRegionlessByPr")),
+
+    findRegionlessByPrAll: (awsAccountId: string, pullRequestId: string, repositoryName: string) =>
+      findRegionlessByPrAll_({ awsAccountId, pullRequestId, repositoryName }).pipe(
+        cacheError("findRegionlessByPrAll")
+      ),
+
+    /** Retained for migrations that can prove a legacy row's region out of band. */
+    updateRegion: (id: SandboxId, region: string) =>
+      sql`UPDATE sandboxes SET region = ${region} WHERE id = ${id}`.pipe(
+        Effect.tap(() => publish),
+        cacheError("updateRegion")
+      ),
 
     findActive: () => findActive_(voidRequest).pipe(cacheError("findActive")),
 

@@ -29,27 +29,39 @@ export interface AgentRuntimeService {
 
 const decodeAgentRuntimeEvent = Schema.decodeUnknownEffect(AgentRuntimeEvent)
 const isAgentProviderError = Schema.is(AgentProviderError)
-const isAgentRuntimeProtocolFailure = Schema.is(Schema.Struct({
-  _tag: Schema.Literal("AgentRuntimeProtocolError")
-}))
+const isAgentRuntimeProtocolFailure = Schema.is(Schema.TaggedStruct("AgentRuntimeProtocolError", {}))
 
 const normalizeAdapterFailure = <UnparsedInput>(
   providerId: AgentRunRequest["providerId"],
   failure: UnparsedInput
-): AgentProviderError =>
-  !isAgentRuntimeProtocolFailure(failure) && isAgentProviderError(failure)
-    ? new AgentProviderError({
+): AgentProviderError => {
+  if (!isAgentRuntimeProtocolFailure(failure) && isAgentProviderError(failure)) {
+    const required = {
       providerId,
       phase: failure.phase,
       message: failure.message,
       retryable: failure.retryable
-    })
-    : new AgentProviderError({
-      providerId,
-      phase: "protocol",
-      message: "Agent adapter emitted an invalid failure.",
-      retryable: false
-    })
+    }
+    if (failure.reviewStage === undefined) {
+      return failure.reviewCause === undefined
+        ? new AgentProviderError(required)
+        : new AgentProviderError({ ...required, reviewCause: failure.reviewCause })
+    }
+    return failure.reviewCause === undefined
+      ? new AgentProviderError({ ...required, reviewStage: failure.reviewStage })
+      : new AgentProviderError({
+        ...required,
+        reviewCause: failure.reviewCause,
+        reviewStage: failure.reviewStage
+      })
+  }
+  return new AgentProviderError({
+    providerId,
+    phase: "protocol",
+    message: "Agent adapter emitted an invalid failure.",
+    retryable: false
+  })
+}
 
 const validateAdapterStream = (
   request: AgentRunRequest,

@@ -8,7 +8,7 @@ export const VIEW_TITLES = {
 } satisfies Record<string, string>
 
 export const HINTS = {
-  prs: "enter details   / filter   1–9 filters   r refresh   n notifications   : commands",
+  prs: "enter details   o managed review   / filter   1–9 filters   r refresh   n notifications   : commands",
   settings: "tab section   1–4 jump   esc back   : commands",
   notifications: "enter action   r refresh   esc back   : commands",
   details:

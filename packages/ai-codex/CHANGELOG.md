@@ -1,5 +1,11 @@
 # @knpkv/ai-codex
 
+## 0.4.0
+
+### Minor Changes
+
+- [#387](https://github.com/knpkv/npm/pull/387) [`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa) Thanks [@konopkov](https://github.com/konopkov)! - Allow Codex event streams to pass a native JSON Schema for structured final output.
+
 ## 0.3.1
 
 ### Patch Changes

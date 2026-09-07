@@ -1,13 +1,22 @@
 import { describe, expect, it } from "@effect/vitest"
+import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import * as Schema from "effect/Schema"
 import {
   appendReviewTurn,
   applyFindingDecision,
   initialFindingDispositions,
   reconcileFindingDispositions,
+  reconcileReviewConversationTurns,
+  replaceRelayReviewPreservingTurns,
   settleFindingPublication
 } from "../src/client/review-session-state.js"
-import { MAXIMUM_RELAY_REVIEW_TURNS, RelayReviewConversationTurn, type RelayReviewFinding } from "../src/server/Api.js"
+import {
+  MAXIMUM_RELAY_REVIEW_TURNS,
+  type PullRequestRelayReviewResponse,
+  RelayReviewConversationTurn,
+  type RelayReviewFinding,
+  type RelayReviewProfile
+} from "../src/server/Api.js"
 import { MAXIMUM_RELAY_REVIEW_TURNS_BYTES } from "../src/server/review/ReviewPromptBudget.js"
 
 const finding = (summary: string): RelayReviewFinding => ({
@@ -21,6 +30,16 @@ const finding = (summary: string): RelayReviewFinding => ({
   publicationTarget: "line-comment",
   location: { scope: "line", filePath: "src/index.ts", line: 1, side: "after" }
 })
+
+const reviewProfile = {
+  id: "thorough",
+  name: "Thorough review",
+  kind: "review",
+  provider: "codex",
+  harness: "native-codex",
+  model: "configured-default",
+  skillIds: ["builtin:pr-review"]
+} satisfies RelayReviewProfile
 
 describe("Relay finding dispositions", () => {
   it("starts every new finding pending", () => {
@@ -130,6 +149,63 @@ describe("Relay finding dispositions", () => {
     expect(next.at(-1)?.message).toBe("newest")
     expect(appendReviewTurn([], { findingId: "F1", role: "user", message: "first" }))
       .toEqual([{ findingId: "F1", role: "user", message: "first" }])
+  })
+
+  it("preserves the in-memory transcript when a rerun replaces the review", () => {
+    const turns: ReadonlyArray<RelayReviewConversationTurn> = [
+      { findingId: "F1", role: "user", message: "Explain this finding again." }
+    ]
+    const nextReview = {
+      pullRequestId: PullRequestId.make("42"),
+      revisionId: "revision-2",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: "review",
+      profile: {
+        id: "thorough",
+        name: "Thorough review",
+        kind: "review",
+        provider: "codex",
+        harness: "native-codex",
+        model: "configured-default",
+        skillIds: ["builtin:pr-review"]
+      },
+      result: { findings: [], verdict: "No findings." }
+    } satisfies PullRequestRelayReviewResponse
+
+    const replaced = replaceRelayReviewPreservingTurns(turns, {
+      expectedIdentity: "exact-head-1",
+      identity: "exact-head-2",
+      skillIds: ["builtin:pr-review"],
+      value: nextReview
+    })
+
+    expect(replaced.value).toBe(nextReview)
+    expect(replaced.turns).toEqual(turns)
+  })
+
+  it("does not rebind an ordinal finding turn to a changed rerun finding", () => {
+    const previous = {
+      pullRequestId: "42",
+      revisionId: "revision-1",
+      baseCommit: "a".repeat(40),
+      headCommit: "b".repeat(40),
+      kind: "review",
+      profile: reviewProfile,
+      result: { findings: [finding("first")], verdict: "One finding." }
+    } satisfies PullRequestRelayReviewResponse
+    const next = {
+      ...previous,
+      revisionId: "revision-2",
+      result: { findings: [finding("changed")], verdict: "One finding." }
+    } satisfies PullRequestRelayReviewResponse
+    const turns: ReadonlyArray<RelayReviewConversationTurn> = [
+      { findingId: "PR", role: "user", message: "Keep the PR context." },
+      { findingId: "F1", role: "user", message: "Explain the old concern." }
+    ]
+
+    expect(reconcileReviewConversationTurns(previous, next, turns)).toEqual([turns[0]])
+    expect(reconcileReviewConversationTurns(previous, { ...next, result: previous.result }, turns)).toEqual(turns)
   })
 
   it("trims completed conversation exchanges as atomic user and assistant pairs", () => {

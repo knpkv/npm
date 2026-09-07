@@ -27,17 +27,17 @@ model({
 })
 ```
 
-| Option           | Required | Meaning                                                                  |
-| ---------------- | -------- | ------------------------------------------------------------------------ |
-| `cwd`            | Yes      | Working directory used for the Claude process.                           |
-| `executable`     | No       | Claude executable name or path. Defaults to `claude`.                    |
-| `model`          | No       | Claude model override. Otherwise the CLI chooses its configured default. |
-| `access`         | No       | `read-only` or `workspace-write`. Defaults to `read-only`.               |
-| `timeout`        | No       | Maximum lifetime of one local process.                                   |
-| `maxOutputBytes` | No       | Maximum accepted stdout before the request fails.                        |
-| `maxStderrBytes` | No       | Maximum retained stderr used for a bounded failure description.          |
+| Option           | Required | Meaning                                                                    |
+| ---------------- | -------- | -------------------------------------------------------------------------- |
+| `cwd`            | Yes      | Working directory used for the Claude process.                             |
+| `executable`     | No       | Claude executable name or path. Defaults to `claude`.                      |
+| `model`          | No       | Claude model override. Otherwise the CLI chooses its configured default.   |
+| `access`         | No       | `prompt-only`, `read-only`, or `workspace-write`. Defaults to `read-only`. |
+| `timeout`        | No       | Maximum lifetime of one local process.                                     |
+| `maxOutputBytes` | No       | Maximum accepted stdout before the request fails.                          |
+| `maxStderrBytes` | No       | Maximum retained stderr used for a bounded failure description.            |
 
-Keep `access: "read-only"` for review, explanation, and planning. Opt into `workspace-write` only when the calling workflow is prepared to validate changes made under `cwd`.
+Use `access: "prompt-only"` for untrusted review prompts: it disables built-in and MCP tools, isolates ordinary settings, and remains compatible with enterprise-managed MCP configuration. Keep `access: "read-only"` when Claude needs read-oriented tools for review, explanation, and planning. Opt into `workspace-write` only when the calling workflow is prepared to validate changes made under `cwd`.
 
 ## Generate Text
 
@@ -89,6 +89,7 @@ Spawn failures, invalid events, non-zero exits, timeouts, and output-limit failu
 ## Compatibility Limits
 
 - Effect AI toolkits are rejected before Claude starts. Native Claude tools cannot safely call arbitrary Effect handlers in the parent runtime.
+- `prompt-only` denies built-in and MCP tools without replacing enterprise-managed MCP configuration; use it when the prompt must not grant Claude model-invocable tools.
 - File prompt parts are rejected. Put relevant text in the prompt or let Claude inspect files permitted by `cwd` and `access`.
 - The adapter does not promise compatibility with undocumented Claude CLI event fields.
 - Read-only access limits workspace mutation; it is not a substitute for isolating an untrusted repository or executable.

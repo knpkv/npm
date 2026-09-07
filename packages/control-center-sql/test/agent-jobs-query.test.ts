@@ -263,4 +263,17 @@ describe("durable agent job queries", () => {
     expect(rendered.sql).toContain("not (\"agent_jobs\".\"job_id\" = ?)")
     expect(rendered.params).toContain("current-job-secret")
   })
+
+  it("can skip newer jobs that have not produced a durable review report", () => {
+    const rendered = renderLatestAgentReviewQuery({
+      workspaceId: "workspace-secret",
+      taskContextPrefix: "task-identity-prefix",
+      requireReport: true
+    })
+
+    expect(rendered.sql).toContain("exists (select")
+    expect(rendered.sql).toContain("from \"agent_thread_events\" as \"reviewReportEvents\"")
+    expect(rendered.sql).toContain("\"reviewReportEvents\".\"job_id\" = \"agent_jobs\".\"job_id\"")
+    expect(rendered.params).toContain("review-report")
+  })
 })

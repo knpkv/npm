@@ -3,6 +3,7 @@
 import { type ReactElement, act, useLayoutEffect } from "react"
 import { createRoot, type Root } from "react-dom/client"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import * as Data from "effect/Data"
 import * as Schema from "effect/Schema"
 
 import {
@@ -36,6 +37,7 @@ import {
 import {
   observePullRequestReviewHistoryLoad,
   publishNewestPullRequestReviewThread,
+  PullRequestReviewRequestAborted,
   type PullRequestReviewControllerState,
   type PullRequestReviewTransport,
   usePullRequestReview
@@ -89,6 +91,10 @@ const EMPTY_THREAD = PullRequestReviewThreadPage.make({
   hasMore: false,
   nextCursor: ReleaseAgentThreadCursor.make(0)
 })
+
+class LateEnqueueFailure extends Data.TaggedError("LateEnqueueFailure")<{}> {}
+class UnexpectedPreview extends Data.TaggedError("UnexpectedPreview")<{}> {}
+class UnexpectedPublish extends Data.TaggedError("UnexpectedPublish")<{}> {}
 
 const threadEvent = (sequence: number): PullRequestReviewThreadEvent => ({
   _tag: "operator-message",
@@ -413,6 +419,22 @@ const ReviewThreadHarness = ({
       </span>
       <button data-load-earlier onClick={controller.loadEarlier} />
       <button data-start onClick={() => controller.start(TARGETED_PROMPT, providerId)} />
+    </>
+  )
+}
+
+const AwaitableStartHarness = ({
+  onFailure,
+  transport
+}: {
+  readonly onFailure: (failure: PullRequestReviewRequestAborted) => void
+  readonly transport: PullRequestReviewTransport
+}): ReactElement => {
+  const controller = usePullRequestReview(ENTITY_ID, BASE_A, HEAD_A, "session-a", true, ignoreSessionExpired, transport)
+  return (
+    <>
+      <span data-start-state>{controller.state._tag}</span>
+      <button data-start-awaitable onClick={() => void controller.startAwaitable(TARGETED_PROMPT).catch(onFailure)} />
     </>
   )
 }
@@ -1271,6 +1293,63 @@ describe("usePullRequestReview", () => {
       TARGETED_PROMPT,
       expect.any(AbortSignal)
     )
+  })
+
+  it("rejects an enqueue that settles after its request is aborted", async () => {
+    const failures: Array<PullRequestReviewRequestAborted> = []
+    let enqueueSignal: AbortSignal | undefined
+    let resolveEnqueue: ((review: PullRequestReviewState) => void) | undefined
+    const transport = {
+      enqueue: vi.fn(
+        (_entityId, _provider, _prompt, signal) =>
+          new Promise<PullRequestReviewState>((resolve) => {
+            enqueueSignal = signal
+            resolveEnqueue = resolve
+          })
+      ),
+      load: () => Promise.resolve(reviewFor(BASE_A, HEAD_A)),
+      loadThread: () => Promise.resolve(EMPTY_THREAD),
+      previewPublication: () => Promise.reject(new UnexpectedPreview()),
+      providers: () =>
+        Promise.resolve({
+          providers: [
+            {
+              providerId: DurableAgentProviderId.make("openai-compatible"),
+              models: [AgentModelId.make("review-model")],
+              capabilities: ["pr-review"],
+              health: "available",
+              reviewProfile: REVIEW_PROFILE
+            }
+          ]
+        }),
+      publishSuggestion: () => Promise.reject(new UnexpectedPublish())
+    } satisfies PullRequestReviewTransport
+    const host = document.createElement("div")
+    document.body.append(host)
+    mountedRoot = createRoot(host)
+
+    await act(async () =>
+      mountedRoot?.render(
+        <AwaitableStartHarness onFailure={(failure) => failures.push(failure)} transport={transport} />
+      )
+    )
+    await vi.waitFor(() => expect(host.querySelector("[data-start-state]")?.textContent).toBe("ready"))
+    await act(async () => host.querySelector<HTMLButtonElement>("[data-start-awaitable]")?.click())
+    expect(transport.enqueue).toHaveBeenCalledOnce()
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+    await act(async () => mountedRoot?.unmount())
+    expect(enqueueSignal?.aborted).toBe(true)
+    if (resolveEnqueue === undefined) throw new LateEnqueueFailure()
+    await act(async () => {
+      resolveEnqueue?.(reviewFor(BASE_A, HEAD_A))
+      await Promise.resolve()
+    })
+    await vi.waitFor(() => expect(failures).toHaveLength(1))
+    expect(failures[0]).toBeInstanceOf(PullRequestReviewRequestAborted)
+    mountedRoot = undefined
   })
 
   it("keeps the durable review available when provider catalog retries remain unavailable", async () => {

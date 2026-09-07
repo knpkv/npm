@@ -32,6 +32,9 @@ ignores:
   - "**/bin.ts"
   - "**/main.ts"
   - "**/main.tsx"
+  # Private fixture executable: its only process access captures the inherited
+  # environment for the ChildEnv service at the runtime boundary.
+  - "packages/codecommit-mock/src/cli.ts"
   - "**/generated/**"
   - "repos/**"
   - "scratchpad/**"

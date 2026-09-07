@@ -36,12 +36,61 @@ import { PersistenceConfigError } from "./persistence/errors.js"
 export { decodeControlCenterDataPaths }
 export type { ControlCenterDataPaths }
 
+/** Invalid mock-only Git fixture configuration rejected before server startup. */
+export class CodeCommitMockSourceConfigurationError extends Schema.TaggedError<
+  CodeCommitMockSourceConfigurationError
+>()("CodeCommitMockSourceConfigurationError", {
+  reason: Schema.Literals(["incomplete", "invalid-repository", "invalid-url", "mock-endpoint-required"])
+}) {}
+
+const mockRepositoryName = /^[A-Za-z0-9._-]{1,100}$/u
+
+/** Decode the server-private Git locator printed by the loopback CodeCommit mock. */
+export const decodeCodeCommitMockSourceFixture = Effect.fn("decodeCodeCommitMockSourceFixture")(
+  function*(input: {
+    readonly gitRemote: string | undefined
+    readonly repositoryName: string | undefined
+    readonly mockEndpoint: URL | undefined
+  }) {
+    const configured = input.gitRemote !== undefined || input.repositoryName !== undefined
+    if (!configured) return undefined
+    if (input.mockEndpoint === undefined) {
+      return yield* new CodeCommitMockSourceConfigurationError({ reason: "mock-endpoint-required" })
+    }
+    if (input.gitRemote === undefined || input.repositoryName === undefined) {
+      return yield* new CodeCommitMockSourceConfigurationError({ reason: "incomplete" })
+    }
+    if (!mockRepositoryName.test(input.repositoryName)) {
+      return yield* new CodeCommitMockSourceConfigurationError({ reason: "invalid-repository" })
+    }
+    if (!URL.canParse(input.gitRemote)) {
+      return yield* new CodeCommitMockSourceConfigurationError({ reason: "invalid-url" })
+    }
+    const repositoryUrl = new URL(input.gitRemote)
+    if (
+      repositoryUrl.protocol !== "file:" ||
+      repositoryUrl.hostname.length > 0 ||
+      repositoryUrl.username.length > 0 ||
+      repositoryUrl.password.length > 0 ||
+      !repositoryUrl.pathname.startsWith("/") ||
+      repositoryUrl.search.length > 0 ||
+      repositoryUrl.hash.length > 0
+    ) {
+      return yield* new CodeCommitMockSourceConfigurationError({ reason: "invalid-url" })
+    }
+    return {
+      repositoryName: input.repositoryName,
+      repositoryUrl: repositoryUrl.href
+    }
+  }
+)
+
 const PrReviewBudgetMillis = Schema.Int.check(
   Schema.isBetween({ minimum: MINIMUM_PR_REVIEW_BUDGET_MILLIS, maximum: 1_800_000 })
 )
 
 const PrReviewSandboxDurationMillis = Schema.Int.check(
-  Schema.isBetween({ minimum: 1, maximum: 1_800_000 })
+  Schema.isBetween({ minimum: 1, maximum: 3_600_000 })
 )
 
 /** Cross-field timing contract for one Review Agent Profile and its sbx lifetime. */
@@ -561,7 +610,7 @@ const refuseLostDataRootClaim = Effect.fn("ControlCenterCli.refuseLostDataRootCl
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const inspected = yield* inspectLostDataRootClaims(request).pipe(Effect.result)
     if (Result.isSuccess(inspected)) return
-    if (attempt === 2) return yield* Effect.fail(inspected.failure)
+    if (attempt === 2) return yield* inspected.failure
     yield* Effect.yieldNow
   }
 })

@@ -75,7 +75,11 @@ export const browserWorkspacePullRequestDiffTransport: WorkspacePullRequestDiffT
           },
           query: { revision: scope.revision }
         })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      }).pipe(
+        // Browser transport is the executable boundary for this request.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(FetchHttpClient.layer)
+      ),
       { signal }
     ),
   content: (scope, entry, side, signal) =>
@@ -98,7 +102,11 @@ export const browserWorkspacePullRequestDiffTransport: WorkspacePullRequestDiffT
             length: 1_048_576
           }
         })
-      }).pipe(Effect.provide(FetchHttpClient.layer)),
+      }).pipe(
+        // Browser transport is the executable boundary for this request.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(FetchHttpClient.layer)
+      ),
       { signal }
     )
 }
@@ -507,7 +515,7 @@ export const WorkspacePullRequestDiff = ({
         <div aria-label="Severity" role="group">
           {severities.map((severity) => (
             <button
-              aria-label={`Filter suggestions by ${severity === "all" ? "all" : severity} severity`}
+              aria-label={severity === "all" ? "All severities" : severity}
               aria-pressed={severityFilter === severity}
               key={severity}
               onClick={() => setSeverityFilter(severity)}
@@ -520,7 +528,7 @@ export const WorkspacePullRequestDiff = ({
         <div aria-label="Suggestion state" role="group">
           {states.map((state) => (
             <button
-              aria-label={`Filter suggestions by ${state} state`}
+              aria-label={state === "all" ? "All states" : state}
               aria-pressed={suggestionStateFilter === state}
               key={state}
               onClick={() => setSuggestionStateFilter(state)}

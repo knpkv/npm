@@ -10,21 +10,25 @@
  *
  * @module
  */
-import { AwsClient, CacheService, ChildEnv, PRService, ReadClient } from "@knpkv/codecommit-core"
+import { AwsClient, CacheService, ChildEnv, ConfigService, PRService, ReadClient } from "@knpkv/codecommit-core"
 import type { PullRequestRepoContract } from "@knpkv/codecommit-core/CacheService/repos/PullRequestRepo/index.js"
-import type * as Domain from "@knpkv/codecommit-core/Domain.js"
+import * as Domain from "@knpkv/codecommit-core/Domain.js"
 import { encodeCommentLocations } from "@knpkv/codecommit-core/Domain.js"
-import { Chunk, Effect, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
+import type { RefreshSinglePRCoordinates } from "@knpkv/codecommit-core/PRService/index.js"
+import { Chunk, Effect, Option, Predicate, Schema, Semaphore, Stream, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { decodePullRequestCoordinates } from "../../pull-request-coordinates.js"
+import type { PullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   ApiError,
   CodeCommitApi,
   type PullRequestDiffContentResponse,
   type PullRequestRefreshResponse,
   RelayReviewContinueStreamRequest,
+  type RelayReviewProfile,
   RelayReviewStreamEvent,
   RelayReviewStreamRequest
 } from "../Api.js"
@@ -41,7 +45,11 @@ import {
   withRelayReviewStreamPermit
 } from "../review/PullRequestReview.js"
 import { RelayFindingPublisher } from "../review/RelayFindingPublisher.js"
-import { discoverReviewSkills, selectedReviewSkillPrompt } from "../review/ReviewSkillCatalog.js"
+import {
+  discoverReviewSkills,
+  type ReviewSkillDefinition,
+  selectedReviewSkillPrompt
+} from "../review/ReviewSkillCatalog.js"
 
 const copyToClipboard = (text: string) => {
   const stdin = Stream.make(text).pipe(Stream.encodeText)
@@ -86,6 +94,33 @@ const buildApprovalRuleContent = (requiredApprovals: number, poolMembers: Readon
 const relayEventEncoder = new TextEncoder()
 const encodeRelayStreamEvent = Schema.encodeSync(Schema.fromJsonString(RelayReviewStreamEvent))
 const relayReviewMarker = /\n\n<!-- knpkv-codecommit-review:[0-9a-f]{64} -->$/u
+const sameReviewProfile = Schema.toEquivalence(ConfigService.ReviewProfileConfig)
+
+/** Resolve only an exact saved profile snapshot; stale or forged execution fields fail closed. */
+export const resolveRelayReviewProfile = Effect.fn("PrsLive.resolveRelayReviewProfile")(function*(
+  configService: Pick<ConfigService.ConfigService["Service"], "load">,
+  requested: RelayReviewProfile
+) {
+  const config = yield* configService.load.pipe(
+    Effect.mapError(() => new ApiError({ message: "Relay profiles are unavailable" }))
+  )
+  const configured = config.review.profiles.find(({ id }) => id === requested.id)
+  if (configured === undefined || !sameReviewProfile(configured, requested)) {
+    return yield* new ApiError({ message: "The selected Relay profile is unknown or has changed; reload settings" })
+  }
+  return configured
+})
+
+/** Resolve one server-owned profile and its catalog-owned prompt as one execution configuration. */
+export const resolveRelayReviewExecution = Effect.fn("PrsLive.resolveRelayReviewExecution")(function*(
+  configService: Pick<ConfigService.ConfigService["Service"], "load">,
+  requested: RelayReviewProfile,
+  skills: ReadonlyArray<ReviewSkillDefinition>
+) {
+  const profile = yield* resolveRelayReviewProfile(configService, requested)
+  const skillPrompt = yield* selectedReviewSkillPrompt(skills, profile.skillIds)
+  return { profile, skillPrompt }
+})
 
 const stripRelayReviewMarker = (content: string): string => content.replace(relayReviewMarker, "")
 
@@ -120,37 +155,110 @@ const relayStreamResponse = (stream: Stream.Stream<typeof RelayReviewStreamEvent
 export const selectedPullRequest = (
   pullRequests: ReadonlyArray<Domain.PullRequest>,
   awsAccountId: string,
-  pullRequestId: Domain.PullRequestId
+  pullRequestId: Domain.PullRequestId,
+  coordinates?: PullRequestSelectionCoordinates
 ): Effect.Effect<Domain.PullRequest, ApiError> => {
-  const pullRequest = pullRequests.find(
+  const routeAccountId = coordinates?.accountId ?? awsAccountId
+  const accountMatches = (candidate: Domain.PullRequest): boolean =>
+    coordinates === undefined
+      ? candidate.account.awsAccountId === routeAccountId
+        || candidate.account.repoAccountId === routeAccountId
+        || candidate.account.profile === routeAccountId
+      : coordinates.accountIdSource === "coordinate-token"
+      ? candidate.account.awsAccountId !== undefined && candidate.account.awsAccountId !== ""
+        && candidate.account.awsAccountId === routeAccountId
+      : candidate.account.awsAccountId === routeAccountId
+        || candidate.account.repoAccountId === routeAccountId
+        || candidate.account.profile === routeAccountId
+  const matches = pullRequests.filter(
     (candidate) =>
       candidate.id === pullRequestId &&
-      (candidate.account.awsAccountId === awsAccountId ||
-        candidate.account.repoAccountId === awsAccountId ||
-        candidate.account.profile === awsAccountId)
+      accountMatches(candidate) &&
+      (coordinates === undefined ||
+        (candidate.repositoryName === coordinates.repositoryName && candidate.account.region === coordinates.region))
   )
-  return pullRequest === undefined
-    ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
-    : Effect.succeed(pullRequest)
+  if (matches.length === 1) {
+    const pullRequest = matches[0]
+    return pullRequest === undefined
+      ? Effect.fail(new ApiError({ message: "The selected pull request is not available in the local workspace" }))
+      : Effect.succeed(pullRequest)
+  }
+  return Effect.fail(
+    new ApiError({
+      message: matches.length === 0
+        ? "The selected pull request is not available in the local workspace"
+        : "The selected pull request is ambiguous; repository and region coordinates are required"
+    })
+  )
 }
 
 interface PullRequestLookup {
   readonly findAll: PullRequestRepoContract["findAll"]
 }
 
+interface PullRequestSelectionCoordinates {
+  readonly accountId?: string
+  readonly repositoryName: string
+  readonly region: string
+  readonly accountIdSource?: "coordinate-token"
+}
+
 /** Resolve the same durable PR row used by SSE before enforcing the route account boundary. */
 export const cachedPullRequest = (
   pullRequestRepo: PullRequestLookup,
   awsAccountId: string,
-  pullRequestId: Domain.PullRequestId
-): Effect.Effect<Domain.PullRequest, ApiError> =>
-  pullRequestRepo.findAll().pipe(
-    Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-    Effect.mapError(() =>
-      new ApiError({ message: "The selected pull request is not available in the local workspace" })
-    ),
-    Effect.flatMap((pullRequests) => selectedPullRequest(pullRequests, awsAccountId, pullRequestId))
+  pullRequestId: Domain.PullRequestId,
+  directCoordinates?: PullRequestSelectionCoordinates
+): Effect.Effect<Domain.PullRequest, ApiError> => {
+  const coordinatesEffect = decodePullRequestCoordinates(awsAccountId).pipe(
+    Effect.mapError((error) => new ApiError({ message: error.message })),
+    Effect.flatMap((token) => {
+      if (Option.isSome(token)) {
+        if (token.value.pullRequestId !== pullRequestId) {
+          return Effect.fail(new ApiError({ message: "The pull-request coordinate token does not match its route" }))
+        }
+        if (
+          directCoordinates !== undefined &&
+          (token.value.repositoryName !== directCoordinates.repositoryName ||
+            token.value.region !== directCoordinates.region)
+        ) {
+          return Effect.fail(new ApiError({ message: "The pull-request coordinates do not match its route" }))
+        }
+        return Effect.succeed(Option.some<PullRequestSelectionCoordinates>({
+          ...token.value,
+          accountIdSource: "coordinate-token"
+        }))
+      }
+      return directCoordinates === undefined
+        ? Effect.succeed(Option.none<PullRequestCoordinates>())
+        : Effect.succeed(Option.some<PullRequestCoordinates>({
+          accountId: awsAccountId,
+          pullRequestId,
+          repositoryName: Domain.RepositoryName.make(directCoordinates.repositoryName),
+          region: Domain.AwsRegion.make(directCoordinates.region)
+        }))
+    })
   )
+  return coordinatesEffect.pipe(
+    Effect.flatMap((coordinatesOption) => {
+      const coordinates = Option.getOrUndefined(coordinatesOption)
+      return pullRequestRepo.findAll().pipe(
+        Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
+        Effect.mapError(() =>
+          new ApiError({ message: "The selected pull request is not available in the local workspace" })
+        ),
+        Effect.flatMap((pullRequests) =>
+          selectedPullRequest(
+            pullRequests,
+            coordinates?.accountId ?? awsAccountId,
+            pullRequestId,
+            coordinates
+          )
+        )
+      )
+    })
+  )
+}
 
 /** Keep proprietary source revisions out of browser and intermediary caches. */
 export const makeDiffContentResponse = (content: PullRequestDiffContentResponse) =>
@@ -165,6 +273,50 @@ export const completeSinglePullRequestRefresh = <E, R>(
   refresh.pipe(
     Effect.map(({ revisionId, sourceCommit }) => ({ revisionId, headCommit: sourceCommit }))
   )
+
+export const refreshRouteCoordinates = (
+  accountId: string,
+  pullRequestId: Domain.PullRequestId,
+  query: {
+    readonly repositoryName?: string | undefined
+    readonly region?: Domain.AwsRegion | undefined
+  }
+): Effect.Effect<
+  { readonly accountId: string; readonly coordinates?: RefreshSinglePRCoordinates },
+  ApiError
+> =>
+  Effect.gen(function*() {
+    const token = yield* decodePullRequestCoordinates(accountId).pipe(
+      Effect.mapError((error) => new ApiError({ message: error.message }))
+    )
+    if (Option.isSome(token)) {
+      if (token.value.pullRequestId !== pullRequestId) {
+        return yield* new ApiError({ message: "The pull-request coordinate token does not match its route" })
+      }
+      return {
+        accountId: token.value.accountId,
+        coordinates: {
+          repositoryName: token.value.repositoryName,
+          region: token.value.region,
+          accountIdSource: "coordinate-token"
+        }
+      }
+    }
+    if (query.repositoryName === undefined && query.region === undefined) return { accountId }
+    if (query.repositoryName === undefined || query.region === undefined) {
+      return yield* new ApiError({ message: "Pull-request refresh coordinates require repository and region together" })
+    }
+    const repositoryName = yield* Schema.decodeUnknownEffect(Domain.RepositoryName)(query.repositoryName).pipe(
+      Effect.mapError(() => new ApiError({ message: "Invalid pull-request repository coordinate" }))
+    )
+    return {
+      accountId,
+      coordinates: {
+        repositoryName,
+        region: query.region
+      }
+    }
+  })
 
 export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
   Effect.gen(function*() {
@@ -183,6 +335,7 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
     const fileSystem = yield* FileSystem.FileSystem
     const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const relayFindingPublisher = yield* RelayFindingPublisher
+    const configService = yield* ConfigService.ConfigService
 
     return handlers
       .handle("list", () =>
@@ -206,10 +359,15 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           return { items, total: result.total, hasMore: result.hasMore }
         }).pipe(Effect.mapError((e) => new ApiError({ message: String(e) }))))
-      .handle("refreshSingle", ({ params }) =>
-        completeSinglePullRequestRefresh(prService.refreshSinglePR(params.awsAccountId, params.prId)).pipe(
+      .handle("refreshSingle", ({ params, query }) =>
+        Effect.gen(function*() {
+          const route = yield* refreshRouteCoordinates(params.awsAccountId, params.prId, query)
+          return yield* completeSinglePullRequestRefresh(
+            prService.refreshSinglePR(route.accountId, params.prId, route.coordinates)
+          )
+        }).pipe(
           Effect.mapError((error) =>
-            new ApiError({ message: extractAwsMessage(error) })
+            Predicate.isTagged(error, "ApiError") ? error : new ApiError({ message: extractAwsMessage(error) })
           )
         ))
       .handle("create", ({ payload }) =>
@@ -232,14 +390,14 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           Effect.map(encodeClientVisibleCommentLocations),
           Effect.mapError((e) => new ApiError({ message: e.message }))
         ))
-      .handle("diff", ({ params }) =>
+      .handle("diff", ({ params, query }) =>
         Effect.gen(function*() {
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* loadPullRequestDiff(readClient, pullRequest, changedFiles)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
       .handleRaw("diffContent", ({ params, query }) =>
         Effect.gen(function*() {
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           const content = yield* loadPullRequestDiffContent(
             readClient,
             pullRequest,
@@ -249,33 +407,36 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
           )
           return yield* makeDiffContentResponse(content)
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
-      .handle("relayReview", ({ params, payload }) =>
+      .handle("relayReview", ({ params, payload, query }) =>
         Effect.gen(function*() {
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const skills = yield* discoverReviewSkills()
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* withRelayReviewPermit(
             relaySemaphore,
             runPullRequestRelayReview(
               readClient,
               pullRequest,
               payload,
-              payload.kind,
-              changedFiles
+              profile,
+              changedFiles,
+              skillPrompt
             )
           )
         }).pipe(Effect.mapError((error) => new ApiError({ message: error.message }))))
-      .handleRaw("relayReviewStream", ({ params }) =>
+      .handleRaw("relayReviewStream", ({ params, query }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewStreamRequest)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
-          const skillPrompt = yield* selectedReviewSkillPrompt(skills, payload.skillIds)
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayReview(
               readClient,
               pullRequest,
               payload,
-              payload.kind,
+              profile,
               changedFiles,
               skillPrompt
             )
@@ -286,22 +447,24 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Stream.provideService(FileSystem.FileSystem, fileSystem),
             Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
           ))
-        }).pipe(Effect.mapError((error) =>
-          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
-        )))
-      .handleRaw("relayReviewContinueStream", ({ params }) =>
+        }).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+          )
+        ))
+      .handleRaw("relayReviewContinueStream", ({ params, query }) =>
         Effect.gen(function*() {
           const payload = yield* HttpServerRequest.schemaBodyJson(RelayReviewContinueStreamRequest)
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
           const skills = yield* discoverReviewSkills()
-          const skillPrompt = yield* selectedReviewSkillPrompt(skills, payload.skillIds)
+          const { profile, skillPrompt } = yield* resolveRelayReviewExecution(configService, payload.profile, skills)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           const stream = withRelayReviewStreamPermit(
             relaySemaphore,
             streamPullRequestRelayConversation(
               readClient,
               pullRequest,
               payload,
-              payload.kind,
+              profile,
               payload.currentReview,
               payload.turns,
               payload.findingId,
@@ -316,15 +479,17 @@ export const PrsLive = HttpApiBuilder.group(CodeCommitApi, "prs", (handlers) =>
             Stream.provideService(FileSystem.FileSystem, fileSystem),
             Stream.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner)
           ))
-        }).pipe(Effect.mapError((error) =>
-          new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
-        )))
-      .handle("postRelayFinding", ({ params, payload }) =>
+        }).pipe(
+          Effect.mapError((error) =>
+            new ApiError({ message: Predicate.isError(error) ? error.message : String(error) })
+          )
+        ))
+      .handle("postRelayFinding", ({ params, payload, query }) =>
         Effect.gen(function*() {
           if (payload.finding.id !== params.findingId) {
             return yield* new ApiError({ message: "The finding route does not match the submitted finding" })
           }
-          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId)
+          const pullRequest = yield* cachedPullRequest(pullRequestRepo, params.awsAccountId, params.prId, query)
           return yield* postPullRequestRelayFinding(
             readClient,
             relayFindingPublisher,

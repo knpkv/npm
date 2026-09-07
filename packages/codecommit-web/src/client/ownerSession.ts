@@ -1,7 +1,13 @@
-import { Predicate, Schema } from "effect"
+import {
+  bootstrapRouteWithoutToken,
+  CsrfToken,
+  PairingConfirmationResponse,
+  readBootstrapToken
+} from "@knpkv/browser-pairing/schema"
+import { Predicate, Redacted, Result, Schema } from "effect"
 
 const csrfStorageKey = "codecommit_web_csrf"
-const BootstrapResponse = Schema.Struct({ csrfToken: Schema.String })
+const BootstrapResponse = PairingConfirmationResponse
 let inMemoryCsrfToken: string | null = null
 let storageUnavailable = false
 
@@ -24,7 +30,10 @@ export const readOwnerCsrfToken = (): string | null => {
   if (!browserAvailable()) return null
   if (storageUnavailable) return inMemoryCsrfToken
   try {
-    return window.localStorage.getItem(csrfStorageKey)
+    const stored = window.localStorage.getItem(csrfStorageKey)
+    if (stored === null) return inMemoryCsrfToken
+    const decoded = Schema.decodeUnknownResult(CsrfToken)(stored)
+    return Result.isSuccess(decoded) ? decoded.success : inMemoryCsrfToken
   } catch {
     storageUnavailable = true
     return inMemoryCsrfToken
@@ -33,16 +42,18 @@ export const readOwnerCsrfToken = (): string | null => {
 
 const bootstrapOwnerSession = async (): Promise<OwnerSessionBootstrapStatus> => {
   if (!browserAvailable()) return ready
-  const fragment = new URLSearchParams(window.location.hash.slice(1))
-  const bootstrapToken = fragment.get("bootstrap_token")
-  if (bootstrapToken === null) return ready
+  const bootstrap = readBootstrapToken(window.location.hash)
+  if (bootstrap._tag === "missing") return ready
 
   try {
-    window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}`)
+    const route = bootstrapRouteWithoutToken(window.location.pathname, window.location.search)
+    window.history.replaceState(null, "", route)
+    if (bootstrap._tag === "malformed") return failed("Owner session bootstrap token is malformed")
+    const bootstrapToken = bootstrap.token
     const response = await window.fetch("/auth/bootstrap", {
       method: "POST",
       credentials: "same-origin",
-      headers: { Authorization: `Bearer ${bootstrapToken}` }
+      headers: { Authorization: `Bearer ${Redacted.value(bootstrapToken)}` }
     })
     if (!response.ok) return failed(`Owner session bootstrap failed with status ${response.status}`)
     const payload = await Schema.decodeUnknownPromise(BootstrapResponse)(await response.json())

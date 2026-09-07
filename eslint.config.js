@@ -155,6 +155,18 @@ export default tseslint.config(
     }
   },
   {
+    files: ["packages/herdr-coordinator/test/**/*.{ts,tsx}", "packages/herdr-work/test/**/*.{ts,tsx}"],
+    rules: {
+      "local-rules/require-immediate-work-store-cleanup": "error"
+    }
+  },
+  {
+    files: ["packages/herdr-coordinator/src/orchestrator.ts"],
+    rules: {
+      "local-rules/require-named-orchestrator-service-effects": "error"
+    }
+  },
+  {
     files: ["packages/*/src/**/*.{ts,tsx}"],
     rules: {
       "@typescript-eslint/no-explicit-any": "error",
@@ -290,7 +302,10 @@ export default tseslint.config(
   {
     // Prettier formats root JavaScript utilities; ESLint still enforces their
     // semantic and safety rules.
-    files: ["scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs"],
+    files: [
+      "scripts/check-{control-center-live-aws,effect-reference-alignment,security-doc-examples}.mjs",
+      "scripts/pack-herdr.mjs"
+    ],
     rules: {
       "@effect/dprint": "off"
     }

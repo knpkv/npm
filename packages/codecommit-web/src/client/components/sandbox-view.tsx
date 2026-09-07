@@ -13,6 +13,7 @@ import {
   sandboxCredentialsAtom,
   stopSandboxAtom
 } from "../atoms/app.js"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { sandboxBrowserUrl } from "../sandbox-origin.js"
 import styles from "./sandbox.module.css"
 
@@ -201,7 +202,10 @@ export function SandboxViewContent({
   const canRestart = (sandbox.status === "stopped" || sandbox.status === "error") && sandbox.containerId !== null
   const canDelete = sandbox.status === "stopped" || sandbox.status === "error"
   const canStop = isRunning || isProvisioning
-  const backUrl = `/accounts/${sandbox.awsAccountId}/prs/${sandbox.pullRequestId}`
+  const backUrl =
+    sandbox.region === null
+      ? `/accounts/${sandbox.awsAccountId}/prs/${sandbox.pullRequestId}`
+      : codeCommitPullRequestHref(sandbox.awsAccountId, sandbox.pullRequestId, sandbox.repositoryName, sandbox.region)
 
   return (
     <div className={styles.workspace}>

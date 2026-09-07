@@ -15,6 +15,8 @@ const NotificationRow = Schema.Struct({
   message: Schema.String,
   title: Schema.String,
   profile: Schema.String,
+  repositoryName: Schema.String,
+  accountRegion: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
 })
@@ -102,10 +104,13 @@ const makeNotificationRepo = Effect.gen(function*() {
   const add_ = (n: NewNotification) =>
     Clock.currentTimeMillis.pipe(
       Effect.flatMap((nowMs) =>
-        sql`INSERT INTO notifications (pull_request_id, aws_account_id, type, message, title, profile, created_at)
-          VALUES (${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""}, ${
-          n.profile ?? ""
-        }, ${new Date(nowMs).toISOString()})`
+        sql`INSERT INTO notifications (
+          pull_request_id, aws_account_id, type, message, title, profile,
+          repository_name, account_region, created_at
+        ) VALUES (
+          ${n.pullRequestId}, ${n.awsAccountId}, ${n.type}, ${n.message}, ${n.title ?? ""}, ${n.profile ?? ""},
+          ${n.repositoryName ?? ""}, ${n.accountRegion ?? ""}, ${new Date(nowMs).toISOString()}
+        )`
       ),
       Effect.asVoid
     )
@@ -162,7 +167,7 @@ const makeNotificationRepo = Effect.gen(function*() {
         profile: n.profile ?? ""
       }).pipe(Effect.tap(() => publish))
 
-      if (!n.deduplicate) {
+      if (n.deduplicate !== true) {
         return insert.pipe(cacheError("addSystem"))
       }
 

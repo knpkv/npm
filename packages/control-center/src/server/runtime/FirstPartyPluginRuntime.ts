@@ -1,6 +1,12 @@
+import type * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
 import * as Layer from "effect/Layer"
+import type * as HttpClient from "effect/unstable/http/HttpClient"
 
-import { FirstPartyPluginRuntimeRegistry } from "../plugins/internal/FirstPartyPluginRuntimeRegistry.js"
+import {
+  codeCommitClientsLayer,
+  FirstPartyPluginRuntimeRegistry,
+  makeFirstPartyPluginRuntimeRegistry
+} from "../plugins/internal/FirstPartyPluginRuntimeRegistry.js"
 import { pluginRuntimeAuthoritySourceLayer } from "../plugins/internal/PluginRuntimeAuthorityRepository.js"
 import { PluginConnectionMapLive, PluginRuntimeMap } from "../plugins/internal/PluginRuntimeMap.js"
 import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "../plugins/internal/PluginRuntimeRegistry.js"
@@ -9,6 +15,15 @@ import { PluginRuntimeRegistry, type PluginRuntimeRegistryV1 } from "../plugins/
 export const firstPartyPluginRuntimeRegistryLayer = FirstPartyPluginRuntimeRegistry.pipe(
   Layer.provide(pluginRuntimeAuthoritySourceLayer)
 )
+
+/** Production registry with only CodeCommit routed through a dedicated transport. @internal */
+export const firstPartyPluginRuntimeRegistryLayerWithCodeCommitHttpClient = (
+  httpClient: HttpClient.HttpClient,
+  awsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
+) =>
+  makeFirstPartyPluginRuntimeRegistry(codeCommitClientsLayer(httpClient, awsConfiguration)).pipe(
+    Layer.provide(pluginRuntimeAuthoritySourceLayer)
+  )
 
 /**
  * Build public proposal and private execution projections over one server-owned cache.

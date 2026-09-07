@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { Layer, Sink, Stream } from "effect"
@@ -15,7 +16,8 @@ import {
 } from "../src/CacheService/internal/PrivateDatabasePathNode.js"
 import { defaultSandboxConfig, validateSandboxConfig } from "../src/ConfigService/index.js"
 import type { SandboxConfig } from "../src/ConfigService/internal.js"
-import { DockerService, renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
+import { DockerError } from "../src/Errors.js"
+import { DockerService, isMissingContainerError, renderDockerPortBinding } from "../src/SandboxService/DockerService.js"
 import { makeContainerConfig, sandboxContainerIdentityForWorkspaceOwner } from "../src/SandboxService/SandboxService.js"
 
 const homePath = "/Users/security-test"
@@ -334,6 +336,8 @@ describe("sandbox security boundary", () => {
   })
 
   it.effect("pipes container environment without exposing secrets in process arguments", () =>
+    // The fake spawner intentionally supplies the runtime process boundary in this security test.
+    // @effect-diagnostics-next-line missingEffectContext:off
     Effect.gen(function*() {
       const commands: Array<ChildProcess.Command> = []
       const output = Stream.make("container-id\n").pipe(Stream.encodeText)
@@ -395,6 +399,133 @@ describe("sandbox security boundary", () => {
       expect(environment).toContain("EDITOR_THEME=dark\n")
       expect(environment).toContain("PASSWORD=process-visible-secret\n")
     }))
+
+  it.effect("classifies docker inspect's missing-container output before JSON decoding", () =>
+    Effect.gen(function*() {
+      const output = Stream.make("Error: No such object: missing-container\n").pipe(Stream.encodeText)
+      const processLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            ChildProcessSpawner.makeHandle({
+              all: output,
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              pid: ChildProcessSpawner.ProcessId(44),
+              reref: Effect.void,
+              stderr: Stream.empty,
+              stdin: Sink.drain,
+              stdout: output,
+              unref: Effect.succeed(Effect.void)
+            })
+          )
+        )
+      )
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const docker = yield* DockerService
+          return yield* docker.inspectContainer("missing-container").pipe(Effect.result)
+        }).pipe(Effect.provide(DockerService.Default.pipe(Layer.provide(processLayer))))
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(isMissingContainerError(result.failure)).toBe(true)
+      }
+    }))
+
+  it.effect("keeps docker inspect infrastructure failures distinct from missing containers", () =>
+    Effect.gen(function*() {
+      const output = Stream.make("Cannot connect to the Docker daemon\n").pipe(Stream.encodeText)
+      const processLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            ChildProcessSpawner.makeHandle({
+              all: output,
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              pid: ChildProcessSpawner.ProcessId(45),
+              reref: Effect.void,
+              stderr: Stream.empty,
+              stdin: Sink.drain,
+              stdout: output,
+              unref: Effect.succeed(Effect.void)
+            })
+          )
+        )
+      )
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const docker = yield* DockerService
+          return yield* docker.inspectContainer("daemon-unavailable").pipe(Effect.result)
+        }).pipe(Effect.provide(DockerService.Default.pipe(Layer.provide(processLayer))))
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(isMissingContainerError(result.failure)).toBe(false)
+      }
+    }))
+
+  it.effect("reports a nonzero docker stop as a typed missing-container failure", () =>
+    Effect.gen(function*() {
+      const output = Stream.make("Error response from daemon: No such container: missing-container\n").pipe(
+        Stream.encodeText
+      )
+      const processLayer = Layer.succeed(
+        ChildProcessSpawner.ChildProcessSpawner,
+        ChildProcessSpawner.make(() =>
+          Effect.succeed(
+            ChildProcessSpawner.makeHandle({
+              all: output,
+              exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(1)),
+              getInputFd: () => Sink.drain,
+              getOutputFd: () => Stream.empty,
+              isRunning: Effect.succeed(false),
+              kill: () => Effect.void,
+              pid: ChildProcessSpawner.ProcessId(46),
+              reref: Effect.void,
+              stderr: Stream.empty,
+              stdin: Sink.drain,
+              stdout: output,
+              unref: Effect.succeed(Effect.void)
+            })
+          )
+        )
+      )
+
+      const result = yield* Effect.scoped(
+        Effect.gen(function*() {
+          const docker = yield* DockerService
+          return yield* docker.stopContainer("missing-container").pipe(Effect.result)
+        }).pipe(Effect.provide(DockerService.Default.pipe(Layer.provide(processLayer))))
+      )
+
+      expect(result._tag).toBe("Failure")
+      if (result._tag === "Failure") {
+        expect(isMissingContainerError(result.failure)).toBe(true)
+      }
+    }))
+
+  it("classifies Docker Engine stop absence without swallowing infrastructure failures", () => {
+    expect(
+      isMissingContainerError(
+        new DockerError({
+          operation: "stopContainer",
+          cause: "Error response from daemon: No such container: missing-container"
+        })
+      )
+    ).toBe(true)
+  })
 
   it("matches a non-root workspace owner and repairs root-owned workspaces without running as root", () => {
     expect(sandboxContainerIdentityForWorkspaceOwner(1001, 1002)).toEqual({

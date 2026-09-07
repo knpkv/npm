@@ -915,6 +915,40 @@ export const componentManifest = {
     {
       category: "pattern",
       exports: [
+        { kind: "value", name: "RelayDock" },
+        { kind: "type", name: "RelayDockProps" },
+        { kind: "type", name: "RlyRelayDockContextChip" },
+        { kind: "type", name: "RlyRelayDockDesktopPresentation" },
+        { kind: "type", name: "RlyRelayDockSelection" },
+        { kind: "type", name: "RlyRelayDockSelectionControl" },
+        { kind: "type", name: "RlyRelayDockState" }
+      ],
+      name: "RelayDock",
+      publicEntry: "patterns",
+      registry: true,
+      source: "src/patterns/RelayDock.tsx",
+      status: "experimental",
+      styles: ["src/patterns/RelayDock.module.css"],
+      variants: [
+        { defaultValue: "overlay", name: "desktopPresentation", values: ["overlay", "rail"] }
+      ],
+      visual: {
+        coverageStoryIds: [
+          "patterns-relaydock--desktop-rail",
+          "patterns-relaydock--empty",
+          "patterns-relaydock--error",
+          "patterns-relaydock--loading",
+          "patterns-relaydock--mobile-sheet",
+          "patterns-relaydock--unavailable"
+        ],
+        story: "stories/patterns/RelayDock.stories.tsx",
+        storyId: "patterns-relaydock--interaction",
+        tests: ["test/patterns/RelayDock.test.tsx"]
+      }
+    },
+    {
+      category: "pattern",
+      exports: [
         { kind: "value", name: "AgentJob" },
         { kind: "type", name: "AgentJobProps" },
         { kind: "type", name: "RlyAgentJobState" }

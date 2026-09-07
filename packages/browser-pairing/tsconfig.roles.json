@@ -1,0 +1,10 @@
+{
+  "$schema": "http://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.jsonc",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": []
+  },
+  "include": ["test/roles.ts"],
+  "references": [{ "path": "./tsconfig.build.json" }]
+}

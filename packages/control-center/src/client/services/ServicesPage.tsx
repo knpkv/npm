@@ -817,7 +817,7 @@ export const ServicesPage = ({
   }, [connectionsState, searchParams, sessionState, setSearchParams])
 
   const testConnection = useCallback(
-    (pluginConnectionId: PluginConnectionId): void => {
+    (pluginConnectionId: PluginConnectionId, refreshOverviewAfterHealthy = false): void => {
       if (sessionKey === null) return
       testRequests.current.get(pluginConnectionId)?.abort()
       const request = new AbortController()
@@ -828,6 +828,10 @@ export const ServicesPage = ({
           if (request.signal.aborted) return
           testRequests.current.delete(pluginConnectionId)
           setTestStates((current) => new Map(current).set(pluginConnectionId, { _tag: "result", result }))
+          refreshAdministration(pluginConnectionId)
+          if (result._tag === "healthy" && refreshOverviewAfterHealthy) {
+            setRequestRevision((revision) => revision + 1)
+          }
         },
         (failure) => {
           if (request.signal.aborted) return
@@ -837,7 +841,7 @@ export const ServicesPage = ({
         }
       )
     },
-    [invalidateSession, sessionKey, transport]
+    [invalidateSession, refreshAdministration, sessionKey, transport]
   )
 
   const createConnections = useCallback(
@@ -1337,7 +1341,7 @@ export const ServicesPage = ({
                   onRevoke={revokeConnection}
                   onStartAtlassianOAuth={transport.startAtlassianOAuthGrant}
                   onSynchronize={synchronizeConnection}
-                  onTest={testConnection}
+                  onTest={(pluginConnectionId) => testConnection(pluginConnectionId, true)}
                   synchronizationState={synchronizationStates.get(connection.pluginConnectionId)}
                   testState={testStates.get(connection.pluginConnectionId)}
                 />

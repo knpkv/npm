@@ -1,5 +1,24 @@
 # @knpkv/rly
 
+## 0.5.1
+
+### Patch Changes
+
+- [#400](https://github.com/knpkv/npm/pull/400) [`1dcc473`](https://github.com/knpkv/npm/commit/1dcc473ebd14c2a4ac00d7fd67bf9a8d80201f66) Thanks [@konopkov](https://github.com/konopkov)! - Keep modal Relay focus trapping correct for controls inside nested open ShadowRoots.
+
+## 0.5.0
+
+### Minor Changes
+
+- [#390](https://github.com/knpkv/npm/pull/390) [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead) Thanks [@konopkov](https://github.com/konopkov)! - Add the shared responsive Relay Dock presentation pattern.
+
+## 0.4.1
+
+### Patch Changes
+
+- [#382](https://github.com/knpkv/npm/pull/382) [`94ee004`](https://github.com/knpkv/npm/commit/94ee00487f0595cdc16fd8f1332689eb39ecfaf2) Thanks [@konopkov](https://github.com/konopkov)! - Run release-independent CodeCommit reviews through authenticated native Codex sandboxes, resolve AWS SSO profiles safely, preserve redacted review failure stages and causes, and make review setup, settings, service health, and narrow-screen navigation clearer.
+  Review activity now scrolls independently, follows new output without stealing a reader's position, and keeps a multiline draft composer available while a run is active.
+
 ## 0.4.0
 
 ### Minor Changes

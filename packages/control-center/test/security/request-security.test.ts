@@ -344,6 +344,22 @@ describe("bind and request security", () => {
         assert.strictEqual(arbitraryCsrf.failure.reason, "csrf-rejected")
       }
 
+      const malformedCsrf = yield* authorizeAuthenticatedMutation(
+        {
+          config,
+          request: {
+            ...request,
+            method: "POST",
+            origin: "http://127.0.0.1:4173",
+            csrfToken: "bad"
+          },
+          capability: "release-action"
+        },
+        (token) => verifyCsrfToken(Redacted.value(token), expectedCsrfDigest)
+      ).pipe(Effect.result)
+      assert.isTrue(Result.isFailure(malformedCsrf))
+      if (Result.isFailure(malformedCsrf)) assert.strictEqual(malformedCsrf.failure.reason, "csrf-rejected")
+
       yield* authorizeAuthenticatedMutation(
         {
           config,
@@ -418,7 +434,11 @@ describe("bind and request security", () => {
         assert.strictEqual(bypassedProxy.failure.reason, "proxy-rejected")
       }
       assert.deepStrictEqual(effectiveReachableUrls(proxyConfig, ["10.0.0.8"]), ["https://control.local"])
-    }).pipe(Effect.provide(NodeServices.layer)))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("verifies CSRF digests without retaining or returning token text", () =>
     Effect.gen(function*() {
@@ -431,7 +451,11 @@ describe("bind and request security", () => {
       assert.isTrue(Result.isFailure(rejected))
       if (Result.isFailure(rejected)) assert.strictEqual(rejected.failure.reason, "csrf-rejected")
       assert.notInclude(JSON.stringify(rejected), secretCanary)
-    }).pipe(Effect.provide(NodeServices.layer)))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 
   it.effect("blocks agents and administration but permits ordinary release work on explicitly insecure LAN", () =>
     Effect.gen(function*() {
@@ -520,5 +544,9 @@ describe("bind and request security", () => {
       if (Result.isFailure(composedAdministration)) {
         assert.strictEqual(composedAdministration.failure.reason, "insecure-lan-capability-rejected")
       }
-    }).pipe(Effect.provide(NodeServices.layer)))
+    }).pipe(
+      // The test runner owns the Node service lifetime.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer)
+    ))
 })

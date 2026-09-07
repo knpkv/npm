@@ -18,6 +18,7 @@ import { useCallback, useMemo } from "react"
 import { useSearchParams } from "react-router"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { FilterSidebar } from "./filter-sidebar.js"
 import { PRRow } from "./pr-row.js"
 import { RecentActivity } from "./recent-activity.js"
@@ -33,6 +34,12 @@ import styles from "./review-queue.module.css"
 import { SearchBar } from "./search-bar.js"
 
 type PullRequest = Domain.PullRequest
+
+export const prListHref = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
+  codeCommitPullRequestHref(pr.account.profile, String(pr.id), String(pr.repositoryName), String(pr.account.region))
+
+export const prListKey = (pr: Pick<PullRequest, "account" | "id" | "repositoryName">): string =>
+  `${pr.account.awsAccountId ?? pr.account.profile}:${String(pr.id)}:${String(pr.repositoryName)}:${String(pr.account.region)}`
 
 const replaceStatusFacet = (params: URLSearchParams, status: "approved" | "open" | "pending"): void => {
   const retained = params.getAll("f").filter((raw) => !raw.startsWith("status:") && raw !== "")
@@ -76,14 +83,14 @@ export function PRList() {
       (filter) => filter.key === "status" && ["open", "merged", "closed"].includes(filter.value)
     )
     const requireOpen = hasOpenSubStatus && !hasLifecycle
-    const fromMs = from ? new Date(from).getTime() : undefined
-    const toMs = to ? new Date(to).getTime() : undefined
+    const fromMs = from !== undefined && from !== "" ? new Date(from).getTime() : undefined
+    const toMs = to !== undefined && to !== "" ? new Date(to).getTime() : undefined
     const statusFilter = filters.find((filter) => filter.key === "status")
 
     return prs
       .filter((pr) => {
         if (
-          q &&
+          q.length > 0 &&
           !pr.repositoryName.toLowerCase().includes(filterLower) &&
           !pr.title.toLowerCase().includes(filterLower) &&
           !pr.author.toLowerCase().includes(filterLower) &&
@@ -120,7 +127,7 @@ export function PRList() {
           previous.delete("review")
           previous.set("sortBy", "updated")
 
-          if (appState.currentUser) {
+          if (appState.currentUser !== undefined && appState.currentUser !== "") {
             const retained = previous
               .getAll("f")
               .filter((raw) => raw !== `author:${appState.currentUser}` && raw !== "")
@@ -138,18 +145,14 @@ export function PRList() {
     [appState.currentUser, setSearchParams]
   )
 
-  const prHref = (pr: PullRequest): string => {
-    const accountKey = pr.account.awsAccountId ?? pr.account.profile
-    return `/accounts/${encodeURIComponent(accountKey)}/prs/${pr.id}`
-  }
-
   const profiles = useMemo(
     () => [...new Set(appState.accounts.filter((account) => account.enabled).map((account) => account.profile))],
     [appState.accounts]
   )
   const needsLogin = prs.length === 0 && profiles.length > 0
   const accountCount = new Set(sorted.map((pr) => pr.account.profile)).size
-  const activity = appState.currentUser ? (appState.notifications?.items ?? []) : []
+  const activity =
+    appState.currentUser !== undefined && appState.currentUser !== "" ? (appState.notifications?.items ?? []) : []
 
   const listContent = (() => {
     if (sorted.length === 0 && isLoading) {
@@ -225,13 +228,7 @@ export function PRList() {
       return (
         <Surface className={styles.queueSurface} padding="none" form="grouped">
           {sorted.map((pr) => (
-            <PRRow
-              currentUser={appState.currentUser}
-              key={`${pr.account.profile}:${pr.id}`}
-              pr={pr}
-              showUpdated
-              to={prHref(pr)}
-            />
+            <PRRow currentUser={appState.currentUser} key={prListKey(pr)} pr={pr} showUpdated to={prListHref(pr)} />
           ))}
         </Surface>
       )
@@ -241,7 +238,7 @@ export function PRList() {
     for (const pr of sorted) {
       const accountId = pr.account?.profile ?? "unknown"
       const group = byAccount.get(accountId)
-      if (group) group.push(pr)
+      if (group !== undefined) group.push(pr)
       else byAccount.set(accountId, [pr])
     }
 
@@ -259,12 +256,7 @@ export function PRList() {
             </div>
             <Surface className={styles.queueSurface} padding="none" form="grouped">
               {accountPrs.map((pr) => (
-                <PRRow
-                  currentUser={appState.currentUser}
-                  key={`${pr.account.profile}:${pr.id}`}
-                  pr={pr}
-                  to={prHref(pr)}
-                />
+                <PRRow currentUser={appState.currentUser} key={prListKey(pr)} pr={pr} to={prListHref(pr)} />
               ))}
             </Surface>
           </section>

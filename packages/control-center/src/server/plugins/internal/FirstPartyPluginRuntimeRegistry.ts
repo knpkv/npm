@@ -835,6 +835,7 @@ const atlassianAuthentication = Effect.fn("FirstPartyPluginRuntime.atlassianAuth
   if (authMode === "oauth") {
     const profileCredential = yield* credentialTextValue(loaded.configuration, "oauthProfileId")
     const profile = yield* loadAtlassianProfile(provider, profileCredential.value).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(HomeDirectoryLive),
       Effect.mapError(() => configurationFailure("plugin-oauth-profile-unavailable"))
     )
@@ -1099,14 +1100,15 @@ const confluenceLayer = Effect.fn("FirstPartyPluginRuntime.confluenceLayer")(fun
   return { credentialGeneration: authentication.credentialGeneration, layer: plugin }
 })
 
-type CodeCommitClientsLayer = Layer.Layer<
+export type CodeCommitClientsLayer = Layer.Layer<
   ReadClient.CodeCommitReadClient | ReviewClient.CodeCommitReviewClient,
   never,
   HttpClient.HttpClient
 >
 
-const liveCodeCommitClients = (() => {
-  const awsConfiguration = AwsClientConfig.Default
+const liveCodeCommitClients = (
+  awsConfiguration: Layer.Layer<AwsClientConfig.AwsClientConfig>
+) => {
   const readClient = ReadClient.CodeCommitReadClient.live.pipe(Layer.provide(awsConfiguration))
   const reviewProvider = ReviewClient.CodeCommitReviewProviderLive.pipe(
     Layer.provide(awsConfiguration)
@@ -1115,7 +1117,18 @@ const liveCodeCommitClients = (() => {
     Layer.provide(Layer.merge(readClient, reviewProvider))
   )
   return Layer.merge(readClient, reviewClient)
-})()
+}
+
+/** Bind only CodeCommit and its identity lookup to a dedicated transport. @internal */
+export const codeCommitClientsLayer = (
+  httpClient?: HttpClient.HttpClient,
+  awsConfiguration: Layer.Layer<AwsClientConfig.AwsClientConfig> = AwsClientConfig.Default
+): CodeCommitClientsLayer =>
+  httpClient === undefined
+    ? liveCodeCommitClients(awsConfiguration)
+    : liveCodeCommitClients(awsConfiguration).pipe(
+      Layer.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
+    )
 
 const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(function*(
   loaded: LoadedRuntime,
@@ -1134,6 +1147,7 @@ const codeCommitLayer = Effect.fn("FirstPartyPluginRuntime.codeCommitLayer")(fun
     const readClient = yield* ReadClient.CodeCommitReadClient
     return yield* readClient.discoverAccount(configuration)
   }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(clients),
     Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
   )
@@ -1189,6 +1203,7 @@ const codePipelineLayer = Effect.fn("FirstPartyPluginRuntime.codePipelineLayer")
       operationTimeoutMillis: configuration.operationTimeoutMillis
     })
   }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(clientLayer),
     Effect.mapError(() => configurationFailure("plugin-credential-identity-unavailable"))
   )
@@ -1264,6 +1279,7 @@ const makeRegistry = Effect.fn("FirstPartyPluginRuntime.makeRegistry")(function*
             Layer.provide(requirements)
           )
         }).pipe(
+          // @effect-diagnostics-next-line strictEffectProvide:off
           Effect.provide(requirements)
         )
       )
@@ -1287,4 +1303,4 @@ export const makeFirstPartyPluginRuntimeRegistry = (
 > => Layer.effect(PluginRuntimeRegistry, makeRegistry(codeCommitClients, codePipelineClient))
 
 /** Production registry for the fixed first-party provider catalog. @internal */
-export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(liveCodeCommitClients)
+export const FirstPartyPluginRuntimeRegistry = makeFirstPartyPluginRuntimeRegistry(codeCommitClientsLayer())

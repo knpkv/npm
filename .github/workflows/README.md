@@ -110,7 +110,9 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - Manual workflow dispatch
 
 **Condition**: Verification runs only when the repository owner is `knpkv`.
-Publishing additionally requires a trusted non-PR `refs/heads/main` run.
+Publishing is impossible for pull-request events. It runs for ordinary pushes
+to `main`, or for a repository-authorized manual dispatch against its explicitly
+selected ref. Both jobs pin checkout to the event's exact `github.sha`.
 
 **Jobs**:
 
@@ -124,8 +126,10 @@ Publishing additionally requires a trusted non-PR `refs/heads/main` run.
 
 #### Publish snapshot
 
-- Runs only for pushes to `main` or a `main` workflow dispatch
-- Checks out `refs/heads/main`, rebuilds, and alone receives `id-token: write`
+- Runs only for pushes to `main` or a repository-authorized manual dispatch;
+  pull-request events can never enter this job
+- Checks out the dispatch or push event's exact `github.sha`, rebuilds, and
+  alone receives `id-token: write`
 - Creates snapshot releases using `pkg-pr-new`
 - Publishes to the temporary registry for testing
 - **Commands**:

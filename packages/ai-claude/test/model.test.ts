@@ -177,19 +177,19 @@ describe("model", () => {
 
   // Given file tools the CLI explores before answering, which costs turns and wall clock on a prompt
   // that is already self-contained: 42s over 6 turns with Read,Glob,Grep against 15s over 2 turns
-  // with none. `access: "none"` is how a caller says the prompt needs nothing from disk.
-  it.effect("withholds every tool for access none", () =>
+  // with none. `access: "prompt-only"` is how a caller says the prompt needs nothing from disk.
+  it.effect("withholds every tool for prompt-only access", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
       yield* LanguageModel.generateText({ prompt: "Classify this" }).pipe(
-        Effect.provide(model({ cwd: "/workspace", access: "none" })),
+        Effect.provide(model({ cwd: "/workspace", access: "prompt-only" })),
         Effect.provide(fakeProcessLayer(calls, { stdout: success("ok") }))
       )
       const command = calls[0]
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
-        expect(command.args).toContain("plan")
+        expect(command.args[command.args.indexOf("--permission-mode") + 1]).toBe("dontAsk")
       }
     }))
 

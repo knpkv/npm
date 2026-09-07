@@ -35,6 +35,7 @@ import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
   PrReviewReport,
   PrReviewSubject,
+  type PrReviewSuggestion,
   PrReviewSuggestionId,
   reconcilePrReviewReports
 } from "../../../domain/prReview.js"
@@ -188,14 +189,14 @@ const ThreadRow = Schema.Struct({
   threadId: AgentThreadId,
   threadKind: AgentJobTaskTag,
   subjectKey: Schema.String,
-  releaseId: ReleaseId
+  releaseId: Schema.NullOr(ReleaseId)
 })
 
 const JobRow = Schema.Struct({
   workspaceId: WorkspaceId,
   jobId: JobId,
   threadId: AgentThreadId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   providerId: EnqueueAgentJobInput.fields.providerId,
   model: EnqueueAgentJobInput.fields.model,
   access: EnqueueAgentJobInput.fields.access,
@@ -1198,7 +1199,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         )`.pipe(
       mapPersistenceOperation("agent-job.review-suggestion-lifecycle-revisions")
     )
-    const dismissedSuggestionIds = new Set<string>()
+    const latestSuggestionById = new Map<string, typeof PrReviewSuggestion.Type>()
     for (const unknownLifecycleRow of lifecycleRows) {
       const lifecycleRow = Schema.decodeUnknownResult(
         ReviewSuggestionLifecycleRevisionRow
@@ -1226,7 +1227,8 @@ const makeAgentJobRepository = Effect.gen(function*() {
       if (
         Result.isFailure(revision) ||
         revision.success.sourceJobId !== request.jobId ||
-        revision.success.suggestion.suggestionId !== lifecycleRow.success.suggestionId
+        revision.success.suggestion.suggestionId !== lifecycleRow.success.suggestionId ||
+        !PrReviewSubjectEquivalence(revision.success.subject, decodedReport.success.subject)
       ) {
         return yield* persistedRecordError(
           request.workspaceId,
@@ -1235,11 +1237,9 @@ const makeAgentJobRepository = Effect.gen(function*() {
           "agent-review-lifecycle-revision-payload-invalid"
         )
       }
-      if (revision.success.suggestion.state === "dismissed") {
-        dismissedSuggestionIds.add(lifecycleRow.success.suggestionId)
-      }
+      latestSuggestionById.set(lifecycleRow.success.suggestionId, revision.success.suggestion)
     }
-    if (publishedSuggestionIds.size === 0 && dismissedSuggestionIds.size === 0) {
+    if (publishedSuggestionIds.size === 0 && latestSuggestionById.size === 0) {
       return yield* Schema.decodeUnknownEffect(Schema.toType(AgentReviewResultRecord))({
         workspaceId: request.workspaceId,
         jobId: request.jobId,
@@ -1251,12 +1251,11 @@ const makeAgentJobRepository = Effect.gen(function*() {
     const projectedReport = yield* Schema.decodeUnknownEffect(Schema.toType(PrReviewReport))({
       ...decodedReport.success,
       suggestions: decodedReport.success.suggestions.map((suggestion) => {
+        const latest = latestSuggestionById.get(suggestion.suggestionId) ?? suggestion
         const state = publishedSuggestionIds.has(suggestion.suggestionId)
           ? "published"
-          : dismissedSuggestionIds.has(suggestion.suggestionId)
-          ? "dismissed"
-          : suggestion.state
-        return state === suggestion.state ? suggestion : { ...suggestion, state }
+          : latest.state
+        return state === latest.state ? latest : { ...latest, state }
       })
     }).pipe(
       Effect.mapError(() =>
@@ -1697,30 +1696,45 @@ const makeAgentJobRepository = Effect.gen(function*() {
         Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.thread-id" }))
       )
       const threadKind = request.task._tag
-      const subjectKey = request.task._tag === "release-chat"
-        ? request.releaseId
-        : yield* reviewThreadSubjectKey(
+      let subjectKey: string
+      if (request.task._tag === "release-chat") {
+        if (request.releaseId === null) {
+          return yield* new AgentJobInputError({
+            workspaceId: request.workspaceId,
+            jobId: request.jobId,
+            reason: "task-mismatch"
+          })
+        }
+        subjectKey = request.releaseId
+      } else {
+        subjectKey = yield* reviewThreadSubjectKey(
           request.task.pluginConnectionId,
           request.task.subject
         )
+      }
       return yield* database
         .transaction(
           Effect.gen(function*() {
-            const releaseRows = yield* sql`SELECT release_id FROM releases
-          WHERE workspace_id = ${request.workspaceId} AND release_id = ${request.releaseId}`
-            if (releaseRows.length === 0) {
-              return yield* new RecordNotFoundError({
-                workspaceId: request.workspaceId,
-                recordKind: "release",
-                recordKey: request.releaseId
-              })
+            if (request.releaseId !== null) {
+              const releaseRows = yield* sql`SELECT release_id FROM releases
+            WHERE workspace_id = ${request.workspaceId} AND release_id = ${request.releaseId}`
+              if (releaseRows.length === 0) {
+                return yield* new RecordNotFoundError({
+                  workspaceId: request.workspaceId,
+                  recordKind: "release",
+                  recordKey: request.releaseId
+                })
+              }
             }
+            const threadReleaseId = request.task._tag === "release-chat"
+              ? request.releaseId
+              : null
             yield* sql`INSERT INTO agent_threads (
           workspace_id, thread_id, thread_kind, subject_key, release_id,
           next_event_sequence, created_at
         ) VALUES (
           ${request.workspaceId}, ${candidateThreadId}, ${threadKind}, ${subjectKey},
-          ${request.releaseId}, 1,
+          ${threadReleaseId}, 1,
           ${encodeTimestamp(request.createdAt)}
         ) ON CONFLICT (workspace_id, thread_kind, subject_key) DO NOTHING`
             const thread = yield* findThread(request.workspaceId, threadKind, subjectKey)
@@ -2940,7 +2954,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
             if (
               request.preservedAttempts?.some((preserved) =>
                 preserved.jobId === jobId && preserved.attemptSequence === attempt.success.attemptSequence
-              )
+              ) === true
             ) continue
             const existing = yield* readReviewResult({
               workspaceId: request.workspaceId,
@@ -3129,14 +3143,17 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const taskContextPrefix =
         `{"_tag":"pr-review","pluginConnectionId":"${request.pluginConnectionId}","subject":${subjectJson},"reviewProfile":`
       const identityPrefix = taskContextPrefix.slice(0, taskContextPrefix.indexOf("\"baseRevision\""))
-      const rendered = renderLatestAgentReviewQuery({
+      const queryInput = {
         workspaceId: request.workspaceId,
         ...(!(request.excludeJobId === undefined) && { excludeJobId: request.excludeJobId }),
         ...(!(request.allowDifferentHead === true) && { subjectRevision: request.subject.headRevision }),
         taskContextPrefix: request.allowDifferentHead === true ? identityPrefix : taskContextPrefix,
         excludeTargeted: true,
         ...(!(request.jobId === undefined) && { jobId: request.jobId })
-      })
+      }
+      const rendered = request.requireReport === true
+        ? renderLatestAgentReviewQuery({ ...queryInput, requireReport: true })
+        : renderLatestAgentReviewQuery(queryInput)
       const rows = yield* sql
         .unsafe<SqlRow>(rendered.sql, [...rendered.params])
         .pipe(mapPersistenceOperation("agent-job.latest-review"))
@@ -3157,6 +3174,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         row.success.taskContextDigest
       )
       let interrupted = false
+      let failure: AgentProviderError | null = null
       if (row.success.state === "failed") {
         const interruptionRows = yield* sql<SqlRow>`SELECT COUNT(*) AS interrupted
           FROM agent_thread_events
@@ -3167,6 +3185,40 @@ const makeAgentJobRepository = Effect.gen(function*() {
           mapPersistenceOperation("agent-job.latest-review-interruption")
         )
         interrupted = Number(interruptionRows[0]?.interrupted ?? 0) > 0
+        const failureRows = yield* sql<SqlRow>`SELECT
+          workspace_id AS workspaceId, thread_id AS threadId,
+          event_sequence AS eventSequence, job_id AS jobId,
+          attempt_sequence AS attemptSequence, event_kind AS eventKind,
+          payload_json AS payloadJson, payload_digest AS payloadDigest,
+          payload_byte_length AS payloadByteLength, occurred_at AS occurredAt
+          FROM agent_thread_events
+          WHERE workspace_id = ${request.workspaceId}
+            AND job_id = ${row.success.jobId}
+            AND event_kind = 'job-failed'
+          ORDER BY event_sequence DESC
+          LIMIT 1`.pipe(mapPersistenceOperation("agent-job.latest-review-failure"))
+        if (failureRows.length === 1) {
+          const failureRow = Schema.decodeUnknownResult(ThreadEventRow)(failureRows[0])
+          if (Result.isFailure(failureRow)) {
+            return yield* persistedRecordError(
+              request.workspaceId,
+              "agent-review",
+              request.subject.pullRequestId,
+              "agent-review-failure-schema-invalid"
+            )
+          }
+          const failurePayload = yield* decodeEventPayload(request.workspaceId, failureRow.success)
+          const decodedFailure = Schema.decodeUnknownResult(ProviderFailurePayload)(failurePayload)
+          if (Result.isFailure(decodedFailure)) {
+            return yield* persistedRecordError(
+              request.workspaceId,
+              "agent-review",
+              request.subject.pullRequestId,
+              "agent-review-failure-payload-invalid"
+            )
+          }
+          failure = decodedFailure.success.error
+        }
       }
       if (
         task._tag !== "pr-review" ||
@@ -3264,6 +3316,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
       const record = yield* Schema.decodeUnknownEffect(Schema.toType(LatestAgentReviewRecord))({
         ...row.success,
         state: interrupted ? "interrupted" : row.success.state,
+        failure: interrupted ? null : failure,
         startedAt: startedAt.success.startedAt,
         ...(!(reviewBudget.reviewBudgetMillis === undefined) &&
           { reviewBudgetMillis: reviewBudget.reviewBudgetMillis }),

@@ -160,14 +160,16 @@ const baseReviewClient = (
   ...overrides
 })
 
-const runWithClient = <A, E>(
+const runWithConfiguration = <A, E>(
+  selectedConfiguration: typeof configuration,
   client: ReadClient.CodeCommitReadClientService,
   effect: Effect.Effect<A, E, AuthorizedPluginExecutor | PluginConnection>,
   reviewClient: ReviewClient.CodeCommitReviewClientService = baseReviewClient()
 ) =>
   effect.pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(
-      buildPluginDefinitionLayer(codeCommitPluginDefinition, configuration).pipe(
+      buildPluginDefinitionLayer(codeCommitPluginDefinition, selectedConfiguration).pipe(
         Layer.provide(Layer.mergeAll(
           Layer.succeed(ReadClient.CodeCommitReadClient, client),
           Layer.succeed(ReviewClient.CodeCommitReviewClient, reviewClient),
@@ -178,12 +180,19 @@ const runWithClient = <A, E>(
     Effect.scoped
   )
 
+const runWithClient = <A, E>(
+  client: ReadClient.CodeCommitReadClientService,
+  effect: Effect.Effect<A, E, AuthorizedPluginExecutor | PluginConnection>,
+  reviewClient: ReviewClient.CodeCommitReviewClientService = baseReviewClient()
+) => runWithConfiguration(configuration, client, effect, reviewClient)
+
 const runLegacyWithClient = <A, E>(
   client: ReadClient.CodeCommitReadClientService,
   effect: Effect.Effect<A, E, AuthorizedPluginExecutor | PluginConnection>,
   reviewClient: ReviewClient.CodeCommitReviewClientService = baseReviewClient()
 ) =>
   effect.pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(
       buildPluginDefinitionLayerFromNegotiatedDescriptor(
         codeCommitPluginDefinition,
@@ -358,6 +367,43 @@ describe("CodeCommitPlugin", () => {
         assert.strictEqual(event.attributes.baseRevision, "base-commit-17")
       }
     }))
+
+  it.effect("keeps persisted pull-request source URLs stable across AWS partitions", () => {
+    const chinaConfiguration = {
+      ...configuration,
+      region: "cn-north-1"
+    }
+    const chinaPullRequest = makePullRequest(chinaConfiguration.repositoryName)
+    const client = baseReadClient({
+      listPullRequestsPage: (request) =>
+        Effect.succeed(
+          new ReadClient.CodeCommitPullRequestPage({
+            pullRequests: request.status === "OPEN" ? [chinaPullRequest] : [],
+            nextToken: null
+          })
+        )
+    })
+    const request = Schema.decodeUnknownSync(PluginSyncRequestV1)({
+      streamKey: "pull-requests",
+      checkpoint: null
+    })
+
+    return runWithConfiguration(
+      chinaConfiguration,
+      client,
+      Effect.gen(function*() {
+        const connection = yield* PluginConnection
+        const pages = yield* connection.sync(request).pipe(Stream.runCollect)
+        const event = pages.flatMap(({ events }) => events)[0]
+        assert.strictEqual(event?._tag, "UpsertEntity")
+        if (event?._tag !== "UpsertEntity") return
+        assert.strictEqual(
+          event.sourceUrl?.href,
+          "https://cn-north-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments-api/pull-requests/17?region=cn-north-1"
+        )
+      })
+    )
+  })
 
   it.effect("emits a distinct terminal event when CodeCommit preserves the revision across merge", () =>
     Effect.gen(function*() {

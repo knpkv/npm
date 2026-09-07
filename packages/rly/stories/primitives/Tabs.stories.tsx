@@ -8,6 +8,8 @@ import { Text } from "../../src/primitives/Text.js"
 import { pageStyle, stackStyle } from "./storyStyles.js"
 
 const narrowStyle: CSSProperties = { maxWidth: "20rem" }
+const fleetStyle: CSSProperties = { ...pageStyle, maxWidth: "24.5rem", padding: "var(--rly-space-16)" }
+const stackedMobileStyle: CSSProperties = { inlineSize: "20.5625rem" }
 
 const panel = (title: string, detail: string) => (
   <Surface padding="compact" tone="secondary">
@@ -78,6 +80,32 @@ const TabsInteraction = () => {
   )
 }
 
+const fleetItems = [
+  { content: <p>Pending approvals</p>, label: "Approvals", value: "approvals" },
+  { content: <p>Connected terminal</p>, label: "Connect", value: "connect" },
+  { content: <p>Daily fleet Work</p>, label: "Work", value: "work" }
+] satisfies ReadonlyArray<RlyTabItem>
+
+const FleetMobileTabs = () => (
+  <main style={fleetStyle}>
+    <Tabs
+      aria-label="Fleet applications"
+      data-mobile-layout="single-row"
+      defaultValue="connect"
+      items={fleetItems}
+      size="large"
+    />
+  </main>
+)
+
+const StackedMobileTabs = () => (
+  <main style={fleetStyle}>
+    <div style={stackedMobileStyle}>
+      <Tabs aria-label="Stacked sections" defaultValue="connect" items={fleetItems} size="large" />
+    </div>
+  </main>
+)
+
 const meta = { component: Tabs, tags: ["autodocs"], title: "Primitives/Tabs" } satisfies Meta<typeof Tabs>
 export default meta
 type Story = StoryObj<typeof meta>
@@ -105,4 +133,26 @@ export const Interaction: Story = {
     canvasElement.dataset.tabsPlayComplete = "true"
   },
   render: () => <TabsInteraction />
+}
+
+export const FleetMobile: Story = {
+  args: { "aria-label": "Fleet applications", items: fleetItems },
+  play: async ({ canvas }) => {
+    const list = canvas.getByRole("tablist", { name: "Fleet applications" })
+    const approvals = within(list).getByRole("tab", { name: "Approvals" })
+    const work = within(list).getByRole("tab", { name: "Work" })
+
+    await userEvent.click(work)
+    await expect(work).toHaveAttribute("aria-selected", "true")
+    await userEvent.click(approvals)
+    await userEvent.keyboard("{ArrowRight}")
+    await expect(canvas.getByRole("tab", { name: "Connect" })).toHaveFocus()
+    await expect(getComputedStyle(list).flexWrap).toBe("nowrap")
+  },
+  render: () => <FleetMobileTabs />
+}
+
+export const StackedMobile: Story = {
+  args: { "aria-label": "Stacked sections", items: fleetItems },
+  render: () => <StackedMobileTabs />
 }

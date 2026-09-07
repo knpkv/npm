@@ -26,7 +26,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import type { CommentThreadJsonEncoded } from "@knpkv/codecommit-core/Domain.js"
-import { PullRequestId } from "@knpkv/codecommit-core/Domain.js"
+import { AwsRegion, PullRequestId } from "@knpkv/codecommit-core/Domain.js"
 import {
   calculateHealthScore,
   type CategoryStatus,
@@ -44,7 +44,7 @@ import {
   Text,
   type RlyStateTone
 } from "@knpkv/rly/primitives"
-import { Option } from "effect"
+import { Exit, Option } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import {
@@ -61,7 +61,7 @@ import {
 } from "lucide-react"
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Markdown from "react-markdown"
-import { Link, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams, useSearchParams } from "react-router"
 import rehypeSanitize from "rehype-sanitize"
 import remarkGfm from "remark-gfm"
 import { toast } from "sonner"
@@ -80,6 +80,8 @@ import { useComments } from "../hooks/useComments.js"
 import { useDismissable } from "../hooks/useDismissable.js"
 import { useOptimistic } from "../hooks/useOptimistic.js"
 import { useOptimisticSet } from "../hooks/useOptimisticSet.js"
+import { matchesCodeCommitPullRequestRoute, type CodeCommitPullRequestRouteCoordinates } from "../codecommit-route.js"
+import { encodePullRequestCoordinates } from "../../pull-request-coordinates.js"
 import {
   type ReviewCommentNavigation,
   type ReviewCommentNavigationTarget,
@@ -98,6 +100,94 @@ const PullRequestReviewWorkspace = lazy(() =>
     default: module.PullRequestReviewWorkspace
   }))
 )
+
+/** Use the discovered account as the durable sandbox key, with profile identity for undiscovered accounts. */
+export const sandboxAccountIdForPullRequest = (pullRequest: Pick<Domain.PullRequest, "account">): string =>
+  pullRequest.account.awsAccountId !== undefined && pullRequest.account.awsAccountId.length > 0
+    ? pullRequest.account.awsAccountId
+    : pullRequest.account.profile
+
+export const sandboxMatchesPullRequest = (
+  sandbox: {
+    readonly awsAccountId: string
+    readonly pullRequestId: string
+    readonly repositoryName: string
+    readonly region?: string | null
+  },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  sandbox.awsAccountId === sandboxAccountIdForPullRequest(pullRequest) &&
+  sandbox.pullRequestId === String(pullRequest.id) &&
+  sandbox.repositoryName === String(pullRequest.repositoryName) &&
+  sandbox.region === String(pullRequest.account.region)
+
+/** A sandbox is reusable only while it can still serve this pull request. */
+export const isReusableSandbox = (
+  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  sandbox.status !== "stopped" &&
+  sandbox.status !== "stopping" &&
+  sandbox.status !== "error" &&
+  sandboxMatchesPullRequest(sandbox, pullRequest)
+
+/** Detect a matching sandbox whose stop is still in flight. */
+export const isStoppingSandbox = (
+  sandbox: Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status: string },
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean => sandbox.status === "stopping" && sandboxMatchesPullRequest(sandbox, pullRequest)
+
+/** Block fallback-account creation when an active numeric sandbox cannot be attributed safely. */
+export const hasFallbackSandboxCollision = (
+  sandboxes: ReadonlyArray<Parameters<typeof sandboxMatchesPullRequest>[0] & { readonly status?: string }>,
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): boolean =>
+  (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) &&
+  sandboxes.some(
+    (sandbox) =>
+      /^\d{12}$/u.test(sandbox.awsAccountId) &&
+      sandbox.awsAccountId !== pullRequest.account.profile &&
+      sandbox.status !== "stopped" &&
+      sandbox.status !== "error" &&
+      sandbox.pullRequestId === String(pullRequest.id) &&
+      sandbox.repositoryName === String(pullRequest.repositoryName) &&
+      sandbox.region === String(pullRequest.account.region)
+  )
+
+/** Keep review API requests bound to the exact PR shown by this page. */
+export const reviewApiAccountId = (
+  pullRequest: Pick<Domain.PullRequest, "account" | "id" | "repositoryName">
+): string => {
+  if (pullRequest.account.awsAccountId === undefined || pullRequest.account.awsAccountId.length === 0) {
+    return pullRequest.account.profile
+  }
+  return encodePullRequestCoordinates({
+    accountId: pullRequest.account.awsAccountId,
+    pullRequestId: pullRequest.id,
+    repositoryName: pullRequest.repositoryName,
+    region: pullRequest.account.region
+  })
+}
+
+/** Keep optimistic comment state isolated to one exact pull-request coordinate. */
+export const commentNavigationIdentityForCoordinates = (
+  accountId: string | undefined,
+  pullRequestId: string | undefined,
+  repositoryName: string | undefined,
+  region: string | undefined
+): string => JSON.stringify([accountId ?? "", pullRequestId ?? "", repositoryName ?? "", region ?? ""])
+
+/** Select a cached PR only when the route identifies exactly one coordinate. */
+export const selectCodeCommitPullRequest = (
+  pullRequests: ReadonlyArray<Domain.PullRequest>,
+  route: CodeCommitPullRequestRouteCoordinates
+) => {
+  const matches = pullRequests.filter((candidate) => matchesCodeCommitPullRequestRoute(candidate, route))
+  return {
+    pullRequest: matches.length === 1 ? (matches[0] ?? null) : null,
+    ambiguous: matches.length > 1
+  }
+}
 
 const healthTone = (tier: ReturnType<typeof getScoreTier>): RlyStateTone =>
   tier === "green" ? "positive" : tier === "yellow" ? "caution" : "critical"
@@ -784,21 +874,29 @@ const pullRequestStatusTone = (status: Domain.PullRequest["status"]): RlyStateTo
 
 export function PRDetail() {
   const { accountId, prId } = useParams<{ accountId: string; prId: string }>()
+  const [searchParams] = useSearchParams()
   const state = useAtomValue(appStateAtom)
   const refreshSingle = useAtomSet(refreshSinglePrAtom)
   const refreshSingleWithResult = useAtomSet(refreshSinglePrAtom, { mode: "promise" })
   const createRule = useAtomSet(createApprovalRuleAtom)
   const updateRule = useAtomSet(updateApprovalRuleAtom)
   const fetchedRef = useRef<string | null>(null)
-  const pr = useMemo(
-    () =>
-      prId !== undefined && prId.length > 0
-        ? (state.pullRequests.find(
-            (p) => p.id === prId && (p.account.awsAccountId === accountId || p.account.profile === accountId)
-          ) ?? null)
-        : null,
-    [accountId, prId, state.pullRequests]
-  )
+  const routeSelection = useMemo(() => {
+    if (prId === undefined || prId.length === 0) return { pullRequest: null, ambiguous: false }
+    let route: CodeCommitPullRequestRouteCoordinates = { pullRequestId: prId }
+    if (accountId !== undefined) route = { ...route, accountId }
+    if (searchParams.has("region")) route = { ...route, region: searchParams.get("region") ?? "" }
+    if (searchParams.has("repository")) {
+      route = { ...route, repositoryName: searchParams.get("repository") ?? "" }
+    }
+    return selectCodeCommitPullRequest(state.pullRequests, route)
+  }, [accountId, prId, searchParams, state.pullRequests])
+  const pr = routeSelection.pullRequest
+  const routeHasPartialCoordinates = searchParams.has("repository") !== searchParams.has("region")
+  const routeAmbiguous = routeHasPartialCoordinates || routeSelection.ambiguous
+  const refreshAccountId = pr === null ? accountId : reviewApiAccountId(pr)
+  const refreshRepositoryName = pr === null ? (searchParams.get("repository") ?? undefined) : String(pr.repositoryName)
+  const refreshRegion = pr === null ? (searchParams.get("region") ?? undefined) : String(pr.account.region)
 
   // Collect ALL known users from all PRs (authors, approvers, commenters, pool members)
   // Build CodeCommitApprovers:REPO_ACCT:username directly — no ARN needed
@@ -826,13 +924,26 @@ export function PRDetail() {
 
   // Fetch from AWS when PR not in cache (e.g. merged/closed)
   useEffect(() => {
-    if (pr !== null || accountId === undefined || accountId.length === 0 || prId === undefined || prId.length === 0)
+    if (
+      routeAmbiguous ||
+      pr !== null ||
+      refreshAccountId === undefined ||
+      refreshAccountId.length === 0 ||
+      prId === undefined ||
+      prId.length === 0
+    )
       return
-    const key = `${accountId}:${prId}`
+    const key = `${refreshAccountId}:${prId}:${refreshRepositoryName ?? ""}:${refreshRegion ?? ""}`
     if (fetchedRef.current === key) return
     fetchedRef.current = key
-    refreshSingle({ params: { awsAccountId: accountId, prId: PullRequestId.make(prId) } })
-  }, [pr, accountId, prId, refreshSingle])
+    refreshSingle({
+      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
+      query:
+        refreshRepositoryName !== undefined && refreshRegion !== undefined
+          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+          : {}
+    })
+  }, [pr, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingle, routeAmbiguous])
 
   const score: HealthScore | undefined = useMemo(
     () => (pr !== null ? Option.getOrUndefined(calculateHealthScore(pr, new Date())) : undefined),
@@ -848,17 +959,30 @@ export function PRDetail() {
   const subscribe = useAtomSet(subscribeAtom)
   const unsubscribe = useAtomSet(unsubscribeAtom)
   const accountKey = pr?.account.awsAccountId ?? pr?.account.profile
+  const subscriptionCoordinates =
+    pr === null ? undefined : { repositoryName: String(pr.repositoryName), region: pr.account.region }
   const serverSubscribed = useMemo(
     () =>
       AsyncResult.isSuccess(subscriptionsResult) && accountKey !== undefined && accountKey.length > 0
-        ? subscriptionsResult.value.some((s) => s.awsAccountId === accountKey && s.pullRequestId === prId)
+        ? subscriptionsResult.value.some(
+            (s) =>
+              s.awsAccountId === accountKey &&
+              s.pullRequestId === prId &&
+              s.repositoryName === subscriptionCoordinates?.repositoryName &&
+              s.accountRegion === subscriptionCoordinates?.region
+          )
         : false,
-    [subscriptionsResult, accountKey, prId]
+    [subscriptionsResult, accountKey, prId, subscriptionCoordinates]
   )
   const [isSubscribed, setOptimistic] = useOptimistic(serverSubscribed)
   const handleSubscriptionToggle = useCallback(() => {
     if (accountKey === undefined || accountKey.length === 0 || pr === null) return
-    const payload = { awsAccountId: accountKey, pullRequestId: pr.id }
+    const payload = {
+      awsAccountId: accountKey,
+      pullRequestId: pr.id,
+      repositoryName: String(pr.repositoryName),
+      region: pr.account.region
+    }
     setOptimistic(!isSubscribed)
     if (isSubscribed) {
       unsubscribe({ payload })
@@ -872,7 +996,12 @@ export function PRDetail() {
   const [reviewRefreshGeneration, setReviewRefreshGeneration] = useState(0)
   const [commentsRefreshGeneration, setCommentsRefreshGeneration] = useState(0)
   const commentRefreshTimersRef = useRef<Set<number>>(new Set())
-  const commentNavigationIdentity = `${accountKey ?? ""}:${prId ?? ""}`
+  const commentNavigationIdentity = commentNavigationIdentityForCoordinates(
+    accountKey ?? accountId,
+    prId,
+    pr === null ? refreshRepositoryName : String(pr.repositoryName),
+    pr === null ? refreshRegion : String(pr.account.region)
+  )
   const [commentCountState, setCommentCountState] = useState<OptimisticCommentCount | null>(null)
   const authoritativeCommentCount = pr?.commentCount
   const commentCount = (() => {
@@ -978,17 +1107,36 @@ export function PRDetail() {
     [commentNavigationIdentity, pr?.commentCount]
   )
   const refreshAfterApprovalMutation = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0) return
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    if (refreshAccountId === undefined || refreshAccountId.length === 0 || prId === undefined || prId.length === 0)
+      return
+    void refreshSingleWithResult({
+      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
+      query:
+        refreshRepositoryName !== undefined && refreshRegion !== undefined
+          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+          : {}
+    }).then(
       (refreshed) => invalidateReview(refreshed, false),
       () => {}
     )
-  }, [accountKey, invalidateReview, prId, refreshSingleWithResult])
+  }, [invalidateReview, prId, refreshAccountId, refreshRegion, refreshRepositoryName, refreshSingleWithResult])
   const handleRefresh = useCallback(() => {
-    if (accountKey === undefined || accountKey.length === 0 || prId === undefined || prId.length === 0 || isRefreshing)
+    if (
+      refreshAccountId === undefined ||
+      refreshAccountId.length === 0 ||
+      prId === undefined ||
+      prId.length === 0 ||
+      isRefreshing
+    )
       return
     setIsRefreshing(true)
-    void refreshSingleWithResult({ params: { awsAccountId: accountKey, prId: PullRequestId.make(prId) } }).then(
+    void refreshSingleWithResult({
+      params: { awsAccountId: refreshAccountId, prId: PullRequestId.make(prId) },
+      query:
+        refreshRepositoryName !== undefined && refreshRegion !== undefined
+          ? { repositoryName: refreshRepositoryName, region: AwsRegion.make(refreshRegion) }
+          : {}
+    }).then(
       (refreshed) => {
         invalidateReview(refreshed, true)
         setIsRefreshing(false)
@@ -1000,7 +1148,15 @@ export function PRDetail() {
         })
       }
     )
-  }, [accountKey, invalidateReview, isRefreshing, prId, refreshSingleWithResult])
+  }, [
+    invalidateReview,
+    isRefreshing,
+    prId,
+    refreshAccountId,
+    refreshRegion,
+    refreshRepositoryName,
+    refreshSingleWithResult
+  ])
 
   // Copy console URL
   const consoleUrl =
@@ -1024,14 +1180,18 @@ export function PRDetail() {
   }, [consoleUrl])
 
   // Sandbox
-  const createSandbox = useAtomSet(createSandboxAtom)
+  const createSandbox = useAtomSet(createSandboxAtom, { mode: "promiseExit" })
   const existingSandbox = useMemo(
-    () =>
-      state.sandboxes?.find(
-        (s) =>
-          s.pullRequestId === prId && s.awsAccountId === accountId && s.status !== "stopped" && s.status !== "error"
-      ),
-    [state.sandboxes, prId, accountId]
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isReusableSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
+  )
+  const stoppingSandbox = useMemo(
+    () => (pr === null ? undefined : state.sandboxes?.find((sandbox) => isStoppingSandbox(sandbox, pr))),
+    [pr, state.sandboxes]
+  )
+  const fallbackSandboxCollision = useMemo(
+    () => (pr === null ? false : hasFallbackSandboxCollision(state.sandboxes ?? [], pr)),
+    [pr, state.sandboxes]
   )
 
   const [sandboxCreating, setSandboxCreating] = useState(false)
@@ -1045,8 +1205,8 @@ export function PRDetail() {
 
   const proceedSandbox = useCallback(() => {
     if (pr === null) return
-    const sandboxAccountKey = pr.account.awsAccountId ?? pr.account.profile
-    createSandbox({
+    const sandboxAccountKey = sandboxAccountIdForPullRequest(pr)
+    const request = createSandbox({
       payload: {
         pullRequestId: pr.id,
         awsAccountId: sandboxAccountKey,
@@ -1057,10 +1217,29 @@ export function PRDetail() {
       }
     })
     setSandboxCreating(true)
+    void request.then((exit) => {
+      if (Exit.isFailure(exit)) {
+        setSandboxCreating(false)
+        const description = Option.match(Exit.findErrorOption(exit), {
+          onNone: () => "Try again once the current sandbox has stopped.",
+          onSome: (error) =>
+            Predicate.isError(error) ? error.message : "Try again once the current sandbox has stopped."
+        })
+        toast.error("Unable to create sandbox", { description })
+      }
+    })
   }, [pr, createSandbox])
 
   const handleSandbox = useCallback(() => {
     if (pr === null) return
+    if (fallbackSandboxCollision) {
+      toast.info("AWS account discovery is unavailable. Refresh before creating a sandbox.")
+      return
+    }
+    if (stoppingSandbox !== undefined) {
+      toast.info("Sandbox is still stopping. Try again once it has stopped.")
+      return
+    }
     if (existingSandbox !== undefined) {
       navigate(`/sandbox/${existingSandbox.id}`)
       return
@@ -1068,7 +1247,7 @@ export function PRDetail() {
     if (!docker.show()) {
       proceedSandbox()
     }
-  }, [pr, existingSandbox, docker, proceedSandbox, navigate])
+  }, [pr, fallbackSandboxCollision, stoppingSandbox, existingSandbox, docker, proceedSandbox, navigate])
 
   const handleDockerContinue = () => {
     docker.dismiss()
@@ -1108,6 +1287,19 @@ export function PRDetail() {
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [consoleUrl, handleOpen, handleSandbox, navigate, pr])
+
+  if (routeAmbiguous) {
+    return (
+      <section className={styles.loadingState}>
+        <StatePanel
+          announce="assertive"
+          description="Choose both repository and region to identify this pull request."
+          title="Pull request coordinates are ambiguous"
+          tone="critical"
+        />
+      </section>
+    )
+  }
 
   if (pr === null) {
     return (
@@ -1185,7 +1377,7 @@ export function PRDetail() {
             </Button>
             <Button className={styles.actionButton} onClick={handleSandbox} size="sm" variant="outline">
               <CodeIcon className="size-3.5" />
-              {existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
+              {stoppingSandbox !== undefined ? "Stopping…" : existingSandbox !== undefined ? "Open Sandbox" : "Sandbox"}
             </Button>
             <RlyButton
               className={styles.actionButton}
@@ -1329,7 +1521,7 @@ export function PRDetail() {
         }
       >
         <PullRequestReviewWorkspace
-          accountId={accountId ?? pr.account.profile}
+          accountId={reviewApiAccountId(pr)}
           commentsRefreshGeneration={commentsRefreshGeneration}
           commentNavigation={commentNavigation}
           onFindingPosted={refreshCommentsAfterPublication}

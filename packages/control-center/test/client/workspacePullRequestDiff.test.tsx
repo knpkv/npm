@@ -237,11 +237,9 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.textContent).toContain("src/other.ts:8")
     expect(host.querySelectorAll("[data-rly-diff-file-id]")).toHaveLength(1)
 
-    const p1Filter = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by P1 severity']")
-    const allSeverityFilter = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by all severity']")
-    const resolvedStateFilter = host.querySelector<HTMLButtonElement>(
-      "[aria-label='Filter suggestions by resolved state']"
-    )
+    const p1Filter = host.querySelector<HTMLButtonElement>("[aria-label='P1']")
+    const allSeverityFilter = host.querySelector<HTMLButtonElement>("[aria-label='All severities']")
+    const resolvedStateFilter = host.querySelector<HTMLButtonElement>("[aria-label='resolved']")
     if (p1Filter === null || allSeverityFilter === null || resolvedStateFilter === null) {
       throw new Error("Expected review suggestion filters.")
     }
@@ -274,7 +272,7 @@ describe("WorkspacePullRequestDiff", () => {
     expect(host.textContent).toContain("Keep one invariant per file")
     expect(host.textContent).not.toContain("Keep the supported invariant")
 
-    const p4Filter = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by P4 severity']")
+    const p4Filter = host.querySelector<HTMLButtonElement>("[aria-label='P4']")
     if (p4Filter === null) throw new Error("Expected the P4 review suggestion filter.")
     await act(async () => {
       p4Filter.click()
@@ -294,10 +292,8 @@ describe("WorkspacePullRequestDiff", () => {
       await Promise.resolve()
     })
     expect(host.textContent).toContain("Keep the supported invariant")
-    expect(host.querySelector("[aria-label='Filter suggestions by P2 severity']")?.getAttribute("aria-pressed")).toBe(
-      "false"
-    )
-    expect(host.querySelector("[aria-label='Filter suggestions by resolved state']")).toBeNull()
+    expect(host.querySelector("[aria-label='P2']")?.getAttribute("aria-pressed")).toBe("false")
+    expect(host.querySelector("[aria-label='resolved']")).toBeNull()
   })
 
   it.each(unauthorizedReadKinds)(

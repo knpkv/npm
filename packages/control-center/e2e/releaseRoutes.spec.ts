@@ -763,6 +763,19 @@ test("audits every authenticated route family for keyboard, WCAG, reflow, forced
       primaryAction: () => page.getByRole("searchbox", { name: "Search" })
     },
     {
+      audit: productionRouteAuditCase("release-routes", "open-pr", "authenticated", "open-pr"),
+      exercise: async (primaryAction) =>
+        primaryAction.fill(
+          "https://eu-west-1.console.aws.amazon.com/codesuite/codecommit/repositories/payments/pull-requests/42?region=eu-west-1"
+        ),
+      expectOutcome: async () =>
+        expect(page.getByRole("textbox", { name: "Pull request URL" })).toHaveValue(
+          /pull-requests\/42/u
+        ),
+      landmark: () => page.getByRole("heading", { level: 1, name: "Open CodeCommit PR" }),
+      primaryAction: () => page.getByRole("textbox", { name: "Pull request URL" })
+    },
+    {
       audit: productionRouteAuditCase("release-routes", "item", "authenticated", "items/:entityId"),
       expectOutcome: async () =>
         expect(page.getByRole("heading", { level: 1, name: "Find release work." })).toBeVisible(),
@@ -1212,7 +1225,9 @@ test("launches an exact-head review and presents its durable findings", async ({
           _tag: "stale",
           subject: reviewSubject,
           previousHead: reviewHeadRevision,
-          previousJobId: reviewJobId
+          previousJobId: reviewJobId,
+          previousState: "succeeded",
+          previousReport: reviewReport
         })
       )
       : !enqueued
@@ -1346,11 +1361,13 @@ test("launches an exact-head review and presents its durable findings", async ({
 
   const launchDialog = page.getByRole("dialog", { name: "Review this exact head" })
   await expect(launchDialog).toBeVisible()
-  await expect(launchDialog.getByRole("button", { name: "Keep reading" })).toBeFocused()
+  await expect(launchDialog.getByRole("button", { name: "Cancel" })).toBeFocused()
   await expect(launchDialog).toContainText(reviewHeadRevision)
-  await expect(launchDialog).toContainText(reviewProfile.label)
+  await expect(launchDialog.locator("dl")).toContainText("Agentopenai-compatible")
+  await expect(launchDialog.locator("dl")).toContainText("Modelreview-model")
   await expect(launchDialog).toContainText("20 minutes")
-  await expect(launchDialog).toContainText("Network blocked · sbx")
+  await expect(launchDialog.locator("dl")).toContainText("NetworkNetwork blocked")
+  await expect(launchDialog.locator("dl")).toContainText("IsolationDisposable sbx sandbox")
   await expect(page.locator("[inert]")).not.toHaveCount(0)
   await expect(page.locator("body")).toHaveAttribute("data-scroll-locked", "1")
 
@@ -1361,7 +1378,7 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.locator("body")).not.toHaveAttribute("data-scroll-locked", "1")
 
   await reviewTrigger.click()
-  await launchDialog.getByRole("button", { name: "Start full review" }).click()
+  await launchDialog.getByRole("button", { name: "Start full-project review" }).click()
   await expect
     .poll(() => enqueuePayload)
     .toEqual({
@@ -1409,8 +1426,25 @@ test("launches an exact-head review and presents its durable findings", async ({
   await expect(page.getByText("Review sandbox started")).toBeVisible()
   await expect(page.getByText("1 suggestions · 0 notes")).toBeVisible()
   await expect(page.getByText("Run completed · success")).toBeVisible()
+  const reviewActivity = page.getByRole("log", { name: "Review activity" })
+  await expect(reviewActivity).toBeVisible()
+  expect(
+    await reviewActivity.evaluate((element) => element.ownerDocument.defaultView?.getComputedStyle(element).overflowY)
+  ).toBe("auto")
+  const reviewRequest = page.getByLabel("Ask Relay about this pull request")
+  await reviewRequest.fill("Keep this draft.")
+  await reviewRequest.press("End")
+  await page.getByRole("button", { name: "Security" }).click()
+  await expect(reviewRequest).toBeFocused()
+  await expect(reviewRequest).toHaveValue(
+    "Keep this draft.\nReview authorization, credential handling, unsafe input, and privilege boundaries."
+  )
+  await reviewRequest.press("Enter")
+  await expect(reviewRequest).toHaveValue(
+    "Keep this draft.\nReview authorization, credential handling, unsafe input, and privilege boundaries.\n"
+  )
   await expect(
-    page.getByText("Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally.")
+    page.getByText("Agent advice only. Preview and confirm a finding to post it to CodeCommit, or dismiss it locally.")
   ).toBeVisible()
   await page.locator(`[data-rly-diff-file-id="${helperDiffAnchor}"] button`).click()
   await expect(page.getByText("export const helper = true")).toBeVisible()
@@ -1461,8 +1495,8 @@ test("launches an exact-head review and presents its durable findings", async ({
   await page.getByRole("dialog", { name: "Dismiss finding?" }).getByRole("button", { name: "Dismiss finding" }).click()
   await expect(page.getByText("Dismissed · high confidence", { exact: true })).toBeVisible()
   await page.reload()
-  await expect(page.getByText("Agent review not run")).toBeVisible()
-  await expect(page.getByRole("button", { name: "Review exact head" })).toBeVisible()
+  await expect(page.getByText("New head available")).toBeVisible()
+  await expect(page.getByRole("button", { name: "Review current head" })).toBeVisible()
 })
 
 test("preserves a filtered overview through Active work and the full release", async ({ page }) => {

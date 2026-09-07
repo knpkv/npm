@@ -1,3 +1,11 @@
 # Use a provider-neutral agent tool loop
 
 The existing `@knpkv/ai-runtime` package is deepened with a structured tool loop over Effect AI `LanguageModel` adapters rather than layering a new `@knpkv/ai-agent` package over its provider-neutral streaming protocol. The tool loop is stateless, has one primary run interface that streams typed events and returns schema-validated output, and does not persist conversations, retries, or domain state. Malformed tool arguments or final output receive one schema-guided self-repair attempt; a second invalid response ends the run as Unable to Conclude rather than coercing missing data. Providers remain outside the Review Sandbox, while Control Center supplies review instructions, typed sandbox tools, persistence, and the Review Suggestion output schema. Tool requests execute through the hardened sbx Review Sandbox module. Each result returned to the model is bounded with an artifact reference for retained output. Providers never receive direct host or sbx control access. This gives providers equivalent project exploration and command capability without injecting provider credentials or network access into the sandbox.
+
+## Amendment 2026-08-29: native provider execution
+
+The original placement remains the rule for Effect AI typed-tool review: its provider process stays on the host, and its Review Sandbox has no network access or provider credentials.
+
+Native Codex and Claude review are explicit exceptions. Control Center asks `sbx run codex` or `sbx run claude` to create the sandbox, then executes that provider CLI inside it. The sandbox can reach only the selected provider connection. Authentication stays behind the sbx-owned credential proxy and user configuration; Control Center does not inject raw provider credentials, host credential files, or ambient credential environment variables. Reviewed source cannot select the connection or modify that sbx-owned configuration.
+
+Both execution modes retain the same trusted-host boundaries: immutable source verification, prompt and output schemas, diff-evidence validation, durable review state, and sandbox cleanup. Native CLIs receive neither host control nor direct sbx control. This exception changes provider placement and narrow network authority, not the provider-neutral review result contract.

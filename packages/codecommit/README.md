@@ -25,7 +25,7 @@ CLI and TUI for AWS CodeCommit pull requests.
 - [Granted](https://granted.dev) with the `assume` executable configured for
   opening a selected pull request, or a selected changed file, in the matching
   AWS account console
-- A locally authenticated `codex` executable for optional Relay actions in both TUI and web mode
+- A locally authenticated `codex` executable for optional TUI Relay actions; the web workbench supports authenticated `codex` or `claude` Relay actions
 - Docker for optional web-mode review sandboxes. Sandbox IDE ports are
   loopback-only and require the per-sandbox password shown by the web UI.
 - `nvim` for the same-terminal Neovim shortcut and/or the VS Code `code` CLI
@@ -68,6 +68,24 @@ codecommit
 # or
 codecommit tui
 ```
+
+Press `o` on a selected pull request to hand its AWS Console URL to the durable
+Control Center Managed Review. The TUI resolves `CODECOMMIT_CONTROL_CENTER_ORIGIN`,
+then Control Center's `CONTROL_CENTER_PUBLIC_ORIGIN`, then its host and port settings,
+with `http://127.0.0.1:4173` as the default. Assisted browser handoff requires an
+HTTPS origin so TLS authenticates the server before the browser sends its host-only
+owner cookie. The TUI copies the provider URL locally and opens a clean `/open-pr`
+target; paste the URL there so the authenticated resolver sends it only in a POST
+body. The ordinary local HTTP origin must be opened manually. For HTTPS origins, the
+TUI also requires Control Center's exact bounded versioned identity response before
+opening the page. When it is unavailable,
+the TUI labels its local review as **Relay-only** and **non-durable**; local
+findings never silently merge into a later Managed Review.
+
+For a shared PR link, open Control Center's **Open PR** page and paste the URL.
+The link does not identify an AWS account. Control Center resolves it only inside
+the paired workspace and asks the operator to choose when several connected
+accounts contain the same repository and pull-request ID.
 
 Open a pull request to enter the exact-revision review workspace. Opening is
 API-first: the TUI reads the advertised base/head and changed-file metadata,
@@ -292,10 +310,15 @@ remain server-private; the browser receives only the authenticated PR revision,
 numbered file inventory, safe paths and modes, and bounded text selected for
 rendering.
 
-**Run Relay** starts one ephemeral prompt-only Codex pass over the same exact
-revision after the server rechecks its revision ID and immutable base/head
-commits. Full, security, tests, and explanation focuses are available. The
-Relay settings tab selects a default review profile and prompt-only methods
+**Run Relay** starts one ephemeral prompt-only Codex or Claude pass over the
+same exact revision after the server rechecks its revision ID and immutable
+base/head commits. Full, security, tests, and explanation focuses are
+available. Codex uses the local `codex` CLI and its configured authentication;
+Claude uses the local `claude` CLI and its configured authentication. One Relay
+profile owns the complete execution choice: focus, prompt-only methods,
+provider, harness, and model. The browser sends that exact saved profile and
+the server rejects stale, mixed, or unknown values before starting the agent.
+The Relay settings tab selects a default profile and prompt-only methods
 from the built-in catalogue or bounded `SKILL.md` metadata discovered under the
 local agent, Codex, and installed-plugin skill roots. Only server-issued skill
 IDs and safe source labels cross the authenticated browser boundary; local
@@ -305,8 +328,18 @@ Schema-decoded CodeCommit blobs, including Git mode headers, and stops reading
 later files as soon as the cumulative patch byte budget is exceeded. It marks
 repository text as untrusted evidence, rejects text pairs above its 5,000-line
 or 4,000,000-line-pair synchronous diff-complexity budgets, and gives the agent
-no host tools or repository access. Sanitized progress frames expose revision,
+no host tools or repository access; native Claude Relay additionally passes an
+empty tool set and `dontAsk` permission mode. Sanitized progress frames expose revision,
 file, patch, agent, and validation stages without returning hidden reasoning.
+Each provider receives the focus- and turn-specific native JSON Schema before
+execution. Explain requires an empty findings array plus verdict and
+explanation; strict decoding still rejects malformed output. Completed sessions
+retain their exact profile metadata across reload. A failed rerun labels the
+retained deck as the previous result instead of presenting it as fresh output.
+
+An authenticated, opt-in Explain check is available with
+`pnpm --filter @knpkv/codecommit-web test:relay-smoke:real`; ordinary test runs
+exclude it.
 
 Findings are decoded into a bounded local deck and exact line findings appear
 beside the matching diff. **Accept · post** immediately publishes the unchanged
@@ -476,6 +509,38 @@ codecommit pr export 123 my-repo
 codecommit pr export 123 my-repo -o pr-comments.md
 ```
 
+#### Open the PR for the current branch
+
+Opens the console page for the open PR whose source branch is checked out in a
+working directory. There is no `--profile` flag: a profile embedded in a
+git-remote-codecommit URL narrows the scan; otherwise every enabled account in
+the remote's region is checked. Matching PRs in different accounts are reported
+as ambiguous instead of choosing one by timestamp. A renamed local branch uses
+its upstream source branch when that upstream belongs to the selected remote.
+A regionless helper URL is
+accepted only when its eligible accounts resolve to one configured region. Requires
+`git` and, for the browser handover, Granted's `assume`.
+
+```bash
+codecommit pr open [options]
+```
+
+| Option     | Alias | Description                                         | Default  |
+| ---------- | ----- | --------------------------------------------------- | -------- |
+| `--cwd`    |       | Directory inside the repository                     | `.`      |
+| `--remote` |       | Git remote naming the CodeCommit repository         | `origin` |
+| `--json`   |       | Print the resolved PR as JSON instead of opening it | `false`  |
+| `--url`    |       | Print the console URL instead of opening it         | `false`  |
+
+`--json` and `--url` select different stdout shapes, so passing both is an
+error rather than a silent precedence.
+
+```bash
+codecommit pr open
+codecommit pr open --cwd ~/work/my-repo --url
+codecommit pr open --remote upstream --json
+```
+
 #### Update PR
 
 ```bash
@@ -496,6 +561,12 @@ codecommit pr update 123 -t "New title" -d "New description"
 ```
 
 ## AWS Configuration
+
+### Local CodeCommit mock
+
+Set `CODECOMMIT_MOCK_ENDPOINT` to the exact HTTP origin printed by `pnpm mock:codecommit`. Only literal loopback origins are accepted, and only CodeCommit and STS requests are redirected; Jira, Confluence, Clockify, and Control Center traffic is unchanged. The mock runner prints a direct PR link and exposes head-advance, author-comment, state, and reset controls documented in `packages/codecommit-mock/README.md`.
+
+Mock mode does not resolve the selected AWS profile or read ambient AWS credentials. It signs with a fixed non-secret fixture identity and removes authorization/session-token headers before loopback dispatch. Select region `eu-west-1` for the bundled scenario; the configured profile name may be nonexistent.
 
 Uses AWS SSO. Configure profiles in `~/.aws/config`:
 

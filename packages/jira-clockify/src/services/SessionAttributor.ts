@@ -242,7 +242,7 @@ export const layer = Layer.effect(
     // No tools: the prompt carries the candidates and the digest, so there is nothing on disk to
     // consult. Given file tools the CLI goes exploring first — measured at 42s over 6 turns against
     // 15s over 2 with none, which is the difference between fitting the timeout and losing a batch.
-    const provider = claudeModel({ cwd: home, access: "none", timeout: ATTRIBUTION_TIMEOUT })
+    const provider = claudeModel({ cwd: home, access: "prompt-only", timeout: ATTRIBUTION_TIMEOUT })
     // Bound here so the spawner stays a requirement of the *layer*, not of every `attribute`
     // call — the service's error and requirement channels are the whole point of this boundary.
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner

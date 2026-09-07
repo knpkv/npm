@@ -11,8 +11,34 @@
  * @module
  */
 import { useCallback, useRef } from "react"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import { readNotificationApi } from "../host-globals.js"
 import { StorageKeys } from "../storage-keys.js"
+
+export interface DesktopNotificationNavigation {
+  readonly awsAccountId?: string
+  readonly pullRequestId?: string
+  readonly repositoryName?: string
+  readonly accountRegion?: string
+}
+
+/** Keep complete notifications exact while retaining legacy links for old payloads. */
+export const desktopNotificationPath = (n: DesktopNotificationNavigation): string => {
+  const accountId = n.awsAccountId
+  const pullRequestId = n.pullRequestId
+  if (accountId !== undefined && accountId !== "" && pullRequestId !== undefined && pullRequestId !== "") {
+    if (
+      n.repositoryName !== undefined &&
+      n.repositoryName !== "" &&
+      n.accountRegion !== undefined &&
+      n.accountRegion !== ""
+    ) {
+      return codeCommitPullRequestHref(accountId, pullRequestId, n.repositoryName, n.accountRegion)
+    }
+    return `/accounts/${encodeURIComponent(accountId)}/prs/${encodeURIComponent(pullRequestId)}`
+  }
+  return "/notifications"
+}
 
 export function useDesktopNotification(onNavigate?: (path: string) => void) {
   const navigateRef = useRef(onNavigate)
@@ -28,6 +54,8 @@ export function useDesktopNotification(onNavigate?: (path: string) => void) {
       readonly message: string
       readonly awsAccountId?: string
       readonly pullRequestId?: string
+      readonly repositoryName?: string
+      readonly accountRegion?: string
     }) => {
       // Dedup: don't fire the same notification twice
       if (n.id != null) {
@@ -55,10 +83,7 @@ export function useDesktopNotification(onNavigate?: (path: string) => void) {
       notification.addEventListener("click", () => {
         window.focus()
         notification.close()
-        const path = n.awsAccountId && n.pullRequestId
-          ? `/accounts/${n.awsAccountId}/prs/${n.pullRequestId}`
-          : "/notifications"
-        navigateRef.current?.(path)
+        navigateRef.current?.(desktopNotificationPath(n))
       })
 
       // Prevent GC from collecting the notification before user clicks

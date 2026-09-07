@@ -23,6 +23,7 @@ import {
 import { AgentThreadId, JobId, PluginConnectionId, ReleaseId, WorkspaceId } from "../../src/domain/identifiers.js"
 import {
   MAXIMUM_PR_REVIEW_REPORT_BYTES,
+  PrReviewOrientation,
   PrReviewPath,
   type PrReviewSubject,
   PrReviewSuggestionDraft
@@ -35,6 +36,7 @@ import {
   type PrReviewSandboxCommandResult,
   type PrReviewSandboxSession,
   PrReviewSandboxSessionError,
+  type PrReviewSandboxSessionRequest,
   PrReviewSandboxSessions
 } from "../../src/server/agent/internal/PrReviewSandboxSession.js"
 import {
@@ -202,9 +204,10 @@ const response = (
 ]
 
 const completeScript = (
-  report: Schema.Json = {
+  report: Readonly<Record<string, Schema.Json>> = {
     schemaVersion: 3,
     completion: { status: "complete" },
+    orientation: null,
     suggestions: [suggestion],
     notes: []
   },
@@ -242,7 +245,7 @@ const completeScript = (
   {
     _tag: "response",
     parts: response({
-      text: JSON.stringify(report),
+      text: JSON.stringify({ orientation: null, ...report }),
       type: "text"
     })
   }
@@ -263,6 +266,25 @@ const output = (
     artifact: null,
     byteLength: new TextEncoder().encode(stdout).byteLength,
     text: stdout,
+    truncated: false
+  }
+})
+
+const failedOutput = (
+  stderr: string,
+  exitCode = 1
+): PrReviewSandboxCommandResult => ({
+  exitCode,
+  stderr: {
+    artifact: null,
+    byteLength: new TextEncoder().encode(stderr).byteLength,
+    text: stderr,
+    truncated: false
+  },
+  stdout: {
+    artifact: null,
+    byteLength: 0,
+    text: "",
     truncated: false
   }
 })
@@ -312,6 +334,7 @@ const runShellCommand = (
     })
   ).pipe(
     Effect.orDie,
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   )
 
@@ -345,6 +368,11 @@ const assertSharedNativeReviewContract = (
   assert.include(request.outputSchema ?? "", "\"prevention\":{\"anyOf\"")
   assert.include(request.outputSchema ?? "", "\"replacement\":{\"anyOf\"")
   assert.include(request.outputSchema ?? "", "\"prevention\",\"replacement\",\"anchor\"")
+  assert.include(request.outputSchema ?? "", "\"orientation\"")
+  assert.include(
+    request.outputSchema ?? "",
+    "\"required\":[\"schemaVersion\",\"completion\",\"orientation\",\"suggestions\",\"notes\"]"
+  )
 }
 
 const makeRealGitSessionLayer = (
@@ -394,7 +422,10 @@ const makeSessionLayer = (
   retainPrimaryDiff = false,
   artifactPagingFailure?: typeof PrReviewSandboxSessionError.Type,
   nativeReviewOutput?: string,
-  nativeReviewRunner: "claude" | "codex" = "codex"
+  nativeReviewRunner: "claude" | "codex" = "codex",
+  nativeReviewResult?: PrReviewSandboxCommandResult,
+  finalizationFailure?: typeof PrReviewSandboxSessionError.Type,
+  acquisitionFailure?: typeof PrReviewSandboxSessionError.Type
 ) => {
   const retainedArtifactId = PrReviewCommandArtifactId.make(
     "01890f6f-6d6a-7cc0-98d2-000000000454"
@@ -406,7 +437,16 @@ const makeSessionLayer = (
     stream: "stdout"
   })
   const commandResult = (command: string): PrReviewSandboxCommandResult => {
-    if (command.startsWith("git -c core.quotePath=false diff --unified=0")) {
+    if (command.startsWith("git cat-file -t ")) {
+      return command.includes("missing.ts") || command.includes("deleted.ts") || command.includes("packages'")
+        ? output("tree\n")
+        : output("blob\n")
+    }
+    if (
+      command.startsWith("git -c core.quotePath=false diff --unified=0") ||
+      command.startsWith("git --literal-pathspecs -c core.quotePath=false diff --unified=0") ||
+      command.startsWith("previous_path=$(git -c core.quotePath=false diff --name-status --find-renames")
+    ) {
       if (
         retainedDiff !== undefined &&
         (retainPrimaryDiff || command.includes("paged.ts"))
@@ -490,31 +530,45 @@ const makeSessionLayer = (
         })
         : Effect.fail(artifactPagingFailure),
     searchArtifact: () => Effect.succeed([]),
-    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "codex") && {
+    ...(!((nativeReviewOutput === undefined && nativeReviewResult === undefined) || nativeReviewRunner !== "codex") && {
       runNativeCodexReview: <UnparsedInput>(request: UnparsedInput) =>
         Effect.sync(() => {
           observation.operations.push("runNativeCodexReview")
           observation.requests.push(request)
-          return output(nativeReviewOutput)
+          return nativeReviewResult ?? output(nativeReviewOutput ?? "")
         })
     }),
-    ...(!(nativeReviewOutput === undefined || nativeReviewRunner !== "claude") && {
-      runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
-        Effect.sync(() => {
-          observation.operations.push("runNativeClaudeReview")
-          observation.requests.push(request)
-          return output(nativeReviewOutput)
-        })
-    }),
+    ...(!((nativeReviewOutput === undefined && nativeReviewResult === undefined) || nativeReviewRunner !== "claude") &&
+      {
+        runNativeClaudeReview: <UnparsedInput>(request: UnparsedInput) =>
+          Effect.sync(() => {
+            observation.operations.push("runNativeClaudeReview")
+            observation.requests.push(request)
+            return nativeReviewResult ?? output(nativeReviewOutput ?? "")
+          })
+      }),
     close: Effect.void
   }
   return Layer.succeed(
     PrReviewSandboxSessions,
     PrReviewSandboxSessions.of({
-      withSession: (request, use) =>
-        Effect.sync(() => {
+      withSession: <Success, Failure, Requirements>(
+        request: PrReviewSandboxSessionRequest,
+        use: (session: PrReviewSandboxSession) => Effect.Effect<Success, Failure, Requirements>
+      ): Effect.Effect<Success, Failure | PrReviewSandboxSessionError, Requirements> => {
+        const recordRequest = Effect.sync(() => {
           observation.requests.push(request)
-        }).pipe(Effect.andThen(use(session))),
+        })
+        if (acquisitionFailure !== undefined) {
+          return recordRequest.pipe(Effect.andThen(Effect.fail(acquisitionFailure)))
+        }
+        return recordRequest.pipe(
+          Effect.andThen(use(session)),
+          Effect.flatMap((result) =>
+            finalizationFailure === undefined ? Effect.succeed(result) : Effect.fail(finalizationFailure)
+          )
+        )
+      },
       reconcile: () => Effect.succeed({ removedSandboxes: [] })
     })
   )
@@ -569,6 +623,7 @@ const runExecutor = <Success, Failure>(
         })
     })
     return yield* use.pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, registry)),
@@ -578,6 +633,7 @@ const runExecutor = <Success, Failure>(
       )
     )
   }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(fake.layer.pipe(Layer.provideMerge(NodeServices.layer))),
     Effect.scoped,
     Effect.map((result) => ({ fake, result }))
@@ -696,6 +752,7 @@ describe("PR review task executor", () => {
     const nativeReport = JSON.stringify({
       schemaVersion: 3,
       completion: { status: "complete" },
+      orientation: null,
       suggestions: [{ ...suggestion, prevention: null, replacement: null }],
       notes: []
     })
@@ -764,11 +821,103 @@ describe("PR review task executor", () => {
         ["started", "output"]
       )
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
           Layer.provide(nativeSessionLayer),
           Layer.provide(historyLayer),
+          Layer.provideMerge(NodeServices.layer)
+        )
+      ),
+      Effect.scoped
+    )
+  })
+
+  it.effect("classifies rejected native provider credentials without retaining stderr", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const nativeClaim = {
+      ...claim,
+      providerId: NATIVE_PROVIDER_ID,
+      model: NATIVE_MODEL_ID,
+      context: {
+        ...claim.context,
+        task: {
+          ...claim.context.task,
+          reviewProfile: NATIVE_REVIEW_PROFILE
+        }
+      }
+    } satisfies ClaimedAgentJob
+    const nativeSessionLayer = makeSessionLayer(
+      observation,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+      undefined,
+      undefined,
+      "codex",
+      failedOutput("HTTP error: 401 Unauthorized. Missing scopes: api.responses.write.")
+    )
+    const nativeRegistry = AgentRuntimeRegistry.of({
+      catalog: () =>
+        Effect.succeed({
+          providers: [{
+            providerId: NATIVE_DURABLE_PROVIDER_ID,
+            models: [NATIVE_MODEL_ID],
+            capabilities: ["release-chat", "pr-review"],
+            health: "available",
+            reviewProfile: NATIVE_REVIEW_PROFILE
+          }]
+        }),
+      select: () =>
+        Effect.succeed({
+          model: NATIVE_MODEL_ID,
+          runtime: makeAgentRuntime({ run: () => Stream.empty }),
+          runtimeMetadata: {
+            _tag: "local-cli",
+            implementation: "codex-cli",
+            version: "1.2.3"
+          },
+          filesystemAccess: "configured-workspace",
+          reviewExecution: "native-codex",
+          reviewExecutable: "codex"
+        })
+    })
+
+    return Effect.gen(function*() {
+      const executor = yield* PrReviewTaskExecutor
+      const result = yield* executor.execute(nativeClaim).pipe(Effect.result)
+
+      assert.isTrue(Result.isFailure(result))
+      if (Result.isFailure(result)) {
+        assert.strictEqual(result.failure._tag, "AgentProviderError")
+        if (result.failure._tag === "AgentProviderError") {
+          assert.strictEqual(result.failure.reviewStage, "agent-run")
+          assert.strictEqual(result.failure.reviewCause, "provider-authentication")
+          assert.isFalse(result.failure.retryable)
+          assert.notInclude(result.failure.message, "api.responses.write")
+        }
+      }
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(
+        prReviewTaskExecutorLayer.pipe(
+          Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
+          Layer.provide(nativeSessionLayer),
+          Layer.provide(
+            Layer.succeed(
+              PrReviewThreadHistory,
+              PrReviewThreadHistory.of({
+                page: ({ after }) => Effect.succeed({ events: [], hasMore: false, nextCursor: after })
+              })
+            )
+          ),
           Layer.provideMerge(NodeServices.layer)
         )
       ),
@@ -809,6 +958,7 @@ describe("PR review task executor", () => {
       JSON.stringify({
         schemaVersion: 3,
         completion: { status: "complete" },
+        orientation: null,
         suggestions: [],
         notes: []
       })
@@ -853,6 +1003,7 @@ describe("PR review task executor", () => {
       assert.notInclude(observation.operations, "runNativeCodexReview")
       assert.strictEqual(observation.requests.length, 1)
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
@@ -893,6 +1044,7 @@ describe("PR review task executor", () => {
     const nativeReport = JSON.stringify({
       schemaVersion: 3,
       completion: { status: "complete" },
+      orientation: null,
       suggestions: [],
       notes: []
     })
@@ -946,6 +1098,7 @@ describe("PR review task executor", () => {
       assert.strictEqual(nativeRequest.executable, "claude")
       assert.notProperty(nativeRequest, "model")
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
         prReviewTaskExecutorLayer.pipe(
           Layer.provide(Layer.succeed(AgentRuntimeRegistry, nativeRegistry)),
@@ -964,6 +1117,232 @@ describe("PR review task executor", () => {
       Effect.scoped
     )
   })
+
+  it.effect("keeps valid orientation ranges when a sibling lacks literal changed-line evidence", () => {
+    const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        orientation: {
+          summary: "Moves retry identity into the persistence boundary.",
+          cohorts: [{
+            title: "Retry identity",
+            summary: "Implementation plus its tests.",
+            layers: [{
+              kind: "implementation",
+              title: "Persisted identity",
+              summary: "The retry path now persists the key.",
+              ranges: [{
+                path: EVIDENCE_PATH,
+                startLine: 42,
+                endLine: 42,
+                label: "Changed implementation"
+              }]
+            }, {
+              kind: "tests",
+              title: "Invalid directory anchor",
+              summary: "A directory is not a concrete changed blob.",
+              ranges: [{
+                path: "packages",
+                startLine: 42,
+                endLine: 42,
+                label: "Directory path"
+              }]
+            }]
+          }]
+        },
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      })
+    ).pipe(
+      Effect.tap(({ result }) =>
+        Effect.sync(() => {
+          assert.deepStrictEqual(
+            result.orientation,
+            Schema.decodeUnknownSync(PrReviewOrientation)({
+              summary: "Moves retry identity into the persistence boundary.",
+              cohorts: [{
+                title: "Retry identity",
+                summary: "Implementation plus its tests.",
+                layers: [{
+                  kind: "implementation",
+                  title: "Persisted identity",
+                  summary: "The retry path now persists the key.",
+                  ranges: [{
+                    path: EVIDENCE_PATH,
+                    startLine: 42,
+                    endLine: 42,
+                    label: "Changed implementation"
+                  }]
+                }]
+              }]
+            })
+          )
+          assert.isTrue(
+            observation.commands.some((command) => command === `git cat-file -t '${HEAD_REVISION}:packages'`)
+          )
+          assert.isTrue(
+            observation.commands.some((command) =>
+              command.startsWith("previous_path=$(git -c core.quotePath=false diff --name-status --find-renames") &&
+              command.includes(`-v target='${EVIDENCE_PATH}'`) &&
+              command.includes(`-- '${EVIDENCE_PATH}' "$previous_path"`)
+            )
+          )
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps an orientation whose complete structure has literal changed-line evidence", () => {
+    const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+    const orientation = Schema.decodeUnknownSync(PrReviewOrientation)({
+      summary: "Moves retry identity into the persistence boundary.",
+      cohorts: [{
+        title: "Retry identity",
+        summary: "Implementation boundary.",
+        layers: [{
+          kind: "implementation",
+          title: "Persisted identity",
+          summary: "The retry path now persists the key.",
+          ranges: [{
+            path: EVIDENCE_PATH,
+            startLine: 42,
+            endLine: 42,
+            label: "Changed implementation"
+          }]
+        }]
+      }]
+    })
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        orientation,
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      })
+    ).pipe(
+      Effect.tap(({ result }) => Effect.sync(() => assert.deepStrictEqual(result.orientation, orientation))),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps only edited lines when a changed file was renamed", () =>
+    Effect.gen(function*() {
+      const fileSystem = yield* FileSystem.FileSystem
+      const path = yield* Path.Path
+      const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "pr-review-rename-" })
+      const oldPath = "old.ts"
+      const newPath = "new.ts"
+      yield* fileSystem.writeFileString(path.join(root, "AGENTS.md"), "# Review instructions\n")
+      yield* fileSystem.writeFileString(
+        path.join(root, oldPath),
+        ["const one = 1", "const two = 2", "const three = 3", "const four = 4"].join("\n") + "\n"
+      )
+      const initialized = yield* runShellCommand(
+        root,
+        "git init --quiet && git add -- AGENTS.md old.ts && " +
+          "git -c user.name=Review -c user.email=review@example.invalid commit --quiet -m base"
+      )
+      assert.strictEqual(initialized.exitCode, 0, initialized.stderr.text)
+      const base = yield* runShellCommand(root, "git rev-parse HEAD")
+      assert.strictEqual(base.exitCode, 0, base.stderr.text)
+      const baseRevision = base.stdout.text.trim()
+
+      const renamed = yield* runShellCommand(root, "git mv -- old.ts new.ts")
+      assert.strictEqual(renamed.exitCode, 0, renamed.stderr.text)
+      yield* fileSystem.writeFileString(
+        path.join(root, newPath),
+        ["const one = 1", "const two = 20", "const three = 3", "const four = 4"].join("\n") + "\n"
+      )
+      const committed = yield* runShellCommand(
+        root,
+        "git add -- new.ts && git -c user.name=Review -c user.email=review@example.invalid " +
+          "commit --quiet -m head"
+      )
+      assert.strictEqual(committed.exitCode, 0, committed.stderr.text)
+      const head = yield* runShellCommand(root, "git rev-parse HEAD")
+      assert.strictEqual(head.exitCode, 0, head.stderr.text)
+      const headRevision = head.stdout.text.trim()
+      const reviewSubject = { ...subject, baseRevision, headRevision }
+      const actualClaim = {
+        ...claim,
+        context: {
+          ...claim.context,
+          subjectRevision: headRevision,
+          task: { ...claim.context.task, subject: reviewSubject }
+        }
+      } satisfies ClaimedAgentJob
+      const observation: SessionObservation = { commands: [], operations: [], requests: [] }
+      const sessionLayer = makeRealGitSessionLayer(observation, root, baseRevision, headRevision)
+      const executed = yield* runExecutor(
+        completeScript({
+          schemaVersion: 3,
+          completion: { status: "complete" },
+          orientation: {
+            summary: "Renames one file and edits one line.",
+            cohorts: [{
+              title: "Rename",
+              summary: "Preserves unchanged lines.",
+              layers: [{
+                kind: "contract",
+                title: "Unchanged line",
+                summary: "This line only moved.",
+                ranges: [{ path: newPath, startLine: 1, endLine: 1, label: "Moved" }]
+              }, {
+                kind: "implementation",
+                title: "Edited line",
+                summary: "This line changed.",
+                ranges: [{ path: newPath, startLine: 2, endLine: 2, label: "Edited" }]
+              }]
+            }]
+          },
+          suggestions: [],
+          notes: []
+        }, reviewSubject),
+        observation,
+        Effect.gen(function*() {
+          const executor = yield* PrReviewTaskExecutor
+          return yield* executor.execute(actualClaim)
+        }),
+        undefined,
+        undefined,
+        sessionLayer
+      )
+
+      assert.deepStrictEqual(
+        executed.result.orientation,
+        Schema.decodeUnknownSync(PrReviewOrientation)({
+          summary: "Renames one file and edits one line.",
+          cohorts: [{
+            title: "Rename",
+            summary: "Preserves unchanged lines.",
+            layers: [{
+              kind: "implementation",
+              title: "Edited line",
+              summary: "This line changed.",
+              ranges: [{ path: newPath, startLine: 2, endLine: 2, label: "Edited" }]
+            }]
+          }]
+        })
+      )
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("exposes more than 64 fenced history events without exhausting tool steps", () => {
     const observedCursors = new Array<number>()
@@ -1536,6 +1915,7 @@ describe("PR review task executor", () => {
       })
       assert.deepStrictEqual(mixedDeletionAndAddition.result.suggestions, [])
     }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(NodeServices.layer),
       Effect.scoped
     ))
@@ -1721,7 +2101,165 @@ describe("PR review task executor", () => {
             assert.strictEqual(result.failure._tag, "AgentProviderError")
             if (result.failure._tag === "AgentProviderError") {
               assert.strictEqual(result.failure.phase, "timeout")
+              assert.strictEqual(result.failure.reviewCause, "command-timeout")
+              assert.strictEqual(result.failure.reviewStage, "result-validation")
               assert.isTrue(result.failure.retryable)
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("keeps sandbox acquisition failures at sandbox start", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript(),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "sandbox-unavailable" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "sandbox-unavailable")
+              assert.strictEqual(result.failure.reviewStage, "sandbox-start")
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("classifies rejected sandbox output as result validation", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    const replacementSuggestion = {
+      ...suggestion,
+      replacement: {
+        reviewedHead: HEAD_REVISION,
+        unifiedDiff: [
+          `--- a/${EVIDENCE_PATH}`,
+          `+++ b/${EVIDENCE_PATH}`,
+          "@@ -42,1 +42,1 @@",
+          `-${EVIDENCE_EXCERPT}`,
+          "+const unsafe = false"
+        ].join("\n"),
+        explanation: "Use the safe value."
+      }
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [replacementSuggestion],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "output-rejected" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "output-rejected")
+              assert.strictEqual(result.failure.reviewStage, "result-validation")
+            }
+          }
+        })
+      ),
+      Effect.asVoid
+    )
+  })
+
+  it.effect("classifies post-run sandbox cleanup failures as cleanup", () => {
+    const observation: SessionObservation = {
+      commands: [],
+      operations: [],
+      requests: []
+    }
+    return runExecutor(
+      completeScript({
+        schemaVersion: 3,
+        completion: { status: "complete" },
+        suggestions: [],
+        notes: []
+      }),
+      observation,
+      Effect.gen(function*() {
+        const executor = yield* PrReviewTaskExecutor
+        return yield* executor.execute(claim)
+      }),
+      undefined,
+      undefined,
+      makeSessionLayer(
+        observation,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        false,
+        undefined,
+        undefined,
+        "codex",
+        undefined,
+        new PrReviewSandboxSessionError({ reason: "cleanup-failed" })
+      )
+    ).pipe(
+      Effect.result,
+      Effect.tap((result) =>
+        Effect.sync(() => {
+          assert.isTrue(Result.isFailure(result))
+          if (Result.isFailure(result)) {
+            assert.strictEqual(result.failure._tag, "AgentProviderError")
+            if (result.failure._tag === "AgentProviderError") {
+              assert.strictEqual(result.failure.reviewCause, "cleanup-failed")
+              assert.strictEqual(result.failure.reviewStage, "cleanup")
             }
           }
         })

@@ -19,7 +19,8 @@ import {
 } from "../../RelayReview.js"
 import { defaultRelayReviewSkills, relayReviewSkillsLabel, type RelayReviewSkillId } from "../../ReviewSkills.js"
 import type { WorktreePlan } from "../../WorktreeService.js"
-import { fetchPrCommentsAtom, openPrAtom } from "../atoms/actions.js"
+import { managedReviewPullRequestUrl } from "../../managed-review.js"
+import { fetchPrCommentsAtom, openManagedReviewAtom } from "../atoms/actions.js"
 import { type AppState, appStateAtom, refreshAtom } from "../atoms/app.js"
 import {
   checkoutWorktreeAtom,
@@ -122,6 +123,7 @@ import {
   detachedStalePublicationIds,
   findingDispositionNeedsResolution,
   findingDispositionMarker,
+  RELAY_ONLY_REVIEW_LABEL,
   type FindingDisposition,
   nextPendingFindingIndex,
   type RelayReviewReconciliation,
@@ -197,7 +199,7 @@ function CommentThread({
           fg={theme.textMuted}
         >{`${depth > 0 ? "│" : "┌"} ${terminalSafeText(thread.root.author)} · ${formatRelativeDate(thread.root.creationDate)}`}</text>
       )}
-      {thread.root.deleted ? null : syntaxStyle ? (
+      {thread.root.deleted ? null : syntaxStyle !== null ? (
         <markdown
           content={terminalSafeMultilineText(thread.root.content)}
           syntaxStyle={syntaxStyle}
@@ -456,7 +458,7 @@ export function DetailsView() {
   const refresh = useAtomSet(refreshAtom)
   const setAmbiguousMergeGuards = useAtomSet(ambiguousMergeGuardsAtom)
   const setView = useAtomSet(viewAtom)
-  const openPr = useAtomSet(openPrAtom)
+  const openManagedReview = useAtomSet(openManagedReviewAtom)
   const loadWorkspace = useAtomSet(loadPullRequestWorkspaceAtom)
   const workspaceResult = useAtomValue(loadPullRequestWorkspaceAtom)
   const pollRevision = useAtomSet(loadPullRequestRevisionAtom)
@@ -1734,8 +1736,9 @@ export function DetailsView() {
       }
     } else if (intent === "show-diff") setTab("diff")
     else if (intent === "show-comments") setTab("comments")
-    else if (intent === "open-browser" && pr !== null) openPr(pr)
-    else if (intent === "choose-review-skills") {
+    else if (intent === "open-managed-review" && pr !== null) {
+      openManagedReview(managedReviewPullRequestUrl(pr))
+    } else if (intent === "choose-review-skills") {
       dialog.show(() => <DialogReviewSkills onApply={setReviewSkills} selected={reviewSkills} />)
     } else if (intent === "choose-merge-strategy") {
       const current = mergeDialogWorkspaceRef.current
@@ -1874,7 +1877,7 @@ export function DetailsView() {
         <text
           fg={tab === "comments" ? theme.textAccent : theme.textMuted}
           {...(tab === "comments" ? { bg: theme.accentTint } : {})}
-        >{` 2  Comments${pr.commentCount ? ` ${pr.commentCount}` : ""} `}</text>
+        >{` 2  Comments${pr.commentCount !== undefined && pr.commentCount > 0 ? ` ${pr.commentCount}` : ""} `}</text>
       </box>
 
       {tab === "comments" ? (
@@ -2042,6 +2045,7 @@ export function DetailsView() {
               width: reviewCardExpanded ? "36%" : "22%"
             }}
           >
+            <text fg={theme.textWarning}>{terminalSafeText(RELAY_ONLY_REVIEW_LABEL)}</text>
             {!reviewCardExpanded && (
               <>
                 <text fg={theme.textMuted}>OPEN SELECTED</text>
@@ -2087,7 +2091,6 @@ export function DetailsView() {
                   </text>
                 )}
                 <box style={{ height: 1 }} />
-                <text fg={theme.textMuted}>RELAY</text>
                 <text fg={theme.text}>{"API preview · local Codex on demand"}</text>
                 <ActionKey active={!actionCancelable && !providerDriftPending} keyName="g" label="Skills" />
                 <text fg={theme.textAccent}>{`${reviewSkills.length} SELECTED`}</text>

@@ -92,11 +92,13 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
   const executors = yield* AuthorizedPluginExecutorMap
   const store = yield* GovernedActionExecutionStore
 
+  /** Reload provider source material before every authority-bearing dispatch. */
   const withExecutor = <Value, Failure>(
     scope: GovernedActionDispatchPreparation["scope"],
     use: (lease: AuthorizedPluginExecutorLease) => Effect.Effect<Value, Failure>
   ) =>
     Effect.scoped(Effect.gen(function*() {
+      yield* executors.invalidate(scope)
       const lease = yield* executors.contextEffect(scope)
       return yield* use(lease)
     }))
@@ -107,6 +109,7 @@ const makeGovernedActionExecutionEngine = Effect.gen(function*() {
     use: (lease: AuthorizedPluginExecutorLease) => Effect.Effect<Value, Failure>
   ) =>
     Effect.scoped(Effect.gen(function*() {
+      yield* executors.invalidate(scope)
       const lease = yield* executors.contextEffectForAuthority(scope, runtimeAuthorityToken)
       return yield* use(lease)
     }))

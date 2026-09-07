@@ -1,7 +1,8 @@
+import { CodeView } from "@pierre/diffs/react"
 import type { Meta, StoryObj } from "@storybook/react-vite"
-import { type CSSProperties, type ReactElement, useMemo, useRef, useState } from "react"
+import { createContext, type CSSProperties, type ReactElement, useContext, useMemo, useRef, useState } from "react"
 import { expect, userEvent, waitFor } from "storybook/test"
-import { DiffCodeView } from "../../src/diff/DiffCodeView.js"
+import { createDiffCodeView, DiffCodeView, type DiffCodeRendererAdapter } from "../../src/diff/DiffCodeView.js"
 import { DiffWorkerProvider, useDiffWorkerState } from "../../src/diff/worker-pool.js"
 import type {
   RlyDiffCodeAnnotation,
@@ -276,6 +277,38 @@ const StatePreservationHarness = (): ReactElement => {
   )
 }
 
+type DiffThemeType = "dark" | "light"
+
+const DiffThemeTypeContext = createContext<DiffThemeType>("light")
+
+const ThemeAwareRenderer: DiffCodeRendererAdapter = ({ rendererProps }) => {
+  const themeType = useContext(DiffThemeTypeContext)
+  return <CodeView {...rendererProps} options={{ ...rendererProps.options, themeType }} />
+}
+
+const ThemeAwareDiffCodeView = createDiffCodeView(ThemeAwareRenderer)
+
+const ThemeTransitionHarness = (): ReactElement => {
+  const [themeType, setThemeType] = useState<DiffThemeType>("light")
+  return (
+    <DiffThemeTypeContext.Provider value={themeType}>
+      <main data-diff-theme-type={themeType} style={pageStyle}>
+        <div style={{ ...stackStyle, inlineSize: "100%", maxInlineSize: "76rem" }}>
+          <div style={{ display: "flex", gap: "var(--rly-space-8)" }}>
+            <Button onClick={() => setThemeType("light")} size="compact">
+              Use light diff theme
+            </Button>
+            <Button onClick={() => setThemeType("dark")} size="compact">
+              Use dark diff theme
+            </Button>
+          </div>
+          <ThemeAwareDiffCodeView initialItems={[releaseItem]} />
+        </div>
+      </main>
+    </DiffThemeTypeContext.Provider>
+  )
+}
+
 const WorkerState = ({ label }: { readonly label: string }): ReactElement => {
   const state = useDiffWorkerState()
   return (
@@ -408,6 +441,11 @@ export const AnnotationStatePreservation: Story = {
     canvasElement.dataset.diffCodeViewAnnotationStatePlayComplete = "true"
   },
   render: () => <StatePreservationHarness />
+}
+
+export const ThemeTransition: Story = {
+  args: { initialItems: [releaseItem] },
+  render: () => <ThemeTransitionHarness />
 }
 
 export const WorkerStates: Story = {

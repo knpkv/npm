@@ -110,6 +110,12 @@
       padding-block-end: var(--rly-space-32);
     }
 
+    .title {
+      font-size: clamp(2rem, 8cqi, 3.5rem);
+      line-height: 0.95;
+      max-inline-size: 100%;
+    }
+
     .hero,
     .body {
       gap: var(--rly-space-24);

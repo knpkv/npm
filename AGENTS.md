@@ -113,6 +113,12 @@ row may cover several flows only when each is named, and a checklist cannot pass
 owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
 an alternate authorization path must not contradict a provider-enforced prerequisite.
 
+Keep Herdr worker-relationship behavior synchronized across
+`packages/herdr-fleet/README.md`, `packages/herdr-coordinator/README.md`, and
+`packages/herdr-fleet/src/service.ts`: `consult` and `transition_summary` accept
+relationship-free coordinator roots; `review` and `work` require the exact child
+relationship.
+
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
 GitHub workflow guards must compare external action owner/repository names
@@ -174,6 +180,7 @@ Public motion-ownership props must document their default, affected surfaces and
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
 
 Security documentation in `.specs/**` and package READMEs must distinguish server-private provider locators from normalized or client-visible representations. Name a bucket, key, ARN, token, or similar coordinate only with its private boundary, and list the safe fields that may cross normalization or HTTP boundaries.
+For `packages/browser-pairing/src/**`, structs containing `PairingCode`, `SessionToken`, or `CsrfToken` must be documented as credential-bearing; do not describe those payloads as secret-free. Credential-free summaries may retain a secret-free description.
 Every provider fixture-locator list must classify each coordinate as server-private or name its safe normalized/authenticated boundary, persisted representation, and prohibited emission surfaces.
 For `packages/control-center/README.md`, `packages/control-center/src/api/**`, and `packages/control-center/src/client/**`, an identifier that crosses an authenticated HTTP route or browser storage boundary is client-visible and must not be described as server-private. In particular, document `pluginConnectionId` as a normalized authenticated client-visible identifier when it appears in typed routes or cross-tab storage, including that persisted representation and its unauthenticated/public emission prohibition; keep raw provider site locators and credentials server-private. Generated and vendor documentation are excluded, while identifiers that never cross a transport boundary still require judgment.
 
@@ -269,6 +276,20 @@ When writing Effect code:
   compact name and foreign-workspace fixture pass. Generated and vendor docs are
   excluded. Clearly historical implementation plans may remain unchanged, but
   ADR history requires an amendment rather than a silent rewrite.
+- When PR-review execution placement, provider-network authority, or retained
+  provider user configuration changes in
+  `packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts`,
+  update `packages/control-center/CONTEXT.md`,
+  `packages/control-center/README.md`, and
+  `packages/control-center/docs/agentic-pr-review.md`, and append an amendment
+  to `packages/control-center/docs/adr/0009-use-a-provider-neutral-agent-tool-loop.md`.
+  Typed-tool review keeps its provider on the host and denies sandbox network
+  access. Native Codex and Claude execute inside sbx with only the selected
+  provider connection; authentication remains behind sbx-owned configuration
+  and its credential proxy, and raw provider credentials never enter Control
+  Center or the reviewed checkout. Output-label and error-copy changes alone do
+  not alter this boundary. Generated and vendor docs are excluded; whether a
+  configuration flag changes authority still requires review judgment.
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
@@ -318,6 +339,10 @@ When writing Effect code:
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
   presentation changes do not require a capability update.
+- Keep Jira Clockify Neovim polling path claims synchronized across
+  `.changeset/*.md`, `packages/jira-clockify/**`, and the owning Lua fixtures.
+  Poll coordination follows jcf's fixed `~/.jcf/state.json` authority, not the
+  plugin's configurable display-only `state_path`.
 - Keep sandbox capability boundaries synchronized across
   `packages/codecommit-core/README.md`, `packages/codecommit/README.md`, and the
   owning policy, service, projection, and security tests. The invariant is:

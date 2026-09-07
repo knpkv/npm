@@ -1,3 +1,4 @@
+import type { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
 import { Schema, SchemaTransformation } from "effect"
 import type * as Redacted from "effect/Redacted"
 
@@ -66,15 +67,15 @@ export type PairingCodeSummary = typeof PairingCodeSummary.Type
 
 /** One-time pairing code returned only by explicit issuance operations. */
 export interface IssuedPairingCode {
-  readonly pairingCode: Redacted.Redacted<string>
+  readonly pairingCode: Redacted.Redacted<PairingCode>
   readonly summary: PairingCodeSummary
 }
 
 /** Newly established session credentials returned only once. */
 export interface IssuedSession {
-  readonly csrfToken: Redacted.Redacted<string>
+  readonly csrfToken: Redacted.Redacted<CsrfToken>
   readonly session: SessionSummary
-  readonly sessionToken: Redacted.Redacted<string>
+  readonly sessionToken: Redacted.Redacted<SessionToken>
 }
 
 /** Default validity of first-run, device, and recovery pairing codes. */
