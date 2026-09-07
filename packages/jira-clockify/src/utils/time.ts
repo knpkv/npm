@@ -25,6 +25,31 @@ export function nextLocalMidnight(atMs: number): number {
   return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0).getTime()
 }
 
+/**
+ * Local Monday 00:00 of the ISO week containing `date`.
+ *
+ * Built from local calendar fields, never by subtracting days in milliseconds: a week containing a
+ * daylight-saving change is 167 or 169 hours long, so arithmetic on the clock lands an hour either
+ * side of midnight and the week then starts on Sunday night or Monday morning.
+ */
+export function startOfIsoWeek(date: Date): Date {
+  // getDay() is Sunday-first; ISO weeks start on Monday, so Sunday is six days into its week.
+  const daysSinceMonday = (date.getDay() + 6) % 7
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - daysSinceMonday, 0, 0, 0, 0)
+}
+
+/**
+ * The ISO week containing `date` as a half-open local period `[Monday, next Monday)` — the same
+ * shape every jcf period has, so a week is reconciled by exactly the code a day is.
+ */
+export function isoWeekPeriod(date: Date): { readonly from: Date; readonly to: Date } {
+  const from = startOfIsoWeek(date)
+  let to = from.getTime()
+  // Seven local midnights rather than seven times 24 hours, for the reason startOfIsoWeek gives.
+  for (let day = 0; day < 7; day++) to = nextLocalMidnight(to)
+  return { from, to: new Date(to) }
+}
+
 /** Format a `Date` as local `HH:MM` — the canonical clock format for prompts and confirmations. */
 export function formatClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`

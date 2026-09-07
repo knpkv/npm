@@ -29,7 +29,12 @@
  * - `keep` scripts the row picker: `keep[i] === false` unchecks row `i`. Omitting `keep` entirely
  *   sends no input at all, which is the same signal as a missing TTY.
  *
- * @internal
+ * **Why it ships**
+ *
+ * It lives in `src` and is exported as `@knpkv/jira-clockify/testing.js` because it is the highest
+ * seam in the package and the only one a *consumer* can drive: a web server over these services has
+ * to be testable against captured writes rather than a real Clockify account. Kept out of the barrel
+ * so nothing production imports it by accident.
  */
 import { NodePath } from "@effect/platform-node"
 import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
@@ -51,16 +56,16 @@ import * as Stdio from "effect/Stdio"
 import * as Terminal from "effect/Terminal"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { LogToStderrLive } from "../src/cli/layers.js"
-import { layer as agentSessionReaderLayer } from "../src/services/AgentSessionReader.js"
-import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
-import { ConfigService, type JcfConfig } from "../src/services/ConfigService.js"
-import { HomeDirectory } from "../src/services/HomeDirectory.js"
-import { layer as reconcileServiceLayer } from "../src/services/ReconcileService.js"
-import { type AttributionChoice, SessionAttributor, SessionAttributorError } from "../src/services/SessionAttributor.js"
-import { StateWriter } from "../src/services/StateWriter.js"
-import { layer as ticketServiceLayer } from "../src/services/TicketService.js"
-import { layer as timerServiceLayer } from "../src/services/TimerService.js"
+import { LogToStderrLive } from "../cli/layers.js"
+import { layer as agentSessionReaderLayer } from "../services/AgentSessionReader.js"
+import { ClockifyAuth } from "../services/ClockifyAuth.js"
+import { ConfigService, type JcfConfig } from "../services/ConfigService.js"
+import { HomeDirectory } from "../services/HomeDirectory.js"
+import { layer as reconcileServiceLayer } from "../services/ReconcileService.js"
+import { type AttributionChoice, SessionAttributor, SessionAttributorError } from "../services/SessionAttributor.js"
+import { StateWriter } from "../services/StateWriter.js"
+import { layer as ticketServiceLayer } from "../services/TicketService.js"
+import { layer as timerServiceLayer } from "../services/TimerService.js"
 
 export const FAKE_HOME = "/fake-home"
 export const FAKE_WORKSPACE_ID = "ws-fake"

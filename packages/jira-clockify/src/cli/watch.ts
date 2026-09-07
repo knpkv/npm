@@ -35,7 +35,15 @@ import { decideWatchWrites, type HeldProposal, SETTLE_GRACE_SECONDS } from "../a
 import { ConfigService } from "../services/ConfigService.js"
 import { ReconcileService } from "../services/ReconcileService.js"
 import { formatClock, formatDuration } from "../utils/time.js"
-import { applyProposal, entryDescription, proposalTargets } from "./agentWrite.js"
+import {
+  applyProposal,
+  clockifyWritten,
+  entryDescription,
+  jiraWritten,
+  keepGoing,
+  proposalTargets,
+  writeOutcomeLines
+} from "./agentWrite.js"
 import { fetchTicketByKey } from "./fetchTicket.js"
 import * as WatchLease from "./watchLease.js"
 
@@ -327,19 +335,19 @@ export const runWatch = (options: {
         // here, and a closing summary that claimed hours neither system holds would be wrong in the
         // one direction this command must never be wrong in.
         const written = yield* applyProposal(svc, proposal, description)
-        if (written.clockifySeconds > 0 || written.jiraSeconds > 0) totals.blocks += 1
-        totals.clockifySeconds += written.clockifySeconds
-        totals.jiraSeconds += written.jiraSeconds
+        yield* Effect.forEach(writeOutcomeLines(written), (line) => Console.log(`    ${line}`))
+        const clockifySeconds = clockifyWritten(written)
+        const jiraSeconds = jiraWritten(written)
+        if (clockifySeconds > 0 || jiraSeconds > 0) totals.blocks += 1
+        totals.clockifySeconds += clockifySeconds
+        totals.jiraSeconds += jiraSeconds
         // Only when both sides that were short have taken it. A half-written block stays behind the
         // cursor, so the restart re-derives it and offers the missing side alone — the subtraction
         // that makes every tick safe is the same thing that stops the written side repeating.
-        if (
-          written.clockifySeconds >= proposal.clockifyDelta &&
-          written.jiraSeconds >= proposal.jiraDelta
-        ) {
+        if (clockifySeconds >= proposal.clockifyDelta && jiraSeconds >= proposal.jiraDelta) {
           unwritten.delete(proposal)
         }
-        if (!written.keepGoing) {
+        if (!keepGoing(written)) {
           commitCursor(unwrittenStarts())
           return {
             _tag: "Stop",

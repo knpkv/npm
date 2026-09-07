@@ -5,11 +5,23 @@
   "license": "MIT",
   "author": "knpkv",
   "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing.js": "./src/testing/fakeHeadless.ts",
+    "./*.js": "./src/*.ts"
+  },
   "bin": {
     "jcf": "dist/src/bin.js"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "main": "dist/src/index.js",
+    "exports": {
+      ".": "./dist/src/index.js",
+      "./testing.js": "./dist/src/testing/fakeHeadless.js",
+      "./*.js": "./dist/src/*.js"
+    }
   },
   "files": [
     "dist",

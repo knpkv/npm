@@ -1,17 +1,20 @@
 /**
- * Writing one Proposed Worklog, shared by `jcf sync reconcile --agent` and `jcf watch`.
+ * Writing one Proposed Worklog, shared by `jcf sync reconcile --agent`, `jcf watch`, and any other
+ * surface that offers a proposal for confirmation.
  *
  * **Mental model**
  *
- * - **One write path**: both commands derive proposals from the same evidence and must put the same
+ * - **One write path**: every surface derives proposals from the same evidence and must put the same
  *   text in the same two places. A second implementation would drift, and the drift would only ever
  *   be visible in someone else's timesheet.
  * - **Say it before writing it**: the entry text lands in two systems other people read, so the
- *   caller prints it first. Nothing here writes anything the user has not already been shown.
+ *   caller shows it first. Nothing here writes anything the user has not already been shown.
+ * - **Reports, never prints.** A write returns what each side did and the caller renders it. A
+ *   terminal has a console to print to and an HTTP handler has a response to fill; a write path that
+ *   printed could only ever serve the first, and the second would grow its own copy of these rules.
  *
  * @module
  */
-import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import type { CreditedSpan, SessionProposal } from "../agent/sessions.js"
 import type { ReconcileServiceContract } from "../services/ReconcileService.js"
@@ -39,11 +42,29 @@ export const proposalTargets = (proposal: SessionProposal): string => {
 }
 
 /**
+ * How the amount on a written entry was arrived at.
+ *
+ * The distinction is not decoration. `session` says the number is what a transcript evidences, which
+ * is the claim ADR-0006 lets the tool make; the other two say a person chose it. A row whose amount
+ * was typed over must not keep claiming a transcript stands behind it.
+ */
+export type WriteOrigin = "session" | "session-adjusted" | "manual"
+
+/**
  * Where a written entry says it came from. Provenance for a human reading the row months later,
  * never load-bearing: the tally keys on the `[KEY]` prefix and the day, so editing this text away
  * in Clockify's web UI cannot re-enable double-logging.
  */
 export const PROVENANCE = "Reconciled from Claude Agent Session"
+
+const PROVENANCE_BY_ORIGIN: Record<WriteOrigin, string> = {
+  manual: "Entered by hand",
+  session: PROVENANCE,
+  "session-adjusted": `${PROVENANCE}, amount set by hand`
+}
+
+/** What an entry of this origin says about itself. */
+export const provenanceOf = (origin: WriteOrigin): string => PROVENANCE_BY_ORIGIN[origin]
 
 /** Keeps the issue title from crowding out the sentence that says what was actually done. */
 const ENTRY_SUMMARY_WIDTH = 80
@@ -64,12 +85,15 @@ const ENTRY_SUMMARY_WIDTH = 80
 export const entryDescription = (options: {
   readonly summary: string | null
   readonly note: string | null
+  /** Defaults to `session` — the only origin the CLI's own commands write. */
+  readonly origin?: WriteOrigin | undefined
 }): string => {
+  const provenance = provenanceOf(options.origin ?? "session")
   const parts = [
     ...(options.summary === null ? [] : [clip(options.summary, ENTRY_SUMMARY_WIDTH)]),
     ...(options.note === null || options.note.trim() === "" ? [] : [options.note.trim()])
   ]
-  return parts.length === 0 ? PROVENANCE : `${parts.join(" — ")} (${PROVENANCE})`
+  return parts.length === 0 ? provenance : `${parts.join(" — ")} (${provenance})`
 }
 
 /**
@@ -107,18 +131,65 @@ export const writeAnchor = (
 }
 
 /**
- * What one write attempt actually achieved, per side.
+ * What one side of a write did.
  *
- * Per side rather than a single boolean because the two fail independently and a caller that
- * summarises what it wrote must not count a side that refused. `keepGoing` is false only for
- * `NotLoggedIn`: every remaining Jira write would fail the same way, and twenty rows that all fail
- * is worse than stopping at the first.
+ * `NothingOwed` is not a failure and not a write: the side already holds the proposal's time, which
+ * is the ordinary outcome of topping up a day only one system missed. Keeping it distinct from a
+ * `Written` of zero is what stops a summary counting it as work logged.
+ */
+export type SideOutcome =
+  | { readonly _tag: "Written"; readonly seconds: number }
+  | { readonly _tag: "NothingOwed" }
+  | { readonly _tag: "Refused"; readonly message: string }
+  /** Jira only: the session expired, so every later Jira write would fail the same way. */
+  | { readonly _tag: "NotLoggedIn" }
+
+/**
+ * What one write attempt achieved, per side.
+ *
+ * Per side rather than a single boolean because the two fail independently, and a caller that
+ * summarises what it wrote must not count a side that refused.
  */
 export interface WriteOutcome {
-  readonly clockifySeconds: number
-  readonly jiraSeconds: number
-  readonly keepGoing: boolean
+  readonly clockify: SideOutcome
+  readonly jira: SideOutcome
 }
+
+const sideSeconds = (outcome: SideOutcome): number => outcome._tag === "Written" ? outcome.seconds : 0
+
+/** Seconds this write actually put on Clockify. */
+export const clockifyWritten = (outcome: WriteOutcome): number => sideSeconds(outcome.clockify)
+
+/** Seconds this write actually put on Jira. */
+export const jiraWritten = (outcome: WriteOutcome): number => sideSeconds(outcome.jira)
+
+/**
+ * Whether a run should go on to the next row.
+ *
+ * False only for an expired Jira session: every remaining Jira write would fail the same way, and
+ * twenty rows that all fail is worse than stopping at the first. A Clockify refusal, or a Jira
+ * refusal about *this* row, says nothing about the next one.
+ */
+export const keepGoing = (outcome: WriteOutcome): boolean => outcome.jira._tag !== "NotLoggedIn"
+
+/**
+ * One line per side saying what happened, in the words every surface should use.
+ *
+ * Here rather than in each caller so a terminal and a browser cannot describe the same write
+ * differently. Silent about a side that owed nothing — a row where only Jira was short should not
+ * report a Clockify non-event.
+ */
+export const writeOutcomeLines = (outcome: WriteOutcome): ReadonlyArray<string> => {
+  const lines: Array<string> = []
+  if (outcome.clockify._tag === "Written") lines.push("✓ created Clockify entry")
+  if (outcome.clockify._tag === "Refused") lines.push(`✗ Clockify: ${outcome.clockify.message}`)
+  if (outcome.jira._tag === "Written") lines.push("✓ posted to Jira")
+  if (outcome.jira._tag === "Refused") lines.push(`✗ Jira: ${outcome.jira.message}`)
+  if (outcome.jira._tag === "NotLoggedIn") lines.push(`✗ ${NOT_LOGGED_IN_HINT}`)
+  return lines
+}
+
+const nothingOwed: SideOutcome = { _tag: "NothingOwed" }
 
 /** Write one confirmed proposal, sizing each side to its own gap. */
 export const applyProposal = (
@@ -130,9 +201,8 @@ export const applyProposal = (
     // Anchored to real activity rather than left to the service's local-noon fallback, which files a
     // 00:17 session as a lunchtime block — wrong on its face to anyone reading the timesheet later.
     // Per side, because the two can already hold different amounts and so start in different blocks.
-    let clockifySeconds = 0
-    if (proposal.clockifyDelta > 0) {
-      const ok = yield* service
+    const clockify: SideOutcome = proposal.clockifyDelta > 0
+      ? yield* service
         .applyToClockify(
           proposal.ticketKey,
           proposal.day,
@@ -141,30 +211,28 @@ export const applyProposal = (
           writeAnchor(proposal.spans, proposal.clockifySeconds)
         )
         .pipe(
-          Effect.catch((error) => Console.log(`    ✗ Clockify: ${error.message}`).pipe(Effect.as(false)))
+          Effect.map((created): SideOutcome =>
+            created
+              ? { _tag: "Written", seconds: proposal.clockifyDelta }
+              : { _tag: "Refused", message: "the entry was not created" }
+          ),
+          Effect.catch((error) => Effect.succeed<SideOutcome>({ _tag: "Refused", message: error.message }))
         )
-      if (ok) {
-        clockifySeconds = proposal.clockifyDelta
-        yield* Console.log(`    ✓ created Clockify entry`)
-      }
-    }
-    if (proposal.jiraDelta > 0) {
-      const outcome = yield* service.applyToJira(
-        proposal.ticketKey,
-        proposal.day,
-        proposal.jiraDelta,
-        description,
-        writeAnchor(proposal.spans, proposal.jiraSeconds)
-      )
-      if (outcome._tag === "Posted") {
-        yield* Console.log(`    ✓ posted to Jira`)
-        return { clockifySeconds, jiraSeconds: proposal.jiraDelta, keepGoing: true }
-      }
-      if (outcome._tag === "NotLoggedIn") {
-        yield* Console.log(`    ✗ ${NOT_LOGGED_IN_HINT}`)
-        return { clockifySeconds, jiraSeconds: 0, keepGoing: false }
-      }
-      yield* Console.log(`    ✗ Jira: ${outcome.message}`)
-    }
-    return { clockifySeconds, jiraSeconds: 0, keepGoing: true }
+      : nothingOwed
+
+    if (proposal.jiraDelta <= 0) return { clockify, jira: nothingOwed }
+
+    const posted = yield* service.applyToJira(
+      proposal.ticketKey,
+      proposal.day,
+      proposal.jiraDelta,
+      description,
+      writeAnchor(proposal.spans, proposal.jiraSeconds)
+    )
+    const jira: SideOutcome = posted._tag === "Posted"
+      ? { _tag: "Written", seconds: proposal.jiraDelta }
+      : posted._tag === "NotLoggedIn"
+      ? { _tag: "NotLoggedIn" }
+      : { _tag: "Refused", message: posted.message }
+    return { clockify, jira }
   })

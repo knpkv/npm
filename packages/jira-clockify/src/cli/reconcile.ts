@@ -22,7 +22,7 @@ import {
   type SessionProposalReport
 } from "../services/ReconcileService.js"
 import { formatDuration, localDay, nextLocalMidnight } from "../utils/time.js"
-import { applyProposal, clip, entryDescription, proposalTargets } from "./agentWrite.js"
+import { applyProposal, clip, entryDescription, keepGoing, proposalTargets, writeOutcomeLines } from "./agentWrite.js"
 import { type CalendarRow, earliestStart, formatSpanBounds, formatSpanRanges, renderDayCalendar } from "./calendar.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
 
@@ -571,7 +571,8 @@ const runAgentMode = (options: {
       // it should never be a surprise found later in Clockify.
       yield* say(`    ${description}`)
       const written = yield* applyProposal(svc, proposal, description)
-      if (!written.keepGoing) return
+      yield* Effect.forEach(writeOutcomeLines(written), (line) => say(`    ${line}`))
+      if (!keepGoing(written)) return
     }
   })
 

@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect"
 import { Command } from "effect/unstable/cli"
 import { root } from "../src/cli/root.js"
 import { ConfigService, parseConfigPatch } from "../src/services/ConfigService.js"
-import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "./fakeHeadless.js"
+import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "../src/testing/fakeHeadless.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and
 // provides them there. Both provide diagnostics are about production wiring, where a Layer
