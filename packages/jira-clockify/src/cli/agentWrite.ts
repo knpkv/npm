@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect"
 import type { CreditedSpan, SessionProposal } from "../agent/sessions.js"
 import type { ReconcileServiceContract } from "../services/ReconcileService.js"
 import { formatDuration } from "../utils/time.js"
-import { NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
+import { NOT_LOGGED_IN_HINT } from "../utils/hints.js"
 
 /** Clip `text` to `width`, marking that something was dropped. */
 export const clip = (text: string, width: number): string =>
@@ -31,7 +31,7 @@ export const clip = (text: string, width: number): string =>
  * Collapsed to "to both" when the two gaps are equal, which is the usual case for time neither
  * side ever recorded — spelling the same number out twice reads like a mistake.
  */
-export const proposalTargets = (proposal: SessionProposal): string => {
+export const proposalTargets = (proposal: Pick<SessionProposal, "clockifyDelta" | "jiraDelta">): string => {
   if (proposal.clockifyDelta > 0 && proposal.clockifyDelta === proposal.jiraDelta) {
     return `+${formatDuration(proposal.clockifyDelta)} to both`
   }

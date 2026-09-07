@@ -1,0 +1,299 @@
+@import "@knpkv/rly/styles.css";
+
+/*
+ * The week is a table because it is one: Issue Keys down, days across, and a reader compares along
+ * both axes. Everything here is rly tokens — no colour, spacing, or type is invented locally.
+ */
+
+.jcf-shell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-16);
+  margin: 0 auto;
+  max-width: 1400px;
+  padding: var(--rly-space-24);
+}
+
+.jcf-bar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-12);
+}
+
+.jcf-bar h1 {
+  font-size: var(--rly-type-title-size, 1.25rem);
+  font-weight: 600;
+  margin: 0;
+}
+
+.jcf-bar-spacer {
+  flex: 1;
+}
+
+.jcf-totals {
+  color: var(--rly-color-text-2);
+  display: flex;
+  gap: var(--rly-space-16);
+  font-variant-numeric: tabular-nums;
+}
+
+.jcf-note {
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  color: var(--rly-color-text-2);
+  padding: var(--rly-space-12);
+}
+
+.jcf-note[data-tone="warning"] {
+  background: var(--rly-color-held-tint);
+  color: var(--rly-color-held-ink);
+}
+
+.jcf-note[data-tone="failure"] {
+  background: var(--rly-color-blocked-tint);
+  color: var(--rly-color-blocked-ink);
+}
+
+.jcf-note[data-tone="success"] {
+  background: var(--rly-color-success-tint);
+  color: var(--rly-color-success-ink);
+}
+
+.jcf-grid-scroll {
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  overflow-x: auto;
+}
+
+.jcf-grid {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+}
+
+.jcf-grid th,
+.jcf-grid td {
+  border-bottom: 1px solid var(--rly-color-border-1);
+  padding: var(--rly-space-8);
+  text-align: left;
+  vertical-align: top;
+}
+
+.jcf-grid thead th {
+  background: var(--rly-color-surface-2);
+  color: var(--rly-color-text-2);
+  font-weight: 600;
+  position: sticky;
+  top: 0;
+}
+
+.jcf-grid tbody th {
+  background: var(--rly-color-surface-1);
+  font-family: var(--rly-font-mono);
+  left: 0;
+  position: sticky;
+  white-space: nowrap;
+}
+
+.jcf-day-heading {
+  align-items: baseline;
+  display: flex;
+  gap: var(--rly-space-6);
+}
+
+.jcf-day-heading .jcf-date {
+  color: var(--rly-color-text-3);
+}
+
+.jcf-cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-4);
+  min-width: 7rem;
+}
+
+.jcf-allocated {
+  color: var(--rly-color-text-1);
+}
+
+.jcf-allocated[data-empty="true"] {
+  color: var(--rly-color-text-3);
+}
+
+.jcf-split {
+  color: var(--rly-color-text-2);
+  font-size: 0.85em;
+}
+
+.jcf-gap {
+  align-items: center;
+  background: var(--rly-color-surface-3);
+  border: 1px dashed var(--rly-color-border-2);
+  border-radius: var(--rly-radius-tag);
+  color: var(--rly-color-text-1);
+  cursor: pointer;
+  display: inline-flex;
+  gap: var(--rly-space-6);
+  padding: var(--rly-space-4) var(--rly-space-8);
+  text-align: left;
+}
+
+.jcf-gap:hover {
+  border-color: var(--rly-color-action-background);
+}
+
+.jcf-gap[data-selected="true"] {
+  border-color: var(--rly-color-action-background);
+  border-style: solid;
+}
+
+.jcf-gap:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
+}
+
+.jcf-signal {
+  border-radius: var(--rly-radius-tag);
+  color: var(--rly-color-text-2);
+  font-size: 0.8em;
+  padding: 0 var(--rly-space-4);
+}
+
+/* A branch or a path is something a person deliberately created; a model's reading is not. */
+.jcf-signal[data-signal="agent"] {
+  background: var(--rly-color-agent);
+  color: var(--rly-color-action-foreground);
+}
+
+.jcf-signal[data-signal="none"] {
+  background: var(--rly-color-held-tint);
+  color: var(--rly-color-held-ink);
+}
+
+.jcf-panel {
+  background: var(--rly-color-surface-2);
+  border: 1px solid var(--rly-color-action-background);
+  border-radius: var(--rly-radius-group);
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-12);
+  padding: var(--rly-space-16);
+}
+
+.jcf-panel h2 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0;
+}
+
+.jcf-panel dl {
+  display: grid;
+  gap: var(--rly-space-4) var(--rly-space-12);
+  grid-template-columns: max-content 1fr;
+  margin: 0;
+}
+
+.jcf-panel dt {
+  color: var(--rly-color-text-3);
+}
+
+.jcf-panel dd {
+  margin: 0;
+}
+
+.jcf-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-12);
+}
+
+.jcf-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-4);
+}
+
+.jcf-field span {
+  color: var(--rly-color-text-3);
+}
+
+.jcf-field input {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  padding: var(--rly-space-6) var(--rly-space-8);
+}
+
+.jcf-field input:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 1px;
+}
+
+.jcf-field-wide input {
+  min-width: 22rem;
+}
+
+.jcf-preview {
+  background: var(--rly-color-surface-1);
+  border-radius: var(--rly-radius-field);
+  font-family: var(--rly-font-mono);
+  padding: var(--rly-space-8);
+  word-break: break-word;
+}
+
+.jcf-actions {
+  display: flex;
+  gap: var(--rly-space-8);
+}
+
+.jcf-lanes {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-12);
+}
+
+.jcf-lane {
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  padding: var(--rly-space-12);
+}
+
+.jcf-lane h2 {
+  font-size: 1em;
+  font-weight: 600;
+  margin: 0 0 var(--rly-space-8);
+}
+
+.jcf-lane ul {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-8);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.jcf-lane li {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-8);
+}
+
+.jcf-cwd {
+  color: var(--rly-color-text-2);
+  font-family: var(--rly-font-mono);
+  font-size: 0.9em;
+}
+
+.jcf-spans {
+  color: var(--rly-color-text-2);
+  font-family: var(--rly-font-mono);
+  font-size: 0.9em;
+}
+
+.jcf-muted {
+  color: var(--rly-color-text-3);
+}

@@ -1,0 +1,73 @@
+# @knpkv/jcf-web
+
+A week of Jira and Clockify time in a browser, with the gaps a Coding Agent's sessions evidence
+offered for confirmation one row at a time.
+
+`jcf sync reconcile --agent claude` already derives those gaps and writes them from a terminal. This
+is the same engine — `@knpkv/jira-clockify`, the same services against the same config — behind a
+grid, because a gap only means something next to the time already logged around it, and a week is how
+a timesheet is actually read.
+
+## Running it
+
+```bash
+pnpm --filter @knpkv/jcf-web build   # the client is a static bundle the server serves
+pnpm --filter @knpkv/jcf-web start   # prints the URL that gets you in
+```
+
+The printed URL carries a one-time code in its fragment. Opening it exchanges the code for a session
+cookie and strips it from the address bar; reloading afterwards works because the cookie is what
+authenticates. The code expires a minute after the server binds, so restart to get a fresh one.
+
+For development, `pnpm --filter @knpkv/jcf-web dev` runs the server and Vite together and prints a
+URL on the dev origin, which proxies the API and the bootstrap exchange so the browser stays on one
+origin.
+
+`PORT` moves the server (3111 by default).
+
+## What the grid shows
+
+Rows are Issue Keys, columns are the seven local days of one ISO week — Monday to Sunday, fixed, so
+a week is the same week every time you open it.
+
+Each cell shows what Clockify and Jira already hold, and the two separately whenever they disagree:
+that disagreement is the original problem the tool exists for, so it is not reduced to one figure. A
+cell whose sessions account for more than either system holds also carries the gap, with the
+Attribution Signal that produced it — a branch name, a working directory, a Standing Attribution, or
+a Coding Agent's reading of the transcript.
+
+Three lanes sit under the grid, none of them decoration: hours a Coding Agent placed too weakly to
+offer, hours nothing placed at all, and days withheld because a Timer is still running. Each is time
+that exists and is not in the grid, so hiding it would make the grid a lie.
+
+## Filling a gap
+
+Clicking a gap opens a panel, not a modal — filling several in a row means comparing each against
+the grid it came from. The panel states the evidence, when the work happened, what each system
+already holds, and the exact text that will be written, before its confirm button does anything.
+
+Two things may be overruled, and both are said out loud in what gets written:
+
+- **The amount**, downward to any duration and upward only to the credited evidence. Above that the
+  write is refused with the ceiling named, because a tool that can invent hours is the one failure
+  every rule in the engine exists to prevent. Time no session evidences is logged as a manual entry
+  instead, which claims no evidence at all.
+- **The Issue Key.** An override is re-tallied against the bucket it moves to before anything is
+  written: the target may already hold time the row knew nothing about, and sizing the write from the
+  plan's own numbers would log that time twice.
+
+Unplaced hours name the directories their sessions ran in, and mapping one to an Issue Key writes a
+Standing Attribution into `~/.jcf/config.json`. Nothing is logged by that action — reload the week
+and those hours arrive as an ordinary proposal. A Standing Attribution loses to a branch or a path,
+so it can only ever add attribution, never redirect work that was already placed correctly.
+
+## Safety
+
+- Loopback only, one process, one operator. A read needs the session cookie; a write needs the
+  cookie, a matching origin, and the CSRF token this tab holds.
+- A confirmation names a row of a plan the server still holds and carries no evidence of its own, so
+  a browser cannot post its own spans or its own credited seconds.
+- Every write re-reads what Jira and Clockify hold at that moment and writes the difference, so
+  confirming the same row twice writes once — the same live-state subtraction that makes the CLI safe
+  to run out of curiosity. Nothing is remembered about what was declined.
+- Nothing is ever modified or deleted in either system. Reconciliation only adds.

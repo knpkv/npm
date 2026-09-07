@@ -31,3 +31,8 @@ Unplaced hours now name the directories behind them. `UnattributedDayCredit.cwds
 working directories of the sessions whose time no signal could place — the repair for unplaced hours
 is a Standing Attribution, and a Standing Attribution is a directory prefix, so "3h40m
 unattributed" on its own told a reader nothing they could act on.
+
+`ticketSummaryReader` joins `fetchTicketByKey`: it resolves the Jira services once and returns a
+function that answers with a title or null, so a consumer can name what `[PROJ-1]` was about without
+importing a Jira client. The `NOT_LOGGED_IN_HINT` moved to a leaf module for the same reason — the
+write path now runs in a browser bundle, where an HTTP client and a keychain have no business being.
