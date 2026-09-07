@@ -159,15 +159,34 @@ export const writeAnchor = (
  * What one side of a write did.
  *
  * `NothingOwed` is not a failure and not a write: the side already holds the proposal's time, which
- * is the ordinary outcome of topping up a day only one system missed. Keeping it distinct from a
- * `Written` of zero is what stops a summary counting it as work logged.
+ * is the ordinary outcome of topping up a day only one system missed. `Skipped` is a different
+ * statement again — the side was never asked. Keeping all three distinct from a `Written` of zero is
+ * what stops a summary counting any of them as work logged, and stops "you asked me not to" reading
+ * as "there was nothing to do".
  */
 export type SideOutcome =
   | { readonly _tag: "Written"; readonly seconds: number }
   | { readonly _tag: "NothingOwed" }
+  | { readonly _tag: "Skipped" }
   | { readonly _tag: "Refused"; readonly message: string }
   /** Jira only: the session expired, so every later Jira write would fail the same way. */
   | { readonly _tag: "NotLoggedIn" }
+
+/**
+ * Which systems a write may touch.
+ *
+ * Both by default, because a gap in one system is usually a gap in both and the point of the tool is
+ * that they agree. One side alone is a deliberate choice — someone whose team reads only Jira, or a
+ * day already tracked in Clockify by hand — so it is stated per write rather than configured once
+ * and forgotten.
+ */
+export interface WriteTargets {
+  readonly clockify: boolean
+  readonly jira: boolean
+}
+
+/** Both systems: what a write means unless someone says otherwise. */
+export const bothTargets: WriteTargets = { clockify: true, jira: true }
 
 /**
  * What one write attempt achieved, per side.
@@ -208,25 +227,40 @@ export const writeOutcomeLines = (outcome: WriteOutcome): ReadonlyArray<string> 
   const lines: Array<string> = []
   if (outcome.clockify._tag === "Written") lines.push("✓ created Clockify entry")
   if (outcome.clockify._tag === "Refused") lines.push(`✗ Clockify: ${outcome.clockify.message}`)
+  // Said out loud rather than left silent: a side nobody asked for looks exactly like a side that
+  // failed quietly, and the difference is the whole point of asking.
+  if (outcome.clockify._tag === "Skipped") lines.push("· Clockify not asked for")
   if (outcome.jira._tag === "Written") lines.push("✓ posted to Jira")
   if (outcome.jira._tag === "Refused") lines.push(`✗ Jira: ${outcome.jira.message}`)
+  if (outcome.jira._tag === "Skipped") lines.push("· Jira not asked for")
   if (outcome.jira._tag === "NotLoggedIn") lines.push(`✗ ${NOT_LOGGED_IN_HINT}`)
   return lines
 }
 
 const nothingOwed: SideOutcome = { _tag: "NothingOwed" }
+const skipped: SideOutcome = { _tag: "Skipped" }
 
-/** Write one confirmed proposal, sizing each side to its own gap. */
+/**
+ * Write one confirmed proposal, sizing each side to its own gap.
+ *
+ * `targets` narrows which systems are touched. A side left out is reported as `Skipped` and its gap
+ * is left exactly as it was — so asking for Jira alone today and both tomorrow writes the Clockify
+ * half tomorrow, rather than treating the skipped side as settled.
+ */
 export const applyProposal = (
   service: Pick<ReconcileServiceContract, "applyToClockify" | "applyToJira">,
   proposal: SessionProposal,
-  description: string
+  description: string,
+  targets: WriteTargets = bothTargets
 ): Effect.Effect<WriteOutcome, never, never> =>
   Effect.gen(function*() {
+    if (!targets.clockify && !targets.jira) return { clockify: skipped, jira: skipped }
     // Anchored to real activity rather than left to the service's local-noon fallback, which files a
     // 00:17 session as a lunchtime block — wrong on its face to anyone reading the timesheet later.
     // Per side, because the two can already hold different amounts and so start in different blocks.
-    const clockify: SideOutcome = proposal.clockifyDelta > 0
+    const clockify: SideOutcome = !targets.clockify
+      ? skipped
+      : proposal.clockifyDelta > 0
       ? yield* service
         .applyToClockify(
           proposal.ticketKey,
@@ -245,6 +279,7 @@ export const applyProposal = (
         )
       : nothingOwed
 
+    if (!targets.jira) return { clockify, jira: skipped }
     if (proposal.jiraDelta <= 0) return { clockify, jira: nothingOwed }
 
     const posted = yield* service.applyToJira(

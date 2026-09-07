@@ -28,6 +28,7 @@ const recorded = (
 ): ReconcileService.ReconcileRow => ({
   clockifyDescription: null,
   clockifySeconds: 0,
+  intervals: [],
   jiraSeconds: 0,
   ...overrides
 })
@@ -43,13 +44,14 @@ const report = (
   recorded: [],
   sessionCount: 1,
   sessionRootCount: 1,
+  sides: { clockify: true, jira: true },
   unattributed: [],
   withheld: [],
   ...overrides
 })
 
 const build = (overrides: Partial<ReconcileService.SessionProposalReport>) =>
-  buildWeekPlan({ createdAtMillis: 0, monday, planId: "plan-1", report: report(overrides) })
+  buildWeekPlan({ createdAtMillis: 0, monday, planId: "plan-1", report: report(overrides), scope: "both" })
 
 describe("weekDays", () => {
   it("names the seven local days from Monday", () => {
@@ -118,7 +120,8 @@ describe("buildWeekPlan", () => {
       createdAtMillis: 1,
       monday,
       planId: "plan-2",
-      report: report({ proposals: [proposal({ day: "2025-06-18", ticketKey: "PROJ-3" })] })
+      report: report({ proposals: [proposal({ day: "2025-06-18", ticketKey: "PROJ-3" })] }),
+      scope: "both"
     })
     expect(first.plan.rows[0]!.rowId).toBe(second.plan.rows[0]!.rowId)
   })
@@ -132,6 +135,25 @@ describe("buildWeekPlan", () => {
     expect(held.plan.rows).toEqual([])
     expect(held.plan.unattributed).toEqual([])
     expect(held.evidence.size).toBe(0)
+  })
+
+  it("carries the intervals behind the totals, which is what a calendar is drawn from", () => {
+    const held = build({
+      recorded: [
+        recorded({
+          clockifySeconds: 3600,
+          day: "2025-06-17",
+          intervals: [{ endMs: at(17, 11), source: "clockify", startMs: at(17, 10) }],
+          ticketKey: "PROJ-1"
+        })
+      ]
+    })
+    expect(held.plan.rows[0]!.intervals).toEqual([{ endMs: at(17, 11), source: "clockify", startMs: at(17, 10) }])
+  })
+
+  it("says which systems the week was read from", () => {
+    const held = buildWeekPlan({ createdAtMillis: 0, monday, planId: "p", report: report({}), scope: "jira" })
+    expect(held.plan.scope).toBe("jira")
   })
 
   it("carries the directories behind unplaced hours, which is what makes them actionable", () => {
@@ -178,5 +200,24 @@ describe("proposeWrite", () => {
   it("drops a side whose remaining gap is under a minute rather than writing a rounding artefact", () => {
     expect(proposeWrite({ credited: 3600, heldClockifySeconds: 3570, heldJiraSeconds: 0, requested: undefined }))
       .toEqual({ _tag: "Write", clockifyDelta: 0, jiraDelta: 3600 })
+  })
+
+  it("proposes nothing for a system that is out of scope", () => {
+    expect(proposeWrite({
+      ...held,
+      credited: 3600,
+      requested: undefined,
+      targets: { clockify: false, jira: true }
+    })).toEqual({ _tag: "Write", clockifyDelta: 0, jiraDelta: 3600 })
+  })
+
+  it("owes nothing when the only system in scope already holds the time", () => {
+    expect(proposeWrite({
+      credited: 3600,
+      heldClockifySeconds: 0,
+      heldJiraSeconds: 3600,
+      requested: undefined,
+      targets: { clockify: false, jira: true }
+    })).toEqual({ _tag: "NothingOwed" })
   })
 })

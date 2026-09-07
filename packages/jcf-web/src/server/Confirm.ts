@@ -20,7 +20,7 @@ import type { ReconcileService } from "@knpkv/jira-clockify"
 import { Effect } from "effect"
 import type { WriteResultResponse } from "./Api.js"
 import type { HeldPlan } from "./WeekPlan.js"
-import { MINIMUM_WRITE_SECONDS, proposeWrite } from "./WeekPlan.js"
+import { MINIMUM_WRITE_SECONDS, planSides, proposeWrite } from "./WeekPlan.js"
 
 /** The engine operations these functions need. Narrow, so a test provides only what it must. */
 export type WriteCapableService = Pick<
@@ -35,12 +35,15 @@ export type ConfirmOutcome =
   | { readonly _tag: "UnknownRow" }
   | { readonly _tag: "PastEvidence"; readonly maxSeconds: number }
   | { readonly _tag: "BelowMinimum"; readonly minimumSeconds: number }
+  | { readonly _tag: "NoTargets" }
 
 export interface ConfirmRequest {
   readonly rowId: string
   readonly seconds: number | undefined
   readonly ticketKey: string | undefined
   readonly note: string | undefined
+  /** Which systems to write. Absent means the ones the plan was read under. */
+  readonly targets: AgentWrite.WriteTargets | undefined
 }
 
 /** Local midnight of a `YYYY-MM-DD`, and the half-open day after it. */
@@ -49,12 +52,25 @@ const dayPeriod = (day: string) => {
   return { from, to: new Date(Time.nextLocalMidnight(from.getTime())) }
 }
 
-const nothingOwed = (description: string): WriteResultResponse => ({
-  clockify: { _tag: "NothingOwed" },
-  description,
-  jira: { _tag: "NothingOwed" },
-  lines: ["· both sides already hold this time — nothing written"]
-})
+/**
+ * Nothing was owed on the sides that were asked for.
+ *
+ * A side nobody asked about is `Skipped` rather than `NothingOwed`: its gap may well still be there,
+ * and saying "already holds this time" about a system that was never read would be a claim this run
+ * cannot make.
+ */
+const nothingOwed = (description: string, targets: AgentWrite.WriteTargets): WriteResultResponse => {
+  const asked = { _tag: "NothingOwed" } as const
+  const unasked = { _tag: "Skipped" } as const
+  const clockify = targets.clockify ? asked : unasked
+  const jira = targets.jira ? asked : unasked
+  return {
+    clockify,
+    description,
+    jira,
+    lines: ["· already logged where asked — nothing written", ...AgentWrite.writeOutcomeLines({ clockify, jira })]
+  }
+}
 
 /**
  * Write one confirmed row.
@@ -74,8 +90,14 @@ export const confirmProposal = (options: {
     if (evidence === undefined) return { _tag: "UnknownRow" } as const
     const proposal = evidence.proposal
     const ticketKey = options.request.ticketKey ?? proposal.ticketKey
+    // The plan's own scope by default: someone reading a Jira-only week and confirming a row means
+    // Jira, and a payload that says otherwise had to say so.
+    const targets = options.request.targets ?? planSides(options.plan)
+    if (!targets.clockify && !targets.jira) return { _tag: "NoTargets" } as const
 
-    const recorded = yield* options.service.compare(dayPeriod(proposal.day))
+    // Only the systems in play are re-read. A Clockify tally nobody is writing to is a request that
+    // can only fail a run that never needed it.
+    const recorded = yield* options.service.compare(dayPeriod(proposal.day), { sides: targets })
     const bucket = recorded.find((row) => row.ticketKey === ticketKey && row.day === proposal.day)
     const heldClockifySeconds = bucket?.clockifySeconds ?? 0
     const heldJiraSeconds = bucket?.jiraSeconds ?? 0
@@ -84,7 +106,8 @@ export const confirmProposal = (options: {
       credited: proposal.sessionSeconds,
       heldClockifySeconds,
       heldJiraSeconds,
-      requested: options.request.seconds
+      requested: options.request.seconds,
+      targets
     })
     if (write._tag === "PastEvidence") return { _tag: "PastEvidence", maxSeconds: write.maxSeconds } as const
     if (write._tag === "BelowMinimum") {
@@ -102,7 +125,9 @@ export const confirmProposal = (options: {
       provenance,
       summary: yield* options.summaryOf(ticketKey)
     })
-    if (write._tag === "NothingOwed") return { _tag: "NothingOwed", result: nothingOwed(description) } as const
+    if (write._tag === "NothingOwed") {
+      return { _tag: "NothingOwed", result: nothingOwed(description, targets) } as const
+    }
 
     const outcome = yield* AgentWrite.applyProposal(
       options.service,
@@ -114,7 +139,8 @@ export const confirmProposal = (options: {
         jiraSeconds: heldJiraSeconds,
         ticketKey
       },
-      description
+      description,
+      targets
     )
     return {
       _tag: "Written",
@@ -133,6 +159,7 @@ export interface ManualRequest {
   readonly seconds: number
   readonly startClock: string | undefined
   readonly note: string | undefined
+  readonly targets: AgentWrite.WriteTargets
 }
 
 /**
@@ -159,16 +186,22 @@ export const logManualEntry = (options: {
       ? undefined
       : new Date(`${request.day}T${request.startClock}:00`)
 
-    const clockify: AgentWrite.SideOutcome = yield* options.service
-      .applyToClockify(request.ticketKey, request.day, request.seconds, description, startedAt)
-      .pipe(
-        Effect.map((created): AgentWrite.SideOutcome =>
-          created
-            ? { _tag: "Written", seconds: request.seconds }
-            : { _tag: "Refused", message: "the entry was not created" }
-        ),
-        Effect.catch((error) => Effect.succeed<AgentWrite.SideOutcome>({ _tag: "Refused", message: error.message }))
-      )
+    const clockify: AgentWrite.SideOutcome = !request.targets.clockify
+      ? { _tag: "Skipped" }
+      : yield* options.service
+        .applyToClockify(request.ticketKey, request.day, request.seconds, description, startedAt)
+        .pipe(
+          Effect.map((created): AgentWrite.SideOutcome =>
+            created
+              ? { _tag: "Written", seconds: request.seconds }
+              : { _tag: "Refused", message: "the entry was not created" }
+          ),
+          Effect.catch((error) => Effect.succeed<AgentWrite.SideOutcome>({ _tag: "Refused", message: error.message }))
+        )
+    if (!request.targets.jira) {
+      const jira: AgentWrite.SideOutcome = { _tag: "Skipped" }
+      return { clockify, description, jira, lines: AgentWrite.writeOutcomeLines({ clockify, jira }) }
+    }
     const posted = yield* options.service.applyToJira(
       request.ticketKey,
       request.day,

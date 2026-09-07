@@ -15,7 +15,7 @@
  */
 import { Button } from "@knpkv/rly"
 import { useState } from "react"
-import type { UnattributedDayResponse, WeekRowResponse } from "../server/Api.js"
+import type { UnattributedDayResponse, WeekRowResponse, WriteTargetsRequest } from "../server/Api.js"
 import { duration, formatDuration, parseDuration, proposalTargets, signalMeaning, spanRange } from "./format.js"
 
 /** A labelled text input. rly owns the look through tokens; the label stays a real `<label>`. */
@@ -40,7 +40,39 @@ export interface ConfirmSubmission {
   readonly seconds: number | undefined
   readonly ticketKey: string | undefined
   readonly note: string | undefined
+  readonly targets: WriteTargetsRequest
 }
+
+/**
+ * Which systems this write touches, defaulted to the week's own scope.
+ *
+ * Per write rather than only per week: most days both systems want the same hours, and the day they
+ * do not is a deliberate choice someone should be able to make without re-reading the week.
+ */
+const TargetPicker = (props: {
+  readonly targets: WriteTargetsRequest
+  readonly onChange: (targets: WriteTargetsRequest) => void
+}) => (
+  <fieldset className="jcf-targets">
+    <legend>Write to</legend>
+    <label>
+      <input
+        checked={props.targets.clockify}
+        onChange={(event) => props.onChange({ ...props.targets, clockify: event.target.checked })}
+        type="checkbox"
+      />
+      <span>Clockify</span>
+    </label>
+    <label>
+      <input
+        checked={props.targets.jira}
+        onChange={(event) => props.onChange({ ...props.targets, jira: event.target.checked })}
+        type="checkbox"
+      />
+      <span>Jira</span>
+    </label>
+  </fieldset>
+)
 
 /**
  * Accept one proposed row.
@@ -51,6 +83,7 @@ export interface ConfirmSubmission {
 export const ConfirmPanel = (props: {
   readonly row: WeekRowResponse
   readonly busy: boolean
+  readonly scopeTargets: WriteTargetsRequest
   readonly onConfirm: (submission: ConfirmSubmission) => void
   readonly onCancel: () => void
 }) => {
@@ -58,6 +91,7 @@ export const ConfirmPanel = (props: {
   const [amount, setAmount] = useState(proposal === undefined ? "" : formatDuration(proposal.maxSeconds))
   const [ticketKey, setTicketKey] = useState(props.row.ticketKey)
   const [note, setNote] = useState("")
+  const [targets, setTargets] = useState(props.scopeTargets)
   if (proposal === undefined) return null
 
   const requested = parseDuration(amount.trim())
@@ -70,6 +104,7 @@ export const ConfirmPanel = (props: {
   const retargeted = ticketKey !== props.row.ticketKey
   const adjusted = requested !== null && requested !== proposal.maxSeconds
   const ticketProblem = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ticketKey) ? null : "That is not an Issue Key."
+  const noTargets = !targets.clockify && !targets.jira
 
   return (
     <section aria-label={`Confirm ${props.row.ticketKey} on ${props.row.day}`} className="jcf-panel">
@@ -103,10 +138,11 @@ export const ConfirmPanel = (props: {
         <TextField
           label="What was done (optional)"
           onChange={setNote}
-          placeholder="goes into both systems"
+          placeholder="goes with the entry"
           value={note}
           wide
         />
+        <TargetPicker onChange={setTargets} targets={targets} />
       </div>
       {amountProblem === null ? null : (
         <p className="jcf-note" data-tone="failure">
@@ -128,14 +164,20 @@ export const ConfirmPanel = (props: {
           {retargeted ? " The write is re-checked against what the new ticket already holds." : ""}
         </p>
       ) : null}
+      {noTargets ? (
+        <p className="jcf-note" data-tone="failure">
+          Pick at least one system — a write to neither is not a write.
+        </p>
+      ) : null}
       <div className="jcf-actions">
         <Button
-          disabled={props.busy || amountProblem !== null || ticketProblem !== null}
+          disabled={props.busy || amountProblem !== null || ticketProblem !== null || noTargets}
           loading={props.busy}
           onClick={() =>
             props.onConfirm({
               note: note.trim() === "" ? undefined : note.trim(),
               seconds: requested === proposal.maxSeconds ? undefined : (requested ?? undefined),
+              targets,
               ticketKey: retargeted ? ticketKey : undefined
             })
           }
@@ -156,6 +198,7 @@ export interface ManualSubmission {
   readonly seconds: number
   readonly startClock: string | undefined
   readonly note: string | undefined
+  readonly targets: WriteTargetsRequest
 }
 
 /**
@@ -168,13 +211,16 @@ export interface ManualSubmission {
 export const ManualPanel = (props: {
   readonly day: string
   readonly busy: boolean
+  readonly startClock: string
+  readonly scopeTargets: WriteTargetsRequest
   readonly onLog: (submission: ManualSubmission) => void
   readonly onCancel: () => void
 }) => {
   const [ticketKey, setTicketKey] = useState("")
   const [amount, setAmount] = useState("")
-  const [startClock, setStartClock] = useState("")
+  const [startClock, setStartClock] = useState(props.startClock)
   const [note, setNote] = useState("")
+  const [targets, setTargets] = useState(props.scopeTargets)
 
   const seconds = parseDuration(amount.trim())
   const ticketOk = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ticketKey)
@@ -192,6 +238,7 @@ export const ManualPanel = (props: {
         <TextField label="Amount" onChange={setAmount} placeholder="45m" value={amount} />
         <TextField label="Started (optional)" onChange={setStartClock} placeholder="14:30" value={startClock} />
         <TextField label="What was done (optional)" onChange={setNote} value={note} wide />
+        <TargetPicker onChange={setTargets} targets={targets} />
       </div>
       {clockOk ? null : (
         <p className="jcf-note" data-tone="failure">
@@ -200,7 +247,7 @@ export const ManualPanel = (props: {
       )}
       <div className="jcf-actions">
         <Button
-          disabled={props.busy || seconds === null || !ticketOk || !clockOk}
+          disabled={props.busy || seconds === null || !ticketOk || !clockOk || (!targets.clockify && !targets.jira)}
           loading={props.busy}
           onClick={() => {
             if (seconds === null) return
@@ -208,6 +255,7 @@ export const ManualPanel = (props: {
               note: note.trim() === "" ? undefined : note.trim(),
               seconds,
               startClock: startClock.trim() === "" ? undefined : startClock.trim(),
+              targets,
               ticketKey
             })
           }}

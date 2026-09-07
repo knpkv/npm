@@ -13,7 +13,14 @@
  * @module
  */
 import type { Schema } from "effect"
-import type { ManualPayload, StandingResult, WeekPlanResponse, WriteResultResponse } from "../server/Api.js"
+import type {
+  ManualPayload,
+  StandingResult,
+  WeekPlanResponse,
+  WeekScopeName,
+  WriteResultResponse,
+  WriteTargetsRequest
+} from "../server/Api.js"
 
 const csrfStorageKey = "jcf_web_csrf"
 
@@ -114,8 +121,14 @@ const post = async <A>(path: string, payload: unknown): Promise<A> => {
   return response.json() as Promise<A>
 }
 
-export const readWeek = (monday: string | undefined): Promise<WeekPlanResponse> =>
-  get(monday === undefined ? "/api/week" : `/api/week?monday=${encodeURIComponent(monday)}`)
+export const readWeek = (monday: string | undefined, scope: WeekScopeName): Promise<WeekPlanResponse> => {
+  const query = new URLSearchParams()
+  if (monday !== undefined) query.set("monday", monday)
+  // Sent only when it narrows: a both-systems week is the server's own default.
+  if (scope !== "both") query.set("only", scope)
+  const search = query.toString()
+  return get(search === "" ? "/api/week" : `/api/week?${search}`)
+}
 
 export interface ConfirmRequest {
   readonly planId: string
@@ -123,6 +136,7 @@ export interface ConfirmRequest {
   readonly seconds?: number
   readonly ticketKey?: string
   readonly note?: string
+  readonly targets?: WriteTargetsRequest
 }
 
 export const confirmRow = (request: ConfirmRequest): Promise<WriteResultResponse> => post("/api/rows/confirm", request)

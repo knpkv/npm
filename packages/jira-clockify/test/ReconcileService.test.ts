@@ -58,8 +58,40 @@ describe("buildReconcileRows", () => {
       [{ ticketKey: "PROJ-2", day: "2026-06-24", seconds: 1800 }]
     )
     expect(rows).toEqual([
-      { ticketKey: "PROJ-1", day: "2026-06-23", clockifySeconds: 3600, jiraSeconds: 0, clockifyDescription: null },
-      { ticketKey: "PROJ-2", day: "2026-06-24", clockifySeconds: 0, jiraSeconds: 1800, clockifyDescription: null }
+      {
+        ticketKey: "PROJ-1",
+        day: "2026-06-23",
+        clockifySeconds: 3600,
+        jiraSeconds: 0,
+        clockifyDescription: null,
+        intervals: []
+      },
+      {
+        ticketKey: "PROJ-2",
+        day: "2026-06-24",
+        clockifySeconds: 0,
+        jiraSeconds: 1800,
+        clockifyDescription: null,
+        intervals: []
+      }
+    ])
+  })
+
+  // The intervals behind the totals, which is what lets a week be drawn as a calendar rather than a
+  // table of day sums. An entry with no usable interval contributes none rather than a fabricated one.
+  it("carries each side's intervals, ascending and labelled with their source", () => {
+    const rows = buildReconcileRows(
+      [
+        { ticketKey: "PROJ-1", day: "2026-06-23", seconds: 1800, endMs: 400, startMs: 300 },
+        { ticketKey: "PROJ-1", day: "2026-06-23", seconds: 1800, endMs: 200, startMs: 100 },
+        { ticketKey: "PROJ-1", day: "2026-06-23", seconds: 0 }
+      ],
+      [{ ticketKey: "PROJ-1", day: "2026-06-23", seconds: 3600, endMs: 600, startMs: 500 }]
+    )
+    expect(rows[0]!.intervals).toEqual([
+      { endMs: 200, source: "clockify", startMs: 100 },
+      { endMs: 400, source: "clockify", startMs: 300 },
+      { endMs: 600, source: "jira", startMs: 500 }
     ])
   })
 
@@ -136,7 +168,8 @@ describe("deltaToApply", () => {
     day: "2026-06-23",
     clockifySeconds,
     jiraSeconds,
-    clockifyDescription: null
+    clockifyDescription: null,
+    intervals: []
   })
 
   it("returns the gap the target is short in the chosen direction", () => {

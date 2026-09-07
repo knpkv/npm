@@ -11,7 +11,7 @@ import { Clock, Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
 import { confirmProposal, logManualEntry } from "./Confirm.js"
-import { buildWeekPlan } from "./WeekPlan.js"
+import { buildWeekPlan, sidesOfScope } from "./WeekPlan.js"
 import { WeekPlans } from "./WeekPlans.js"
 
 const failed = (message: string) => new ApiError({ message })
@@ -25,14 +25,16 @@ export const WeekLive = HttpApiBuilder.group(JcfWebApi, "week", (handlers) =>
       Effect.gen(function*() {
         const anchor = query.monday === undefined ? new Date() : new Date(`${query.monday}T00:00:00`)
         const period = Time.isoWeekPeriod(anchor)
-        const report = yield* reconcile.proposeFromSessions(period).pipe(
+        const scope = query.only ?? "both"
+        const report = yield* reconcile.proposeFromSessions(period, { sides: sidesOfScope(scope) }).pipe(
           Effect.mapError((error) => failed(error.message))
         )
         const held = buildWeekPlan({
           createdAtMillis: yield* Clock.currentTimeMillis,
           monday: period.from,
           planId: yield* plans.nextPlanId,
-          report
+          report,
+          scope
         })
         yield* plans.keep(held)
         return held.plan
@@ -58,6 +60,7 @@ export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
               note: payload.note,
               rowId: payload.rowId,
               seconds: payload.seconds,
+              targets: payload.targets,
               ticketKey: payload.ticketKey
             },
             service: reconcile,
@@ -78,19 +81,33 @@ export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
               message: `Jira floors worklogs to the minute, so ${outcome.minimumSeconds}s is the smallest write.`
             })
           }
+          if (outcome._tag === "NoTargets") {
+            return yield* new ProposalRejectedError({
+              message: "Pick at least one of Clockify or Jira — a write to neither is not a write."
+            })
+          }
           return outcome.result
         }))
       .handle("manual", ({ payload }) =>
-        logManualEntry({
-          request: {
-            day: payload.day,
-            note: payload.note,
-            seconds: payload.seconds,
-            startClock: payload.startClock,
-            ticketKey: payload.ticketKey
-          },
-          service: reconcile,
-          summaryOf: ticketSummary
+        Effect.gen(function*() {
+          const targets = payload.targets ?? { clockify: true, jira: true }
+          if (!targets.clockify && !targets.jira) {
+            return yield* new ProposalRejectedError({
+              message: "Pick at least one of Clockify or Jira — a write to neither is not a write."
+            })
+          }
+          return yield* logManualEntry({
+            request: {
+              day: payload.day,
+              note: payload.note,
+              seconds: payload.seconds,
+              startClock: payload.startClock,
+              targets,
+              ticketKey: payload.ticketKey
+            },
+            service: reconcile,
+            summaryOf: ticketSummary
+          })
         }))
   }))
 

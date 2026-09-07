@@ -1,8 +1,10 @@
 @import "@knpkv/rly/styles.css";
 
 /*
- * The week is a table because it is one: Issue Keys down, days across, and a reader compares along
- * both axes. Everything here is rly tokens — no colour, spacing, or type is invented locally.
+ * The week is a calendar: hours down, days across, and every block at the time it happened. Which is
+ * how a timesheet is actually read, and the only layout in which a gap has a shape.
+ *
+ * Everything here is rly tokens — no colour, spacing, or type is invented locally.
  */
 
 .jcf-shell {
@@ -61,115 +63,181 @@
   color: var(--rly-color-success-ink);
 }
 
-.jcf-grid-scroll {
+/*
+ * The calendar. One CSS variable holds the height of an hour, set from the component so the pixels
+ * a click is measured in and the pixels a block is drawn in cannot drift apart.
+ */
+
+.jcf-calendar {
   border: 1px solid var(--rly-color-border-1);
   border-radius: var(--rly-radius-group);
-  overflow-x: auto;
+  overflow: hidden;
 }
 
-.jcf-grid {
-  border-collapse: collapse;
-  font-variant-numeric: tabular-nums;
-  width: 100%;
+.jcf-calendar-head,
+.jcf-calendar-body {
+  display: grid;
+  grid-template-columns: 4rem repeat(var(--jcf-columns, 5), minmax(8rem, 1fr));
 }
 
-.jcf-grid th,
-.jcf-grid td {
-  border-bottom: 1px solid var(--rly-color-border-1);
-  padding: var(--rly-space-8);
-  text-align: left;
-  vertical-align: top;
-}
-
-.jcf-grid thead th {
+.jcf-calendar-head {
   background: var(--rly-color-surface-2);
-  color: var(--rly-color-text-2);
-  font-weight: 600;
+  border-bottom: 1px solid var(--rly-color-border-1);
   position: sticky;
   top: 0;
+  z-index: 2;
 }
 
-.jcf-grid tbody th {
-  background: var(--rly-color-surface-1);
-  font-family: var(--rly-font-mono);
-  left: 0;
-  position: sticky;
-  white-space: nowrap;
-}
-
-.jcf-day-heading {
+.jcf-column-head {
   align-items: baseline;
+  border-left: 1px solid var(--rly-color-border-1);
   display: flex;
   gap: var(--rly-space-6);
+  padding: var(--rly-space-8);
 }
 
-.jcf-day-heading .jcf-date {
+.jcf-column-head[data-today="true"] {
+  color: var(--rly-color-action-background);
+  font-weight: 600;
+}
+
+.jcf-column-head .jcf-date {
   color: var(--rly-color-text-3);
 }
 
-.jcf-cell {
+.jcf-gutter {
   display: flex;
   flex-direction: column;
-  gap: var(--rly-space-4);
-  min-width: 7rem;
 }
 
-.jcf-allocated {
-  color: var(--rly-color-text-1);
-}
-
-.jcf-allocated[data-empty="true"] {
+.jcf-hour-label {
   color: var(--rly-color-text-3);
+  font-size: 0.8em;
+  font-variant-numeric: tabular-nums;
+  height: var(--jcf-hour);
+  padding-right: var(--rly-space-6);
+  text-align: right;
+  /* Sits on its own hour line rather than in the middle of the row below it. */
+  transform: translateY(-0.6em);
 }
 
-.jcf-split {
-  color: var(--rly-color-text-2);
-  font-size: 0.85em;
+.jcf-column {
+  border-left: 1px solid var(--rly-color-border-1);
+  cursor: copy;
+  position: relative;
 }
 
-.jcf-gap {
-  align-items: center;
-  background: var(--rly-color-surface-3);
-  border: 1px dashed var(--rly-color-border-2);
+.jcf-hour-line {
+  border-top: 1px solid var(--rly-color-border-1);
+  display: block;
+  height: var(--jcf-hour);
+}
+
+.jcf-hour-line:first-child {
+  border-top-color: transparent;
+}
+
+.jcf-now {
+  background: var(--rly-color-action-background);
+  height: 2px;
+  left: 0;
+  position: absolute;
+  right: 0;
+  z-index: 1;
+}
+
+.jcf-block {
   border-radius: var(--rly-radius-tag);
-  color: var(--rly-color-text-1);
-  cursor: pointer;
-  display: inline-flex;
-  gap: var(--rly-space-6);
-  padding: var(--rly-space-4) var(--rly-space-8);
+  display: flex;
+  flex-direction: column;
+  font-size: 0.8em;
+  gap: 1px;
+  line-height: 1.25;
+  overflow: hidden;
+  padding: 2px var(--rly-space-4);
+  position: absolute;
   text-align: left;
 }
 
-.jcf-gap:hover {
-  border-color: var(--rly-color-action-background);
+/* Logged time: solid, because it is a fact both systems can be asked about. */
+.jcf-block-logged {
+  background: var(--rly-color-service-clockify);
+  color: var(--rly-color-action-foreground);
 }
 
-.jcf-gap[data-selected="true"] {
+.jcf-block-logged[data-source="jira"] {
+  background: var(--rly-color-service-jira);
+}
+
+.jcf-block-logged[data-behind="true"] {
+  /* The two systems disagreeing is the original problem, so the block says so on its face. */
+  outline: 2px dashed var(--rly-color-held-ink);
+  outline-offset: -2px;
+}
+
+/* Proposable time: dashed, because nothing has recorded it yet. */
+.jcf-block-gap {
+  background: var(--rly-color-surface-3);
+  border: 1px dashed var(--rly-color-border-2);
+  color: var(--rly-color-text-1);
+  cursor: pointer;
+}
+
+.jcf-block-gap:hover,
+.jcf-block-gap[data-selected="true"] {
   border-color: var(--rly-color-action-background);
   border-style: solid;
 }
 
-.jcf-gap:focus-visible {
+.jcf-block-gap:focus-visible {
   outline: 2px solid var(--rly-color-focus);
-  outline-offset: 2px;
+  outline-offset: 1px;
 }
 
-.jcf-signal {
-  border-radius: var(--rly-radius-tag);
-  color: var(--rly-color-text-2);
-  font-size: 0.8em;
+.jcf-block-key {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.jcf-block-clock {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.jcf-block-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jcf-block-flag {
+  font-size: 0.9em;
+  font-weight: 600;
+  text-transform: lowercase;
+}
+
+.jcf-scope {
+  display: flex;
+  gap: var(--rly-space-4);
+}
+
+.jcf-targets {
+  align-items: center;
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  display: flex;
+  gap: var(--rly-space-12);
+  padding: 0 var(--rly-space-8) var(--rly-space-6);
+}
+
+.jcf-targets legend {
+  color: var(--rly-color-text-3);
   padding: 0 var(--rly-space-4);
 }
 
-/* A branch or a path is something a person deliberately created; a model's reading is not. */
-.jcf-signal[data-signal="agent"] {
-  background: var(--rly-color-agent);
-  color: var(--rly-color-action-foreground);
-}
-
-.jcf-signal[data-signal="none"] {
-  background: var(--rly-color-held-tint);
-  color: var(--rly-color-held-ink);
+.jcf-targets label {
+  align-items: center;
+  display: flex;
+  gap: var(--rly-space-4);
 }
 
 .jcf-panel {

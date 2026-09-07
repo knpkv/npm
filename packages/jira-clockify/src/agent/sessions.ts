@@ -760,6 +760,21 @@ export interface SessionProposal {
  * state is also the whole of the idempotency story: nothing is persisted, so running twice
  * cannot double-log and a manually deleted entry is correctly re-proposed.
  */
+/**
+ * Which systems a reconciliation is about.
+ *
+ * A side that is out is not read, not proposed for, and not written to. That is stronger than
+ * skipping its write: a side nobody read holds an unknown amount, and treating unknown as zero would
+ * propose the whole day for it — which is precisely the double-log this arithmetic exists to prevent.
+ */
+export interface ReconcileSides {
+  readonly clockify: boolean
+  readonly jira: boolean
+}
+
+/** Both systems: what reconciliation means unless someone says otherwise. */
+export const bothSides: ReconcileSides = { clockify: true, jira: true }
+
 export const buildSessionProposals = (
   credits: ReadonlyArray<TicketDayCredit>,
   recorded: ReadonlyArray<RecordedBucket>,
@@ -768,8 +783,11 @@ export const buildSessionProposals = (
     readonly minimumSeconds: number
     /** Days withheld from proposals entirely — e.g. a day with a Timer still running. */
     readonly excludedDays: ReadonlyArray<string>
+    /** Which systems this run is about. Both by default. */
+    readonly sides?: ReconcileSides | undefined
   }
 ): ReadonlyArray<SessionProposal> => {
+  const sides = options.sides ?? bothSides
   const excluded = new Set(options.excludedDays)
   const recordedByBucket = new Map(recorded.map((r) => [`${r.ticketKey}\u0000${r.day}`, r]))
 
@@ -794,8 +812,10 @@ export const buildSessionProposals = (
         activeSeconds: credit.activeSeconds,
         clockifySeconds,
         jiraSeconds,
-        clockifyDelta: gap(credit.seconds, clockifySeconds),
-        jiraDelta: gap(credit.seconds, jiraSeconds),
+        // Zero for a side that is out of scope, never the whole day: its tally was not read, so the
+        // only defensible statement about its gap is that this run makes none.
+        clockifyDelta: sides.clockify ? gap(credit.seconds, clockifySeconds) : 0,
+        jiraDelta: sides.jira ? gap(credit.seconds, jiraSeconds) : 0,
         sessionIds: credit.sessionIds
       }
     })

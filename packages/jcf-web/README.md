@@ -25,26 +25,50 @@ origin.
 
 `PORT` moves the server (3111 by default).
 
-## What the grid shows
+## What the calendar shows
 
-Rows are Issue Keys, columns are the seven local days of one ISO week — Monday to Sunday, fixed, so
-a week is the same week every time you open it.
+Hours down, days across, and every block at the time it actually happened — one ISO week, Monday
+first, so a week is the same week every time you open it. Saturday and Sunday appear only when they
+hold something. The visible hours are a working day, widened to cover anything outside it, because a
+23:40 session is exactly what someone opens this to find.
 
-Each cell shows what Clockify and Jira already hold, and the two separately whenever they disagree:
-that disagreement is the original problem the tool exists for, so it is not reduced to one figure. A
-cell whose sessions account for more than either system holds also carries the gap, with the
-Attribution Signal that produced it — a branch name, a working directory, a Standing Attribution, or
-a Coding Agent's reading of the transcript.
+Two kinds of block, in one visual language:
 
-Three lanes sit under the grid, none of them decoration: hours a Coding Agent placed too weakly to
-offer, hours nothing placed at all, and days withheld because a Timer is still running. Each is time
-that exists and is not in the grid, so hiding it would make the grid a lie.
+- **Logged**, solid, from the intervals the systems reported — a Clockify entry knows when it ran, a
+  Jira worklog states a duration from a start. One block per entry, outlined when the other system
+  holds less for the same ticket and day: that disagreement is the original problem the tool exists
+  for, so it is marked rather than averaged away. Time only Jira holds is its own block, because that
+  direction is a discrepancy too.
+- **Proposable**, dashed, from the credited spans of the sessions behind it, with the Attribution
+  Signal that placed it — a branch name, a working directory, a Standing Attribution, or a Coding
+  Agent's reading of the transcript.
+
+Three lanes sit under the calendar, none of them decoration: hours a Coding Agent placed too weakly
+to offer, hours nothing placed at all, and days withheld because a Timer is still running. Each is
+time that exists and cannot be drawn at a time, so hiding it would make the calendar a lie.
+
+## One system or both
+
+The header picks what the week is about: both, Jira only, or Clockify only. The choice is remembered
+per browser, because someone who tracks in one system does so every week.
+
+A system that is out is not read, not proposed for, and not written to. That is stronger than
+skipping its write, and it matters: a side nobody read holds an unknown amount, and treating unknown
+as zero would propose the whole day for it. In a Jira-only week no Clockify request is made at all,
+so a Clockify workspace you do not use cannot fail a run that never needed it.
+
+Each write can still overrule the week: the confirmation panel carries the two systems as
+checkboxes, defaulted to the week's own scope. A side you did not ask for is reported as skipped and
+its gap is left exactly as it was, so asking for Jira today and both tomorrow writes the Clockify
+half tomorrow.
 
 ## Filling a gap
 
-Clicking a gap opens a panel, not a modal — filling several in a row means comparing each against
-the grid it came from. The panel states the evidence, when the work happened, what each system
-already holds, and the exact text that will be written, before its confirm button does anything.
+Clicking a dashed block opens a panel, not a modal — filling several in a row means comparing each
+against the calendar it came from. The panel states the evidence, when the work happened, what each
+system already holds, and the exact text that will be written, before its confirm button does
+anything. Clicking empty space offers a manual entry at the time clicked, which is the gesture a
+calendar teaches.
 
 Two things may be overruled, and both are said out loud in what gets written:
 

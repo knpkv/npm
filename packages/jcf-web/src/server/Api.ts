@@ -93,6 +93,28 @@ export const Span = Schema.Struct({
 export const AttributionSignal = Schema.Literals(["branch", "path", "standing", "agent", "none"])
 
 /**
+ * Which systems a week is about.
+ *
+ * One name rather than two booleans in the query string, because "neither" is not a week anyone
+ * asked for. A side that is out is not read, not proposed for, and not written to — so a week with
+ * `only=jira` never touches Clockify at all.
+ */
+export const WeekScope = Schema.Literals(["both", "clockify", "jira"])
+
+/** Which systems a single write may touch. Defaults to the scope the week was read under. */
+export const WriteTargets = Schema.Struct({
+  clockify: Schema.Boolean,
+  jira: Schema.Boolean
+})
+
+/** When recorded time happened, and which system says so. */
+export const RecordedInterval = Schema.Struct({
+  endMs: Schema.Number,
+  source: Schema.Literals(["clockify", "jira"]),
+  startMs: Schema.Number
+})
+
+/**
  * What a row's sessions say, and what accepting it would write.
  *
  * `maxSeconds` is the credited evidence: the ceiling on an edited amount. Editing below it is a
@@ -121,6 +143,11 @@ export const WeekRow = Schema.Struct({
   clockifyDescription: Schema.NullOr(Schema.String),
   clockifySeconds: Schema.Number,
   day: Day,
+  /**
+   * When the recorded time happened — the entries behind the totals, so a week can be drawn as a
+   * calendar. Empty when the systems reported no usable interval, never fabricated from the total.
+   */
+  intervals: Schema.Array(RecordedInterval),
   jiraSeconds: Schema.Number,
   proposal: Schema.optional(RowProposal),
   rowId: Schema.String,
@@ -163,6 +190,8 @@ export const WeekPlan = Schema.Struct({
   planId: Schema.String,
   rows: Schema.Array(WeekRow),
   sessionCount: Schema.Number,
+  /** Which systems this week was read from. A side that is out reports zero because nobody asked. */
+  scope: WeekScope,
   /** Zero means nothing is opted in, which is the usual reason for an empty week. */
   sessionRootCount: Schema.Number,
   unattributed: Schema.Array(UnattributedDay),
@@ -173,6 +202,7 @@ export const WeekPlan = Schema.Struct({
 export const SideOutcome = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("Written"), seconds: Schema.Number }),
   Schema.Struct({ _tag: Schema.Literal("NothingOwed") }),
+  Schema.Struct({ _tag: Schema.Literal("Skipped") }),
   Schema.Struct({ _tag: Schema.Literal("Refused"), message: Schema.String }),
   Schema.Struct({ _tag: Schema.Literal("NotLoggedIn") })
 ])
@@ -202,6 +232,8 @@ export const ConfirmPayload = Schema.Struct({
   note: Schema.optional(Note),
   planId: Schema.String,
   rowId: Schema.String,
+  /** Absent means the systems the week was read under. Neither is a usage error, not a write. */
+  targets: Schema.optional(WriteTargets),
   /** Absent means "as proposed". Present must not exceed the row's `maxSeconds`. */
   seconds: Schema.optional(WorkSeconds),
   /** Absent means the Issue Key the evidence placed it on. */
@@ -219,6 +251,7 @@ export const ManualPayload = Schema.Struct({
   day: Day,
   note: Schema.optional(Note),
   seconds: WorkSeconds,
+  targets: Schema.optional(WriteTargets),
   /** Local `HH:MM` the work began. Absent lets the engine place it at local noon. */
   startClock: Schema.optional(Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{2}:\d{2}$/)))),
   ticketKey: TicketKey
@@ -238,7 +271,7 @@ export class WeekGroup extends HttpApiGroup.make("week")
   .add(
     HttpApiEndpoint.get("read", "/", {
       error: ApiError,
-      query: Schema.Struct({ monday: Schema.optional(Day) }),
+      query: Schema.Struct({ monday: Schema.optional(Day), only: Schema.optional(WeekScope) }),
       success: WeekPlan
     })
   )
@@ -286,3 +319,6 @@ export type WeekRowResponse = Schema.Schema.Type<typeof WeekRow>
 export type RowProposalResponse = Schema.Schema.Type<typeof RowProposal>
 export type UnattributedDayResponse = Schema.Schema.Type<typeof UnattributedDay>
 export type WriteResultResponse = Schema.Schema.Type<typeof WriteResult>
+export type WeekScopeName = Schema.Schema.Type<typeof WeekScope>
+export type WriteTargetsRequest = Schema.Schema.Type<typeof WriteTargets>
+export type RecordedIntervalResponse = Schema.Schema.Type<typeof RecordedInterval>

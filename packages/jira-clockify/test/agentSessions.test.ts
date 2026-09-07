@@ -655,6 +655,26 @@ describe("buildSessionProposals", () => {
     })
     expect(proposals).toEqual([])
   })
+
+  // Someone who tracks in one system only. The side that is out was never read, so the only
+  // defensible statement about its gap is none at all — certainly not the whole day.
+  it("proposes nothing for a side that is out of scope", () => {
+    const proposals = buildSessionProposals(credit(3600), [], {
+      excludedDays: [],
+      minimumSeconds: 60,
+      sides: { clockify: false, jira: true }
+    })
+    expect(proposals[0]).toMatchObject({ clockifyDelta: 0, jiraDelta: 3600 })
+  })
+
+  it("drops a row whose only short side is out of scope", () => {
+    const proposals = buildSessionProposals(
+      credit(3600),
+      [{ ticketKey: "PROJ-1", day: "2026-07-01", clockifySeconds: 0, jiraSeconds: 3600 }],
+      { excludedDays: [], minimumSeconds: 60, sides: { clockify: false, jira: true } }
+    )
+    expect(proposals).toEqual([])
+  })
 })
 
 describe("buildSessionDigest", () => {

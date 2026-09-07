@@ -15,7 +15,7 @@
  */
 import { Button, ThemeProvider } from "@knpkv/rly"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import type { WeekPlanResponse, WeekRowResponse, WriteResultResponse } from "../server/Api.js"
+import type { WeekPlanResponse, WeekScopeName, WriteResultResponse, WriteTargetsRequest } from "../server/Api.js"
 import {
   bootstrapSession,
   confirmRow,
@@ -25,45 +25,53 @@ import {
   RequestFailure
 } from "./api.js"
 import { readWeek } from "./api.js"
-import { dayHeading, duration, shiftWeek, weekLabel } from "./format.js"
+import { duration, shiftWeek, weekLabel } from "./format.js"
 import { ConfirmPanel, ManualPanel, StandingPanel } from "./panels.js"
+import { WeekGrid } from "./WeekGrid.js"
 
 type OpenPanel =
   | { readonly kind: "confirm"; readonly rowId: string }
-  | { readonly kind: "manual"; readonly day: string }
+  | { readonly kind: "manual"; readonly day: string; readonly clock: string }
   | { readonly kind: "standing"; readonly day: string; readonly cwd: string }
+
+const scopeStorageKey = "jcf_web_scope"
+
+/** Which systems a scope name writes to. */
+const targetsOfScope = (scope: WeekScopeName): WriteTargetsRequest => ({
+  clockify: scope !== "jira",
+  jira: scope !== "clockify"
+})
+
+/** Remembered per browser: someone who tracks in one system does so every week. */
+const storedScope = (): WeekScopeName => {
+  try {
+    const stored = window.localStorage.getItem(scopeStorageKey)
+    return stored === "clockify" || stored === "jira" ? stored : "both"
+  } catch {
+    return "both"
+  }
+}
+
+const rememberScope = (scope: WeekScopeName): void => {
+  try {
+    window.localStorage.setItem(scopeStorageKey, scope)
+  } catch {
+    // Storage is unavailable; the choice lasts this page.
+  }
+}
+
+const scopeLabels: ReadonlyArray<{ readonly scope: WeekScopeName; readonly label: string }> = [
+  { label: "Both", scope: "both" },
+  { label: "Jira only", scope: "jira" },
+  { label: "Clockify only", scope: "clockify" }
+]
 
 const messageOf = (error: unknown): string =>
   error instanceof RequestFailure || error instanceof Error ? error.message : String(error)
 
-/** Allocated time in one cell: one figure when the two systems agree, both when they do not. */
-const Allocated = (props: { readonly row: WeekRowResponse | undefined }) => {
-  if (props.row === undefined)
-    return (
-      <span className="jcf-allocated" data-empty="true">
-        —
-      </span>
-    )
-  const { clockifySeconds, jiraSeconds } = props.row
-  if (clockifySeconds === jiraSeconds) {
-    return (
-      <span className="jcf-allocated" data-empty={clockifySeconds === 0 ? "true" : "false"}>
-        {duration(clockifySeconds)}
-      </span>
-    )
-  }
-  // The two disagreeing is the original problem this tool exists for, so it is shown rather than
-  // reduced to one number.
-  return (
-    <span className="jcf-allocated">
-      {duration(clockifySeconds)}
-      <span className="jcf-split"> C / {duration(jiraSeconds)} J</span>
-    </span>
-  )
-}
-
 export const App = () => {
   const [monday, setMonday] = useState<string | undefined>(undefined)
+  const [scope, setScope] = useState<WeekScopeName>(storedScope)
   const [plan, setPlan] = useState<WeekPlanResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
@@ -71,11 +79,11 @@ export const App = () => {
   const [written, setWritten] = useState<WriteResultResponse | null>(null)
   const [open, setOpen] = useState<OpenPanel | null>(null)
 
-  const load = useCallback(async (week: string | undefined) => {
+  const load = useCallback(async (week: string | undefined, which: WeekScopeName) => {
     setLoading(true)
     setFailure(null)
     try {
-      const next = await readWeek(week)
+      const next = await readWeek(week, which)
       setPlan(next)
       setMonday(next.monday)
       setOpen(null)
@@ -91,18 +99,8 @@ export const App = () => {
     // fragment relies on the cookie a previous load stored.
     bootstrapSession()
       .catch((error: unknown) => setFailure(messageOf(error)))
-      .then(() => load(undefined))
+      .then(() => load(undefined, storedScope()))
   }, [load])
-
-  const rowsByTicket = useMemo(() => {
-    const grouped = new Map<string, Map<string, WeekRowResponse>>()
-    for (const row of plan?.rows ?? []) {
-      const byDay = grouped.get(row.ticketKey) ?? new Map<string, WeekRowResponse>()
-      byDay.set(row.day, row)
-      grouped.set(row.ticketKey, byDay)
-    }
-    return grouped
-  }, [plan])
 
   const openRow = useMemo(
     () => (open?.kind === "confirm" ? plan?.rows.find((row) => row.rowId === open.rowId) : undefined),
@@ -110,19 +108,25 @@ export const App = () => {
   )
 
   const totals = useMemo(() => {
-    let allocated = 0
+    let logged = 0
     let proposable = 0
     for (const row of plan?.rows ?? []) {
-      allocated += Math.max(row.clockifySeconds, row.jiraSeconds)
+      logged += Math.max(row.clockifySeconds, row.jiraSeconds)
       proposable += Math.max(row.proposal?.clockifyDelta ?? 0, row.proposal?.jiraDelta ?? 0)
     }
-    return { allocated, proposable }
+    return { logged, proposable }
   }, [plan])
 
   const afterWrite = async (result: WriteResultResponse) => {
     setWritten(result)
     setOpen(null)
-    await load(monday)
+    await load(monday, scope)
+  }
+
+  const chooseScope = (next: WeekScopeName) => {
+    setScope(next)
+    rememberScope(next)
+    void load(monday, next)
   }
 
   const act = async (action: () => Promise<void>) => {
@@ -150,22 +154,36 @@ export const App = () => {
         <h1>{plan === null ? "Week" : weekLabel(plan.days)}</h1>
         <Button
           disabled={loading || monday === undefined}
-          onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, -1))}
+          onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, -1), scope)}
         >
           ← Previous
         </Button>
-        <Button disabled={loading} onClick={() => load(undefined)}>
+        <Button disabled={loading} onClick={() => load(undefined, scope)}>
           This week
         </Button>
         <Button
           disabled={loading || monday === undefined}
-          onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, 1))}
+          onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, 1), scope)}
         >
           Next →
         </Button>
         <span className="jcf-bar-spacer" />
+        {/* A side that is out is not read, not proposed for, and not written to. */}
+        <span className="jcf-scope" role="group">
+          {scopeLabels.map((option) => (
+            <Button
+              disabled={loading}
+              key={option.scope}
+              onClick={() => chooseScope(option.scope)}
+              size="compact"
+              variant={option.scope === scope ? "primary" : "quiet"}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </span>
         <span className="jcf-totals">
-          <span>Allocated {duration(totals.allocated)}</span>
+          <span>Logged {duration(totals.logged)}</span>
           <span>Proposable {duration(totals.proposable)}</span>
         </span>
       </header>
@@ -196,77 +214,18 @@ export const App = () => {
       {loading && plan === null ? <p className="jcf-muted">Reading sessions…</p> : null}
 
       {plan === null ? null : (
-        <div className="jcf-grid-scroll">
-          <table className="jcf-grid">
-            <thead>
-              <tr>
-                <th scope="col">Issue</th>
-                {plan.days.map((day) => {
-                  const heading = dayHeading(day)
-                  return (
-                    <th key={day} scope="col">
-                      <span className="jcf-day-heading">
-                        <span>{heading.weekday}</span>
-                        <span className="jcf-date">{heading.date}</span>
-                      </span>
-                    </th>
-                  )
-                })}
-              </tr>
-            </thead>
-            <tbody>
-              {[...rowsByTicket.entries()].map(([ticketKey, byDay]) => (
-                <tr key={ticketKey}>
-                  <th scope="row">{ticketKey}</th>
-                  {plan.days.map((day) => {
-                    const row = byDay.get(day)
-                    const proposal = row?.proposal
-                    return (
-                      <td key={day}>
-                        <span className="jcf-cell">
-                          <Allocated row={row} />
-                          {row !== undefined && proposal !== undefined ? (
-                            <button
-                              className="jcf-gap"
-                              data-selected={open?.kind === "confirm" && open.rowId === row.rowId}
-                              onClick={() => {
-                                setWritten(null)
-                                setOpen({ kind: "confirm", rowId: row.rowId })
-                              }}
-                              type="button"
-                            >
-                              <span>+{duration(Math.max(proposal.clockifyDelta, proposal.jiraDelta))}</span>
-                              <span className="jcf-signal" data-signal={proposal.signal}>
-                                {proposal.signal}
-                              </span>
-                            </button>
-                          ) : null}
-                        </span>
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-              <tr>
-                <th scope="row">By hand</th>
-                {plan.days.map((day) => (
-                  <td key={day}>
-                    <Button
-                      onClick={() => {
-                        setWritten(null)
-                        setOpen({ day, kind: "manual" })
-                      }}
-                      size="compact"
-                      variant="quiet"
-                    >
-                      + time
-                    </Button>
-                  </td>
-                ))}
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <WeekGrid
+          onOpenRow={(rowId) => {
+            setWritten(null)
+            setOpen({ kind: "confirm", rowId })
+          }}
+          onOpenSlot={(day, clock) => {
+            setWritten(null)
+            setOpen({ clock, day, kind: "manual" })
+          }}
+          plan={plan}
+          selectedRowId={open?.kind === "confirm" ? open.rowId : undefined}
+        />
       )}
 
       {openRow === undefined ? null : (
@@ -276,6 +235,7 @@ export const App = () => {
           onConfirm={(submission) =>
             confirm(
               {
+                targets: submission.targets,
                 ...(submission.note === undefined ? {} : { note: submission.note }),
                 ...(submission.seconds === undefined ? {} : { seconds: submission.seconds }),
                 ...(submission.ticketKey === undefined ? {} : { ticketKey: submission.ticketKey })
@@ -284,6 +244,7 @@ export const App = () => {
             )
           }
           row={openRow}
+          scopeTargets={targetsOfScope(scope)}
         />
       )}
 
@@ -298,6 +259,7 @@ export const App = () => {
                 await logManual({
                   day: open.day,
                   seconds: submission.seconds,
+                  targets: submission.targets,
                   ticketKey: submission.ticketKey,
                   ...(submission.note === undefined ? {} : { note: submission.note }),
                   ...(submission.startClock === undefined ? {} : { startClock: submission.startClock })
@@ -305,6 +267,8 @@ export const App = () => {
               )
             })
           }
+          scopeTargets={targetsOfScope(scope)}
+          startClock={open.clock}
         />
       ) : null}
 
@@ -324,7 +288,7 @@ export const App = () => {
           onMap={(mapping) =>
             act(async () => {
               await mapStandingAttribution(mapping)
-              await load(monday)
+              await load(monday, scope)
             })
           }
         />

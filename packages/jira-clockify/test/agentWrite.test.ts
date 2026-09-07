@@ -1,5 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 import {
+  applyProposal,
   asProposed,
   byHand,
   clockifyWritten,
@@ -10,6 +12,7 @@ import {
   type WriteOutcome,
   writeOutcomeLines
 } from "../src/cli/agentWrite.js"
+import type { JiraWorklogOutcome } from "../src/services/TimerService.js"
 
 const outcome = (clockify: WriteOutcome["clockify"], jira: WriteOutcome["jira"]): WriteOutcome => ({ clockify, jira })
 
@@ -89,4 +92,66 @@ describe("written seconds", () => {
     expect(clockifyWritten(partial)).toBe(900)
     expect(jiraWritten(partial)).toBe(0)
   })
+})
+
+describe("applyProposal targets", () => {
+  const proposal = {
+    activeSeconds: 3600,
+    clockifyDelta: 3600,
+    clockifySeconds: 0,
+    confidence: null,
+    day: "2026-07-01",
+    jiraDelta: 3600,
+    jiraSeconds: 0,
+    sessionIds: ["s1"],
+    sessionSeconds: 3600,
+    signal: "branch" as const,
+    spans: [{ endMs: 2, startMs: 1 }],
+    ticketKey: "PROJ-1"
+  }
+
+  /** Captures what each side was asked to write, so "not asked" is assertable rather than implied. */
+  const fakeService = () => {
+    const calls: Array<string> = []
+    return {
+      calls,
+      service: {
+        applyToClockify: (ticketKey: string, _day: string, seconds: number) => {
+          calls.push(`clockify ${ticketKey} ${seconds}`)
+          return Effect.succeed(true)
+        },
+        applyToJira: (ticketKey: string, _day: string, seconds: number) => {
+          calls.push(`jira ${ticketKey} ${seconds}`)
+          return Effect.succeed<JiraWorklogOutcome>({ _tag: "Posted" })
+        }
+      }
+    }
+  }
+
+  it.effect("writes both sides by default", () =>
+    Effect.gen(function*() {
+      const fake = fakeService()
+      const outcome = yield* applyProposal(fake.service, proposal, "note")
+      expect(fake.calls).toEqual(["clockify PROJ-1 3600", "jira PROJ-1 3600"])
+      expect(outcome.clockify).toEqual({ _tag: "Written", seconds: 3600 })
+      expect(outcome.jira).toEqual({ _tag: "Written", seconds: 3600 })
+    }))
+
+  it.effect("leaves a side alone when it is not asked for, and says so", () =>
+    Effect.gen(function*() {
+      const fake = fakeService()
+      const outcome = yield* applyProposal(fake.service, proposal, "note", { clockify: false, jira: true })
+      expect(fake.calls).toEqual(["jira PROJ-1 3600"])
+      // Not `NothingOwed`: the Clockify gap is still there, and next time it may be asked for.
+      expect(outcome.clockify).toEqual({ _tag: "Skipped" })
+      expect(writeOutcomeLines(outcome)).toEqual(["· Clockify not asked for", "✓ posted to Jira"])
+    }))
+
+  it.effect("writes nowhere when neither side is asked for", () =>
+    Effect.gen(function*() {
+      const fake = fakeService()
+      const outcome = yield* applyProposal(fake.service, proposal, "note", { clockify: false, jira: false })
+      expect(fake.calls).toEqual([])
+      expect(outcome).toEqual({ clockify: { _tag: "Skipped" }, jira: { _tag: "Skipped" } })
+    }))
 })

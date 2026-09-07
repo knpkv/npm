@@ -17,7 +17,7 @@
  */
 import type { AgentSessions, ReconcileService } from "@knpkv/jira-clockify"
 import { Time } from "@knpkv/jira-clockify"
-import type { WeekPlanResponse, WeekRowResponse } from "./Api.js"
+import type { RecordedIntervalResponse, WeekPlanResponse, WeekRowResponse, WeekScopeName } from "./Api.js"
 
 /** How a confirmation names a row. Deterministic, so re-reading a week keeps the same names. */
 export const rowId = (ticketKey: string, day: string): string => `${day}:${ticketKey}`
@@ -53,10 +53,14 @@ export interface HeldPlan {
   readonly evidence: ReadonlyMap<string, RowEvidence>
 }
 
+/** The systems a plan was read under — what a confirmation writes to unless it says otherwise. */
+export const planSides = (plan: HeldPlan): ReconcileService.ReconcileSides => sidesOfScope(plan.plan.scope)
+
 interface RowDraft {
   clockifyDescription: string | null
   clockifySeconds: number
   day: string
+  intervals: ReadonlyArray<RecordedIntervalResponse>
   jiraSeconds: number
   proposal: AgentSessions.SessionProposal | undefined
   ticketKey: string
@@ -66,15 +70,23 @@ const emptyRow = (ticketKey: string, day: string): RowDraft => ({
   clockifyDescription: null,
   clockifySeconds: 0,
   day,
+  intervals: [],
   jiraSeconds: 0,
   proposal: undefined,
   ticketKey
+})
+
+/** Which systems a scope name puts in play. */
+export const sidesOfScope = (scope: WeekScopeName): ReconcileService.ReconcileSides => ({
+  clockify: scope !== "jira",
+  jira: scope !== "clockify"
 })
 
 const toWire = (draft: RowDraft): WeekRowResponse => ({
   clockifyDescription: draft.clockifyDescription,
   clockifySeconds: draft.clockifySeconds,
   day: draft.day,
+  intervals: draft.intervals,
   jiraSeconds: draft.jiraSeconds,
   rowId: rowId(draft.ticketKey, draft.day),
   ticketKey: draft.ticketKey,
@@ -104,6 +116,7 @@ export const buildWeekPlan = (options: {
   readonly planId: string
   readonly monday: Date
   readonly createdAtMillis: number
+  readonly scope: WeekScopeName
   readonly report: ReconcileService.SessionProposalReport
 }): HeldPlan => {
   const days = weekDays(options.monday)
@@ -127,6 +140,11 @@ export const buildWeekPlan = (options: {
     draft.clockifySeconds = recorded.clockifySeconds
     draft.jiraSeconds = recorded.jiraSeconds
     draft.clockifyDescription = recorded.clockifyDescription
+    draft.intervals = recorded.intervals.map((interval) => ({
+      endMs: interval.endMs,
+      source: interval.source,
+      startMs: interval.startMs
+    }))
   }
 
   const evidence = new Map<string, RowEvidence>()
@@ -155,6 +173,7 @@ export const buildWeekPlan = (options: {
       monday: days[0]!,
       planId: options.planId,
       rows,
+      scope: options.scope,
       sessionCount: options.report.sessionCount,
       sessionRootCount: options.report.sessionRootCount,
       unattributed: options.report.unattributed
@@ -207,20 +226,25 @@ export const proposeWrite = (options: {
   readonly requested: number | undefined
   readonly heldClockifySeconds: number
   readonly heldJiraSeconds: number
+  /** Which systems are in play. A side that is out gets a zero delta, never a gap. */
+  readonly targets?: { readonly clockify: boolean; readonly jira: boolean } | undefined
 }): ProposedWrite => {
+  const targets = options.targets ?? { clockify: true, jira: true }
   const requested = options.requested ?? options.credited
   if (requested > options.credited) return { _tag: "PastEvidence", maxSeconds: options.credited }
   if (requested < MINIMUM_WRITE_SECONDS) {
     return { _tag: "BelowMinimum", minimumSeconds: MINIMUM_WRITE_SECONDS }
   }
-  const clockifyDelta = Math.max(0, requested - options.heldClockifySeconds)
-  const jiraDelta = Math.max(0, requested - options.heldJiraSeconds)
-  // Under a minute on both sides is the ordinary outcome of confirming a row twice, or of a watch
-  // having taken it in between. It is not a failure and it is not a write.
-  if (clockifyDelta < MINIMUM_WRITE_SECONDS && jiraDelta < MINIMUM_WRITE_SECONDS) return { _tag: "NothingOwed" }
-  return {
-    _tag: "Write",
-    clockifyDelta: clockifyDelta < MINIMUM_WRITE_SECONDS ? 0 : clockifyDelta,
-    jiraDelta: jiraDelta < MINIMUM_WRITE_SECONDS ? 0 : jiraDelta
+  const owed = (held: number, asked: boolean): number => {
+    if (!asked) return 0
+    const delta = Math.max(0, requested - held)
+    // Under a minute is a rounding artefact rather than work: Jira floors worklogs to the minute.
+    return delta < MINIMUM_WRITE_SECONDS ? 0 : delta
   }
+  const clockifyDelta = owed(options.heldClockifySeconds, targets.clockify)
+  const jiraDelta = owed(options.heldJiraSeconds, targets.jira)
+  // Nothing left on either side asked for: the ordinary outcome of confirming a row twice, or of a
+  // watch having taken it in between. Not a failure, and not a write.
+  if (clockifyDelta === 0 && jiraDelta === 0) return { _tag: "NothingOwed" }
+  return { _tag: "Write", clockifyDelta, jiraDelta }
 }

@@ -64,7 +64,15 @@ const readPlan = Effect.gen(function*() {
   const reconcile = yield* ReconcileService.ReconcileService
   const period = Time.isoWeekPeriod(new Date(at(12, 0)))
   const report = yield* reconcile.proposeFromSessions(period)
-  return buildWeekPlan({ createdAtMillis: 0, monday: period.from, planId: "plan-1", report })
+  return buildWeekPlan({ createdAtMillis: 0, monday: period.from, planId: "plan-1", report, scope: "both" })
+})
+
+/** The same week read as a Jira-only week: Clockify is neither read nor written. */
+const readJiraOnlyPlan = Effect.gen(function*() {
+  const reconcile = yield* ReconcileService.ReconcileService
+  const period = Time.isoWeekPeriod(new Date(at(12, 0)))
+  const report = yield* reconcile.proposeFromSessions(period, { sides: { clockify: false, jira: true } })
+  return buildWeekPlan({ createdAtMillis: 0, monday: period.from, planId: "plan-jira", report, scope: "jira" })
 })
 
 /** No Jira lookup in these tests: a title is provenance, not behaviour. */
@@ -79,6 +87,7 @@ const confirm = (plan: HeldPlan, request: Partial<ConfirmRequest> = {}) =>
         note: undefined,
         rowId: rowId(TICKET, DAY),
         seconds: undefined,
+        targets: undefined,
         ticketKey: undefined,
         ...request
       },
@@ -232,6 +241,7 @@ describe("logging time by hand", () => {
         note: "Sprint planning",
         seconds: 1800,
         startClock: "14:00",
+        targets: { clockify: true, jira: true },
         ticketKey: OTHER_TICKET
       },
       service: reconcile,
@@ -256,5 +266,102 @@ describe("logging time by hand", () => {
       })
       expect(world.jiraWorklogs).toHaveLength(1)
       expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(1800)
+    }))
+})
+
+describe("reconciling one system only", () => {
+  it.effect("never reads Clockify, so time it holds does not shrink the Jira proposal", () =>
+    Effect.gen(function*() {
+      const { value } = yield* run(
+        Effect.gen(function*() {
+          const both = yield* readPlan
+          const jiraOnly = yield* readJiraOnlyPlan
+          return {
+            bothClockify: rowFor(both, TICKET, DAY)?.clockifySeconds,
+            bothJiraDelta: rowFor(both, TICKET, DAY)?.proposal?.jiraDelta,
+            credited: rowFor(jiraOnly, TICKET, DAY)?.proposal?.maxSeconds,
+            jiraOnlyClockifyDelta: rowFor(jiraOnly, TICKET, DAY)?.proposal?.clockifyDelta,
+            jiraOnlyJiraDelta: rowFor(jiraOnly, TICKET, DAY)?.proposal?.jiraDelta
+          }
+        }),
+        {
+          // An hour already in Clockify. A both-sides week sees it; a Jira-only week must not, and
+          // must not treat "not read" as "nothing there" either.
+          clockifyEntries: [{
+            description: `[${TICKET}] tracked with a timer`,
+            end: iso(at(11, 0)),
+            start: iso(at(10, 0))
+          }]
+        }
+      )
+      expect(value.bothClockify).toBe(3600)
+      expect(value.jiraOnlyClockifyDelta).toBe(0)
+      expect(value.jiraOnlyJiraDelta).toBe(value.credited)
+      expect(value.bothJiraDelta).toBe(value.credited)
+    }))
+
+  it.effect("writes to Jira alone and says Clockify was not asked for", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.gen(function*() {
+          const plan = yield* readJiraOnlyPlan
+          return { credited: rowFor(plan, TICKET, DAY)?.proposal?.maxSeconds, outcome: yield* confirm(plan) }
+        }),
+        {}
+      )
+      expect(value.outcome._tag).toBe("Written")
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toHaveLength(1)
+      expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(value.credited)
+      if (value.outcome._tag === "Written") {
+        expect(value.outcome.result.clockify).toEqual({ _tag: "Skipped" })
+        expect(value.outcome.result.lines).toContain("· Clockify not asked for")
+      }
+    }))
+
+  it.effect("lets one write override the week's scope", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        Effect.flatMap(readJiraOnlyPlan, (plan) => confirm(plan, { targets: { clockify: true, jira: false } })),
+        {}
+      )
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  it.effect("refuses a write to neither system", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.flatMap(readPlan, (plan) => confirm(plan, { targets: { clockify: false, jira: false } })),
+        {}
+      )
+      expect(value._tag).toBe("NoTargets")
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  it.effect("logs a manual entry to one system when that is all that was asked", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.gen(function*() {
+          const reconcile = yield* ReconcileService.ReconcileService
+          return yield* logManualEntry({
+            request: {
+              day: DAY,
+              note: "Sprint planning",
+              seconds: 1800,
+              startClock: "14:00",
+              targets: { clockify: false, jira: true },
+              ticketKey: OTHER_TICKET
+            },
+            service: reconcile,
+            summaryOf: noSummary
+          })
+        }),
+        {}
+      )
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toHaveLength(1)
+      expect(value.clockify).toEqual({ _tag: "Skipped" })
     }))
 })
