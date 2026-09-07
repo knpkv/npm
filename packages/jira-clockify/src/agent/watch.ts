@@ -92,7 +92,7 @@ export const decideWatchWrites = (
       held.push({ proposal, reason: { _tag: "NeedsReview" } })
       continue
     }
-    const settlesAtMs = settlesAt(proposal.spans)
+    const settlesAtMs = settlesAt(proposal.blocks)
     if (options.nowMs < settlesAtMs) {
       held.push({ proposal, reason: { _tag: "Unsettled", settlesAtMs } })
       continue

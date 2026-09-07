@@ -33,6 +33,16 @@ const printConfig = (config: JcfConfig) =>
       `  Dwell (sec):     ${config.sessionDwellSeconds === 0 ? "off" : config.sessionDwellSeconds}`
     )
     yield* Console.log(`  Confidence floor:${` ${config.sessionConfidenceFloor}`}`)
+    yield* Console.log(
+      `  Ownership:       ${
+        config.sessionOwnership === "assigned" ? "assigned to you only" : "any ticket a signal placed"
+      }`
+    )
+    yield* Console.log(
+      `  Yours anyway:    ${
+        config.sessionOwnershipOverrides.length > 0 ? config.sessionOwnershipOverrides.join(", ") : "(none)"
+      }`
+    )
   })
 
 const configShow = Command.make(
@@ -233,6 +243,48 @@ const configSetDwell = Command.make(
     })
 ).pipe(Command.withDescription("Shortest stretch that may own time on its own"))
 
+const configSetOwnership = Command.make(
+  "ownership",
+  { mode: Args.string("assigned|any") },
+  ({ mode }) =>
+    Effect.gen(function*() {
+      const cfg = yield* ConfigService
+      if (mode !== "assigned" && mode !== "any") {
+        yield* Console.log("Provide `assigned` (only your own tickets) or `any`.")
+        return
+      }
+      yield* cfg.set({ sessionOwnership: mode })
+      yield* Console.log(
+        mode === "assigned"
+          ? "Ownership: only tickets assigned to you are proposed — the rest are reported"
+          : "Ownership: any ticket an Attribution Signal placed is proposed"
+      )
+    })
+).pipe(Command.withDescription("Whether a proposal may name a ticket assigned to somebody else"))
+
+const configSetMine = Command.make(
+  "mine",
+  { key: Args.string("ISSUE-KEY") },
+  ({ key }) =>
+    Effect.gen(function*() {
+      const cfg = yield* ConfigService
+      const ticketKey = key.trim().toUpperCase()
+      if (!isTicketKey(ticketKey)) {
+        yield* Console.log("That is not an Issue Key, e.g. PROJ-123.")
+        return
+      }
+      const current = yield* cfg.get
+      if (current.sessionOwnershipOverrides.includes(ticketKey)) {
+        yield* Console.log(`${ticketKey} is already treated as yours.`)
+        return
+      }
+      yield* cfg.set({
+        sessionOwnershipOverrides: [...current.sessionOwnershipOverrides, ticketKey].sort()
+      })
+      yield* Console.log(`${ticketKey} will be proposed as yours whatever Jira says its assignee is.`)
+    })
+).pipe(Command.withDescription("Treat one ticket as yours even when Jira assigns it to somebody else"))
+
 // ---------------------------------------------------------------------------
 // reset
 // ---------------------------------------------------------------------------
@@ -257,7 +309,9 @@ const configReset = Command.make(
         sessionTicketMap: defaultJcfConfig.sessionTicketMap,
         sessionIdleCapSeconds: defaultJcfConfig.sessionIdleCapSeconds,
         sessionConfidenceFloor: defaultJcfConfig.sessionConfidenceFloor,
-        sessionDwellSeconds: defaultJcfConfig.sessionDwellSeconds
+        sessionDwellSeconds: defaultJcfConfig.sessionDwellSeconds,
+        sessionOwnership: defaultJcfConfig.sessionOwnership,
+        sessionOwnershipOverrides: defaultJcfConfig.sessionOwnershipOverrides
       })
       yield* Console.log("Config reset to defaults, including session roots and standing attributions.")
     })
@@ -266,7 +320,10 @@ const configReset = Command.make(
 const configSet = Command.make(
   "set",
   {},
-  () => Console.log("Config set: project, billable, jql, session-root, session-ticket, idle-cap, dwell")
+  () =>
+    Console.log(
+      "Config set: project, billable, jql, session-root, session-ticket, idle-cap, dwell, ownership, mine"
+    )
 ).pipe(
   Command.withSubcommands([
     configSetProject,
@@ -275,7 +332,9 @@ const configSet = Command.make(
     configSetSessionRoot,
     configSetSessionTicket,
     configSetIdleCap,
-    configSetDwell
+    configSetDwell,
+    configSetOwnership,
+    configSetMine
   ])
 )
 

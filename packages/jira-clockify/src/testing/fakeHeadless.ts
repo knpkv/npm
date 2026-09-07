@@ -61,6 +61,7 @@ import { layer as agentSessionReaderLayer } from "../services/AgentSessionReader
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService, type JcfConfig } from "../services/ConfigService.js"
 import { HomeDirectory } from "../services/HomeDirectory.js"
+import { layer as issueFactsLayer } from "../services/IssueFacts.js"
 import { layer as reconcileServiceLayer } from "../services/ReconcileService.js"
 import { type AttributionChoice, SessionAttributor, SessionAttributorError } from "../services/SessionAttributor.js"
 import { StateWriter } from "../services/StateWriter.js"
@@ -232,9 +233,20 @@ export interface FakeHeadlessOptions {
   readonly columns?: number | undefined
   /** Issue summaries Jira will return, keyed by issue key. Unlisted keys 404. */
   readonly issueSummaries?: Readonly<Record<string, string>> | undefined
-  /** Assignee display names by issue key. A key with a summary but no entry here is unassigned. */
+  /**
+   * Assignees by issue key. A key with a summary but no entry here is unassigned.
+   *
+   * Serves as both the display name and the account id, so a test that cares about ownership sets it
+   * to whatever it passes as {@link FakeHeadlessOptions.jiraAccountId} and a test that does not can
+   * keep writing a person's name.
+   */
   readonly issueAssignees?: Readonly<Record<string, string>> | undefined
+  /** The account this fake Jira is logged in as, for deciding whose tickets are whose. */
+  readonly jiraAccountId?: string | undefined
 }
+
+/** Whoever the fake is logged in as unless a test says otherwise. */
+export const FAKE_ACCOUNT_ID = "acct-me"
 
 const defaultConfig: JcfConfig = {
   defaultJql: "",
@@ -248,6 +260,8 @@ const defaultConfig: JcfConfig = {
   sessionTicketMap: {},
   sessionIdleCapSeconds: 300,
   sessionConfidenceFloor: 0.7,
+  sessionOwnership: "assigned",
+  sessionOwnershipOverrides: [],
   sessionDwellSeconds: 900
 }
 
@@ -672,7 +686,36 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             }
           })
         }
+        if (request.url.includes("/myself")) {
+          return jsonResponse(request, 200, {
+            accountId: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
+            displayName: "Fake User"
+          })
+        }
         if (request.url.includes("/search/jql")) {
+          // A `key in (…)` search answers about exactly those keys. Any other JQL keeps the old
+          // behaviour: whatever the ledger happens to hold. The query lives in `urlParams` rather
+          // than in `url` — the client keeps them apart until the request is actually sent.
+          const jql = request.urlParams.params.find(([name]) => name === "jql")?.[1]
+          const clause = jql === undefined ? null : jql.match(/key in \(([^)]*)\)/)
+          if (clause !== null) {
+            const keys = (clause[1] ?? "").split(",").map((key) => key.trim()).filter((key) => key !== "")
+            const summaries = options.issueSummaries ?? {}
+            const assignees = options.issueAssignees ?? {}
+            return jsonResponse(request, 200, {
+              // Only the keys this fake Jira knows about, so a test can model an issue that is gone.
+              issues: keys.filter((key) => summaries[key] !== undefined).map((key, index) => ({
+                id: String(index),
+                key,
+                fields: {
+                  summary: summaries[key],
+                  ...((assignees[key] !== undefined) && {
+                    assignee: { accountId: assignees[key], displayName: assignees[key] }
+                  })
+                }
+              }))
+            })
+          }
           return jsonResponse(request, 200, {
             issues: [...jiraLedger.keys()].map((key, index) => ({ id: String(index), key }))
           })
@@ -850,10 +893,11 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     Layer.provide(ReaderLive)
   )
   const TicketLive = ticketServiceLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
+  const IssueFactsLive = issueFactsLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
 
   // `ReconcileService` is built from the timer, the reader and the Jira client, so those cannot sit
   // beside it in a `mergeAll` — that builds its members in parallel. They go underneath.
-  const layer = Layer.mergeAll(ReconcileLive, TicketLive).pipe(
+  const layer = Layer.mergeAll(ReconcileLive, TicketLive, IssueFactsLive).pipe(
     Layer.provideMerge(Layer.mergeAll(TimerLive, ReaderLive, JiraLayer)),
     Layer.provideMerge(Externals)
   )

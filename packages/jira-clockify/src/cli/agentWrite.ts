@@ -267,7 +267,7 @@ export const applyProposal = (
           proposal.day,
           proposal.clockifyDelta,
           description,
-          writeAnchor(proposal.spans, proposal.clockifySeconds)
+          writeAnchor(proposal.blocks, proposal.clockifySeconds)
         )
         .pipe(
           Effect.map((created): SideOutcome =>
@@ -287,7 +287,7 @@ export const applyProposal = (
       proposal.day,
       proposal.jiraDelta,
       description,
-      writeAnchor(proposal.spans, proposal.jiraSeconds)
+      writeAnchor(proposal.blocks, proposal.jiraSeconds)
     )
     const jira: SideOutcome = posted._tag === "Posted"
       ? { _tag: "Written", seconds: proposal.jiraDelta }

@@ -357,6 +357,35 @@ describe("activeWindows and sharing", () => {
     expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(60 + idleCapSeconds / 2)
   })
 
+  // A block is what a person accepts on its own, so the parts have to add up to the whole they were
+  // offered under — including where sharing made the arithmetic fractional, which is where flooring
+  // each block independently would have quietly lost seconds.
+  it("gives every block credit that sums to the row exactly", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 2)),
+        activity("s2", at(2026, 7, 1, 10, 4)),
+        // A second stretch after a long gap, so this row has more than one block to add up.
+        activity("s1", at(2026, 7, 1, 14, 0)),
+        activity("s1", at(2026, 7, 1, 14, 7))
+      ],
+      { s1: "PROJ-1", s2: "PROJ-2" }
+    )
+    for (const row of [...split.attributed, ...split.withheld]) {
+      expect(row.blocks.reduce((sum, block) => sum + block.seconds, 0)).toBe(row.seconds)
+    }
+    const row = split.attributed.find((entry) => entry.ticketKey === "PROJ-1")
+    // Morning, then the afternoon in two: the 7-minute gap between its prompts passes the Idle Cap,
+    // and with the Dwell Floor off nothing joins the halves back up.
+    expect(row?.blocks).toHaveLength(3)
+    // Credit, not wall clock: the morning block spans four minutes but two of them were shared.
+    const morning = row?.blocks[0]
+    expect(morning?.endMs).toBe(at(2026, 7, 1, 10, 4) + idleCapSeconds * 1000)
+    expect(morning?.seconds).toBeLessThan((morning!.endMs - morning!.startMs) / 1000)
+  })
+
   it("reports wall-clock active seconds next to the shared credit", () => {
     const split = creditFor(
       [
@@ -510,7 +539,9 @@ describe("splitCredits", () => {
       confidence: 0.8
     })
     // Two separate blocks of work, kept separate because they are not contiguous.
-    expect(split.attributed[0]!.spans).toHaveLength(2)
+    expect(split.attributed[0]!.blocks).toHaveLength(2)
+    // And they add up to the row, so accepting them one at a time writes what accepting the row does.
+    expect(split.attributed[0]!.blocks.reduce((sum, block) => sum + block.seconds, 0)).toBe(900)
   })
 
   it("keeps below-floor credit out of the proposable set but still reports it", () => {
@@ -749,7 +780,7 @@ describe("splitCredits under the Dwell Floor", () => {
     const total = (rows: ReadonlyArray<{ seconds: number }>) => rows.reduce((sum, row) => sum + row.seconds, 0)
     expect(total(withFloor.attributed)).toBe(total(withoutFloor.attributed))
     // And one block instead of two, which is the difference on a calendar.
-    expect(withFloor.attributed[0]!.spans).toHaveLength(1)
+    expect(withFloor.attributed[0]!.blocks).toHaveLength(1)
   })
 })
 
@@ -762,7 +793,7 @@ describe("buildSessionProposals", () => {
     sessionIds: ["s1"],
     signal: "branch",
     confidence: null,
-    spans: [{ startMs: at(2026, 7, 1, 10, 0), endMs: at(2026, 7, 1, 10, 0) + seconds * 1000 }]
+    blocks: [{ startMs: at(2026, 7, 1, 10, 0), endMs: at(2026, 7, 1, 10, 0) + seconds * 1000, seconds }]
   }]
 
   it("proposes the whole amount when neither side holds anything", () => {

@@ -13,6 +13,7 @@ import { layer as AgentSessionReaderLayer } from "../services/AgentSessionReader
 import { ClockifyAuth, layer as ClockifyAuthLayer } from "../services/ClockifyAuth.js"
 import { layer as ConfigLayer } from "../services/ConfigService.js"
 import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
+import { layer as IssueFactsLayer } from "../services/IssueFacts.js"
 import { layer as ReconcileServiceLayer } from "../services/ReconcileService.js"
 import { layer as SessionAttributorLayer } from "../services/SessionAttributor.js"
 import { layer as StateWriterLayer } from "../services/StateWriter.js"
@@ -129,6 +130,13 @@ export const JiraApiLive = JiraApiClient.layer.pipe(
 // Service layers
 // ---------------------------------------------------------------------------
 
+export const IssueFactsLive = IssueFactsLayer.pipe(
+  Layer.provide(HomeDirectoryLive),
+  Layer.provide(JiraApiLive),
+  Layer.provide(JiraAuthLive),
+  Layer.provide(PlatformLayer)
+)
+
 export const TicketServiceLive = TicketServiceLayer.pipe(
   Layer.provide(JiraApiLive),
   Layer.provide(ConfigLive)
@@ -196,5 +204,6 @@ const FoundationLayer = Layer.mergeAll(
 export const HeadlessLayer = Layer.mergeAll(
   TimerServiceLive,
   ReconcileServiceLive,
-  TicketServiceLive
+  TicketServiceLive,
+  IssueFactsLive
 ).pipe(Layer.provideMerge(FoundationLayer))

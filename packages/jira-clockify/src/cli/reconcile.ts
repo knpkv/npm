@@ -245,7 +245,7 @@ const choiceLines = (options: {
   readonly width: number
 }): ReadonlyArray<string> => {
   const { proposal, tickets, width } = options
-  const bounds = formatSpanBounds(proposal.spans)
+  const bounds = formatSpanBounds(proposal.blocks)
   const when = bounds === "" ? proposal.day : `${proposal.day} ${bounds}`
   // Clipped like the detail line is. The fields are padded to line the columns up, not bounded — a
   // long Issue Key with unequal gaps ("+10h Clockify, +9h Jira") already passes 80 columns, and the
@@ -276,7 +276,7 @@ const choiceLines = (options: {
   ]
   // That the credited total covers several blocks rather than one stretch is worth a place of its
   // own; *which* blocks is the detail, and the only part worth losing to a narrow terminal.
-  const blocks = proposal.spans.length > 1 ? [`${proposal.spans.length} blocks`] : []
+  const blocks = proposal.blocks.length > 1 ? [`${proposal.blocks.length} blocks`] : []
 
   const separator = " · "
   const usable = width - 1 - CHOICE_CONTINUATION.length
@@ -292,8 +292,8 @@ const choiceLines = (options: {
   // The block ranges go on only if a whole `HH:MM-HH:MM` fits after them. Appending them to a line
   // with no room left would spend the last few columns on an ellipsis and take a word with it.
   const ranges = usable - kept.length - separator.length
-  const detail = proposal.spans.length > 1 && ranges >= MIN_RANGE_TAIL
-    ? `${kept}${separator}${clip(formatSpanRanges(proposal.spans), ranges)}`
+  const detail = proposal.blocks.length > 1 && ranges >= MIN_RANGE_TAIL
+    ? `${kept}${separator}${clip(formatSpanRanges(proposal.blocks), ranges)}`
     : kept
 
   return detail === "" ? [head] : [head, `${CHOICE_CONTINUATION}${clip(detail, usable)}`]
@@ -330,18 +330,18 @@ export const agentReportJson = (options: {
 }) => {
   // `summary` and `assignee` are null when Jira could not be reached or the issue is gone — never
   // omitted, so a consumer can tell "unknown" from "not looked up".
-  const withSummary = <T extends { readonly ticketKey: string; readonly spans: ReadonlyArray<CreditedSpan> }>(
+  const withSummary = <T extends { readonly ticketKey: string; readonly blocks: ReadonlyArray<CreditedSpan> }>(
     row: T
   ) => {
-    const first = earliestStart(row.spans)
-    const last = row.spans.length === 0
+    const first = earliestStart(row.blocks)
+    const last = row.blocks.length === 0
       ? null
-      : row.spans.reduce((latest, span) => Math.max(latest, span.endMs), -Infinity)
+      : row.blocks.reduce((latest, block) => Math.max(latest, block.endMs), -Infinity)
     return {
       ...row,
       summary: options.tickets.get(row.ticketKey)?.summary ?? null,
       assignee: options.tickets.get(row.ticketKey)?.assignee ?? null,
-      // The outer bounds of the work item, so a consumer never has to fold `spans` itself.
+      // The outer bounds of the work item, so a consumer never has to fold `blocks` itself.
       startedAt: first?.toISOString() ?? null,
       endedAt: last === null ? null : new Date(last).toISOString()
     }
@@ -412,7 +412,7 @@ const calendarByDay = (proposals: ReadonlyArray<SessionProposal>): ReadonlyArray
   const days = new Map<string, Array<CalendarRow>>()
   for (const proposal of proposals) {
     const rows = days.get(proposal.day) ?? []
-    rows.push({ ticketKey: proposal.ticketKey, spans: proposal.spans })
+    rows.push({ ticketKey: proposal.ticketKey, spans: proposal.blocks })
     days.set(proposal.day, rows)
   }
   return [...days.entries()].sort(([a], [b]) => a.localeCompare(b))

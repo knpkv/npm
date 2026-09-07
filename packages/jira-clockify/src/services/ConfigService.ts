@@ -57,6 +57,25 @@ export interface JcfConfig {
    * rule off and reports the raw interleaving, which is a day of unreadable slivers.
    */
   readonly sessionDwellSeconds: number
+  /**
+   * Whether a proposal may name an Issue Key that is not assigned to you.
+   *
+   * `"assigned"` offers only your own tickets, because a branch cannot tell authoring from
+   * reviewing: checking out a colleague's PR puts their key on the branch, and that key then arrives
+   * as a proposal for your timesheet. `"any"` offers whatever the signals placed — right for someone
+   * who works on tickets assigned to a team rather than a person.
+   *
+   * Withheld, never dropped: an unowned row is still reported, with its hours, and
+   * {@link JcfConfig.sessionOwnershipOverrides} is how one becomes proposable for good.
+   */
+  readonly sessionOwnership: "assigned" | "any"
+  /**
+   * Issue Keys to treat as yours whatever Jira says — your work on somebody else's ticket.
+   *
+   * Per key rather than a switch, because the honest answer to "is this mine?" differs ticket by
+   * ticket, and answering it once should not have to be answered again next week.
+   */
+  readonly sessionOwnershipOverrides: ReadonlyArray<string>
 }
 
 /** The values every unset field falls back to, and what `jcf config reset` restores. */
@@ -72,7 +91,9 @@ export const defaultJcfConfig: JcfConfig = {
   sessionTicketMap: {},
   sessionIdleCapSeconds: 300,
   sessionConfidenceFloor: 0.7,
-  sessionDwellSeconds: 900
+  sessionDwellSeconds: 900,
+  sessionOwnership: "assigned",
+  sessionOwnershipOverrides: []
 }
 
 export interface ConfigServiceContract {
@@ -150,7 +171,13 @@ export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
     ? parsed.sessionDwellSeconds
     : undefined
   const sessionConfidenceFloor = confidence(parsed.sessionConfidenceFloor)
+  const sessionOwnership = parsed.sessionOwnership === "assigned" || parsed.sessionOwnership === "any"
+    ? parsed.sessionOwnership
+    : undefined
+  const sessionOwnershipOverrides = stringArray(parsed.sessionOwnershipOverrides)?.filter(isTicketKey)
   return {
+    ...((sessionOwnership !== undefined) && { sessionOwnership }),
+    ...((sessionOwnershipOverrides !== undefined) && { sessionOwnershipOverrides }),
     ...((sessionRoots !== undefined) && { sessionRoots }),
     ...((sessionTicketMap !== undefined) && { sessionTicketMap }),
     ...((sessionIdleCapSeconds !== undefined) && { sessionIdleCapSeconds }),

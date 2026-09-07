@@ -117,7 +117,7 @@ const proposal = (overrides: Partial<SessionProposal> = {}): SessionProposal => 
   day: "2026-07-01",
   signal: "branch",
   confidence: null,
-  spans: [{ startMs: at(10, 0), endMs: at(10, 30) }],
+  blocks: [{ startMs: at(10, 0), endMs: at(10, 30), seconds: 1_800 }],
   sessionSeconds: 1_800,
   activeSeconds: 1_800,
   clockifySeconds: 0,
@@ -161,7 +161,10 @@ describe("decideWatchWrites", () => {
   // remainder, because proposals subtract what the two sides already hold.
   it("holds a whole bucket while any of its blocks is still warm", () => {
     const row = proposal({
-      spans: [{ startMs: at(9, 0), endMs: at(9, 30) }, { startMs: at(13, 0), endMs: at(13, 30) }]
+      blocks: [
+        { startMs: at(9, 0), endMs: at(9, 30), seconds: 1_800 },
+        { startMs: at(13, 0), endMs: at(13, 30), seconds: 1_800 }
+      ]
     })
     const decision = decideWatchWrites([row], { nowMs: at(13, 10) })
     expect(decision.write).toEqual([])

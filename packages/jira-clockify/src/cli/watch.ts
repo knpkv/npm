@@ -253,7 +253,7 @@ export const runWatch = (options: {
       const commitCursor = (unwritten: ReadonlyArray<number>): void => {
         const heldFrom = decision.held
           .filter((entry) => entry.reason._tag === "Unsettled")
-          .flatMap((entry) => entry.proposal.spans.map((span) => span.startMs))
+          .flatMap((entry) => entry.proposal.blocks.map((block) => block.startMs))
         const pendingFrom = [...heldFrom, ...unwritten]
         const horizon = pendingFrom.length === 0
           ? nowMs - settleSeconds * 1000
@@ -263,7 +263,7 @@ export const runWatch = (options: {
 
       /** The earliest instant a proposal covers — where the cursor must stop if it is not written. */
       const proposalStart = (proposal: SessionProposal): number =>
-        Math.min(...proposal.spans.map((span) => span.startMs))
+        Math.min(...proposal.blocks.map((block) => block.startMs))
 
       for (const held of decision.held) {
         if (held.reason._tag !== "NeedsReview") continue

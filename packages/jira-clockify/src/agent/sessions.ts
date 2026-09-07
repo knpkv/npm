@@ -316,6 +316,23 @@ export interface CreditedSpan {
 }
 
 /**
+ * A span of credited time that carries the seconds it contributes to its bucket.
+ *
+ * The unit a person can accept on its own. A row is exactly the sum of its blocks, so accepting four
+ * blocks one at a time and accepting the whole row put the same total in both systems — which is
+ * what makes writing a morning now and an afternoon later safe rather than a way to double-log.
+ *
+ * `seconds` is credit, not wall clock: time worked on several Issue Keys at once is divided between
+ * them, so a block's seconds can be shorter than the interval it spans. That gap is the sharing
+ * doing its job, and hiding it by reporting the wall clock would overstate the day.
+ */
+export interface CreditedBlock {
+  readonly startMs: number
+  readonly endMs: number
+  readonly seconds: number
+}
+
+/**
  * Merge spans that touch or overlap, so a hundred one-minute credits read as one block of work.
  */
 export const mergeSpans = (spans: ReadonlyArray<CreditedSpan>): ReadonlyArray<CreditedSpan> => {
@@ -622,28 +639,39 @@ export const applyDwellFloor = (
   return mergeRuns(held)
 }
 
+/** A run of one bucket's time, still carrying its credit in milliseconds. */
+interface PricedSpan {
+  readonly startMs: number
+  readonly endMs: number
+  readonly creditedMs: number
+}
+
 /**
- * Join a bucket's spans that sit closer together than the Dwell Floor.
+ * Coalesce a bucket's runs into the blocks a person sees, adding up the credit each one carries.
  *
- * For the picture only. Once ownership cannot change inside the floor, two spans of the same ticket
- * four minutes apart are one stretch of work with a pause in it, and drawing them as two blocks says
- * something about the day that is not true. The seconds are untouched — a row's total remains the
- * authority on how much, and its spans on when.
+ * `gapMs` is the Dwell Floor. Once ownership cannot change inside the floor, two runs of the same
+ * ticket four minutes apart are one stretch of work with a pause in it, and offering them as two
+ * blocks says something about the day that is not true. Runs that merely touch are joined at any
+ * floor, including zero.
+ *
+ * Never across a local midnight, because everything downstream buckets by day: welding the last run
+ * of Monday to the first of Tuesday would file a whole morning under the wrong date.
  */
-const joinSpansWithinDwell = (
-  spans: ReadonlyArray<CreditedSpan>,
-  dwellMs: number
-): ReadonlyArray<CreditedSpan> => {
+const coalesceBlocks = (spans: ReadonlyArray<PricedSpan>, gapMs: number): ReadonlyArray<PricedSpan> => {
   const ordered = [...spans].sort((a, b) => a.startMs - b.startMs)
-  const joined: Array<CreditedSpan> = []
+  const joined: Array<PricedSpan> = []
   for (const span of ordered) {
     const previous = joined[joined.length - 1]
     if (
       previous !== undefined &&
-      span.startMs - previous.endMs < dwellMs &&
+      span.startMs - previous.endMs <= gapMs &&
       localDay(new Date(previous.startMs)) === localDay(new Date(span.startMs))
     ) {
-      joined[joined.length - 1] = { ...previous, endMs: Math.max(previous.endMs, span.endMs) }
+      joined[joined.length - 1] = {
+        creditedMs: previous.creditedMs + span.creditedMs,
+        endMs: Math.max(previous.endMs, span.endMs),
+        startMs: previous.startMs
+      }
       continue
     }
     joined.push(span)
@@ -651,11 +679,41 @@ const joinSpansWithinDwell = (
   return joined
 }
 
+/**
+ * Give every block whole seconds that add up to the day's total, exactly.
+ *
+ * Flooring each block on its own leaves the row short by up to a second per block, and a row whose
+ * blocks do not add up to it is a row nobody can check — the panel would offer 56m 36s and its five
+ * blocks would come to 56m 32s. The seconds the flooring drops go to the blocks with the largest
+ * fractional part, which is the same rule an invoice uses to make its lines sum to its total.
+ */
+const wholeSeconds = (spans: ReadonlyArray<PricedSpan>, totalSeconds: number): ReadonlyArray<CreditedBlock> => {
+  const floored = spans.map((span) => ({
+    remainder: (span.creditedMs / 1000) - Math.floor(span.creditedMs / 1000),
+    seconds: Math.floor(span.creditedMs / 1000),
+    span
+  }))
+  let spare = totalSeconds - floored.reduce((sum, entry) => sum + entry.seconds, 0)
+  // Largest fractional part first, and an earlier block wins a tie so the result never depends on
+  // the order runs happened to arrive in.
+  const order = [...floored].sort((a, b) => b.remainder - a.remainder || a.span.startMs - b.span.startMs)
+  for (const entry of order) {
+    if (spare <= 0) break
+    entry.seconds += 1
+    spare -= 1
+  }
+  return floored.map((entry) => ({
+    endMs: entry.span.endMs,
+    seconds: entry.seconds,
+    startMs: entry.span.startMs
+  }))
+}
+
 /** Credited and wall-clock seconds for one bucket on one day. */
 interface BucketDayCredit {
   readonly seconds: number
   readonly activeSeconds: number
-  readonly spans: ReadonlyArray<CreditedSpan>
+  readonly blocks: ReadonlyArray<CreditedBlock>
 }
 
 /**
@@ -689,36 +747,45 @@ const shareBetweenBuckets = (
   // the totals from the runs and the spans from the original windows would put a row's seconds and
   // its blocks at odds — and the blocks are what a person checks the seconds against.
   const runs = applyDwellFloor(overlapSlices(spansByBucket), options)
-  const runSpans = new Map<string, Array<CreditedSpan>>()
+  const runSpans = new Map<string, Array<PricedSpan>>()
   for (const run of runs) {
     // Windows are already day-bounded, so a run never straddles two days.
     const day = localDay(new Date(run.startMs))
     const duration = run.endMs - run.startMs
+    // Divided, never duplicated: this is the one place an instant becomes seconds, and it is the
+    // same number that reaches the row's total and the block a person accepts.
+    const creditedMs = duration / run.bucketIds.length
     for (const bucketId of run.bucketIds) {
-      add(bucketId, day, duration / run.bucketIds.length, duration)
-      runSpans.set(bucketId, [...(runSpans.get(bucketId) ?? []), { endMs: run.endMs, startMs: run.startMs }])
+      add(bucketId, day, creditedMs, duration)
+      runSpans.set(bucketId, [...(runSpans.get(bucketId) ?? []), {
+        creditedMs,
+        endMs: run.endMs,
+        startMs: run.startMs
+      }])
     }
   }
 
   const result = new Map<string, Map<string, BucketDayCredit>>()
   for (const [bucketId, byDay] of totals) {
-    const spansByDay = new Map<string, Array<CreditedSpan>>()
+    const spansByDay = new Map<string, Array<PricedSpan>>()
     for (const span of runSpans.get(bucketId) ?? []) {
       const day = localDay(new Date(span.startMs))
       spansByDay.set(day, [...(spansByDay.get(day) ?? []), span])
     }
     const perDay = new Map<string, BucketDayCredit>()
     for (const [day, sums] of byDay) {
+      // Floor, not round. A share of an odd-length slice is fractional, and rounding each bucket
+      // up independently can push the day one second past the wall clock it occupied — breaking
+      // the one invariant this shape exists to guarantee. Flooring errs the way the design prefers.
+      const seconds = Math.floor(sums.creditedMs / 1000)
       perDay.set(day, {
-        // Floor, not round. A share of an odd-length slice is fractional, and rounding each bucket
-        // up independently can push the day one second past the wall clock it occupied — breaking
-        // the one invariant this shape exists to guarantee. Flooring errs the way the design prefers.
-        seconds: Math.floor(sums.creditedMs / 1000),
         activeSeconds: Math.floor(sums.activeMs / 1000),
-        spans: joinSpansWithinDwell(
-          mergeSpansWithinDays(spansByDay.get(day) ?? []),
-          Math.max(0, options.dwellSeconds) * 1000
-        )
+        // The blocks are the row: the same runs, coalesced for reading, sharing out the same total.
+        blocks: wholeSeconds(
+          coalesceBlocks(spansByDay.get(day) ?? [], Math.max(0, options.dwellSeconds) * 1000),
+          seconds
+        ),
+        seconds
       })
     }
     result.set(bucketId, perDay)
@@ -743,8 +810,11 @@ export interface TicketDayCredit {
   readonly confidence: number | null
   /** Wall-clock seconds spent on this Issue Key before sharing overlaps with other keys. */
   readonly activeSeconds: number
-  /** When the work happened, merged and ascending. */
-  readonly spans: ReadonlyArray<CreditedSpan>
+  /**
+   * When the work happened and what each stretch is worth, ascending. Sums to `seconds` exactly, so
+   * a surface can offer one block at a time without the parts and the whole disagreeing.
+   */
+  readonly blocks: ReadonlyArray<CreditedBlock>
   /**
    * The sessions that contributed to this bucket, in id order.
    *
@@ -903,7 +973,7 @@ export const splitCredits = (
         signal: meta.signal,
         confidence: meta.confidence,
         activeSeconds: credit.activeSeconds,
-        spans: credit.spans,
+        blocks: credit.blocks,
         sessionIds: [...daySessions].sort()
       }
       if (meta.kind === "withheld") withheld.push(row)
@@ -942,8 +1012,12 @@ export interface SessionProposal {
   readonly signal: AttributionSignal
   /** Coding Agent confidence, or null when the attribution needed no Coding Agent. */
   readonly confidence: number | null
-  /** When the session's work happened — the evidence behind `sessionSeconds`. */
-  readonly spans: ReadonlyArray<CreditedSpan>
+  /**
+   * When the session's work happened and what each stretch is worth — the evidence behind
+   * `sessionSeconds`, which is their sum. Also the unit of acceptance: a surface may offer these one
+   * at a time, so long as it never writes more for the bucket than `sessionSeconds` in total.
+   */
+  readonly blocks: ReadonlyArray<CreditedBlock>
   /**
    * Credited seconds: this Issue Key's share of the time worked. Where several keys were worked on
    * at once, that time is divided equally, so no instant is ever counted twice.
@@ -1016,7 +1090,7 @@ export const buildSessionProposals = (
         day: credit.day,
         signal: credit.signal,
         confidence: credit.confidence,
-        spans: credit.spans,
+        blocks: credit.blocks,
         sessionSeconds: credit.seconds,
         activeSeconds: credit.activeSeconds,
         clockifySeconds,

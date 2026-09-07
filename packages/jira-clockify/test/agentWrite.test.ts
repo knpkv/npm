@@ -106,7 +106,7 @@ describe("applyProposal targets", () => {
     sessionIds: ["s1"],
     sessionSeconds: 3600,
     signal: "branch" as const,
-    spans: [{ endMs: 2, startMs: 1 }],
+    blocks: [{ endMs: 2, seconds: 3600, startMs: 1 }],
     ticketKey: "PROJ-1"
   }
 
