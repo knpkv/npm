@@ -1,6 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { AgentSessions, ReconcileService } from "@knpkv/jira-clockify"
-import { buildWeekPlan, MINIMUM_WRITE_SECONDS, proposeWrite, rowId, weekDays } from "../src/server/WeekPlan.js"
+import type { AgentSessions, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
+import {
+  buildWeekPlan,
+  isOwnedByMe,
+  MINIMUM_WRITE_SECONDS,
+  type OwnershipInput,
+  proposeWrite,
+  rowId,
+  selectedBlocks,
+  weekDays
+} from "../src/server/WeekPlan.js"
 
 /** Local components throughout, so these hold in any timezone. */
 const at = (day: number, hour: number): number => new Date(2025, 5, day, hour, 0, 0, 0).getTime()
@@ -19,7 +28,7 @@ const proposal = (
   sessionIds: ["s1"],
   sessionSeconds: 3600,
   signal: "branch",
-  spans: [{ endMs: at(16, 11), startMs: at(16, 10) }],
+  blocks: [{ endMs: at(16, 11), seconds: 3600, startMs: at(16, 10) }],
   ...overrides
 })
 
@@ -111,7 +120,7 @@ describe("buildWeekPlan", () => {
   it("holds the engine's own proposal behind the row a confirmation names", () => {
     const held = build({ proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-2" })] })
     const evidence = held.evidence.get(rowId("PROJ-2", "2025-06-16"))
-    expect(evidence?.proposal.spans).toEqual([{ endMs: at(16, 11), startMs: at(16, 10) }])
+    expect(evidence?.proposal.blocks).toEqual([{ endMs: at(16, 11), seconds: 3600, startMs: at(16, 10) }])
   })
 
   it("keeps row names stable across reads, so a re-read puts every row back where it was", () => {
@@ -164,6 +173,141 @@ describe("buildWeekPlan", () => {
   })
 })
 
+describe("ownership", () => {
+  const fact = (
+    key: string,
+    overrides: Partial<IssueFacts.IssueFact> = {}
+  ): IssueFacts.IssueFact => ({ assignee: "Someone Else", key, mine: false, title: `${key} title`, ...overrides })
+
+  const owning = (overrides: Partial<OwnershipInput> = {}): OwnershipInput => ({
+    checked: true,
+    facts: new Map([
+      ["PROJ-1", fact("PROJ-1", { assignee: "Me", mine: true })],
+      ["PROJ-2", fact("PROJ-2")]
+    ]),
+    mode: "assigned",
+    overrides: [],
+    ...overrides
+  })
+
+  const withOwnership = (
+    overrides: Partial<ReconcileService.SessionProposalReport>,
+    ownership: OwnershipInput
+  ) =>
+    buildWeekPlan({
+      createdAtMillis: 0,
+      monday,
+      ownership,
+      planId: "plan-1",
+      report: report(overrides),
+      scope: "both"
+    })
+
+  it("proposes a ticket assigned to me", () => {
+    const held = withOwnership({ proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-1" })] }, owning())
+    expect(held.plan.rows[0]?.proposal).toBeDefined()
+    expect(held.plan.notMine).toEqual([])
+  })
+
+  // The case this exists for: a branch checked out to review somebody's pull request.
+  it("withholds a ticket assigned to somebody else, keeping its hours in view", () => {
+    const held = withOwnership({ proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-2" })] }, owning())
+    // No row to accept, and no evidence held, so there is nothing a confirmation could name either.
+    expect(held.plan.rows).toEqual([])
+    expect(held.evidence.size).toBe(0)
+    expect(held.plan.notMine).toEqual([{
+      assignee: "Someone Else",
+      day: "2025-06-16",
+      seconds: 3600,
+      signal: "branch",
+      ticketKey: "PROJ-2",
+      ticketTitle: "PROJ-2 title"
+    }])
+  })
+
+  it("proposes a withheld ticket once it has been claimed", () => {
+    const held = withOwnership(
+      { proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-2" })] },
+      owning({ overrides: ["PROJ-2"] })
+    )
+    expect(held.plan.rows[0]?.proposal).toBeDefined()
+    expect(held.plan.notMine).toEqual([])
+  })
+
+  // Silence is not an answer. A key Jira was never asked about, or could not answer for, stays
+  // proposable — withholding on an unknown is how hours go missing with nothing to explain them.
+  it("proposes a ticket nobody could answer for", () => {
+    const unknown = withOwnership({ proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-9" })] }, owning())
+    expect(unknown.plan.rows[0]?.proposal).toBeDefined()
+
+    const unchecked = withOwnership(
+      { proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-2" })] },
+      owning({ checked: false, facts: new Map() })
+    )
+    expect(unchecked.plan.rows[0]?.proposal).toBeDefined()
+    expect(unchecked.plan.ownershipChecked).toBe(false)
+  })
+
+  it("proposes everything when ownership is not being enforced", () => {
+    const held = withOwnership(
+      { proposals: [proposal({ day: "2025-06-16", ticketKey: "PROJ-2" })] },
+      owning({ mode: "any" })
+    )
+    expect(held.plan.rows[0]?.proposal).toBeDefined()
+    expect(held.plan.ownership).toBe("any")
+  })
+
+  it("titles every row it can, including one only Clockify knows about", () => {
+    const held = withOwnership({
+      recorded: [recorded({ clockifySeconds: 1800, day: "2025-06-17", ticketKey: "PROJ-1" })],
+      withheld: [{
+        activeSeconds: 600,
+        blocks: [],
+        confidence: 0.4,
+        day: "2025-06-18",
+        seconds: 600,
+        sessionIds: ["s1"],
+        signal: "agent",
+        ticketKey: "PROJ-2"
+      }]
+    }, owning())
+    expect(held.plan.rows[0]?.ticketTitle).toBe("PROJ-1 title")
+    expect(held.plan.withheld[0]?.ticketTitle).toBe("PROJ-2 title")
+  })
+
+  it("says a key is mine on any of the four grounds, and only withholds on a named assignee", () => {
+    expect(isOwnedByMe("PROJ-1", owning())).toBe(true)
+    expect(isOwnedByMe("PROJ-2", owning())).toBe(false)
+    expect(isOwnedByMe("PROJ-2", owning({ mode: "any" }))).toBe(true)
+    expect(isOwnedByMe("PROJ-2", owning({ overrides: ["PROJ-2"] }))).toBe(true)
+    expect(isOwnedByMe("PROJ-404", owning())).toBe(true)
+  })
+})
+
+describe("selectedBlocks", () => {
+  const blocks = [
+    { endMs: at(16, 11), seconds: 600, startMs: at(16, 10) },
+    { endMs: at(16, 15), seconds: 900, startMs: at(16, 14) },
+    { endMs: at(16, 20), seconds: 1200, startMs: at(16, 19) }
+  ]
+
+  it("takes every block when a confirmation names none", () => {
+    expect(selectedBlocks(blocks, undefined)).toEqual(blocks)
+  })
+
+  it("takes the named blocks, deduplicated and in time order", () => {
+    expect(selectedBlocks(blocks, [2, 0, 2])).toEqual([blocks[0], blocks[2]])
+  })
+
+  // A page confirming against a plan that has since been re-read. Refusing is the only safe answer:
+  // writing "whatever block 7 turned out to be" would write time nobody chose.
+  it("refuses a position this row does not have, and refuses an empty choice", () => {
+    expect(selectedBlocks(blocks, [7])).toBeUndefined()
+    expect(selectedBlocks(blocks, [])).toBeUndefined()
+    expect(selectedBlocks(blocks, [-1])).toBeUndefined()
+  })
+})
+
 describe("proposeWrite", () => {
   const held = { heldClockifySeconds: 0, heldJiraSeconds: 0 }
 
@@ -190,6 +334,40 @@ describe("proposeWrite", () => {
   it("writes nothing when both sides already hold the time", () => {
     expect(proposeWrite({ credited: 3600, heldClockifySeconds: 3600, heldJiraSeconds: 3600, requested: undefined }))
       .toEqual({ _tag: "NothingOwed" })
+  })
+
+  it("writes only the blocks that were chosen", () => {
+    expect(proposeWrite({ ...held, credited: 3600, requested: undefined, selected: 900 }))
+      .toEqual({ _tag: "Write", clockifyDelta: 900, jiraDelta: 900 })
+  })
+
+  // The reason a side is sized against the row and not against the selection. Writing the morning
+  // must not make the afternoon look like time both systems already hold.
+  it("still writes a second block after the first one is in", () => {
+    expect(proposeWrite({
+      credited: 3600,
+      heldClockifySeconds: 900,
+      heldJiraSeconds: 900,
+      requested: undefined,
+      selected: 1800
+    })).toEqual({ _tag: "Write", clockifyDelta: 1800, jiraDelta: 1800 })
+  })
+
+  // Whatever the selection says, the day's total credit is the ceiling: the last block of a row
+  // three-quarters written is worth only the quarter that is left.
+  it("never writes past the row's own credit, however much was selected", () => {
+    expect(proposeWrite({
+      credited: 3600,
+      heldClockifySeconds: 3000,
+      heldJiraSeconds: 3000,
+      requested: undefined,
+      selected: 1800
+    })).toEqual({ _tag: "Write", clockifyDelta: 600, jiraDelta: 600 })
+  })
+
+  it("caps an edited amount at the selection rather than at the row", () => {
+    expect(proposeWrite({ ...held, credited: 3600, requested: 1200, selected: 900 }))
+      .toEqual({ _tag: "PastEvidence", maxSeconds: 900 })
   })
 
   it("refuses an amount Jira could not record faithfully", () => {

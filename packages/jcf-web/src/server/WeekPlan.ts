@@ -15,9 +15,16 @@
  *
  * @module
  */
-import type { AgentSessions, ReconcileService } from "@knpkv/jira-clockify"
+import type { AgentSessions, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
 import { Time } from "@knpkv/jira-clockify"
-import type { RecordedIntervalResponse, WeekPlanResponse, WeekRowResponse, WeekScopeName } from "./Api.js"
+import type {
+  NotMineRowResponse,
+  OwnershipMode,
+  RecordedIntervalResponse,
+  WeekPlanResponse,
+  WeekRowResponse,
+  WeekScopeName
+} from "./Api.js"
 
 /** How a confirmation names a row. Deterministic, so re-reading a week keeps the same names. */
 export const rowId = (ticketKey: string, day: string): string => `${day}:${ticketKey}`
@@ -64,6 +71,37 @@ interface RowDraft {
   jiraSeconds: number
   proposal: AgentSessions.SessionProposal | undefined
   ticketKey: string
+  ticketTitle: string | null
+}
+
+/**
+ * What Jira says about the tickets in a week, and whether it could be asked at all.
+ *
+ * Passed in rather than looked up here so this stays a pure function of one report plus one set of
+ * answers — which is what makes the ownership rule testable without a Jira anywhere near it.
+ */
+export interface OwnershipInput {
+  readonly facts: ReadonlyMap<string, IssueFacts.IssueFact>
+  readonly checked: boolean
+  readonly mode: OwnershipMode
+  /** Issue Keys a person has said are theirs regardless. */
+  readonly overrides: ReadonlyArray<string>
+}
+
+export const anyOwner: OwnershipInput = { checked: false, facts: new Map(), mode: "any", overrides: [] }
+
+/**
+ * Whether a row may be proposed on this Issue Key.
+ *
+ * Four ways to be yours, and only one way not to be: the mode is `any`, the key is overridden, Jira
+ * says you are the assignee — or Jira was never asked. A row is withheld only on a positive answer
+ * that names somebody else, because withholding on silence is how hours disappear.
+ */
+export const isOwnedByMe = (ticketKey: string, ownership: OwnershipInput): boolean => {
+  if (ownership.mode === "any") return true
+  if (ownership.overrides.includes(ticketKey)) return true
+  const fact = ownership.facts.get(ticketKey)
+  return fact === undefined || fact.mine
 }
 
 const emptyRow = (ticketKey: string, day: string): RowDraft => ({
@@ -73,7 +111,8 @@ const emptyRow = (ticketKey: string, day: string): RowDraft => ({
   intervals: [],
   jiraSeconds: 0,
   proposal: undefined,
-  ticketKey
+  ticketKey,
+  ticketTitle: null
 })
 
 /** Which systems a scope name puts in play. */
@@ -90,9 +129,15 @@ const toWire = (draft: RowDraft): WeekRowResponse => ({
   jiraSeconds: draft.jiraSeconds,
   rowId: rowId(draft.ticketKey, draft.day),
   ticketKey: draft.ticketKey,
+  ticketTitle: draft.ticketTitle,
   ...(draft.proposal === undefined ? {} : {
     proposal: {
       activeSeconds: draft.proposal.activeSeconds,
+      blocks: draft.proposal.blocks.map((block) => ({
+        endMs: block.endMs,
+        seconds: block.seconds,
+        startMs: block.startMs
+      })),
       clockifyDelta: draft.proposal.clockifyDelta,
       confidence: draft.proposal.confidence,
       jiraDelta: draft.proposal.jiraDelta,
@@ -100,8 +145,7 @@ const toWire = (draft: RowDraft): WeekRowResponse => ({
       // only what is missing right now and would fall to zero the moment one side is filled.
       maxSeconds: draft.proposal.sessionSeconds,
       sessionCount: draft.proposal.sessionIds.length,
-      signal: draft.proposal.signal,
-      spans: draft.proposal.spans.map((span) => ({ endMs: span.endMs, startMs: span.startMs }))
+      signal: draft.proposal.signal
     }
   })
 })
@@ -118,6 +162,8 @@ export const buildWeekPlan = (options: {
   readonly createdAtMillis: number
   readonly scope: WeekScopeName
   readonly report: ReconcileService.SessionProposalReport
+  /** What Jira says about these tickets. Omitted means nobody asked, so nothing is withheld. */
+  readonly ownership?: OwnershipInput | undefined
 }): HeldPlan => {
   const days = weekDays(options.monday)
   // The report was read for exactly this week, so this only guards the two disagreeing. A row for
@@ -147,13 +193,33 @@ export const buildWeekPlan = (options: {
     }))
   }
 
+  const ownership = options.ownership ?? anyOwner
   const evidence = new Map<string, RowEvidence>()
+  const notMine: Array<NotMineRowResponse> = []
   for (const proposal of options.report.proposals) {
     if (!inWeek.has(proposal.day)) continue
+    // A ticket Jira says belongs to somebody else keeps its hours and loses its offer: no proposal
+    // on the row and no evidence held, so there is nothing for a confirmation to name either.
+    if (!isOwnedByMe(proposal.ticketKey, ownership)) {
+      notMine.push({
+        assignee: ownership.facts.get(proposal.ticketKey)?.assignee ?? null,
+        day: proposal.day,
+        seconds: proposal.sessionSeconds,
+        signal: proposal.signal,
+        ticketKey: proposal.ticketKey,
+        ticketTitle: ownership.facts.get(proposal.ticketKey)?.title ?? null
+      })
+      continue
+    }
     const draft = draftFor(proposal.ticketKey, proposal.day)
     draft.proposal = proposal
     const id = rowId(proposal.ticketKey, proposal.day)
     evidence.set(id, { proposal, rowId: id })
+  }
+
+  // Titles last, so every row that exists gets one — including a row that only Clockify knows about.
+  for (const draft of drafts.values()) {
+    draft.ticketTitle = ownership.facts.get(draft.ticketKey)?.title ?? null
   }
 
   const rows = [...drafts.values()]
@@ -171,6 +237,12 @@ export const buildWeekPlan = (options: {
         .filter((excluded) => inWeek.has(excluded.day))
         .map((excluded) => ({ day: excluded.day, reason: excluded.reason })),
       monday: days[0]!,
+      notMine: notMine.sort((
+        a,
+        b
+      ) => (a.day === b.day ? a.ticketKey.localeCompare(b.ticketKey) : a.day.localeCompare(b.day))),
+      ownership: ownership.mode,
+      ownershipChecked: ownership.checked,
       planId: options.planId,
       rows,
       scope: options.scope,
@@ -190,7 +262,8 @@ export const buildWeekPlan = (options: {
           confidence: credit.confidence,
           day: credit.day,
           seconds: credit.seconds,
-          ticketKey: credit.ticketKey
+          ticketKey: credit.ticketKey,
+          ticketTitle: ownership.facts.get(credit.ticketKey)?.title ?? null
         }))
     },
     planId: options.planId
@@ -198,12 +271,38 @@ export const buildWeekPlan = (options: {
 }
 
 /**
+ * The blocks a confirmation named, or every block when it named none.
+ *
+ * `undefined` for an index that is not a block of this row: a stale page confirming against a plan
+ * that has been re-read is a case to refuse, not to write a guess for.
+ */
+export const selectedBlocks = (
+  blocks: ReadonlyArray<AgentSessions.CreditedBlock>,
+  chosen: ReadonlyArray<number> | undefined
+): ReadonlyArray<AgentSessions.CreditedBlock> | undefined => {
+  if (chosen === undefined) return blocks
+  const picked: Array<AgentSessions.CreditedBlock> = []
+  for (const index of [...new Set(chosen)].sort((a, b) => a - b)) {
+    const block = blocks[index]
+    if (block === undefined) return undefined
+    picked.push(block)
+  }
+  return picked.length === 0 ? undefined : picked
+}
+
+/**
  * What accepting a row would write, given a live re-tally of the target bucket.
  *
- * Every number here is the server's: `credited` is the evidence the plan was built from, and `held`
- * is what the two systems answered a moment ago. `requested` is the only input a person supplies,
- * and it is capped by the evidence rather than clamped to it — silently writing less than someone
- * asked for is its own kind of wrong.
+ * Every number here is the server's: `credited` is the evidence the plan was built from, `selected`
+ * is the part of it a person is accepting now, and `held` is what the two systems answered a moment
+ * ago. `requested` is the only input a person supplies, and it is capped by the selection rather
+ * than clamped to it — silently writing less than someone asked for is its own kind of wrong.
+ *
+ * **Why a side is sized against the whole row and not against the selection.** `credited - held` is
+ * the room left in the day; the selection only says how much of that room to use now. Sizing a
+ * block against `selected - held` instead would report "already logged" for the second block of any
+ * row whose first block is already in — the arithmetic would treat the morning's entry as evidence
+ * that the afternoon had been written too.
  */
 export type ProposedWrite =
   | {
@@ -223,6 +322,8 @@ export const MINIMUM_WRITE_SECONDS = 60
 
 export const proposeWrite = (options: {
   readonly credited: number
+  /** The blocks being accepted now. Defaults to the whole row. */
+  readonly selected?: number | undefined
   readonly requested: number | undefined
   readonly heldClockifySeconds: number
   readonly heldJiraSeconds: number
@@ -230,14 +331,17 @@ export const proposeWrite = (options: {
   readonly targets?: { readonly clockify: boolean; readonly jira: boolean } | undefined
 }): ProposedWrite => {
   const targets = options.targets ?? { clockify: true, jira: true }
-  const requested = options.requested ?? options.credited
-  if (requested > options.credited) return { _tag: "PastEvidence", maxSeconds: options.credited }
+  const selected = Math.min(options.selected ?? options.credited, options.credited)
+  const requested = options.requested ?? selected
+  if (requested > selected) return { _tag: "PastEvidence", maxSeconds: selected }
   if (requested < MINIMUM_WRITE_SECONDS) {
     return { _tag: "BelowMinimum", minimumSeconds: MINIMUM_WRITE_SECONDS }
   }
   const owed = (held: number, asked: boolean): number => {
     if (!asked) return 0
-    const delta = Math.max(0, requested - held)
+    // Room left in the day, then as much of it as this selection asks for.
+    const room = Math.max(0, options.credited - held)
+    const delta = Math.min(requested, room)
     // Under a minute is a rounding artefact rather than work: Jira floors worklogs to the minute.
     return delta < MINIMUM_WRITE_SECONDS ? 0 : delta
   }

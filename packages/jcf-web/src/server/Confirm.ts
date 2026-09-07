@@ -20,7 +20,7 @@ import type { ReconcileService } from "@knpkv/jira-clockify"
 import { Effect } from "effect"
 import type { WriteResultResponse } from "./Api.js"
 import type { HeldPlan } from "./WeekPlan.js"
-import { MINIMUM_WRITE_SECONDS, planSides, proposeWrite } from "./WeekPlan.js"
+import { MINIMUM_WRITE_SECONDS, planSides, proposeWrite, selectedBlocks } from "./WeekPlan.js"
 
 /** The engine operations these functions need. Narrow, so a test provides only what it must. */
 export type WriteCapableService = Pick<
@@ -33,12 +33,16 @@ export type ConfirmOutcome =
   | { readonly _tag: "Written"; readonly result: WriteResultResponse }
   | { readonly _tag: "NothingOwed"; readonly result: WriteResultResponse }
   | { readonly _tag: "UnknownRow" }
+  /** A block position that is not part of this row — a page confirming against a plan that moved. */
+  | { readonly _tag: "UnknownBlocks" }
   | { readonly _tag: "PastEvidence"; readonly maxSeconds: number }
   | { readonly _tag: "BelowMinimum"; readonly minimumSeconds: number }
   | { readonly _tag: "NoTargets" }
 
 export interface ConfirmRequest {
   readonly rowId: string
+  /** Which of the row's blocks to write, by position. Absent means the whole row. */
+  readonly blocks: ReadonlyArray<number> | undefined
   readonly seconds: number | undefined
   readonly ticketKey: string | undefined
   readonly note: string | undefined
@@ -89,6 +93,10 @@ export const confirmProposal = (options: {
     const evidence = options.plan.evidence.get(options.request.rowId)
     if (evidence === undefined) return { _tag: "UnknownRow" } as const
     const proposal = evidence.proposal
+    const blocks = selectedBlocks(proposal.blocks, options.request.blocks)
+    if (blocks === undefined) return { _tag: "UnknownBlocks" } as const
+    const partial = options.request.blocks !== undefined && blocks.length < proposal.blocks.length
+    const selected = blocks.reduce((sum, block) => sum + block.seconds, 0)
     const ticketKey = options.request.ticketKey ?? proposal.ticketKey
     // The plan's own scope by default: someone reading a Jira-only week and confirming a row means
     // Jira, and a payload that says otherwise had to say so.
@@ -107,6 +115,7 @@ export const confirmProposal = (options: {
       heldClockifySeconds,
       heldJiraSeconds,
       requested: options.request.seconds,
+      selected,
       targets
     })
     if (write._tag === "PastEvidence") return { _tag: "PastEvidence", maxSeconds: write.maxSeconds } as const
@@ -115,8 +124,9 @@ export const confirmProposal = (options: {
     }
 
     const provenance: AgentWrite.WriteProvenance = {
-      amountSetByHand: options.request.seconds !== undefined &&
-        options.request.seconds !== proposal.sessionSeconds,
+      // Against the selection, not the row: accepting one block of five is not an amount typed over
+      // the evidence, it is the evidence for that block.
+      amountSetByHand: options.request.seconds !== undefined && options.request.seconds !== selected,
       evidence: "session",
       ticketSetByHand: ticketKey !== proposal.ticketKey
     }
@@ -133,10 +143,16 @@ export const confirmProposal = (options: {
       options.service,
       {
         ...proposal,
+        // Only the blocks being accepted, so the entry is filed at the time they name. The held
+        // seconds go with them: `applyProposal` skips that much of what it is given before anchoring,
+        // which is right for a whole row written in instalments and wrong for a chosen block — there
+        // the person has already said which stretch this is, and skipping into it would file a 20:52
+        // block at 21:32.
+        blocks,
         clockifyDelta: write.clockifyDelta,
-        clockifySeconds: heldClockifySeconds,
+        clockifySeconds: partial ? 0 : heldClockifySeconds,
         jiraDelta: write.jiraDelta,
-        jiraSeconds: heldJiraSeconds,
+        jiraSeconds: partial ? 0 : heldJiraSeconds,
         ticketKey
       },
       description,

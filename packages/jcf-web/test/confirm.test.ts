@@ -84,6 +84,7 @@ const confirm = (plan: HeldPlan, request: Partial<ConfirmRequest> = {}) =>
     return yield* confirmProposal({
       plan,
       request: {
+        blocks: undefined,
         note: undefined,
         rowId: rowId(TICKET, DAY),
         seconds: undefined,
@@ -162,6 +163,95 @@ describe("confirming a proposed row", () => {
       expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(value.credited - 1800)
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(value.outcome._tag).toBe("Written")
+    }))
+})
+
+/**
+ * A day's evidence arrives in stretches, and a person may accept them one at a time.
+ *
+ * Two properties matter here and nothing else does: a chosen block writes its own seconds at its own
+ * time, and accepting the rest afterwards still works — the arithmetic must not read the morning's
+ * entry as evidence that the afternoon was written too.
+ */
+describe("writing one block at a time", () => {
+  /** The same ticket worked on again after lunch, so its row has two blocks. */
+  const twoBlocks: FakeHeadlessOptions = {
+    transcripts: {
+      "repo/session-b.jsonl": transcript({
+        branch: `feature/${TICKET}-otel`,
+        minutes: 30,
+        sessionId: "session-b",
+        startMs: at(15, 0)
+      })
+    }
+  }
+
+  it.effect("writes only the block that was chosen, at the time it happened", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.gen(function*() {
+          const plan = yield* readPlan
+          const blocks = rowFor(plan, TICKET, DAY)?.proposal?.blocks ?? []
+          return { blocks, outcome: yield* confirm(plan, { blocks: [1] }) }
+        }),
+        twoBlocks
+      )
+      expect(value.blocks).toHaveLength(2)
+      const afternoon = value.blocks[1]!
+      expect(value.outcome._tag).toBe("Written")
+      expect(world.jiraWorklogs).toHaveLength(1)
+      expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(afternoon.seconds)
+      // At the block's own start. Anchoring past what the day already holds is right for a row
+      // written in instalments and wrong here: the person pointed at this stretch.
+      expect(new Date(world.jiraWorklogs[0]!.started).getHours()).toBe(15)
+      expect(world.createdClockifyEntries).toHaveLength(1)
+    }))
+
+  it.effect("still writes the other block afterwards, rather than reporting nothing owed", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.gen(function*() {
+          const plan = yield* readPlan
+          const blocks = rowFor(plan, TICKET, DAY)?.proposal?.blocks ?? []
+          yield* confirm(plan, { blocks: [1] })
+          // A fresh read, as the page reloads after a write, then the morning.
+          const reread = yield* readPlan
+          const second = yield* confirm(reread, { blocks: [0] })
+          return { blocks, second }
+        }),
+        twoBlocks
+      )
+      expect(value.second._tag).toBe("Written")
+      expect(world.jiraWorklogs).toHaveLength(2)
+      // Both blocks, and no more than the day's credit between them.
+      const written = world.jiraWorklogs.reduce((sum, worklog) => sum + worklog.timeSpentSeconds, 0)
+      expect(written).toBe(value.blocks.reduce((sum, block) => sum + block.seconds, 0))
+      expect(new Date(world.jiraWorklogs[1]!.started).getHours()).toBe(10)
+    }))
+
+  it.effect("refuses an amount larger than the blocks that were ticked", () =>
+    Effect.gen(function*() {
+      const { value } = yield* run(
+        Effect.gen(function*() {
+          const plan = yield* readPlan
+          const blocks = rowFor(plan, TICKET, DAY)?.proposal?.blocks ?? []
+          const chosen = blocks[1]?.seconds ?? 0
+          return { chosen, outcome: yield* confirm(plan, { blocks: [1], seconds: chosen + 60 }) }
+        }),
+        twoBlocks
+      )
+      expect(value.outcome).toEqual({ _tag: "PastEvidence", maxSeconds: value.chosen })
+    }))
+
+  it.effect("refuses a block position this row does not have, and writes nothing", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.flatMap(readPlan, (plan) => confirm(plan, { blocks: [7] })),
+        twoBlocks
+      )
+      expect(value._tag).toBe("UnknownBlocks")
+      expect(world.jiraWorklogs).toEqual([])
+      expect(world.createdClockifyEntries).toEqual([])
     }))
 })
 

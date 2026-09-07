@@ -25,7 +25,7 @@ their ticket as your work. Ownership is decided by account id, never by display 
 cache is discarded when the logged-in account changes — `mine` is a claim about one account, and
 another account's answer is wrong rather than merely stale.
 
-Every failure mode leaves a key *unknown* rather than "not yours": no login, an unreachable site, an
+Every failure mode leaves a key _unknown_ rather than "not yours": no login, an unreachable site, an
 issue in a project you cannot see. A caller may act on Jira saying a ticket belongs to somebody
 else; acting on Jira not having been asked would hide hours that really happened.
 

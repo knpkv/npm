@@ -11,6 +11,9 @@
  *   that direction is a real discrepancy and hiding it would be the same lie in reverse.
  * - **Empty space is an offer.** Clicking it is how time nobody recorded gets logged, at the time
  *   clicked — which is the gesture a calendar teaches.
+ * - **A block is the unit, not the day.** Clicking one proposable block offers that stretch, because
+ *   that is the thing on screen a person pointed at. Its row's other blocks are one tick away in the
+ *   panel, so accepting the whole day never costs more than a click either.
  *
  * @module
  */
@@ -23,6 +26,15 @@ import { clockAtOffset, type HourWindow, hourWindow, type Placed, placeBlocks } 
 const MINUTE_PX = 0.8
 
 const HOUR_PX = MINUTE_PX * 60
+
+/**
+ * The shortest a block may be drawn.
+ *
+ * Enough for one line of its label. At true scale a five-minute block is four pixels tall, which
+ * renders as a sliver with the top half of its Issue Key showing and is barely clickable — and a
+ * block that cannot be read or clicked is not an offer.
+ */
+const MIN_BLOCK_PX = 18
 
 export type GridBlock =
   | {
@@ -42,8 +54,14 @@ export type GridBlock =
       readonly startMs: number
       readonly endMs: number
       readonly rowId: string
+      /** Which block of its row this is, which is what confirming just this one names. */
+      readonly blockIndex: number
       readonly ticketKey: string
+      readonly ticketTitle: string | null
       readonly signal: string
+      /** This block's own credit, which is what accepting it alone would write. */
+      readonly seconds: number
+      /** Everything the row could still put in the two systems, for the tooltip. */
       readonly deltaSeconds: number
     }
 
@@ -63,7 +81,7 @@ const blocksForRow = (row: WeekRowResponse): ReadonlyArray<GridBlock> => {
   return [
     ...logged.map((interval, index): GridBlock => ({
       behind,
-      description: row.clockifyDescription,
+      description: row.clockifyDescription ?? row.ticketTitle,
       endMs: interval.endMs,
       id: `${row.rowId}:logged:${index}`,
       kind: "logged",
@@ -73,15 +91,18 @@ const blocksForRow = (row: WeekRowResponse): ReadonlyArray<GridBlock> => {
     })),
     ...(row.proposal === undefined
       ? []
-      : row.proposal.spans.map((span, index): GridBlock => ({
+      : row.proposal.blocks.map((block, index): GridBlock => ({
+          blockIndex: index,
           deltaSeconds: Math.max(row.proposal?.clockifyDelta ?? 0, row.proposal?.jiraDelta ?? 0),
-          endMs: span.endMs,
+          endMs: block.endMs,
           id: `${row.rowId}:gap:${index}`,
           kind: "proposable",
           rowId: row.rowId,
+          seconds: block.seconds,
           signal: row.proposal?.signal ?? "none",
-          startMs: span.startMs,
-          ticketKey: row.ticketKey
+          startMs: block.startMs,
+          ticketKey: row.ticketKey,
+          ticketTitle: row.ticketTitle
         })))
   ]
 }
@@ -113,12 +134,12 @@ export const visibleDays = (plan: WeekPlanResponse, blocks: ReadonlyArray<GridBl
 const Block = (props: {
   readonly placed: Placed<GridBlock>
   readonly window: HourWindow
-  readonly onOpen: (rowId: string) => void
+  readonly onOpen: (rowId: string, blockIndex: number) => void
   readonly selectedRowId: string | undefined
 }) => {
   const { block, column, columns, endMinutes, startMinutes } = props.placed
   const style = {
-    height: `${Math.max(endMinutes - startMinutes, 12) * MINUTE_PX}px`,
+    height: `${Math.max((endMinutes - startMinutes) * MINUTE_PX, MIN_BLOCK_PX)}px`,
     left: `${(column / columns) * 100}%`,
     top: `${(startMinutes - props.window.fromHour * 60) * MINUTE_PX}px`,
     width: `${(1 / columns) * 100}%`
@@ -151,19 +172,20 @@ const Block = (props: {
       onClick={(event) => {
         // Stops the column's own click from also offering a manual entry underneath it.
         event.stopPropagation()
-        props.onOpen(block.rowId)
+        props.onOpen(block.rowId, block.blockIndex)
       }}
       style={style}
-      title={`${block.ticketKey} ${clock} — not logged · +${duration(
-        block.deltaSeconds
-      )} proposable on this ticket today`}
+      title={[
+        `${block.ticketKey}${block.ticketTitle === null ? "" : ` — ${block.ticketTitle}`}`,
+        `${clock} · ${duration(block.seconds)} on this block`,
+        `+${duration(block.deltaSeconds)} proposable on this ticket today · placed by ${block.signal}`
+      ].join("\n")}
       type="button"
     >
       <span className="jcf-block-key">{block.ticketKey}</span>
       <span className="jcf-block-clock">{clock}</span>
-      <span className="jcf-signal" data-signal={block.signal}>
-        {block.signal}
-      </span>
+      {/* Last, so a block too short for three lines loses the title rather than the times. */}
+      {block.ticketTitle === null ? null : <span className="jcf-block-note">{block.ticketTitle}</span>}
     </button>
   )
 }
@@ -171,7 +193,7 @@ const Block = (props: {
 export const WeekGrid = (props: {
   readonly plan: WeekPlanResponse
   readonly selectedRowId: string | undefined
-  readonly onOpenRow: (rowId: string) => void
+  readonly onOpenRow: (rowId: string, blockIndex: number) => void
   readonly onOpenSlot: (day: string, clock: string) => void
 }) => {
   const blocks = blocksForWeek(props.plan)

@@ -83,9 +83,16 @@ export class OwnerSessionAuth extends HttpApiMiddleware.Service<OwnerSessionAuth
   }
 ) {}
 
-/** When credited work happened. Epoch milliseconds, because the browser draws these on a grid. */
-export const Span = Schema.Struct({
+/**
+ * One stretch of credited work: when it happened, and what it is worth.
+ *
+ * Epoch milliseconds because the browser draws these on a grid, and `seconds` because a block is
+ * what a person accepts on its own — `seconds` is its share of the row, which on time worked in
+ * parallel is less than the interval it spans.
+ */
+export const ProposalBlock = Schema.Struct({
   endMs: Schema.Number,
+  seconds: Schema.Number,
   startMs: Schema.Number
 })
 
@@ -123,13 +130,17 @@ export const RecordedInterval = Schema.Struct({
  */
 export const RowProposal = Schema.Struct({
   activeSeconds: Schema.Number,
+  /**
+   * The stretches behind this row, ascending. They sum to `maxSeconds`, and a confirmation may name
+   * a subset of them by position — which is how a morning gets written without the afternoon.
+   */
+  blocks: Schema.Array(ProposalBlock),
   clockifyDelta: Schema.Number,
   confidence: Schema.NullOr(Schema.Number),
   jiraDelta: Schema.Number,
   maxSeconds: Schema.Number,
   sessionCount: Schema.Number,
-  signal: AttributionSignal,
-  spans: Schema.Array(Span)
+  signal: AttributionSignal
 })
 
 /**
@@ -151,7 +162,13 @@ export const WeekRow = Schema.Struct({
   jiraSeconds: Schema.Number,
   proposal: Schema.optional(RowProposal),
   rowId: Schema.String,
-  ticketKey: Schema.String
+  ticketKey: Schema.String,
+  /**
+   * The issue title, or null when Jira could not be asked — logged out, unreachable, or out of
+   * scope for this week. Null is "unknown", never "untitled": an Issue Key alone is a lookup nobody
+   * can do six months later, so it is worth saying when it is missing.
+   */
+  ticketTitle: Schema.NullOr(Schema.String)
 })
 
 /** Hours that happened on a day and no signal could place, with the directories behind them. */
@@ -167,7 +184,25 @@ export const WithheldRow = Schema.Struct({
   confidence: Schema.NullOr(Schema.Number),
   day: Day,
   seconds: Schema.Number,
-  ticketKey: Schema.String
+  ticketKey: Schema.String,
+  ticketTitle: Schema.NullOr(Schema.String)
+})
+
+/**
+ * Hours a signal placed on a ticket Jira says belongs to somebody else.
+ *
+ * Reported rather than proposed, and reported rather than dropped: a branch cannot tell authoring
+ * from reviewing, so this is usually a pull request you read — and occasionally your own work on a
+ * colleague's ticket, which is what `assignee` and the override are for.
+ */
+export const NotMineRow = Schema.Struct({
+  /** Who Jira says owns it, or null when it is unassigned. */
+  assignee: Schema.NullOr(Schema.String),
+  day: Day,
+  seconds: Schema.Number,
+  signal: AttributionSignal,
+  ticketKey: Schema.String,
+  ticketTitle: Schema.NullOr(Schema.String)
 })
 
 /** A day withheld from proposals, with the reason, so it never reads as "nothing to log". */
@@ -194,6 +229,17 @@ export const WeekPlan = Schema.Struct({
   scope: WeekScope,
   /** Zero means nothing is opted in, which is the usual reason for an empty week. */
   sessionRootCount: Schema.Number,
+  /** Hours on tickets assigned to somebody else. Empty when ownership is not being enforced. */
+  notMine: Schema.Array(NotMineRow),
+  /**
+   * True when Jira actually answered about who owns these tickets.
+   *
+   * False means nothing was filtered on ownership, whatever the setting says — a week that quietly
+   * hid rows because Jira was unreachable would be a week missing hours with nothing to explain it.
+   */
+  ownershipChecked: Schema.Boolean,
+  /** Whether this week withheld tickets assigned to other people. */
+  ownership: Schema.Literals(["assigned", "any"]),
   unattributed: Schema.Array(UnattributedDay),
   withheld: Schema.Array(WithheldRow)
 })
@@ -229,6 +275,13 @@ export const WriteResult = Schema.Struct({
  * a person is allowed to choose.
  */
 export const ConfirmPayload = Schema.Struct({
+  /**
+   * Which of the row's blocks to write, by position. Absent means all of them.
+   *
+   * Positions rather than times or durations, so the server still owns every number: naming block
+   * two of a row it built is not the same kind of claim as sending "40 minutes at 20:52".
+   */
+  blocks: Schema.optional(Schema.Array(Schema.Number.pipe(Schema.check(Schema.isInt())))),
   note: Schema.optional(Note),
   planId: Schema.String,
   rowId: Schema.String,
@@ -255,6 +308,15 @@ export const ManualPayload = Schema.Struct({
   /** Local `HH:MM` the work began. Absent lets the engine place it at local noon. */
   startClock: Schema.optional(Schema.String.pipe(Schema.check(Schema.isPattern(/^\d{2}:\d{2}$/)))),
   ticketKey: TicketKey
+})
+
+/** Treat one ticket as yours whatever Jira says its assignee is. Sticks, in `~/.jcf/config.json`. */
+export const OwnershipPayload = Schema.Struct({
+  ticketKey: TicketKey
+})
+
+export const OwnershipResult = Schema.Struct({
+  ownershipOverrides: Schema.Array(Schema.String)
 })
 
 /** Map a directory prefix to an Issue Key, so recurring ticket-less work stops being unplaced. */
@@ -304,6 +366,13 @@ export class ConfigGroup extends HttpApiGroup.make("config")
       success: StandingResult
     })
   )
+  .add(
+    HttpApiEndpoint.post("mine", "/mine", {
+      error: Schema.Union([ApiError, ProposalRejectedError]),
+      payload: OwnershipPayload,
+      success: OwnershipResult
+    })
+  )
   .prefix("/api/config")
 {}
 
@@ -322,3 +391,6 @@ export type WriteResultResponse = Schema.Schema.Type<typeof WriteResult>
 export type WeekScopeName = Schema.Schema.Type<typeof WeekScope>
 export type WriteTargetsRequest = Schema.Schema.Type<typeof WriteTargets>
 export type RecordedIntervalResponse = Schema.Schema.Type<typeof RecordedInterval>
+export type ProposalBlockResponse = Schema.Schema.Type<typeof ProposalBlock>
+export type NotMineRowResponse = Schema.Schema.Type<typeof NotMineRow>
+export type OwnershipMode = "assigned" | "any"

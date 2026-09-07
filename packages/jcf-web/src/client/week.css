@@ -240,6 +240,36 @@
   gap: var(--rly-space-4);
 }
 
+/*
+ * The blocks a write is for. A list rather than a grid: they are read top to bottom in time order,
+ * and there are rarely more than a handful.
+ */
+.jcf-blocks {
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  padding: 0 var(--rly-space-8) var(--rly-space-8);
+}
+
+.jcf-blocks legend {
+  color: var(--rly-color-text-3);
+  padding: 0 var(--rly-space-4);
+}
+
+.jcf-blocks ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-4) var(--rly-space-16);
+  list-style: none;
+  margin: 0 0 var(--rly-space-8);
+  padding: 0;
+}
+
+.jcf-blocks label {
+  align-items: center;
+  display: flex;
+  gap: var(--rly-space-6);
+}
+
 .jcf-panel {
   background: var(--rly-color-surface-2);
   border: 1px solid var(--rly-color-action-background);

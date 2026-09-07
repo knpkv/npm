@@ -7,9 +7,10 @@
  *   there, which is the whole reason this is a grid and not a list of proposals.
  * - **The server owns every number.** This component chooses what to show and what to ask; it never
  *   computes hours, never sizes a write, and never decides what is safe.
- * - **Three lanes under the grid, none of them decoration.** Hours a Coding Agent placed too weakly
- *   to offer, hours nothing placed at all, and days withheld because a Timer is still running. Each
- *   one is time that exists and is not in the grid, so hiding it would make the grid a lie.
+ * - **Four lanes under the grid, none of them decoration.** Hours on somebody else's ticket, hours a
+ *   Coding Agent placed too weakly to offer, hours nothing placed at all, and days withheld because
+ *   a Timer is still running. Each one is time that exists and is not in the grid, so hiding it
+ *   would make the grid a lie.
  *
  * @module
  */
@@ -22,6 +23,7 @@ import {
   type ConfirmRequest,
   logManual,
   mapStandingAttribution,
+  markTicketMine,
   RequestFailure
 } from "./api.js"
 import { readWeek } from "./api.js"
@@ -30,7 +32,7 @@ import { ConfirmPanel, ManualPanel, StandingPanel } from "./panels.js"
 import { WeekGrid } from "./WeekGrid.js"
 
 type OpenPanel =
-  | { readonly kind: "confirm"; readonly rowId: string }
+  | { readonly kind: "confirm"; readonly rowId: string; readonly blockIndex: number | undefined }
   | { readonly kind: "manual"; readonly day: string; readonly clock: string }
   | { readonly kind: "standing"; readonly day: string; readonly cwd: string }
 
@@ -205,6 +207,13 @@ export const App = () => {
           <code>jcf config set session-root ~/dev/work</code>.
         </p>
       ) : null}
+      {plan !== null && plan.ownership === "assigned" && !plan.ownershipChecked ? (
+        <p className="jcf-note" data-tone="warning">
+          {plan.scope === "clockify"
+            ? "Clockify only, so Jira was not asked who owns these tickets — nothing is withheld and no titles are shown."
+            : "Jira could not say who owns these tickets, so nothing was withheld on ownership this week."}
+        </p>
+      ) : null}
       {plan !== null && !plan.attributorAvailable ? (
         <p className="jcf-note" data-tone="warning">
           A Coding Agent could not be reached, so sessions no branch or path could place are only reported below.
@@ -215,9 +224,9 @@ export const App = () => {
 
       {plan === null ? null : (
         <WeekGrid
-          onOpenRow={(rowId) => {
+          onOpenRow={(rowId, blockIndex) => {
             setWritten(null)
-            setOpen({ kind: "confirm", rowId })
+            setOpen({ blockIndex, kind: "confirm", rowId })
           }}
           onOpenSlot={(day, clock) => {
             setWritten(null)
@@ -228,14 +237,18 @@ export const App = () => {
         />
       )}
 
-      {openRow === undefined ? null : (
+      {openRow === undefined || open?.kind !== "confirm" ? null : (
         <ConfirmPanel
+          blockIndex={open.blockIndex}
           busy={busy}
+          // Mounted fresh per block, so the ticks and the amount always belong to what was clicked.
+          key={`${openRow.rowId}:${open.blockIndex ?? "all"}`}
           onCancel={() => setOpen(null)}
           onConfirm={(submission) =>
             confirm(
               {
                 targets: submission.targets,
+                ...(submission.blocks === undefined ? {} : { blocks: submission.blocks }),
                 ...(submission.note === undefined ? {} : { note: submission.note }),
                 ...(submission.seconds === undefined ? {} : { seconds: submission.seconds }),
                 ...(submission.ticketKey === undefined ? {} : { ticketKey: submission.ticketKey })
@@ -323,6 +336,41 @@ export const App = () => {
             </section>
           )}
 
+          {plan.notMine.length === 0 ? null : (
+            <section className="jcf-lane">
+              <h2>Assigned to somebody else</h2>
+              <p className="jcf-muted">
+                A branch cannot tell writing a ticket from reviewing one. These hours are real; they are just not
+                offered, because Jira says the ticket is not yours. If one of them is your work, say so once and it
+                stays said.
+              </p>
+              <ul>
+                {plan.notMine.map((row) => (
+                  <li key={`${row.day}:${row.ticketKey}`}>
+                    <strong>{row.day}</strong>
+                    <span>{row.ticketKey}</span>
+                    <span>{duration(row.seconds)}</span>
+                    {row.ticketTitle === null ? null : <span className="jcf-muted">{row.ticketTitle}</span>}
+                    <span className="jcf-muted">{row.assignee === null ? "unassigned" : row.assignee}</span>
+                    <Button
+                      disabled={busy}
+                      onClick={() =>
+                        act(async () => {
+                          await markTicketMine({ ticketKey: row.ticketKey })
+                          await load(monday, scope)
+                        })
+                      }
+                      size="compact"
+                      variant="quiet"
+                    >
+                      It is mine
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           {plan.withheld.length === 0 ? null : (
             <section className="jcf-lane">
               <h2>Placed too weakly to offer</h2>
@@ -332,6 +380,7 @@ export const App = () => {
                     <strong>{credit.day}</strong>
                     <span>{credit.ticketKey}</span>
                     <span>{duration(credit.seconds)}</span>
+                    {credit.ticketTitle === null ? null : <span className="jcf-muted">{credit.ticketTitle}</span>}
                     <span className="jcf-muted">
                       confidence {credit.confidence === null ? "unknown" : credit.confidence.toFixed(2)} — below the
                       floor, so it is reported rather than proposed

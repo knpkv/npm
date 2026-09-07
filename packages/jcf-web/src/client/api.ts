@@ -15,6 +15,7 @@
 import type { Schema } from "effect"
 import type {
   ManualPayload,
+  OwnershipResult,
   StandingResult,
   WeekPlanResponse,
   WeekScopeName,
@@ -133,6 +134,8 @@ export const readWeek = (monday: string | undefined, scope: WeekScopeName): Prom
 export interface ConfirmRequest {
   readonly planId: string
   readonly rowId: string
+  /** Which of the row's blocks to write, by position. Omitted means all of them. */
+  readonly blocks?: ReadonlyArray<number>
   readonly seconds?: number
   readonly ticketKey?: string
   readonly note?: string
@@ -143,6 +146,11 @@ export const confirmRow = (request: ConfirmRequest): Promise<WriteResultResponse
 
 export const logManual = (request: Schema.Schema.Type<typeof ManualPayload>): Promise<WriteResultResponse> =>
   post("/api/rows/manual", request)
+
+/** Claim a ticket as yours for good, so its hours stop being withheld every week. */
+export const markTicketMine = (
+  request: { readonly ticketKey: string }
+): Promise<Schema.Schema.Type<typeof OwnershipResult>> => post("/api/config/mine", request)
 
 export const mapStandingAttribution = (
   request: { readonly cwd: string; readonly ticketKey: string }
