@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   formatClock,
+  formatDuration,
   formatElapsed,
   isFullIsoTimestamp,
   isoWeekPeriod,
@@ -29,11 +30,28 @@ describe("parseDuration", () => {
     expect(parseDuration("  15m ")).toBe(900)
   })
 
+  // Whatever formatDuration writes has to read back, or a form pre-filled with a credited amount
+  // rejects its own contents. These three are exactly its output shapes.
+  it("parses what formatDuration prints", () => {
+    expect(parseDuration(formatDuration(3396))).toBe(3396)
+    expect(parseDuration(formatDuration(45))).toBe(45)
+    expect(parseDuration(formatDuration(5400))).toBe(5400)
+  })
+
+  it("parses spaced parts and a seconds component", () => {
+    expect(parseDuration("1h 30m")).toBe(5400)
+    expect(parseDuration("56m 36s")).toBe(3396)
+    expect(parseDuration("30s")).toBe(30)
+    expect(parseDuration("1h 0m 5s")).toBe(3605)
+  })
+
   it("rejects empty or malformed input", () => {
     expect(parseDuration("")).toBeNull()
     expect(parseDuration("abc")).toBeNull()
     expect(parseDuration("1h30")).toBeNull()
-    expect(parseDuration("30s")).toBeNull()
+    // Units out of order stay malformed: a unit that already passed cannot come round again.
+    expect(parseDuration("30s 5m")).toBeNull()
+    expect(parseDuration("m")).toBeNull()
   })
 })
 

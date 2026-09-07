@@ -74,16 +74,23 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
- * Parse a duration string like `1h30m`, `2h`, `45m`, or `90m` into seconds.
+ * Parse a duration string like `1h30m`, `2h`, `45m`, `90m`, or `56m 36s` into seconds.
  * Returns `null` when the input is empty or malformed (unlike the loose regex
  * that previously lived in the `log` command, which silently matched garbage).
+ *
+ * Spaces between the parts, and a trailing seconds component, are accepted because
+ * {@link formatDuration} *writes* both: a form pre-filled with `56m 36s` that its own parser then
+ * rejects is a row nobody can accept. Parse what we print.
  */
 export function parseDuration(input: string): number | null {
-  const match = input.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?$/)
-  if (match === null || ((match[1] ?? "") === "" && (match[2] ?? "") === "")) return null
+  const match = input.trim().match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/)
+  if (match === null) return null
+  const parts = [match[1] ?? "", match[2] ?? "", match[3] ?? ""]
+  if (parts.every((part) => part === "")) return null
   const hours = parseInt(match[1] ?? "0", 10)
   const minutes = parseInt(match[2] ?? "0", 10)
-  return hours * 3600 + minutes * 60
+  const seconds = parseInt(match[3] ?? "0", 10)
+  return hours * 3600 + minutes * 60 + seconds
 }
 
 /** Full ISO-8601 timestamp: `YYYY-MM-DDTHH:MM[:SS[.sss]][Z|±HH:MM]`. */
