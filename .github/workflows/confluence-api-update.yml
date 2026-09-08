@@ -71,6 +71,10 @@ jobs:
       - name: Create pull request
         if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        # The husky pre-commit gate needs the effect-upstream remote and a full
+        # local toolchain; this workflow already ran the focused build and tests.
+        env:
+          HUSKY: "0"
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(confluence-api-client): update OpenAPI clients"
