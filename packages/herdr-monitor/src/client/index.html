@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Herdr monitor</title>
+    <link rel="icon" href="data:," />
+  </head>
+  <body>
+    <header>
+      <p class="eyebrow">HERDR / MONITOR</p>
+      <h1>Agent board</h1>
+      <p>Published agent status, at a glance.</p>
+    </header>
+    <main id="main">
+      <form id="login" method="post" action="/">
+        <h2>Open your board</h2>
+        <label for="board">Board</label
+        ><input
+          id="board"
+          name="board"
+          value="main"
+          required
+          pattern="[a-z0-9][a-z0-9\-]{0,47}"
+          maxlength="48"
+          autocomplete="off"
+        /><label for="credential">View key</label
+        ><input
+          id="credential"
+          name="credential"
+          type="password"
+          required
+          maxlength="48"
+          autocomplete="off"
+          aria-describedby="key-help"
+        />
+        <p id="key-help">Use the view key provided by the board owner.</p>
+        <button>Open board</button>
+      </form>
+      <p id="connection" role="status" aria-live="polite">Locked</p>
+      <button id="lock" type="button" hidden>Lock board</button>
+      <section id="board-view" hidden>
+        <div class="toolbar"><h2 id="title">Board</h2></div>
+        <p id="freshness"></p>
+        <div id="totals"></div>
+        <ul id="agents" role="list"></ul>
+      </section>
+    </main>
+    <footer>Published snapshots only · No session controls</footer>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
