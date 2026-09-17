@@ -51,6 +51,12 @@ export interface SandboxItem {
 export interface AppState {
   readonly pullRequests: ReadonlyArray<Domain.PullRequest>
   readonly accounts: ReadonlyArray<Domain.AccountState>
+  /**
+   * Accounts switched on, from the server's persisted config. Absent means it
+   * could not be read; `accounts` above is a profile-detection snapshot and is
+   * not authoritative for this.
+   */
+  readonly enabledProfiles?: ReadonlyArray<string>
   readonly status: "idle" | "loading" | "error"
   readonly statusDetail?: string
   readonly error?: string
