@@ -2,7 +2,8 @@
 export const makeDiagramRenderer = (
   root: HTMLElement,
   preferredDark: Pick<MediaQueryList, "matches">,
-  draw: (nodes: Array<HTMLElement>, theme: "dark" | "neutral") => Promise<void>
+  draw: (nodes: Array<HTMLElement>, theme: "dark" | "neutral") => Promise<void>,
+  printing: Pick<MediaQueryList, "matches">
 ): () => Promise<void> => {
   const sources = new WeakMap<Element, string>()
   let rendering = false
@@ -11,6 +12,8 @@ export const makeDiagramRenderer = (
 
   /** Re-render newly mounted tab content and theme changes after React has committed. */
   const render = async (): Promise<void> => {
+    // Printing may change the system color preference; retain the completed SVG for synchronous capture.
+    if (printing.matches) return
     if (rendering) {
       renderPending = true
       return
@@ -33,6 +36,7 @@ export const makeDiagramRenderer = (
     rendering = true
     try {
       await draw(pending, theme)
+      for (const node of pending) node.dataset.diagramTheme = theme
     } catch (cause) {
       const message = document.createElement("p")
       message.setAttribute("role", "alert")

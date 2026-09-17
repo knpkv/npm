@@ -16,11 +16,19 @@ source-line placement. `@knpkv/review/guide/react` exports `GuidePage` and
 `GuideUsage`; import `@knpkv/review/guide/styles.css` once when embedding them.
 `@knpkv/review/guide/export` exports `exportGuide`, an Effect returning the HTML
 and placement counts or a typed `GuideExportError`. It validates inputs and
-requires each changed file to appear exactly once. Default Git prefixes and
-`--no-prefix` work directly. For custom prefixes, pass `prefixes: { source, destination }`
-with the exact `--src-prefix` and `--dst-prefix` values; filenames alone cannot
-unambiguously identify arbitrary prefixes. Copies retain their original source
+requires each changed file to appear exactly once. Default Git prefixes work
+directly. For `--no-prefix`, pass `prefixes: { source: "", destination: "" }`;
+real paths such as `a/file.txt` and `b/file.txt` otherwise resemble default
+prefixes. Other custom producers must pass `prefixes: { source, destination }`
+with their exact `--src-prefix` and `--dst-prefix` values. Copies retain their original source
 but only their destination is a changed-file identity. CRLF patch records are accepted.
+
+Printing includes both change intent and review verdict, regardless of the selected
+tab. Screen reading retains one visible panel and keyboard tab navigation.
+Completed diagrams retain their colors during print capture; system-theme redraws
+resume when the browser returns to screen media.
+Diagram measurement runs outside hidden tab panels so changing theme from the review
+panel still produces a complete printable diagram.
 
 ```ts
 import { exportGuide } from "@knpkv/review/guide/export"

@@ -9,6 +9,37 @@ const diagram = (source: string) => {
   return node
 }
 
+it("retains a completed system-theme diagram through print media changes and resumes afterward", async () => {
+  const root = document.createElement("div")
+  const themed = document.createElement("div")
+  themed.dataset.theme = "system"
+  const node = diagram("flowchart LR; A-->B")
+  themed.append(node)
+  root.append(themed)
+  const preferredDark = { matches: true }
+  const printing = { matches: false }
+  const themes: Array<string> = []
+  const render = makeDiagramRenderer(root, preferredDark, async (nodes, theme) => {
+    themes.push(theme)
+    for (const node of nodes) {
+      node.dataset.processed = "true"
+      node.textContent = `${theme} diagram`
+    }
+  }, printing)
+  await render()
+  printing.matches = true
+  preferredDark.matches = false
+  await render()
+  expect(node.textContent).toBe("dark diagram")
+  expect(node.dataset.diagramTheme).toBe("dark")
+  expect(themes).toEqual(["dark"])
+  printing.matches = false
+  await render()
+  expect(node.textContent).toBe("neutral diagram")
+  expect(node.dataset.diagramTheme).toBe("neutral")
+  expect(themes).toEqual(["dark", "neutral"])
+})
+
 it.each(["theme", "tab"])("retains a %s update while diagram rendering is active", async (change) => {
   const root = document.createElement("div")
   const themed = document.createElement("div")
@@ -24,7 +55,7 @@ it.each(["theme", "tab"])("retains a %s update while diagram rendering is active
       node.textContent = "rendered diagram"
     }
     if (calls.length === 1) await release.promise
-  })
+  }, { matches: false })
   const active = render()
   if (change === "theme") themed.dataset.theme = "dark"
   else themed.replaceChildren(diagram("flowchart LR; B-->C"))

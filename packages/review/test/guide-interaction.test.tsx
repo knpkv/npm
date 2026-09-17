@@ -1,9 +1,68 @@
 // @vitest-environment happy-dom
 import { type Patch, parsePatch } from "@knpkv/rly/diff/patch"
+import { Window } from "happy-dom"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { expect, it } from "vitest"
 import { GuidePage } from "../src/guide/view.js"
+import guideStyles from "../src/guide/style.css?raw"
+
+it("prints intent and verdict from either tab while screen navigation exposes one panel", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  try {
+    await act(async () =>
+      root.render(
+        <GuidePage
+          guide={{
+            title: "Printable guide",
+            intent: "Distinct change intent",
+            sections: [],
+            unplacedFiles: [],
+            review: { gitRef: "abc" }
+          }}
+          patch={parsed("")}
+          findings={{
+            source: "Distinct review source",
+            checklist: [{ item: "Distinct approval verdict", verdict: "Yes" }],
+            issues: []
+          }}
+        />
+      )
+    )
+    for (const selected of ["Change guide", "Review"]) {
+      const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(
+        (item) => item.textContent === selected
+      )
+      if (tab === undefined) throw new TypeError("Fixture has no reading tab")
+      await act(async () => tab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })))
+      for (const mediaType of ["screen", "print"]) {
+        const page = new Window({ settings: { device: { mediaType } } })
+        try {
+          page.document.body.innerHTML = `<style>${guideStyles}</style>${host.innerHTML}`
+          const panels = [...page.document.querySelectorAll('[role="tabpanel"]')]
+          expect(panels).toHaveLength(2)
+          const visible = panels.filter((panel) => page.getComputedStyle(panel).display !== "none")
+          expect(visible, `${mediaType} with ${selected} selected`).toHaveLength(mediaType === "print" ? 2 : 1)
+          const text = visible.map((panel) => panel.textContent).join(" ")
+          if (mediaType === "print") {
+            expect(text).toContain("Distinct change intent")
+            expect(text).toContain("Distinct review source")
+            expect(text).toContain("Distinct approval verdict")
+          } else {
+            expect(text).toContain(selected === "Change guide" ? "Distinct change intent" : "Distinct approval verdict")
+          }
+        } finally {
+          await page.happyDOM.close()
+        }
+      }
+    }
+  } finally {
+    await act(async () => root.unmount())
+    host.remove()
+  }
+})
 
 /** Unwrap a patch these tests expect to be well formed. */
 const parsed = (text: string): Patch => {
@@ -122,7 +181,7 @@ it("retains a rendered diagram when diff mode and wrapping change", async () => 
     expect(host.querySelector("#verdict")?.textContent).toContain("No review source supplied")
     await act(async () => guideTab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })))
     expect(guideTab.getAttribute("aria-selected")).toBe("true")
-    expect(host.querySelector(".mermaid")?.textContent).toContain("flowchart LR")
+    expect(host.querySelector(".mermaid")?.firstChild).toBe(svg)
     await act(async () => wrap.click())
     expect(wrap.checked).toBe(false)
     await act(async () => wrap.labels?.[0]?.click())

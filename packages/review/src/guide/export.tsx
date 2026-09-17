@@ -17,7 +17,7 @@ export class GuideExportError extends Schema.TaggedError<GuideExportError>()("Gu
 export interface GuideExportInput {
   readonly guide: unknown
   readonly patch: string
-  /** Exact custom Git prefixes; omit for default a/b or no-prefix patches. */
+  /** Exact producer prefixes; pass two empty strings for --no-prefix to preserve paths resembling a/ and b/. */
   readonly prefixes?: typeof PatchPrefixes.Type
   readonly findings?: unknown
 }

@@ -383,7 +383,19 @@ body {
     gap: var(--rly-space-8);
   }
 }
+#reading > [role="tabpanel"][data-state="inactive"] {
+  display: none;
+}
 @media print {
+  .review-prose .mermaid[data-diagram-theme="dark"] {
+    background: #1f2020;
+  }
+  #reading > [role="tabpanel"][data-state="inactive"] {
+    display: block;
+  }
+  #reading > [role="tablist"] {
+    display: none;
+  }
   .review-nav,
   .review-controls,
   .review-skip {
@@ -391,6 +403,7 @@ body {
   }
   .review-guide {
     display: block;
+    print-color-adjust: exact;
   }
   .review-content {
     padding: 0;

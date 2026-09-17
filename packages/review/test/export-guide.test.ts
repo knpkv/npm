@@ -34,6 +34,7 @@ it.effect("reports malformed input, coverage, and patch failures through the typ
       { guide: { ...guide, title: 42 }, patch, stage: "input" },
       { guide: { ...guide, source: { pr: { url: "javascript:alert(1)" } } }, patch, stage: "input" },
       { guide: { ...guide, sections: [] }, patch, stage: "coverage" },
+      { guide, patch: patch.replace("--- a/release.ts\n+++ b/release.ts\n", ""), stage: "patch" },
       { guide, patch: patch.replace("+if (approved) ship()\n", ""), stage: "patch" }
     ]
     for (const input of inputs) {
@@ -41,6 +42,18 @@ it.effect("reports malformed input, coverage, and patch failures through the typ
       expect(error._tag).toBe("GuideExportError")
       expect(error.stage).toBe(input.stage)
     }
+  }))
+
+it.effect("retains explicit no-prefix mode in exported paths and hydration input", () =>
+  Effect.gen(function*() {
+    const prefixes = { source: "", destination: "" }
+    const page = yield* exportGuide({
+      guide: { ...guide, sections: [{ title: "Rename", overview: "", diffs: [{ file: "b/file.txt", summary: "" }] }] },
+      patch: "diff --git a/file.txt b/file.txt\nrename from a/file.txt\nrename to b/file.txt\n",
+      prefixes
+    })
+    expect(page.html).toContain("a/file.txt → b/file.txt</code>")
+    expect(page.html).toContain("\"prefixes\":{\"source\":\"\",\"destination\":\"\"}")
   }))
 
 it.effect("includes offline diagram support only for guides containing Mermaid", () =>

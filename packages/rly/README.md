@@ -114,6 +114,11 @@ consumer-owned input, textarea, or `Select` through its render callback, so it
 can connect visible labels, descriptions, required state, and announced errors
 without cloning a framework-specific control.
 
+`Tabs` items may set `forceMount: true` to retain inactive content, for example
+when printing both panels. It defaults to unmounting inactive content. Callers
+opting in must hide inactive `[role="tabpanel"][data-state="inactive"]` panels
+on screen and supply their own print visibility rules.
+
 `Dialog` and `Sheet` expose owned compound APIs (`Root`, `Trigger`, `Content`,
 and `Close`; `Sheet` also provides `Body` and `Footer`). Both require an
 available `PortalProvider` target, isolate the background with native inert
@@ -504,9 +509,11 @@ The command emits deterministic JSON. Missing refs, malformed Git output,
 unknown paths, catalog drift, or changes to foundations and shared visual
 configuration fail closed to a full visual run.
 
-`parsePatch(text, prefixes?)` accepts default Git prefixes or `--no-prefix`. Pass
-`{ source, destination }` for exact custom Git prefixes; arbitrary prefixes cannot
-be inferred from filenames. Copied files retain both paths and `copied` status,
+`parsePatch(text, prefixes?)` infers default `a/` and `b/` prefixes when present.
+For `--no-prefix`, pass `{ source: "", destination: "" }`, especially when real
+paths begin with `a/` and `b/`; those names are indistinguishable from prefixed
+headers. Other custom producers must supply their exact `{ source, destination }`.
+Copied files retain both paths and `copied` status,
 but only the destination resolves as a changed file. CRLF patch records are accepted.
 Quoted path bytes must be valid UTF-8; unsupported byte sequences return
 `PatchInvalid` rather than replacing bytes and collapsing distinct file identities.

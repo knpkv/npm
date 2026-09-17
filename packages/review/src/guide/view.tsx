@@ -245,6 +245,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
               {
                 value: "guide",
                 label: "Change guide",
+                forceMount: true,
                 content: (
                   <section className="review-explanation">
                     <Prose text={guide.intent} />
@@ -270,6 +271,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
               {
                 value: "review",
                 label: `Review${findings.issues.length === 0 ? "" : ` · ${findings.issues.length}`}`,
+                forceMount: true,
                 content: (
                   <Surface as="section" id="verdict" className="review-verdict">
                     <Text as="h2" variant="section-title">

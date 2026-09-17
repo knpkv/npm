@@ -216,6 +216,57 @@ test("no-prefix names with spaces remain exact, including directories named a", 
   assert.equal(patch.files[0]?.path, "a/my file.ts")
 })
 
+test("explicit no-prefix mode retains paths that resemble default Git prefixes", () => {
+  const rename =
+    "diff --git a/file.txt b/file.txt\nsimilarity index 100%\nrename from a/file.txt\nrename to b/file.txt\n"
+  const prefixes = { source: "", destination: "" }
+  const result = parsePatch(rename, prefixes)
+  assert.equal(result._tag, "Patch")
+  if (result._tag !== "Patch") return
+  assert.equal(result.patch.files[0]?.oldPath, "a/file.txt")
+  assert.equal(result.patch.files[0]?.newPath, "b/file.txt")
+  assert.equal(parsePatch(rename.replace("rename to b/file.txt", "rename to wrong.txt"), prefixes)._tag, "PatchInvalid")
+  const text = "diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n"
+  const explicit = parsePatch(text, prefixes)
+  assert.equal(explicit._tag, "Patch")
+  if (explicit._tag !== "Patch") return
+  assert.equal(explicit.patch.files[0]?.oldPath, "a/file.txt")
+  assert.equal(explicit.patch.files[0]?.newPath, "b/file.txt")
+  assert.equal(parsed(text).files[0]?.path, "file.txt")
+})
+
+test("text hunks require both file markers while metadata-only records remain valid", () => {
+  assert.equal(parsePatch("diff --git a/a.txt b/a.txt\n@@ -1 +1 @@\n-old\n+new\n")._tag, "PatchInvalid")
+  assert.equal(parsePatch("diff --git a/a.txt b/a.txt\n@@ -0,0 +0,0 @@\n")._tag, "PatchInvalid")
+  assert.equal(parsed(modified).files[0]?.hunks.length, 2)
+  assert.equal(parsed("diff --git a/a.txt b/a.txt\nold mode 100644\nnew mode 100755\n").files[0]?.hunks.length, 0)
+  assert.equal(parsed("diff --git a/a.txt b/b.txt\nrename from a.txt\nrename to b.txt\n").files[0]?.status, "renamed")
+  assert.equal(parsed("diff --git a/a.txt b/a.txt\nBinary files a/a.txt and b/a.txt differ\n").files[0]?.binary, true)
+})
+
+test.each([
+  ["late markers", "@@ -1 +1 @@\n-old\n+new\n--- a/a.txt\n+++ b/a.txt\n"],
+  ["missing source", "+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"],
+  ["missing destination", "--- a/a.txt\n@@ -1 +1 @@\n-old\n+new\n"],
+  ["conflicting source", "--- a/wrong.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"],
+  ["conflicting destination", "+++ b/wrong.txt\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"]
+])("rejects %s instead of accepting repaired hunk headers", (_name, body) => {
+  assert.equal(parsePatch(`diff --git a/a.txt b/a.txt\n${body}`)._tag, "PatchInvalid")
+})
+
+test("consistent repeated or reordered markers retain valid Git coordinates", () => {
+  for (
+    const markers of [
+      "+++ b/a.txt\n--- a/a.txt\n",
+      "--- a/a.txt\n+++ b/a.txt\n--- a/a.txt\n+++ b/a.txt\n"
+    ]
+  ) {
+    const file = parsed(`diff --git a/a.txt b/a.txt\n${markers}@@ -1 +1 @@\n-old\n+new\n`).files[0]
+    assert.equal(file?.path, "a.txt")
+    assert.equal(file?.hunks[0]?.lines[1]?.newNo, 1)
+  }
+})
+
 test("CR in source content survives an LF-encoded patch", () => {
   const patch = parsed("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\r\n+new\r\n")
   assert.equal(patch.files[0]?.hunks[0]?.lines[0]?.text, "old\r")

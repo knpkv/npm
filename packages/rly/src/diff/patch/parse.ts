@@ -55,7 +55,7 @@ export interface Patch {
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/
 const HEADER = "diff --git "
 
-/** Custom Git prefixes cannot be inferred reliably from filenames; supply the exact producer options. */
+/** Exact Git producer prefixes. Use two empty strings for --no-prefix, including paths resembling a/ and b/. */
 export interface PatchPrefixes {
   readonly source: string
   readonly destination: string
@@ -132,7 +132,7 @@ const headerPaths = (
     : invalid("Inconsistent or ambiguous Git file headers; custom prefixes must be supplied explicitly")
 }
 
-/** Parse Git unified diffs with default or no prefixes; custom producer prefixes must be explicit. */
+/** Infer default a/b prefixes when present; pass explicit empty prefixes for unambiguous --no-prefix parsing. */
 export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult => {
   // A CR on a Git header identifies transport line endings; body-only CR belongs to the source.
   const records = text.split("\n")
@@ -175,9 +175,17 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
       else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
         const path = unquote(line.slice(4).replace(/\t$/, ""))
         if (path._tag === "PatchInvalid") return path
-        if (line.startsWith("--- ")) source = path.path
-        else destination = path.path
+        if (line.startsWith("--- ")) {
+          if (source !== undefined && source !== path.path) return invalid("Conflicting source file markers")
+          source = path.path
+        } else {
+          if (destination !== undefined && destination !== path.path) {
+            return invalid("Conflicting destination file markers")
+          }
+          destination = path.path
+        }
       } else if (HUNK.test(line)) {
+        if (source === undefined || destination === undefined) return invalid("Text hunks require paired file markers")
         const parsed = readHunk(lines, index)
         if (parsed._tag === "PatchInvalid") return parsed
         for (const record of parsed.hunk.lines) {
