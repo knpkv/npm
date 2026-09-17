@@ -104,6 +104,10 @@ const SsePayload = Schema.Struct({
     region: Schema.String,
     enabled: Schema.Boolean
   })),
+  // Absent when the server could not read the persisted config. `accounts`
+  // above is a profile-detection snapshot and is not authoritative for which
+  // accounts the queue may list.
+  enabledProfiles: Schema.optional(Schema.Array(Schema.String)),
   status: AppStatus,
   statusDetail: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
@@ -150,6 +154,7 @@ const toAppState = (payload: typeof SsePayload.Type): AppState => {
     })),
     status: payload.status,
     pendingReviewCount: payload.pendingReviewCount,
+    ...((payload.enabledProfiles !== undefined) && { enabledProfiles: payload.enabledProfiles }),
     ...((payload.statusDetail !== undefined) && { statusDetail: payload.statusDetail }),
     ...((payload.error !== undefined) && { error: payload.error }),
     ...((payload.lastUpdated !== undefined) && { lastUpdated: payload.lastUpdated }),
