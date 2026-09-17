@@ -98,8 +98,8 @@ jcf sync reconcile --agent claude --calendar  # ...with an hour-by-hour grid of 
 jcf sync reconcile --agent claude --json      # Reporting only: one JSON value, nothing logged
 ```
 
-`--agent claude` is for time _neither_ side recorded: it reads the Claude Code transcripts under your
-session roots — and only those — works out which issue each
+`--agent claude` is for time _neither_ side recorded: it reads Claude Code and Codex transcripts,
+keeps work inside your session roots, and works out which issue each
 session belongs to and how long it accounts for, subtracts
 what Clockify and Jira already hold, and offers each remaining gap for confirmation. Every row shows
 the signal behind it — the git branch, the directory path, a standing ticket, or a reading of the
@@ -114,6 +114,14 @@ is nearly all of them. One that collides with a root's encoding is opened, and i
 discarded once the working directory inside says they were out of scope. So an out-of-scope session
 can be read from disk by jcf; it can never reach a coding agent, a proposal, or either of the two
 systems.
+
+Codex rollouts live under `~/.codex/sessions` in creation-date directories. Those names cannot
+identify the working project, so JCF decodes their metadata locally before applying session roots
+to each stretch of work. Resumed rollouts in older directories remain eligible for the current
+week. Large tool payloads are discarded while streaming the file. Current `UserMessage` events
+and older `user_message` events count as presence; injected instructions, response-item prompt
+copies, compacted history and native subagent rollouts do not. Selecting Claude or Codex as the
+matching agent does not restrict which of these two transcript sources is scanned.
 
 Only messages _you typed_ count as presence — the agent's own output, its tool results, and the
 prompts it sends its own subagents do not, since they show it was busy rather than that you were

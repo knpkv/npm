@@ -1,14 +1,14 @@
 /**
- * Read local Claude Code Agent Sessions as reconciliation evidence.
+ * Read local Claude Code and Codex Agent Sessions as reconciliation evidence.
  *
  * **Mental model**
  *
  * - **Read-only evidence**: transcripts are never written, moved, or modified. This service only
  *   reports what a session touched, when, and where — see ADR-0006.
  * - **Opt-in scope**: a session becomes evidence only when its working directory sits inside a
- *   configured Session Root, and is skipped before its contents are parsed whenever the project
- *   directory's name rules it out — see {@link mayHoldSessionRoot} for the one case that name cannot
- *   rule out. Either way, out-of-scope work never reaches a Coding Agent or a proposal.
+ *   configured Session Root. Claude project names allow a pre-read filter; Codex date directories
+ *   do not, so Codex working directories are checked after local decoding. Out-of-scope text never
+ *   reaches ticket mining, a Coding Agent or a proposal.
  * - **Tolerant decoding**: the transcript layout is an external contract that changes without
  *   notice. Unrecognised and malformed lines are skipped; a session survives on the lines it can
  *   decode rather than failing the whole run.
@@ -38,6 +38,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
+import * as Stream from "effect/Stream"
 import {
   type AttributableSession,
   buildSessionDigest,
@@ -46,6 +47,7 @@ import {
   mineTicketKeys,
   type SessionActivity
 } from "../agent/sessions.js"
+import { codexTranscriptLines, decodeCodexLine } from "./CodexTranscript.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 import type { ReconcilePeriod } from "./ReconcileService.js"
@@ -74,8 +76,8 @@ export class AgentSessionError extends Data.TaggedError("AgentSessionError")<{
 
 export interface AgentSessionReaderContract {
   /**
-   * Every in-scope Agent Session with activity inside the period. Sessions outside every
-   * Session Root are never read.
+   * Every in-scope Agent Session with activity inside the period. Codex files are decoded locally
+   * to check their working directories; only in-scope segments become evidence.
    */
   readonly read: (
     period: ReconcilePeriod
@@ -203,6 +205,22 @@ interface DecodedTranscript {
 export const decodeTranscript = (
   content: string,
   period: { readonly fromMs: number; readonly toMs: number }
+): ReadonlyArray<DecodedTranscript> => decodeTranscriptLines(claudeTranscriptLines(content), period)
+
+/** Skip malformed external lines before the common segmenter sees them. */
+function* claudeTranscriptLines(content: string) {
+  for (const rawLine of content.split("\n")) {
+    const json = decodeJson(rawLine)
+    if (Option.isNone(json)) continue
+    const decoded = decodeLine(json.value)
+    if (Option.isSome(decoded)) yield decoded.value
+  }
+}
+
+/** Both providers share presence accounting and per-directory evidence boundaries. */
+const decodeTranscriptLines = (
+  lines: Iterable<typeof TranscriptLine.Type>,
+  period: { readonly fromMs: number; readonly toMs: number }
 ): ReadonlyArray<DecodedTranscript> => {
   const segments: Array<DecodedTranscript> = []
   let promptTimes: Array<number> = []
@@ -234,13 +252,7 @@ export const decodeTranscript = (
     texts = []
   }
 
-  for (const rawLine of content.split("\n")) {
-    if (rawLine.trim().length === 0) continue
-    const json = decodeJson(rawLine)
-    if (Option.isNone(json)) continue // malformed JSONL line — skip, never fail the run
-    const decoded = decodeLine(json.value)
-    if (Option.isNone(decoded)) continue
-    const line = decoded.value
+  for (const line of lines) {
     if (line.type === undefined || !ACTIVITY_TYPES.includes(line.type)) continue
     if (line.sessionId === undefined || line.timestamp === undefined || line.cwd === undefined) continue
 
@@ -316,6 +328,7 @@ export const layer = Layer.effect(
     const config = yield* ConfigService
 
     const transcriptRoot = path.join(home, ...CLAUDE_TRANSCRIPT_DIR)
+    const codexRoot = path.join(home, ".codex", "sessions")
 
     const asAgentSessionError = (message: string) => (cause: { readonly message: string }) =>
       Effect.fail(new AgentSessionError({ message: `${message}: ${cause.message}`, cause }))
@@ -382,6 +395,22 @@ export const layer = Layer.effect(
         const paths = yield* transcriptPaths(roots)
         const records: Array<AgentSessionRecord> = []
 
+        const addSegments = (segments: ReadonlyArray<DecodedTranscript>) => {
+          for (const segment of segments) {
+            // Scope precedes key mining and digest construction, including moved Codex sessions.
+            if (!isWithinSessionRoots(segment.cwd, roots)) continue
+            records.push({
+              sessionId: segment.sessionId,
+              cwd: segment.cwd,
+              gitBranch: segment.gitBranch,
+              candidateKeys: mineTicketKeys(segment.texts.join("\n")),
+              digest: buildSessionDigest(segment.texts),
+              activity: segment.activity,
+              boundedAtMs: segment.boundedAtMs
+            })
+          }
+        }
+
         for (const filePath of paths) {
           if (!(yield* mayHoldActivity(filePath, fromMs))) continue
 
@@ -399,21 +428,32 @@ export const layer = Layer.effect(
             )
           )
 
-          for (const segment of decodeTranscript(content, { fromMs, toMs })) {
-            // Scope check before anything is mined or digested: out-of-scope work leaves no trace.
-            // Per segment, because a session can move between directories mid-run.
-            if (!isWithinSessionRoots(segment.cwd, roots)) continue
+          addSegments(decodeTranscript(content, { fromMs, toMs }))
+        }
 
-            const text = segment.texts.join("\n")
-            records.push({
-              sessionId: segment.sessionId,
-              cwd: segment.cwd,
-              gitBranch: segment.gitBranch,
-              candidateKeys: mineTicketKeys(text),
-              digest: buildSessionDigest(segment.texts),
-              activity: segment.activity,
-              boundedAtMs: segment.boundedAtMs
-            })
+        const hasCodex = yield* fs.exists(codexRoot).pipe(
+          Effect.catch(asAgentSessionError("Checking Codex sessions failed"))
+        )
+        if (hasCodex) {
+          // Date directories name creation time, not last activity: resumed old rollouts still count.
+          const entries = yield* fs.readDirectory(codexRoot, { recursive: true }).pipe(
+            Effect.catch(asAgentSessionError("Listing Codex sessions failed"))
+          )
+          for (const entry of entries) {
+            if (!entry.endsWith(TRANSCRIPT_SUFFIX)) continue
+            const filePath = path.join(codexRoot, entry)
+            if (!(yield* mayHoldActivity(filePath, fromMs))) continue
+            // Rollouts can be hundreds of MB; discard tool data before retaining decoded messages.
+            const lines = yield* fs.stream(filePath).pipe(
+              Stream.decodeText(),
+              Stream.splitLines,
+              Stream.map((line) => decodeCodexLine(line)),
+              Stream.filter(Option.isSome),
+              Stream.map((decoded) => decoded.value),
+              Stream.runCollect,
+              Effect.catch(asAgentSessionError("Reading Codex session failed"))
+            )
+            addSegments(decodeTranscriptLines(codexTranscriptLines(lines), { fromMs, toMs }))
           }
         }
 

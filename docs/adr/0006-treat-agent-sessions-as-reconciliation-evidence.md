@@ -90,3 +90,18 @@ stretch shorter than the floor keeps its actual duration; the floor never invent
 time. The calendar position is an allocation of evidenced presence, not a claim that
 one ticket was worked at precisely those instants. This supersedes the shared-minute
 calendar consequence above while retaining the total-under-wall-clock invariant.
+
+## Amendment, 10 September 2026: Codex transcript evidence
+
+Session discovery reads Claude Code and Codex independently of the provider chosen
+for attribution. Codex rollouts are filed by creation date, so discovery uses file
+modification time and in-window prompt timestamps to include resumed sessions.
+Their directories cannot prove project scope: local decoding may read out-of-scope
+rollouts, but each segment's working directory must match a configured session root
+before its text is mined, summarized or sent to a coding agent.
+
+Only authoritative Codex user events count as presence. Response-item prompt copies,
+injected instructions, tool output, compaction replay and native subagent rollouts
+do not establish human activity. Both providers feed the same allocation and idle
+rules; adding a transcript source does not relax the fifteen-minute web minimum or
+make reloading the page start a scan.
