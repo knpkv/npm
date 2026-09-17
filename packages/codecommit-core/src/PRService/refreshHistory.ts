@@ -18,6 +18,7 @@ import { ConfigService } from "../ConfigService/index.js"
 import { parseISOWeek } from "../DateUtils.js"
 import type { AppStatus } from "../Domain.js"
 import { decodeCachedPR, type PRState, prToUpsertInput } from "./internal.js"
+import { currentEnabledProfiles, retainEnabledAccountRows, staleListMessage } from "./visibility.js"
 
 type CachedPullRequestDomain = ReturnType<typeof decodeCachedPR>
 
@@ -29,8 +30,6 @@ const fallbackIdentity = (accountId: string): CallerIdentity => ({
   accountId,
   username: ""
 })
-
-const emptyCachedPullRequestDomains = (): Array<CachedPullRequestDomain> => []
 
 export const syncWeek = Effect.fn("syncWeek")(
   function*(state: PRState, week: string) {
@@ -175,13 +174,30 @@ export const syncWeek = Effect.fn("syncWeek")(
         Effect.catchIf(() => true, (e) => Effect.logWarning("refreshCommentedBy failed", e))
       )
 
-      // Reload PRs from DB so SSE clients get fresh data (incl. approvedBy, commentedBy)
-      const freshPRs = yield* prRepo.findAll().pipe(
-        Effect.map((rows) => rows.map((r) => decodeCachedPR(r))),
-        Effect.catchIf(() => true, () => Effect.succeed(emptyCachedPullRequestDomains()))
+      // Reload PRs from DB so SSE clients get fresh data (incl. approvedBy, commentedBy).
+      // Enabled accounts only, re-read now: phases 1 and 2 above are minutes of
+      // provider traffic, and this sync runs forked from the stats route rather
+      // than behind the refresh semaphore, so a toggle is not serialized with it.
+      const syncedRows = yield* prRepo.findAll().pipe(
+        Effect.catchIf(() => true, () => Effect.succeed([]))
       )
+      // After the cache read, so a toggle during a slow read still applies.
+      const enabled = yield* currentEnabledProfiles
+      if (Option.isNone(enabled)) {
+        // Leave the last correctly filtered list standing rather than republish
+        // with visibility this sync can no longer vouch for — and say that the
+        // list is stale instead of finishing as if it were fresh.
+        yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
+          ...s,
+          status: idleStatus,
+          error: staleListMessage
+        }))
+        return
+      }
+      const freshPRs: Array<CachedPullRequestDomain> = retainEnabledAccountRows(syncedRows, enabled.value)
+        .map((r) => decodeCachedPR(r))
 
-      yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
+      yield* SubscriptionRef.update(state, ({ error: _, statusDetail: __, ...s }) => ({
         ...s,
         status: idleStatus,
         pullRequests: freshPRs

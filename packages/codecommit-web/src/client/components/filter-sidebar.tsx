@@ -11,6 +11,7 @@ import { useAtomValue } from "@effect/atom-react"
 import { Button, Text } from "@knpkv/rly/primitives"
 import { CheckIcon, ChevronDownIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { queuePullRequests } from "../utils/queuePullRequests.js"
 import { useSearchParams } from "react-router"
 import { appStateAtom } from "../atoms/app.js"
 import type { FilterKey } from "../atoms/ui.js"
@@ -65,10 +66,10 @@ export function FilterSelectionIndicator({ selected }: { readonly selected: bool
 function FilterCombobox({ filterKey, groups, label, onToggle, options, selected }: FilterComboboxProps) {
   const [open, setOpen] = useState(false)
   const count = selected.length
-  const groupChildren = useMemo(() => new Set(groups ? Object.values(groups).flat() : []), [groups])
+  const groupChildren = useMemo(() => new Set(groups !== undefined ? Object.values(groups).flat() : []), [groups])
   const childToParent = useMemo(() => {
     const map = new Map<string, string>()
-    if (groups) {
+    if (groups !== undefined) {
       for (const [group, children] of Object.entries(groups)) {
         for (const child of children) map.set(child, group)
       }
@@ -127,7 +128,9 @@ export function FilterSidebar() {
   const appState = useAtomValue(appStateAtom)
   const { clearAll, state, toggleFilter } = useFilterParams()
   const [, setSearchParams] = useSearchParams()
-  const prs = appState.pullRequests
+  // Facets describe the queue, so a switched-off account must not appear as a
+  // filter option.
+  const prs = useMemo(() => queuePullRequests(appState), [appState.enabledProfiles, appState.pullRequests])
   const currentUser = appState.currentUser
 
   useEffect(() => {
@@ -147,7 +150,7 @@ export function FilterSidebar() {
     const map = new Map<FilterKey, Array<string>>()
     for (const filter of state.filters) {
       const selected = map.get(filter.key)
-      if (selected) selected.push(filter.value)
+      if (selected !== undefined) selected.push(filter.value)
       else map.set(filter.key, [filter.value])
     }
     return map
@@ -187,7 +190,11 @@ export function FilterSidebar() {
           },
           { preventScrollReset: true, replace: true }
         )
-      } else if (key === "status" && openSubStatuses.has(value) && selectedMap.get("status")?.includes("open")) {
+      } else if (
+        key === "status" &&
+        openSubStatuses.has(value) &&
+        selectedMap.get("status")?.includes("open") === true
+      ) {
         setSearchParams(
           (previous) => {
             let existing = previous.getAll("f")
@@ -254,7 +261,9 @@ export function FilterSidebar() {
           previous.delete("review")
           const filters = previous
             .getAll("f")
-            .filter((filter) => (currentUser ? filter !== `author:${currentUser}` : true))
+            .filter((filter) =>
+              currentUser !== undefined && currentUser.length > 0 ? filter !== `author:${currentUser}` : true
+            )
           previous.delete("f")
           for (const filter of filters) previous.append("f", filter)
 
@@ -268,7 +277,7 @@ export function FilterSidebar() {
               break
             case "mine":
               previous.set("groupBy", "account")
-              if (currentUser) previous.append("f", `author:${currentUser}`)
+              if (currentUser !== undefined && currentUser.length > 0) previous.append("f", `author:${currentUser}`)
               break
             case "review":
               previous.set("review", "1")

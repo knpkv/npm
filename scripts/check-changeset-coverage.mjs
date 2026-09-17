@@ -9467,11 +9467,11 @@ const decodeJson = Effect.fn("ChangesetCoverage.decodeJson")(function* (content,
   })
 })
 
-const makeGit = Effect.fn("ChangesetCoverage.makeGit")(function* (repositoryRoot) {
+const makeGit = Effect.fn("ChangesetCoverage.makeGit")(function* (repositoryRoot, env) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
   return Effect.fn("ChangesetCoverage.git")(function* (args) {
-    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: repositoryRoot }))
+    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: repositoryRoot, env, extendEnv: false }))
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         Stream.decodeText(handle.stdout).pipe(Stream.mkString),
@@ -9491,23 +9491,58 @@ const makeGit = Effect.fn("ChangesetCoverage.makeGit")(function* (repositoryRoot
 
 const gitOption = (git, args) => git(args).pipe(Effect.option, Effect.map(Option.getOrUndefined))
 
-const resolveMergeBase = Effect.fn("ChangesetCoverage.resolveMergeBase")(function* (git, configuredBase, githubBase) {
-  const candidates = [
-    configuredBase,
-    githubBase === undefined ? undefined : `origin/${githubBase}`,
-    "origin/main",
-    "main"
-  ].filter((candidate) => candidate !== undefined)
-  for (const candidate of candidates) {
-    const mergeBase = yield* gitOption(git, ["merge-base", "HEAD", candidate])
-    if (mergeBase !== undefined) return mergeBase
+// Read the worktree-specific file: rev-parse MERGE_HEAD alone can hide octopus heads.
+const readPendingMergeHead = Effect.fn("ChangesetCoverage.readPendingMergeHead")(function* (git) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const mergeHeadPath = yield* git(["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"])
+  if (!(yield* fileSystem.exists(mergeHeadPath))) return undefined
+  const heads = splitLines(yield* fileSystem.readFileString(mergeHeadPath))
+  if (heads.length !== 1 || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/u.test(heads[0])) {
+    return yield* fail("Changeset coverage requires exactly one valid pending merge head")
   }
-  return yield* fail(
-    `Could not resolve a changeset coverage merge base from: ${candidates.join(
-      ", "
-    )}. Fetch the base branch history or set CHANGESET_COVERAGE_BASE explicitly.`
-  )
+  const head = yield* git(["rev-parse", "--verify", `${heads[0]}^{commit}`])
+  yield* git(["rev-parse", "--verify", "HEAD^{commit}"])
+  if ((yield* git(["ls-files", "--unmerged"])) !== "") {
+    return yield* fail("Resolve merge conflicts before checking changeset coverage")
+  }
+  return head
 })
+
+const resolveMergeBase = Effect.fn("ChangesetCoverage.resolveMergeBase")(
+  function* (git, configuredBase, githubBase, pendingMergeHead) {
+    const explicitPendingBase = pendingMergeHead !== undefined && configuredBase !== undefined
+    const candidates = explicitPendingBase
+      ? [configuredBase]
+      : [configuredBase, githubBase === undefined ? undefined : `origin/${githubBase}`, "origin/main", "main"].filter(
+          (candidate) => candidate !== undefined
+        )
+    for (const candidate of candidates) {
+      const mergeBase = yield* gitOption(git, ["merge-base", "HEAD", candidate])
+      if (mergeBase === undefined) continue
+      if (pendingMergeHead === undefined) return mergeBase
+      const candidateCommit = yield* git(["rev-parse", "--verify", `${candidate}^{commit}`])
+      if (candidateCommit !== pendingMergeHead) {
+        if (explicitPendingBase) {
+          return yield* fail(`Selected base ${candidate} must exactly match pending merge head ${pendingMergeHead}`)
+        }
+        continue
+      }
+      // The pending tree already contains this base's released changes. Compare the
+      // actual tree against it, retaining feature edits and conflict resolutions.
+      return candidateCommit
+    }
+    if (pendingMergeHead !== undefined) {
+      return yield* fail(
+        `Could not resolve exact pending merge head ${pendingMergeHead} from: ${candidates.join(", ")}. Set CHANGESET_COVERAGE_BASE to the pending merge head explicitly.`
+      )
+    }
+    return yield* fail(
+      `Could not resolve a changeset coverage merge base from: ${candidates.join(
+        ", "
+      )}. Fetch the base branch history or set CHANGESET_COVERAGE_BASE explicitly.`
+    )
+  }
+)
 
 const runMergeBaseSelfTest = Effect.fn("ChangesetCoverage.runMergeBaseSelfTest")(function* () {
   const validAttempts = []
@@ -9909,15 +9944,142 @@ const loadPackageRecords = Effect.fn("ChangesetCoverage.loadPackageRecords")(
   }
 )
 
+const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelfTest")(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "changeset-pending-merge-" })
+  // A pre-commit caller may export GIT_INDEX_FILE or GIT_DIR. The fixture must
+  // never inherit those pointers or the caller's Git configuration.
+  const git = yield* makeGit(root, {
+    PATH: yield* Config.string("PATH"),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1"
+  })
+  const write = Effect.fn("ChangesetCoverage.fixtureWrite")(function* (name, content) {
+    const target = path.join(root, name)
+    yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true })
+    yield* fileSystem.writeFileString(target, content)
+  })
+  const commit = Effect.fn("ChangesetCoverage.fixtureCommit")(function* (message) {
+    yield* git(["add", "."])
+    yield* git(["commit", "-m", message])
+  })
+  const equal = (actual, expected) =>
+    Effect.try({
+      try: () => assert.deepEqual(actual, expected),
+      catch: (cause) => new ChangesetCoverageError({ cause, reason: "Pending merge Git regression failed" })
+    })
+  const missingCoverage = Effect.fn("ChangesetCoverage.fixtureMissingCoverage")(function* (base) {
+    const paths = yield* changedPaths(git, base)
+    const records = yield* loadPackageRecords(git, fileSystem, path, root, path.join(root, "packages"), base, paths)
+    const changedChangesetNames = yield* changedChangesetPackages(fileSystem, path, root, paths)
+    return validateCoverage({ changedChangesetNames, paths, records })
+  })
+
+  yield* git(["init", "--initial-branch=main"])
+  yield* git(["config", "user.name", "Fixture"])
+  yield* git(["config", "user.email", "fixture@example.test"])
+  for (const name of ["upstream", "feature"]) {
+    yield* write(`packages/${name}/package.json`, JSON.stringify({ name: `@fixture/${name}`, version: "1.0.0" }))
+    yield* write(`packages/${name}/src/index.ts`, "export const value = 1\n")
+  }
+  yield* write(".github/workflows/check.yml", "# old checkout pin\n")
+  yield* commit("baseline")
+  const initial = yield* git(["rev-parse", "HEAD"])
+  yield* git(["update-ref", "refs/remotes/origin/main", initial])
+  yield* git(["branch", "feature"])
+  yield* write("packages/upstream/src/index.ts", "export const value = 2\n")
+  yield* write(".changeset/upstream.md", '---\n"@fixture/upstream": patch\n---\n\nUpstream fix.\n')
+  yield* commit("upstream fix")
+  yield* fileSystem.remove(path.join(root, ".changeset/upstream.md"))
+  yield* write("packages/upstream/package.json", JSON.stringify({ name: "@fixture/upstream", version: "1.0.1" }))
+  yield* commit("release upstream")
+  const released = yield* git(["rev-parse", "HEAD"])
+  yield* git(["switch", "feature"])
+  yield* write(".github/workflows/check.yml", "# updated checkout pin\n")
+  yield* commit("checkout pin only")
+
+  yield* equal(yield* readPendingMergeHead(git), undefined)
+  const ordinaryBase = yield* resolveMergeBase(git, "main", undefined)
+  yield* equal(ordinaryBase, initial)
+  yield* equal(yield* resolveMergeBase(git, undefined, undefined), initial)
+  yield* equal(yield* resolveMergeBase(git, "missing", undefined), initial)
+  yield* equal(yield* missingCoverage(ordinaryBase), [])
+  yield* write("packages/feature/src/index.ts", "export const value = 2\n")
+  yield* equal(yield* missingCoverage(ordinaryBase), ["@fixture/feature"])
+  yield* write("packages/feature/src/index.ts", "export const value = 1\n")
+
+  yield* git(["merge", "--no-ff", "--no-commit", "main"])
+  const pending = yield* readPendingMergeHead(git)
+  const pendingBase = yield* resolveMergeBase(git, "main", undefined, pending)
+  yield* equal(pendingBase, released)
+  // A stale remote-tracking ref must not hide the exact local merge target.
+  yield* equal(yield* resolveMergeBase(git, undefined, undefined, pending), released)
+  yield* equal(yield* resolveMergeBase(git, undefined, "main", pending), released)
+  const explicitStale = yield* resolveMergeBase(git, "origin/main", undefined, pending).pipe(Effect.flip)
+  yield* equal(explicitStale.reason.includes("must exactly match"), true)
+  const explicitMissing = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
+  yield* equal(explicitMissing.reason.includes("Could not resolve"), true)
+  const ancestorBase = yield* resolveMergeBase(git, initial, undefined, pending).pipe(Effect.flip)
+  yield* equal(ancestorBase.reason.includes("must exactly match"), true)
+  // Reproduce the original false failure, then prove the checkout-only case.
+  yield* equal(yield* missingCoverage(ordinaryBase), ["@fixture/upstream"])
+  yield* equal(yield* missingCoverage(pendingBase), [])
+
+  yield* write("packages/feature/src/index.ts", "export const value = 2\n")
+  yield* equal(yield* missingCoverage(pendingBase), ["@fixture/feature"])
+  yield* write(".changeset/feature.md", '---\n"@fixture/feature": patch\n---\n\nFeature fix.\n')
+  yield* equal(yield* missingCoverage(pendingBase), [])
+  // Resolution edits to imported upstream files still need release coverage.
+  yield* write("packages/upstream/src/index.ts", "export const value = 3\n")
+  yield* equal(yield* missingCoverage(pendingBase), ["@fixture/upstream"])
+
+  const unrelatedBase = yield* resolveMergeBase(git, "HEAD", undefined, pending).pipe(Effect.flip)
+  yield* equal(unrelatedBase.reason.includes("must exactly match"), true)
+  yield* git(["branch", "-m", "main", "released"])
+  const noExactImplicitBase = yield* resolveMergeBase(git, undefined, undefined, pending).pipe(Effect.flip)
+  yield* equal(noExactImplicitBase.reason.includes("exact pending merge head"), true)
+  const missingBase = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
+  yield* equal(missingBase.reason.includes("Could not resolve"), true)
+  yield* git(["branch", "-m", "released", "main"])
+  const mergeHeadPath = yield* git(["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"])
+  for (const invalid of ["", "not-a-commit\n", `${released}\n${initial}\n`, `${"0".repeat(40)}\n`]) {
+    yield* fileSystem.writeFileString(mergeHeadPath, invalid)
+    const error = yield* readPendingMergeHead(git).pipe(Effect.flip)
+    yield* equal(error._tag, "ChangesetCoverageError")
+  }
+  yield* fileSystem.writeFileString(mergeHeadPath, `${released}\n`)
+  yield* write("packages/feature/src/index.ts", "export const value = 1\n")
+  yield* write("packages/upstream/src/index.ts", "export const value = 2\n")
+  yield* fileSystem.remove(path.join(root, ".changeset/feature.md"))
+  // Restoring bytes does not refresh Git's cached file metadata. Require a clean
+  // index before aborting this disposable fixture's merge.
+  yield* git(["update-index", "--refresh"])
+  yield* git(["merge", "--abort"])
+  yield* write("packages/upstream/src/index.ts", "export const value = 99\n")
+  yield* commit("conflicting feature")
+  yield* git(["merge", "--no-ff", "--no-commit", "main"]).pipe(Effect.flip)
+  const conflict = yield* readPendingMergeHead(git).pipe(Effect.flip)
+  yield* equal(conflict.reason, "Resolve merge conflicts before checking changeset coverage")
+  yield* Console.log(
+    "Pending merge Git regressions passed: stale implicit refs, explicit base rejection, checkout-only, released upstream, feature coverage, resolution edits, invalid heads, conflicts"
+  )
+})
+
 const program = Effect.gen(function* () {
+  const stdio = yield* Stdio.Stdio
+  const args = yield* stdio.args
+  if (args.includes("--merge-base-self-test")) {
+    yield* runMergeBaseSelfTest()
+    yield* runPendingMergeSelfTest()
+    return
+  }
   yield* Effect.try({
     try: runSelfTest,
     catch: (cause) => new ChangesetCoverageError({ cause, reason: "Changeset coverage self-test failed" })
   })
   yield* runMergeBaseSelfTest()
-
-  const stdio = yield* Stdio.Stdio
-  const args = yield* stdio.args
+  yield* runPendingMergeSelfTest()
   if (args.includes("--self-test")) return
 
   const path = yield* Path.Path
@@ -9928,7 +10090,8 @@ const program = Effect.gen(function* () {
   const git = yield* makeGit(repositoryRoot)
   const configuredBase = Option.getOrUndefined(yield* Config.option(Config.string("CHANGESET_COVERAGE_BASE")))
   const githubBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_BASE_REF")))
-  const mergeBase = yield* resolveMergeBase(git, configuredBase, githubBase)
+  const pendingMergeHead = yield* readPendingMergeHead(git)
+  const mergeBase = yield* resolveMergeBase(git, configuredBase, githubBase, pendingMergeHead)
   const paths = yield* changedPaths(git, mergeBase)
   const records = yield* loadPackageRecords(git, fileSystem, path, repositoryRoot, packagesRoot, mergeBase, paths)
   const changedChangesetNames = yield* changedChangesetPackages(fileSystem, path, repositoryRoot, paths)
