@@ -6,6 +6,15 @@ The package is intentionally application-independent: it contains no vendor clie
 
 ## Status
 
+`@knpkv/rly/diff/patch` exports `parsePatch` and `PatchDiffView` for sparse git
+unified diffs. Parsing retains source line numbers, renamed/deleted paths, and
+binary markers; a malformed hunk comes back as `PatchInvalid` with a reason
+rather than throwing, so bad input cannot yield invented line numbers. The
+view accepts a parsed `file`, a document-unique `id`, `mode` (`split` or `stacked`), `wrap`,
+and `renderAnnotation(side, line)`. It shares the bounded renderer's styling
+and supports server rendering. A patch contains only its original context;
+use the complete-file diff views when reviewers need context expansion.
+
 The initial public surface is complete. Tokens, foundations, primitives,
 delivery patterns, contextual-agent patterns, and the isolated diff workbench
 are available through explicit, generated exports. The package remains
