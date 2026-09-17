@@ -118,9 +118,11 @@ void [publication, monitor];`
     await writeFile(privatePath, "{}")
     const malformed = await run([cli, "publish", privatePath])
     const invalid = await run([cli, "serve"], { MONITOR_PUBLISH_TOKEN: viewToken })
-    for (const result of [oversized, malformed, invalid]) {
+    const invalidOrigin = "https://private-monitor.example:99999"
+    const badOrigin = await run([cli, "serve"], { MONITOR_ORIGIN: invalidOrigin })
+    for (const result of [oversized, malformed, invalid, badOrigin]) {
       assert.notEqual(result.code, 0)
-      for (const secret of [privatePath, publishToken, viewToken]) {
+      for (const secret of [privatePath, publishToken, viewToken, invalidOrigin]) {
         assert.ok(!(result.stdout + result.stderr).includes(secret))
       }
       assert.match(result.stderr, /Monitor failed/)

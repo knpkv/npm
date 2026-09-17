@@ -48,6 +48,10 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
   const config = yield* Schema.decodeUnknownEffect(Configuration)(options).pipe(
     Effect.mapError(() => new MonitorConfigurationError())
   )
+  const origin = yield* Schema.decodeUnknownEffect(Schema.URLFromString)(config.origin).pipe(
+    Effect.mapError(() => new MonitorConfigurationError())
+  )
+  if (origin.origin !== config.origin) return yield* new MonitorConfigurationError()
   const state = yield* Ref.make<
     { readonly snapshot: Snapshot | null; readonly sequence: number; readonly receivedAt: number }
   >({ snapshot: null, sequence: -1, receivedAt: 0 })
@@ -77,7 +81,7 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
     })
     if (!admitted) return empty(429)
     if (
-      request.headers.host !== new URL(config.origin).host ||
+      request.headers.host !== origin.host ||
       (request.headers.origin !== undefined && request.headers.origin !== config.origin) ||
       request.headers["sec-fetch-site"] === "cross-site"
     ) return empty(403)

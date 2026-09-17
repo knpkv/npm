@@ -200,6 +200,22 @@ describe("actual HTTP authority boundary", () => {
       }
     }))
 
+  it.effect("rejects invalid or noncanonical origins before startup", () =>
+    Effect.gen(function*() {
+      for (const origin of ["https://monitor.example:99999", "http://127.0.0.1:99999", "https://monitor.example:443"]) {
+        const result = yield* makeMonitor({ boardId: "main", origin, publishToken, viewToken }, assets).pipe(
+          Effect.result
+        )
+        expect(result._tag).toBe("Failure")
+      }
+      for (const origin of ["https://monitor.example", "https://monitor.example:8443", "http://127.0.0.1:4319"]) {
+        const result = yield* makeMonitor({ boardId: "main", origin, publishToken, viewToken }, assets).pipe(
+          Effect.result
+        )
+        expect(result._tag).toBe("Success")
+      }
+    }))
+
   it.effect("publisher ignores response instructions and refuses redirects", () =>
     Effect.gen(function*() {
       const server = yield* HttpServer.HttpServer

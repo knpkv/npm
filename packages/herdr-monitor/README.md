@@ -25,6 +25,8 @@ Provide configuration through your deployment's secret manager or a private proc
 
 Run `herdr-monitor serve` in the isolated monitor environment. On the trusted publishing side run `herdr-monitor publish sanitized.json`. `herdr-monitor demo` publishes three synthetic agents using the same authenticated endpoint. It never reads live session data. Each successful command prints only a short acknowledgment; failures exit nonzero with a generic diagnostic.
 
+The origin must be a valid canonical URL origin. Invalid ports and noncanonical spellings fail startup. Use `https://monitor.example`, without an explicit default `:443` port; nondefault ports such as `:8443` are supported.
+
 Open the configured origin and enter the board identifier and view key. The page polls the monitor every ten seconds. The key lives only in page memory, is cleared from the input after submission and is forgotten on Lock or page exit. No application cookies, local storage or session storage are used. Browser password managers and extensions remain outside this guarantee.
 
 ## Snapshot contract

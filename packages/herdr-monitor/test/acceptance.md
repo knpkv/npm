@@ -49,6 +49,13 @@ an encoded URL pathname; the CLI now converts file URLs through Effect's Path
 service. This startup-only correction leaves the accepted browser assets
 unchanged and is verified by the packed server test.
 
+A later startup probe found that the origin allowlist accepted port `99999`.
+The regression test failed with `Success` where `Failure` was expected before
+the fix. Startup now parses the origin with `Schema.URLFromString` and rejects
+noncanonical representations before opening a listener. Focused tests retain
+valid HTTPS, nondefault HTTPS-port and loopback cases; the packed CLI test checks
+nonzero failure without exposing the invalid origin. Browser assets are unchanged.
+
 ## Independent security review
 
 The read-only Herdr reviewer `monitor-security` reviewed the implementation and
