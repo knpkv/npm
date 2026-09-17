@@ -91,6 +91,22 @@ time. The calendar position is an allocation of evidenced presence, not a claim 
 one ticket was worked at precisely those instants. This supersedes the shared-minute
 calendar consequence above while retaining the total-under-wall-clock invariant.
 
+Saved Jira and Clockify intervals remain independent authoritative layers. Hiding a
+provider changes which suggestions are classified as overlapping; it does not change
+their duration or the evidence. Minimum card height participates in visual collision
+detection, so even short independent stretches cannot cover one another.
+
+A retained plan caches evidence and attribution for review. Reload and post-write
+refresh use that evidence and reread provider totals and running timers. Only an
+explicit session rescan reads transcripts and invokes attribution. This cache is not
+persisted acceptance or rejection state; declined proposals may still reappear.
+
+Confirmation and optimistic preview use the same pure selection, sizing and anchoring
+planner. The browser supplies cached totals for its preview; the server supplies live
+totals before writing. A failed provider write removes only that provider's preview.
+Successful writes stay visible if the following totals refresh fails, and retrying
+that refresh never repeats a mutation.
+
 ## Amendment, 10 September 2026: Codex transcript evidence
 
 Session discovery reads Claude Code and Codex independently of the provider chosen

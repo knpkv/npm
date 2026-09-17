@@ -20,7 +20,12 @@ export const spanRange = (span: { readonly startMs: number; readonly endMs: numb
 const weekdayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 /** `Mon 16` for a column heading. Parsed as a local day, which is what every bucket is keyed by. */
-export const dayHeading = (day: string): { readonly weekday: string; readonly date: string } => {
+export interface DayHeading {
+  readonly weekday: string
+  readonly date: string
+}
+
+export const dayHeading = (day: string): DayHeading => {
   const at = new Date(`${day}T00:00:00`)
   return { date: String(at.getDate()), weekday: weekdayNames[(at.getDay() + 6) % 7] ?? "" }
 }
@@ -57,7 +62,11 @@ export { proposalTargets } from "@knpkv/jira-clockify/cli/agentWrite.js"
 export { parseDuration } from "@knpkv/jira-clockify/utils/time.js"
 
 /** What the attribution signal means, in one phrase, for a reader deciding whether to trust a row. */
-export const signalMeaning: Readonly<Record<string, string>> = {
+export interface AttributionExplanations {
+  readonly [signal: string]: string
+}
+
+export const signalMeaning: AttributionExplanations = {
   agent: "a Coding Agent read the transcript",
   branch: "the git branch names this ticket",
   none: "nothing placed this work",

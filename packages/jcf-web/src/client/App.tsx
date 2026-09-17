@@ -5,62 +5,38 @@
  *
  * - **Allocated and proposable in one cell.** A gap only means something next to what is already
  *   there, which is the whole reason this is a grid and not a list of proposals.
- * - **The server owns every number.** This component chooses what to show and what to ask; it never
- *   computes hours, never sizes a write, and never decides what is safe.
- * - **Four lanes under the grid, none of them decoration.** Hours on somebody else's ticket, hours a
- *   Coding Agent placed too weakly to offer, hours nothing placed at all, and days withheld because
- *   a Timer is still running. Each one is time that exists and is not in the grid, so hiding it
- *   would make the grid a lie.
+ * - **The server authorizes writes.** The browser previews pending intervals with shared sizing
+ *   rules; the server rechecks live provider totals and returns the actual result.
+ * - **Review time in the calendar.** Provider entries and suggestions remain separate. Ownership
+ *   exceptions and running-timer exclusions are explained below it.
  *
  * @module
  */
-import { Button, ThemeProvider } from "@knpkv/rly"
-import { useCallback, useEffect, useMemo, useState } from "react"
-import type { WeekPlanResponse, WeekScopeName, WriteResultResponse, WriteTargetsRequest } from "../server/Api.js"
-import {
-  bootstrapSession,
-  confirmRow,
-  type ConfirmRequest,
-  logManual,
-  mapStandingAttribution,
-  markTicketMine,
-  RequestFailure
-} from "./api.js"
-import { readWeek } from "./api.js"
-import { duration, shiftWeek, weekLabel } from "./format.js"
-import { ConfirmPanel, ManualPanel, StandingPanel } from "./panels.js"
+import { ThemeProvider } from "@knpkv/rly/foundations"
+import { RegistryContext } from "@effect/atom-react"
+import { Button, StatePanel, Text } from "@knpkv/rly/primitives"
+import { lazy, Suspense, useContext, useEffect, useMemo, useState } from "react"
+import type { WeekScopeName } from "../server/Api.js"
+import type { ConfirmRequest } from "./api.js"
+import { useWeek } from "./useWeek.js"
+import { AgentTerminal } from "./AgentTerminal.js"
+import { ReadStatus } from "./ReadStatus.js"
+import { EditorFrame } from "./EditorFrame.js"
+import { duration, formatClock, formatDuration, shiftWeek, weekLabel } from "./format.js"
+import { ConfirmPanel, ManualPanel } from "./panels.js"
+import { weekTotals } from "./calendarProjection.js"
 import { WeekGrid } from "./WeekGrid.js"
+import { makeRowDescriptions } from "./rowDescriptions.js"
+import { SavedEntryPanel } from "./SavedEntryPanel.js"
+import type { SavedEntry } from "../shared/contracts.js"
+
+const AgentSettingsPanel = lazy(() => import("./AgentSettingsPanel.js"))
 
 type OpenPanel =
-  | { readonly kind: "confirm"; readonly rowId: string; readonly blockIndex: number | undefined }
+  | { readonly kind: "saved"; readonly entry: SavedEntry }
+  | { readonly kind: "agent" }
+  | { readonly kind: "confirm"; readonly rowId: string; readonly blockIndex: number }
   | { readonly kind: "manual"; readonly day: string; readonly clock: string }
-  | { readonly kind: "standing"; readonly day: string; readonly cwd: string }
-
-const scopeStorageKey = "jcf_web_scope"
-
-/** Which systems a scope name writes to. */
-const targetsOfScope = (scope: WeekScopeName): WriteTargetsRequest => ({
-  clockify: scope !== "jira",
-  jira: scope !== "clockify"
-})
-
-/** Remembered per browser: someone who tracks in one system does so every week. */
-const storedScope = (): WeekScopeName => {
-  try {
-    const stored = window.localStorage.getItem(scopeStorageKey)
-    return stored === "clockify" || stored === "jira" ? stored : "both"
-  } catch {
-    return "both"
-  }
-}
-
-const rememberScope = (scope: WeekScopeName): void => {
-  try {
-    window.localStorage.setItem(scopeStorageKey, scope)
-  } catch {
-    // Storage is unavailable; the choice lasts this page.
-  }
-}
 
 const scopeLabels: ReadonlyArray<{ readonly scope: WeekScopeName; readonly label: string }> = [
   { label: "Both", scope: "both" },
@@ -68,344 +44,557 @@ const scopeLabels: ReadonlyArray<{ readonly scope: WeekScopeName; readonly label
   { label: "Clockify only", scope: "clockify" }
 ]
 
-const messageOf = (error: unknown): string =>
-  error instanceof RequestFailure || error instanceof Error ? error.message : String(error)
-
 export const App = () => {
-  const [monday, setMonday] = useState<string | undefined>(undefined)
-  const [scope, setScope] = useState<WeekScopeName>(storedScope)
-  const [plan, setPlan] = useState<WeekPlanResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [busy, setBusy] = useState(false)
-  const [failure, setFailure] = useState<string | null>(null)
-  const [written, setWritten] = useState<WriteResultResponse | null>(null)
+  const registry = useContext(RegistryContext)
+  const descriptions = useMemo(() => makeRowDescriptions(registry), [registry])
+  const { actions, state } = useWeek()
+  useEffect(() => () => descriptions.dispose(), [descriptions])
+  useEffect(() => descriptions.retain(state.plan?.planId), [descriptions, state.plan?.planId])
+  const {
+    actionFailure: failure,
+    activity,
+    busy: writing,
+    cancelled,
+    configurationChanged,
+    failure: readFailure,
+    loading,
+    missingPlan,
+    monday,
+    optimisticEntries,
+    plan,
+    progress,
+    readMode,
+    scope,
+    startedAt,
+    unavailable,
+    written
+  } = state
+  const busy = writing || state.queueActive
+  const { chooseScope, refreshRecorded } = actions
+  const [agentSettingsOpen, setAgentSettingsOpen] = useState(false)
+  const [agentSettingsSaving, setAgentSettingsSaving] = useState(false)
+  const [quickApproval, setQuickApproval] = useState(false)
   const [open, setOpen] = useState<OpenPanel | null>(null)
-
-  const load = useCallback(async (week: string | undefined, which: WeekScopeName) => {
-    setLoading(true)
-    setFailure(null)
-    try {
-      const next = await readWeek(week, which)
-      setPlan(next)
-      setMonday(next.monday)
-      setOpen(null)
-    } catch (error) {
-      setFailure(messageOf(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
+  const [theme, setTheme] = useState<"system" | "light" | "dark">("system")
+  const rescan = () => {
+    setOpen({ kind: "agent" })
+    return actions.rescan()
+  }
+  const retry = () => {
+    if (readMode === "full") setOpen({ kind: "agent" })
+    return actions.retry()
+  }
+  const cancel = () => {
+    setOpen(null)
+    actions.cancel()
+  }
+  const load = (week: string | undefined, which: WeekScopeName) => {
+    setOpen(null)
+    return actions.navigate(week, which)
+  }
   useEffect(() => {
-    // The session first: every read below depends on it, and a page opened without a bootstrap
-    // fragment relies on the cookie a previous load stored.
-    bootstrapSession()
-      .catch((error: unknown) => setFailure(messageOf(error)))
-      .then(() => load(undefined, storedScope()))
-  }, [load])
+    if (loading) setOpen((current) => (current?.kind === "agent" ? current : null))
+  }, [loading])
 
   const openRow = useMemo(
     () => (open?.kind === "confirm" ? plan?.rows.find((row) => row.rowId === open.rowId) : undefined),
     [open, plan]
   )
 
-  const totals = useMemo(() => {
-    let logged = 0
-    let proposable = 0
-    for (const row of plan?.rows ?? []) {
-      logged += Math.max(row.clockifySeconds, row.jiraSeconds)
-      proposable += Math.max(row.proposal?.clockifyDelta ?? 0, row.proposal?.jiraDelta ?? 0)
-    }
-    return { logged, proposable }
-  }, [plan])
+  const totals = useMemo(() => weekTotals(plan), [plan])
 
-  const afterWrite = async (result: WriteResultResponse) => {
-    setWritten(result)
-    setOpen(null)
-    await load(monday, scope)
-  }
-
-  const chooseScope = (next: WeekScopeName) => {
-    setScope(next)
-    rememberScope(next)
-    void load(monday, next)
-  }
-
-  const act = async (action: () => Promise<void>) => {
-    setBusy(true)
-    setFailure(null)
-    setWritten(null)
-    try {
-      await action()
-    } catch (error) {
-      setFailure(messageOf(error))
-    } finally {
-      setBusy(false)
-    }
+  const closeAfter = async (result: Promise<boolean>) => {
+    if (await result) setOpen(null)
   }
 
   const confirm = (request: Omit<ConfirmRequest, "planId" | "rowId">, rowId: string) =>
-    act(async () => {
-      if (plan === null) return
-      await afterWrite(await confirmRow({ ...request, planId: plan.planId, rowId }))
-    })
+    closeAfter(actions.confirm({ ...request, rowId }))
 
   return (
-    <ThemeProvider className="jcf-shell" theme="system">
-      <header className="jcf-bar">
-        <h1>{plan === null ? "Week" : weekLabel(plan.days)}</h1>
-        <Button
-          disabled={loading || monday === undefined}
-          onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, -1), scope)}
-        >
-          ← Previous
-        </Button>
-        <Button disabled={loading} onClick={() => load(undefined, scope)}>
-          This week
-        </Button>
-        <Button
-          disabled={loading || monday === undefined}
-          onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, 1), scope)}
-        >
-          Next →
-        </Button>
-        <span className="jcf-bar-spacer" />
-        {/* A side that is out is not read, not proposed for, and not written to. */}
-        <span className="jcf-scope" role="group">
-          {scopeLabels.map((option) => (
-            <Button
-              disabled={loading}
-              key={option.scope}
-              onClick={() => chooseScope(option.scope)}
-              size="compact"
-              variant={option.scope === scope ? "primary" : "quiet"}
+    <ThemeProvider className="jcf-shell" theme={theme}>
+      <main className="jcf-app">
+        <header className="jcf-heading">
+          <div>
+            <Text as="h1" variant="section-title">
+              JCF
+            </Text>
+            <Text as="p" tone="secondary">
+              Your week in Jira and Clockify.
+            </Text>
+          </div>
+          <label className="jcf-theme">
+            Appearance
+            <select
+              aria-label="Appearance"
+              value={theme}
+              onChange={(event) => {
+                const value = event.target.value
+                if (value === "light" || value === "dark" || value === "system") setTheme(value)
+              }}
             >
-              {option.label}
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+        </header>
+        <header className="jcf-bar">
+          <div className="jcf-week-nav">
+            <Button
+              aria-label="Previous week"
+              disabled={busy || monday === undefined}
+              onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, -1), scope)}
+              size="compact"
+            >
+              Previous
             </Button>
-          ))}
-        </span>
-        <span className="jcf-totals">
-          <span>Logged {duration(totals.logged)}</span>
-          <span>Proposable {duration(totals.proposable)}</span>
-        </span>
-      </header>
-
-      {failure === null ? null : (
-        <p className="jcf-note" data-tone="failure">
-          {failure}
-        </p>
-      )}
-      {written === null ? null : (
-        <div className="jcf-note" data-tone="success">
-          <p>{written.lines.join(" · ")}</p>
-          <p className="jcf-preview">{written.description}</p>
+            <Button disabled={busy} onClick={() => load(undefined, scope)} size="compact">
+              This week
+            </Button>
+            <Button
+              aria-label="Next week"
+              disabled={busy || monday === undefined}
+              onClick={() => load(monday === undefined ? undefined : shiftWeek(monday, 1), scope)}
+              size="compact"
+            >
+              Next
+            </Button>
+          </div>
+          <div className="jcf-scope" role="group" aria-label="Systems to reconcile">
+            {scopeLabels.map((option) => (
+              <Button
+                aria-pressed={scope === option.scope}
+                disabled={busy}
+                key={option.scope}
+                onClick={() => {
+                  setOpen(null)
+                  chooseScope(option.scope)
+                }}
+                size="compact"
+                variant={option.scope === scope ? "primary" : "quiet"}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+          <Button
+            size="compact"
+            disabled={busy || loading || agentSettingsSaving}
+            aria-expanded={agentSettingsOpen}
+            onClick={() => setAgentSettingsOpen((open) => !open)}
+          >
+            Agent settings
+          </Button>
+          <Button
+            aria-expanded={open?.kind === "agent"}
+            disabled={(activity.length === 0 && !loading) || cancelled}
+            onClick={() => setOpen(open?.kind === "agent" ? null : { kind: "agent" })}
+            size="compact"
+          >
+            Agent requests and responses
+          </Button>
+          <Button disabled={busy || loading} onClick={refreshRecorded} size="compact">
+            Refresh totals
+          </Button>
+          <Button
+            disabled={busy || loading || agentSettingsSaving}
+            onClick={() => {
+              void rescan()
+            }}
+            size="compact"
+          >
+            Rescan sessions
+          </Button>
+          <Button
+            disabled={unavailable}
+            onClick={() => {
+              if (plan !== null) setOpen({ kind: "manual", day: plan.monday, clock: "09:00" })
+            }}
+            size="compact"
+            variant="primary"
+          >
+            Log time
+          </Button>
+        </header>
+        {agentSettingsOpen ? (
+          <Suspense fallback={<p>Loading agent settings…</p>}>
+            <AgentSettingsPanel
+              disabled={busy || loading}
+              onSaved={actions.markConfigurationChanged}
+              onSaving={(saving) => {
+                setAgentSettingsSaving(saving)
+                descriptions.invalidate()
+              }}
+            />
+          </Suspense>
+        ) : null}
+        <div className="jcf-week-summary">
+          <Text as="h2" variant="card-title">
+            {plan === null ? "Your week" : weekLabel(plan.days)}
+          </Text>
+          <div className="jcf-totals">
+            {plan?.scope === "clockify" ? null : (
+              <div aria-label="Jira totals" data-source="jira">
+                <span>
+                  Jira <strong>{formatDuration(totals.jira)} saved</strong>
+                </span>
+                <span className="jcf-muted">+{formatDuration(totals.jiraSuggested)} suggested</span>
+              </div>
+            )}
+            {plan?.scope === "jira" ? null : (
+              <div aria-label="Clockify totals" data-source="clockify">
+                <span>
+                  Clockify <strong>{formatDuration(totals.clockify)} saved</strong>
+                </span>
+                <span className="jcf-muted">+{formatDuration(totals.clockifySuggested)} suggested</span>
+              </div>
+            )}
+          </div>
         </div>
-      )}
-      {plan !== null && plan.sessionRootCount === 0 ? (
-        <p className="jcf-note" data-tone="warning">
-          No Session Root is configured, so no session can become a proposal. Run{" "}
-          <code>jcf config set session-root ~/dev/work</code>.
-        </p>
-      ) : null}
-      {plan !== null && plan.ownership === "assigned" && !plan.ownershipChecked ? (
-        <p className="jcf-note" data-tone="warning">
-          {plan.scope === "clockify"
-            ? "Clockify only, so Jira was not asked who owns these tickets — nothing is withheld and no titles are shown."
-            : "Jira could not say who owns these tickets, so nothing was withheld on ownership this week."}
-        </p>
-      ) : null}
-      {plan !== null && !plan.attributorAvailable ? (
-        <p className="jcf-note" data-tone="warning">
-          A Coding Agent could not be reached, so sessions no branch or path could place are only reported below.
-        </p>
-      ) : null}
+        {configurationChanged ? (
+          <p className="jcf-note">Setting saved. Choose Rescan sessions to update the suggestions.</p>
+        ) : null}
+        <div
+          className="jcf-feedback"
+          data-editing={open !== null}
+          data-floating={plan !== null && (readMode === "recorded" || !loading)}
+        >
+          {loading && readMode === "recorded" ? (
+            <ReadStatus key={startedAt} progress={progress} startedAt={startedAt} onCancel={cancel} mode={readMode} />
+          ) : null}
+          {readFailure === null ? null : (
+            <StatePanel
+              announce="assertive"
+              title={readMode === "recorded" ? "Could not update logged time" : "Could not load the week"}
+              description={readFailure}
+              tone="critical"
+              action={
+                <Button disabled={agentSettingsSaving} onClick={retry} size="compact">
+                  {readMode === "full" ? "Rescan sessions" : "Retry read"}
+                </Button>
+              }
+            />
+          )}
+          {cancelled ? (
+            <StatePanel
+              title="Read cancelled"
+              description={
+                plan === null
+                  ? "No time was logged. Choose Rescan sessions when you are ready."
+                  : "The last loaded calendar is still shown. Refresh totals to read current time."
+              }
+              action={
+                <Button disabled={agentSettingsSaving} onClick={retry} size="compact">
+                  {readMode === "recorded" ? "Refresh totals" : "Rescan sessions"}
+                </Button>
+              }
+            />
+          ) : null}
+          {failure === null ? null : (
+            <StatePanel
+              announce="assertive"
+              title="Could not complete the action"
+              description={failure}
+              tone="critical"
+            />
+          )}
+          {written === null ? null : (
+            <StatePanel
+              announce="polite"
+              title={
+                written.clockify._tag === "Refused" ||
+                written.jira._tag === "Refused" ||
+                written.clockify._tag === "NotLoggedIn" ||
+                written.jira._tag === "NotLoggedIn"
+                  ? "Some time could not be logged"
+                  : "Time checked"
+              }
+              tone={
+                written.clockify._tag === "Refused" ||
+                written.jira._tag === "Refused" ||
+                written.clockify._tag === "NotLoggedIn" ||
+                written.jira._tag === "NotLoggedIn"
+                  ? "caution"
+                  : "positive"
+              }
+              description={
+                <>
+                  <p>{written.lines.join(". ")}</p>
+                  <p>{written.description}</p>
+                </>
+              }
+            />
+          )}
+        </div>
+        {plan !== null && plan.sessionRootCount === 0 ? (
+          <p className="jcf-note" data-tone="warning">
+            No Session Root is configured, so no session can become a proposal. Run{" "}
+            <code>jcf config set session-root ~/dev/work</code>.
+          </p>
+        ) : null}
+        {plan !== null && plan.ownership === "assigned" && !plan.ownershipChecked ? (
+          <p className="jcf-note" data-tone="warning">
+            {plan.scope === "clockify"
+              ? "Clockify only, so Jira was not asked who owns these tickets — nothing is withheld and no titles are shown."
+              : "Jira could not say who owns these tickets, so nothing was withheld on ownership this week."}
+          </p>
+        ) : null}
+        {plan !== null && !plan.attributorAvailable ? (
+          <p className="jcf-note" data-tone="warning">
+            A Coding Agent could not be reached. Sessions without a branch or path match have no suggestions.
+          </p>
+        ) : null}
 
-      {loading && plan === null ? <p className="jcf-muted">Reading sessions…</p> : null}
+        {plan === null ? null : (
+          <div className="jcf-approval-mode" role="group" aria-label="Suggestion approval mode">
+            <Button
+              size="compact"
+              aria-pressed={!quickApproval}
+              variant={quickApproval ? "secondary" : "primary"}
+              onClick={() => setQuickApproval(false)}
+            >
+              Review first
+            </Button>
+            <Button
+              size="compact"
+              aria-pressed={quickApproval}
+              variant={quickApproval ? "primary" : "secondary"}
+              onClick={() => {
+                setOpen(null)
+                setQuickApproval(true)
+              }}
+            >
+              Quick approve · 5s Undo
+            </Button>
+            <span>
+              {quickApproval
+                ? "Click suggestions to queue them. Keep going while they save."
+                : "Open a suggestion to adjust its time or note."}
+            </span>
+          </div>
+        )}
+        {state.queued.length === 0 ? null : (
+          <section className="jcf-approval-queue" aria-label="Approval queue">
+            <p role="status">
+              {state.queued.length} approval{state.queued.length === 1 ? "" : "s"} pending. Undo is available until
+              saving starts.
+            </p>
+            <ul role="list">
+              {state.queued.map((entry) => {
+                const label = `${entry.ticketKey} · ${entry.day} · ${formatClock(new Date(entry.startMs))}–${formatClock(new Date(entry.endMs))}`
+                return (
+                  <li key={entry.id}>
+                    <span>{label}</span>
+                    {entry.status === "saving" ? (
+                      <span>Saving…</span>
+                    ) : (
+                      <Button size="compact" aria-label={`Undo ${label}`} onClick={() => actions.undoQueued(entry.id)}>
+                        Undo
+                      </Button>
+                    )}
+                  </li>
+                )
+              })}
+            </ul>
+          </section>
+        )}
+        <div className="jcf-workspace" data-editing={open !== null}>
+          {plan === null ? null : (
+            <WeekGrid
+              onOpenSaved={(entry) => {
+                actions.clearWritten()
+                setOpen({ kind: "saved", entry })
+              }}
+              queueUnavailable={state.queueUnavailable}
+              onQuickApprove={(rowId, blockIndex) => {
+                actions.clearWritten()
+                actions.queueConfirm({ rowId, blocks: [blockIndex] })
+              }}
+              layers={state.layers}
+              onToggleLayer={actions.toggleLayer}
+              writing={writing}
+              optimisticEntries={optimisticEntries}
+              disabled={state.queueUnavailable}
+              manualDisabled={unavailable}
+              quickApproval={quickApproval}
+              selectedBlockIndex={open?.kind === "confirm" ? open.blockIndex : undefined}
+              onOpenRow={(rowId, blockIndex) => {
+                actions.clearWritten()
+                if (quickApproval) {
+                  actions.queueConfirm({ rowId, blocks: [blockIndex] })
+                  return
+                }
+                setOpen({ blockIndex, kind: "confirm", rowId })
+              }}
+              onOpenSlot={(day, clock) => {
+                actions.clearWritten()
+                setOpen({ clock, day, kind: "manual" })
+              }}
+              plan={plan}
+              selectedRowId={open?.kind === "confirm" ? open.rowId : undefined}
+            />
+          )}
 
-      {plan === null ? null : (
-        <WeekGrid
-          onOpenRow={(rowId, blockIndex) => {
-            setWritten(null)
-            setOpen({ blockIndex, kind: "confirm", rowId })
-          }}
-          onOpenSlot={(day, clock) => {
-            setWritten(null)
-            setOpen({ clock, day, kind: "manual" })
-          }}
-          plan={plan}
-          selectedRowId={open?.kind === "confirm" ? open.rowId : undefined}
-        />
-      )}
+          {open === null &&
+          plan !== null &&
+          !loading &&
+          (missingPlan || (plan.rows.length === 0 && plan.unlinkedClockify.length === 0)) ? (
+            <aside className="jcf-empty-state" aria-label="Session suggestions">
+              {missingPlan ? (
+                <StatePanel
+                  title="No session suggestions for this week"
+                  description="Saved Jira and Clockify time is shown. Scan your coding sessions to add suggestions."
+                  action={
+                    <Button
+                      disabled={busy || agentSettingsSaving}
+                      onClick={() => void rescan()}
+                      size="compact"
+                      variant="primary"
+                    >
+                      Scan sessions
+                    </Button>
+                  }
+                />
+              ) : (
+                <StatePanel
+                  title="No logged or proposed time this week"
+                  description="Choose another week or use Log time for work away from your coding sessions."
+                />
+              )}
+            </aside>
+          ) : null}
 
-      {openRow === undefined || open?.kind !== "confirm" ? null : (
-        <ConfirmPanel
-          blockIndex={open.blockIndex}
-          busy={busy}
-          // Mounted fresh per block, so the ticks and the amount always belong to what was clicked.
-          key={`${openRow.rowId}:${open.blockIndex ?? "all"}`}
-          onCancel={() => setOpen(null)}
-          onConfirm={(submission) =>
-            confirm(
-              {
-                targets: submission.targets,
-                ...(submission.blocks === undefined ? {} : { blocks: submission.blocks }),
-                ...(submission.note === undefined ? {} : { note: submission.note }),
-                ...(submission.seconds === undefined ? {} : { seconds: submission.seconds }),
-                ...(submission.ticketKey === undefined ? {} : { ticketKey: submission.ticketKey })
-              },
-              openRow.rowId
-            )
-          }
-          row={openRow}
-          scopeTargets={targetsOfScope(scope)}
-        />
-      )}
+          {open === null ? null : (
+            <EditorFrame
+              busy={open.kind === "agent" ? false : writing}
+              label={
+                open.kind === "agent"
+                  ? "Agent conversation"
+                  : open.kind === "saved"
+                    ? "Saved time editor"
+                    : "Time entry editor"
+              }
+              onClose={() => setOpen(null)}
+              identity={JSON.stringify(open)}
+            >
+              {open.kind === "saved" && plan !== null ? (
+                <SavedEntryPanel
+                  key={`${plan.planId}:${open.entry.source}:${open.entry.id}`}
+                  entry={open.entry}
+                  targetVisible={state.writeTargets[open.entry.source]}
+                  planId={plan.planId}
+                  busy={writing}
+                  unavailable={unavailable}
+                  descriptionDisabled={agentSettingsSaving}
+                  onSave={(request) => closeAfter(actions.updateSaved({ entry: open.entry, request }))}
+                  onCancel={() => setOpen(null)}
+                />
+              ) : null}
+              {open.kind === "agent" ? (
+                <>
+                  <div className="jcf-conversation-heading">
+                    <h2>Agent conversation</h2>
+                    <Button onClick={() => setOpen(null)} size="compact" variant="quiet">
+                      Close
+                    </Button>
+                  </div>
+                  {loading && readMode === "full" ? (
+                    <>
+                      <ReadStatus
+                        key={startedAt}
+                        progress={progress}
+                        startedAt={startedAt}
+                        onCancel={cancel}
+                        mode={readMode}
+                      />
+                      {plan === null ? null : (
+                        <p className="jcf-muted">Showing the last loaded week while the new read runs.</p>
+                      )}
+                    </>
+                  ) : null}
+                  <AgentTerminal key={startedAt} activity={activity} />
+                </>
+              ) : null}
+              {openRow === undefined || open?.kind !== "confirm" || plan === null ? null : (
+                <ConfirmPanel
+                  description={descriptions.get(plan.planId, openRow.rowId)}
+                  descriptionDisabled={agentSettingsSaving}
+                  blockIndex={open.blockIndex}
+                  busy={writing}
+                  unavailable={unavailable}
+                  // Each clicked block starts a fresh editor.
+                  key={`${openRow.rowId}:${open.blockIndex}`}
+                  onCancel={() => setOpen(null)}
+                  onConfirm={(submission) => confirm(submission, openRow.rowId)}
+                  row={openRow}
+                  scopeTargets={state.writeTargets}
+                />
+              )}
 
-      {open?.kind === "manual" ? (
-        <ManualPanel
-          busy={busy}
-          day={open.day}
-          onCancel={() => setOpen(null)}
-          onLog={(submission) =>
-            act(async () => {
-              await afterWrite(
-                await logManual({
-                  day: open.day,
-                  seconds: submission.seconds,
-                  targets: submission.targets,
-                  ticketKey: submission.ticketKey,
-                  ...(submission.note === undefined ? {} : { note: submission.note }),
-                  ...(submission.startClock === undefined ? {} : { startClock: submission.startClock })
-                })
-              )
-            })
-          }
-          scopeTargets={targetsOfScope(scope)}
-          startClock={open.clock}
-        />
-      ) : null}
+              {open?.kind === "manual" ? (
+                <ManualPanel
+                  busy={busy}
+                  key={`${open.day}:${open.clock}`}
+                  days={plan?.days ?? [open.day]}
+                  day={open.day}
+                  onCancel={() => setOpen(null)}
+                  onLog={(submission) => closeAfter(actions.logManual(submission))}
+                  scopeTargets={state.writeTargets}
+                  startClock={open.clock}
+                />
+              ) : null}
+            </EditorFrame>
+          )}
+        </div>
 
-      {open?.kind === "standing" && plan !== null ? (
-        <StandingPanel
-          busy={busy}
-          credit={
-            plan.unattributed.find((credit) => credit.day === open.day) ?? {
-              cwds: [],
-              day: open.day,
-              seconds: 0,
-              sessionCount: 0
-            }
-          }
-          cwd={open.cwd}
-          onCancel={() => setOpen(null)}
-          onMap={(mapping) =>
-            act(async () => {
-              await mapStandingAttribution(mapping)
-              await load(monday, scope)
-            })
-          }
-        />
-      ) : null}
-
-      {plan === null ? null : (
-        <div className="jcf-lanes">
-          {plan.unattributed.length === 0 ? null : (
-            <section className="jcf-lane">
-              <h2>Nothing placed these hours</h2>
-              <ul>
-                {plan.unattributed.map((credit) => (
-                  <li key={credit.day}>
-                    <strong>{credit.day}</strong>
-                    <span>{duration(credit.seconds)}</span>
-                    <span className="jcf-muted">
-                      {credit.sessionCount} session{credit.sessionCount === 1 ? "" : "s"}
-                    </span>
-                    {credit.cwds.map((cwd) => (
+        {plan === null ? null : (
+          <div className="jcf-lanes">
+            {plan.notMine.length === 0 ? null : (
+              <section className="jcf-lane">
+                <h2>Assigned to somebody else</h2>
+                <p className="jcf-muted">
+                  A branch cannot tell writing a ticket from reviewing one. These hours are real; they are just not
+                  offered, because Jira says the ticket is not yours. If one of them is your work, say so once and it
+                  stays said.
+                </p>
+                <ul>
+                  {plan.notMine.map((row) => (
+                    <li key={`${row.day}:${row.ticketKey}`}>
+                      <strong>{row.day}</strong>
+                      <span>{row.ticketKey}</span>
+                      <span>{duration(row.seconds)}</span>
+                      {row.ticketTitle === null ? null : <span className="jcf-muted">{row.ticketTitle}</span>}
+                      <span className="jcf-muted">{row.assignee === null ? "unassigned" : row.assignee}</span>
                       <Button
-                        key={cwd}
-                        onClick={() => setOpen({ cwd, day: credit.day, kind: "standing" })}
+                        disabled={unavailable}
+                        onClick={() => closeAfter(actions.markMine({ ticketKey: row.ticketKey }))}
                         size="compact"
                         variant="quiet"
                       >
-                        {cwd}
+                        It is mine
                       </Button>
-                    ))}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
 
-          {plan.notMine.length === 0 ? null : (
-            <section className="jcf-lane">
-              <h2>Assigned to somebody else</h2>
-              <p className="jcf-muted">
-                A branch cannot tell writing a ticket from reviewing one. These hours are real; they are just not
-                offered, because Jira says the ticket is not yours. If one of them is your work, say so once and it
-                stays said.
-              </p>
-              <ul>
-                {plan.notMine.map((row) => (
-                  <li key={`${row.day}:${row.ticketKey}`}>
-                    <strong>{row.day}</strong>
-                    <span>{row.ticketKey}</span>
-                    <span>{duration(row.seconds)}</span>
-                    {row.ticketTitle === null ? null : <span className="jcf-muted">{row.ticketTitle}</span>}
-                    <span className="jcf-muted">{row.assignee === null ? "unassigned" : row.assignee}</span>
-                    <Button
-                      disabled={busy}
-                      onClick={() =>
-                        act(async () => {
-                          await markTicketMine({ ticketKey: row.ticketKey })
-                          await load(monday, scope)
-                        })
-                      }
-                      size="compact"
-                      variant="quiet"
-                    >
-                      It is mine
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {plan.withheld.length === 0 ? null : (
-            <section className="jcf-lane">
-              <h2>Placed too weakly to offer</h2>
-              <ul>
-                {plan.withheld.map((credit) => (
-                  <li key={`${credit.day}:${credit.ticketKey}`}>
-                    <strong>{credit.day}</strong>
-                    <span>{credit.ticketKey}</span>
-                    <span>{duration(credit.seconds)}</span>
-                    {credit.ticketTitle === null ? null : <span className="jcf-muted">{credit.ticketTitle}</span>}
-                    <span className="jcf-muted">
-                      confidence {credit.confidence === null ? "unknown" : credit.confidence.toFixed(2)} — below the
-                      floor, so it is reported rather than proposed
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-
-          {plan.excludedDays.length === 0 ? null : (
-            <section className="jcf-lane">
-              <h2>Days held back</h2>
-              <ul>
-                {plan.excludedDays.map((excluded) => (
-                  <li key={excluded.day}>
-                    <strong>{excluded.day}</strong>
-                    <span className="jcf-muted">{excluded.reason}</span>
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </div>
-      )}
+            {plan.excludedDays.length === 0 ? null : (
+              <section className="jcf-lane">
+                <h2>Days held back</h2>
+                <ul>
+                  {plan.excludedDays.map((excluded) => (
+                    <li key={excluded.day}>
+                      <strong>{excluded.day}</strong>
+                      <span className="jcf-muted">{excluded.reason}</span>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
+          </div>
+        )}
+      </main>
     </ThemeProvider>
   )
 }

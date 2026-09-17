@@ -63,6 +63,11 @@ export interface BootstrapAttemptState {
 export interface OwnerSessionSecretsContract {
   /** The origin this server considers itself to be. A request's Host header is never authoritative. */
   readonly authorityOrigin: string
+  /**
+   * The origin the browser is expected to present. Same as the authority in production; the Vite
+   * dev server when it proxies in front of it, because that is the origin the page runs on.
+   */
+  readonly browserOrigin: string
   readonly bootstrapAvailable: Ref.Ref<boolean>
   readonly bootstrapAttemptState: Ref.Ref<BootstrapAttemptState>
   readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
@@ -120,8 +125,9 @@ export const resolvePublicOrigin = Effect.fn("OwnerSession.resolvePublicOrigin")
 )
 
 export const makeOwnerSessionSecrets = Effect.fn("OwnerSession.makeSecrets")(
-  function*(authorityOrigin: string) {
+  function*(authorityOrigin: string, configuredPublicOrigin?: string) {
     const validated = yield* requireLoopbackOrigin(authorityOrigin)
+    const browserOrigin = yield* resolvePublicOrigin(configuredPublicOrigin, validated)
     const [ownerToken, csrfToken, bootstrapToken] = yield* Effect.all([
       issueSessionToken(),
       issueCsrfToken(),
@@ -133,6 +139,7 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSession.makeSecrets")(
       bootstrapAvailable: yield* Ref.make(true),
       bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined),
       bootstrapToken,
+      browserOrigin,
       csrfToken,
       ownerToken
     })
@@ -178,7 +185,7 @@ export const authorizeOwnerRequest = Effect.fn("OwnerSession.authorizeRequest")(
     if (credentialValuesEqual(request.credential, Redacted.value(secrets.ownerToken)) !== true) {
       return yield* new UnauthorizedApiError({ message: "Missing or invalid owner session" })
     }
-    const sameOrigin = request.origin !== undefined && request.origin === secrets.authorityOrigin
+    const sameOrigin = request.origin !== undefined && request.origin === secrets.browserOrigin
     if (request.origin !== undefined && !sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Request origin does not match this jcf-web server" })
     }
@@ -206,7 +213,7 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSession.authorizeBootst
     request: { readonly authorization: string | undefined; readonly origin: string | undefined },
     secrets: OwnerSessionSecretsContract
   ) {
-    if (request.origin !== secrets.authorityOrigin) {
+    if (request.origin !== secrets.browserOrigin) {
       return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match this jcf-web server" })
     }
     const supplied = bearerToken(request.authorization)

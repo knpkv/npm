@@ -1,19 +1,15 @@
 @import "@knpkv/rly/styles.css";
 
-/*
- * The week is a calendar: hours down, days across, and every block at the time it happened. Which is
- * how a timesheet is actually read, and the only layout in which a gap has a shape.
- *
- * Everything here is rly tokens — no colour, spacing, or type is invented locally.
- */
+/* Rly owns presentation tokens. Calendar geometry stays local to the time grid. */
 
 .jcf-shell {
   display: flex;
   flex-direction: column;
   gap: var(--rly-space-16);
   margin: 0 auto;
-  max-width: 1400px;
+  max-width: none;
   padding: var(--rly-space-24);
+  min-height: 100dvh;
 }
 
 .jcf-bar {
@@ -21,16 +17,8 @@
   display: flex;
   flex-wrap: wrap;
   gap: var(--rly-space-12);
-}
-
-.jcf-bar h1 {
-  font-size: var(--rly-type-title-size, 1.25rem);
-  font-weight: 600;
-  margin: 0;
-}
-
-.jcf-bar-spacer {
-  flex: 1;
+  padding-block: var(--rly-space-12);
+  border-block: 1px solid var(--rly-color-border-1);
 }
 
 .jcf-totals {
@@ -63,21 +51,20 @@
   color: var(--rly-color-success-ink);
 }
 
-/*
- * The calendar. One CSS variable holds the height of an hour, set from the component so the pixels
- * a click is measured in and the pixels a block is drawn in cannot drift apart.
- */
-
 .jcf-calendar {
   border: 1px solid var(--rly-color-border-1);
-  border-radius: var(--rly-radius-group);
-  overflow: hidden;
+  border-radius: var(--rly-radius-control);
+  overflow: auto;
+  background: var(--rly-color-surface-1);
+  max-height: 72dvh;
+  scrollbar-gutter: stable;
 }
 
 .jcf-calendar-head,
 .jcf-calendar-body {
   display: grid;
-  grid-template-columns: 4rem repeat(var(--jcf-columns, 5), minmax(8rem, 1fr));
+  grid-template-columns: 4rem repeat(var(--jcf-columns, 5), minmax(max(9rem, var(--jcf-column-min, 0px)), 1fr));
+  min-width: calc(4rem + var(--jcf-columns, 5) * max(9rem, var(--jcf-column-min, 0px)));
 }
 
 .jcf-calendar-head {
@@ -86,10 +73,11 @@
   position: sticky;
   top: 0;
   z-index: 2;
+  min-height: var(--rly-space-48);
 }
 
 .jcf-column-head {
-  align-items: baseline;
+  align-items: center;
   border-left: 1px solid var(--rly-color-border-1);
   display: flex;
   gap: var(--rly-space-6);
@@ -117,17 +105,22 @@
   height: var(--jcf-hour);
   padding-right: var(--rly-space-6);
   text-align: right;
-  /* Sits on its own hour line rather than in the middle of the row below it. */
   transform: translateY(-0.6em);
 }
 
 .jcf-column {
   border-left: 1px solid var(--rly-color-border-1);
-  cursor: copy;
+  cursor: pointer;
   position: relative;
 }
 
+.jcf-column[data-disabled="true"],
+.jcf-block-logged {
+  cursor: default;
+}
+
 .jcf-hour-line {
+  pointer-events: none;
   border-top: 1px solid var(--rly-color-border-1);
   display: block;
   height: var(--jcf-hour);
@@ -147,40 +140,25 @@
 }
 
 .jcf-block {
+  container: jcf-card / inline-size;
   border-radius: var(--rly-radius-tag);
   display: flex;
   flex-direction: column;
-  font-size: 0.8em;
+  font-size: var(--rly-type-meta-size);
   gap: 1px;
-  line-height: 1.25;
+  line-height: var(--rly-type-meta-line-height);
   overflow: hidden;
   padding: 2px var(--rly-space-4);
   position: absolute;
   text-align: left;
 }
 
-/* Logged time: solid, because it is a fact both systems can be asked about. */
-.jcf-block-logged {
-  background: var(--rly-color-service-clockify);
-  color: var(--rly-color-action-foreground);
-}
-
-.jcf-block-logged[data-source="jira"] {
-  background: var(--rly-color-service-jira);
-}
-
-.jcf-block-logged[data-behind="true"] {
-  /* The two systems disagreeing is the original problem, so the block says so on its face. */
-  outline: 2px dashed var(--rly-color-held-ink);
-  outline-offset: -2px;
-}
-
-/* Proposable time: dashed, because nothing has recorded it yet. */
 .jcf-block-gap {
-  background: var(--rly-color-surface-3);
+  background: var(--rly-color-surface-1);
   border: 1px dashed var(--rly-color-border-2);
   color: var(--rly-color-text-1);
   cursor: pointer;
+  border-color: var(--rly-color-action-background);
 }
 
 .jcf-block-gap:hover,
@@ -192,6 +170,46 @@
 .jcf-block-gap:focus-visible {
   outline: 2px solid var(--rly-color-focus);
   outline-offset: 1px;
+}
+
+/* Both actions stay inside their collision slot without covering adjacent cards. */
+.jcf-block-actions {
+  position: absolute;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px;
+  align-items: start;
+}
+
+.jcf-block-actions > .jcf-block-gap {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.jcf-quick-approve {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  color: var(--rly-color-action-foreground);
+  background: var(--rly-color-action-background);
+  border: 1px solid var(--rly-color-action-background);
+  border-radius: var(--rly-radius-tag);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.jcf-quick-approve:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: -2px;
+}
+
+.jcf-quick-approve:disabled {
+  opacity: 0.65;
+  cursor: wait;
 }
 
 .jcf-block-key {
@@ -207,12 +225,6 @@
 .jcf-block-note {
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.jcf-block-flag {
-  font-size: 0.9em;
-  font-weight: 600;
-  text-transform: lowercase;
 }
 
 .jcf-scope {
@@ -240,50 +252,22 @@
   gap: var(--rly-space-4);
 }
 
-/*
- * The blocks a write is for. A list rather than a grid: they are read top to bottom in time order,
- * and there are rarely more than a handful.
- */
-.jcf-blocks {
-  border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-field);
-  padding: 0 var(--rly-space-8) var(--rly-space-8);
-}
-
-.jcf-blocks legend {
-  color: var(--rly-color-text-3);
-  padding: 0 var(--rly-space-4);
-}
-
-.jcf-blocks ul {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--rly-space-4) var(--rly-space-16);
-  list-style: none;
-  margin: 0 0 var(--rly-space-8);
-  padding: 0;
-}
-
-.jcf-blocks label {
-  align-items: center;
-  display: flex;
-  gap: var(--rly-space-6);
-}
-
 .jcf-panel {
-  background: var(--rly-color-surface-2);
+  background: var(--rly-color-surface-1);
   border: 1px solid var(--rly-color-action-background);
   border-radius: var(--rly-radius-group);
   display: flex;
   flex-direction: column;
-  gap: var(--rly-space-12);
+  gap: var(--rly-space-16);
   padding: var(--rly-space-16);
+  border-color: var(--rly-color-border-2);
 }
 
 .jcf-panel h2 {
-  font-size: 1em;
+  font-size: var(--rly-type-card-title-size);
   font-weight: 600;
   margin: 0;
+  line-height: var(--rly-type-card-title-line-height);
 }
 
 .jcf-panel dl {
@@ -291,6 +275,8 @@
   gap: var(--rly-space-4) var(--rly-space-12);
   grid-template-columns: max-content 1fr;
   margin: 0;
+  font-size: var(--rly-type-label-size);
+  line-height: var(--rly-type-body-line-height);
 }
 
 .jcf-panel dt {
@@ -302,9 +288,10 @@
 }
 
 .jcf-fields {
-  display: flex;
+  display: grid;
   flex-wrap: wrap;
-  gap: var(--rly-space-12);
+  gap: var(--rly-space-16);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .jcf-field {
@@ -313,24 +300,8 @@
   gap: var(--rly-space-4);
 }
 
-.jcf-field span {
-  color: var(--rly-color-text-3);
-}
-
-.jcf-field input {
-  background: var(--rly-color-surface-1);
-  border: 1px solid var(--rly-color-border-2);
-  border-radius: var(--rly-radius-field);
-  padding: var(--rly-space-6) var(--rly-space-8);
-}
-
-.jcf-field input:focus-visible {
-  outline: 2px solid var(--rly-color-focus);
-  outline-offset: 1px;
-}
-
 .jcf-field-wide input {
-  min-width: 22rem;
+  min-width: 0;
 }
 
 .jcf-preview {
@@ -344,6 +315,7 @@
 .jcf-actions {
   display: flex;
   gap: var(--rly-space-8);
+  flex-wrap: wrap;
 }
 
 .jcf-lanes {
@@ -359,7 +331,7 @@
 }
 
 .jcf-lane h2 {
-  font-size: 1em;
+  font-size: var(--rly-type-card-title-size);
   font-weight: 600;
   margin: 0 0 var(--rly-space-8);
 }
@@ -394,4 +366,760 @@
 
 .jcf-muted {
   color: var(--rly-color-text-3);
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+.jcf-app {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-16);
+  margin-inline: auto;
+  max-width: 1600px;
+  width: 100%;
+}
+
+.jcf-heading,
+.jcf-week-summary,
+.jcf-calendar-tools,
+.jcf-read-summary {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-12);
+  justify-content: space-between;
+}
+
+.jcf-heading {
+  padding-block: var(--rly-space-16);
+}
+
+.jcf-heading p {
+  margin-top: var(--rly-space-8);
+}
+
+.jcf-theme {
+  color: var(--rly-color-text-2);
+  display: flex;
+  align-items: center;
+  gap: var(--rly-space-8);
+  font-size: var(--rly-type-label-size);
+}
+
+.jcf-theme select {
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  padding: var(--rly-space-8);
+  min-height: var(--rly-space-40);
+}
+
+.jcf-week-nav {
+  display: flex;
+  gap: var(--rly-space-4);
+  margin-right: auto;
+}
+
+.jcf-totals strong {
+  color: var(--rly-color-text-1);
+  margin-left: var(--rly-space-4);
+}
+
+.jcf-workspace {
+  align-items: start;
+  display: grid;
+  gap: var(--rly-space-20);
+  min-width: 0;
+  /* Keep controls at the same width when saving removes the editor. */
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+}
+
+.jcf-week-view {
+  min-width: 0;
+}
+
+.jcf-calendar-tools {
+  align-items: start;
+  margin-bottom: var(--rly-space-12);
+}
+
+.jcf-layers {
+  display: grid;
+  flex: 1 1 600px;
+  min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  gap: var(--rly-space-8);
+  font-size: var(--rly-type-label-size);
+}
+
+.jcf-layers button {
+  border-bottom-width: 3px;
+}
+
+.jcf-layers button[aria-pressed="false"] {
+  color: var(--rly-color-text-2);
+  border-style: dashed;
+}
+
+.jcf-layers button[data-source="jira"] {
+  border-bottom-color: var(--rly-color-service-jira);
+}
+
+.jcf-layers button[data-source="clockify"] {
+  border-bottom-color: var(--rly-color-service-clockify);
+}
+
+.jcf-layer-help {
+  color: var(--rly-color-text-2);
+  font-size: var(--rly-type-meta-size);
+  margin-bottom: var(--rly-space-12);
+}
+
+.jcf-block-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--rly-space-4);
+  min-width: 0;
+}
+
+.jcf-block-label .jcf-block-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.jcf-block-source {
+  margin-left: auto;
+  font-size: 0.8em;
+  color: var(--rly-color-text-2);
+}
+
+/* The ticket key takes priority when a collision lane cannot fit both labels. */
+@container jcf-card (max-width: 9rem) {
+  .jcf-block-source {
+    display: none;
+  }
+}
+
+.jcf-totals {
+  flex-wrap: wrap;
+}
+
+.jcf-totals > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-4);
+  border-left: 3px solid var(--rly-color-service-clockify);
+  padding-left: var(--rly-space-8);
+}
+
+.jcf-totals > div[data-source="jira"] {
+  border-color: var(--rly-color-service-jira);
+}
+
+.jcf-gutter,
+.jcf-gutter-head {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--rly-color-surface-2);
+}
+
+.jcf-block-logged {
+  background: var(--rly-color-surface-3);
+  color: var(--rly-color-text-1);
+  border: 0;
+  border-left: var(--rly-space-4) solid var(--rly-color-service-clockify);
+}
+
+.jcf-block-logged:enabled {
+  cursor: pointer;
+}
+
+.jcf-block-logged:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 1px;
+}
+
+.jcf-description-status {
+  display: grid;
+  gap: var(--rly-space-4);
+}
+
+.jcf-description-status progress {
+  width: 100%;
+}
+
+.jcf-block-logged[data-source="jira"],
+.jcf-agenda-entry[data-source="jira"] {
+  border-left: var(--rly-space-4) solid var(--rly-color-service-jira);
+}
+
+.jcf-agenda-entry[data-source="clockify"] {
+  border-left: var(--rly-space-4) solid var(--rly-color-service-clockify);
+}
+
+.jcf-block-gap[data-selected="true"] {
+  background: var(--rly-color-deploying-tint);
+  outline: 2px solid var(--rly-color-action-background);
+  outline-offset: -2px;
+}
+
+.jcf-block:disabled,
+.jcf-agenda-entry:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.jcf-editor {
+  grid-column: 2;
+  min-width: 0;
+  background: var(--rly-color-surface-1);
+  position: sticky;
+  top: var(--rly-space-16);
+  max-height: calc(100dvh - 2 * var(--rly-space-16));
+  overflow: auto;
+  border-radius: var(--rly-radius-group);
+  scroll-margin-block: var(--rly-space-16);
+}
+
+.jcf-editor-fields {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+}
+
+.jcf-empty-state {
+  grid-column: 2;
+  min-width: 0;
+  position: sticky;
+  top: var(--rly-space-16);
+}
+
+.jcf-panel p {
+  margin: 0;
+}
+
+.jcf-field,
+.jcf-field input,
+.jcf-field textarea,
+.jcf-field select {
+  min-width: 0;
+  width: 100%;
+}
+
+.jcf-field-wide,
+.jcf-targets {
+  grid-column: 1 / -1;
+}
+
+.jcf-description-progress {
+  display: block;
+  width: 100%;
+  height: var(--rly-space-8);
+  margin-bottom: var(--rly-space-8);
+  accent-color: var(--rly-color-action-background);
+}
+
+.jcf-targets label {
+  min-height: var(--rly-space-40);
+}
+
+.jcf-targets input {
+  accent-color: var(--rly-color-action-background);
+  height: var(--rly-space-16);
+  width: var(--rly-space-16);
+}
+
+.jcf-lane li > *,
+.jcf-lane button {
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.jcf-lane > p {
+  max-width: 75ch;
+}
+
+.jcf-read-status {
+  padding: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-1);
+}
+
+/* Routine save/refresh feedback cannot insert height above the visible calendar. */
+.jcf-feedback {
+  display: contents;
+}
+
+.jcf-feedback[data-floating="true"] {
+  position: fixed;
+  inset-inline-end: var(--rly-space-24);
+  inset-block-end: var(--rly-space-24);
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-8);
+  width: min(400px, calc(100% - 2 * var(--rly-space-24)));
+  max-height: 45dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-radius: var(--rly-radius-control);
+  z-index: 6;
+}
+
+.jcf-feedback[data-floating="true"] > * {
+  flex-shrink: 0;
+}
+
+/* Failed writes leave the editor open. Keep feedback clear of its fields and actions. */
+.jcf-feedback[data-floating="true"][data-editing="true"] {
+  inset-inline-start: var(--rly-space-24);
+  inset-inline-end: auto;
+  inset-block-start: var(--rly-space-16);
+  inset-block-end: auto;
+  max-height: calc(25dvh - 2 * var(--rly-space-16));
+}
+
+.jcf-read-summary [role="status"] {
+  flex: 1;
+  min-width: 200px;
+}
+
+.jcf-elapsed {
+  font-variant-numeric: tabular-nums;
+}
+
+.jcf-read-status progress {
+  display: block;
+  width: 100%;
+  height: var(--rly-space-8);
+  accent-color: var(--rly-color-action-background);
+  margin-block: var(--rly-space-12);
+}
+
+.jcf-read-status summary {
+  cursor: pointer;
+  color: var(--rly-color-text-2);
+}
+
+.jcf-read-stages {
+  display: grid;
+  gap: var(--rly-space-12);
+  list-style: none;
+  padding: 0;
+}
+
+.jcf-read-stages li {
+  display: flex;
+  gap: var(--rly-space-12);
+  color: var(--rly-color-text-2);
+}
+
+.jcf-read-stages li[data-state="active"] {
+  color: var(--rly-color-text-1);
+}
+
+.jcf-read-stages p {
+  margin: var(--rly-space-4) 0 0;
+  font-size: var(--rly-type-label-size);
+}
+
+.jcf-agenda {
+  display: none;
+}
+
+.jcf-week-view[data-view="agenda"] .jcf-calendar {
+  display: none;
+}
+
+.jcf-week-view[data-view="agenda"] .jcf-agenda {
+  display: grid;
+}
+
+.jcf-agenda-day {
+  border-top: 1px solid var(--rly-color-border-1);
+  padding-block: var(--rly-space-12);
+}
+
+.jcf-agenda-day header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jcf-agenda-day h3 {
+  margin: 0;
+  font-size: var(--rly-type-body-size);
+}
+
+.jcf-agenda-day ul {
+  display: grid;
+  gap: var(--rly-space-8);
+  list-style: none;
+  padding: 0;
+  margin: var(--rly-space-8) 0;
+}
+
+.jcf-agenda-entry {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--rly-space-4) var(--rly-space-12);
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-field);
+  text-align: left;
+  padding: var(--rly-space-12);
+  width: 100%;
+  color: var(--rly-color-text-1);
+}
+
+.jcf-agenda-entry[data-kind="proposable"] {
+  border-style: dashed;
+  border-color: var(--rly-color-action-background);
+  cursor: pointer;
+}
+
+.jcf-agenda-entry[aria-pressed="true"] {
+  background: var(--rly-color-deploying-tint);
+}
+
+.jcf-agenda-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: var(--rly-space-4);
+  align-items: start;
+}
+
+.jcf-agenda-actions > .jcf-quick-approve {
+  width: 44px;
+  height: 44px;
+}
+
+.jcf-agenda-time {
+  grid-column: 1 / -1;
+  font-size: var(--rly-type-meta-size);
+  color: var(--rly-color-text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.jcf-agenda-state {
+  grid-column: 1 / -1;
+  font-size: var(--rly-type-label-size);
+  color: var(--rly-color-text-2);
+}
+
+@media (max-width: 1100px) {
+  .jcf-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jcf-empty-state {
+    grid-column: 1;
+    position: static;
+  }
+
+  .jcf-editor {
+    grid-column: 1;
+    position: fixed;
+    inset: var(--rly-space-16);
+    inset-block-start: auto;
+    max-height: 75dvh;
+    overscroll-behavior: contain;
+    z-index: 5;
+  }
+}
+
+@media (max-width: 640px) {
+  .jcf-shell {
+    padding: var(--rly-space-12);
+  }
+
+  .jcf-heading {
+    padding-block: var(--rly-space-8);
+  }
+
+  .jcf-week-nav,
+  .jcf-scope {
+    width: 100%;
+  }
+
+  .jcf-week-nav button,
+  .jcf-scope button {
+    flex: 1;
+  }
+
+  .jcf-week-view[data-view="auto"] .jcf-calendar {
+    display: none;
+  }
+
+  .jcf-week-view[data-view="auto"] .jcf-agenda {
+    display: grid;
+  }
+
+  .jcf-totals {
+    font-size: var(--rly-type-label-size);
+  }
+
+  .jcf-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jcf-panel dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.jcf-block-note {
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.jcf-block[data-density="short"] .jcf-block-clock,
+.jcf-block:not([data-density="full"]) .jcf-block-note {
+  display: none;
+}
+
+.jcf-presentation button[aria-pressed="true"] {
+  background: var(--rly-color-surface-1);
+  border-color: var(--rly-color-border-2);
+}
+
+.jcf-agent-terminal {
+  min-width: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.jcf-terminal-toolbar {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  background: var(--rly-color-surface-2);
+}
+.jcf-terminal-toolbar > span {
+  color: var(--rly-color-text-2);
+  font-size: 12px;
+}
+.jcf-terminal-batches {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.jcf-terminal-status {
+  color: var(--rly-color-text-2);
+  font-size: var(--rly-type-meta-size);
+}
+.jcf-agent-conversation {
+  display: grid;
+  gap: var(--rly-space-16);
+  padding: var(--rly-space-12);
+}
+.jcf-agent-message {
+  min-width: 0;
+  padding: var(--rly-space-12);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+  margin-right: var(--rly-space-24);
+}
+.jcf-agent-message[data-speaker="request"] {
+  margin-right: 0;
+  margin-left: var(--rly-space-24);
+  background: var(--rly-color-surface-2);
+}
+.jcf-agent-message header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-8);
+}
+.jcf-agent-message h3 {
+  font-size: var(--rly-type-label-size);
+  margin: 0;
+}
+.jcf-agent-message pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 280px;
+  overflow: auto;
+  font-size: var(--rly-type-meta-size);
+  line-height: var(--rly-type-meta-line-height);
+  margin: var(--rly-space-8) 0 0;
+  scrollbar-gutter: stable;
+}
+.jcf-agent-message[data-speaker="request"] pre {
+  max-height: 150px;
+}
+.jcf-agent-message pre:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: 2px;
+}
+
+.jcf-conversation-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--rly-space-8);
+  padding: var(--rly-space-12);
+  background: var(--rly-color-surface-1);
+}
+.jcf-conversation-heading h2 {
+  margin: 0;
+  font-size: var(--rly-type-label-size);
+}
+
+.jcf-block-logged[data-pending="true"],
+.jcf-agenda-entry[data-pending="true"] {
+  background: var(--rly-color-surface-2);
+  outline: 2px dotted var(--rly-color-border-2);
+  outline-offset: -2px;
+}
+
+/* Share heading, button and caption tracks so wrapped labels keep adjacent controls aligned. */
+.jcf-layer-group {
+  display: grid;
+  grid-row: span 3;
+  grid-template-rows: auto 1fr auto;
+  grid-template-rows: subgrid;
+  gap: var(--rly-space-8);
+  min-width: 0;
+}
+
+.jcf-layer-choices {
+  display: grid;
+  grid-row: span 2;
+  grid-template-rows: 1fr auto;
+  grid-template-rows: subgrid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--rly-space-8);
+}
+
+.jcf-layer-choice {
+  display: grid;
+  min-width: 0;
+  grid-row: span 2;
+  grid-template-rows: 1fr auto;
+  grid-template-rows: subgrid;
+}
+
+.jcf-layer-choices[data-suggestions="true"] {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.jcf-layer-choices button {
+  font-variant-numeric: tabular-nums;
+  height: auto;
+  min-height: 44px;
+  width: 100%;
+  justify-content: flex-start;
+  text-align: left;
+  white-space: normal;
+}
+
+.jcf-layer-choice small {
+  display: block;
+  color: var(--rly-color-text-2);
+  font-size: var(--rly-type-meta-size);
+  margin-top: 0;
+}
+
+.jcf-layers button[data-source="overlapping"],
+.jcf-block-gap[data-overlap="true"] {
+  border-color: var(--rly-color-held-ink);
+}
+
+.jcf-agent-settings {
+  margin-block: var(--rly-space-12);
+  padding: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+}
+
+.jcf-approval-mode {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--rly-space-8);
+  margin-block: var(--rly-space-12);
+}
+
+.jcf-approval-mode > span {
+  color: var(--rly-color-text-2);
+}
+
+.jcf-approval-queue {
+  position: fixed;
+  inset-block-start: var(--rly-space-16);
+  inset-inline-end: var(--rly-space-24);
+  width: min(400px, calc(100% - 2 * var(--rly-space-24)));
+  max-height: 25dvh;
+  overflow: auto;
+  overscroll-behavior: contain;
+  z-index: 5;
+  padding: var(--rly-space-12);
+  margin: 0;
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-group);
+  background: var(--rly-color-surface-1);
+}
+
+.jcf-approval-queue p {
+  margin: 0 0 var(--rly-space-8);
+}
+
+.jcf-approval-queue ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.jcf-approval-queue li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: var(--rly-space-8);
+  padding-block: var(--rly-space-4);
+}
+
+.jcf-approval-queue li > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.jcf-agent-settings-fields {
+  display: grid;
+  grid-template-columns: minmax(8rem, 1fr) minmax(12rem, 2fr) minmax(8rem, 1fr);
+  gap: var(--rly-space-12);
+  margin-block: var(--rly-space-12);
+}
+
+.jcf-agent-settings input,
+.jcf-agent-settings select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--rly-color-surface-1);
+  border: 1px solid var(--rly-color-border-1);
+  border-radius: var(--rly-radius-field);
+  padding: var(--rly-space-8);
+}
+
+@media (max-width: 640px) {
+  .jcf-agent-settings-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

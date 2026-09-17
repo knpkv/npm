@@ -54,6 +54,9 @@ export interface RowEvidence {
  * could place a session differently from the plan the person was looking at.
  */
 export interface HeldPlan {
+  /** Server-held attribution and ownership snapshot. Never accepted from a browser payload. */
+  readonly report: ReconcileService.SessionProposalReport
+  readonly ownership: OwnershipInput
   readonly planId: string
   readonly createdAtMillis: number
   readonly plan: WeekPlanResponse
@@ -130,24 +133,22 @@ const toWire = (draft: RowDraft): WeekRowResponse => ({
   rowId: rowId(draft.ticketKey, draft.day),
   ticketKey: draft.ticketKey,
   ticketTitle: draft.ticketTitle,
-  ...(draft.proposal === undefined ? {} : {
-    proposal: {
-      activeSeconds: draft.proposal.activeSeconds,
-      blocks: draft.proposal.blocks.map((block) => ({
-        endMs: block.endMs,
-        seconds: block.seconds,
-        startMs: block.startMs
-      })),
-      clockifyDelta: draft.proposal.clockifyDelta,
-      confidence: draft.proposal.confidence,
-      jiraDelta: draft.proposal.jiraDelta,
-      // The credited evidence, which is the ceiling on an edited amount — not the gap, which is
-      // only what is missing right now and would fall to zero the moment one side is filled.
-      maxSeconds: draft.proposal.sessionSeconds,
-      sessionCount: draft.proposal.sessionIds.length,
-      signal: draft.proposal.signal
-    }
-  })
+  proposal: draft.proposal === undefined ? undefined : {
+    activeSeconds: draft.proposal.activeSeconds,
+    blocks: draft.proposal.blocks.map((block) => ({
+      endMs: block.endMs,
+      seconds: block.seconds,
+      startMs: block.startMs
+    })),
+    clockifyDelta: draft.proposal.clockifyDelta,
+    confidence: draft.proposal.confidence,
+    jiraDelta: draft.proposal.jiraDelta,
+    // The credited evidence, which is the ceiling on an edited amount — not the gap, which is
+    // only what is missing right now and would fall to zero the moment one side is filled.
+    maxSeconds: draft.proposal.sessionSeconds,
+    sessionCount: draft.proposal.sessionIds.length,
+    signal: draft.proposal.signal
+  }
 })
 
 /**
@@ -164,6 +165,10 @@ export const buildWeekPlan = (options: {
   readonly report: ReconcileService.SessionProposalReport
   /** What Jira says about these tickets. Omitted means nobody asked, so nothing is withheld. */
   readonly ownership?: OwnershipInput | undefined
+  /** Initial scans use their opaque plan ID; later snapshots supply fresh or retained entry handles. */
+  readonly entryRevision?: (entry: ReconcileService.RecordedEntry) => string
+  /** Defaults to true for explicit scans; recorded-only reads must pass false. */
+  readonly sessionScanAvailable?: boolean | undefined
 }): HeldPlan => {
   const days = weekDays(options.monday)
   // The report was read for exactly this week, so this only guards the two disagreeing. A row for
@@ -186,11 +191,14 @@ export const buildWeekPlan = (options: {
     draft.clockifySeconds = recorded.clockifySeconds
     draft.jiraSeconds = recorded.jiraSeconds
     draft.clockifyDescription = recorded.clockifyDescription
-    draft.intervals = recorded.intervals.map((interval) => ({
-      endMs: interval.endMs,
-      source: interval.source,
-      startMs: interval.startMs
-    }))
+    draft.intervals = recorded.intervals.map((interval) => {
+      const projected = { endMs: interval.endMs, source: interval.source, startMs: interval.startMs }
+      if (interval.entry === undefined) return projected
+      return {
+        ...projected,
+        entry: { ...interval.entry, revision: options.entryRevision?.(interval.entry) ?? options.planId }
+      }
+    })
   }
 
   const ownership = options.ownership ?? anyOwner
@@ -227,6 +235,8 @@ export const buildWeekPlan = (options: {
     .map(toWire)
 
   return {
+    report: options.report,
+    ownership,
     createdAtMillis: options.createdAtMillis,
     evidence,
     plan: {
@@ -245,8 +255,15 @@ export const buildWeekPlan = (options: {
       ownershipChecked: ownership.checked,
       planId: options.planId,
       rows,
+      unlinkedClockify: options.report.unlinkedClockify.filter((entry) => inWeek.has(entry.day)).map((
+        { entry, ...slice }
+      ) => {
+        if (entry === undefined) return slice
+        return { ...slice, entry: { ...entry, revision: options.entryRevision?.(entry) ?? options.planId } }
+      }),
       scope: options.scope,
       sessionCount: options.report.sessionCount,
+      sessionScanAvailable: options.sessionScanAvailable ?? true,
       sessionRootCount: options.report.sessionRootCount,
       unattributed: options.report.unattributed
         .filter((credit) => inWeek.has(credit.day))
@@ -270,85 +287,4 @@ export const buildWeekPlan = (options: {
   }
 }
 
-/**
- * The blocks a confirmation named, or every block when it named none.
- *
- * `undefined` for an index that is not a block of this row: a stale page confirming against a plan
- * that has been re-read is a case to refuse, not to write a guess for.
- */
-export const selectedBlocks = (
-  blocks: ReadonlyArray<AgentSessions.CreditedBlock>,
-  chosen: ReadonlyArray<number> | undefined
-): ReadonlyArray<AgentSessions.CreditedBlock> | undefined => {
-  if (chosen === undefined) return blocks
-  const picked: Array<AgentSessions.CreditedBlock> = []
-  for (const index of [...new Set(chosen)].sort((a, b) => a - b)) {
-    const block = blocks[index]
-    if (block === undefined) return undefined
-    picked.push(block)
-  }
-  return picked.length === 0 ? undefined : picked
-}
-
-/**
- * What accepting a row would write, given a live re-tally of the target bucket.
- *
- * Every number here is the server's: `credited` is the evidence the plan was built from, `selected`
- * is the part of it a person is accepting now, and `held` is what the two systems answered a moment
- * ago. `requested` is the only input a person supplies, and it is capped by the selection rather
- * than clamped to it — silently writing less than someone asked for is its own kind of wrong.
- *
- * **Why a side is sized against the whole row and not against the selection.** `credited - held` is
- * the room left in the day; the selection only says how much of that room to use now. Sizing a
- * block against `selected - held` instead would report "already logged" for the second block of any
- * row whose first block is already in — the arithmetic would treat the morning's entry as evidence
- * that the afternoon had been written too.
- */
-export type ProposedWrite =
-  | {
-    readonly _tag: "Write"
-    readonly clockifyDelta: number
-    readonly jiraDelta: number
-  }
-  | { readonly _tag: "NothingOwed" }
-  | { readonly _tag: "PastEvidence"; readonly maxSeconds: number }
-  | { readonly _tag: "BelowMinimum"; readonly minimumSeconds: number }
-
-/**
- * Below this a gap is noise rather than work: Jira floors worklogs to the minute, so a shorter write
- * could not be made faithfully even if it were offered. The same bound the engine proposes on.
- */
-export const MINIMUM_WRITE_SECONDS = 60
-
-export const proposeWrite = (options: {
-  readonly credited: number
-  /** The blocks being accepted now. Defaults to the whole row. */
-  readonly selected?: number | undefined
-  readonly requested: number | undefined
-  readonly heldClockifySeconds: number
-  readonly heldJiraSeconds: number
-  /** Which systems are in play. A side that is out gets a zero delta, never a gap. */
-  readonly targets?: { readonly clockify: boolean; readonly jira: boolean } | undefined
-}): ProposedWrite => {
-  const targets = options.targets ?? { clockify: true, jira: true }
-  const selected = Math.min(options.selected ?? options.credited, options.credited)
-  const requested = options.requested ?? selected
-  if (requested > selected) return { _tag: "PastEvidence", maxSeconds: selected }
-  if (requested < MINIMUM_WRITE_SECONDS) {
-    return { _tag: "BelowMinimum", minimumSeconds: MINIMUM_WRITE_SECONDS }
-  }
-  const owed = (held: number, asked: boolean): number => {
-    if (!asked) return 0
-    // Room left in the day, then as much of it as this selection asks for.
-    const room = Math.max(0, options.credited - held)
-    const delta = Math.min(requested, room)
-    // Under a minute is a rounding artefact rather than work: Jira floors worklogs to the minute.
-    return delta < MINIMUM_WRITE_SECONDS ? 0 : delta
-  }
-  const clockifyDelta = owed(options.heldClockifySeconds, targets.clockify)
-  const jiraDelta = owed(options.heldJiraSeconds, targets.jira)
-  // Nothing left on either side asked for: the ordinary outcome of confirming a row twice, or of a
-  // watch having taken it in between. Not a failure, and not a write.
-  if (clockifyDelta === 0 && jiraDelta === 0) return { _tag: "NothingOwed" }
-  return { _tag: "Write", clockifyDelta, jiraDelta }
-}
+export { MINIMUM_WRITE_SECONDS, type ProposedWrite, proposeWrite, selectedBlocks } from "../shared/writePlanning.js"

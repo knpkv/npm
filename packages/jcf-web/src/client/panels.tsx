@@ -13,27 +13,55 @@
  *
  * @module
  */
-import { Button } from "@knpkv/rly"
-import { useState } from "react"
+import { Button, Field } from "@knpkv/rly/primitives"
+import { useAtomValue } from "@effect/atom-react"
+import { useEffect, useState } from "react"
 import type { UnattributedDayResponse, WeekRowResponse, WriteTargetsRequest } from "../server/Api.js"
-import { duration, formatDuration, parseDuration, proposalTargets, signalMeaning, spanRange } from "./format.js"
+import { duration, formatDuration, parseDuration, signalMeaning, spanRange } from "./format.js"
+import type { RowDescriptionDraft } from "./rowDescriptions.js"
 
-/** A labelled text input. rly owns the look through tokens; the label stays a real `<label>`. */
+/** Rly owns field labels, focus, input sizing and announced validation. */
 const TextField = (props: {
   readonly label: string
   readonly value: string
   readonly onChange: (value: string) => void
   readonly wide?: boolean
   readonly placeholder?: string
+  readonly error?: string | undefined
+  readonly type?: "text" | "time"
+  readonly maxLength?: number
+  readonly loading?: boolean
+  readonly multiline?: boolean
 }) => (
-  <label className={props.wide === true ? "jcf-field jcf-field-wide" : "jcf-field"}>
-    <span>{props.label}</span>
-    <input
-      onChange={(event) => props.onChange(event.target.value)}
-      placeholder={props.placeholder}
-      value={props.value}
-    />
-  </label>
+  <Field
+    className={props.wide === true ? "jcf-field jcf-field-wide" : "jcf-field"}
+    label={props.label}
+    {...(props.error === undefined ? {} : { error: props.error })}
+  >
+    {(control) =>
+      props.multiline === true ? (
+        <textarea
+          {...control}
+          rows={4}
+          onChange={(event) => props.onChange(event.target.value)}
+          placeholder={props.placeholder}
+          value={props.value}
+          maxLength={props.maxLength}
+          aria-busy={props.loading}
+        />
+      ) : (
+        <input
+          {...control}
+          onChange={(event) => props.onChange(event.target.value)}
+          placeholder={props.placeholder}
+          value={props.value}
+          type={props.type ?? "text"}
+          maxLength={props.maxLength}
+          aria-busy={props.loading}
+        />
+      )
+    }
+  </Field>
 )
 
 export interface ConfirmSubmission {
@@ -46,20 +74,19 @@ export interface ConfirmSubmission {
 }
 
 /**
- * Which systems this write touches, defaulted to the week's own scope.
- *
- * Per write rather than only per week: most days both systems want the same hours, and the day they
- * do not is a deliberate choice someone should be able to make without re-reading the week.
+ * A write can narrow the selected provider layers. Hidden layers cannot be re-enabled here.
  */
 const TargetPicker = (props: {
+  readonly allowed: WriteTargetsRequest
   readonly targets: WriteTargetsRequest
   readonly onChange: (targets: WriteTargetsRequest) => void
 }) => (
   <fieldset className="jcf-targets">
-    <legend>Write to</legend>
+    <legend>Write to selected layers</legend>
     <label>
       <input
         checked={props.targets.clockify}
+        disabled={!props.allowed.clockify}
         onChange={(event) => props.onChange({ ...props.targets, clockify: event.target.checked })}
         type="checkbox"
       />
@@ -68,6 +95,7 @@ const TargetPicker = (props: {
     <label>
       <input
         checked={props.targets.jira}
+        disabled={!props.allowed.jira}
         onChange={(event) => props.onChange({ ...props.targets, jira: event.target.checked })}
         type="checkbox"
       />
@@ -77,104 +105,49 @@ const TargetPicker = (props: {
 )
 
 /**
- * Which stretches of the row this write is for.
- *
- * The whole point of the list: a day's evidence arrives as several blocks, and the answer to "did
- * that hour go on this ticket?" is often yes for three of them and no for the fourth. Ticking is
- * cheaper than typing an amount, and unlike an amount it keeps the evidence attached — a chosen
- * block still has a transcript behind when it happened.
- */
-const BlockPicker = (props: {
-  readonly blocks: ReadonlyArray<{ readonly startMs: number; readonly endMs: number; readonly seconds: number }>
-  readonly chosen: ReadonlySet<number>
-  readonly onChange: (chosen: ReadonlySet<number>) => void
-}) => {
-  const all = props.chosen.size === props.blocks.length
-  return (
-    <fieldset className="jcf-blocks">
-      <legend>Blocks to write</legend>
-      <ul>
-        {props.blocks.map((block, index) => (
-          <li key={`${block.startMs}:${index}`}>
-            <label>
-              <input
-                checked={props.chosen.has(index)}
-                onChange={(event) => {
-                  const next = new Set(props.chosen)
-                  if (event.target.checked) next.add(index)
-                  else next.delete(index)
-                  props.onChange(next)
-                }}
-                type="checkbox"
-              />
-              <span className="jcf-spans">{spanRange(block)}</span>
-              <span>{duration(block.seconds)}</span>
-            </label>
-          </li>
-        ))}
-      </ul>
-      {props.blocks.length < 2 ? null : (
-        <Button
-          onClick={() => props.onChange(all ? new Set() : new Set(props.blocks.map((_, index) => index)))}
-          size="compact"
-          variant="quiet"
-        >
-          {all ? "None" : "All"}
-        </Button>
-      )}
-    </fieldset>
-  )
-}
-
-/**
- * Accept one proposed row, or one block of it.
+ * Review the one block clicked in the calendar.
  *
  * The amount box takes a duration the way the CLI does (`45m`, `1h30m`), because a person editing an
- * amount is thinking in hours and minutes, not seconds. It follows the blocks that are ticked, so
- * the number on screen is always the number that would be written.
+ * amount is thinking in hours and minutes, not seconds. The clicked block caps the editable amount.
  */
 export const ConfirmPanel = (props: {
+  readonly description: RowDescriptionDraft
+  readonly descriptionDisabled: boolean
   readonly row: WeekRowResponse
   readonly busy: boolean
+  readonly unavailable: boolean
   readonly scopeTargets: WriteTargetsRequest
-  /** The block the reader clicked. Its siblings start unticked, so one click writes one stretch. */
-  readonly blockIndex: number | undefined
+  /** The only block this editor can submit. */
+  readonly blockIndex: number
   readonly onConfirm: (submission: ConfirmSubmission) => void
   readonly onCancel: () => void
 }) => {
   const proposal = props.row.proposal
-  const blocks = proposal?.blocks ?? []
-  // Only the clicked block, or all of them when the panel was opened without one. The parent keys
-  // this component by row and block, so clicking another block mounts a fresh panel rather than
-  // leaving one block's amount attached to another block's times.
-  const chosenAtFirst = new Set(props.blockIndex === undefined ? blocks.map((_, index) => index) : [props.blockIndex])
-  const secondsOf = (chosen: ReadonlySet<number>): number =>
-    [...chosen].reduce((sum, index) => sum + (blocks[index]?.seconds ?? 0), 0)
-  const [chosen, setChosen] = useState<ReadonlySet<number>>(chosenAtFirst)
-  const [amount, setAmount] = useState(() => formatDuration(secondsOf(chosenAtFirst)))
+  const block = proposal?.blocks[props.blockIndex]
+  const selected = block?.seconds ?? 0
+  const [amount, setAmount] = useState(() => formatDuration(selected))
   const [ticketKey, setTicketKey] = useState(props.row.ticketKey)
-  const [note, setNote] = useState("")
-  const [targets, setTargets] = useState(props.scopeTargets)
-  if (proposal === undefined) return null
-
-  const selected = secondsOf(chosen)
-
-  const chooseBlocks = (next: ReadonlySet<number>) => {
-    setChosen(next)
-    // The amount is a consequence of the selection, not an independent field: leaving a stale
-    // number behind would offer to write time the ticked blocks do not account for.
-    setAmount(formatDuration(secondsOf(next)))
+  const draft = useAtomValue(props.description.state)
+  useEffect(() => {
+    if (!props.descriptionDisabled && draft.status === "idle" && !draft.edited) void props.description.load()
+  }, [props.description, props.descriptionDisabled, draft.status, draft.edited])
+  const note = draft.text
+  const suggesting =
+    !draft.edited && !props.descriptionDisabled && (draft.status === "loading" || draft.status === "idle")
+  const [chosenTargets, setTargets] = useState({ jira: true, clockify: true })
+  const targets = {
+    jira: props.scopeTargets.jira && chosenTargets.jira,
+    clockify: props.scopeTargets.clockify && chosenTargets.clockify
   }
+  if (proposal === undefined || block === undefined) return null
 
   const requested = parseDuration(amount.trim())
   const amountProblem =
-    chosen.size === 0
-      ? "Tick at least one block, or use the manual entry below the grid."
-      : requested === null
-        ? "Enter a duration like 45m or 1h30m."
-        : requested > selected
-          ? `The blocks you ticked evidence ${formatDuration(selected)}. Tick more, or log the rest by hand.`
-          : null
+    requested === null || requested < 60 || requested > 86400
+      ? "Enter between 1m and 24h, for example 45m or 1h30m."
+      : requested > selected
+        ? `This block contains ${formatDuration(selected)}. Use Log time to add other work.`
+        : null
   const retargeted = ticketKey !== props.row.ticketKey
   const adjusted = requested !== null && requested !== selected
   const ticketProblem = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ticketKey) ? null : "That is not an Issue Key."
@@ -183,10 +156,7 @@ export const ConfirmPanel = (props: {
   return (
     <section aria-label={`Confirm ${props.row.ticketKey} on ${props.row.day}`} className="jcf-panel">
       <h2>
-        {props.row.ticketKey} · {props.row.day} ·{" "}
-        {selected === proposal.maxSeconds
-          ? proposalTargets(proposal)
-          : `+${formatDuration(selected)} of ${formatDuration(proposal.maxSeconds)}`}
+        {props.row.ticketKey} · {props.row.day} · {spanRange(block)}
       </h2>
       {props.row.ticketTitle === null ? null : <p className="jcf-muted">{props.row.ticketTitle}</p>}
       <dl>
@@ -209,29 +179,53 @@ export const ConfirmPanel = (props: {
           Clockify {duration(props.row.clockifySeconds)} · Jira {duration(props.row.jiraSeconds)}
         </dd>
       </dl>
-      <BlockPicker blocks={proposal.blocks} chosen={chosen} onChange={chooseBlocks} />
       <div className="jcf-fields">
-        <TextField label="Amount" onChange={setAmount} value={amount} />
-        <TextField label="Issue Key" onChange={setTicketKey} value={ticketKey} />
+        <TextField label="Amount" onChange={setAmount} value={amount} error={amountProblem ?? undefined} />
         <TextField
+          label="Issue key"
+          onChange={(value) => setTicketKey(value.toUpperCase())}
+          value={ticketKey}
+          error={ticketProblem ?? undefined}
+        />
+        <TextField
+          maxLength={500}
           label="What was done (optional)"
-          onChange={setNote}
-          placeholder="goes with the entry"
+          multiline
+          loading={suggesting}
+          onChange={props.description.edit}
+          placeholder={suggesting ? "Agent is writing a description…" : "Describe this work"}
           value={note}
           wide
         />
-        <TargetPicker onChange={setTargets} targets={targets} />
+        <div className="jcf-field-wide jcf-muted" role="status" aria-label="Description suggestion">
+          {suggesting ? (
+            <progress className="jcf-description-progress" aria-label="Generating work description" />
+          ) : null}
+          {draft.edited ? (
+            "Your description will be used."
+          ) : props.descriptionDisabled ? (
+            "Waiting for agent settings to save…"
+          ) : draft.status === "loading" || draft.status === "idle" ? (
+            "Suggesting a description from session evidence…"
+          ) : draft.status === "ready" ? (
+            "Suggested from this ticket’s sessions for the day. Edit as needed."
+          ) : (
+            <>
+              <span>
+                {draft.status === "failed"
+                  ? draft.failure
+                  : "Couldn’t suggest a description from session evidence. You can write one."}
+              </span>{" "}
+              {draft.status === "failed" ? (
+                <Button size="compact" variant="quiet" onClick={() => void props.description.load()}>
+                  Try description again
+                </Button>
+              ) : null}
+            </>
+          )}
+        </div>
+        <TargetPicker allowed={props.scopeTargets} onChange={setTargets} targets={targets} />
       </div>
-      {amountProblem === null ? null : (
-        <p className="jcf-note" data-tone="failure">
-          {amountProblem}
-        </p>
-      )}
-      {ticketProblem === null ? null : (
-        <p className="jcf-note" data-tone="failure">
-          {ticketProblem}
-        </p>
-      )}
       {retargeted || adjusted ? (
         <p className="jcf-note" data-tone="warning">
           {retargeted && adjusted
@@ -247,14 +241,24 @@ export const ConfirmPanel = (props: {
           Pick at least one system — a write to neither is not a write.
         </p>
       ) : null}
+      {!retargeted && requested !== null ? (
+        <p className="jcf-muted">
+          Will add {targets.clockify ? `Clockify ${duration(Math.min(requested, proposal.clockifyDelta))}` : ""}
+          {targets.clockify && targets.jira ? " · " : ""}
+          {targets.jira ? `Jira ${duration(Math.min(requested, proposal.jiraDelta))}` : ""}.
+          {Math.max(targets.clockify ? proposal.clockifyDelta : 0, targets.jira ? proposal.jiraDelta : 0) < requested
+            ? " Reduced to the time still missing for this ticket and day."
+            : ""}
+        </p>
+      ) : null}
       <div className="jcf-actions">
         <Button
-          disabled={props.busy || amountProblem !== null || ticketProblem !== null || noTargets}
+          disabled={props.unavailable || amountProblem !== null || ticketProblem !== null || noTargets}
           loading={props.busy}
           onClick={() =>
             props.onConfirm({
               // Positions, never durations: the server holds the blocks and sizes the write.
-              blocks: chosen.size === proposal.blocks.length ? undefined : [...chosen].sort((a, b) => a - b),
+              blocks: [props.blockIndex],
               note: note.trim() === "" ? undefined : note.trim(),
               seconds: requested === selected ? undefined : (requested ?? undefined),
               targets,
@@ -263,7 +267,7 @@ export const ConfirmPanel = (props: {
           }
           variant="primary"
         >
-          Write it
+          Log selected time
         </Button>
         <Button disabled={props.busy} onClick={props.onCancel} variant="quiet">
           Cancel
@@ -274,6 +278,7 @@ export const ConfirmPanel = (props: {
 }
 
 export interface ManualSubmission {
+  readonly day: string
   readonly ticketKey: string
   readonly seconds: number
   readonly startClock: string | undefined
@@ -289,6 +294,7 @@ export interface ManualSubmission {
  * than tops up, so it says so.
  */
 export const ManualPanel = (props: {
+  readonly days: ReadonlyArray<string>
   readonly day: string
   readonly busy: boolean
   readonly startClock: string
@@ -298,27 +304,66 @@ export const ManualPanel = (props: {
 }) => {
   const [ticketKey, setTicketKey] = useState("")
   const [amount, setAmount] = useState("")
+  const [day, setDay] = useState(props.day)
   const [startClock, setStartClock] = useState(props.startClock)
   const [note, setNote] = useState("")
-  const [targets, setTargets] = useState(props.scopeTargets)
+  const [chosenTargets, setTargets] = useState({ jira: true, clockify: true })
+  const targets = {
+    jira: props.scopeTargets.jira && chosenTargets.jira,
+    clockify: props.scopeTargets.clockify && chosenTargets.clockify
+  }
 
   const seconds = parseDuration(amount.trim())
   const ticketOk = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ticketKey)
-  const clockOk = startClock.trim() === "" || /^\d{2}:\d{2}$/.test(startClock.trim())
+  const clockOk = startClock.trim() === "" || /^([01]\d|2[0-3]):[0-5]\d$/.test(startClock.trim())
+  const amountOk = seconds !== null && seconds >= 60 && seconds <= 86400
 
   return (
-    <section aria-label={`Log time by hand on ${props.day}`} className="jcf-panel">
-      <h2>Time by hand · {props.day}</h2>
+    <section aria-label={`Log time by hand on ${day}`} className="jcf-panel">
+      <h2>Log time</h2>
       <p className="jcf-muted">
-        Added to both systems as typed. Nothing is subtracted, so this is for work no session evidences rather than for
-        topping up a row above.
+        Adds the amount you enter to the selected systems. Use this for meetings or other work your sessions did not
+        record.
       </p>
       <div className="jcf-fields">
-        <TextField label="Issue Key" onChange={setTicketKey} placeholder="PROJ-123" value={ticketKey} />
-        <TextField label="Amount" onChange={setAmount} placeholder="45m" value={amount} />
-        <TextField label="Started (optional)" onChange={setStartClock} placeholder="14:30" value={startClock} />
-        <TextField label="What was done (optional)" onChange={setNote} value={note} wide />
-        <TargetPicker onChange={setTargets} targets={targets} />
+        <TextField
+          label="Issue key"
+          onChange={(value) => setTicketKey(value.toUpperCase())}
+          placeholder="PROJ-123"
+          value={ticketKey}
+          error={ticketKey !== "" && !ticketOk ? "Enter an issue key such as PROJ-123." : undefined}
+        />
+        <Field label="Day" className="jcf-field">
+          {(control) => (
+            <select {...control} value={day} onChange={(event) => setDay(event.target.value)}>
+              {props.days.map((date) => (
+                <option key={date} value={date}>
+                  {new Date(`${date}T12:00:00`).toLocaleDateString(undefined, {
+                    weekday: "short",
+                    month: "short",
+                    day: "numeric"
+                  })}
+                </option>
+              ))}
+            </select>
+          )}
+        </Field>
+        <TextField
+          label="Amount"
+          onChange={setAmount}
+          placeholder="45m"
+          value={amount}
+          error={amount !== "" && !amountOk ? "Enter between 1m and 24h, for example 45m." : undefined}
+        />
+        <TextField
+          label="Started (optional)"
+          type="time"
+          onChange={setStartClock}
+          value={startClock}
+          error={clockOk ? undefined : "Enter a time between 00:00 and 23:59."}
+        />
+        <TextField maxLength={500} label="What was done (optional)" multiline onChange={setNote} value={note} wide />
+        <TargetPicker allowed={props.scopeTargets} onChange={setTargets} targets={targets} />
       </div>
       {clockOk ? null : (
         <p className="jcf-note" data-tone="failure">
@@ -327,11 +372,12 @@ export const ManualPanel = (props: {
       )}
       <div className="jcf-actions">
         <Button
-          disabled={props.busy || seconds === null || !ticketOk || !clockOk || (!targets.clockify && !targets.jira)}
+          disabled={props.busy || !amountOk || !ticketOk || !clockOk || (!targets.clockify && !targets.jira)}
           loading={props.busy}
           onClick={() => {
             if (seconds === null) return
             props.onLog({
+              day,
               note: note.trim() === "" ? undefined : note.trim(),
               seconds,
               startClock: startClock.trim() === "" ? undefined : startClock.trim(),
@@ -341,7 +387,7 @@ export const ManualPanel = (props: {
           }}
           variant="primary"
         >
-          Write it
+          Log time
         </Button>
         <Button disabled={props.busy} onClick={props.onCancel} variant="quiet">
           Cancel
@@ -371,14 +417,20 @@ export const StandingPanel = (props: {
 
   return (
     <section aria-label={`Map ${props.cwd} to an Issue Key`} className="jcf-panel">
-      <h2>Standing Attribution · {props.credit.day}</h2>
+      <h2>Map sessions to a ticket</h2>
       <p className="jcf-muted">
         Sessions under this directory will be placed on this Issue Key from now on, unless a branch or a path names one.
-        Nothing is written to Jira or Clockify now — reload the week to see the hours become an ordinary proposal.
+        This saves the mapping and refreshes the week. It does not log time.
       </p>
       <div className="jcf-fields">
         <TextField label="Directory" onChange={setCwd} value={cwd} wide />
-        <TextField label="Issue Key" onChange={setTicketKey} placeholder="PROJ-123" value={ticketKey} />
+        <TextField
+          label="Issue key"
+          onChange={(value) => setTicketKey(value.toUpperCase())}
+          placeholder="PROJ-123"
+          value={ticketKey}
+          error={ticketKey !== "" && !ticketOk ? "Enter an issue key such as PROJ-123." : undefined}
+        />
       </div>
       <div className="jcf-actions">
         <Button
@@ -387,7 +439,7 @@ export const StandingPanel = (props: {
           onClick={() => props.onMap({ cwd: cwd.trim(), ticketKey })}
           variant="primary"
         >
-          Save the mapping
+          Save mapping
         </Button>
         <Button disabled={props.busy} onClick={props.onCancel} variant="quiet">
           Cancel

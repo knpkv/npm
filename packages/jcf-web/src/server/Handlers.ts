@@ -1,18 +1,19 @@
 /**
- * The four endpoints, as thin as they can be.
+ * Authenticated endpoint handlers.
  *
- * Every decision worth testing lives in `WeekPlan.ts` and `Confirm.ts`; this module only turns
- * their outcomes into status codes, and turns a query string into a week.
+ * Week reads, retained descriptions, and write decisions live in their owning modules.
+ * These handlers translate their outcomes and coordinate configuration changes.
  *
  * @module
  */
-import { ConfigService, FetchTicket, IssueFacts, ReconcileService, Time } from "@knpkv/jira-clockify"
-import { Clock, Effect } from "effect"
+import { ConfigService, FetchTicket, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
+import { Effect } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
+import type { ReadProgress, WeekScopeName } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
 import { confirmProposal, logManualEntry } from "./Confirm.js"
-import { buildWeekPlan, type OwnershipInput, sidesOfScope } from "./WeekPlan.js"
 import { WeekPlans } from "./WeekPlans.js"
+import { readRecordedWeekPlan, readWeekPlan, refreshWeekPlan, savedWeekPlan, streamWeekRead } from "./WeekRead.js"
 
 const failed = (message: string) => new ApiError({ message })
 
@@ -23,45 +24,23 @@ export const WeekLive = HttpApiBuilder.group(JcfWebApi, "week", (handlers) =>
     const config = yield* ConfigService.ConfigService
     const plans = yield* WeekPlans
 
-    return handlers.handle("read", ({ query }) =>
-      Effect.gen(function*() {
-        const anchor = query.monday === undefined ? new Date() : new Date(`${query.monday}T00:00:00`)
-        const period = Time.isoWeekPeriod(anchor)
-        const scope = query.only ?? "both"
-        const sides = sidesOfScope(scope)
-        const report = yield* reconcile.proposeFromSessions(period, { sides }).pipe(
-          Effect.mapError((error) => failed(error.message))
-        )
-        const settings = yield* config.get
+    const read = (
+      query: { readonly monday?: string | undefined; readonly only?: WeekScopeName | undefined },
+      report: (progress: ReadProgress) => Effect.Effect<void>
+    ) => readWeekPlan({ query, report, reconcile, issues, config, plans })
 
-        // Every key on screen, so a row that is only recorded gets its title too. One search covers
-        // the week — asking per row would be a request per cell.
-        const keys = [
-          ...report.proposals.map((proposal) => proposal.ticketKey),
-          ...report.recorded.map((row) => row.ticketKey),
-          ...report.withheld.map((credit) => credit.ticketKey)
-        ]
-        // A Clockify-only week must not touch Jira at all, titles included: "only Clockify" is a
-        // statement about which systems this run may talk to, not merely which it may write to.
-        const looked = sides.jira ? yield* issues.lookup(keys) : { checked: false, facts: new Map() }
-        const ownership: OwnershipInput = {
-          checked: looked.checked,
-          facts: looked.facts,
-          mode: settings.sessionOwnership,
-          overrides: settings.sessionOwnershipOverrides
-        }
-
-        const held = buildWeekPlan({
-          createdAtMillis: yield* Clock.currentTimeMillis,
-          monday: period.from,
-          ownership,
-          planId: yield* plans.nextPlanId,
-          report,
-          scope
-        })
-        yield* plans.keep(held)
-        return held.plan
-      }))
+    return handlers
+      .handle("saved", ({ query }) => savedWeekPlan({ query, plans }))
+      .handle("read", ({ query }) => read(query, () => Effect.void))
+      .handle("stream", ({ query }) => Effect.succeed(streamWeekRead((report) => read(query, report))))
+      .handle("recordedOnly", ({ query }) =>
+        Effect.succeed(streamWeekRead((report) =>
+          readRecordedWeekPlan({ query, report, reconcile, config, plans })
+        )))
+      .handle("recorded", ({ query }) =>
+        Effect.succeed(streamWeekRead((report) =>
+          refreshWeekPlan({ planId: query.planId, report, reconcile, plans })
+        )))
   }))
 
 export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
@@ -71,6 +50,7 @@ export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
     const ticketSummary = yield* FetchTicket.ticketSummaryReader
 
     return handlers
+      .handle("describe", ({ payload }) => plans.describe(payload))
       .handle("confirm", ({ payload }) =>
         Effect.gen(function*() {
           const plan = yield* plans.find(payload.planId)
@@ -143,8 +123,22 @@ export const RowsLive = HttpApiBuilder.group(JcfWebApi, "rows", (handlers) =>
 export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =>
   Effect.gen(function*() {
     const config = yield* ConfigService.ConfigService
+    const plans = yield* WeekPlans
 
     return handlers
+      .handle("agent", () => config.get.pipe(Effect.map((settings) => settings.sessionAgent)))
+      .handle("saveAgent", ({ payload }) =>
+        Effect.gen(function*() {
+          yield* plans.invalidateDescriptions
+          yield* config.set({ sessionAgent: payload }).pipe(Effect.ensuring(plans.invalidateDescriptions))
+          const stored = (yield* config.get).sessionAgent
+          if (
+            stored.provider !== payload.provider || stored.model !== payload.model || stored.effort !== payload.effort
+          ) {
+            return yield* failed("Agent settings could not be saved. Retry the save.")
+          }
+          return stored
+        }))
       .handle("standing", ({ payload }) =>
         Effect.gen(function*() {
           const current = yield* config.get
@@ -173,4 +167,12 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
           }
           return { ownershipOverrides: stored }
         }))
+  }))
+
+export const EntriesLive = HttpApiBuilder.group(JcfWebApi, "entries", (handlers) =>
+  Effect.gen(function*() {
+    const plans = yield* WeekPlans
+    return handlers
+      .handle("update", ({ payload }) => plans.updateSaved(payload))
+      .handle("describe", ({ payload }) => plans.describeSaved(payload))
   }))

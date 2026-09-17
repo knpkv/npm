@@ -28,9 +28,11 @@
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts"
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
+    "test:browser": "vite build && playwright test"
   },
   "dependencies": {
+    "@effect/atom-react": "4.0.0-rc.109",
     "@effect/platform-node": "4.0.0-rc.109",
     "@knpkv/browser-pairing": "workspace:^",
     "@knpkv/jira-clockify": "workspace:^",
@@ -41,6 +43,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0-rc.109",
+    "@playwright/test": "1.62.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",

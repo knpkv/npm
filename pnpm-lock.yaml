@@ -1076,6 +1076,9 @@ importers:
 
   packages/jcf-web:
     dependencies:
+      '@effect/atom-react':
+        specifier: 4.0.0-rc.109
+        version: 4.0.0-rc.109(effect@4.0.0-rc.109)(react@19.2.8)(scheduler@0.27.0)
       '@effect/platform-node':
         specifier: 4.0.0-rc.109
         version: 4.0.0-rc.109(effect@4.0.0-rc.109)(redis@6.2.1(@opentelemetry/api@1.9.1))
@@ -1098,6 +1101,9 @@ importers:
         specifier: ^19.2.8
         version: 19.2.8(react@19.2.8)
     devDependencies:
+      '@playwright/test':
+        specifier: 1.62.1
+        version: 1.62.1
       '@effect/vitest':
         specifier: 4.0.0-rc.109
         version: 4.0.0-rc.109(effect@4.0.0-rc.109)(vitest@4.1.10)

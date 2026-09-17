@@ -19,9 +19,11 @@ export default defineConfig(({ mode }) => {
       strictPort: true,
       // The dev server is the public origin; every API call and the bootstrap exchange are proxied
       // to the bound server, so the browser stays on one origin and the session cookie applies.
+      // The keys are anchored regexes: a bare "/api" prefix also captures the client's own
+      // `api.ts` module, which the backend then answers with the SPA shell.
       proxy: {
-        "/api": { target: backendOrigin, changeOrigin: false },
-        "/auth": { target: backendOrigin, changeOrigin: false }
+        "^/api/": { target: backendOrigin, changeOrigin: false },
+        "^/auth/": { target: backendOrigin, changeOrigin: false }
       }
     }
   }

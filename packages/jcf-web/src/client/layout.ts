@@ -20,7 +20,7 @@ export interface Timed {
 }
 
 /** Local midnight of `day`, and the midnight after it. */
-export const dayBounds = (day: string): { readonly startMs: number; readonly endMs: number } => {
+export const dayBounds = (day: string): Timed => {
   const start = new Date(`${day}T00:00:00`)
   const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 1, 0, 0, 0, 0)
   return { endMs: end.getTime(), startMs: start.getTime() }
@@ -62,7 +62,11 @@ const clampToDay = <A extends Timed>(
  * rather than across the day: one pair of overlapping blocks in the morning must not make the
  * afternoon's single block half-width.
  */
-export const placeBlocks = <A extends Timed>(blocks: ReadonlyArray<A>, day: string): ReadonlyArray<Placed<A>> => {
+export const placeBlocks = <A extends Timed>(
+  blocks: ReadonlyArray<A>,
+  day: string,
+  minimumMinutes = 0
+): ReadonlyArray<Placed<A>> => {
   const clamped = blocks
     .flatMap((block) => {
       const bounds = clampToDay(block, day)
@@ -96,10 +100,11 @@ export const placeBlocks = <A extends Timed>(blocks: ReadonlyArray<A>, day: stri
     if (entry.startMinutes >= clusterEnd) flush()
     const free = columnEnds.findIndex((end) => end <= entry.startMinutes)
     const column = free === -1 ? columnEnds.length : free
-    columnEnds[column] = entry.endMinutes
+    const occupiedEnd = Math.max(entry.endMinutes, entry.startMinutes + minimumMinutes)
+    columnEnds[column] = occupiedEnd
     clusterColumns.push(column)
     cluster.push(entry)
-    clusterEnd = Math.max(clusterEnd, entry.endMinutes)
+    clusterEnd = Math.max(clusterEnd, occupiedEnd)
   }
   flush()
   return placed
@@ -129,6 +134,15 @@ export const hourWindow = (
   for (const block of blocks) {
     const start = new Date(block.startMs)
     const end = new Date(block.endMs)
+    if (
+      block.endMs > block.startMs &&
+      (start.getFullYear() !== end.getFullYear() || start.getMonth() !== end.getMonth() ||
+        start.getDate() !== end.getDate())
+    ) {
+      fromHour = 0
+      toHour = 24
+      continue
+    }
     fromHour = Math.min(fromHour, start.getHours())
     // A block ending at 18:01 needs the 18:00 row drawn through 19:00.
     const endHour = end.getMinutes() > 0 || end.getSeconds() > 0 ? end.getHours() + 1 : end.getHours()

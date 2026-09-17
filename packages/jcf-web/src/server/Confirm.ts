@@ -18,9 +18,10 @@
 import { AgentWrite, Time } from "@knpkv/jira-clockify"
 import type { ReconcileService } from "@knpkv/jira-clockify"
 import { Effect } from "effect"
+import { MINIMUM_WRITE_SECONDS, prepareProposal } from "../shared/writePlanning.js"
 import type { WriteResultResponse } from "./Api.js"
 import type { HeldPlan } from "./WeekPlan.js"
-import { MINIMUM_WRITE_SECONDS, planSides, proposeWrite, selectedBlocks } from "./WeekPlan.js"
+import { planSides } from "./WeekPlan.js"
 
 /** The engine operations these functions need. Narrow, so a test provides only what it must. */
 export type WriteCapableService = Pick<
@@ -64,8 +65,8 @@ const dayPeriod = (day: string) => {
  * cannot make.
  */
 const nothingOwed = (description: string, targets: AgentWrite.WriteTargets): WriteResultResponse => {
-  const asked = { _tag: "NothingOwed" } as const
-  const unasked = { _tag: "Skipped" } as const
+  const asked: AgentWrite.SideOutcome = { _tag: "NothingOwed" }
+  const unasked: AgentWrite.SideOutcome = { _tag: "Skipped" }
   const clockify = targets.clockify ? asked : unasked
   const jira = targets.jira ? asked : unasked
   return {
@@ -91,73 +92,30 @@ export const confirmProposal = (options: {
 }): Effect.Effect<ConfirmOutcome, ReconcileService.ReconcileError> =>
   Effect.gen(function*() {
     const evidence = options.plan.evidence.get(options.request.rowId)
-    if (evidence === undefined) return { _tag: "UnknownRow" } as const
+    if (evidence === undefined) return { _tag: "UnknownRow" } satisfies ConfirmOutcome
     const proposal = evidence.proposal
-    const blocks = selectedBlocks(proposal.blocks, options.request.blocks)
-    if (blocks === undefined) return { _tag: "UnknownBlocks" } as const
-    const partial = options.request.blocks !== undefined && blocks.length < proposal.blocks.length
-    const selected = blocks.reduce((sum, block) => sum + block.seconds, 0)
-    const ticketKey = options.request.ticketKey ?? proposal.ticketKey
-    // The plan's own scope by default: someone reading a Jira-only week and confirming a row means
-    // Jira, and a payload that says otherwise had to say so.
-    const targets = options.request.targets ?? planSides(options.plan)
-    if (!targets.clockify && !targets.jira) return { _tag: "NoTargets" } as const
-
-    // Only the systems in play are re-read. A Clockify tally nobody is writing to is a request that
-    // can only fail a run that never needed it.
-    const recorded = yield* options.service.compare(dayPeriod(proposal.day), { sides: targets })
-    const bucket = recorded.find((row) => row.ticketKey === ticketKey && row.day === proposal.day)
-    const heldClockifySeconds = bucket?.clockifySeconds ?? 0
-    const heldJiraSeconds = bucket?.jiraSeconds ?? 0
-
-    const write = proposeWrite({
-      credited: proposal.sessionSeconds,
-      heldClockifySeconds,
-      heldJiraSeconds,
-      requested: options.request.seconds,
-      selected,
-      targets
+    const prepared = prepareProposal({
+      evidence: { ...proposal, credited: proposal.sessionSeconds },
+      request: options.request,
+      targets: planSides(options.plan)
     })
-    if (write._tag === "PastEvidence") return { _tag: "PastEvidence", maxSeconds: write.maxSeconds } as const
-    if (write._tag === "BelowMinimum") {
-      return { _tag: "BelowMinimum", minimumSeconds: write.minimumSeconds } as const
-    }
+    if (prepared._tag !== "Prepared") return prepared
 
-    const provenance: AgentWrite.WriteProvenance = {
-      // Against the selection, not the row: accepting one block of five is not an amount typed over
-      // the evidence, it is the evidence for that block.
-      amountSetByHand: options.request.seconds !== undefined && options.request.seconds !== selected,
-      evidence: "session",
-      ticketSetByHand: ticketKey !== proposal.ticketKey
-    }
+    // Only the requested providers are re-read; cached browser totals never authorize writes.
+    const recorded = yield* options.service.compare(dayPeriod(prepared.day), { sides: prepared.targets })
+    const write = prepared.plan(recorded)
+    if (write._tag === "PastEvidence" || write._tag === "BelowMinimum") return write
+
     const description = AgentWrite.entryDescription({
       note: options.request.note ?? null,
-      provenance,
-      summary: yield* options.summaryOf(ticketKey)
+      provenance: prepared.provenance,
+      summary: yield* options.summaryOf(prepared.ticketKey)
     })
     if (write._tag === "NothingOwed") {
-      return { _tag: "NothingOwed", result: nothingOwed(description, targets) } as const
+      return { _tag: "NothingOwed", result: nothingOwed(description, prepared.targets) } satisfies ConfirmOutcome
     }
 
-    const outcome = yield* AgentWrite.applyProposal(
-      options.service,
-      {
-        ...proposal,
-        // Only the blocks being accepted, so the entry is filed at the time they name. The held
-        // seconds go with them: `applyProposal` skips that much of what it is given before anchoring,
-        // which is right for a whole row written in instalments and wrong for a chosen block — there
-        // the person has already said which stretch this is, and skipping into it would file a 20:52
-        // block at 21:32.
-        blocks,
-        clockifyDelta: write.clockifyDelta,
-        clockifySeconds: partial ? 0 : heldClockifySeconds,
-        jiraDelta: write.jiraDelta,
-        jiraSeconds: partial ? 0 : heldJiraSeconds,
-        ticketKey
-      },
-      description,
-      targets
-    )
+    const outcome = yield* AgentWrite.applyPlannedWrite(options.service, write, description)
     return {
       _tag: "Written",
       result: {
@@ -166,7 +124,7 @@ export const confirmProposal = (options: {
         jira: outcome.jira,
         lines: AgentWrite.writeOutcomeLines(outcome)
       }
-    } as const
+    } satisfies ConfirmOutcome
   })
 
 export interface ManualRequest {
