@@ -26,12 +26,13 @@ import {
   SandboxId,
   SandboxStatus
 } from "@knpkv/codecommit-core/Domain.js"
-import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
+import { ReviewKind, ReviewProfileConfig, reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
 import {
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
+  MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,
   MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
   MAXIMUM_RELAY_REVIEW_TURNS_BYTES
 } from "./review/ReviewPromptBudget.js"
@@ -114,6 +115,23 @@ export const PullRequestRefreshResponse = Schema.Struct({
 })
 export type PullRequestRefreshResponse = typeof PullRequestRefreshResponse.Type
 
+/** Provider coordinates required to keep same-id pull requests distinct. */
+const PullRequestCoordinates = Schema.Struct({
+  repositoryName: Schema.String,
+  region: AwsRegion
+})
+
+/** Legacy refresh links may omit coordinates, but a partial coordinate is never valid. */
+const PullRequestRefreshCoordinates = Schema.Struct({
+  repositoryName: Schema.optional(Schema.String),
+  region: Schema.optional(AwsRegion)
+}).check(
+  Schema.makeFilter(
+    ({ region, repositoryName }) => (repositoryName === undefined) === (region === undefined),
+    { expected: "repositoryName and region must be provided together" }
+  )
+)
+
 /** Bounded text for one inventory entry; exceptional content remains explicit. */
 export const PullRequestDiffContentResponse = Schema.Struct({
   fileIndex: Schema.Int.pipe(Schema.check(Schema.isGreaterThanOrEqualTo(0))),
@@ -124,10 +142,16 @@ export const PullRequestDiffContentResponse = Schema.Struct({
 })
 export type PullRequestDiffContentResponse = typeof PullRequestDiffContentResponse.Type
 
-export const RelayReviewKind = Schema.Literals(["review", "security", "tests", "explain"])
+export const RelayReviewKind = ReviewKind
 export type RelayReviewKind = typeof RelayReviewKind.Type
 
 const RelayReviewFindingId = Schema.String.check(Schema.isPattern(/^F[1-9][0-9]{0,5}$/u))
+const RelayReviewConversationTarget = Schema.Union([RelayReviewFindingId, Schema.Literal("PR")])
+const RelayReviewConversationTurnId = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(200)
+)
 export const RelayReviewSkillId = Schema.String.check(
   Schema.isTrimmed(),
   Schema.isNonEmpty(),
@@ -137,6 +161,10 @@ export const RelayReviewSkillIds = Schema.Array(RelayReviewSkillId).check(
   Schema.isMaxLength(reviewProfileSkillLimit),
   Schema.isUnique()
 )
+
+/** Complete server-validated execution configuration owned by one saved profile. */
+export const RelayReviewProfile = ReviewProfileConfig
+export type RelayReviewProfile = typeof RelayReviewProfile.Type
 
 const RelayReviewLocation = Schema.Union([
   Schema.Struct({ scope: Schema.Literal("general") }),
@@ -170,17 +198,29 @@ export const RelayReviewFinding = Schema.Struct({
 )
 export type RelayReviewFinding = typeof RelayReviewFinding.Type
 
+const RelayReviewVerdict = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000))
+const RelayReviewExplanation = Schema.String.check(
+  Schema.isTrimmed(),
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(12_000)
+)
+
+const RelayReviewFindings = Schema.Array(RelayReviewFinding).check(
+  Schema.isMaxLength(50),
+  Schema.makeFilter((findings) => new Set(findings.map((finding) => finding.id)).size === findings.length, {
+    expected: "unique Relay finding ids"
+  })
+)
+
+/** Native non-Explain output excludes Explain's required explanation field. */
+export const RelayNativeReviewResult = Schema.Struct({
+  findings: RelayReviewFindings,
+  verdict: RelayReviewVerdict
+})
+
 export const RelayReviewResult = Schema.Struct({
-  findings: Schema.Array(RelayReviewFinding).check(
-    Schema.isMaxLength(50),
-    Schema.makeFilter((findings) => new Set(findings.map((finding) => finding.id)).size === findings.length, {
-      expected: "unique Relay finding ids"
-    })
-  ),
-  verdict: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(8_000)),
-  explanation: Schema.optional(
-    Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(12_000))
-  )
+  ...RelayNativeReviewResult.fields,
+  explanation: Schema.optional(RelayReviewExplanation)
 }).check(
   Schema.makeFilter(
     (result) => jsonByteEncoder.encode(JSON.stringify(result)).byteLength <= MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
@@ -189,28 +229,34 @@ export const RelayReviewResult = Schema.Struct({
 )
 export type RelayReviewResult = typeof RelayReviewResult.Type
 
-/** Explain-mode results must be explanatory rather than a hidden findings response. */
-export const RelayExplainResult = RelayReviewResult.check(
+/** Explain-mode native schema makes a findings-shaped response impossible. */
+export const RelayExplainResult = Schema.Struct({
+  findings: Schema.Array(RelayReviewFinding).check(Schema.isMaxLength(0)),
+  verdict: RelayReviewVerdict,
+  explanation: RelayReviewExplanation
+}).check(
   Schema.makeFilter(
-    (result) => result.explanation !== undefined && result.findings.length === 0,
-    { expected: "a nonempty explanation and no findings for Explain mode" }
+    (result) => jsonByteEncoder.encode(JSON.stringify(result)).byteLength <= MAXIMUM_RELAY_REVIEW_RESULT_BYTES,
+    { expected: `an Explain result no larger than ${String(MAXIMUM_RELAY_REVIEW_RESULT_BYTES)} UTF-8 bytes` }
   )
 )
 
-/** One ephemeral Relay result bound to the exact diff that was reviewed. */
+/** One Relay result bound to the exact diff that was reviewed within a durable pull-request thread. */
 export const PullRequestRelayReviewResponse = Schema.Struct({
   pullRequestId: PullRequestId,
   revisionId: Schema.String,
   baseCommit: Schema.String,
   headCommit: Schema.String,
   kind: RelayReviewKind,
+  profile: RelayReviewProfile,
   result: RelayReviewResult
 }).check(
   Schema.makeFilter(
     (response) =>
-      response.kind !== "explain" ||
-      (response.result.explanation !== undefined && response.result.findings.length === 0),
-    { expected: "an Explain response with a nonempty explanation and no findings" }
+      response.kind === response.profile.kind &&
+      (response.kind !== "explain" ||
+        (response.result.explanation !== undefined && response.result.findings.length === 0)),
+    { expected: "a response matching its profile and Explain output contract" }
   )
 )
 export type PullRequestRelayReviewResponse = typeof PullRequestRelayReviewResponse.Type
@@ -228,13 +274,14 @@ export const RelayReviewMessage = Schema.String.check(
   Schema.makeFilter(
     (message) =>
       jsonByteEncoder.encode(JSON.stringify(message)).byteLength <=
-        Math.floor((MAXIMUM_RELAY_REVIEW_TURNS_BYTES - 128) / 2),
+        MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,
     { expected: "a Relay conversation message retainable as one half of a completed exchange" }
   )
 )
 
 export const RelayReviewConversationTurn = Schema.Struct({
-  findingId: RelayReviewFindingId,
+  id: Schema.optional(RelayReviewConversationTurnId),
+  findingId: RelayReviewConversationTarget,
   role: Schema.Literals(["user", "assistant"]),
   message: RelayReviewMessage
 })
@@ -280,8 +327,7 @@ export const RelayReviewStreamRequest = Schema.Struct({
   revisionId: Schema.String,
   baseCommit: Schema.String,
   headCommit: Schema.String,
-  kind: RelayReviewKind,
-  skillIds: RelayReviewSkillIds
+  profile: RelayReviewProfile
 })
 export type RelayReviewStreamRequest = typeof RelayReviewStreamRequest.Type
 
@@ -299,7 +345,7 @@ export const RelayReviewContinueStreamRequest = Schema.Struct({
   ...RelayReviewStreamRequest.fields,
   currentReview: RelayReviewResult,
   turns: RelayReviewConversationTurns,
-  findingId: RelayReviewFindingId,
+  findingId: RelayReviewConversationTarget,
   message: RelayReviewMessage
 }).check(
   Schema.makeFilter(
@@ -317,6 +363,8 @@ export const NotificationResponse = Schema.Struct({
   type: Schema.String,
   title: Schema.String,
   profile: Schema.String,
+  repositoryName: Schema.String,
+  accountRegion: Schema.String,
   message: Schema.String,
   createdAt: Schema.String,
   read: Schema.Number
@@ -350,6 +398,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("refreshSingle", "/:awsAccountId/:prId/refresh", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestRefreshCoordinates,
       success: PullRequestRefreshResponse,
       error: ApiError
     })
@@ -395,6 +444,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.get("diff", "/:awsAccountId/:prId/diff", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       success: PullRequestDiffResponse,
       error: ApiError
     })
@@ -409,6 +459,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
         )
       }),
       query: Schema.Struct({
+        ...PullRequestCoordinates.fields,
         revisionId: Schema.String,
         baseCommit: Schema.String,
         headCommit: Schema.String
@@ -420,11 +471,12 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("relayReview", "/:awsAccountId/:prId/relay-review", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       payload: Schema.Struct({
         revisionId: Schema.String,
         baseCommit: Schema.String,
         headCommit: Schema.String,
-        kind: RelayReviewKind
+        profile: RelayReviewProfile
       }),
       success: PullRequestRelayReviewResponse,
       error: ApiError
@@ -433,6 +485,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("relayReviewStream", "/:awsAccountId/:prId/relay-review/stream", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       payload: RelayReviewStreamRequest,
       success: Schema.String,
       error: ApiError
@@ -441,6 +494,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("relayReviewContinueStream", "/:awsAccountId/:prId/relay-review/continue", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId }),
+      query: PullRequestCoordinates,
       payload: RelayReviewContinueStreamRequest,
       success: Schema.String,
       error: ApiError
@@ -449,6 +503,7 @@ export class PrsGroup extends HttpApiGroup.make("prs")
   .add(
     HttpApiEndpoint.post("postRelayFinding", "/:awsAccountId/:prId/relay-review/findings/:findingId/post", {
       params: Schema.Struct({ awsAccountId: Schema.String, prId: PullRequestId, findingId: RelayReviewFindingId }),
+      query: PullRequestCoordinates,
       payload: Schema.Struct({
         revisionId: Schema.String,
         baseCommit: Schema.String,
@@ -521,12 +576,7 @@ const SandboxSettingsResponse = Schema.Struct({
   cloneDepth: Schema.Number
 })
 
-const ReviewProfileResponse = Schema.Struct({
-  id: Schema.String,
-  name: Schema.String,
-  kind: RelayReviewKind,
-  skillIds: Schema.Array(Schema.String)
-})
+const ReviewProfileResponse = RelayReviewProfile
 
 const ReviewSettingsResponse = Schema.Struct({
   defaultProfileId: Schema.String,
@@ -624,14 +674,25 @@ export class AccountsGroup extends HttpApiGroup.make("accounts")
 {}
 
 // Subscription endpoints
-const SubscriptionPayload = Schema.Struct({
+const subscriptionCoordinate = Schema.Trim.check(Schema.isNonEmpty())
+export const SubscriptionPayload = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: PullRequestId
-})
+  pullRequestId: PullRequestId,
+  repositoryName: Schema.optional(subscriptionCoordinate),
+  region: Schema.optional(subscriptionCoordinate)
+}).check(
+  Schema.makeFilter((payload) =>
+    (payload.repositoryName === undefined) === (payload.region === undefined)
+      ? undefined
+      : "repositoryName and region must be provided together"
+  )
+)
 
 const SubscriptionResponse = Schema.Struct({
   awsAccountId: Schema.String,
-  pullRequestId: Schema.String
+  pullRequestId: Schema.String,
+  repositoryName: Schema.NullOr(Schema.String),
+  accountRegion: Schema.NullOr(Schema.String)
 })
 
 export class SubscriptionsGroup extends HttpApiGroup.make("subscriptions")
@@ -711,6 +772,7 @@ export const SandboxResponse = Schema.Struct({
   id: Schema.String,
   pullRequestId: Schema.String,
   awsAccountId: Schema.String,
+  region: Schema.NullOr(Schema.String),
   repositoryName: Schema.String,
   sourceBranch: Schema.String,
   containerId: Schema.NullOr(Schema.String),

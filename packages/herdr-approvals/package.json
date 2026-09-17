@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-approvals",
-  "version": "0.1.0",
+  "version": "0.4.0",
   "description": "Authenticated fleet approvals, PWA, coordinator, and hostd runtime",
   "license": "MIT",
   "author": "knpkv",
@@ -34,6 +34,10 @@
     "./hostd": {
       "types": "./dist/bin.d.ts",
       "import": "./dist/bin.js"
+    },
+    "./hostd-runtime": {
+      "types": "./dist/hostd.d.ts",
+      "import": "./dist/hostd.js"
     }
   },
   "files": [

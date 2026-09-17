@@ -1,4 +1,5 @@
 import { Button, Dialog, Text } from "@knpkv/rly/primitives"
+import { ReviewProfileControl } from "@knpkv/review/react"
 import * as DateTime from "effect/DateTime"
 import {
   type KeyboardEvent,
@@ -23,6 +24,7 @@ import {
 } from "../../api/agent.js"
 import type { PrReviewOrientation, PrReviewSuggestion } from "../../domain/prReview.js"
 import { ReviewNotes, ReviewSuggestionCard } from "./ReviewSuggestionPresentation.js"
+import { controlCenterReviewProfile } from "./reviewPlatformAdapter.js"
 import { VersionedReviewSuggestionCard } from "./VersionedReviewSuggestionCard.js"
 import type { ReviewSuggestionRevisionTransport } from "./useReviewSuggestionRevisions.js"
 import type {
@@ -202,25 +204,30 @@ const ReviewPresetChoices = ({
   readonly onSelect: (providerId: DurableAgentProviderId) => void
   readonly presets: ReadonlyArray<Parameters<typeof providerName>[0]>
   readonly selectedProviderId: DurableAgentProviderId
-}): ReactElement => (
-  <fieldset aria-label={accessibleName} className={styles.reviewPresetList}>
-    {presets.map((preset) => (
-      <label key={preset.providerId}>
-        <input
-          checked={preset.providerId === selectedProviderId}
-          name={groupName}
-          onChange={() => onSelect(preset.providerId)}
-          type="radio"
-          value={preset.providerId}
-        />
-        <span>
-          <strong>{providerReviewLabel(preset)}</strong>
-          <small>{modelName(preset.providerId, preset.model)}</small>
-        </span>
-      </label>
-    ))}
-  </fieldset>
-)
+}): ReactElement => {
+  const profiles = presets.map((preset) => ({
+    ...controlCenterReviewProfile(preset),
+    name: providerReviewLabel(preset)
+  }))
+  return (
+    <ReviewProfileControl
+      accessibleName={accessibleName}
+      {...(styles.reviewPresetList === undefined ? {} : { className: styles.reviewPresetList })}
+      describeProfile={(profile) => {
+        const preset = presets.find(({ providerId }) => String(providerId) === profile.provider)
+        return preset === undefined ? profile.model : modelName(preset.providerId, preset.model)
+      }}
+      groupName={groupName}
+      onProfileChange={(profile) => {
+        const preset = presets.find(({ providerId }) => String(providerId) === profile.provider)
+        if (preset !== undefined) onSelect(preset.providerId)
+      }}
+      presentation="radios"
+      profiles={profiles}
+      selectedProfileId={String(selectedProviderId)}
+    />
+  )
+}
 
 type PresentedThreadEvent = {
   readonly event: PullRequestReviewThreadEvent

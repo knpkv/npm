@@ -22,7 +22,10 @@ export function KPICard({
   onClick?: () => void
 }) {
   return (
-    <Card className={onClick ? "cursor-pointer transition-colors hover:bg-accent/50" : undefined} onClick={onClick}>
+    <Card
+      className={onClick !== undefined ? "cursor-pointer transition-colors hover:bg-accent/50" : undefined}
+      onClick={onClick}
+    >
       <CardContent className="flex items-center gap-3 p-4">
         <div className="rounded-md bg-muted p-2">
           <Icon className="size-4 text-muted-foreground" />
@@ -51,18 +54,18 @@ function RankingRow({
 }) {
   return (
     <div
-      className={`group relative flex items-center gap-2 rounded-md px-2 py-1.5${onClick ? " cursor-pointer" : ""}`}
+      className={`group relative flex items-center gap-2 rounded-md px-2 py-1.5${onClick !== undefined ? " cursor-pointer" : ""}`}
       onClick={onClick}
     >
       <div
         className={`absolute inset-0 rounded-md transition-colors ${
-          highlight
+          highlight === true
             ? "bg-amber-400/[0.08] group-hover:bg-amber-400/[0.14]"
             : "bg-foreground/[0.06] dark:bg-foreground/[0.08] group-hover:bg-foreground/[0.10] dark:group-hover:bg-foreground/[0.14]"
         }`}
         style={{ width: `${pct}%` }}
       />
-      {highlight && (
+      {highlight === true && (
         <StarIcon
           key={label}
           aria-hidden="true"
@@ -70,11 +73,13 @@ function RankingRow({
           style={{ animation: "star-in 400ms ease-out" }}
         />
       )}
-      <span className={`relative z-10 flex-1 truncate text-xs${highlight ? " text-amber-400 font-medium" : ""}`}>
+      <span
+        className={`relative z-10 flex-1 truncate text-xs${highlight === true ? " text-amber-400 font-medium" : ""}`}
+      >
         {label}
       </span>
       <span
-        className={`relative z-10 shrink-0 text-xs tabular-nums ${highlight ? "text-amber-400/60" : "text-muted-foreground"}`}
+        className={`relative z-10 shrink-0 text-xs tabular-nums ${highlight === true ? "text-amber-400/60" : "text-muted-foreground"}`}
       >
         {value}
       </span>
@@ -117,7 +122,7 @@ export function RankingChart({
                   value={value}
                   pct={pct}
                   highlight={i === 0}
-                  onClick={onItemClick ? () => onItemClick(label) : undefined}
+                  onClick={onItemClick !== undefined ? () => onItemClick(label) : undefined}
                 />
               )
             })}
@@ -157,9 +162,9 @@ export function SizeDistributionChart({
               <div
                 key={d.key}
                 className={`flex flex-1 flex-col items-center gap-1${
-                  onBarClick && d.count > 0 ? " cursor-pointer" : ""
+                  onBarClick !== undefined && d.count > 0 ? " cursor-pointer" : ""
                 }`}
-                onClick={onBarClick && d.count > 0 ? () => onBarClick(d.key) : undefined}
+                onClick={onBarClick !== undefined && d.count > 0 ? () => onBarClick(d.key) : undefined}
               >
                 <span className="text-xs tabular-nums text-muted-foreground">{d.count}</span>
                 <div className="w-full flex items-end" style={{ height: 80 }}>
@@ -186,7 +191,7 @@ export function MostActivePRs({
   prs
 }: {
   prs: WeeklyStats["mostActivePRs"]
-  onPRClick: (awsAccountId: string, id: string) => void
+  onPRClick: (awsAccountId: string, id: string, repositoryName: string, accountRegion: string) => void
 }) {
   if (prs.length === 0) return null
   return (
@@ -198,9 +203,9 @@ export function MostActivePRs({
         <div className="space-y-2">
           {prs.map((pr) => (
             <div
-              key={`${pr.awsAccountId}:${pr.id}`}
+              key={`${pr.awsAccountId}:${pr.id}:${pr.repositoryName}:${pr.accountRegion}`}
               className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent rounded px-2 py-1"
-              onClick={() => onPRClick(pr.awsAccountId, pr.id)}
+              onClick={() => onPRClick(pr.awsAccountId, pr.id, pr.repositoryName, pr.accountRegion)}
             >
               <span className="text-muted-foreground font-mono">#{pr.id}</span>
               <span className="truncate flex-1">{pr.title}</span>
@@ -222,7 +227,7 @@ export function StalePRs({
   prs
 }: {
   prs: WeeklyStats["stalePRs"]
-  onPRClick: (awsAccountId: string, id: string) => void
+  onPRClick: (awsAccountId: string, id: string, repositoryName: string, accountRegion: string) => void
 }) {
   if (prs.length === 0) return null
   return (
@@ -234,9 +239,9 @@ export function StalePRs({
         <div className="space-y-1">
           {prs.map((pr) => (
             <div
-              key={`${pr.awsAccountId}:${pr.id}`}
+              key={`${pr.awsAccountId}:${pr.id}:${pr.repositoryName}:${pr.accountRegion}`}
               className="flex items-center gap-2 text-sm cursor-pointer hover:bg-accent rounded px-2 py-1"
-              onClick={() => onPRClick(pr.awsAccountId, pr.id)}
+              onClick={() => onPRClick(pr.awsAccountId, pr.id, pr.repositoryName, pr.accountRegion)}
             >
               <span className="text-muted-foreground font-mono">#{pr.id}</span>
               <span className="truncate flex-1">{pr.title}</span>
@@ -279,7 +284,7 @@ export function HealthCard({ data }: { data: WeeklyStats }) {
           <div>
             <div className="text-xs text-muted-foreground">Bus Factor</div>
             <div className="text-lg font-bold tabular-nums">
-              {data.busFactor
+              {data.busFactor !== null
                 ? `${data.busFactor.uniqueContributors} (${(data.busFactor.topContributorShare * 100).toFixed(0)}%)`
                 : "—"}
             </div>

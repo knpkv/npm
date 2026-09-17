@@ -9,14 +9,11 @@ describe("dashboard model", () => {
         _tag: "local",
         record: {
           actor: "andrey@example.com",
-          approvalNonce: "nonce-1",
           approvedBy: null,
           createdAt: 1,
-          error: null,
-          hash: "a".repeat(64),
           id: "job-1",
           payload: { kind: "nix.check" },
-          result: null,
+          approvalAvailable: true,
           status: "pending_approval",
           updatedAt: 1
         }

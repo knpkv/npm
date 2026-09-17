@@ -61,12 +61,15 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     "@knpkv/ai-codex",
     "@knpkv/ai-runtime",
     "@knpkv/atlassian-common",
+    "@knpkv/browser-pairing",
     "@knpkv/codecommit-core",
     "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
     "@knpkv/confluence-to-markdown",
     "@knpkv/control-center-sql",
     "@knpkv/jira-api-client",
+    "@knpkv/review",
+    "@knpkv/relay-product",
     "@knpkv/rly",
     "@distilled.cloud/aws",
     "effect",
@@ -96,21 +99,27 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
     | "@knpkv/ai-codex"
     | "@knpkv/ai-runtime"
     | "@knpkv/atlassian-common"
+    | "@knpkv/browser-pairing"
     | "@knpkv/codecommit-core"
     | "@knpkv/clockify-api-client"
     | "@knpkv/confluence-api-client"
     | "@knpkv/confluence-to-markdown"
     | "@knpkv/jira-api-client"
+    | "@knpkv/review"
+    | "@knpkv/relay-product"
   > = [
     "@knpkv/ai-claude",
     "@knpkv/ai-codex",
     "@knpkv/ai-runtime",
     "@knpkv/atlassian-common",
+    "@knpkv/browser-pairing",
     "@knpkv/codecommit-core",
     "@knpkv/clockify-api-client",
     "@knpkv/confluence-api-client",
     "@knpkv/confluence-to-markdown",
-    "@knpkv/jira-api-client"
+    "@knpkv/jira-api-client",
+    "@knpkv/review",
+    "@knpkv/relay-product"
   ]
   for (const dependency of workspaceDependencies) {
     if (manifest.dependencies[dependency] !== "workspace:^") {

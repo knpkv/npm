@@ -1,12 +1,52 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
-import { RelayReviewResult } from "../src/server/Api.js"
+import { RelayReviewProfile, RelayReviewResult } from "../src/server/Api.js"
 
 declare global {
   interface Window {
     emitReviewWorkspaceEvent?: (data: string) => number
+    releaseRelayMigration?: () => void
+    releaseRelayMigrationReady?: boolean
   }
 }
+
+test.beforeEach(async ({ page }) => {
+  await page.route("**/api/session/current", (route) => route.fulfill({ status: 204 }))
+  await page.route("**/api/config", (route) =>
+    route.fulfill({
+      body: JSON.stringify({
+        accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }],
+        autoDetect: true,
+        autoRefresh: true,
+        refreshIntervalSeconds: 300,
+        review: {
+          defaultProfileId: "thorough",
+          profiles: [{
+            id: "thorough",
+            name: "Thorough review",
+            kind: "review",
+            skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+          }]
+        }
+      }),
+      contentType: "application/json",
+      status: 200
+    }))
+  await page.route(
+    "**/api/subscriptions",
+    (route) => route.fulfill({ body: "[]", contentType: "application/json", status: 200 })
+  )
+  await page.route("**/api/prs/*/*/refresh", (route) =>
+    route.fulfill({
+      body: JSON.stringify({ revisionId: "revision-1", headCommit: "b".repeat(40) }),
+      contentType: "application/json",
+      status: 200
+    }))
+  await page.route(
+    "**/api/prs/comments*",
+    (route) => route.fulfill({ body: "[]", contentType: "application/json", status: 200 })
+  )
+})
 
 const pullRequest = {
   account: {
@@ -54,9 +94,8 @@ const changedReviewResult: RelayReviewResult = {
 
 const RelayContinuePayload = Schema.Struct({
   currentReview: RelayReviewResult,
-  kind: Schema.String,
   message: Schema.String,
-  skillIds: Schema.Array(Schema.String),
+  profile: RelayReviewProfile,
   turns: Schema.Array(Schema.Struct({ message: Schema.String, role: Schema.String }))
 })
 type RelayContinuePayload = typeof RelayContinuePayload.Type
@@ -66,11 +105,16 @@ const RelayRunPayload = Schema.Struct({
   revisionId: Schema.String,
   baseCommit: Schema.String,
   headCommit: Schema.String,
-  kind: Schema.String,
-  skillIds: Schema.Array(Schema.String)
+  profile: RelayReviewProfile
 })
 type RelayRunPayload = typeof RelayRunPayload.Type
 const decodeRelayRunPayload = Schema.decodeUnknownSync(RelayRunPayload)
+
+const expectExactProviderCoordinates = (requestUrl: string): void => {
+  const query = new URL(requestUrl).searchParams
+  expect(query.get("repositoryName")).toBe("payments-api")
+  expect(query.get("region")).toBe("eu-west-1")
+}
 
 interface ReviewWorkspaceOptions {
   readonly commentCount?: () => number
@@ -93,6 +137,9 @@ interface ReviewWorkspaceOptions {
       readonly id: string
       readonly name: string
       readonly kind: "explain" | "review" | "security" | "tests"
+      readonly provider?: "codex"
+      readonly harness?: "native-codex"
+      readonly model?: "configured-default" | "gpt-5.6-luna" | "gpt-5.6-terra" | "gpt-5.6-sol"
       readonly skillIds: ReadonlyArray<string>
     }>
   }
@@ -134,20 +181,29 @@ const routeReviewWorkspace = async (
       await route.fulfill({ body: "config unavailable", contentType: "text/plain", status: options.configStatus })
       return
     }
+    const review = options?.review?.() ?? {
+      defaultProfileId: "thorough",
+      profiles: [{
+        id: "thorough",
+        name: "Thorough review",
+        kind: expectedKind,
+        skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+      }]
+    }
     await route.fulfill({
       body: JSON.stringify({
         accounts: [{ profile: "production", regions: ["eu-west-1"], enabled: true }],
         autoDetect: true,
         autoRefresh: true,
         refreshIntervalSeconds: 300,
-        review: options?.review?.() ?? {
-          defaultProfileId: "thorough",
-          profiles: [{
-            id: "thorough",
-            name: "Thorough review",
-            kind: "review",
-            skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
-          }]
+        review: {
+          ...review,
+          profiles: review.profiles.map((profile) => ({
+            provider: "codex",
+            harness: "native-codex",
+            model: "configured-default",
+            ...profile
+          }))
         }
       }),
       contentType: "application/json",
@@ -221,7 +277,8 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -241,11 +298,14 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/0?*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     expect(Object.fromEntries(new URL(route.request().url()).searchParams)).toEqual({
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
-      headCommit: "b".repeat(40)
+      headCommit: "b".repeat(40),
+      repositoryName: "payments-api",
+      region: "eu-west-1"
     })
     await route.fulfill({
       body: JSON.stringify({
@@ -259,7 +319,8 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/stream*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     reviewRunCount += 1
     await options?.runGate?.(reviewRunCount)
     await reviewGate
@@ -269,8 +330,15 @@ const routeReviewWorkspace = async (
         revisionId: "revision-1",
         baseCommit: "a".repeat(40),
         headCommit: "b".repeat(40),
-        kind: expectedKind,
-        skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+        profile: {
+          id: "thorough",
+          name: "Thorough review",
+          kind: expectedKind,
+          provider: "codex",
+          harness: "native-codex",
+          model: "configured-default",
+          skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+        }
       })
     } else {
       options.onRun(payload)
@@ -280,8 +348,9 @@ const routeReviewWorkspace = async (
       revisionId: "revision-1",
       baseCommit: "a".repeat(40),
       headCommit: "b".repeat(40),
-      kind: payload.kind,
-      result: payload.kind === "explain"
+      kind: payload.profile.kind,
+      profile: payload.profile,
+      result: payload.profile.kind === "explain"
         ? {
           verdict: "The retry budget changes one shared request path.",
           explanation: "The patch raises the retry budget used by the payment request flow.",
@@ -325,7 +394,8 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/findings/*/post*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     const finding = route.request().postDataJSON().finding
     findingPostCount += 1
     options?.onPost?.(findingPostCount)
@@ -344,7 +414,8 @@ const routeReviewWorkspace = async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/continue*", async (route) => {
+    expectExactProviderCoordinates(route.request().url())
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     onContinue?.(payload)
     await route.fulfill({
@@ -357,7 +428,8 @@ const routeReviewWorkspace = async (
             revisionId: "revision-1",
             baseCommit: "a".repeat(40),
             headCommit: "b".repeat(40),
-            kind: payload.kind,
+            kind: payload.profile.kind,
+            profile: payload.profile,
             result: options?.continueReview?.(payload) ?? payload.currentReview
           },
           reply: "Confirmed against the same exact revision."
@@ -418,8 +490,15 @@ test("submits the configured default profile as soon as delayed profiles load", 
     revisionId: "revision-1",
     baseCommit: "a".repeat(40),
     headCommit: "b".repeat(40),
-    kind: "security",
-    skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+    profile: {
+      id: "thorough",
+      name: "Thorough review",
+      kind: "security",
+      provider: "codex",
+      harness: "native-codex",
+      model: "configured-default",
+      skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+    }
   }])
 })
 
@@ -461,17 +540,44 @@ test("renders a substantive Relay explanation", async ({ page }) => {
   await routeReviewWorkspace(page, "explain")
   await page.goto("/accounts/111111111111/prs/42")
 
-  await page.getByRole("button", { name: "Explain" }).click()
+  await expect(page.getByLabel("Profile")).toHaveValue("thorough")
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByRole("heading", { name: "Change explanation" })).toBeVisible()
   await expect(page.getByText("The patch raises the retry budget used by the payment request flow.")).toBeVisible()
 })
 
-test("continues a completed review with its original focus and skills", async ({ page }) => {
+test("sends the selected Relay review focus with the configured profile", async ({ page }) => {
+  const runs: Array<RelayRunPayload> = []
+  const streamUrls: Array<string> = []
+  page.on("request", (request) => {
+    if (request.url().includes("/relay-review/stream")) streamUrls.push(request.url())
+  })
+  await routeReviewWorkspace(page, "review", undefined, undefined, { onRun: (payload) => runs.push(payload) })
+  await page.goto("/accounts/111111111111/prs/42")
+
+  const relayPane = page.getByRole("complementary", { name: "Relay findings" })
+  const focuses: ReadonlyArray<{ readonly label: string; readonly kind: "security" | "tests" | "explain" }> = [
+    { label: "Security", kind: "security" },
+    { label: "Tests", kind: "tests" },
+    { label: "Explain", kind: "explain" }
+  ]
+  for (const [index, focus] of focuses.entries()) {
+    await relayPane.getByRole("button", { name: focus.label, exact: true }).click()
+    await relayPane.getByRole("button", { name: index === 0 ? "Run Relay" : "Run again" }).click()
+    await expect.poll(() => runs.length).toBe(index + 1)
+    expect(runs[index]?.profile.kind).toBe(focus.kind)
+  }
+  const streamUrl = streamUrls[0]
+  expect(streamUrl).toBeDefined()
+  expect(new URL(streamUrl ?? "http://localhost").searchParams.get("repositoryName")).toBe("payments-api")
+  expect(new URL(streamUrl ?? "http://localhost").searchParams.get("region")).toBe("eu-west-1")
+})
+
+test("restores the exact profile and roundtrips its model-owned execution", async ({ page }) => {
   const continuations: Array<RelayContinuePayload> = []
   const runs: Array<RelayRunPayload> = []
-  let defaultProfileId = "thorough"
-  await routeReviewWorkspace(page, "security", undefined, (payload) => continuations.push(payload), {
+  let defaultProfileId = "quick"
+  await routeReviewWorkspace(page, "tests", undefined, (payload) => continuations.push(payload), {
     onRun: (payload) => runs.push(payload),
     review: () => ({
       defaultProfileId,
@@ -479,51 +585,145 @@ test("continues a completed review with its original focus and skills", async ({
         {
           id: "thorough",
           name: "Thorough review",
-          kind: "review",
+          kind: "security",
           skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
         },
-        { id: "quick", name: "Quick review", kind: "tests", skillIds: [] }
+        {
+          id: "quick",
+          name: "Test review",
+          kind: "tests",
+          model: "gpt-5.6-luna",
+          skillIds: []
+        }
       ]
     })
   })
   await page.goto("/accounts/111111111111/prs/42")
 
-  await page.getByRole("button", { name: "Security" }).click()
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   expect(runs[0]).toMatchObject({
-    kind: "security",
-    skillIds: ["builtin:pr-review", "builtin:pr-review-diff"]
+    profile: {
+      id: "quick",
+      kind: "tests",
+      provider: "codex",
+      harness: "native-codex",
+      model: "gpt-5.6-luna",
+      skillIds: []
+    }
   })
-  defaultProfileId = "quick"
+  defaultProfileId = "thorough"
   await page.reload()
   await expect(page.getByLabel("Profile")).toHaveValue("quick")
+  await expect(page.getByLabel("Profile").locator("option:checked")).toHaveText("Test review")
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue this security review.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => continuations.length).toBe(1)
   expect(continuations[0]).toMatchObject({
-    kind: "security",
+    profile: { id: "quick", kind: "tests", model: "gpt-5.6-luna", skillIds: [] },
     message: "Continue this security review.",
-    skillIds: ["builtin:pr-review", "builtin:pr-review-diff"],
     turns: []
   })
   await page.getByPlaceholder("Ask Relay about this finding…").fill("Check the evidence once more.")
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect.poll(() => continuations.length).toBe(2)
   expect(continuations[1]).toMatchObject({
-    kind: "security",
+    profile: { id: "quick", kind: "tests", model: "gpt-5.6-luna" },
     message: "Check the evidence once more.",
     turns: [
       { message: "Continue this security review.", role: "user" },
       { message: "Confirmed against the same exact revision.", role: "assistant" }
     ]
   })
+  await page.getByLabel("Profile").selectOption("thorough")
   await page.getByRole("button", { name: "Run again" }).click()
   await expect.poll(() => runs.length).toBe(2)
-  expect(runs[1]).toMatchObject({ kind: "tests", skillIds: [] })
-  await expect(page.getByRole("log").locator("li")).toHaveCount(0)
+  expect(runs[1]).toMatchObject({
+    profile: { id: "thorough", kind: "security", model: "configured-default" }
+  })
+  await expect(page.getByRole("log").locator("li")).toHaveCount(4)
+})
+
+test("waits for legacy session migration before persisting the first continuation", async ({ page }) => {
+  await routeReviewWorkspace(page, "review", undefined, undefined, {
+    continueReview: () => changedReviewResult,
+    pullRequest: () => ({
+      ...pullRequest,
+      account: { ...pullRequest.account, repoAccountId: "222222222222" }
+    })
+  })
+  const sourceKey = "codecommit:relay-review-session:111111111111:payments-api:eu-west-1:42"
+  const targetPrefix = "codecommit:relay-review-session:222222222222:payments-api:eu-west-1:42"
+  await page.addInitScript(({ key, session }) => {
+    window.localStorage.setItem(key, JSON.stringify(session))
+    void navigator.locks.request("codecommit:relay-review-session", async () => {
+      await new Promise<void>((resolve) => {
+        window.releaseRelayMigration = resolve
+        window.releaseRelayMigrationReady = true
+      })
+    })
+  }, {
+    key: sourceKey,
+    session: {
+      identity: "legacy-head",
+      resource: {
+        accountKind: "credential",
+        accountId: "111111111111",
+        pullRequestId: "42",
+        region: "eu-west-1",
+        repositoryName: "payments-api"
+      },
+      review: {
+        pullRequestId: "42",
+        revisionId: "revision-1",
+        baseCommit: "a".repeat(40),
+        headCommit: "b".repeat(40),
+        kind: "review",
+        profile: {
+          id: "thorough",
+          name: "Thorough review",
+          kind: "review",
+          provider: "codex",
+          harness: "native-codex",
+          model: "configured-default",
+          skillIds: []
+        },
+        result: { verdict: "Saved legacy review.", findings: changedReviewResult.findings }
+      },
+      skillIds: [],
+      turns: [],
+      dispositions: {},
+      version: 2
+    }
+  })
+  await page.goto("/accounts/111111111111/prs/42")
+  await expect.poll(() => page.evaluate(() => window.releaseRelayMigrationReady === true)).toBe(true)
+  await expect(page.getByRole("button", { name: "Run again" })).toBeVisible()
+  await page.getByRole("button", { name: /Retry amplification/ }).click()
+
+  await page.getByPlaceholder("Ask Relay about this finding…").fill("Continue before migration completes.")
+  await page.getByRole("button", { exact: true, name: "Send" }).click()
+  await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
+  await expect(page.getByText("The retry finding changed after re-review.")).toBeVisible()
+  expect(
+    await page.evaluate(
+      (prefix) => Object.keys(window.localStorage).some((key) => key.startsWith(prefix)),
+      targetPrefix
+    )
+  ).toBe(false)
+
+  await page.evaluate(() => {
+    window.releaseRelayMigration?.()
+    window.releaseRelayMigration = undefined
+  })
+  await expect.poll(async () =>
+    page.evaluate((prefix) => {
+      const key = Object.keys(window.localStorage).find((candidate) => candidate.startsWith(prefix))
+      return key === undefined ? null : window.localStorage.getItem(key)
+    }, targetPrefix)
+  ).toContain("The retry finding changed after re-review.")
 })
 
 test("preserves completed conversations when a rerun fails", async ({ page }) => {
@@ -535,11 +735,13 @@ test("preserves completed conversations when a rerun fails", async ({ page }) =>
   await page.getByRole("button", { exact: true, name: "Send" }).click()
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
 
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/stream*", async (route) => {
     await route.fulfill({ body: "Relay rerun unavailable", contentType: "text/plain", status: 500 })
   })
   await page.getByRole("button", { name: "Run again" }).click()
   await expect(page.getByText("Relay review failed")).toBeVisible()
+  await expect(page.getByText("Previous result retained. The latest rerun failed", { exact: false })).toBeVisible()
+  await expect(page.getByText("Previous result", { exact: true })).toBeVisible()
   await expect(page.getByText("Keep this verified conversation.")).toBeVisible()
   await expect(page.getByText("Confirmed against the same exact revision.")).toBeVisible()
 
@@ -555,7 +757,7 @@ test("preserves completed conversations when a rerun fails", async ({ page }) =>
 test("retries a failed continuation without persisting the failed turn", async ({ page }) => {
   const continuations: Array<RelayContinuePayload> = []
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     continuations.push(payload)
     if (continuations.length === 1) {
@@ -571,7 +773,8 @@ test("retries a failed continuation without persisting the failed turn", async (
             revisionId: "revision-1",
             baseCommit: "a".repeat(40),
             headCommit: "b".repeat(40),
-            kind: payload.kind,
+            kind: payload.profile.kind,
+            profile: payload.profile,
             result: payload.currentReview
           },
           reply: "Confirmed after retry."
@@ -604,7 +807,7 @@ test("retries a failed continuation without persisting the failed turn", async (
 
 test("keeps the prior review session atomic when frames follow completion", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     await route.fulfill({
       body: [
@@ -615,7 +818,8 @@ test("keeps the prior review session atomic when frames follow completion", asyn
             revisionId: "revision-1",
             baseCommit: "a".repeat(40),
             headCommit: "b".repeat(40),
-            kind: payload.kind,
+            kind: payload.profile.kind,
+            profile: payload.profile,
             result: {
               verdict: "This invalid terminal frame must not replace the prior deck.",
               findings: [{
@@ -643,13 +847,29 @@ test("keeps the prior review session atomic when frames follow completion", asyn
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
   await page.getByRole("button", { name: /Retry amplification/ }).click()
+  await expect.poll(() =>
+    page.evaluate(() => {
+      const key = Object.keys(window.localStorage).find((candidate) =>
+        candidate.startsWith("codecommit:relay-review-session:")
+      )
+      return key === undefined ? null : window.localStorage.getItem(key)
+    })
+  ).toContain("\"revisionId\":\"revision-1\"")
   await page.getByRole("button", { exact: true, name: "Ack" }).first().click()
   await expect(page.getByText("acknowledged")).toBeVisible()
+  await expect.poll(() =>
+    page.evaluate(() => {
+      const key = Object.keys(window.localStorage).find((candidate) =>
+        candidate.startsWith("codecommit:relay-review-session:")
+      )
+      return key === undefined ? null : window.localStorage.getItem(key)
+    })
+  ).toContain("\"F1\":\"acknowledged\"")
   const persistedBefore = await page.evaluate(() => {
-    const key = Object.keys(window.sessionStorage).find((candidate) =>
+    const key = Object.keys(window.localStorage).find((candidate) =>
       candidate.startsWith("codecommit:relay-review-session:")
     )
-    return key === undefined ? null : window.sessionStorage.getItem(key)
+    return key === undefined ? null : window.localStorage.getItem(key)
   })
   expect(persistedBefore).not.toBeNull()
 
@@ -664,17 +884,17 @@ test("keeps the prior review session atomic when frames follow completion", asyn
   await expect(page.getByText("acknowledged")).toBeVisible()
   expect(
     await page.evaluate(() => {
-      const key = Object.keys(window.sessionStorage).find((candidate) =>
+      const key = Object.keys(window.localStorage).find((candidate) =>
         candidate.startsWith("codecommit:relay-review-session:")
       )
-      return key === undefined ? null : window.sessionStorage.getItem(key)
+      return key === undefined ? null : window.localStorage.getItem(key)
     })
   ).toBe(persistedBefore)
 })
 
 test("commits a staged continuation after clean EOF", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     await route.fulfill({
       body: `${
@@ -685,7 +905,8 @@ test("commits a staged continuation after clean EOF", async ({ page }) => {
             revisionId: "revision-1",
             baseCommit: "a".repeat(40),
             headCommit: "b".repeat(40),
-            kind: payload.kind,
+            kind: payload.profile.kind,
+            profile: payload.profile,
             result: {
               verdict: "The staged terminal review is committed after clean EOF.",
               findings: [{
@@ -722,7 +943,7 @@ test("commits a staged continuation after clean EOF", async ({ page }) => {
 
 test("keeps a continuation reply visible when its finding is withdrawn", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/continue", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/continue*", async (route) => {
     const payload = decodeRelayContinuePayload(route.request().postDataJSON())
     await route.fulfill({
       body: `${
@@ -733,7 +954,8 @@ test("keeps a continuation reply visible when its finding is withdrawn", async (
             revisionId: "revision-1",
             baseCommit: "a".repeat(40),
             headCommit: "b".repeat(40),
-            kind: payload.kind,
+            kind: payload.profile.kind,
+            profile: payload.profile,
             result: {
               verdict: "The retry finding was withdrawn after verification.",
               findings: [{
@@ -774,15 +996,15 @@ test("recovers an interrupted finding publication after reload", async ({ page }
   await page.goto("/accounts/111111111111/prs/42")
   await page.getByRole("button", { name: "Run Relay" }).click()
   await expect(page.getByText("P2 · Retry amplification")).toBeVisible()
-  await expect.poll(() => page.evaluate(() => window.sessionStorage.length)).toBeGreaterThan(0)
+  await expect.poll(() => page.evaluate(() => window.localStorage.length)).toBeGreaterThan(0)
   await page.evaluate(() => {
-    const key = Object.keys(window.sessionStorage).find((candidate) =>
+    const key = Object.keys(window.localStorage).find((candidate) =>
       candidate.startsWith("codecommit:relay-review-session:")
     )
     if (key === undefined) throw new Error("Relay session was not stored")
-    const session = JSON.parse(window.sessionStorage.getItem(key) ?? "null")
+    const session = JSON.parse(window.localStorage.getItem(key) ?? "null")
     session.dispositions = { ...session.dispositions, F1: "posting", F2: "posted" }
-    window.sessionStorage.setItem(key, JSON.stringify(session))
+    window.localStorage.setItem(key, JSON.stringify(session))
   })
 
   await page.reload()
@@ -943,8 +1165,8 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   expect(fileBox).not.toBeNull()
   expect(fileBox!.x).toBeGreaterThan(directoryBox!.x + 8)
   await page.getByRole("button", { name: "Run Relay" }).click()
-  await expect(page.getByRole("button", { name: "Security" })).toBeDisabled()
-  await expect(page.getByRole("button", { name: "Tests" })).toBeDisabled()
+  await expect(relayPane.getByLabel("Profile")).toBeDisabled()
+  await expect(relayPane.getByRole("group", { name: "Relay review focus" })).toHaveCount(0)
   await expect(page.getByRole("heading", { name: "Relay is reviewing" })).toBeVisible()
   await expect(page.getByText("Live stages are updating above.")).toBeVisible()
   reviewGate.resolve()
@@ -1019,8 +1241,8 @@ test("reviews an exact CodeCommit diff with Relay", async ({ page }) => {
   await expect(page.getByText("posted")).toBeVisible()
   await expect(page.getByText("rejected")).toBeVisible()
   await page.getByRole("button", { name: "Run again" }).click()
-  await expect(page.getByText("Verify this again.")).toHaveCount(0)
-  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(0)
+  await expect(page.getByText("Verify this again.")).toHaveCount(1)
+  await expect(page.getByText("Confirmed against the same exact revision.")).toHaveCount(5)
 
   await page.screenshot({ fullPage: true, path: "test-results/codecommit-web/pr-review-workspace.png" })
   await page.setViewportSize({ height: 844, width: 390 })
@@ -1281,7 +1503,7 @@ test("preserves manual approver input when the repository account is unavailable
 test("clears a failed publication error after a successful retry", async ({ page }) => {
   let attempts = 0
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/findings/*/post*", async (route) => {
     attempts++
     if (attempts === 1) {
       await route.fulfill({ body: JSON.stringify({ message: "Provider rejected the comment." }), status: 500 })
@@ -1299,6 +1521,7 @@ test("clears a failed publication error after a successful retry", async ({ page
   const post = page.getByRole("button", { name: "Accept · post" }).first()
   await post.click()
   await expect(page.getByText("Finding post failed")).toBeVisible()
+  await expect(page.getByText("Newer PR review preserved")).toHaveCount(0)
   await expect(post).toBeEnabled()
 
   await post.click()
@@ -1308,7 +1531,7 @@ test("clears a failed publication error after a successful retry", async ({ page
 
 test("keeps an initial diff failure blocking when no exact workspace was retained", async ({ page }) => {
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     await route.fulfill({ body: "diff unavailable", contentType: "text/plain", status: 500 })
   })
   await page.goto("/accounts/111111111111/prs/42")
@@ -1320,7 +1543,8 @@ test("keeps an initial diff failure blocking when no exact workspace was retaine
 test("rejects description-target findings before presenting a post action", async ({ page }) => {
   let postAttempts = 0
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/stream*", async (route) => {
+    const payload = decodeRelayRunPayload(route.request().postDataJSON())
     await route.fulfill({
       body: JSON.stringify({
         type: "complete",
@@ -1330,6 +1554,7 @@ test("rejects description-target findings before presenting a post action", asyn
           baseCommit: "a".repeat(40),
           headCommit: "b".repeat(40),
           kind: "review",
+          profile: payload.profile,
           result: {
             verdict: "Description suggestion.",
             findings: [{
@@ -1350,7 +1575,7 @@ test("rejects description-target findings before presenting a post action", asyn
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/findings/*/post", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/findings/*/post*", async (route) => {
     postAttempts++
     await route.abort()
   })
@@ -1387,7 +1612,8 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/stream*", async (route) => {
+    const payload = decodeRelayRunPayload(route.request().postDataJSON())
     await route.fulfill({
       body: JSON.stringify({
         type: "complete",
@@ -1397,6 +1623,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
           baseCommit: "a".repeat(40),
           headCommit: "b".repeat(40),
           kind: "review",
+          profile: payload.profile,
           result: {
             verdict: "One retry regression needs attention.",
             findings: [{
@@ -1437,7 +1664,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     diffRequestCount++
     if (currentRevision === "revision-2" && changedDiffFailures === 0) {
       changedDiffFailures++
@@ -1463,7 +1690,7 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/0?*", async (route) => {
     const revisionId = new URL(route.request().url()).searchParams.get("revisionId")
     await route.fulfill({
       body: JSON.stringify({
@@ -1477,8 +1704,9 @@ test("reloads after a completed manual refresh without refetching for ordinary S
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+  await page.route("**/api/prs/*/42/refresh*", async (route) => {
     if (manualRefreshRequested) {
+      expectExactProviderCoordinates(route.request().url())
       manualRefreshCount++
       if (manualRefreshCount === 1) {
         await route.fulfill({ body: "refresh failed", contentType: "text/plain", status: 500 })
@@ -1535,6 +1763,10 @@ test("reloads after a completed manual refresh without refetching for ordinary S
   await expect(page.getByText(staleReviewMessage)).toBeVisible()
   await expect(page.getByRole("button", { name: "Re-review latest" })).toBeVisible()
   await expect(page.getByLabel("P2 finding: Retry amplification")).toHaveCount(0)
+  const conversation = page.locator("section[aria-label=\"Conversation about F1\"]")
+  await conversation.getByRole("button", { name: "Open" }).click()
+  await expect(conversation.getByLabel("Message Relay")).toBeDisabled()
+  await expect(conversation.getByRole("button", { exact: true, name: "Send" })).toBeDisabled()
   expect(diffRequestCount).toBe(4)
 })
 
@@ -1543,7 +1775,7 @@ test("drops exceptional file state when the exact revision changes", async ({ pa
   let manualRefreshRequested = false
   const replacementContent = Promise.withResolvers<void>()
   await routeReviewWorkspace(page)
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     const replacement = currentRevision === "revision-2"
     await route.fulfill({
       body: JSON.stringify({
@@ -1574,7 +1806,7 @@ test("drops exceptional file state when the exact revision changes", async ({ pa
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/*?*", async (route) => {
     const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
     if (fileIndex === 1 && currentRevision === "revision-1") {
       await route.fulfill({
@@ -1603,7 +1835,7 @@ test("drops exceptional file state when the exact revision changes", async ({ pa
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+  await page.route("**/api/prs/*/42/refresh*", async (route) => {
     if (manualRefreshRequested) currentRevision = "revision-2"
     await route.fulfill({
       body: JSON.stringify({ revisionId: currentRevision, headCommit: "c".repeat(40) }),
@@ -1647,7 +1879,7 @@ test("invalidates approver refreshes once per observed head without polling chur
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     diffRequestCount++
     await route.fulfill({
       body: JSON.stringify({
@@ -1668,7 +1900,7 @@ test("invalidates approver refreshes once per observed head without polling chur
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/0?*", async (route) => {
     const revisionId = new URL(route.request().url()).searchParams.get("revisionId")
     await route.fulfill({
       body: JSON.stringify({
@@ -1686,7 +1918,7 @@ test("invalidates approver refreshes once per observed head without polling chur
     approvalRequests++
     await route.fulfill({ body: JSON.stringify("ok"), contentType: "application/json", status: 200 })
   })
-  await page.route("**/api/prs/111111111111/42/refresh", async (route) => {
+  await page.route("**/api/prs/*/42/refresh*", async (route) => {
     refreshRequestCount++
     if (approvalRequests > 0) currentRevision = "revision-2"
     await route.fulfill({
@@ -1741,7 +1973,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/*/diff", async (route) => {
+  await page.route("**/api/prs/*/*/diff*", async (route) => {
     const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
     if (pullRequestId === "43" && holdSecondPullRequestDiff) await heldSecondPullRequestDiff.promise
     await route.fulfill({
@@ -1763,7 +1995,7 @@ test("scopes file selection to the exact pull request while preserving same-revi
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/*/diff/*?*", async (route) => {
+  await page.route("**/api/prs/*/*/diff/*?*", async (route) => {
     const segments = new URL(route.request().url()).pathname.split("/")
     const pullRequestId = segments.at(-3) ?? ""
     const fileIndex = Number(segments.at(-1))
@@ -1886,7 +2118,7 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/*/diff", async (route) => {
+  await page.route("**/api/prs/*/*/diff*", async (route) => {
     const pullRequestId = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
     await route.fulfill({
       body: JSON.stringify({
@@ -1907,7 +2139,7 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/*/diff/0?*", async (route) => {
+  await page.route("**/api/prs/*/*/diff/0?*", async (route) => {
     const revisionId = new URL(route.request().url()).searchParams.get("revisionId")
     await route.fulfill({
       body: JSON.stringify({
@@ -1921,7 +2153,7 @@ test("does not carry a failed Relay run into another pull request", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/relay-review/stream", async (route) => {
+  await page.route("**/api/prs/*/42/relay-review/stream*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({ message: "Relay failed for PR 42." }),
       contentType: "application/json",
@@ -1960,7 +2192,7 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -1980,7 +2212,7 @@ test("shows a mode-only change even when file text is unchanged", async ({ page 
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/0?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/0?*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         fileIndex: 0,
@@ -2017,7 +2249,7 @@ test("reflects loaded exceptional content states in the file tree", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2037,7 +2269,7 @@ test("reflects loaded exceptional content states in the file tree", async ({ pag
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/*?*", async (route) => {
     const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
     await route.fulfill({
       body: JSON.stringify({
@@ -2095,7 +2327,7 @@ test("uses a bounded fallback for newline- and byte-dense files", async ({ page 
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2115,7 +2347,7 @@ test("uses a bounded fallback for newline- and byte-dense files", async ({ page 
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/*?*", async (route) => {
     const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
     await route.fulfill({
       body: JSON.stringify({
@@ -2172,7 +2404,7 @@ test("renders small disjoint and large append-only changes within the complexity
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2192,7 +2424,7 @@ test("renders small disjoint and large append-only changes within the complexity
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/*?*", async (route) => {
     const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
     await route.fulfill({
       body: JSON.stringify({
@@ -2236,7 +2468,7 @@ test("evicts inactive file content while retaining same-file rerenders", async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff", async (route) => {
+  await page.route("**/api/prs/*/42/diff*", async (route) => {
     await route.fulfill({
       body: JSON.stringify({
         pullRequestId: "42",
@@ -2256,7 +2488,7 @@ test("evicts inactive file content while retaining same-file rerenders", async (
       status: 200
     })
   })
-  await page.route("**/api/prs/111111111111/42/diff/*?*", async (route) => {
+  await page.route("**/api/prs/*/42/diff/*?*", async (route) => {
     const fileIndex = Number(new URL(route.request().url()).pathname.split("/").at(-1))
     contentRequests.set(fileIndex, (contentRequests.get(fileIndex) ?? 0) + 1)
     await route.fulfill({

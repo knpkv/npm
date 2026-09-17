@@ -6,6 +6,12 @@ export const JobIdentifier = Schema.String.check(
   Schema.isMaxLength(256),
   Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
 )
+export const HostOperationReceipt = Schema.String.check(
+  Schema.isNonEmpty(),
+  Schema.isMaxLength(2 * 1_024),
+  Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
+)
+export type HostOperationReceipt = typeof HostOperationReceipt.Type
 const WorkerTimestamp = Schema.Number.check(
   Schema.isInt(),
   Schema.isBetween({ minimum: 0, maximum: 8_640_000_000_000_000 })
@@ -18,7 +24,7 @@ export const JobHash = Schema.String.check(
 )
 export type JobHash = typeof JobHash.Type
 
-export const DelegateMode = Schema.Literals(["consult", "review", "work"])
+export const DelegateMode = Schema.Literals(["consult", "review", "transition_summary", "work"])
 export type DelegateMode = typeof DelegateMode.Type
 
 export const AgentStableId = Schema.String.check(
@@ -236,6 +242,8 @@ export const JobRecord = Schema.Struct({
   status: JobStatus,
   payload: JobPayload,
   result: Schema.NullOr(Schema.String),
+  acceptedReceipt: Schema.optionalKey(Schema.NullOr(HostOperationReceipt)),
+  durableOperation: Schema.optionalKey(Schema.Literal(true)),
   error: Schema.NullOr(Schema.String),
   worker: Schema.optionalKey(AgentWorkerIdentity),
   connectTarget: Schema.optionalKey(AgentConnectTarget),
@@ -309,6 +317,32 @@ const TcpPort = Schema.Number.check(
   Schema.isBetween({ minimum: 1, maximum: 65_535 })
 )
 
+const WorkBindAddress = Schema.String.check(
+  Schema.isPattern(/^(?:\d{1,3}\.){3}\d{1,3}$/),
+  Schema.makeFilter(
+    (address) => {
+      const octets = address.split(".")
+      const values = octets.map(Number)
+      return values.some((octet) => octet !== 0) &&
+        values.every(
+          (octet, index) => String(octet) === octets[index] && octet >= 0 && octet <= 255
+        )
+    },
+    { expected: "a specific IPv4 Work listener address, not a wildcard" }
+  )
+)
+
+export const LanWorkConfiguration = Schema.Struct({
+  address: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(253)),
+  host: Schema.String.check(
+    Schema.isNonEmpty(),
+    Schema.isMaxLength(253),
+    Schema.isPattern(/^[A-Za-z0-9.-]+$/u)
+  ),
+  port: TcpPort
+})
+export interface LanWorkConfiguration extends Schema.Schema.Type<typeof LanWorkConfiguration> {}
+
 export const HostConfiguration = Schema.Struct({
   host: FleetHostName,
   repository: Schema.String,
@@ -316,7 +350,9 @@ export const HostConfiguration = Schema.Struct({
   crossHost: Schema.Boolean,
   port: TcpPort,
   localPort: TcpPort,
+  workBindAddress: Schema.optionalKey(WorkBindAddress),
   approvalPort: TcpPort,
+  lanWork: Schema.optionalKey(LanWorkConfiguration),
   allowedUsers: Schema.Array(Schema.String),
   approvalNodes: Schema.Array(Schema.String),
   machines: FleetMachines,
@@ -370,22 +406,28 @@ export const HostConfiguration = Schema.Struct({
       const approvalHubPort = approvalHubUrl === null || approvalHubUrl.port === ""
         ? 443
         : Number(approvalHubUrl.port)
+      const lanPortAvailable = configuration.lanWork === undefined ||
+        ![configuration.localPort, configuration.port, configuration.approvalPort].includes(
+          configuration.lanWork.port
+        )
       return new Set(applyHosts).size === applyHosts.length &&
         applyHosts.every((host) => configuredHosts.has(host)) &&
         localConfigured &&
         approvalHubUrl !== null &&
         approvalHubPort === configuration.approvalPort &&
+        (configuration.crossHost || configuration.port !== configuration.localPort) &&
         (
           !configuration.crossHost ||
           (
             approvalHubConfigured &&
             configuration.port !== configuration.approvalPort
           )
-        )
+        ) &&
+        lanPortAvailable
     },
     {
       expected:
-        "valid fleet targets, distinct cross-host listeners, and an approval hub URL whose effective port matches the TLS listener"
+        "valid fleet targets, distinct listeners, and an approval hub URL whose effective port matches the TLS listener"
     }
   )
 )

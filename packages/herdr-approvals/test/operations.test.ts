@@ -54,6 +54,173 @@ const config = (
 })
 
 describe("host command output", () => {
+  it.effect("accepts root coordinator lifecycle only for coordinator-handled delegates", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-root-coordinator-test-"))
+    const coordinatorCommand = join(root, "host-coordinator")
+    writeFileSync(
+      coordinatorCommand,
+      `#!/bin/sh
+job_id="$2"
+printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.child.v1\\",\\"requestId\\":\\"request-1\\",\\"type\\":\\"started\\",\\"worker\\":{\\"agentId\\":\\"agent-host-coordinator\\",\\"host\\":\\"SER8\\",\\"name\\":\\"host-coordinator\\",\\"paneId\\":\\"w8:p1\\"}}"
+printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.child.v1\\",\\"reply\\":\\"fleet healthy\\",\\"requestId\\":\\"request-1\\",\\"type\\":\\"completed\\"}"
+`,
+      { mode: 0o700 }
+    )
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const hostOperations = yield* makeHostOperations({
+            ...config(root, ["true"]),
+            coordinatorCommand: [coordinatorCommand]
+          })
+          const consult = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-consult"),
+            now: Effect.succeed(1_000),
+            operations: hostOperations,
+            store
+          })
+          const consultJob = yield* consult.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "consult",
+              prompt: "inspect fleet",
+              repository: root
+            }
+          }, "owner")
+          expect(yield* consult.run(consultJob.id)).toMatchObject({
+            error: null,
+            result: "fleet healthy",
+            status: "succeeded",
+            worker: {
+              agentId: "agent-host-coordinator",
+              host: "SER8",
+              name: "host-coordinator",
+              paneId: "w8:p1"
+            }
+          })
+
+          const transitionSummary = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-transition-summary"),
+            now: Effect.succeed(1_001),
+            operations: hostOperations,
+            store
+          })
+          const transitionSummaryJob = yield* transitionSummary.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "transition_summary",
+              prompt: "summarize transition",
+              repository: root
+            }
+          }, "owner")
+          expect(yield* transitionSummary.run(transitionSummaryJob.id)).toMatchObject({
+            error: null,
+            result: "fleet healthy",
+            status: "succeeded",
+            worker: {
+              agentId: "agent-host-coordinator",
+              host: "SER8",
+              name: "host-coordinator",
+              paneId: "w8:p1"
+            }
+          })
+
+          const chat = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-chat"),
+            nonce: Effect.succeed("nonce-chat"),
+            now: Effect.succeed(1_002),
+            operations: hostOperations,
+            store
+          })
+          const chatJob = yield* chat.submit({
+            payload: {
+              channel: "coordinator_chat",
+              kind: "agent.delegate",
+              mode: "work",
+              prompt: "coordinate fleet",
+              repository: root
+            }
+          }, "owner")
+          yield* chat.approve(chatJob.id, {
+            hash: chatJob.hash,
+            nonce: "nonce-chat"
+          }, "owner")
+          const completedChatWork = yield* chat.runCoordinatorChat(chatJob.id)
+          expect(completedChatWork).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
+          })
+          expect(completedChatWork.worker).toBeUndefined()
+
+          const delegatedReview = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-review"),
+            now: Effect.succeed(1_003),
+            operations: hostOperations,
+            store
+          })
+          const reviewJob = yield* delegatedReview.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "review",
+              prompt: "review fleet",
+              repository: root
+            }
+          }, "owner")
+          const completedReview = yield* delegatedReview.run(reviewJob.id)
+          expect(completedReview).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
+          })
+          expect(completedReview.worker).toBeUndefined()
+
+          const delegatedWork = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-work"),
+            nonce: Effect.succeed("nonce-work"),
+            now: Effect.succeed(1_004),
+            operations: hostOperations,
+            store
+          })
+          const workJob = yield* delegatedWork.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "work",
+              prompt: "change fleet",
+              repository: root
+            }
+          }, "owner")
+          yield* delegatedWork.approve(workJob.id, {
+            hash: workJob.hash,
+            nonce: "nonce-work"
+          }, "owner")
+          const completedWork = yield* delegatedWork.run(workJob.id)
+          expect(completedWork).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
+          })
+          expect(completedWork.worker).toBeUndefined()
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("preserves bounded output and rejects the first byte over the cap", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-command-output-test-"))
     return Effect.gen(function*() {
@@ -264,6 +431,49 @@ printf '%s\n' '{"jobId":"job-1","protocol":"herdr.coordinator.child.v1","reply":
         )
       ).toMatchObject({
         failure: { operation: "agent.delegate.chat.lifecycle" }
+      })
+    }).pipe(
+      Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),
+      provideNodeServices
+    )
+  })
+
+  it.effect("filters the typed launch-pending entry and rejects unknown variants", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-agent-list-test-"))
+    const herdrCommand = join(root, "herdr-test")
+    writeFileSync(herdrCommand, "#!/bin/sh\n", { mode: 0o700 })
+    return Effect.gen(function*() {
+      const operations = yield* makeHostOperations({
+        ...config(root, ["true"]),
+        herdrCommand
+      })
+
+      writeFileSync(
+        herdrCommand,
+        `#!/bin/sh
+printf '%s\\n' '{"result":{"agents":[{"agent":"codex","agent_status":"working","cwd":"/repo","pane_id":"w1:p1","state_change_seq":1},{"launch_pending":true,"agent":"codex","agent_status":"launch_pending","cwd":"/repo/pending","foreground_cwd":"/repo/pending","name":null,"pane_id":"w1:p2","state_change_seq":2,"tokens":{}}]}}'
+`,
+        { mode: 0o700 }
+      )
+      expect(yield* operations.listAgents()).toEqual({
+        agents: [
+          expect.objectContaining({ paneId: "w1:p1", work: "repo" })
+        ],
+        available: true,
+        error: null
+      })
+
+      writeFileSync(
+        herdrCommand,
+        `#!/bin/sh
+printf '%s\\n' '{"result":{"agents":[{"launch_pending":false,"agent_status":"working","cwd":"/repo","pane_id":"w1:p2","state_change_seq":2}]}}'
+`,
+        { mode: 0o700 }
+      )
+      expect(yield* operations.listAgents()).toMatchObject({
+        agents: [],
+        available: false,
+        error: expect.stringContaining("herdr.agent_list.decode:")
       })
     }).pipe(
       Effect.ensuring(Effect.sync(() => rmSync(root, { force: true, recursive: true }))),

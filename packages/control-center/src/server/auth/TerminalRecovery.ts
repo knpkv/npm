@@ -1,3 +1,4 @@
+import { PairingCode } from "@knpkv/browser-pairing/schema"
 import type { FileSystem as FileSystemType, Path as PathType } from "effect"
 import {
   Clock,
@@ -194,7 +195,9 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
       const bytes = yield* cryptoService.randomBytes(32).pipe(
         Effect.mapError(() => new AuthCryptoError())
       )
-      const pairingCode = Redacted.make(Encoding.encodeHex(bytes))
+      const pairingCode = yield* Schema.decodeUnknownEffect(PairingCode)(Encoding.encodeHex(bytes)).pipe(
+        Effect.mapError(() => new AuthCryptoError())
+      )
       const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
         Effect.mapError(() => new AuthCryptoError())
       )
@@ -209,7 +212,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
         createdAt,
         expiresAt: DateTime.add(createdAt, { minutes: PAIRING_CODE_LIFETIME_MINUTES })
       }, request.revokeExistingOwnerSessions)
-      return { pairingCode, summary }
+      return { pairingCode: Redacted.make(pairingCode), summary }
     })
   }
 })

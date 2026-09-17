@@ -1,6 +1,7 @@
 import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { CsrfToken, SessionToken } from "@knpkv/browser-pairing/schema"
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Redacted, Ref, Result, Schema, Stream } from "effect"
 import * as TestClock from "effect/testing/TestClock"
@@ -43,6 +44,7 @@ import { PortfolioSnapshot } from "../../src/api/portfolio.js"
 import {
   CurrentSession,
   CurrentSessionResponse,
+  CurrentSessionToken,
   SessionCookieAuth,
   SessionMutationAuth,
   SessionSummary
@@ -328,7 +330,12 @@ const approverSession = Schema.decodeSync(SessionSummary)({
 })
 
 const sessionMiddlewareLayer = Layer.succeed(SessionCookieAuth, {
-  sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, session)
+  sessionCookie: (effect) =>
+    Effect.provideService(
+      Effect.provideService(effect, CurrentSession, session),
+      CurrentSessionToken,
+      Redacted.make(SessionToken.make("ab".repeat(32)))
+    )
 })
 
 const mutationMiddlewareLayer = Layer.succeed(SessionMutationAuth, {
@@ -4054,6 +4061,56 @@ describe("Control Center API handlers", () => {
       )
     }))
 
+  it.effect("closes a live stream on server drain without a transport token", () =>
+    Effect.gen(function*() {
+      const activeSubscriptions = yield* Ref.make(0)
+      const closed = yield* Deferred.make<void>()
+      const lifecycle = yield* ServerLifecycle.make
+      const sessionWithoutToken = Layer.succeed(SessionCookieAuth, {
+        sessionCookie: (effect) => Effect.provideService(effect, CurrentSession, session)
+      })
+      const trackedHandler = liveEventHandlersLayer.pipe(
+        Layer.provide(sessionWithoutToken),
+        Layer.provide(Layer.succeed(Auth, streamAuthentication)),
+        Layer.provide(LiveStreamAdmission.layer),
+        Layer.provide(Layer.succeed(LiveEvents, {
+          open: () =>
+            Ref.update(activeSubscriptions, (count) => count + 1).pipe(
+              Effect.as(Stream.never.pipe(
+                Stream.ensuring(
+                  Ref.update(activeSubscriptions, (count) => count - 1).pipe(
+                    Effect.andThen(Deferred.succeed(closed, undefined))
+                  )
+                )
+              ))
+            )
+        })),
+        Layer.provide(Layer.succeed(ServerLifecycle, lifecycle))
+      )
+
+      yield* Effect.gen(function*() {
+        const client = yield* HttpApiTest.groups(ControlCenterApi, ["liveEvents"])
+        const eventStream = yield* client.liveEvents.stream({ headers: {}, query: {} })
+        const drained = yield* Stream.runDrain(eventStream).pipe(Effect.forkChild)
+        yield* Effect.yieldNow
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 1)
+
+        yield* lifecycle.beginDrain
+        yield* Fiber.join(drained)
+        yield* Deferred.await(closed)
+
+        assert.strictEqual(yield* Ref.get(activeSubscriptions), 0)
+      }).pipe(
+        Effect.provide([
+          NodeHttpServer.layerHttpServices,
+          mutationMiddlewareLayer,
+          sessionWithoutToken,
+          trackedHandler
+        ]),
+        Effect.provideService(ServerLifecycle, lifecycle)
+      )
+    }))
+
   it.effect("contains periodic authentication defects at the raw SSE boundary", () =>
     Effect.gen(function*() {
       const secretCanary = "periodic-auth-defect-secret-canary"
@@ -4167,7 +4224,7 @@ describe("Control Center API handlers", () => {
       logout: () => Effect.die("not used"),
       recoverCsrfToken: () =>
         Effect.succeed({
-          csrfToken: Redacted.make(recoveredCsrf),
+          csrfToken: Redacted.make(CsrfToken.make(recoveredCsrf)),
           session
         }),
       revokePairingCode: () => Effect.die("not used"),
@@ -4371,7 +4428,7 @@ describe("Control Center API handlers", () => {
       logout: () => Effect.die("blocked insecure-LAN logout reached its handler"),
       recoverCsrfToken: () =>
         Effect.succeed({
-          csrfToken: Redacted.make(recoveredCsrf),
+          csrfToken: Redacted.make(CsrfToken.make(recoveredCsrf)),
           session
         }),
       revokePairingCode: () => Effect.die("not used"),

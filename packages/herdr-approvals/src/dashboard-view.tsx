@@ -4,14 +4,14 @@ import type { FormEvent, KeyboardEvent, ReactElement } from "react"
 import type { DashboardSnapshot, PendingApproval, PendingApprovalFailure } from "./dashboard-model.js"
 import type { ChatMode } from "@knpkv/herdr-coordinator/model"
 import { CoordinatorChatPanel, NotificationPanel, type NotificationState } from "./approval-app-view.js"
-import { requiresApproval, type JobRecord } from "@knpkv/herdr-fleet/model"
+import { requiresApproval } from "@knpkv/herdr-fleet/model"
 import { ActivityHistory, jobTitle, statusLabel, statusTone } from "./activity-history.js"
+import { ApprovalRequestDisclosure } from "./approval-request-view.js"
+import type { SanitizedJobRecord } from "./approval-request.js"
 
 export type ApprovalDecision = {
   readonly decision: "approve" | "reject"
-  readonly hash: string
   readonly jobId: string
-  readonly nonce: string
 }
 
 export const approvalShortcutFor = ({
@@ -55,7 +55,7 @@ type DashboardViewProps = {
 type PendingAgendaItem =
   | {
       readonly _tag: "local"
-      readonly record: JobRecord
+      readonly record: SanitizedJobRecord
     }
   | {
       readonly _tag: "remote"
@@ -65,18 +65,18 @@ type PendingAgendaItem =
 const pendingCreatedAt = (item: PendingAgendaItem): number =>
   item._tag === "local" ? item.record.createdAt : item.remote.approval.createdAt
 
-const jobSummary = (record: Pick<JobRecord, "payload">): string => {
+const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
   switch (record.payload.kind) {
     case "browser.mcp.recover":
       return "Local browser MCP recovery"
     case "nix.check":
       return "Repository checks"
     case "nix.apply":
-      return `Revision ${record.payload.ref}`
+      return "Nix configuration request"
     case "agent.delegate":
-      return `${record.payload.mode} · ${record.payload.prompt}`
+      return `${record.payload.mode} · [redacted internal prompt]`
     case "agent.message":
-      return `${record.payload.session} · ${record.payload.message}`
+      return `${record.payload.session} · [redacted internal message]`
   }
 }
 
@@ -100,7 +100,7 @@ const lifecycleTime = (label: string, timestamp: number | null | undefined, acto
   </li>
 )
 
-const JobTimeline = ({ record }: { readonly record: JobRecord }) => (
+const JobTimeline = ({ record }: { readonly record: SanitizedJobRecord }) => (
   <ol className="job-lifecycle" aria-label="Job lifecycle">
     {lifecycleTime("Arrived", record.createdAt, record.actor)}
     {record.approvedBy === null ? null : lifecycleTime("Approved", record.approvedAt, record.approvedBy)}
@@ -122,9 +122,9 @@ const ApprovalActions = ({
 }: {
   readonly busy: boolean
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
-  readonly record: JobRecord
+  readonly record: SanitizedJobRecord
 }) => {
-  if (onDecision === undefined || record.status !== "pending_approval" || record.approvalNonce === null) {
+  if (onDecision === undefined || record.status !== "pending_approval" || !record.approvalAvailable) {
     return null
   }
   const submit =
@@ -134,24 +134,18 @@ const ApprovalActions = ({
       event.preventDefault()
       onDecision({
         decision,
-        hash: record.hash,
-        jobId: record.id,
-        nonce: record.approvalNonce ?? ""
+        jobId: record.id
       })
     }
   const jobPath = encodeURIComponent(record.id)
   return (
     <div className="approval-actions">
       <form method="post" action={`/v1/jobs/${jobPath}/reject`} onSubmit={submit("reject")}>
-        <input type="hidden" name="hash" value={record.hash} />
-        <input type="hidden" name="nonce" value={record.approvalNonce} />
         <Button type="submit" variant="quiet" disabled={busy}>
           Reject
         </Button>
       </form>
       <form method="post" action={`/v1/jobs/${jobPath}/approve`} onSubmit={submit("approve")}>
-        <input type="hidden" name="hash" value={record.hash} />
-        <input type="hidden" name="nonce" value={record.approvalNonce} />
         <Button type="submit" variant="primary" loading={busy}>
           Approve
         </Button>
@@ -171,7 +165,7 @@ const AgendaItem = ({
   readonly connectBaseUrl: string
   readonly host: string
   readonly onDecision: ((decision: ApprovalDecision) => void) | undefined
-  readonly record: JobRecord
+  readonly record: SanitizedJobRecord
 }) => {
   const handleShortcut = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.target !== event.currentTarget || busy || onDecision === undefined) return
@@ -180,12 +174,11 @@ const AgendaItem = ({
       modified: event.ctrlKey || event.metaKey,
       shift: event.shiftKey
     })
-    const nonce = record.approvalNonce
-    if (decision === null || record.status !== "pending_approval" || nonce === null) return
+    if (decision === null || record.status !== "pending_approval" || !record.approvalAvailable) return
     event.preventDefault()
-    onDecision({ decision, hash: record.hash, jobId: record.id, nonce })
+    onDecision({ decision, jobId: record.id })
   }
-  const actionable = onDecision !== undefined && record.status === "pending_approval" && record.approvalNonce !== null
+  const actionable = onDecision !== undefined && record.status === "pending_approval" && record.approvalAvailable
   return (
     <Surface
       as="article"
@@ -210,6 +203,7 @@ const AgendaItem = ({
         <StateLabel label={statusLabel(record.status)} tone={statusTone(record.status)} size="compact" />
       </div>
       <JobTimeline record={record} />
+      {requiresApproval(record.payload) ? <ApprovalRequestDisclosure id={record.id} payload={record.payload} /> : null}
       {record.connectTarget === undefined || record.worker === undefined ? null : (
         <a className="worker-connect-link" href={new URL(record.connectTarget.url, connectBaseUrl).href}>
           Open {record.worker.name} in Connect
@@ -267,6 +261,7 @@ const RemoteAgendaItem = ({
       {lifecycleTime("Arrived", approval.createdAt, approval.actor)}
       {lifecycleTime("Expires", approval.approvalExpiresAt)}
     </ol>
+    <ApprovalRequestDisclosure id={approval.id} payload={approval.payload} />
     <a className="remote-approval-link" href={approvalUrl} aria-label={`Review approval on ${host}`}>
       Review on {host}
     </a>
@@ -410,14 +405,14 @@ export const AgentActivity = ({ snapshot }: { readonly snapshot: DashboardSnapsh
   </Surface>
 )
 
-const ApprovalDecisionHistory = ({ records }: { readonly records: ReadonlyArray<JobRecord> }) => {
+const ApprovalDecisionHistory = ({ records }: { readonly records: ReadonlyArray<SanitizedJobRecord> }) => {
   type DecisionPresentation = {
     readonly actor: string
     readonly label: "Approved" | "Expired" | "Rejected"
     readonly timestamp: number
     readonly tone: "caution" | "critical" | "positive"
   }
-  const decisionFor = (record: JobRecord): DecisionPresentation | null => {
+  const decisionFor = (record: SanitizedJobRecord): DecisionPresentation | null => {
     if (record.rejectedBy != null) {
       return {
         actor: record.rejectedBy,
@@ -475,6 +470,7 @@ const ApprovalDecisionHistory = ({ records }: { readonly records: ReadonlyArray<
                 <Text tone="secondary" variant="meta">
                   {timeLabel(decision.timestamp)} · {decision.actor}
                 </Text>
+                <ApprovalRequestDisclosure id={record.id} payload={record.payload} />
               </div>
               <StateLabel label={decision.label} size="compact" tone={decision.tone} />
             </li>

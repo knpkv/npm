@@ -9,6 +9,7 @@ export default defineConfig({
   },
   test: {
     environment: "node",
+    exclude: ["test/relay-explain-real-smoke.test.ts"],
     globals: true,
     include: ["src/**/*.test.ts", "test/**/*.test.ts"]
   }

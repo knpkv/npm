@@ -1,0 +1,80 @@
+id: require-host-environment-for-git-child-env
+snapshots:
+  ? |
+    ChildEnv.gitChildEnv(
+      {
+        ...process.env,
+        GIT_DIR: canaryGitDirectory
+      },
+      { GIT_CONFIG_GLOBAL: "/dev/null" }
+    )
+  : labels:
+      - source: |-
+          ChildEnv.gitChildEnv(
+            {
+              ...process.env,
+              GIT_DIR: canaryGitDirectory
+            },
+            { GIT_CONFIG_GLOBAL: "/dev/null" }
+          )
+        style: primary
+        start: 0
+        end: 121
+  ? |
+    ChildEnv.gitChildEnv(process.env)
+  : labels:
+      - source: ChildEnv.gitChildEnv(process.env)
+        style: primary
+        start: 0
+        end: 33
+  ? |
+    ChildEnv.gitChildEnv(process.env, { GIT_CONFIG_GLOBAL: "/dev/null" })
+  : labels:
+      - source: 'ChildEnv.gitChildEnv(process.env, { GIT_CONFIG_GLOBAL: "/dev/null" })'
+        style: primary
+        start: 0
+        end: 69
+  ? |
+    ChildEnv.gitChildEnv({
+      ...process.env,
+      GIT_DIR: canaryGitDirectory
+    })
+  : labels:
+      - source: |-
+          ChildEnv.gitChildEnv({
+            ...process.env,
+            GIT_DIR: canaryGitDirectory
+          })
+        style: primary
+        start: 0
+        end: 73
+  ? |
+    Effect.provideService(ChildEnv.HostEnvironment, {
+      variables: process.env
+    })
+  : labels:
+      - source: |-
+          Effect.provideService(ChildEnv.HostEnvironment, {
+            variables: process.env
+          })
+        style: primary
+        start: 0
+        end: 77
+  ? |
+    Effect.provideService(ChildEnv.HostEnvironment, {
+      variables: {
+        ...process.env,
+        GIT_DIR: canaryGitDirectory
+      }
+    })
+  : labels:
+      - source: |-
+          Effect.provideService(ChildEnv.HostEnvironment, {
+            variables: {
+              ...process.env,
+              GIT_DIR: canaryGitDirectory
+            }
+          })
+        style: primary
+        start: 0
+        end: 123

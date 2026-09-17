@@ -274,10 +274,11 @@ describe("CodeCommit Git and review fixtures", () => {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+        const host = yield* ChildEnv.HostEnvironment
         const canary = yield* fileSystem.makeTempDirectoryScoped({ prefix: "codecommit-mock-git-canary-" })
         yield* spawner.string(
           ChildProcess.make("git", ["init", "--quiet", "--", canary], {
-            env: ChildEnv.gitChildEnv(process.env),
+            env: ChildEnv.gitChildEnv(host.variables),
             extendEnv: true,
             stderr: "pipe",
             stdout: "pipe"
@@ -287,7 +288,7 @@ describe("CodeCommit Git and review fixtures", () => {
         const fixture = yield* makeCodeCommitGitFixture().pipe(
           Effect.provideService(ChildEnv.HostEnvironment, {
             variables: {
-              ...process.env,
+              ...host.variables,
               GIT_ALTERNATE_OBJECT_DIRECTORIES: path.join(canary, "objects"),
               GIT_DIR: canaryGitDirectory,
               GIT_INDEX_FILE: path.join(canary, "outside-index"),
@@ -300,7 +301,7 @@ describe("CodeCommit Git and review fixtures", () => {
         expect(yield* fileSystem.exists(path.join(canary, "outside-index"))).toBe(false)
         const canaryRefs = yield* spawner.string(
           ChildProcess.make("git", [`--git-dir=${canaryGitDirectory}`, "show-ref"], {
-            env: ChildEnv.gitChildEnv(process.env),
+            env: ChildEnv.gitChildEnv(host.variables),
             extendEnv: true,
             stderr: "pipe",
             stdout: "pipe"
@@ -311,7 +312,7 @@ describe("CodeCommit Git and review fixtures", () => {
     ).pipe(
       // The test runner owns the Node service lifetime.
       // @effect-diagnostics-next-line strictEffectProvide:off
-      Effect.provide(NodeServices.layer)
+      Effect.provide(testRuntimeLayer)
     ))
 
   it.effect("returns one schema-v3 review with token usage", () =>

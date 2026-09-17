@@ -6,7 +6,7 @@ import type { ClaudeTransportError } from "./errors.js"
 import { type ClaudeResult, decodeClaudeOutput } from "./protocol.js"
 
 interface RunOptions {
-  readonly access: "read-only" | "workspace-write"
+  readonly access: "prompt-only" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
   readonly executable: string
@@ -69,8 +69,16 @@ const redactDiagnostic = (diagnostic: string, cwd: string): string => {
 }
 
 const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
-  const tools = options.access === "workspace-write" ? "Read,Glob,Grep,Edit,Write" : "Read,Glob,Grep"
-  const permissionMode = options.access === "workspace-write" ? "acceptEdits" : "plan"
+  const tools = options.access === "workspace-write"
+    ? "Read,Glob,Grep,Edit,Write"
+    : options.access === "read-only"
+    ? "Read,Glob,Grep"
+    : ""
+  const permissionMode = options.access === "workspace-write"
+    ? "acceptEdits"
+    : options.access === "read-only"
+    ? "plan"
+    : "dontAsk"
   const arguments_: Array<string> = [
     "--print",
     "--output-format",
@@ -84,6 +92,14 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
     "--no-session-persistence",
     "--safe-mode"
   ]
+  if (options.access === "prompt-only") {
+    arguments_.push(
+      "--setting-sources",
+      "",
+      "--disallowed-tools",
+      "Bash,Edit,Write,Read,Glob,Grep,WebFetch,WebSearch,Task,NotebookEdit,TodoRead,TodoWrite,ExitPlanMode,AskUserQuestion,Skill,EnterPlanMode,mcp__*"
+    )
+  }
   if (options.model !== undefined) arguments_.push("--model", options.model)
   if (options.jsonSchema !== undefined) arguments_.push("--json-schema", options.jsonSchema)
   return arguments_

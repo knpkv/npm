@@ -10,6 +10,9 @@ import * as Stream from "effect/Stream"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 const pnpmVersion = "11.21.0"
+const pnpmExecutable = "corepack"
+const pnpmInvocation = [`pnpm@${pnpmVersion}`]
+const ignoreScriptsArgument = "--config.ignore-scripts=true"
 
 class PackError extends Data.TaggedError("PackError") {
   get message() {
@@ -62,7 +65,12 @@ const collectVersions = Effect.fn("HerdrPack.collectVersions")(function* (fileSy
       .stat(candidateRoot)
       .pipe(Effect.mapError(mapPackError(`Could not inspect ${candidateRoot}`)))
     if (info.type !== "Directory") continue
-    const candidate = yield* readJson(fileSystem, path.join(candidateRoot, "package.json")).pipe(
+    const manifestPath = path.join(candidateRoot, "package.json")
+    const manifestExists = yield* fileSystem
+      .exists(manifestPath)
+      .pipe(Effect.mapError(mapPackError(`Could not inspect ${manifestPath}`)))
+    if (!manifestExists) continue
+    const candidate = yield* readJson(fileSystem, manifestPath).pipe(
       Effect.flatMap(Schema.decodeUnknownEffect(PackageCandidate)),
       Effect.mapError(mapPackError(`Could not decode ${directory} package identity`))
     )
@@ -96,7 +104,7 @@ const publishDependencies = Effect.fn("HerdrPack.publishDependencies")(function*
   return Object.fromEntries(rewritten)
 })
 
-const runPnpm = Effect.fn("HerdrPack.runPnpm")(function* (spawner, stdio, args, cwd, disableScripts) {
+const runCommand = Effect.fn("HerdrPack.runCommand")(function* (spawner, stdio, executable, args, cwd, disableScripts) {
   const options = disableScripts
     ? {
         cwd,
@@ -107,8 +115,8 @@ const runPnpm = Effect.fn("HerdrPack.runPnpm")(function* (spawner, stdio, args, 
       }
     : { cwd, stderr: "pipe", stdout: "pipe" }
   const handle = yield* spawner
-    .spawn(ChildProcess.make("pnpm", args, options))
-    .pipe(Effect.mapError(mapPackError(`Could not run pnpm ${args.join(" ")}`)))
+    .spawn(ChildProcess.make(executable, args, options))
+    .pipe(Effect.mapError(mapPackError(`Could not run ${executable} ${args.join(" ")}`)))
   const [stdout, stderr, exitCode] = yield* Effect.all(
     [
       Stream.decodeText(handle.stdout).pipe(Stream.mkString),
@@ -120,7 +128,7 @@ const runPnpm = Effect.fn("HerdrPack.runPnpm")(function* (spawner, stdio, args, 
   if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
     yield* Stream.make(stdout, stderr).pipe(Stream.run(stdio.stderr()))
     return yield* new PackError({
-      reason: `pnpm ${args.join(" ")} exited with code ${exitCode}`
+      reason: `${executable} ${args.join(" ")} exited with code ${exitCode}`
     })
   }
   return stdout
@@ -198,13 +206,27 @@ const program = Effect.scoped(
         reason: `Expected workspace pnpm@${pnpmVersion}, got ${workspaceManifest.packageManager}`
       })
     }
-    const actualVersion = (yield* runPnpm(spawner, stdio, ["--version"], staging, false)).trim()
+    const actualVersion = (yield* runCommand(
+      spawner,
+      stdio,
+      pnpmExecutable,
+      [...pnpmInvocation, "--version"],
+      staging,
+      false
+    )).trim()
     if (actualVersion !== pnpmVersion) {
       return yield* new PackError({
         reason: `Expected pnpm ${pnpmVersion}, got ${actualVersion}`
       })
     }
-    const output = yield* runPnpm(spawner, stdio, ["pack", "--pack-destination", destination], staging, true)
+    const output = yield* runCommand(
+      spawner,
+      stdio,
+      pnpmExecutable,
+      [...pnpmInvocation, ignoreScriptsArgument, "pack", "--pack-destination", destination],
+      staging,
+      true
+    )
     yield* Stream.make(output).pipe(Stream.run(stdio.stdout()))
   })
 )

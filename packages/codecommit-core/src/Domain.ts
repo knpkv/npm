@@ -363,6 +363,7 @@ export class Sandbox extends Schema.Class<Sandbox>("Sandbox")({
   pullRequestId: PullRequestId,
   awsAccountId: Schema.String,
   repositoryName: RepositoryName,
+  region: AwsRegion,
   sourceBranch: Schema.String,
   containerId: Schema.optional(Schema.String),
   port: Schema.optional(Schema.Number),

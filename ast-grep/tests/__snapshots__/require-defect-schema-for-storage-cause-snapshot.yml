@@ -1,0 +1,38 @@
+id: require-defect-schema-for-storage-cause
+snapshots:
+  ? |
+    class StorageError extends Schema.TaggedError<StorageError>()(
+      "StorageError",
+      { operation: Schema.String, cause: Schema.Unknown }
+    ) {}
+  : labels:
+      - source: "cause: Schema.Unknown"
+        style: primary
+        start: 111
+        end: 132
+      - source: |-
+          class StorageError extends Schema.TaggedError<StorageError>()(
+            "StorageError",
+            { operation: Schema.String, cause: Schema.Unknown }
+          ) {}
+        style: secondary
+        start: 0
+        end: 139
+  ? |
+    class WorkStoreError extends Schema.TaggedError<WorkStoreError>()(
+      "WorkStoreError",
+      { cause: Schema.Unknown, operation: Schema.String }
+    ) {}
+  : labels:
+      - source: "cause: Schema.Unknown"
+        style: primary
+        start: 91
+        end: 112
+      - source: |-
+          class WorkStoreError extends Schema.TaggedError<WorkStoreError>()(
+            "WorkStoreError",
+            { cause: Schema.Unknown, operation: Schema.String }
+          ) {}
+        style: secondary
+        start: 0
+        end: 145

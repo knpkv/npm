@@ -35,7 +35,13 @@ const enrichSingleDiff = Effect.fn("enrichSingleDiff")(
       afterCommitSpecifier: row.sourceBranch
     })
 
-    return { awsAccountId: row.awsAccountId, id: row.id, ...stats }
+    return {
+      awsAccountId: row.awsAccountId,
+      id: row.id,
+      repositoryName: row.repositoryName,
+      accountRegion: row.accountRegion,
+      ...stats
+    }
   },
   Effect.catchIf(() => true, (e) => Effect.logDebug("enrichSingleDiff failed", e).pipe(Effect.as(undefined)))
 )
@@ -75,8 +81,11 @@ export const enrichDiffs = Effect.fn("enrichDiffs")(
     yield* Effect.forEach(
       results,
       (r) => {
-        if (!r) return Effect.void
-        return prRepo.updateDiffStats(r.awsAccountId, r.id, r.filesAdded, r.filesModified, r.filesDeleted).pipe(
+        if (r === undefined) return Effect.void
+        return prRepo.updateDiffStats(r.awsAccountId, r.id, r.filesAdded, r.filesModified, r.filesDeleted, {
+          repositoryName: r.repositoryName,
+          accountRegion: r.accountRegion
+        }).pipe(
           Effect.catchIf(() => true, () => Effect.void)
         )
       },

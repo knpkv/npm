@@ -1,3 +1,4 @@
+import type { PairingCode } from "@knpkv/browser-pairing/schema"
 import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
@@ -25,7 +26,7 @@ export type ControlCenterBootstrapState =
   | {
     readonly _tag: "pairing-issued"
     readonly workspaceId: WorkspaceId
-    readonly pairingCode: Redacted.Redacted<string>
+    readonly pairingCode: Redacted.Redacted<PairingCode>
   }
 
 /** Startup failures possible while ensuring durable workspace and authentication state. */

@@ -26,7 +26,10 @@ export const calculateHealthScores = (
     (row) => {
       const pr = decodeCachedPR(row)
       const score = scoreTotalOr(pr, scoreNow, 0)
-      return prRepo.updateHealthScore(row.awsAccountId, row.id, score).pipe(
+      return prRepo.updateHealthScore(row.awsAccountId, row.id, score, {
+        repositoryName: row.repositoryName,
+        accountRegion: row.accountRegion
+      }).pipe(
         Effect.catch(() => Effect.void)
       )
     },

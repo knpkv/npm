@@ -55,6 +55,16 @@ pnpm --filter @knpkv/control-center start
 
 The first run prints a single-use pairing code and listens at `http://127.0.0.1:4173`. Durable data, content, and owner-only secrets live under `.control-center` by default; set `CONTROL_CENTER_DATA_ROOT` to choose another owner-controlled directory.
 
+Control Center's durable auth is an explicit boundary from CodeCommit web's
+process-scoped owner session. Its `Auth` service keeps secret values redacted
+and role-branded (`PairingCode`, `SessionToken`, and `CsrfToken`) at its
+server-only boundary, stores only digests, and exposes the pairing and CSRF
+brands at its HTTP schemas; session identity and CSRF recovery are bound to
+durable workspace/session UUIDs. CodeCommit's ephemeral
+`OwnerSessionSecurity` retains the same role brands through issuance. These
+lifecycles and credentials are intentionally not interchangeable; neither
+service accepts the other's persistence or authorization policy.
+
 `GET /.well-known/knpkv-control-center` returns a versioned, credential-free
 identity used by the CodeCommit TUI before it opens the clean **Open PR** page. The probe is
 uncached and carries no workspace or session state.

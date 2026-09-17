@@ -438,6 +438,114 @@ describe("coordinator contracts", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("keeps durable chat history decodable at the reply byte boundary", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-durable-chat-reply-bound-test-"))
+    const invalidReply = "界".repeat(6_667)
+    const validReply = "界".repeat(6_666)
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (jobStore) =>
+        Effect.acquireUseRelease(
+          ChatStore.open(join(root, "chat.sqlite")),
+          (chatStore) =>
+            Effect.gen(function*() {
+              const durableOperations = (reply: string): HostOperations => ({
+                ...baseOperations,
+                recovery: { matches: () => true, resume: () => Effect.void },
+                runCoordinatorChat: (_payload, _workerStarted, _jobId, _actor, lifecycle) =>
+                  lifecycle.accepted(`receipt-${reply.length}`).pipe(
+                    Effect.andThen(lifecycle.terminal({ type: "settled", detail: reply })),
+                    Effect.as(`receipt-${reply.length}`)
+                  )
+              })
+              const invalidFleet = yield* makeFleetService({
+                approvalEnabled: true,
+                host: "SER8",
+                id: Effect.succeed("invalid-reply-job"),
+                now: Effect.succeed(1_000),
+                operations: durableOperations(invalidReply),
+                store: jobStore
+              })
+              const invalidChat = yield* makeCoordinatorChat({
+                config: config(root),
+                fleet: invalidFleet,
+                nextId: Effect.succeed("invalid-reply-turn"),
+                now: Effect.succeed(1_000),
+                store: chatStore
+              })
+              const invalid = yield* invalidChat.submit(
+                { message: "return an oversized reply", mode: "ask" },
+                "owner"
+              )
+              expect(yield* Effect.result(invalidChat.run(invalid.jobId))).toMatchObject({
+                failure: { _tag: "FleetOperationError", operation: "fleet.operation_terminal" }
+              })
+
+              const validFleet = yield* makeFleetService({
+                approvalEnabled: true,
+                host: "SER8",
+                id: Effect.succeed("valid-reply-job"),
+                now: Effect.succeed(2_000),
+                operations: durableOperations(validReply),
+                store: jobStore
+              })
+              const validChat = yield* makeCoordinatorChat({
+                config: config(root),
+                fleet: validFleet,
+                nextId: Effect.succeed("valid-reply-turn"),
+                now: Effect.succeed(2_000),
+                store: chatStore
+              })
+              const valid = yield* validChat.submit(
+                { message: "return a bounded reply", mode: "ask" },
+                "owner"
+              )
+              expect(yield* validChat.run(valid.jobId)).toMatchObject({
+                result: validReply,
+                status: "succeeded"
+              })
+
+              const emptyFleet = yield* makeFleetService({
+                approvalEnabled: true,
+                host: "SER8",
+                id: Effect.succeed("empty-reply-job"),
+                now: Effect.succeed(3_000),
+                operations: durableOperations(""),
+                store: jobStore
+              })
+              const emptyChat = yield* makeCoordinatorChat({
+                config: config(root),
+                fleet: emptyFleet,
+                nextId: Effect.succeed("empty-reply-turn"),
+                now: Effect.succeed(3_000),
+                store: chatStore
+              })
+              const empty = yield* emptyChat.submit(
+                { message: "return an empty reply", mode: "ask" },
+                "owner"
+              )
+              expect(yield* Effect.result(emptyChat.run(empty.jobId))).toMatchObject({
+                failure: { _tag: "FleetOperationError", operation: "fleet.operation_terminal" }
+              })
+
+              expect(yield* emptyChat.history()).toMatchObject({
+                entries: [
+                  { id: "invalid-reply-turn", reply: null, state: "running" },
+                  { id: "valid-reply-turn", reply: validReply, state: "completed" },
+                  { id: "empty-reply-turn", reply: null, state: "running" }
+                ]
+              })
+            }),
+          (chatStore) => Effect.sync(() => chatStore.close())
+        ),
+      (jobStore) =>
+        Effect.sync(() => {
+          jobStore.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("persists exact worker identity into chat across restart", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-chat-worker-restart-test-"))
     const jobPath = join(root, "jobs.sqlite")

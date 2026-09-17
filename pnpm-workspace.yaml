@@ -4,7 +4,7 @@ packages:
   - packages/*
 
 catalog:
-  vitest: ^4.1.10
+  vitest: ^4.1.11
 
 allowBuilds:
   "@ast-grep/cli": true
@@ -15,8 +15,8 @@ allowBuilds:
 overrides:
   # GHSA-8r6m-32jq-jx6q: fast-xml-parser <5.10.1 DOCTYPE entity-expansion reset; keep scoped to 5.x
   "@distilled.cloud/aws>fast-xml-parser": ^5.10.1
-  # GHSA-v2hh-gcrm-f6hx and GHSA-7p8r-x3mc-p8w7: fast-uri <=3.1.4 host confusion; keep in 3.x for ajv
-  fast-uri@>=3.0.0 <3.1.5: 3.1.5
+  # GHSA-v2hh-gcrm-f6hx, GHSA-7p8r-x3mc-p8w7, and the 2026-09 host-confusion advisories: keep patched 3.x for ajv
+  fast-uri@>=3.0.0 <3.1.7: 3.1.7
   vitest: "catalog:"
   "@effect/vitest": 4.0.0-rc.109
   "@effect/platform-bun": 4.0.0-rc.109
@@ -28,8 +28,8 @@ overrides:
   file-type@>=13.0.0 <21.3.1: 21.3.3
   uuid@<11.1.1: 11.1.1
   read-yaml-file@<2.1.0: 2.1.0
-  # GHSA-5p4m-2wfm-xmqj: js-yaml <4.3.1 quadratic !!omap resolution
-  js-yaml@<4.3.1: 4.3.1
+  # GHSA-5p4m-2wfm-xmqj and GHSA-2883-xcg3-v3hh: bound !!omap and empty merge-source work
+  js-yaml@<4.3.2: 4.3.2
   # GHSA-pm4m-ph32-ghv5: js-yaml 5.0.0–5.2.1 exponential parsing; keep direct consumers on 5.x
   js-yaml@>=5.0.0 <=5.2.1: 5.2.2
   # GHSA-qwww-vcr4-c8h2: react-router 8.0.0–8.2.x RSC action CSRF; keep current consumers on 8.x
@@ -45,16 +45,15 @@ overrides:
   yaml: 2.9.0
   linkify-it@<=5.0.1: 5.0.2
   diff@>=6.0.0 <8.0.3: 8.0.3
-  svgo@>=4.0.0 <4.0.2: 4.0.2
 
 # Security releases for the pinned overrides above; permit fixes before the age window expires.
 minimumReleaseAgeExclude:
-  - js-yaml@4.3.1
+  - js-yaml@4.3.2
   - js-yaml@5.2.2
   - nanoid@3.3.18
   - postcss@8.5.23
   - brace-expansion@5.0.9
-  - fast-uri@3.1.5
+  - fast-uri@3.1.7
   - undici@8.9.0
 
 patchedDependencies:

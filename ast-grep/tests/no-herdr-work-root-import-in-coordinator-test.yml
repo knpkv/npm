@@ -1,0 +1,13 @@
+id: no-herdr-work-root-import-in-coordinator
+valid:
+  - |
+    import { WorkGoalId } from "@knpkv/herdr-work/model"
+  - |
+    import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
+invalid:
+  - |
+    import { WorkStore } from "@knpkv/herdr-work"
+  - |
+    export { WorkStore } from "@knpkv/herdr-work"
+  - |
+    const work = await import("@knpkv/herdr-work")

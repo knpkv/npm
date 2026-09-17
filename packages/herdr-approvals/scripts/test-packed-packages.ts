@@ -166,13 +166,92 @@ const program = Effect.scoped(
     const second = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-second-" })
     const archives = new Map<string, string>()
 
-    if (archiveNameFor("@knpkv/herdr-approvals", "0.2.0") !== "knpkv-herdr-approvals-0.2.0.tgz") {
+    const stagedPnpmVersion = (yield* run(spawner, "corepack", ["pnpm@11.21.0", "--version"], first)).trim()
+    if (stagedPnpmVersion !== "11.21.0") {
+      return yield* new HerdrPackContractError({
+        reason: `Staging did not resolve pnpm@11.21.0: ${stagedPnpmVersion}`
+      })
+    }
+
+    const cleanWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-clean-" })
+    const cleanPackage = path.join(cleanWorkspace, "packages", "sample")
+    yield* fileSystem.makeDirectory(cleanPackage, { recursive: true })
+    yield* fileSystem.writeFileString(
+      path.join(cleanWorkspace, "package.json"),
+      "{\"packageManager\":\"pnpm@11.21.0\"}\n"
+    )
+    yield* fileSystem.writeFileString(path.join(cleanWorkspace, "LICENSE"), "license\n")
+    yield* fileSystem.writeFileString(
+      path.join(cleanPackage, "package.json"),
+      `${
+        JSON.stringify({
+          dependencies: { "@test/not-installed": "99.99.99" },
+          files: ["README.md", "prepack-marker"],
+          name: "@test/sample",
+          scripts: {
+            prepack: "node -e \"require('node:fs').writeFileSync('prepack-marker', 'ran')\""
+          },
+          version: "1.0.0"
+        })
+      }\n`
+    )
+    yield* fileSystem.writeFileString(path.join(cleanPackage, "README.md"), "fixture\n")
+    yield* fileSystem.writeFileString(path.join(cleanPackage, "prepack-marker"), "source")
+    const cleanArchive = path.join(first, "test-sample-1.0.0.tgz")
+    yield* run(
+      spawner,
+      "node",
+      [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), cleanPackage, first],
+      cleanWorkspace
+    )
+    const cleanListing = (yield* run(spawner, "tar", ["-tzf", cleanArchive], cleanWorkspace))
+      .split("\n")
+      .filter((entry) => entry !== "")
+      .sort()
+    const cleanExpected = yield* expectedFiles(fileSystem, path, cleanPackage, ["README.md", "prepack-marker"])
+    if (JSON.stringify(cleanListing) !== JSON.stringify(cleanExpected)) {
+      return yield* new HerdrPackContractError({
+        reason: `Clean staged manifest packed unexpected files: ${JSON.stringify({ cleanExpected, cleanListing })}`
+      })
+    }
+    const cleanManifest = yield* Schema.decodeUnknownEffect(PackageManifest)(
+      yield* run(spawner, "tar", ["-xOf", cleanArchive, "package/package.json"], cleanWorkspace)
+    ).pipe(
+      Effect.mapError((cause) =>
+        new HerdrPackContractError({ cause, reason: "Could not decode clean packed manifest" })
+      )
+    )
+    if (
+      cleanManifest.dependencies?.["@test/not-installed"] !== "99.99.99" || cleanManifest.devDependencies !== undefined
+    ) {
+      return yield* new HerdrPackContractError({
+        reason: "Clean staged manifest did not pack without installing dependencies"
+      })
+    }
+    const cleanPrepackMarker = yield* run(
+      spawner,
+      "tar",
+      ["-xOf", cleanArchive, "package/prepack-marker"],
+      cleanWorkspace
+    )
+    if (cleanPrepackMarker !== "source") {
+      return yield* new HerdrPackContractError({
+        reason: `Clean staged pack ran prepack scripts: ${JSON.stringify(cleanPrepackMarker)}`
+      })
+    }
+
+    if (archiveNameFor("@knpkv/herdr-work", "0.3.0") !== "knpkv-herdr-work-0.3.0.tgz") {
       return yield* new HerdrPackContractError({ reason: "Archive naming does not preserve package versions" })
     }
 
     const invalidWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-invalid-" })
     const invalidPackage = path.join(invalidWorkspace, "packages", "sample")
     yield* fileSystem.makeDirectory(invalidPackage, { recursive: true })
+    for (const generatedDirectory of ["relay-product", "review"]) {
+      yield* fileSystem.makeDirectory(path.join(invalidWorkspace, "packages", generatedDirectory), {
+        recursive: true
+      })
+    }
     yield* fileSystem.writeFileString(
       path.join(invalidPackage, "package.json"),
       `${
@@ -203,6 +282,44 @@ const program = Effect.scoped(
     ) {
       return yield* new HerdrPackContractError({
         reason: "Missing workspace dependencies do not fail through the named pack error channel"
+      })
+    }
+
+    const probeWorkspace = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-probe-" })
+    const probePackage = path.join(probeWorkspace, "packages", "sample")
+    const brokenPackage = path.join(probeWorkspace, "packages", "broken")
+    yield* fileSystem.makeDirectory(probePackage, { recursive: true })
+    yield* fileSystem.makeDirectory(brokenPackage, { recursive: true })
+    yield* fileSystem.writeFileString(
+      path.join(probeWorkspace, "package.json"),
+      "{\"packageManager\":\"pnpm@11.21.0\"}\n"
+    )
+    yield* fileSystem.writeFileString(path.join(probeWorkspace, "LICENSE"), "license\n")
+    yield* fileSystem.writeFileString(
+      path.join(probePackage, "package.json"),
+      `${JSON.stringify({ files: ["README.md"], name: "@test/sample", version: "1.0.0" })}\n`
+    )
+    yield* fileSystem.writeFileString(path.join(probePackage, "README.md"), "fixture\n")
+    yield* fileSystem.symlink("package.json", path.join(brokenPackage, "package.json"))
+    const manifestProbe = yield* Effect.result(run(
+      spawner,
+      "node",
+      [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), probePackage],
+      probeWorkspace
+    ))
+    if (Result.isSuccess(manifestProbe)) {
+      return yield* new HerdrPackContractError({
+        reason: "Manifest probe failures do not fail through the named pack error channel"
+      })
+    }
+    const manifestProbeFailure = Schema.decodeUnknownResult(HerdrPackFailure)(manifestProbe.failure)
+    if (
+      Result.isFailure(manifestProbeFailure) ||
+      manifestProbeFailure.success.reason.includes("Could not inspect") === false ||
+      manifestProbeFailure.success.reason.includes("package.json") === false
+    ) {
+      return yield* new HerdrPackContractError({
+        reason: "Manifest probe failures do not retain contextual pack diagnostics"
       })
     }
 
@@ -276,6 +393,20 @@ const program = Effect.scoped(
       }
     }
 
+    const fleetArchive = archives.get("@knpkv/herdr-fleet")
+    if (fleetArchive === undefined) {
+      return yield* new HerdrPackContractError({ reason: "Fleet archive was not packed" })
+    }
+    const fleetDelegateEntries = yield* Effect.all([
+      run(spawner, "tar", ["-xOf", fleetArchive, "package/dist/model.js"], workspaceRoot),
+      run(spawner, "tar", ["-xOf", fleetArchive, "package/dist/model.d.ts"], workspaceRoot)
+    ])
+    if (fleetDelegateEntries.some((entry) => entry.includes("transition_summary") === false)) {
+      return yield* new HerdrPackContractError({
+        reason: "Packed Fleet runtime or declarations omit the transition-summary delegate mode"
+      })
+    }
+
     const approvalsArchive = archives.get("@knpkv/herdr-approvals")
     if (approvalsArchive === undefined) {
       return yield* new HerdrPackContractError({ reason: "Approval archive was not packed" })
@@ -295,24 +426,29 @@ const program = Effect.scoped(
       [
         "--input-type=module",
         "--eval",
-        "console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd')); console.log(import.meta.resolve('@knpkv/herdr-approvals/fleetctl'))"
+        "console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd')); console.log(import.meta.resolve('@knpkv/herdr-approvals/hostd-runtime')); console.log(import.meta.resolve('@knpkv/herdr-approvals/fleetctl'))"
       ],
       consumer
     )
     const resolved = resolution.trim().split("\n")
     const hostdResolution = resolved[0]
-    const fleetctlResolution = resolved[1]
+    const hostdRuntimeResolution = resolved[1]
+    const fleetctlResolution = resolved[2]
     if (
-      resolved.length !== 2 ||
+      resolved.length !== 3 ||
       hostdResolution === undefined ||
+      hostdRuntimeResolution === undefined ||
       fleetctlResolution === undefined ||
       hostdResolution.endsWith("/dist/bin.js") === false ||
+      hostdRuntimeResolution.endsWith("/dist/hostd.js") === false ||
       fleetctlResolution.endsWith("/dist/fleetctl.js") === false
     ) {
       return yield* new HerdrPackContractError({ reason: `Approval runtime subpaths do not resolve: ${resolution}` })
     }
 
-    yield* Console.log("six Herdr pnpm packs are reproducible, exact, dependency-clean, and export both runtimes")
+    yield* Console.log(
+      "six Herdr pnpm packs are reproducible, exact, dependency-clean, and export transition summaries plus both executables and hostd composition"
+    )
   }).pipe(
     // The packed-package verifier owns one Node runtime for the complete check.
     // @effect-diagnostics-next-line strictEffectProvide:off

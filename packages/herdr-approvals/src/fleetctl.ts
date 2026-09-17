@@ -14,7 +14,11 @@ import {
   loadConfiguration
 } from "@knpkv/herdr-fleet"
 import { make as makeTailscale, nodeIpv4, resolveFleetNode, type TailscaleClient } from "@knpkv/herdr-tailscale"
-import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
+import {
+  WorkGoalCheckpoint,
+  type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkSnapshots
+} from "@knpkv/herdr-work/model"
 import { Console, Effect, Layer, Schema, Stdio } from "effect"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
@@ -23,7 +27,13 @@ import { submitToHost } from "./fleetctl-submission.js"
 import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
-import { workCheckpointFromJson, workCheckpointHubUrl } from "./work-checkpoint.js"
+import {
+  workCheckpointFromJson,
+  workCheckpointUrl,
+  workSnapshotFromJson,
+  workSnapshotTarget,
+  workSnapshotUrl
+} from "./work-checkpoint.js"
 
 const operationError = (operation: string) => (cause: unknown) =>
   new FleetOperationError({ cause, detail: String(cause), operation })
@@ -56,10 +66,23 @@ const endpoint = Effect.fn("Fleetctl.endpoint")(function*(
   return `http://${address}:${config.port}`
 })
 
+type ResponseDecoder<A> = (
+  text: string
+) => Effect.Effect<A, FleetValidationError | FleetOperationError>
+
+const schemaResponseDecoder = <A>(
+  schema: Schema.Codec<A, unknown, never, never>
+): ResponseDecoder<A> =>
+(text) =>
+  Schema.decodeUnknownEffect(Schema.fromJsonString(schema))(text).pipe(
+    Effect.mapError(operationError("fleet.response.decode"))
+  )
+
 const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
   url: string,
   schema: Schema.Codec<A, unknown, never, never>,
-  body?: JobRequestType | WorkGoalCheckpointType
+  body?: JobRequestType | WorkGoalCheckpointType,
+  decode: ResponseDecoder<A> = schemaResponseDecoder(schema)
 ) {
   const client = yield* HttpClient.HttpClient
   const httpRequest = body === undefined
@@ -83,11 +106,7 @@ const requestAt = Effect.fn("Fleetctl.requestAt")(function*<A>(
           operation: "fleet.response"
         })
       }
-      return yield* Schema.decodeUnknownEffect(
-        Schema.fromJsonString(schema)
-      )(text).pipe(
-        Effect.mapError(operationError("fleet.response.decode"))
-      )
+      return yield* decode(text)
     })
   )
 })
@@ -155,9 +174,17 @@ const recordWorkCheckpoint = (
   checkpoint: WorkGoalCheckpointType
 ) =>
   Effect.flatMap(
-    workCheckpointHubUrl(config, host),
+    workCheckpointUrl(config, host),
     (url) => requestAt(url, WorkGoalCheckpoint, checkpoint)
   )
+
+const snapshotWork = Effect.fn("Fleetctl.snapshotWork")(function*(
+  config: HostConfiguration,
+  host: string
+) {
+  const url = yield* workSnapshotUrl(config, host)
+  return yield* requestAt(url, WorkSnapshots, undefined, workSnapshotFromJson)
+})
 
 export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: ReadonlyArray<string>) {
   const kind = args[0]
@@ -231,9 +258,10 @@ const usage = `fleetctl commands:
   follow HOST ID
   submit HOST nix.check
   submit HOST nix.apply REF
-  submit HOST agent.delegate MODE REPOSITORY PROMPT...
+  submit HOST agent.delegate (consult|transition_summary|review|work) REPOSITORY PROMPT...
   submit HOST agent.message SESSION MESSAGE...
   work record HOST CHECKPOINT_JSON
+  work snapshot [HOST]
   apply-everywhere REF`
 
 const main = Effect.gen(function*() {
@@ -311,15 +339,23 @@ const main = Effect.gen(function*() {
     }
     case "work": {
       const operation = rest[0]
-      const host = rest[1]
-      const json = rest[2]
-      if (operation !== "record" || host === undefined || json === undefined || rest.length !== 3) {
-        return yield* new FleetValidationError({ detail: usage })
+      if (operation === "record") {
+        const host = rest[1]
+        const json = rest[2]
+        if (host === undefined || json === undefined || rest.length !== 3) {
+          return yield* new FleetValidationError({ detail: usage })
+        }
+        const checkpoint = yield* workCheckpointFromJson(json)
+        const recorded = yield* recordWorkCheckpoint(config, host, checkpoint)
+        yield* Console.log(JSON.stringify(recorded, null, 2))
+        return
       }
-      const checkpoint = yield* workCheckpointFromJson(json)
-      const recorded = yield* recordWorkCheckpoint(config, host, checkpoint)
-      yield* Console.log(JSON.stringify(recorded, null, 2))
-      return
+      if (operation === "snapshot" && (rest.length === 1 || rest.length === 2)) {
+        const snapshot = yield* snapshotWork(config, workSnapshotTarget(config, rest[1]))
+        yield* Console.log(JSON.stringify(snapshot, null, 2))
+        return
+      }
+      return yield* new FleetValidationError({ detail: usage })
     }
     case "apply-everywhere": {
       const ref = rest[0]

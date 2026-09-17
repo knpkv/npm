@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-connect",
-  "version": "0.1.0",
+  "version": "0.3.1",
   "description": "Fleet Herdr agent directory and authenticated terminal control",
   "license": "MIT",
   "author": "knpkv",
@@ -53,12 +53,14 @@
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:browser": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0-rc.109",
     "@effect/platform-browser": "4.0.0-rc.109",
     "@knpkv/herdr-fleet": "workspace:^",
+    "@knpkv/herdr-work": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0-rc.109",
     "ghostty-web": "0.4.0"
@@ -66,9 +68,11 @@
   "devDependencies": {
     "@effect/platform-node": "4.0.0-rc.109",
     "@effect/vitest": "4.0.0-rc.109",
+    "@playwright/test": "1.62.1",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "happy-dom": "20.11.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "rimraf": "^6.1.3",

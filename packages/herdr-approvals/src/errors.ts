@@ -24,3 +24,8 @@ export class PushSubscriptionCleanupError extends Schema.TaggedError<PushSubscri
   "PushSubscriptionCleanupError",
   { cause: Schema.Defect() }
 ) {}
+
+export class HostdOperationsCompositionError extends Schema.TaggedError<HostdOperationsCompositionError>()(
+  "HostdOperationsCompositionError",
+  { cause: Schema.Defect(), detail: Schema.String }
+) {}

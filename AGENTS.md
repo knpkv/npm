@@ -113,6 +113,12 @@ row may cover several flows only when each is named, and a checklist cannot pass
 owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
 an alternate authorization path must not contradict a provider-enforced prerequisite.
 
+Keep Herdr worker-relationship behavior synchronized across
+`packages/herdr-fleet/README.md`, `packages/herdr-coordinator/README.md`, and
+`packages/herdr-fleet/src/service.ts`: `consult` and `transition_summary` accept
+relationship-free coordinator roots; `review` and `work` require the exact child
+relationship.
+
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
 GitHub workflow guards must compare external action owner/repository names
@@ -174,6 +180,7 @@ Public motion-ownership props must document their default, affected surfaces and
 Security-sensitive canonical-payload documentation and code examples must name the persisted representation and every identity input. Raw provider secrets must not be described as durable payload fields, and idempotency examples must include every identity component used by production.
 
 Security documentation in `.specs/**` and package READMEs must distinguish server-private provider locators from normalized or client-visible representations. Name a bucket, key, ARN, token, or similar coordinate only with its private boundary, and list the safe fields that may cross normalization or HTTP boundaries.
+For `packages/browser-pairing/src/**`, structs containing `PairingCode`, `SessionToken`, or `CsrfToken` must be documented as credential-bearing; do not describe those payloads as secret-free. Credential-free summaries may retain a secret-free description.
 Every provider fixture-locator list must classify each coordinate as server-private or name its safe normalized/authenticated boundary, persisted representation, and prohibited emission surfaces.
 For `packages/control-center/README.md`, `packages/control-center/src/api/**`, and `packages/control-center/src/client/**`, an identifier that crosses an authenticated HTTP route or browser storage boundary is client-visible and must not be described as server-private. In particular, document `pluginConnectionId` as a normalized authenticated client-visible identifier when it appears in typed routes or cross-tab storage, including that persisted representation and its unauthenticated/public emission prohibition; keep raw provider site locators and credentials server-private. Generated and vendor documentation are excluded, while identifiers that never cross a transport boundary still require judgment.
 

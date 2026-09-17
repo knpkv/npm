@@ -1,5 +1,11 @@
 # @knpkv/ai-claude
 
+## 0.3.0
+
+### Minor Changes
+
+- [#410](https://github.com/knpkv/npm/pull/410) [`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866) Thanks [@konopkov](https://github.com/konopkov)! - Add Claude-native Relay review profiles and persist Relay settings immediately after save.
+
 ## 0.2.1
 
 ### Patch Changes

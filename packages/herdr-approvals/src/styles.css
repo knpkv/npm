@@ -96,6 +96,19 @@
     block-size: auto;
     min-block-size: 38rem;
   }
+
+  .fleet-shell-main .connect-shell-embedded .connect-terminal-screen {
+    --fleet-shell-terminal-offset: max(
+      0px,
+      calc(var(--fleet-shell-tab-bottom, var(--rly-space-48)) - var(--connect-visual-viewport-offset, 0px))
+    );
+
+    block-size: calc(var(--connect-visual-viewport-height, 100dvh) - var(--fleet-shell-terminal-offset));
+    inset-block-start: max(
+      var(--connect-visual-viewport-offset, 0px),
+      var(--fleet-shell-tab-bottom, var(--rly-space-48))
+    );
+  }
   .fleet-workspace {
     display: grid;
     gap: var(--rly-space-24);
@@ -358,6 +371,65 @@
       var(--rly-type-meta-font);
     gap: var(--rly-space-8);
     grid-template-columns: 5rem minmax(7rem, 1fr) auto;
+  }
+
+  .approval-request-disclosure {
+    border-block-start: 1px solid var(--rly-color-border-1);
+    display: grid;
+    gap: var(--rly-space-8);
+    margin-block-start: var(--rly-space-12);
+    padding-block-start: var(--rly-space-12);
+  }
+
+  .approval-request-disclosure summary {
+    color: var(--rly-color-text-2);
+    cursor: pointer;
+    font-size: var(--rly-type-meta-size);
+    font-weight: 650;
+  }
+
+  .approval-request-detail {
+    display: grid;
+    gap: var(--rly-space-8);
+  }
+
+  .approval-request-detail p {
+    margin: 0;
+  }
+
+  .approval-request-kind {
+    color: var(--rly-color-text-3);
+    font-family: var(--rly-font-mono);
+    font-size: var(--rly-type-meta-size);
+  }
+
+  .approval-request-detail dl {
+    display: grid;
+    gap: var(--rly-space-8);
+    margin: 0;
+  }
+
+  .approval-request-detail dl > div {
+    display: grid;
+    gap: var(--rly-space-4);
+  }
+
+  .approval-request-detail dt {
+    color: var(--rly-color-text-3);
+    font-size: var(--rly-type-meta-size);
+  }
+
+  .approval-request-detail dd {
+    color: var(--rly-color-text-1);
+    font-family: var(--rly-font-mono);
+    font-size: var(--rly-type-meta-size);
+    margin: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .approval-request-detail dd[data-redacted="true"] {
+    color: var(--rly-color-text-3);
+    font-style: italic;
   }
 
   .job-lifecycle time,

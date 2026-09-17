@@ -75,6 +75,31 @@ describe("activity history", () => {
     expect(projection).not.toContain("raw terminal failure")
   })
 
+  it("projects transition summaries distinctly from consultations and delegated work", () => {
+    const items = activityItemsFor([
+      {
+        ...delegated,
+        connectTarget: undefined,
+        id: "job-transition-summary",
+        payload: {
+          kind: "agent.delegate",
+          mode: "transition_summary",
+          prompt: sensitivePrompt,
+          repository: "/repo"
+        },
+        status: "succeeded",
+        worker: undefined
+      }
+    ])
+    expect(items).toMatchObject([
+      {
+        approvalRequest: null,
+        summary: "Requested a bounded transition summary.",
+        title: "Summarize a transition"
+      }
+    ])
+  })
+
   it("filters exceptions, human decisions, work, and search text independently", () => {
     const items = activityItemsFor([delegated, failedMessage])
     expect(filterActivityItems(items, "exceptions", "").map((item) => item.id)).toEqual(["job-message"])
@@ -100,6 +125,8 @@ describe("activity history", () => {
     }))
     const markup = renderToStaticMarkup(<ActivityHistory records={records} />)
     expect(markup).toContain('aria-label="Search activity"')
+    expect(markup).toContain('id="work-activity-search"')
+    expect(markup).toContain('name="activity-search"')
     expect(markup).toContain('aria-label="Filter activity"')
     expect(markup).toContain('aria-expanded="false"')
     expect(markup).toContain("24 visible · 30 matching · 30 jobs")

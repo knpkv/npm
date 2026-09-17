@@ -1,3 +1,5 @@
+import { sameReviewThread } from "@knpkv/review"
+import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -26,6 +28,7 @@ import {
   isUnauthorizedPullRequestReviewFailure
 } from "./pullRequestReviewFailures.js"
 import type { PullRequestReviewThread } from "./pullRequestReviewThreadReplay.js"
+import { controlCenterReviewThread } from "./reviewPlatformAdapter.js"
 
 const pullRequestReviewBrowser = import("./pullRequestReviewThreadReplay.js")
 const generatedClientTransport = pullRequestReviewBrowser.then(
@@ -165,6 +168,8 @@ export interface PullRequestReviewTransport {
   ) => Promise<PullRequestReviewState>
 }
 
+export class PullRequestReviewRequestAborted extends Data.TaggedError("PullRequestReviewRequestAborted")<{}> {}
+
 const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewProviderSelection> => {
   const eligible = new Array<ReviewProviderSelection>()
   for (const provider of catalog.providers) {
@@ -173,7 +178,7 @@ const eligibleProviders = (catalog: AgentProviderCatalog): ReadonlyArray<ReviewP
       provider.health === "available" &&
       provider.capabilities.includes("pr-review") &&
       provider.reviewProfile !== undefined &&
-      model
+      model !== undefined
     ) {
       eligible.push({
         providerId: provider.providerId,
@@ -202,11 +207,7 @@ export const browserPullRequestReviewTransport: PullRequestReviewTransport = {
 const sameReviewScope = (
   left: PullRequestReviewScope,
   right: PullRequestReviewScope
-): boolean =>
-  left.baseRevision === right.baseRevision &&
-  left.entityId === right.entityId &&
-  left.headRevision === right.headRevision &&
-  left.sessionKey === right.sessionKey
+): boolean => sameReviewThread(controlCenterReviewThread(left), controlCenterReviewThread(right))
 
 /** Observe the lazy history boundary so a missing browser chunk remains retryable. */
 export const observePullRequestReviewHistoryLoad = (
@@ -502,23 +503,23 @@ export const usePullRequestReview = (
     )
   }, [onSessionExpired, state, transport])
 
-  const start = useCallback((
+  const startAwaitable = useCallback((
     prompt?: DurableAgentPrompt,
     providerId?: ReviewProviderSelection["providerId"]
-  ) => {
-    if (state._tag !== "ready" || state.review._tag === "unavailable") return
+  ): Promise<void> => {
+    if (state._tag !== "ready" || state.review._tag === "unavailable") return Promise.resolve()
     const provider = providerId === undefined
       ? state.provider
       : state.providerPresets?.find((candidate) => candidate.providerId === providerId) ?? null
-    if (provider === null) return
+    if (provider === null) return Promise.resolve()
     const current = state
     mutationAbort.current?.abort()
     const abort = new AbortController()
     mutationAbort.current = abort
     setState({ ...current, action: "starting" })
-    transport.enqueue(entityId, provider, prompt, abort.signal).then(
+    return transport.enqueue(entityId, provider, prompt, abort.signal).then(
       (review) => {
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) return Promise.reject(new PullRequestReviewRequestAborted())
         setState((latest) =>
           latest._tag === "ready" &&
             sameReviewScope(latest, current) &&
@@ -536,16 +537,27 @@ export const usePullRequestReview = (
         )
       },
       (failure) => {
-        if (abort.signal.aborted) return
+        if (abort.signal.aborted) return Promise.reject(new PullRequestReviewRequestAborted())
         if (isUnauthorizedPullRequestReviewFailure(failure)) onSessionExpired(current.sessionKey)
         setState((latest) =>
           latest._tag === "ready" && sameReviewScope(latest, current)
             ? { ...latest, action: "failed" }
             : latest
         )
+        return Promise.reject(failure)
       }
     )
   }, [entityId, onSessionExpired, state, transport])
+
+  const start = useCallback((
+    prompt?: DurableAgentPrompt,
+    providerId?: ReviewProviderSelection["providerId"]
+  ): void => {
+    void startAwaitable(prompt, providerId).catch(<UnparsedInput>(failure: UnparsedInput) => {
+      if (Predicate.isTagged(failure, "PullRequestReviewRequestAborted")) return
+      Effect.runFork(Effect.logError("Pull-request review enqueue failed", failure))
+    })
+  }, [startAwaitable])
 
   const mutatePendingReview = useCallback((
     operation: (jobId: JobId, signal: AbortSignal) => Promise<PullRequestReviewState>
@@ -748,6 +760,7 @@ export const usePullRequestReview = (
       setRequestRevision((revision) => revision + 1)
     }, []),
     start,
+    startAwaitable,
     state: currentState
   }
 }

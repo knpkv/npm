@@ -24,7 +24,6 @@ import {
 import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
 import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
 import type {
-  FleetApprovalError,
   FleetJobConflictError,
   FleetService,
   FleetStoreError,
@@ -34,6 +33,7 @@ import type {
 } from "@knpkv/herdr-fleet"
 import {
   decodeBoundedResponseJson,
+  FleetApprovalError,
   FleetAuthorizationError,
   FleetJobNotFoundError,
   FleetOperationError,
@@ -52,14 +52,21 @@ import {
 } from "@knpkv/herdr-fleet"
 import type { TailscaleAuthorizationError } from "@knpkv/herdr-tailscale"
 import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale } from "@knpkv/herdr-tailscale"
-import type { WorkCheckpointConflictError, WorkProjectionError, WorkService, WorkStoreError } from "@knpkv/herdr-work"
-import { makeWorkService, WorkStore } from "@knpkv/herdr-work"
+import type {
+  WorkCheckpointConflictError,
+  WorkProjectionError,
+  WorkService,
+  WorkSnapshots,
+  WorkStoreError
+} from "@knpkv/herdr-work"
+import { approvalTargetMatchesOrigin, makeWorkService, WorkSnapshotWindow, WorkStore } from "@knpkv/herdr-work"
 import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
 import {
   Cause,
   Clock,
   Crypto,
   Effect,
+  Equal,
   Exit,
   Fiber,
   FileSystem,
@@ -72,6 +79,8 @@ import {
   Semaphore,
   Stream
 } from "effect"
+import type { Redacted } from "effect"
+import type * as SemaphoreModule from "effect/Semaphore"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
@@ -79,7 +88,10 @@ import type { Duplex } from "node:stream"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import WebSocketClient, { WebSocketServer } from "ws"
-import { authorize } from "./auth.js"
+import type { SanitizedJobRecord } from "./approval-request.js"
+import { sanitizeJobPayload, sanitizeJobRecord } from "./approval-request.js"
+import { resolveApprovalPage } from "./approval-url.js"
+import { authorize, authorizeLoopback } from "./auth.js"
 import {
   type ApprovalDirectory,
   type DashboardHistoryPage,
@@ -95,6 +107,26 @@ import { DashboardResponseBudgetError } from "./errors.js"
 import type { ApprovalAppStoreError, PushEndpointNotAllowedError } from "./errors.js"
 import { dashboardDocumentTitle } from "./internal/html.js"
 import { relayTerminalCloseCode, terminalBufferCanAccept } from "./internal/websocket.js"
+import { LanWorkPage, LanWorkPairPage } from "./lan-work-view.js"
+import {
+  decodeLanWorkPairRequest,
+  LanWorkConfigurationError,
+  type LanWorkCryptoError,
+  type LanWorkListenerOptions,
+  LanWorkOriginRejectedError,
+  type LanWorkPairing,
+  type LanWorkPairingExpiredError,
+  LanWorkPairingMalformedError,
+  type LanWorkPairingRejectedError,
+  type LanWorkPairingReplayedError,
+  LanWorkPairRequestInput,
+  LanWorkSelectionMalformedError,
+  lanWorkSessionCookie,
+  type LanWorkSessionRejectedError,
+  type LanWorkSessionRequiredError,
+  makeLanWorkPairing,
+  readLanWorkSessionCookie
+} from "./lan-work.js"
 import {
   ApprovalNotificationCandidate,
   type ApprovalNotificationCandidate as ApprovalNotificationCandidateType,
@@ -105,10 +137,63 @@ import { generateVapidKeys, makePushSender } from "./push-sender.js"
 import { validatePushEndpoint } from "./push-subscription.js"
 import { type ApprovalNotificationBatch, makePushWorker } from "./push-worker.js"
 import { ApprovalAppStore } from "./store.js"
-import { workCheckpointPath } from "./work-checkpoint.js"
+import { workCheckpointPath, workSnapshotPath } from "./work-checkpoint.js"
 
 const Approval = Schema.Struct({ hash: JobHash, nonce: Schema.String })
 type Approval = typeof Approval.Type
+type ApprovalProof = {
+  readonly expiresAt: number
+  readonly generation: number
+  readonly hash: typeof JobHash.Type
+  readonly jobId: string
+  readonly nonce: string
+}
+type ApprovalProofUse = {
+  readonly approval: Approval
+  readonly lockHeld: boolean
+  readonly session: ApprovalProofSession
+  readonly sessionToken: string
+}
+type ApprovalProofSession = {
+  disclosing: boolean
+  expiresAt: number
+  locked: boolean
+  waiters: number
+  readonly lock: SemaphoreModule.Semaphore
+  readonly proofsByJob: Map<string, ApprovalProof>
+  readonly stagedJobIds: Set<string>
+  readonly token: string
+}
+type ApprovalProofMutation = {
+  readonly created: boolean
+  readonly previousExpiresAt: number
+  readonly previousProofs: ReadonlyMap<string, ApprovalProof>
+  readonly session: ApprovalProofSession
+}
+type ApprovalProofIssuer = (
+  records: ReadonlyArray<JobRecord>,
+  request: IncomingMessage
+) => Effect.Effect<void, FleetOperationError>
+const approvalProofCookiePrefix = "fleet_approval_proof_"
+const approvalProofMaxAgeSeconds = 15 * 60
+const approvalProofSessionMaxCount = 256
+const approvalProofSessionMaxProofCount = 4_096
+const approvalProofPruneIntervalMs = 60 * 1_000
+
+const approvalProofCookieName = `${approvalProofCookiePrefix}session`
+const approvalProofLifetimeMs = approvalProofMaxAgeSeconds * 1_000
+
+const cookieValue = (request: IncomingMessage, name: string): string | undefined =>
+  header(request, "cookie")
+    ?.split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${name}=`))
+    ?.slice(name.length + 1)
+
+const approvalProofCookie = (token: string, secure: boolean): string =>
+  `${approvalProofCookieName}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${approvalProofMaxAgeSeconds}${
+    secure ? "; Secure" : ""
+  }`
 const TcpAddress = Schema.Struct({ address: Schema.String, port: Schema.Number })
 
 const decodeJobPathSegment = Effect.fn("ApprovalHttp.decodeJobPathSegment")((segment: string) =>
@@ -148,18 +233,39 @@ type ApiError =
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
+  | LanWorkConfigurationError
+  | LanWorkCryptoError
+  | LanWorkOriginRejectedError
+  | LanWorkPairingExpiredError
+  | LanWorkPairingMalformedError
+  | LanWorkPairingRejectedError
+  | LanWorkPairingReplayedError
+  | LanWorkSelectionMalformedError
+  | LanWorkSessionRejectedError
+  | LanWorkSessionRequiredError
   | PushEndpointNotAllowedError
   | TerminalTransportError
   | WorkCheckpointConflictError
   | WorkProjectionError
   | WorkStoreError
 
+type LanPairError =
+  | LanWorkConfigurationError
+  | LanWorkCryptoError
+  | LanWorkOriginRejectedError
+  | LanWorkPairingExpiredError
+  | LanWorkPairingMalformedError
+  | LanWorkPairingRejectedError
+  | LanWorkPairingReplayedError
+  | LanWorkSessionRejectedError
+  | LanWorkSessionRequiredError
+
 type Runner = {
   readonly close: () => Promise<void>
   readonly enqueue: (jobId: string) => Promise<boolean>
 }
 
-type ListenerMode = "local" | "tailnet" | "approval" | "serve"
+type ListenerMode = "local" | "tailnet" | "approval" | "serve" | "work" | "lan"
 
 type TlsCredentials = {
   readonly certificate: string
@@ -169,6 +275,7 @@ type TlsCredentials = {
 type PushSender = ReturnType<typeof makePushSender>
 
 export type HttpServerOptions = {
+  readonly lanWork?: LanWorkListenerOptions
   readonly now?: () => number
   readonly pushSender?: PushSender
   readonly terminalConnector?: TerminalConnector
@@ -191,13 +298,17 @@ type PeerPendingError =
   | PeerPendingTransportError
   | PeerPendingUnavailableError
 
+type ResponseHeaderValue = string | Array<string>
+
 const json = <Value>(
   response: ServerResponse,
   status: number,
-  value: Value
+  value: Value,
+  headers: Readonly<Record<string, ResponseHeaderValue>> = {}
 ): void => {
   response.writeHead(status, {
-    "content-type": "application/json; charset=utf-8"
+    "content-type": "application/json; charset=utf-8",
+    ...headers
   })
   response.end(`${JSON.stringify(value)}\n`)
 }
@@ -221,6 +332,18 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 409, body: { error: error._tag, jobId: error.jobId } }
     case "FleetValidationError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkPairingMalformedError":
+      return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkSelectionMalformedError":
+      return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkOriginRejectedError":
+      return { status: 403, body: { error: error._tag } }
+    case "LanWorkPairingRejectedError":
+    case "LanWorkPairingExpiredError":
+    case "LanWorkPairingReplayedError":
+    case "LanWorkSessionRejectedError":
+    case "LanWorkSessionRequiredError":
+      return { status: 401, body: { error: error._tag } }
     case "PushEndpointNotAllowedError":
       return { status: 400, body: { error: error._tag, origin: error.origin } }
     case "ConnectPeerError":
@@ -231,6 +354,10 @@ const apiError = (error: ApiError): ApiErrorResponse => {
     case "FleetOperationError":
     case "TerminalTransportError":
       return { status: 503, body: { error: error._tag, detail: error.detail } }
+    case "LanWorkCryptoError":
+      return { status: 503, body: { error: error._tag, detail: error.operation } }
+    case "LanWorkConfigurationError":
+      return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "FleetStoreError":
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "ApprovalAppStoreError":
@@ -282,7 +409,9 @@ const sameOrigin = (request: IncomingMessage, expected: string) => {
 }
 
 export const listenerAuthority = (address: string, port: number): string =>
-  new URL(`http://${address}:${port}/`).host.toLowerCase()
+  new URL(
+    `http://${address.includes(":") && !address.startsWith("[") ? `[${address}]` : address}:${port}/`
+  ).host.toLowerCase()
 
 const approvalIcon =
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="112" fill="#111418"/><path d="M146 264l72 72 148-160" fill="none" stroke="#a6e3a1" stroke-linecap="round" stroke-linejoin="round" stroke-width="52"/></svg>`
@@ -394,13 +523,65 @@ const authorizeOriginlessMutation = (request: IncomingMessage) => {
 }
 
 export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkCheckpointRequest")(
-  function*<AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
-    authorization: Effect.Effect<string, AuthorizationError, AuthorizationRequirements>,
+  function*<Authorization, AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
+    authorization: Effect.Effect<Authorization, AuthorizationError, AuthorizationRequirements>,
     decode: Effect.Effect<WorkGoalCheckpointType, DecodeError, DecodeRequirements>,
-    work: WorkService
+    work: WorkService,
+    approvalPage?: (host: string) => Effect.Effect<string, FleetValidationError | FleetOperationError>
   ) {
     yield* authorization
     const checkpoint = yield* decode
+    const targets = [
+      checkpoint.goal.approvalTarget,
+      ...(checkpoint.goal.requests ?? []).map(({ approvalTarget }) => approvalTarget)
+    ].filter((target): target is NonNullable<typeof target> => target !== undefined && target !== null)
+    if (targets.length > 0) {
+      const snapshots = yield* work.snapshots(checkpoint.occurredAt)
+      const exactReplay = snapshots.now.goals.some(
+        (goal) => goal.id === checkpoint.goal.id && Equal.equals(goal, checkpoint.goal)
+      )
+      if (exactReplay) return yield* work.record(checkpoint)
+    }
+    if (approvalPage === undefined) {
+      if (targets.length > 0) {
+        return yield* new FleetValidationError({
+          detail: "approval target origin cannot be validated without an authoritative page resolver"
+        })
+      }
+      return yield* work.record(checkpoint)
+    }
+    const approvalPageCache = new Map<
+      string,
+      Effect.Effect<string, FleetValidationError | FleetOperationError>
+    >()
+    for (const target of targets) {
+      const hostKey = target.host.toLowerCase()
+      let approvalPageEffect = approvalPageCache.get(hostKey)
+      if (approvalPageEffect === undefined) {
+        approvalPageEffect = yield* Effect.cached(approvalPage(target.host))
+        approvalPageCache.set(hostKey, approvalPageEffect)
+      }
+      const approvalPageUrl = yield* approvalPageEffect
+      const expectedOrigin = yield* Effect.try({
+        try: () => new URL(approvalPageUrl).origin,
+        catch: (cause) =>
+          new FleetValidationError({
+            detail: `invalid authoritative approval page: ${String(cause)}`
+          })
+      })
+      const matchesOrigin = yield* Effect.try({
+        try: () => approvalTargetMatchesOrigin(target, expectedOrigin),
+        catch: (cause) =>
+          new FleetValidationError({
+            detail: `invalid approval target URL: ${String(cause)}`
+          })
+      })
+      if (!matchesOrigin) {
+        return yield* new FleetValidationError({
+          detail: `approval target origin does not match configured page for ${target.host}`
+        })
+      }
+    }
     return yield* work.record(checkpoint)
   }
 )
@@ -457,13 +638,21 @@ const fleetPeers = Effect.fn("HostHttp.fleetPeers")(function*(
   })
 })
 
-const pendingApproval = (record: JobRecord): PendingApproval => ({
-  id: record.id,
-  createdAt: record.createdAt,
-  actor: record.actor,
-  approvalExpiresAt: record.approvalExpiresAt ?? null,
-  status: "pending_approval",
-  payload: record.payload
+const pendingApproval = (record: JobRecord): PendingApproval => {
+  const sanitized = sanitizeJobRecord(record)
+  return {
+    id: sanitized.id,
+    createdAt: sanitized.createdAt,
+    actor: sanitized.actor,
+    approvalExpiresAt: sanitized.approvalExpiresAt ?? null,
+    status: "pending_approval",
+    payload: sanitized.payload
+  }
+}
+
+const sanitizePendingApproval = (approval: PendingApproval): PendingApproval => ({
+  ...approval,
+  payload: sanitizeJobPayload(approval.payload)
 })
 
 const dashboardHistoryMaxBytes = 512 * 1024
@@ -518,9 +707,9 @@ const dashboardHistory = Effect.fn("HostHttp.dashboardHistory")(function*(
   cursor: typeof PendingApprovalCursor.Type | null
 ) {
   const candidates = yield* service.historyAfter(cursor, 51)
-  const records: Array<JobRecord> = []
+  const records: Array<SanitizedJobRecord> = []
   for (const candidate of candidates.slice(0, 50)) {
-    const projected: JobRecord = { ...candidate, error: null, result: null }
+    const projected = sanitizeJobRecord(candidate)
     const bytes = new TextEncoder().encode(
       JSON.stringify([...records, projected])
     ).byteLength
@@ -669,7 +858,10 @@ const fetchPeerPending = Effect.fn("HostHttp.fetchPeerPending")(
         receivedHost: summary.host
       })
     }
-    return summary
+    return {
+      ...summary,
+      approvals: summary.approvals.map(sanitizePendingApproval)
+    }
   },
   (effect, peer) =>
     effect.pipe(
@@ -770,7 +962,7 @@ const aggregatePeerPending = Effect.fn("HostHttp.aggregatePeerPending")(
         remote.push({
           host: peer.host,
           approvalUrl: peer.approvalUrl,
-          approval
+          approval: sanitizePendingApproval(approval)
         })
       }
       if (result.success.nextCursor !== null) {
@@ -785,12 +977,15 @@ const dashboardPendingPage = Effect.fn("HostHttp.dashboardPendingPage")(
   function*(
     config: HostConfiguration,
     service: FleetService,
-    continuation: DashboardSnapshot["pendingApprovals"]["nextCursors"][number]
+    continuation: DashboardSnapshot["pendingApprovals"]["nextCursors"][number],
+    issueApprovalProofs: ApprovalProofIssuer,
+    request: IncomingMessage
   ) {
     if (continuation.host.toLowerCase() === config.host.toLowerCase()) {
       const page = yield* service.pendingApprovalPage(continuation.cursor)
+      yield* issueApprovalProofs(page.records, request)
       return {
-        local: page.records,
+        local: page.records.map(sanitizeJobRecord),
         remote: [],
         failures: [],
         nextCursors: page.nextCursor === null
@@ -821,7 +1016,7 @@ const dashboardPendingPage = Effect.fn("HostHttp.dashboardPendingPage")(
     return {
       local: [],
       remote: page.approvals.map((approval) => ({
-        approval,
+        approval: sanitizePendingApproval(approval),
         approvalUrl,
         host: peer.host
       })),
@@ -838,14 +1033,17 @@ const resolvePendingApprovalTarget = Effect.fn(
 )(function*(
   config: HostConfiguration,
   service: FleetService,
-  target: ApprovalNotificationCandidateType
+  target: ApprovalNotificationCandidateType,
+  issueApprovalProofs: ApprovalProofIssuer,
+  request: IncomingMessage
 ) {
   if (target.host.toLowerCase() === config.host.toLowerCase()) {
     const record = yield* service.get(target.jobId)
     if (record.status !== "pending_approval") {
       return yield* new FleetJobNotFoundError({ jobId: target.jobId })
     }
-    return { _tag: "local", record } satisfies PendingApprovalTarget
+    yield* issueApprovalProofs([record], request)
+    return { _tag: "local", record: sanitizeJobRecord(record) } satisfies PendingApprovalTarget
   }
   const peers = yield* fleetPeers(config)
   const peer = peers.find(
@@ -871,7 +1069,11 @@ const resolvePendingApprovalTarget = Effect.fn(
     if (approval !== undefined) {
       return {
         _tag: "remote",
-        remote: { approval, approvalUrl: peer.approvalUrl, host: peer.host }
+        remote: {
+          approval: sanitizePendingApproval(approval),
+          approvalUrl: peer.approvalUrl,
+          host: peer.host
+        }
       } satisfies PendingApprovalTarget
     }
     cursor = page.nextCursor
@@ -992,6 +1194,66 @@ const connectPage = (): string =>
 </body>
 </html>`
 
+const lanWorkDocument = (body: string): string =>
+  `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#111418">
+<title>Fleet Work</title>
+<link rel="stylesheet" href="/assets/index.css">
+</head>
+<body data-rly-root data-rly-theme="dark">
+${body}
+</body>
+</html>`
+
+const lanPairPage = (error: string | undefined): string =>
+  lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPairPage, error === undefined ? {} : { error })))
+
+const lanHtmlSecurityHeaders = {
+  "content-security-policy": "frame-ancestors 'none'",
+  "x-frame-options": "DENY"
+}
+
+const lanPairErrorMessage = (error: LanPairError): string => {
+  switch (error._tag) {
+    case "LanWorkOriginRejectedError":
+      return "Open this page from the trusted LAN Work address."
+    case "LanWorkPairingMalformedError":
+      return "Enter the 64-character pairing code printed by Work."
+    case "LanWorkPairingExpiredError":
+      return "That pairing code expired. Ask Work for a new code."
+    case "LanWorkPairingReplayedError":
+      return "That pairing code was already used. Ask Work for a new code."
+    case "LanWorkPairingRejectedError":
+      return "That pairing code was not accepted. Check it and try again."
+    case "LanWorkSessionRejectedError":
+    case "LanWorkSessionRequiredError":
+      return "Pair this browser before continuing."
+    case "LanWorkCryptoError":
+    case "LanWorkConfigurationError":
+      return "LAN Work pairing is unavailable. Try again later."
+  }
+}
+
+const lanWorkPage = (
+  snapshots: WorkSnapshots,
+  selection: { readonly goalId: string | null; readonly window: WorkSnapshotWindow }
+): string => lanWorkDocument(renderToStaticMarkup(createElement(LanWorkPage, { ...selection, snapshots })))
+
+const lanWorkSelectionFromUrl = Effect.fn("ApprovalHttp.decodeLanWorkSelection")(
+  function*(url: URL) {
+    const decoded = Schema.decodeUnknownResult(WorkSnapshotWindow)(url.searchParams.get("window") ?? "now")
+    if (Result.isFailure(decoded)) {
+      return yield* new LanWorkSelectionMalformedError({ detail: "LAN Work window selection is invalid" })
+    }
+    return { goalId: url.searchParams.get("goal"), window: decoded.success }
+  }
+)
+
 const rejectUpgrade = (
   socket: Duplex,
   status: number
@@ -1042,9 +1304,26 @@ const readApproval = Effect.fn("ApprovalHttp.readApproval")(function*(
 ) {
   const contentType = header(request, "content-type") ?? ""
   if (contentType.startsWith("application/json")) {
-    return yield* readJson(request, Approval)
+    const body = yield* readBody(request)
+    if (body.trim() === "") return null
+    const parsed = yield* Effect.try({
+      try: () => JSON.parse(body),
+      catch: (cause) =>
+        new FleetValidationError({
+          detail: `invalid approval JSON: ${String(cause)}`
+        })
+    })
+    return yield* Schema.decodeUnknownEffect(Approval)(parsed).pipe(
+      Effect.mapError(
+        (error) =>
+          new FleetValidationError({
+            detail: `invalid approval: ${String(error)}`
+          })
+      )
+    )
   }
   const body = yield* readBody(request)
+  if (body.trim() === "") return null
   const form = new URLSearchParams(body)
   return yield* Schema.decodeUnknownEffect(Approval)({
     hash: form.get("hash"),
@@ -1057,6 +1336,77 @@ const readApproval = Effect.fn("ApprovalHttp.readApproval")(function*(
         })
     )
   )
+})
+
+const approvalFromProof = Effect.fn("ApprovalHttp.approvalFromProof")(function*(
+  service: FleetService,
+  sessions: Map<string, ApprovalProofSession>,
+  request: IncomingMessage,
+  jobId: string,
+  currentTime: () => number
+) {
+  const token = cookieValue(request, approvalProofCookieName)
+  const session = token === undefined ? undefined : sessions.get(token)
+  if (token === undefined || session === undefined) {
+    return yield* new FleetApprovalError({
+      detail: "approval proof is required for a bodyless decision",
+      jobId
+    })
+  }
+  const lockHeld = !(session.disclosing && session.proofsByJob.has(jobId) && !session.stagedJobIds.has(jobId))
+  if (lockHeld) {
+    session.waiters += 1
+    yield* session.lock.take(1).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          session.waiters -= 1
+        })
+      )
+    )
+    session.locked = true
+  }
+  const checked = yield* Effect.exit(
+    Effect.gen(function*() {
+      const proof = session.proofsByJob.get(jobId)
+      if (
+        session.expiresAt <= currentTime() ||
+        proof === undefined ||
+        proof.jobId !== jobId ||
+        proof.expiresAt <= currentTime()
+      ) {
+        return yield* new FleetApprovalError({
+          detail: "approval proof is invalid or expired",
+          jobId
+        })
+      }
+      const record = yield* service.get(jobId)
+      if (
+        record.status !== "pending_approval" ||
+        record.approvalNonce === null ||
+        record.hash !== proof.hash ||
+        record.approvalNonce !== proof.nonce
+      ) {
+        return yield* new FleetApprovalError({
+          detail: "approval proof no longer matches the pending request",
+          jobId
+        })
+      }
+      return {
+        approval: { hash: proof.hash, nonce: proof.nonce },
+        lockHeld,
+        session,
+        sessionToken: token
+      } satisfies ApprovalProofUse
+    })
+  )
+  if (Exit.isFailure(checked)) {
+    if (lockHeld) {
+      session.locked = false
+      yield* session.lock.release(1)
+    }
+    return yield* Effect.failCause(checked.cause)
+  }
+  return checked.value
 })
 
 export const makeRunner = Effect.fn("HostRunner.make")(function*(
@@ -1102,9 +1452,13 @@ export const startHttpServer = async (
   readonly tailnetUrl: string | null
   readonly approvalUrl: string | null
   readonly serveUrl: string | null
+  readonly workUrl: string | null
+  readonly lanWorkUrl: string | null
+  readonly lanWorkPairingCode: Redacted.Redacted<string> | null
 }> => {
   const isHub = config.crossHost &&
     config.host.toLowerCase() === config.approvalHub.host.toLowerCase()
+  const workBindAddress = config.workBindAddress ?? "127.0.0.1"
   const approvalTls = config.approvalTls
   if (isHub && approvalTls === null) {
     throw new FleetValidationError({
@@ -1135,7 +1489,7 @@ export const startHttpServer = async (
   let acceptingRequests = false
   let closed = false
   const runRequest = <A, E>(
-    effect: Effect.Effect<A, E, HttpClient.HttpClient | Tailscale>
+    effect: Effect.Effect<A, E, HttpClient.HttpClient | Tailscale | Crypto.Crypto>
   ): Promise<A> => {
     const controller = new AbortController()
     activeRequestControllers.add(controller)
@@ -1215,15 +1569,16 @@ export const startHttpServer = async (
         ApiError,
         HttpClient.HttpClient | Tailscale
       >,
-      status = 200
+      status = 200,
+      headers: Readonly<Record<string, ResponseHeaderValue>> = {}
     ): Promise<void> => {
       const result = await runRequest(Effect.result(effect))
       if (Result.isSuccess(result)) {
-        json(response, status, result.success)
+        json(response, status, result.success, headers)
         return
       }
       const mapped = apiError(result.failure)
-      json(response, mapped.status, mapped.body)
+      json(response, mapped.status, mapped.body, headers)
     }
     const statePath = `${config.stateDirectory}/approval-app.sqlite`
     const approvalStore = await httpRuntime.runPromise(
@@ -1245,6 +1600,320 @@ export const startHttpServer = async (
     finalizers.unshift(() => Promise.resolve().then(() => workStore.close()))
     const work = await httpRuntime.runPromise(makeWorkService(workStore))
     const now = options.now ?? (() => httpRuntime.runSync(Clock.currentTimeMillis))
+    const approvalProofSessions = new Map<string, ApprovalProofSession>()
+    let pendingApprovalProofSnapshot: {
+      readonly observedAt: number
+      readonly pendingJobIds: Set<string>
+    } | undefined
+    let pendingApprovalProofDisclosureGeneration = 0
+    const approvalProofSessionsByRequest = new WeakMap<IncomingMessage, ApprovalProofSession>()
+    const approvalProofMutationsByRequest = new WeakMap<IncomingMessage, ApprovalProofMutation>()
+    const approvalProofJobReferenceCounts = new Map<string, number>()
+    let pendingApprovalProofRefresh: Effect.Effect<ReadonlyArray<JobRecord>, FleetOperationError> | undefined
+    const activeApprovalProofs = (): ReadonlyArray<ApprovalProof> =>
+      [...approvalProofSessions.values()].flatMap(({ proofsByJob }) => [...proofsByJob.values()])
+    const retainApprovalProofJob = (jobId: string): void => {
+      approvalProofJobReferenceCounts.set(
+        jobId,
+        (approvalProofJobReferenceCounts.get(jobId) ?? 0) + 1
+      )
+      pendingApprovalProofSnapshot?.pendingJobIds.add(jobId)
+    }
+    const releaseApprovalProofJob = (jobId: string): void => {
+      const referenceCount = approvalProofJobReferenceCounts.get(jobId)
+      if (referenceCount === undefined) return
+      if (referenceCount === 1) {
+        approvalProofJobReferenceCounts.delete(jobId)
+        pendingApprovalProofSnapshot?.pendingJobIds.delete(jobId)
+        return
+      }
+      approvalProofJobReferenceCounts.set(jobId, referenceCount - 1)
+    }
+    const deleteApprovalProof = (session: ApprovalProofSession, jobId: string): void => {
+      if (!session.proofsByJob.delete(jobId)) return
+      releaseApprovalProofJob(jobId)
+    }
+    const releaseApprovalProofs = (session: ApprovalProofSession): void => {
+      for (const jobId of session.proofsByJob.keys()) {
+        releaseApprovalProofJob(jobId)
+      }
+    }
+    const pruneApprovalProofSnapshot = (): void => {
+      if (pendingApprovalProofSnapshot === undefined) return
+      for (const jobId of pendingApprovalProofSnapshot.pendingJobIds) {
+        if (!approvalProofJobReferenceCounts.has(jobId)) {
+          pendingApprovalProofSnapshot.pendingJobIds.delete(jobId)
+        }
+      }
+    }
+    const discardApprovalProofMutation = (request: IncomingMessage): void => {
+      const mutation = approvalProofMutationsByRequest.get(request)
+      if (mutation === undefined) return
+      approvalProofMutationsByRequest.delete(request)
+      approvalProofSessionsByRequest.delete(request)
+      const { session } = mutation
+      for (const jobId of session.proofsByJob.keys()) releaseApprovalProofJob(jobId)
+      session.proofsByJob.clear()
+      if (mutation.created) {
+        approvalProofSessions.delete(session.token)
+      } else {
+        session.expiresAt = mutation.previousExpiresAt
+        for (const [jobId, proof] of mutation.previousProofs) {
+          session.proofsByJob.set(jobId, proof)
+          retainApprovalProofJob(jobId)
+        }
+      }
+      for (const jobId of session.stagedJobIds) session.stagedJobIds.delete(jobId)
+      session.disclosing = false
+      session.locked = false
+      httpRuntime.runSync(session.lock.release(1))
+    }
+    const approvalProofSessionFor = (
+      request: IncomingMessage,
+      observedAt: number
+    ): ApprovalProofSession | undefined => {
+      const requestSession = approvalProofSessionsByRequest.get(request)
+      if (requestSession !== undefined) return requestSession
+      const token = cookieValue(request, approvalProofCookieName)
+      if (token === undefined) return undefined
+      const session = approvalProofSessions.get(token)
+      if (session === undefined || (!session.locked && session.waiters === 0 && session.expiresAt <= observedAt)) {
+        if (session !== undefined) {
+          releaseApprovalProofs(session)
+          approvalProofSessions.delete(token)
+        }
+        return undefined
+      }
+      return session
+    }
+    const renewApprovalProofSession = (
+      session: ApprovalProofSession,
+      observedAt: number
+    ): void => {
+      const expiresAt = observedAt + approvalProofLifetimeMs
+      session.expiresAt = expiresAt
+      for (const [jobId, proof] of session.proofsByJob) {
+        session.proofsByJob.set(jobId, { ...proof, expiresAt })
+      }
+    }
+    const pruneApprovalProofSession = Effect.fn("ApprovalHttp.pruneApprovalProofSession")(
+      function*(session: ApprovalProofSession, observedAt: number) {
+        const snapshot = pendingApprovalProofSnapshot
+        let pendingJobIds: ReadonlySet<string>
+        if (
+          snapshot !== undefined &&
+          observedAt - snapshot.observedAt < approvalProofPruneIntervalMs
+        ) {
+          pendingJobIds = snapshot.pendingJobIds
+        } else {
+          const disclosureGenerationAtStart = pendingApprovalProofDisclosureGeneration
+          let refresh = pendingApprovalProofRefresh
+          if (refresh === undefined) {
+            const proofIds = [...new Set(activeApprovalProofs().map(({ jobId }) => jobId))]
+            const refreshRequest = Effect.forEach(proofIds, (jobId) =>
+              service.get(jobId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new FleetOperationError({
+                      cause,
+                      detail: "could not refresh approval proof retention",
+                      operation: "approval.proof.prune"
+                    })
+                )
+              )).pipe(
+                Effect.ensuring(
+                  Effect.sync(() => {
+                    pendingApprovalProofRefresh = undefined
+                  })
+                )
+              )
+            refresh = yield* Effect.cached(refreshRequest)
+            pendingApprovalProofRefresh = refresh
+          }
+          const pendingRecords = yield* refresh
+          const pendingRecordIds = new Set(pendingRecords.map((record) => record.id))
+          const refreshedPendingJobIds = new Set(
+            activeApprovalProofs().flatMap((proof) =>
+              pendingRecordIds.has(proof.jobId) || proof.generation > disclosureGenerationAtStart
+                ? [proof.jobId]
+                : []
+            )
+          )
+          if (pendingApprovalProofDisclosureGeneration === disclosureGenerationAtStart) {
+            pendingApprovalProofSnapshot = {
+              observedAt,
+              pendingJobIds: refreshedPendingJobIds
+            }
+          } else {
+            const mergedPendingJobIds = new Set(pendingApprovalProofSnapshot?.pendingJobIds ?? [])
+            for (const jobId of refreshedPendingJobIds) mergedPendingJobIds.add(jobId)
+            pendingApprovalProofSnapshot = {
+              observedAt: Math.max(pendingApprovalProofSnapshot?.observedAt ?? 0, observedAt),
+              pendingJobIds: mergedPendingJobIds
+            }
+          }
+          pendingJobIds = pendingApprovalProofSnapshot?.pendingJobIds ?? refreshedPendingJobIds
+        }
+        pruneApprovalProofSnapshot()
+        for (const jobId of session.proofsByJob.keys()) {
+          if (!pendingJobIds.has(jobId)) deleteApprovalProof(session, jobId)
+        }
+      }
+    )
+    const issueApprovalProofs: ApprovalProofIssuer = Effect.fn("ApprovalHttp.issueApprovalProofs")(
+      function*(records: ReadonlyArray<JobRecord>, request: IncomingMessage) {
+        const observedAt = now()
+        for (const [token, session] of approvalProofSessions) {
+          if (!session.locked && session.waiters === 0 && session.expiresAt <= observedAt) {
+            releaseApprovalProofs(session)
+            approvalProofSessions.delete(token)
+          }
+        }
+        const pendingRecords = records.filter(
+          (record) => record.status === "pending_approval" && record.approvalNonce !== null
+        )
+        if (pendingRecords.length === 0) return
+        const existingMutation = approvalProofMutationsByRequest.get(request)
+        let session = existingMutation?.session ?? approvalProofSessionFor(request, observedAt)
+        if (session === undefined) {
+          const token = yield* cryptoService.randomUUIDv4.pipe(
+            Effect.mapError(
+              (cause) =>
+                new FleetOperationError({
+                  cause,
+                  detail: "could not issue approval proof",
+                  operation: "approval.proof"
+                })
+            )
+          )
+          const lock = Semaphore.makeUnsafe(1)
+          yield* lock.take(1)
+          session = {
+            disclosing: true,
+            expiresAt: observedAt,
+            locked: true,
+            waiters: 0,
+            lock,
+            proofsByJob: new Map<string, ApprovalProof>(),
+            stagedJobIds: new Set<string>(),
+            token
+          }
+          if (approvalProofSessions.size >= approvalProofSessionMaxCount) {
+            const emptySession = [...approvalProofSessions].find(
+              ([, candidate]) => !candidate.locked && candidate.waiters === 0 && candidate.proofsByJob.size === 0
+            )
+            if (emptySession === undefined) {
+              yield* lock.release(1)
+              return yield* new FleetOperationError({
+                cause: "approval proof session limit",
+                detail: "approval proof session capacity reached",
+                operation: "approval.proof.session-capacity"
+              })
+            }
+            approvalProofSessions.delete(emptySession[0])
+          }
+          approvalProofSessions.set(token, session)
+          approvalProofMutationsByRequest.set(request, {
+            created: true,
+            previousExpiresAt: session.expiresAt,
+            previousProofs: new Map(),
+            session
+          })
+        } else if (existingMutation === undefined) {
+          const selectedSession = session
+          selectedSession.waiters += 1
+          yield* selectedSession.lock.take(1).pipe(
+            Effect.ensuring(
+              Effect.sync(() => {
+                selectedSession.waiters -= 1
+              })
+            )
+          )
+          session.locked = true
+          session.disclosing = true
+          approvalProofMutationsByRequest.set(request, {
+            created: false,
+            previousExpiresAt: session.expiresAt,
+            previousProofs: new Map(session.proofsByJob),
+            session
+          })
+          yield* pruneApprovalProofSession(session, observedAt)
+        }
+        const missingProofCount = pendingRecords.reduce(
+          (count, record) => count + (session.proofsByJob.has(record.id) ? 0 : 1),
+          0
+        )
+        if (session.proofsByJob.size + missingProofCount > approvalProofSessionMaxProofCount) {
+          return yield* new FleetOperationError({
+            cause: "approval proof count limit",
+            detail: "approval proof count capacity reached",
+            operation: "approval.proof.count-capacity"
+          })
+        }
+        for (const record of pendingRecords) {
+          if (record.approvalNonce === null) continue
+          if (!session.proofsByJob.has(record.id)) {
+            pendingApprovalProofDisclosureGeneration += 1
+            retainApprovalProofJob(record.id)
+            session.proofsByJob.set(record.id, {
+              expiresAt: session.expiresAt,
+              generation: pendingApprovalProofDisclosureGeneration,
+              hash: record.hash,
+              jobId: record.id,
+              nonce: record.approvalNonce
+            })
+            session.stagedJobIds.add(record.id)
+          }
+        }
+        approvalProofSessionsByRequest.set(request, session)
+      }
+    )
+    const approvalProofHeaders = (
+      request: IncomingMessage,
+      records: ReadonlyArray<SanitizedJobRecord>,
+      secure: boolean,
+      completedAt: number
+    ) => {
+      const mutation = approvalProofMutationsByRequest.get(request)
+      const session = mutation?.session ?? approvalProofSessionFor(request, completedAt)
+      if (session === undefined) return {}
+      if (mutation !== undefined) renewApprovalProofSession(session, completedAt)
+      const shouldSetCookie = records.some((record) => {
+        const proof = session.proofsByJob.get(record.id)
+        return proof !== undefined && proof.expiresAt > completedAt
+      })
+      if (!shouldSetCookie) {
+        discardApprovalProofMutation(request)
+        return {}
+      }
+      if (mutation !== undefined) {
+        approvalProofMutationsByRequest.delete(request)
+        for (const jobId of session.stagedJobIds) session.stagedJobIds.delete(jobId)
+        session.disclosing = false
+        session.locked = false
+        httpRuntime.runSync(session.lock.release(1))
+      }
+      return {
+        "cache-control": "no-store",
+        "set-cookie": approvalProofCookie(session.token, secure)
+      }
+    }
+    if (options.lanWork !== undefined && config.allowedUsers.length === 0) {
+      throw new LanWorkConfigurationError({
+        detail: "LAN Work requires at least one configured allowed user"
+      })
+    }
+    if (
+      options.lanWork !== undefined &&
+      (options.lanWork.address === "0.0.0.0" || options.lanWork.address === "::" ||
+        options.lanWork.address === "::0") &&
+      options.lanWork.host === undefined
+    ) {
+      throw new LanWorkConfigurationError({
+        detail: "LAN Work wildcard listeners require an explicit browser host"
+      })
+    }
+    let lanWorkPairing: LanWorkPairing | null = null
     const chat = await httpRuntime.runPromise(makeCoordinatorChat({
       config,
       fleet: service,
@@ -1578,6 +2247,8 @@ export const startHttpServer = async (
     ) => {
       let expectedHost = mode === "serve"
         ? new URL(config.approvalHub.url).host.toLowerCase()
+        : mode === "lan" && options.lanWork?.host !== undefined
+        ? options.lanWork.host.toLowerCase()
         : ""
       const expectedOrigin = (): string =>
         mode === "serve"
@@ -1589,6 +2260,12 @@ export const startHttpServer = async (
       ) => {
         try {
           const url = pathOf(request)
+          const workRoute = (request.method === "GET" && url.pathname === workSnapshotPath) ||
+            (request.method === "POST" && url.pathname === workCheckpointPath)
+          if (mode === "work" && !workRoute) {
+            json(response, 404, { error: "not_found" })
+            return
+          }
           if (header(request, "host")?.toLowerCase() !== expectedHost) {
             json(response, 403, {
               error: "FleetAuthorizationError",
@@ -1609,6 +2286,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/assets/approval.js"
           ) {
@@ -1619,7 +2297,7 @@ export const startHttpServer = async (
             response.end(uiAssets.script)
             return
           }
-          if (request.method === "GET" && url.pathname === "/assets/connect.js") {
+          if (mode !== "lan" && request.method === "GET" && url.pathname === "/assets/connect.js") {
             response.writeHead(200, {
               "cache-control": "no-cache, must-revalidate",
               "content-type": "text/javascript; charset=utf-8"
@@ -1628,6 +2306,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/assets/approval-sw.js"
           ) {
@@ -1640,6 +2319,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/manifest.webmanifest"
           ) {
@@ -1651,6 +2331,7 @@ export const startHttpServer = async (
             return
           }
           if (
+            mode !== "lan" &&
             request.method === "GET" &&
             url.pathname === "/assets/approval-icon.svg"
           ) {
@@ -1673,18 +2354,201 @@ export const startHttpServer = async (
             response.end(font)
             return
           }
+          if (mode === "lan" && lanWorkPairing !== null) {
+            const pairing = lanWorkPairing
+            const origin = header(request, "origin")
+            const requireLanOrigin = (required: boolean): Effect.Effect<void, LanWorkOriginRejectedError> =>
+              (origin === expectedOrigin() || (!required && origin === undefined))
+                ? Effect.void
+                : Effect.fail(
+                  new LanWorkOriginRejectedError({
+                    detail: "LAN Work requires the exact browser origin"
+                  })
+                )
+            const authorizeLanSession = pairing.authorizeSession(
+              readLanWorkSessionCookie(header(request, "cookie"))
+            )
+            const readPairRequest = Effect.fn("ApprovalHttp.readLanPairRequest")(function*() {
+              const mediaType = (header(request, "content-type") ?? "")
+                .split(";", 1)[0]
+                ?.trim()
+                .toLowerCase()
+              const body = yield* readBody(request).pipe(
+                Effect.mapError(
+                  (error) => new LanWorkPairingMalformedError({ detail: error.detail })
+                )
+              )
+              if (mediaType === "application/json") {
+                const unknown = yield* Effect.try({
+                  try: () => JSON.parse(body),
+                  catch: (cause) =>
+                    new LanWorkPairingMalformedError({
+                      detail: `invalid LAN Work pairing JSON: ${String(cause)}`
+                    })
+                })
+                const input = yield* Schema.decodeUnknownEffect(LanWorkPairRequestInput)(unknown).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new LanWorkPairingMalformedError({
+                        detail: `invalid LAN Work pairing object: ${String(cause)}`
+                      })
+                  )
+                )
+                return yield* decodeLanWorkPairRequest(input)
+              }
+              if (mediaType === "application/x-www-form-urlencoded") {
+                const form = new URLSearchParams(body)
+                const values = form.getAll("pairingCode")
+                if (values.length !== 1) {
+                  return yield* new LanWorkPairingMalformedError({
+                    detail: "LAN Work pairing request requires one pairingCode"
+                  })
+                }
+                const input = yield* Schema.decodeUnknownEffect(LanWorkPairRequestInput)({ pairingCode: values[0] })
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new LanWorkPairingMalformedError({
+                          detail: `invalid LAN Work pairing object: ${String(cause)}`
+                        })
+                    )
+                  )
+                return yield* decodeLanWorkPairRequest(input)
+              }
+              return yield* new LanWorkPairingMalformedError({
+                detail: "LAN Work pairing content type is unsupported"
+              })
+            })
+            const pairFailure = (error: LanPairError): void => {
+              const mapped = apiError(error)
+              const acceptsHtml = (header(request, "accept") ?? "").includes("text/html")
+              if (acceptsHtml) {
+                response.writeHead(mapped.status, {
+                  "cache-control": "no-store",
+                  "content-type": "text/html; charset=utf-8",
+                  ...lanHtmlSecurityHeaders
+                })
+                response.end(lanPairPage(lanPairErrorMessage(error)))
+              } else {
+                json(response, mapped.status, mapped.body)
+              }
+            }
+            if (request.method === "GET" && url.pathname === "/pair") {
+              if (origin !== undefined && origin !== expectedOrigin()) {
+                pairFailure(new LanWorkOriginRejectedError({ detail: "LAN Work requires the exact browser origin" }))
+                return
+              }
+              if (url.search !== "") {
+                pairFailure(new LanWorkPairingMalformedError({ detail: "LAN Work pairing URL must be plain /pair" }))
+                return
+              }
+              const session = await runRequest(Effect.result(authorizeLanSession))
+              if (Result.isSuccess(session)) {
+                response.writeHead(303, { location: "/" })
+                response.end()
+              } else {
+                response.writeHead(200, {
+                  "cache-control": "no-store",
+                  "content-type": "text/html; charset=utf-8",
+                  ...lanHtmlSecurityHeaders
+                })
+                response.end(lanPairPage(undefined))
+              }
+              return
+            }
+            if (request.method === "POST" && url.pathname === "/pair") {
+              const result = await runRequest(
+                Effect.result(
+                  Effect.gen(function*() {
+                    yield* requireLanOrigin(true)
+                    if (url.search !== "") {
+                      return yield* new LanWorkPairingMalformedError({
+                        detail: "LAN Work pairing URL must be plain /pair"
+                      })
+                    }
+                    const requestBody = yield* readPairRequest()
+                    return yield* pairing.consume(requestBody.pairingCode)
+                  })
+                )
+              )
+              if (Result.isFailure(result)) {
+                pairFailure(result.failure)
+              } else {
+                response.writeHead(303, {
+                  "cache-control": "no-store",
+                  location: "/",
+                  "set-cookie": lanWorkSessionCookie(result.success)
+                })
+                response.end()
+              }
+              return
+            }
+            if (request.method === "GET" && url.pathname === "/") {
+              const selection = await runRequest(Effect.result(lanWorkSelectionFromUrl(url)))
+              if (Result.isFailure(selection)) {
+                const mapped = apiError(selection.failure)
+                json(response, mapped.status, mapped.body)
+                return
+              }
+              const result = await runRequest(
+                Effect.result(
+                  requireLanOrigin(false).pipe(
+                    Effect.andThen(authorizeLanSession),
+                    Effect.andThen(work.snapshots(now()))
+                  )
+                )
+              )
+              if (Result.isSuccess(result)) {
+                response.writeHead(200, {
+                  "cache-control": "no-store",
+                  "content-type": "text/html; charset=utf-8",
+                  ...lanHtmlSecurityHeaders
+                })
+                response.end(lanWorkPage(result.success, selection.success))
+              } else if (
+                result.failure._tag === "LanWorkSessionRequiredError" ||
+                result.failure._tag === "LanWorkSessionRejectedError"
+              ) {
+                response.writeHead(303, { location: "/pair" })
+                response.end()
+              } else {
+                const mapped = apiError(result.failure)
+                json(response, mapped.status, mapped.body)
+              }
+              return
+            }
+            if (request.method === "GET" && url.pathname === workSnapshotPath) {
+              await respond(
+                response,
+                requireLanOrigin(true).pipe(
+                  Effect.andThen(authorizeLanSession),
+                  Effect.andThen(work.snapshots(now()))
+                ),
+                200,
+                { "cache-control": "no-store" }
+              )
+              return
+            }
+            json(response, 404, { error: "not_found" })
+            return
+          }
           const authorized = mode === "approval"
             ? tailnetActor(request, config, config.approvalNodes)
             : mode === "tailnet" || mode === "serve"
             ? tailnetActor(request, config, null)
             : actor(request, config, true)
+          const loopbackAuthorized = authorizeLoopback({
+            login: header(request, "tailscale-user-login"),
+            remoteAddress: request.socket.remoteAddress
+          })
 
           const approvalSurface = mode === "approval" || mode === "serve"
-          const dashboard = Effect.gen(function*() {
+          const dashboard = Effect.fn("HostHttp.dashboard")(function*(request: IncomingMessage) {
             const observedAt = now()
             const resolvedLocalPage = approvalSurface
               ? yield* service.pendingApprovalPage(null)
               : { records: [], nextCursor: null }
+            if (approvalSurface) yield* issueApprovalProofs(resolvedLocalPage.records, request)
             const state = yield* Effect.all({
               history: dashboardHistory(service, null),
               status: service.status()
@@ -1692,7 +2556,7 @@ export const startHttpServer = async (
             let directory: ApprovalDirectory | null = null
             let pendingApprovals: DashboardSnapshot["pendingApprovals"] = {
               local: approvalSurface
-                ? resolvedLocalPage.records
+                ? resolvedLocalPage.records.map(sanitizeJobRecord)
                 : state.history.records.filter(
                   (record) => record.status === "pending_approval"
                 ),
@@ -1727,7 +2591,7 @@ export const startHttpServer = async (
                   peersResult.success
                 )
                 pendingApprovals = {
-                  local: resolvedLocalPage.records,
+                  local: resolvedLocalPage.records.map(sanitizeJobRecord),
                   ...aggregated,
                   nextCursors: resolvedLocalPage.nextCursor === null
                     ? aggregated.nextCursors
@@ -1738,7 +2602,7 @@ export const startHttpServer = async (
                 }
               } else {
                 pendingApprovals = {
-                  local: resolvedLocalPage.records,
+                  local: resolvedLocalPage.records.map(sanitizeJobRecord),
                   remote: [],
                   nextCursors: resolvedLocalPage.nextCursor === null
                     ? []
@@ -1779,7 +2643,26 @@ export const startHttpServer = async (
           })
 
           if (request.method === "GET" && url.pathname === "/v1/dashboard") {
-            await respond(response, Effect.andThen(authorized, dashboard))
+            const result = await runRequest(
+              Effect.result(Effect.andThen(authorized, dashboard(request)))
+            )
+            if (Result.isFailure(result)) {
+              discardApprovalProofMutation(request)
+              const mapped = apiError(result.failure)
+              json(response, mapped.status, mapped.body)
+            } else {
+              json(
+                response,
+                200,
+                result.success,
+                approvalProofHeaders(
+                  request,
+                  result.success.pendingApprovals.local,
+                  mode === "serve",
+                  now()
+                )
+              )
+            }
             return
           }
 
@@ -1820,30 +2703,69 @@ export const startHttpServer = async (
               return yield* resolvePendingApprovalTarget(
                 config,
                 service,
-                target
+                target,
+                issueApprovalProofs,
+                request
               )
             })
-            await respond(response, effect)
+            const result = await runRequest(Effect.result(effect))
+            if (Result.isFailure(result)) {
+              discardApprovalProofMutation(request)
+              const mapped = apiError(result.failure)
+              json(response, mapped.status, mapped.body)
+            } else {
+              const records = result.success._tag === "local" ? [result.success.record] : []
+              json(
+                response,
+                200,
+                result.success,
+                approvalProofHeaders(request, records, mode === "serve", now())
+              )
+            }
             return
           }
 
-          if (mode === "serve" && request.method === "GET" && url.pathname === "/v1/work") {
-            await respond(response, Effect.andThen(authorized, work.snapshots(now())))
+          const servesWork = mode === "serve" || mode === "work" || (mode === "local" && !config.crossHost)
+          if (
+            servesWork &&
+            request.method === "GET" &&
+            url.pathname === workSnapshotPath
+          ) {
+            const workAuthorization = mode === "work"
+              ? Effect.succeed("lan")
+              : mode === "local"
+              ? loopbackAuthorized
+              : authorized
+            await respond(response, Effect.andThen(workAuthorization, work.snapshots(now())))
             return
           }
 
           if (
-            mode === "serve" &&
+            servesWork &&
             request.method === "POST" &&
             url.pathname === workCheckpointPath
           ) {
-            const effect = recordWorkCheckpointRequest(
-              authorized,
-              authorizeOriginlessMutation(request).pipe(
-                Effect.andThen(readJson(request, WorkGoalCheckpoint))
-              ),
-              work
-            )
+            const workAuthorization = mode === "work"
+              ? Effect.succeed("lan")
+              : mode === "local"
+              ? loopbackAuthorized
+              : authorized
+            const effect = Effect.gen(function*() {
+              const approvalPage = mode === "work"
+                ? undefined
+                : yield* Effect.map(
+                  Tailscale,
+                  (tailscale) => (host: string) => resolveApprovalPage(config, tailscale, host)
+                )
+              return yield* recordWorkCheckpointRequest(
+                workAuthorization,
+                authorizeOriginlessMutation(request).pipe(
+                  Effect.andThen(readJson(request, WorkGoalCheckpoint))
+                ),
+                work,
+                approvalPage
+              )
+            })
             await respond(response, effect, 201)
             return
           }
@@ -1971,9 +2893,27 @@ export const startHttpServer = async (
             const effect = Effect.gen(function*() {
               yield* authorized
               const continuation = yield* decodePendingApprovalContinuation(url)
-              return yield* dashboardPendingPage(config, service, continuation)
+              return yield* dashboardPendingPage(
+                config,
+                service,
+                continuation,
+                issueApprovalProofs,
+                request
+              )
             })
-            await respond(response, effect)
+            const result = await runRequest(Effect.result(effect))
+            if (Result.isFailure(result)) {
+              discardApprovalProofMutation(request)
+              const mapped = apiError(result.failure)
+              json(response, mapped.status, mapped.body)
+            } else {
+              json(
+                response,
+                200,
+                result.success,
+                approvalProofHeaders(request, result.success.local, mode === "serve", now())
+              )
+            }
             return
           }
 
@@ -2122,17 +3062,48 @@ export const startHttpServer = async (
             approvalJobId !== undefined &&
             (decision === "approve" || decision === "reject")
           ) {
+            let proofSession: ApprovalProofSession | undefined
             const effect = Effect.gen(function*() {
               const who = yield* authorized
               yield* sameOrigin(request, expectedOrigin())
               const jobId = yield* decodeJobPathSegment(approvalJobId)
-              const approval = yield* readApproval(request)
+              const submittedApproval = yield* readApproval(request)
+              let approval: Approval
+              let proofSessionToken: string | undefined
+              if (submittedApproval === null) {
+                const proof = yield* approvalFromProof(
+                  service,
+                  approvalProofSessions,
+                  request,
+                  jobId,
+                  now
+                )
+                approval = proof.approval
+                proofSession = proof.lockHeld ? proof.session : undefined
+                proofSessionToken = proof.sessionToken
+              } else {
+                approval = submittedApproval
+              }
               const record = decision === "approve"
                 ? yield* service.approve(jobId, approval, who)
                 : yield* service.reject(jobId, approval, who)
+              if (proofSessionToken !== undefined) {
+                const proofSession = approvalProofSessions.get(proofSessionToken)
+                if (proofSession !== undefined) deleteApprovalProof(proofSession, jobId)
+              }
               if (record.status === "queued") yield* enqueueJob(record.id)
-              return record
-            })
+              return sanitizeJobRecord(record)
+            }).pipe(
+              Effect.ensuring(
+                Effect.sync(() => {
+                  if (proofSession !== undefined) {
+                    proofSession.locked = false
+                    httpRuntime.runSync(proofSession.lock.release(1))
+                    proofSession = undefined
+                  }
+                })
+              )
+            )
             if (
               header(request, "content-type")?.startsWith(
                 "application/x-www-form-urlencoded"
@@ -2153,9 +3124,10 @@ export const startHttpServer = async (
           }
           if (request.method === "GET" && url.pathname === "/") {
             const result = await runRequest(
-              Effect.result(Effect.andThen(authorized, dashboard))
+              Effect.result(Effect.andThen(authorized, dashboard(request)))
             )
             if (Result.isFailure(result)) {
+              discardApprovalProofMutation(request)
               const mapped = apiError(result.failure)
               json(response, mapped.status, mapped.body)
               return
@@ -2164,7 +3136,13 @@ export const startHttpServer = async (
               "cache-control": "no-cache, must-revalidate",
               "content-security-policy": "frame-ancestors 'none'",
               "content-type": "text/html; charset=utf-8",
-              "x-frame-options": "DENY"
+              "x-frame-options": "DENY",
+              ...approvalProofHeaders(
+                request,
+                result.success.pendingApprovals.local,
+                mode === "serve",
+                now()
+              )
             })
             response.end(dashboardPage(result.success))
             return
@@ -2291,12 +3269,21 @@ export const startHttpServer = async (
       }
       const bound = decodedAddress.success
       if (mode !== "serve") {
-        expectedHost = listenerAuthority(bound.address, bound.port)
+        expectedHost = listenerAuthority(
+          mode === "lan" && options.lanWork?.host !== undefined
+            ? options.lanWork.host
+            : bound.address,
+          bound.port
+        )
       }
       activeServers.add(server)
       return {
         server,
-        url: `${tls === null ? "http" : "https"}://${bound.address}:${bound.port}`
+        url: `${tls === null ? "http" : "https"}://${
+          mode === "lan"
+            ? expectedHost
+            : `${bound.address}:${bound.port}`
+        }`
       }
     }
 
@@ -2315,14 +3302,26 @@ export const startHttpServer = async (
 
     const recoveredJobIds = await Effect.runPromise(service.recover())
     const local = await listen("127.0.0.1", config.localPort, "local")
+    const lan = options.lanWork === undefined
+      ? null
+      : await listen(options.lanWork.address, options.lanWork.port, "lan")
     if (tailscaleIp === null) {
+      const work = await listen(workBindAddress, config.port, "work")
       for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
+      lanWorkPairing = options.lanWork === undefined
+        ? null
+        : await httpRuntime.runPromise(makeLanWorkPairing(now))
       acceptingRequests = true
       return {
         url: local.url,
         tailnetUrl: null,
         approvalUrl: null,
         serveUrl: null,
+        workUrl: work.url,
+        lanWorkUrl: lan?.url ?? null,
+        lanWorkPairingCode: lan === null || lanWorkPairing === null
+          ? null
+          : lanWorkPairing.pairingCode,
         close: shutdown
       }
     }
@@ -2349,12 +3348,20 @@ export const startHttpServer = async (
         )
       )
     }
+    lanWorkPairing = options.lanWork === undefined
+      ? null
+      : await httpRuntime.runPromise(makeLanWorkPairing(now))
     acceptingRequests = true
     return {
       url: local.url,
       tailnetUrl: remote.url,
       approvalUrl: approval?.url ?? serve?.url ?? null,
       serveUrl: serve?.url ?? null,
+      workUrl: null,
+      lanWorkUrl: lan?.url ?? null,
+      lanWorkPairingCode: lan === null || lanWorkPairing === null
+        ? null
+        : lanWorkPairing.pairingCode,
       close: shutdown
     }
   } catch (error) {
