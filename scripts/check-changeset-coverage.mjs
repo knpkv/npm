@@ -696,10 +696,10 @@ const resolveNamespaceQualifiedTypeDeclaration = (analysis, filePath, typeName, 
   if (!TypeScript.isIdentifier(root)) return undefined
   const imported = analysis.modules.get(filePath)?.imports.get(root.text)
   if (imported?.importedName !== "*") return undefined
+  if (!imported.sourceSpecifier.startsWith(".")) return undefined
   if (!TypeScript.isIdentifier(typeName.left) || !TypeScript.isIdentifier(typeName.right)) {
     failCanonicalType(filePath, typeNode, "unsupported nested namespace-qualified type")
   }
-  if (!imported.sourceSpecifier.startsWith(".")) return undefined
   const target = resolveLocalModule(filePath, imported.sourceSpecifier, analysis.sources)
   if (target === undefined) failCanonicalType(filePath, typeNode, "unresolved namespace-qualified type")
   const declaration = resolveExportedType(analysis, target, typeName.right.text, seen)
@@ -3954,7 +3954,8 @@ const callableParameterTypesInSources = (
   sources,
   filePath,
   analysis = analyzeSources(sources),
-  recursiveDeclarations = new Set()
+  recursiveDeclarations = new Set(),
+  selectedName
 ) => {
   const module = analysis.modules.get(filePath)
   if (module === undefined) return new Map()
@@ -3977,6 +3978,8 @@ const callableParameterTypesInSources = (
     contextualTypeParameters,
     callableNode
   ) => {
+    // Public reachability supplies the declaration name, including non-exported declarations re-exported by a barrel.
+    if (selectedName !== undefined && name !== selectedName) return
     const publicTypeParameters = contextualTypeParameters ?? initializerTypeParameters
     const callableGeneric = genericDescriptor(publicTypeParameters, analysis, filePath, new Map(), {
       depth: 0,
@@ -4145,6 +4148,10 @@ const publicCallableAdditions = (previousSource, currentSource, filePath, reacha
 const isExcludedSourcePath = (filePath) =>
   filePath.split("/").some((segment) => segment === "generated" || segment === "vendor" || segment === "node_modules")
 
+// Generated and vendor declarations can shape a handwritten public API without being report targets themselves.
+const isAnalysisSourcePath = (filePath) =>
+  /\.(?:ts|tsx)$/u.test(filePath) && !filePath.split("/").includes("node_modules")
+
 const resolveLocalModule = (fromPath, specifier, sourceFiles) => {
   if (!specifier.startsWith(".")) return undefined
   const fromSegments = fromPath.split("/")
@@ -4275,11 +4282,13 @@ const publicCallableChanges = (
         [entryPointDescriptor],
         analysis
       )) {
+        if (isExcludedSourcePath(target.filePath)) continue
         const signature = callableParameterTypesInSources(
           sources,
           target.filePath,
           analysis,
-          recursiveDeclarations
+          recursiveDeclarations,
+          target.name
         ).get(target.name)
         if (signature === undefined) continue
         const identity = `${entryPoint}\u0000${exportedName}`
@@ -4882,6 +4891,102 @@ const runSelfTest = () => {
   )
   assert.equal(isExcludedSourcePath("packages/public/src/generated/public.ts"), true)
   assert.equal(isExcludedSourcePath("packages/public/src/vendor/public.ts"), true)
+  assert.equal(isAnalysisSourcePath("packages/public/src/generated/public.ts"), true)
+  assert.equal(isAnalysisSourcePath("packages/public/src/vendor/public.ts"), true)
+  assert.equal(isAnalysisSourcePath("packages/public/src/node_modules/dependency/index.ts"), false)
+  assert.equal(isAnalysisSourcePath("packages/public/src/schema.json"), false)
+  const privateRecursivePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public as View } from "./view.js"'],
+    [
+      "packages/public/src/view.ts",
+      'interface AdfNode { readonly content?: ReadonlyArray<AdfNode> }\nconst internal = (node: AdfNode): string => "text"\nexport function Public(): string { return "before" }'
+    ]
+  ])
+  const privateRecursiveCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public as View } from "./view.js"'],
+    [
+      "packages/public/src/view.ts",
+      'interface AdfNode { readonly content?: ReadonlyArray<AdfNode> }\nconst internal = (node: AdfNode): string => "text"\nexport function Public(): number { return 1 }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(privateRecursivePrevious, privateRecursiveCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.ts", name: "Public", properties: [] }]
+  )
+  const publicRecursive = new Map([
+    ["packages/public/src/index.ts", 'export { internal } from "./view.js"'],
+    [
+      "packages/public/src/view.ts",
+      'interface AdfNode { readonly content?: ReadonlyArray<AdfNode> }\nexport const internal = (node: AdfNode): string => "text"'
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(publicRecursive, publicRecursive, ["packages/public/src/index.ts"]),
+    /recursive type declaration/u
+  )
+  const externalNamespacePrevious = new Map([
+    [
+      "packages/public/src/index.ts",
+      'import * as FileSystem from "effect/FileSystem"\nexport function info(): FileSystem.File.Info { throw new Error("fixture") }'
+    ]
+  ])
+  const externalNamespaceCurrent = new Map([
+    [
+      "packages/public/src/index.ts",
+      'import * as FileSystem from "effect/FileSystem"\nexport function info(): FileSystem.File.Info | undefined { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(externalNamespacePrevious, externalNamespaceCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/index.ts", name: "info", properties: [] }]
+  )
+  const nestedLocalNamespace = new Map([
+    [
+      "packages/public/src/index.ts",
+      'import * as Local from "./local.js"\nexport function info(): Local.Nested.Value { throw new Error("fixture") }'
+    ],
+    ["packages/public/src/local.ts", "export namespace Nested { export interface Value { readonly name: string } }"]
+  ])
+  assert.throws(
+    () => publicCallableChanges(nestedLocalNamespace, nestedLocalNamespace, ["packages/public/src/index.ts"]),
+    /unsupported nested namespace-qualified type/u
+  )
+  const generatedNamespacePrevious = new Map(
+    [
+      [
+        "packages/public/src/index.ts",
+        'export { Public } from "./view.js"\nexport { GeneratedPublic } from "./generated/JiraApi.js"'
+      ],
+      [
+        "packages/public/src/generated/JiraApi.ts",
+        'export interface JiraApi { readonly issue: string }\nexport function GeneratedPublic(): JiraApi { throw new Error("fixture") }'
+      ],
+      [
+        "packages/public/src/view.ts",
+        'import type * as Generated from "./generated/JiraApi.js"\nexport function Public(): Generated.JiraApi { throw new Error("fixture") }'
+      ]
+    ].filter(([filePath]) => isAnalysisSourcePath(filePath))
+  )
+  const generatedNamespaceCurrent = new Map(
+    [
+      [
+        "packages/public/src/index.ts",
+        'export { Public } from "./view.js"\nexport { GeneratedPublic } from "./generated/JiraApi.js"'
+      ],
+      [
+        "packages/public/src/generated/JiraApi.ts",
+        'export interface JiraApi { readonly issue: number }\nexport function GeneratedPublic(): JiraApi { throw new Error("fixture") }'
+      ],
+      [
+        "packages/public/src/view.ts",
+        'import type * as Generated from "./generated/JiraApi.js"\nexport function Public(): Generated.JiraApi { throw new Error("fixture") }'
+      ]
+    ].filter(([filePath]) => isAnalysisSourcePath(filePath))
+  )
+  assert.deepEqual(
+    publicCallableChanges(generatedNamespacePrevious, generatedNamespaceCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.ts", name: "Public", properties: [] }]
+  )
   const manifestSources = [
     "packages/public/src/index.ts",
     "packages/public/src/feature/view.ts",
@@ -9743,7 +9848,7 @@ const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
       if (stats.type === "Directory") {
         const nestedFiles = yield* collectSourceFiles(fileSystem, path, absolute, relative)
         for (const nestedFile of nestedFiles) files.push(nestedFile)
-      } else if (/\.(?:ts|tsx)$/u.test(entry) && !isExcludedSourcePath(relative)) {
+      } else if (isAnalysisSourcePath(relative)) {
         files.push(relative)
       }
     }
@@ -9782,7 +9887,9 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
                 (cause) =>
                   new ChangesetCoverageError({
                     cause,
-                    reason: `${mergeBase}:${configPath.slice(repositoryRoot.length + 1)}: compiler configuration is unavailable`
+                    reason: `${mergeBase}:${configPath.slice(
+                      repositoryRoot.length + 1
+                    )}: compiler configuration is unavailable`
                   })
               )
             )
@@ -9803,9 +9910,7 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         currentSources.set(relativePath, yield* fileSystem.readFileString(path.join(repositoryRoot, relativePath)))
       }
       const previousOutput = yield* git(["ls-tree", "-r", "--name-only", mergeBase, "--", `${record.directory}/src`])
-      const previousRelativeSourceFiles = splitLines(previousOutput).filter(
-        (filePath) => /\.(?:ts|tsx)$/u.test(filePath) && !isExcludedSourcePath(filePath)
-      )
+      const previousRelativeSourceFiles = splitLines(previousOutput).filter(isAnalysisSourcePath)
       const previousSources = new Map()
       for (const relativePath of previousRelativeSourceFiles) {
         const source = yield* gitOption(git, ["show", `${mergeBase}:${relativePath}`])
