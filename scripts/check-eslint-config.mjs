@@ -96,6 +96,31 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
   }
 }
 
+const childEnvironmentRule = "local-rules/require-explicit-child-process-env-inheritance"
+await assertRuleDiagnostics({
+  code: 'import { ChildProcess } from "effect/unstable/process"; ChildProcess.make("git", args, { env })',
+  expected: 1,
+  filePath: "scripts/child-env-invalid.mjs",
+  ruleId: childEnvironmentRule
+})
+await assertRuleDiagnostics({
+  code: 'import { ChildProcess } from "effect/unstable/process"; ChildProcess.make("git", args, { env, extendEnv: false })',
+  expected: 0,
+  filePath: "scripts/child-env-valid.mjs",
+  ruleId: childEnvironmentRule
+})
+
+// Root MJS utilities are not all in lint:eslint's file list. Enforce this
+// binding-aware boundary rule on their actual sources as well as the fixtures.
+for (const result of await eslint.lintFiles(["scripts/**/*.mjs"])) {
+  const diagnostics = result.messages.filter((message) => message.fatal || message.ruleId === childEnvironmentRule)
+  if (diagnostics.length > 0) {
+    throw new Error(
+      `${result.filePath}: ${diagnostics.map((message) => `${message.line}: ${message.message}`).join("; ")}`
+    )
+  }
+}
+
 await assertRuleDiagnostics({
   code: `
     import * as TypeScript from "typescript"

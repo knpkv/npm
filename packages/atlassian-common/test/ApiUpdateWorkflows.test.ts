@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { describe, expect, it } from "@effect/vitest"
+import { expect, layer } from "@effect/vitest"
+import * as Array from "effect/Array"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -36,15 +37,57 @@ const dependencyClosureDiagnostics = (
   })
 }
 
-const loadWorkflow = (name: string) =>
-  Effect.gen(function*() {
-    const fileSystem = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
-    const workflowPath = yield* path.fromFileUrl(new URL(`../../../.github/workflows/${name}`, import.meta.url))
-    return yield* fileSystem.readFileString(workflowPath)
-  }).pipe(Effect.provide(NodeServices.layer))
+const patchGuidanceDiagnostics = (source: string): ReadonlyArray<string> => {
+  const workflow: unknown = parse(source)
+  if (!isRecord(workflow) || !isRecord(workflow.jobs)) return []
 
-describe("API update workflow build closure", () => {
+  return Object.values(workflow.jobs).flatMap((job) => {
+    if (!isRecord(job) || !Array.isArray(job.steps)) return []
+    return job.steps.flatMap((step) => {
+      if (!isRecord(step) || !isRecord(step.with) || !Predicate.isString(step.with.body)) return []
+      const sentences = step.with.body.replace(/\s+/gu, " ").split(/[.!?]/u)
+      return sentences.flatMap((sentence) =>
+        /\bpatch (?:is appropriate|(?:only )?when)\b/iu.test(sentence)
+          && !/\bpublic contract is unchanged\b/iu.test(sentence)
+          ? ["Patch release guidance must require an unchanged public contract"]
+          : []
+      )
+    })
+  })
+}
+
+const loadWorkflow = Effect.fn("ApiUpdateWorkflows.loadWorkflow")(function*(name: string) {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const workflowPath = yield* path.fromFileUrl(new URL(`../../../.github/workflows/${name}`, import.meta.url))
+  return yield* fileSystem.readFileString(workflowPath)
+})
+
+layer(NodeServices.layer)("API update workflow build closure", (it) => {
+  it("rejects compatible-only patch guidance and accepts unchanged-contract guidance", () => {
+    const workflow = (guidance: string) => `
+jobs:
+  update:
+    steps:
+      - name: Create pull request
+        with:
+          body: ${guidance}
+`
+    expect(patchGuidanceDiagnostics(workflow(
+      "Patch is appropriate only after confirming every public contract remains compatible."
+    ))).toEqual(["Patch release guidance must require an unchanged public contract"])
+    expect(patchGuidanceDiagnostics(workflow(
+      "Patch is appropriate only when the generated public contract is unchanged."
+    ))).toEqual([])
+  })
+
+  it.effect("reserves API update patch guidance for unchanged public contracts", () =>
+    Effect.gen(function*() {
+      for (const name of ["clockify-api-update.yml", "jira-api-update.yml", "confluence-api-update.yml"]) {
+        expect(patchGuidanceDiagnostics(yield* loadWorkflow(name))).toEqual([])
+      }
+    }))
+
   it("rejects a bare consumer build and accepts a dependency-closed build", () => {
     const invalid = `
 jobs:

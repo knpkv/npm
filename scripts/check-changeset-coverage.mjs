@@ -9471,7 +9471,7 @@ const makeGit = Effect.fn("ChangesetCoverage.makeGit")(function* (repositoryRoot
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
   return Effect.fn("ChangesetCoverage.git")(function* (args) {
-    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: repositoryRoot, env }))
+    const handle = yield* spawner.spawn(ChildProcess.make("git", args, { cwd: repositoryRoot, env, extendEnv: false }))
     const [stdout, stderr, exitCode] = yield* Effect.all(
       [
         Stream.decodeText(handle.stdout).pipe(Stream.mkString),
@@ -9510,23 +9510,31 @@ const readPendingMergeHead = Effect.fn("ChangesetCoverage.readPendingMergeHead")
 
 const resolveMergeBase = Effect.fn("ChangesetCoverage.resolveMergeBase")(
   function* (git, configuredBase, githubBase, pendingMergeHead) {
-    const candidates = [
-      configuredBase,
-      githubBase === undefined ? undefined : `origin/${githubBase}`,
-      "origin/main",
-      "main"
-    ].filter((candidate) => candidate !== undefined)
+    const explicitPendingBase = pendingMergeHead !== undefined && configuredBase !== undefined
+    const candidates = explicitPendingBase
+      ? [configuredBase]
+      : [configuredBase, githubBase === undefined ? undefined : `origin/${githubBase}`, "origin/main", "main"].filter(
+          (candidate) => candidate !== undefined
+        )
     for (const candidate of candidates) {
       const mergeBase = yield* gitOption(git, ["merge-base", "HEAD", candidate])
       if (mergeBase === undefined) continue
       if (pendingMergeHead === undefined) return mergeBase
       const candidateCommit = yield* git(["rev-parse", "--verify", `${candidate}^{commit}`])
       if (candidateCommit !== pendingMergeHead) {
-        return yield* fail(`Selected base ${candidate} must exactly match pending merge head ${pendingMergeHead}`)
+        if (explicitPendingBase) {
+          return yield* fail(`Selected base ${candidate} must exactly match pending merge head ${pendingMergeHead}`)
+        }
+        continue
       }
       // The pending tree already contains this base's released changes. Compare the
       // actual tree against it, retaining feature edits and conflict resolutions.
       return candidateCommit
+    }
+    if (pendingMergeHead !== undefined) {
+      return yield* fail(
+        `Could not resolve exact pending merge head ${pendingMergeHead} from: ${candidates.join(", ")}. Set CHANGESET_COVERAGE_BASE to the pending merge head explicitly.`
+      )
     }
     return yield* fail(
       `Could not resolve a changeset coverage merge base from: ${candidates.join(
@@ -9978,6 +9986,7 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   yield* write(".github/workflows/check.yml", "# old checkout pin\n")
   yield* commit("baseline")
   const initial = yield* git(["rev-parse", "HEAD"])
+  yield* git(["update-ref", "refs/remotes/origin/main", initial])
   yield* git(["branch", "feature"])
   yield* write("packages/upstream/src/index.ts", "export const value = 2\n")
   yield* write(".changeset/upstream.md", '---\n"@fixture/upstream": patch\n---\n\nUpstream fix.\n')
@@ -9993,6 +10002,8 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   yield* equal(yield* readPendingMergeHead(git), undefined)
   const ordinaryBase = yield* resolveMergeBase(git, "main", undefined)
   yield* equal(ordinaryBase, initial)
+  yield* equal(yield* resolveMergeBase(git, undefined, undefined), initial)
+  yield* equal(yield* resolveMergeBase(git, "missing", undefined), initial)
   yield* equal(yield* missingCoverage(ordinaryBase), [])
   yield* write("packages/feature/src/index.ts", "export const value = 2\n")
   yield* equal(yield* missingCoverage(ordinaryBase), ["@fixture/feature"])
@@ -10002,6 +10013,13 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   const pending = yield* readPendingMergeHead(git)
   const pendingBase = yield* resolveMergeBase(git, "main", undefined, pending)
   yield* equal(pendingBase, released)
+  // A stale remote-tracking ref must not hide the exact local merge target.
+  yield* equal(yield* resolveMergeBase(git, undefined, undefined, pending), released)
+  yield* equal(yield* resolveMergeBase(git, undefined, "main", pending), released)
+  const explicitStale = yield* resolveMergeBase(git, "origin/main", undefined, pending).pipe(Effect.flip)
+  yield* equal(explicitStale.reason.includes("must exactly match"), true)
+  const explicitMissing = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
+  yield* equal(explicitMissing.reason.includes("Could not resolve"), true)
   const ancestorBase = yield* resolveMergeBase(git, initial, undefined, pending).pipe(Effect.flip)
   yield* equal(ancestorBase.reason.includes("must exactly match"), true)
   // Reproduce the original false failure, then prove the checkout-only case.
@@ -10019,6 +10037,8 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   const unrelatedBase = yield* resolveMergeBase(git, "HEAD", undefined, pending).pipe(Effect.flip)
   yield* equal(unrelatedBase.reason.includes("must exactly match"), true)
   yield* git(["branch", "-m", "main", "released"])
+  const noExactImplicitBase = yield* resolveMergeBase(git, undefined, undefined, pending).pipe(Effect.flip)
+  yield* equal(noExactImplicitBase.reason.includes("exact pending merge head"), true)
   const missingBase = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
   yield* equal(missingBase.reason.includes("Could not resolve"), true)
   yield* git(["branch", "-m", "released", "main"])
@@ -10042,7 +10062,7 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   const conflict = yield* readPendingMergeHead(git).pipe(Effect.flip)
   yield* equal(conflict.reason, "Resolve merge conflicts before checking changeset coverage")
   yield* Console.log(
-    "Pending merge Git regressions passed: checkout-only, released upstream, feature coverage, resolution edits, invalid heads, conflicts"
+    "Pending merge Git regressions passed: stale implicit refs, explicit base rejection, checkout-only, released upstream, feature coverage, resolution edits, invalid heads, conflicts"
   )
 })
 

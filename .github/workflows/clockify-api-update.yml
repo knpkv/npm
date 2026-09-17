@@ -93,7 +93,7 @@ jobs:
             Review the published `./generated` exports before merging. The
             changeset defaults to minor; use major for removed exports or
             incompatible schemas in this stable package. Patch is appropriate
-            only after confirming every public contract remains compatible.
+            only when the generated public contract is unchanged.
 
             Review these files closely:
             - `packages/clockify-api-client/.specs/clockify-v1.json`
