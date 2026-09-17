@@ -1,4 +1,4 @@
-import { Config, Effect, Layer, Option, Schema, Stream } from "effect"
+import { Config, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
 import type { Duration } from "effect"
 import { LanguageModel, Model } from "effect/unstable/ai"
 import type { AiError, Response } from "effect/unstable/ai"
@@ -48,8 +48,8 @@ export interface ClaudeModelOptions {
   readonly executable?: string
   /** Claude model identifier. Defaults to the CLI-configured model. */
   readonly model?: string
-  /** Workspace access granted to Claude. Defaults to `read-only`. */
-  readonly access?: "read-only" | "workspace-write"
+  /** Workspace access granted to Claude. Defaults to `read-only`; `prompt-only` disables all tools. */
+  readonly access?: "prompt-only" | "read-only" | "workspace-write"
   /** Maximum duration of one CLI invocation. Defaults to two minutes. */
   readonly timeout?: Duration.Input
   /** Maximum captured stdout bytes. Defaults to 4 MiB. */
@@ -81,28 +81,80 @@ const encodeJson = <UnparsedInput>(value: UnparsedInput, method: string): Effect
     Effect.mapError((cause) => unsupportedSchema(cause, method))
   )
 
+interface JsonSchemaObject {
+  readonly [key: string]: Schema.Json
+}
+
+const isJsonSchemaObject = (value: Schema.Json): value is JsonSchemaObject =>
+  Predicate.isObjectOrArray(value) && value !== null && !Array.isArray(value)
+
+const schemaMapKeys = new Set(["$defs", "definitions", "dependentSchemas", "patternProperties", "properties"])
+const schemaInstanceValueKeys = new Set(["const", "default", "enum", "examples"])
+
+/** Claude Code accepts the JSON Schema subset produced after flattening checks. */
+const flattenJsonSchemaAllOf = (value: Schema.Json): Schema.Json => {
+  if (Array.isArray(value)) return value.map(flattenJsonSchemaAllOf)
+  if (!isJsonSchemaObject(value)) return value
+
+  const flattened: Record<string, Schema.Json> = {}
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== "allOf" && key !== "uniqueItems") {
+      if (schemaInstanceValueKeys.has(key)) {
+        flattened[key] = child
+      } else if (schemaMapKeys.has(key) && isJsonSchemaObject(child)) {
+        const schemas: Record<string, Schema.Json> = {}
+        for (const [name, schema] of Object.entries(child)) {
+          schemas[name] = flattenJsonSchemaAllOf(schema)
+        }
+        flattened[key] = schemas
+      } else {
+        flattened[key] = flattenJsonSchemaAllOf(child)
+      }
+    }
+  }
+  if (value.allOf === undefined) return flattened
+  if (!Array.isArray(value.allOf)) throw new Error("JSON Schema allOf must be an array")
+  for (const clause of value.allOf) {
+    const normalizedClause = flattenJsonSchemaAllOf(clause)
+    if (!isJsonSchemaObject(normalizedClause)) {
+      throw new Error("JSON Schema allOf clauses must be objects")
+    }
+    for (const [key, child] of Object.entries(normalizedClause)) {
+      if (key === "uniqueItems") continue
+      const existing = flattened[key]
+      if (existing !== undefined && JSON.stringify(existing) !== JSON.stringify(child)) {
+        throw new Error(`JSON Schema allOf keyword conflict: ${key}`)
+      }
+      flattened[key] = child
+    }
+  }
+  return flattened
+}
+
 const schemaArgument = (
   options: LanguageModel.ProviderOptions,
   method: string
 ): Effect.Effect<string | undefined, AiError.AiError> => {
-  if (options.responseFormat.type === "text") return Effect.succeed(undefined)
+  if (options.responseFormat.type === "text") return Effect.map(Effect.succeed(true), () => undefined)
   const responseSchema = options.responseFormat.schema
   return Effect.try({
-    try: () => Schema.toJsonSchemaDocument(responseSchema),
+    try: () => {
+      const document = Schema.toJsonSchemaDocument(responseSchema)
+      return flattenJsonSchemaAllOf(
+        Schema.decodeUnknownSync(Schema.Json)({
+          $defs: document.definitions,
+          ...document.schema
+        })
+      )
+    },
     catch: (cause) => unsupportedSchema(cause, method)
   }).pipe(
-    Effect.flatMap((document) =>
-      encodeJson({
-        $defs: document.definitions,
-        $schema: "https://json-schema.org/draft/2020-12/schema",
-        ...document.schema
-      }, method)
-    )
+    Effect.flatMap((document) => encodeJson(document, method))
   )
 }
 
 interface NormalizedOptions {
-  readonly access: "read-only" | "workspace-write"
+  readonly access: "prompt-only" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
   readonly executable: string

@@ -1,0 +1,53 @@
+.page,
+.hero,
+.form,
+.matches {
+  display: grid;
+}
+
+.page {
+  gap: var(--rly-space-32);
+}
+
+.hero,
+.matches {
+  gap: var(--rly-space-8);
+  max-inline-size: 52rem;
+}
+
+.hero > *,
+.matches > * {
+  margin: 0;
+}
+
+.card {
+  max-inline-size: 52rem;
+}
+
+.form {
+  gap: var(--rly-space-16);
+}
+
+.form label {
+  display: grid;
+  gap: var(--rly-space-6);
+  color: var(--rly-color-text-2);
+  font: var(--rly-type-label-weight) var(--rly-type-label-size) / var(--rly-type-label-line-height)
+    var(--rly-type-label-font);
+}
+
+.form input {
+  min-block-size: 3.5rem;
+  inline-size: 100%;
+  padding-inline: var(--rly-space-16);
+  border: 1px solid var(--rly-color-border-2);
+  border-radius: var(--rly-radius-control);
+  background: var(--rly-color-surface-1);
+  color: var(--rly-color-text-1);
+  font: inherit;
+}
+
+.form input:focus-visible {
+  outline: 2px solid var(--rly-color-focus);
+  outline-offset: var(--rly-space-2);
+}

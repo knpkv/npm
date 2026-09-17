@@ -24,6 +24,9 @@ const profileWith = (skillIds: ReadonlyArray<string>): ReviewProfileConfig => ({
   id: "thorough",
   name: "Thorough review",
   kind: "review",
+  provider: "codex",
+  harness: "native-codex",
+  model: "configured-default",
   skillIds
 })
 
@@ -153,6 +156,82 @@ describe("Relay review profile skill selection", () => {
     expect(checkbox.disabled).toBe(false)
     expect(select.disabled).toBe(false)
     expect(saveButton.disabled).toBe(false)
+    await act(async () => rendered.root.unmount())
+  })
+
+  it("reports a persisted save when the follow-up refresh fails", async () => {
+    const saveConfig = vi.fn<SettingsRelayViewProps["saveConfig"]>(() =>
+      Promise.resolve(Exit.succeed("saved-refresh-failed"))
+    )
+    const rendered = await renderRelaySettings(AsyncResult.success(config), { saveConfig })
+    const checkbox = rendered.host.querySelector<HTMLInputElement>("input[type=\"checkbox\"]")
+    const saveButton = Array.from(rendered.host.querySelectorAll<HTMLButtonElement>("button")).find((button) =>
+      button.textContent?.includes("Save")
+    )
+    expect(checkbox).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+    if (checkbox === null || saveButton === undefined) return
+
+    await act(async () => checkbox.click())
+    await act(async () => saveButton.click())
+
+    expect(rendered.host.querySelector("[role=\"alert\"]")?.textContent).toContain(
+      "profiles were saved, but pull-request refresh failed"
+    )
+    expect(saveButton.textContent).toContain("Save")
+    await act(async () => rendered.root.unmount())
+  })
+
+  it("roundtrips the selected model through the saved profile", async () => {
+    const saveConfig = vi.fn<SettingsRelayViewProps["saveConfig"]>(() => Promise.resolve(Exit.succeed("saved")))
+    const rendered = await renderRelaySettings(AsyncResult.success(config), { saveConfig })
+    const modelLabel = Array.from(rendered.host.querySelectorAll("label")).find((label) =>
+      label.textContent?.includes("Model")
+    )
+    const modelSelect = modelLabel?.querySelector("select")
+    const saveButton = Array.from(rendered.host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Save")
+    )
+    expect(modelSelect).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+    if (modelSelect === null || modelSelect === undefined || saveButton === undefined) return
+
+    await act(async () => {
+      modelSelect.value = "gpt-5.6-luna"
+      modelSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await act(async () => saveButton.click())
+
+    expect(saveConfig).toHaveBeenCalledOnce()
+    expect(JSON.stringify(saveConfig.mock.calls[0]?.[0])).toContain("\"model\":\"gpt-5.6-luna\"")
+    expect(saveConfig.mock.calls[0]?.[0].reactivityKeys).toEqual(["config"])
+    await act(async () => rendered.root.unmount())
+  })
+
+  it("selects Claude with its native harness and persists the choice", async () => {
+    const saveConfig = vi.fn<SettingsRelayViewProps["saveConfig"]>(() => Promise.resolve(Exit.succeed("saved")))
+    const rendered = await renderRelaySettings(AsyncResult.success(config), { saveConfig })
+    const providerLabel = Array.from(rendered.host.querySelectorAll("label")).find((label) =>
+      label.textContent?.trim().startsWith("Provider")
+    )
+    const providerSelect = providerLabel?.querySelector("select")
+    const saveButton = Array.from(rendered.host.querySelectorAll("button")).find((button) =>
+      button.textContent?.includes("Save")
+    )
+    expect(providerSelect).not.toBeNull()
+    expect(saveButton).not.toBeUndefined()
+    if (providerSelect === null || providerSelect === undefined || saveButton === undefined) return
+
+    await act(async () => {
+      providerSelect.value = "claude"
+      providerSelect.dispatchEvent(new Event("change", { bubbles: true }))
+    })
+    await act(async () => saveButton.click())
+
+    const input = saveConfig.mock.calls[0]?.[0]
+    expect(input?.reactivityKeys).toEqual(["config"])
+    expect(JSON.stringify(input)).toContain("\"provider\":\"claude\"")
+    expect(JSON.stringify(input)).toContain("\"harness\":\"native-claude\"")
     await act(async () => rendered.root.unmount())
   })
 

@@ -13,7 +13,7 @@ The agent never changes the branch or CodeCommit. The Local Operator may edit, r
 - Full project access exists only inside an ephemeral sandbox.
 - External mutations always require an explicit human preview and confirmation.
 - Review history is durable; execution environments are disposable.
-- Codex and Claude use the same provider-neutral agent runtime.
+- Native Codex, native Claude, and Effect AI typed-tool review share one provider-neutral request, result, evidence, and lifecycle contract.
 - This is a breaking replacement. Pre-stable review data and interfaces need no migration.
 
 ## User experience
@@ -30,6 +30,9 @@ Opening a CodeCommit pull request uses one full-screen review workspace:
 - File-level and whole-change suggestions also appear in a compact overview above the diff.
 - A collapsible right rail contains the durable Review Thread and live agent activity.
 - Commands, files inspected, test progress, and limitations stream live. Speculative suggestions do not.
+- A shared AWS Console URL opens through `/open-pr` for owner or approver sessions, resolves through one narrow authenticated server-side batch inside the paired workspace, and fails closed on truncated candidates or absent account identity. Ambiguous matches use authenticated browser-safe AWS account labels.
+- Review Orientation precedes findings with an overall explanation and ordered Change Cohorts and Change Layers anchored to concrete diff ranges.
+- The Review Thread shows per-run token usage and says when provider/model or cost data was not reported.
 
 The Rly diff interface must be extended to render application-owned annotation cards without exposing Pierre types through Rly's public interface.
 
@@ -40,9 +43,12 @@ The Rly diff interface must be extended to render application-owned annotation c
 - Exact head revision.
 - Selected Review Agent Profile.
 - Twenty-minute default Review Budget.
-- Network disabled status and any explicit unauthenticated endpoint allowlist.
+- Network policy: **Network blocked** for typed-tool review, or **Codex access enabled** / **Claude access enabled** through the selected sbx provider connection for native review.
 
-Advanced options remain collapsed. Reviews never start automatically after a push.
+Advanced options remain collapsed. Manual review remains the default. The current
+implementation never starts a run automatically after a push. A later Review Watch
+policy may prepare read-only runs for explicitly selected accounts, repositories,
+or authors; it grants no publication, approval, finalization, or notification authority.
 
 Explicit triggers are:
 
@@ -50,6 +56,8 @@ Explicit triggers are:
 - Re-review of a new head.
 - Revalidation of one suggestion.
 - Targeted request from the Review Thread.
+
+A synchronized pull request can be reviewed before it is connected to a release. When a canonical release exists, its identity remains part of the immutable run context; otherwise the review is scoped by workspace, provider connection, repository, pull-request ID, and exact base/head revisions.
 
 ### Suggestion actions
 
@@ -96,6 +104,13 @@ Every Review Suggestion contains:
 - Confidence and confidence reason.
 - Optional Suggested Replacement.
 - Optional Prevention Proposal.
+
+The report may also contain Review Orientation: one bounded overall summary and
+ordered Change Cohorts. Each cohort has ordered Change Layers, and every layer
+uses one stable kind in contract, data-flow, implementation, callers, tests,
+docs-release order and names concrete changed ranges. The host removes ranges that do not resolve to
+added lines in the immutable provider diff, then removes empty layers and cohorts.
+The raw provider diff remains publication truth.
 
 Suggested Replacement is a unified diff against the exact reviewed head plus a short explanation. It is inert and is never applied to the branch. Before/After previews retain explicit file and hunk boundaries when a replacement spans multiple regions, including added source text that begins with diff-marker characters.
 
@@ -185,12 +200,15 @@ Pre-existing defects and unverified concerns appear separately as non-publishabl
 ```mermaid
 flowchart LR
   UI[Control Center review workspace] --> Review[Review application module]
-  Review --> Agent["@knpkv/ai-runtime"]
-  Agent --> Model[Effect AI LanguageModel]
-  Model --> Codex["@knpkv/ai-codex"]
-  Model --> Claude["@knpkv/ai-claude"]
+  Review --> Agent["@knpkv/ai-runtime typed-tool branch"]
+  Agent --> Model[Host Effect AI LanguageModel]
   Agent --> Tools[Typed sandbox tools]
   Tools --> Sandbox[Review Sandbox module]
+  Review --> Native[Native review runner]
+  Native --> Codex[Codex CLI inside sbx]
+  Native --> Claude[Claude CLI inside sbx]
+  Codex --> Sandbox
+  Claude --> Sandbox
   Sandbox --> Checkout["@knpkv/codecommit-core checkout"]
   Review --> Store[Local review store]
   Review --> Comments["@knpkv/codecommit-core comments"]
@@ -217,7 +235,7 @@ It does not own:
 - CodeCommit.
 - Provider selection.
 
-Codex and Claude are real adapters at the LanguageModel seam. The package does not depend on their native tool behavior.
+The Effect AI branch may use Codex and Claude adapters at the host LanguageModel seam and does not depend on native tool behavior. Native pull-request review is a separate branch: the selected provider CLI executes inside sbx while preserving the same trusted-host request, result, and evidence validation contract.
 
 Each command stream returned to the model is limited to a 32 KiB UTF-8 prefix
 plus an artifact handle when more output exists, for at most 64 KiB of immediate
@@ -279,7 +297,7 @@ A Review Checkout Broker:
 
 1. Uses the connected CodeCommit profile on the host.
 2. Fetches and verifies the exact base and head commit IDs.
-3. Lets `sbx create shell --clone` copy the checkout into an isolated writable sandbox filesystem.
+3. Copies the checkout into an isolated writable sandbox filesystem: typed-tool review uses `sbx create shell --clone`; native review uses `sbx run codex --clone --detached` or `sbx run claude --clone --detached`.
 4. Removes authenticated remotes and credential configuration inside the sandbox before exposing any tools.
 5. Deletes host staging data when the scoped run ends.
 
@@ -292,17 +310,27 @@ The Review Sandbox is:
 - Ephemeral and isolated in an sbx microVM.
 - Writable inside its cloned sandbox filesystem.
 - Free of host credentials and authority-bearing Git configuration.
-- Network-disabled for the complete run.
+- Network-disabled for typed-tool review; native review can reach only its selected provider through sbx.
 - Autonomous inside its fixed policy: no command confirmations.
 - Destroyed when the run ends.
 
 The source broker checks out the immutable queued head and verifies it after
-fetch. Control Center creates a named shell sandbox from that source with
-`sbx create shell --clone`, immediately applies `sbx policy deny network`, then
-executes a credential-free initialization command inside the sandbox. That
+fetch. Control Center creates a named sandbox from that source. Typed-tool review applies
+`sbx policy deny network`; native review enables only its selected provider connection. Both paths
+execute a credential-free initialization command inside the sandbox. That
 command removes Git remotes and credential helpers and verifies the exact head
 again before any Review Sandbox tool can run.
-The name belongs to a server-private workspace namespace beginning with
+
+The loopback CodeCommit acceptance fixture changes only the source locator. Its
+repository name is the normalized provider identity persisted in CodeCommit plugin
+configuration and synchronized pull-request records. It may cross authenticated
+API and browser surfaces, but is prohibited from unauthenticated and public diagnostics.
+Its canonical `file:` URL and `CODECOMMIT_MOCK_ENDPOINT` are non-persisted,
+server-private locators prohibited from API responses, browser storage, logs, telemetry,
+and traces. Control Center accepts the pair only with
+`CODECOMMIT_MOCK_ENDPOINT`, requires an exact enabled-connection repository
+match, and never falls back to an AWS Git URL when the fixture does not match.
+The sandbox name belongs to a server-private workspace namespace beginning with
 `cc-pr-review-<compact-workspace-id>-`, where the compact ID is the canonical
 workspace UUID without hyphens. The complete name stays within sbx's
 63-character limit; callers do not construct or interpret it.
@@ -311,9 +339,11 @@ Every contained command uses `sbx exec` with an explicit work directory and a
 fixed minimal environment. Host environment inheritance and shell
 interpretation of sbx control arguments are disabled.
 
-Credentials are never injected. Tests requiring secrets or unavailable system capabilities are skipped and reported as limitations.
+Raw provider credentials are never injected. Native Codex retains only the sbx-owned user configuration required to
+select its credential proxy; reviewed source cannot change that configuration. Tests requiring secrets
+or unavailable system capabilities are skipped and reported as limitations.
 
-The AI provider process remains outside sbx. The provider-neutral tool loop
+For typed-tool review, the AI provider process remains outside sbx. The provider-neutral tool loop
 executes typed file read/list/search, arbitrary shell command, temporary patch,
 diff, artifact-page, and artifact-search operations through the Review Sandbox
 module. Command output is bounded before it reaches the model; larger accepted
@@ -324,7 +354,7 @@ handles for the owning review job after recovery; page and search operations
 must then present the handle's original attempt, command, and stream identity.
 Both retained streams for one command commit atomically. An attempt retains at
 most 64 artifacts and 64 MiB, while any one pathological stream above 16 MiB is rejected.
-Provider CLIs never receive direct host or sbx control access. File reads and
+Native provider CLIs execute inside sbx and never receive direct host or sbx control access. File reads and
 listings preserve missing-path failures, and temporary diffs include tracked,
 staged, unstaged, and non-ignored untracked changes.
 
@@ -439,3 +469,5 @@ environment values, and provider-native references remain server-only.
 - [0009 — Use a provider-neutral agent tool loop](./adr/0009-use-a-provider-neutral-agent-tool-loop.md)
 - [0010 — Test agent review through its public seams](./adr/0010-test-agent-review-through-its-public-seams.md)
 - [0011 — Replace the pre-stable review model without migration](./adr/0011-replace-the-pre-stable-review-model-without-migration.md)
+- [0012 — Own managed review in Control Center](./adr/0012-own-managed-review-in-control-center.md)
+- [0013 — Auto-prepare watched reviews without write authority](./adr/0013-auto-prepare-watched-reviews-without-write-authority.md)

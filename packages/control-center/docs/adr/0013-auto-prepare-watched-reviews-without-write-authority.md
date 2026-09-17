@@ -1,0 +1,3 @@
+# Auto-prepare watched reviews without write authority
+
+A Review Watch may start a read-only Managed Review for a matching new pull request or head after a quiet period, coalescing newer heads so only the latest exact revision runs. Pull requests opened manually continue to ask before re-reviewing a changed head. Automatic preparation grants no authority to publish findings, post a secure-review summary, approve in CodeCommit, or notify an author; those remain separately previewed and confirmed actions. This replaces the blanket ban on review-after-push automation with an opt-in scope rule that cannot write externally.

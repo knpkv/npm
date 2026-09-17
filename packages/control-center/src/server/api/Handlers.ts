@@ -1,3 +1,5 @@
+import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
+import * as Context from "effect/Context"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -13,6 +15,11 @@ import { HttpApiBuilder, HttpApiSecurity } from "effect/unstable/httpapi"
 import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import type {
+  CodeCommitPullRequestCandidate,
+  CodeCommitPullRequestResolution,
+  WorkspaceEntityInspection
+} from "../../api/deliveryGraph.js"
+import type {
   ConflictApiError,
   ForbiddenApiError,
   InvalidRequestApiError,
@@ -20,7 +27,7 @@ import type {
   UnauthorizedApiError
 } from "../../api/errors.js"
 import { SafeMediaContentType } from "../../api/media.js"
-import { CsrfToken, CurrentSession, PairingCode } from "../../api/session.js"
+import { CsrfToken, CurrentSession, CurrentSessionToken, PairingCode, SessionToken } from "../../api/session.js"
 import { WorkspacePresentationReadModel } from "../../api/workspaceSettings.js"
 import { PrReviewSuggestionRevisionPageSize } from "../../domain/prReviewRevision.js"
 import type { TimelineActorKind } from "../../domain/timeline.js"
@@ -80,8 +87,18 @@ import { LiveStreamAdmission } from "./LiveStreamAdmission.js"
 
 const sessionCookie = HttpApiSecurity.apiKey({ in: "cookie", key: "cc_session" })
 
-const currentSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) =>
-  Redacted.make(request.cookies.cc_session ?? "")
+const currentSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) => {
+  const raw = request.cookies.cc_session
+  return raw === undefined
+    ? Option.none<Redacted.Redacted<SessionToken>>()
+    : Schema.decodeUnknownOption(SessionToken)(raw).pipe(Option.map(Redacted.make))
+}
+
+const requiredSessionToken = (request: { readonly cookies: Readonly<Record<string, string | undefined>> }) =>
+  Option.match(currentSessionToken(request), {
+    onNone: () => Effect.flatMap(unauthorizedApiError, Effect.fail),
+    onSome: Effect.succeed
+  })
 
 const SESSION_REAUTHENTICATION_INTERVAL = Duration.seconds(25)
 const INITIAL_AGENT_THREAD_CURSOR = ReleaseAgentThreadCursor.make(0)
@@ -168,7 +185,7 @@ const appendTimelineExportHeaders = (
 
 const revalidateSession = (
   auth: Auth["Service"],
-  token: Redacted.Redacted<string>,
+  token: Redacted.Redacted<SessionToken>,
   expected: CurrentSession["Service"]
 ): Effect.Effect<boolean> =>
   auth.authenticate(token).pipe(
@@ -189,7 +206,7 @@ const revalidateSession = (
 
 const awaitSessionEnd = (
   auth: Auth["Service"],
-  token: Redacted.Redacted<string>,
+  token: Redacted.Redacted<SessionToken>,
   expected: CurrentSession["Service"]
 ): Effect.Effect<void> =>
   Effect.sleep(SESSION_REAUTHENTICATION_INTERVAL).pipe(
@@ -231,8 +248,9 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
           ))
         .handle("current", ({ request }) =>
           Effect.gen(function*() {
+            const token = yield* requiredSessionToken(request)
             const recovered = yield* mapAuthenticationFailures(
-              auth.recoverCsrfToken(currentSessionToken(request))
+              auth.recoverCsrfToken(token)
             )
             return {
               csrfToken: CsrfToken.make(Redacted.value(recovered.csrfToken)),
@@ -241,16 +259,16 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
           }))
         .handle("list", ({ request }) =>
           Effect.gen(function*() {
-            return yield* mapAuthenticationFailures(
-              auth.listSessions(currentSessionToken(request))
-            )
+            const token = yield* requiredSessionToken(request)
+            return yield* mapAuthenticationFailures(auth.listSessions(token))
           }))
         .handle("issueBrowserPairingCode", ({ payload, request }) =>
           lifecycle.runMutation(
             Effect.gen(function*() {
               const session = yield* CurrentSession
+              const token = yield* requiredSessionToken(request)
               const issued = yield* mapAuthenticationFailures(
-                auth.issuePairingCode(currentSessionToken(request), {
+                auth.issuePairingCode(token, {
                   actor: session.actor,
                   permission: payload.permission
                 })
@@ -271,13 +289,13 @@ export const sessionHandlersLayer = HttpApiBuilder.group(
           ))
         .handle("revoke", ({ params, request }) =>
           Effect.gen(function*() {
-            yield* mapAuthenticationFailures(
-              auth.revokeSession(currentSessionToken(request), params.sessionId)
-            )
+            const token = yield* requiredSessionToken(request)
+            return yield* mapAuthenticationFailures(auth.revokeSession(token, params.sessionId))
           }))
         .handle("logout", ({ request }) =>
           Effect.gen(function*() {
-            yield* mapAuthenticationFailures(auth.logout(currentSessionToken(request)))
+            const token = yield* requiredSessionToken(request)
+            yield* mapAuthenticationFailures(auth.logout(token))
             yield* HttpApiBuilder.securitySetCookie(sessionCookie, "", {
               ...cookie,
               maxAge: 0
@@ -987,6 +1005,68 @@ export const timelineHandlersLayer = HttpApiBuilder.group(
     })
 )
 
+const legacyPersistedCodeCommitSourceUrl = (
+  locator: CodeCommitDomain.CodeCommitPullRequestLocator
+): string =>
+  `https://${locator.region}.console.aws.amazon.com/codesuite/codecommit/repositories/${locator.repositoryName}/pull-requests/${locator.pullRequestId}?region=${locator.region}`
+
+const codeCommitInspectionMatches = (
+  locator: CodeCommitDomain.CodeCommitPullRequestLocator,
+  inspection: WorkspaceEntityInspection
+): boolean => {
+  if (
+    inspection.source.providerId !== "codecommit" ||
+    inspection.source.sourceUrl === null ||
+    String(inspection.source.vendorImmutableId) !== String(locator.pullRequestId) ||
+    inspection.entity.projection.entityType !== "pull-request" ||
+    inspection.entity.projection.details._tag !== "pull-request" ||
+    inspection.entity.projection.details.repository !== locator.repositoryName
+  ) return false
+  const persistedLocator = Option.getOrNull(
+    Schema.decodeUnknownOption(CodeCommitDomain.CodeCommitPullRequestUrl)(inspection.source.sourceUrl.href)
+  )
+  return persistedLocator === null
+    ? inspection.source.sourceUrl.href === legacyPersistedCodeCommitSourceUrl(locator)
+    : persistedLocator.region === locator.region &&
+      persistedLocator.repositoryName === locator.repositoryName &&
+      persistedLocator.pullRequestId === locator.pullRequestId
+}
+
+const codeCommitAccountLabel = (
+  pluginConnectionId: string,
+  connections: ReadonlyArray<{
+    readonly pluginConnectionId: string
+    readonly providerId: string
+    readonly providerAccountId: string | null
+  }>,
+  accounts: ReadonlyArray<{
+    readonly providerAccountId: string
+    readonly providerFamily: string
+    readonly displayName: string
+    readonly providerImmutableId: string
+  }>
+): string | null => {
+  const connection = connections.find((candidate) =>
+    candidate.pluginConnectionId === pluginConnectionId && candidate.providerId === "codecommit"
+  )
+  if (connection?.providerAccountId === null || connection?.providerAccountId === undefined) return null
+  const account = accounts.find((candidate) => candidate.providerAccountId === connection.providerAccountId)
+  return account?.providerFamily === "aws"
+    ? `${account.displayName} · AWS ${account.providerImmutableId}`
+    : null
+}
+
+const codeCommitResolution = (
+  candidates: ReadonlyArray<CodeCommitPullRequestCandidate>
+): CodeCommitPullRequestResolution => {
+  const onlyCandidate = candidates.length === 1 ? candidates[0] : undefined
+  return onlyCandidate !== undefined
+    ? { _tag: "found", candidate: onlyCandidate }
+    : candidates.length > 1
+    ? { _tag: "ambiguous", candidates }
+    : { _tag: "not-found", indexTruncated: false }
+}
+
 /** Authenticated workspace-scoped delivery relationship and evidence handlers. */
 export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
   ControlCenterApi,
@@ -994,9 +1074,71 @@ export const deliveryGraphHandlersLayer = HttpApiBuilder.group(
   (handlers) =>
     Effect.gen(function*() {
       const inspection = yield* DeliveryGraphInspection
+      const pluginAdministration = Option.getOrUndefined(
+        yield* Effect.serviceOption(PluginAdministration)
+      )
       const repairProposals = yield* RelationshipRepairProposals
       const clockifyActions = Option.getOrUndefined(yield* Effect.serviceOption(ClockifyActionSubmissions))
       return handlers
+        .handle("resolveCodeCommitPullRequest", ({ payload }) =>
+          Effect.gen(function*() {
+            const session = yield* CurrentSession
+            yield* requireWorkspaceRead(session)
+            const locator = payload
+            if (inspection.codeCommitPullRequestCandidates === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            const candidateSet = yield* inspection.codeCommitPullRequestCandidates({
+              workspaceId: session.workspaceId,
+              region: locator.region,
+              repositoryName: locator.repositoryName,
+              pullRequestId: locator.pullRequestId
+            }).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+            if (candidateSet.truncated) {
+              return { _tag: "not-found", indexTruncated: true } satisfies CodeCommitPullRequestResolution
+            }
+            const inspections = yield* Effect.forEach(
+              candidateSet.entityIds,
+              (entityId) => inspection.workspaceEntity({ workspaceId: session.workspaceId, entityId }),
+              { concurrency: 16 }
+            ).pipe(Effect.catchTags({
+              ApplicationResourceNotFound: mapApplicationNotFound,
+              ApplicationServiceUnavailable: mapApplicationUnavailable
+            }))
+            const matches = inspections.filter((candidate) => codeCommitInspectionMatches(locator, candidate))
+            if (matches.length === 0) return codeCommitResolution([])
+            if (pluginAdministration === undefined) {
+              return yield* Effect.flatMap(serviceUnavailableApiError(), Effect.fail)
+            }
+            const connections = yield* pluginAdministration.list(session.workspaceId).pipe(
+              Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+            )
+            const accounts = pluginAdministration.accounts === undefined
+              ? []
+              : yield* pluginAdministration.accounts(session.workspaceId).pipe(
+                Effect.catchTag("ApplicationServiceUnavailable", mapApplicationUnavailable)
+              )
+            const candidates = matches.flatMap((candidate) => {
+              const accountLabel = codeCommitAccountLabel(
+                candidate.source.pluginConnectionId,
+                connections,
+                accounts
+              )
+              return accountLabel === null
+                ? []
+                : [{
+                  entityId: candidate.entity.projection.entityId,
+                  accountLabel,
+                  title: candidate.entity.projection.title
+                }]
+            })
+            return candidates.length === matches.length
+              ? codeCommitResolution(candidates)
+              : { _tag: "account-identity-unavailable" } satisfies CodeCommitPullRequestResolution
+          }))
         .handle("workspaceEntity", ({ params }) =>
           Effect.gen(function*() {
             const session = yield* CurrentSession
@@ -1627,9 +1769,21 @@ export const liveEventHandlersLayer = HttpApiBuilder.group(
               "x-accel-buffering": "no"
             }))
           )
-          const token = currentSessionToken(request)
+          const providedToken = yield* Effect.contextWith(
+            (context: Context.Context<never>): Effect.Effect<
+              Option.Option<Redacted.Redacted<SessionToken>>,
+              never,
+              never
+            > => Effect.succeed(Context.getOption(context, CurrentSessionToken))
+          )
+          const token = Option.isSome(providedToken) ? providedToken : currentSessionToken(request)
+          const reauthentication = Option.match(token, {
+            // Direct handler tests bypass cookie middleware and omit the transport cookie.
+            onNone: () => Effect.never,
+            onSome: (sessionToken) => awaitSessionEnd(auth, sessionToken, session)
+          })
           return eventStream.pipe(
-            Stream.interruptWhen(Effect.race(awaitSessionEnd(auth, token, session), lifecycle.awaitDrain))
+            Stream.interruptWhen(Effect.race(reauthentication, lifecycle.awaitDrain))
           )
         }))
     })

@@ -17,6 +17,7 @@ import * as Q from "./queries.js"
 
 export { CachedPullRequest, type SearchResult, UpsertInput } from "./internal.js"
 export type { CachedPullRequest as CachedPullRequestType } from "./internal.js"
+export { PullRequestAmbiguityError } from "./queries.js"
 
 const makePullRequestRepo = Effect.gen(function*() {
   const sql = yield* SqlClient.SqlClient
@@ -27,6 +28,7 @@ const makePullRequestRepo = Effect.gen(function*() {
     findAll: Q.findAll(sql),
     findMissingDiffStats: Q.findMissingDiffStats(sql),
     findByAccountAndId: Q.findByAccountAndId(sql),
+    findByCoordinates: Q.findByCoordinates(sql),
     search: Q.search(sql),
     findStaleOpen: Q.findStaleOpen(sql),
     findOpenInRange: Q.findOpenInRange(sql),

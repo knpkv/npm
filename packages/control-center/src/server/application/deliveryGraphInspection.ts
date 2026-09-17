@@ -239,6 +239,21 @@ export const makeDeliveryGraphInspection = Effect.gen(function*() {
   })
 
   return DeliveryGraphInspection.of({
+    codeCommitPullRequestCandidates: Effect.fn(
+      "DeliveryGraphInspection.codeCommitPullRequestCandidates"
+    )(function*(input) {
+      const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {
+        _tag: "codeCommitPullRequestCandidates",
+        region: input.region,
+        repositoryName: input.repositoryName,
+        pullRequestId: input.pullRequestId,
+        limit: 128
+      }))
+      if (result._tag !== "codeCommitPullRequestCandidates") {
+        return yield* unexpectedResult("CodeCommit pull request candidates")
+      }
+      return result.value
+    }),
     workspaceEntity,
     workspaceEntityProjections: Effect.fn("DeliveryGraphInspection.workspaceEntityProjections")(function*(input) {
       const result = yield* mapPersistenceRead(persistence.deliveryGraph.read(input.workspaceId, {

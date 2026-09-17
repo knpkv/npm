@@ -1,5 +1,56 @@
 # @knpkv/codecommit
 
+## 0.12.0
+
+### Minor Changes
+
+- [#410](https://github.com/knpkv/npm/pull/410) [`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866) Thanks [@konopkov](https://github.com/konopkov)! - Add Claude-native Relay review profiles and persist Relay settings immediately after save.
+
+### Patch Changes
+
+- Updated dependencies [[`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866), [`316eff1`](https://github.com/knpkv/npm/commit/316eff159bc44fa46d5d1ec68d4515990fb3d9a1)]:
+  - @knpkv/codecommit-core@0.16.0
+  - @knpkv/codecommit-web@0.16.0
+
+## 0.11.1
+
+### Patch Changes
+
+- Updated dependencies [[`dc18f2c`](https://github.com/knpkv/npm/commit/dc18f2c7149cdf6a0b4eee1461d41170311dd5fc), [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead)]:
+  - @knpkv/codecommit-core@0.15.0
+  - @knpkv/codecommit-web@0.15.0
+
+## 0.11.0
+
+### Minor Changes
+
+- [#380](https://github.com/knpkv/npm/pull/380) [`8caea60`](https://github.com/knpkv/npm/commit/8caea601c147b8a1dd0ea9f20155f4e76ff6351e) Thanks [@konopkov](https://github.com/konopkov)! - Open shared CodeCommit pull-request links as durable, release-independent Control Center reviews, show stale-head and per-run usage state, explain validated changes as ordered cohorts and layers, and route both applications through a loopback-only deterministic CodeCommit mock for local review-cycle testing.
+
+- [#383](https://github.com/knpkv/npm/pull/383) [`7c982c9`](https://github.com/knpkv/npm/commit/7c982c9f0ec56a65adff1275182a30f43f0eb0ee) Thanks [@konopkov](https://github.com/konopkov)! - Add `codecommit pr open`, which resolves the open PR for the branch checked out
+  in a working directory and opens its console page.
+
+  The remote names the repository and usually the region. An embedded
+  git-remote-codecommit profile narrows the scan; otherwise ambiguous matches
+  across accounts and incomplete scans are rejected. Regionless helper remotes
+  must resolve to one configured region. Exact-repository fetching avoids losing
+  the result to an unrelated repository failure, and repository absence is
+  treated as a conclusive empty result. `--json` and `--url` print the
+  resolution instead of opening it.
+
+  Adds `collectOpen` to the exported `FilterServiceContract` — the preset-free
+  counterpart to `collect`, narrowed only by repo/author — and exports
+  `codecommitPullRequestConsoleUrl`, a partition-aware PR console link builder.
+  `AwsClient.getPullRequests` now accepts an optional exact repository name.
+
+- [#387](https://github.com/knpkv/npm/pull/387) [`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa) Thanks [@konopkov](https://github.com/konopkov)! - Make Relay profiles own the review kind, skills, provider harness, and model across settings, execution, and restored sessions.
+
+### Patch Changes
+
+- Updated dependencies [[`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa), [`6d42c7c`](https://github.com/knpkv/npm/commit/6d42c7ce69e8b9116df409ec79579bf45d380fad), [`8caea60`](https://github.com/knpkv/npm/commit/8caea601c147b8a1dd0ea9f20155f4e76ff6351e), [`7c982c9`](https://github.com/knpkv/npm/commit/7c982c9f0ec56a65adff1275182a30f43f0eb0ee), [`94ee004`](https://github.com/knpkv/npm/commit/94ee00487f0595cdc16fd8f1332689eb39ecfaf2), [`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa)]:
+  - @knpkv/ai-codex@0.4.0
+  - @knpkv/codecommit-core@0.14.0
+  - @knpkv/codecommit-web@0.14.0
+
 ## 0.10.0
 
 ### Minor Changes

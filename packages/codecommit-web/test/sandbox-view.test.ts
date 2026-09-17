@@ -26,6 +26,7 @@ const sandbox = (status: "running" | "stopped") => ({
   logs: "[09:30] workspace ready",
   port: status === "running" ? 8080 : null,
   pullRequestId: "42",
+  region: "eu-west-1",
   repositoryName: "payments-api",
   sourceBranch: "feature/safe-retries",
   status,
@@ -41,6 +42,7 @@ const renderView = async (status: "running" | "stopped") => {
   }
   const onViewChange = vi.fn()
   const action = vi.fn()
+  const navigate = vi.fn()
   const host = document.createElement("div")
   root = createRoot(host)
   await act(async () =>
@@ -52,11 +54,11 @@ const renderView = async (status: "running" | "stopped") => {
       stopSandbox: action,
       restartSandbox: action,
       deleteSandbox: action,
-      navigate: vi.fn(),
+      navigate,
       renderCredentials: () => null
     }))
   )
-  return { host, onViewChange }
+  return { host, navigate, onViewChange }
 }
 
 const buttonNamed = (host: HTMLElement, name: string): HTMLButtonElement | undefined =>
@@ -86,5 +88,13 @@ describe("SandboxView", () => {
     expect(buttonNamed(host, "Logs")?.getAttribute("aria-pressed")).toBe("true")
     expect(host.querySelector("[role=\"log\"]")?.textContent).toContain("workspace ready")
     expect(onViewChange).toHaveBeenCalledWith("logs")
+  })
+
+  it("returns to the sandbox's exact pull-request coordinates", async () => {
+    const { host, navigate } = await renderView("running")
+    await act(async () => buttonNamed(host, "Back to PR")?.click())
+    expect(navigate).toHaveBeenCalledWith(
+      "/accounts/111111111111/prs/42?repository=payments-api&region=eu-west-1"
+    )
   })
 })

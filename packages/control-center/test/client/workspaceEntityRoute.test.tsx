@@ -1569,13 +1569,15 @@ describe("canonical workspace entity", () => {
     await act(async () => reviewButton.click())
     expect(host.textContent).toContain("Review this exact head")
     expect(host.textContent).toContain(pullRequestReviewSubject.headRevision)
-    expect(host.textContent).toContain("Full-project review · openai-compatible · review-model")
+    expect(host.textContent).toContain("Agentopenai-compatible")
+    expect(host.textContent).toContain("Modelreview-model")
+    expect(host.textContent).toContain("ScopeFull project")
     expect(host.textContent).toContain("20 minutes")
     expect(host.textContent).toContain("Network blocked")
     expect(host.textContent).toContain("sbx")
     expect(onReviewStart).not.toHaveBeenCalled()
     const startButton = [...host.querySelectorAll<HTMLButtonElement>("button")].find(
-      (button) => button.textContent === "Start full review"
+      (button) => button.textContent === "Start full-project review"
     )
     if (startButton === undefined) throw new Error("Expected review confirmation")
     await act(async () => startButton.click())
@@ -1596,7 +1598,7 @@ describe("canonical workspace entity", () => {
     expect(host.textContent).toContain("src/capture.ts:42")
     expect(host.textContent).toContain("Prevention proposal · separate review required")
     expect(host.textContent).toContain(
-      "Agent advice only. Approve a finding to post it to CodeCommit, or dismiss it locally."
+      "Agent advice only. Preview and confirm a finding to post it to CodeCommit, or dismiss it locally."
     )
     expect(host.textContent).toContain("Human review requested")
   })
@@ -1727,7 +1729,7 @@ describe("canonical workspace entity", () => {
     if (publish === undefined) throw new Error("Expected the report lifecycle transition")
     await act(async () => publish.click())
 
-    const published = host.querySelector<HTMLButtonElement>("[aria-label='Filter suggestions by published state']")
+    const published = host.querySelector<HTMLButtonElement>("[aria-label='published']")
     expect(published).not.toBeNull()
     await act(async () => published?.click())
     expect(semanticFindings.textContent).toContain(editedTitle)

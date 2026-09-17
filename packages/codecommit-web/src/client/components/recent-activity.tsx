@@ -14,6 +14,7 @@ import {
 } from "lucide-react"
 import { Link } from "react-router"
 import type { NotificationItem } from "../atoms/app.js"
+import { codeCommitPullRequestHref } from "../codecommit-route.js"
 import styles from "./review-queue.module.css"
 
 type ActivityTone = "neutral" | "positive" | "caution" | "critical" | "progress"
@@ -62,7 +63,7 @@ interface RecentActivityProps {
 }
 
 export function RecentActivity({ notifications }: RecentActivityProps) {
-  const prItems = notifications.filter((notification) => notification.pullRequestId).slice(0, 5)
+  const prItems = notifications.filter((notification) => notification.pullRequestId !== "").slice(0, 5)
   if (prItems.length === 0) return null
 
   const now = new Date()
@@ -87,8 +88,16 @@ export function RecentActivity({ notifications }: RecentActivityProps) {
           const presentation = iconMap[notification.type] ?? defaultIcon
           const Icon = presentation.icon
           const href =
-            notification.awsAccountId && notification.pullRequestId
-              ? `/accounts/${encodeURIComponent(notification.awsAccountId)}/prs/${notification.pullRequestId}`
+            notification.awsAccountId !== "" &&
+            notification.pullRequestId !== "" &&
+            notification.repositoryName !== "" &&
+            notification.accountRegion !== ""
+              ? codeCommitPullRequestHref(
+                  notification.awsAccountId,
+                  notification.pullRequestId,
+                  notification.repositoryName,
+                  notification.accountRegion
+                )
               : undefined
           const content = (
             <>
@@ -101,13 +110,15 @@ export function RecentActivity({ notifications }: RecentActivityProps) {
                 </Text>
                 <Text tone="tertiary" variant="meta">
                   {DateUtils.formatRelativeTime(new Date(notification.createdAt), now)}
-                  {notification.profile ? ` · ${notification.profile}` : ""}
+                  {notification.profile !== undefined && notification.profile !== ""
+                    ? ` · ${notification.profile}`
+                    : ""}
                 </Text>
               </span>
             </>
           )
 
-          return href ? (
+          return href !== undefined ? (
             <Link className={styles.activityItem} key={notification.id} to={href}>
               {content}
             </Link>

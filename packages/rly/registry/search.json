@@ -789,6 +789,42 @@
     },
     {
       "capabilities": [
+        "agent",
+        "conversation",
+        "overlay",
+        "select"
+      ],
+      "category": "pattern",
+      "importPath": "@knpkv/rly/patterns",
+      "name": "RelayDock",
+      "states": [
+        "collapsed",
+        "default",
+        "empty",
+        "error",
+        "loading",
+        "ready",
+        "unavailable"
+      ],
+      "terms": [
+        "agent",
+        "collapsed",
+        "conversation",
+        "desktopPresentation",
+        "empty",
+        "error",
+        "loading",
+        "overlay",
+        "pattern",
+        "rail",
+        "ready",
+        "relaydock",
+        "select",
+        "unavailable"
+      ]
+    },
+    {
+      "capabilities": [
         "inspect",
         "release"
       ],

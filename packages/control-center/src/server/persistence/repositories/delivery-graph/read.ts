@@ -9,8 +9,8 @@ import * as Schema from "effect/Schema"
 
 import { derivePersonInitials, PersonAvatar, PersonSourceIdentity, Role } from "../../../../domain/actors.js"
 import { type DeliveryNode, type DeliveryRelationship, LedgerRevision } from "../../../../domain/deliveryGraph.js"
-import type { EntityId, EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
-import { EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
+import type { EvidenceId, GraphNodeId, WorkspaceId } from "../../../../domain/identifiers.js"
+import { EntityId, EvidenceClaimId, PersonId, RelationshipId, ReleaseId } from "../../../../domain/identifiers.js"
 import { Revision } from "../../../../domain/sourceRevision.js"
 import { Database } from "../../Database.js"
 import { RecordNotFoundError } from "../../errors.js"
@@ -767,6 +767,42 @@ export const makeDeliveryGraphReader = Effect.gen(function*() {
             releaseId: query.releaseId,
             truncated: identities.length > query.limit,
             relationships
+          }
+        })
+      }
+      case "codeCommitPullRequestCandidates": {
+        const rows = yield* sql`SELECT projection.entity_id AS entityId
+          FROM entity_projection_revisions projection
+          INNER JOIN entities entity
+            ON entity.workspace_id = projection.workspace_id
+           AND entity.entity_id = projection.entity_id
+          INNER JOIN entity_revisions source
+            ON source.workspace_id = entity.workspace_id
+           AND source.entity_id = entity.entity_id
+           AND source.revision = entity.current_revision
+          WHERE projection.workspace_id = ${workspaceId}
+            AND projection.entity_state = 'present'
+            AND projection.source_entity_revision = entity.current_revision
+            AND entity.entity_type = 'pull-request'
+            AND entity.provider_id = 'codecommit'
+            AND source.source_url LIKE ${`https://${query.region}.%`}
+            AND projection.display_key = ${query.pullRequestId}
+            AND json_extract(projection.extension_json, '$.repository') = ${query.repositoryName}
+            AND NOT EXISTS (
+              SELECT 1
+              FROM entity_projection_revisions newer
+              WHERE newer.workspace_id = projection.workspace_id
+                AND newer.entity_id = projection.entity_id
+                AND newer.projection_revision > projection.projection_revision
+            )
+          ORDER BY projection.entity_id
+          LIMIT ${query.limit + 1}`
+        const decoded = yield* decodeRows(Schema.Struct({ entityId: EntityId }), rows)
+        return DeliveryGraphReadResult.make({
+          _tag: "codeCommitPullRequestCandidates",
+          value: {
+            entityIds: decoded.slice(0, query.limit).map(({ entityId }) => entityId),
+            truncated: decoded.length > query.limit
           }
         })
       }

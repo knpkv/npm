@@ -2,7 +2,7 @@
  * Shared helpers, parameter types, and transport schemas for all AwsClient
  * method files.
  *
- * Provides {@link withAwsContext} (credential acquisition + Layer provision +
+ * Provides {@link withAwsContext} (credential acquisition + service provision +
  * throttle-retry + timeout), {@link throttleRetry} (exponential backoff on
  * ThrottlingException), {@link normalizeAuthor} (ARN → human name), and
  * {@link PullRequestDetail} (internal transport type for single-PR fetch
@@ -25,13 +25,12 @@
  *
  * @internal
  */
-import { fromNodeProviderChain } from "@aws-sdk/credential-providers"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as DistilledRegion from "@distilled.cloud/aws/Region"
-import { Duration, Effect, Layer, Schedule, Schema } from "effect"
+import { Duration, Effect, Schedule, Schema } from "effect"
 import * as Predicate from "effect/Predicate"
 import { HttpClient } from "effect/unstable/http"
-import { AwsClientConfig, type AwsClientConfigContract } from "../AwsClientConfig.js"
+import { AwsClientConfig, type AwsClientConfigContract, type AwsCredentialIdentity } from "../AwsClientConfig.js"
 import type { Account, AwsProfileName, AwsRegion } from "../Domain.js"
 import { AwsApiError, AwsCredentialError } from "../Errors.js"
 
@@ -58,22 +57,6 @@ export const isThrottlingError = <UnparsedInput>(error: UnparsedInput): boolean 
     || message.includes("rate exceed")
     || message.includes("too many requests")
 }
-
-interface AwsCredentialIdentity {
-  readonly accessKeyId: string
-  readonly secretAccessKey: string
-  readonly sessionToken?: string
-  readonly expiration?: Date
-}
-
-const decodeAwsCredentialIdentity = (
-  identity: Awaited<ReturnType<ReturnType<typeof fromNodeProviderChain>>>
-): AwsCredentialIdentity => ({
-  accessKeyId: identity.accessKeyId,
-  secretAccessKey: identity.secretAccessKey,
-  ...(!(identity.sessionToken === undefined) && { sessionToken: identity.sessionToken }),
-  ...(!(identity.expiration === undefined) && { expiration: identity.expiration })
-})
 
 type AwsRuntimeEnv =
   | AwsClientConfig
@@ -124,8 +107,7 @@ export const acquireCredentials = (
 ): Effect.Effect<AwsCredentialIdentity, AwsCredentialError, AwsClientConfig> =>
   Effect.flatMap(AwsClientConfig, (config) =>
     Effect.tryPromise({
-      try: async () =>
-        decodeAwsCredentialIdentity(await fromNodeProviderChain(profile === "default" ? {} : { profile })()),
+      try: () => config.credentialProvider({ profile, region }),
       catch: (cause) => new AwsCredentialError({ profile, region, cause })
     }).pipe(
       Effect.timeout(config.credentialTimeout),
@@ -161,7 +143,7 @@ export const applyAwsOperationTimeout = <A, E, R>(
     )
 
 /**
- * Shared combinator: acquire credentials → build Layer → provide → optional retry → timeout.
+ * Shared combinator: acquire credentials → provide AWS services → optional retry → timeout.
  * Eliminates boilerplate repeated across all AwsClient method files.
  */
 export const withAwsContext = <A, E>(
@@ -180,14 +162,14 @@ export const withAwsContext = <A, E>(
       ? config.streamTimeout
       : config.operationTimeout
 
-    const provided = Effect.provide(
-      effect,
-      Layer.mergeAll(
-        DistilledCredentials.fromCredentials(credentials, account.region),
-        Layer.succeed(HttpClient.HttpClient, httpClient),
-        Layer.succeed(DistilledRegion.Region, Effect.succeed(account.region)),
-        Layer.succeed(AwsClientConfig, config)
-      )
+    const provided = effect.pipe(
+      Effect.provideService(
+        DistilledCredentials.Credentials,
+        Effect.succeed(DistilledCredentials.fromAwsCredentialIdentity(credentials, account.region))
+      ),
+      Effect.provideService(HttpClient.HttpClient, httpClient),
+      Effect.provideService(DistilledRegion.Region, Effect.succeed(account.region)),
+      Effect.provideService(AwsClientConfig, config)
     )
     const attempted = options?.retry === false ? provided : throttleRetry(provided)
 

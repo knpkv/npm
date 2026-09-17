@@ -26,7 +26,7 @@ const VARIABLE_DEFAULTS = {
   background: "var(--rly-color-surface-1)",
   foreground: "var(--rly-color-text-1)",
   "token-changed": "var(--rly-color-text-1)",
-  "token-comment": "var(--rly-color-text-3)",
+  "token-comment": "var(--rly-color-text-2)",
   "token-constant": "var(--rly-color-text-1)",
   "token-deleted": "var(--rly-color-text-1)",
   "token-function": "var(--rly-color-text-1)",

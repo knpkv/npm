@@ -3579,6 +3579,206 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
+    import { WorkStore } from "@knpkv/herdr-work"
+    import { Effect } from "effect"
+    const program = Effect.gen(function*() {
+      const beforeUse = yield* WorkStore.open(path)
+      inspect(beforeUse.path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => beforeUse.close()))
+      const noFinalizer = yield* WorkStore.open(otherPath)
+      noFinalizer.close()
+    })
+  `,
+  expected: 2,
+  filePath: "packages/herdr-coordinator/test/eslint-work-store-cleanup-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "../src/index.js"
+    import { Effect } from "effect"
+    const releaseOnly = Effect.acquireRelease(WorkStore.open(path), () => Effect.void)
+    const useRelease = Effect.acquireUseRelease(
+      WorkStore.open(otherPath),
+      (store) => inspect(store.path),
+      (_store) => Effect.void
+    )
+    const conditional = Effect.acquireRelease(
+      WorkStore.open(conditionalPath),
+      (store) => Effect.sync(() => false ? store.close() : undefined)
+    )
+    const nested = Effect.acquireRelease(
+      WorkStore.open(nestedPath),
+      (store) => Effect.sync(() => () => store.close())
+    )
+    const branchOnly = Effect.acquireRelease(
+      WorkStore.open(branchPath),
+      (store) => Effect.sync(() => { if (false) store.close() })
+    )
+  `,
+  expected: 5,
+  filePath: "packages/herdr-work/test/eslint-work-store-cleanup-noop-release-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "@knpkv/herdr-work"
+    import { Effect } from "effect"
+    const program = Effect.gen(function*() {
+      const invalid = yield* WorkStore.open(path), service = yield* makeWorkService(invalid)
+      yield* Effect.addFinalizer(() => Effect.sync(() => invalid.close()))
+      const harmless = 1, valid = yield* WorkStore.open(otherPath)
+      yield* Effect.addFinalizer(() => Effect.sync(() => valid.close()))
+    })
+  `,
+  expected: 1,
+  filePath: "packages/herdr-coordinator/test/eslint-work-store-cleanup-declarators-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { Effect } from "effect"
+    const service: OrchestratorService = {
+      queue: (id) => appendTransition(id, "queued"),
+      request: function(id) { return loadRequest(id) },
+      submit
+    }
+  `,
+  expected: 3,
+  filePath: "packages/herdr-coordinator/src/orchestrator.ts",
+  ruleId: "local-rules/require-named-orchestrator-service-effects"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { Effect } from "effect"
+    let queue = Effect.fn("Orchestrator.queue")((id) => appendTransition(id, "queued"))
+    queue = (id) => appendTransition(id, "queued")
+    const service: OrchestratorService = { queue }
+  `,
+  expected: 1,
+  filePath: "packages/herdr-coordinator/src/orchestrator.ts",
+  ruleId: "local-rules/require-named-orchestrator-service-effects"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { Effect } from "effect"
+    const queue = Effect.fn("Orchestrator.queue")((id) => appendTransition(id, "queued"))
+    const submit = Effect.fn("Orchestrator.submit")((command, key) => submitInternal(command, key))
+    const service: OrchestratorService = {
+      queue,
+      request: Effect.fn("Orchestrator.request")((id) => loadRequest(id)),
+      submit
+    }
+  `,
+  expected: 0,
+  filePath: "packages/herdr-coordinator/src/orchestrator.ts",
+  ruleId: "local-rules/require-named-orchestrator-service-effects"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "@knpkv/herdr-work"
+    import { Effect } from "effect"
+    const program = Effect.gen(function*() {
+      const conditional = yield* WorkStore.open(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => false ? conditional.close() : undefined))
+      const nested = yield* WorkStore.open(otherPath)
+      yield* Effect.addFinalizer(() => Effect.sync(() => () => nested.close()))
+    })
+  `,
+  expected: 2,
+  filePath: "packages/herdr-coordinator/test/eslint-work-store-cleanup-dead-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "../src/index.js"
+    import { Effect } from "effect"
+    const program = Effect.gen(function*() {
+      const store = yield* WorkStore.open(path)
+      inspect(store.path)
+      store.close()
+    })
+  `,
+  expected: 1,
+  filePath: "packages/herdr-work/test/eslint-work-store-cleanup-relative-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "../src/index.js"
+    import { Effect } from "effect"
+    const assigned = Effect.gen(function*() {
+      let store
+      store = yield* WorkStore.open(path)
+      yield* WorkStore.open(otherPath)
+    })
+    const returned = Effect.gen(function*() {
+      return yield* WorkStore.open(path)
+    })
+  `,
+  expected: 3,
+  filePath: "packages/herdr-work/test/eslint-work-store-cleanup-direct-yield-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "../src/index.js"
+    import { Effect } from "effect"
+    const program = Effect.gen(function*() {
+      const direct = yield* Effect.result(WorkStore.open(path))
+      const piped = yield* WorkStore.open(otherPath).pipe(Effect.result)
+    })
+  `,
+  expected: 2,
+  filePath: "packages/herdr-work/test/eslint-work-store-cleanup-wrapped-invalid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore } from "../src/index.js"
+    import { Effect } from "effect"
+    const program = Effect.acquireUseRelease(
+      WorkStore.open(path),
+      (store) => inspect(store.path),
+      (store) => Effect.sync(() => store.close())
+    )
+  `,
+  expected: 0,
+  filePath: "packages/herdr-work/test/eslint-work-store-cleanup-acquire-valid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
+    import { WorkStore as DurableWorkStore } from "@knpkv/herdr-work"
+    import { Effect as Fx } from "effect"
+    const program = Fx.gen(function*() {
+      const store = yield* DurableWorkStore.open(path)
+      yield* Fx.addFinalizer(() => Fx.sync(() => store.close()))
+      const blockStore = yield* DurableWorkStore.open(otherPath)
+      yield* Fx.addFinalizer(() => Fx.sync(() => {
+        blockStore.close()
+      }))
+      inspect(store.path)
+    })
+  `,
+  expected: 0,
+  filePath: "packages/herdr-coordinator/test/eslint-work-store-cleanup-valid.ts",
+  ruleId: "local-rules/require-immediate-work-store-cleanup"
+})
+
+await assertRuleDiagnostics({
+  code: `
     import * as ChildProcess from "effect/unstable/process/ChildProcess"
     const namespaced = ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
   `,

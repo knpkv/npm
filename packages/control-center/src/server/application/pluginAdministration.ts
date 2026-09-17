@@ -1728,7 +1728,33 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     }),
     testConnection: Effect.fn("PluginAdministration.testConnection")(function*({ pluginConnectionId, workspaceId }) {
       const connection = yield* requireConnection(persistence, workspaceId, pluginConnectionId)
+      const requiresInitialOwnershipBinding = connection.providerAccountId === null &&
+        connection.followedResourceId === null
+      const unboundConfigurationRevision = requiresInitialOwnershipBinding
+        ? yield* persistence.pluginConfigurations.get(workspaceId, pluginConnectionId).pipe(
+          Effect.map(Option.match({ onNone: () => 0, onSome: ({ revision }) => revision })),
+          Effect.mapError(mapPersistenceReadError)
+        )
+        : null
+      if (connection.isEnabled && requiresInitialOwnershipBinding && pluginConnections !== null) {
+        yield* pluginConnections.invalidate({ workspaceId, pluginConnectionId })
+      }
       const tested = yield* testPluginConnection(persistence, pluginConnections, workspaceId, pluginConnectionId)
+      if (tested.test._tag === "healthy") {
+        if (requiresInitialOwnershipBinding) {
+          yield* materializeConnectionOwnership(
+            persistence,
+            cryptoService,
+            connection,
+            tested.discovery,
+            unboundConfigurationRevision ?? 0
+          ).pipe(Effect.mapError(() => unavailable()))
+        } else {
+          yield* assertConnectionOwnership(persistence, connection, tested.discovery).pipe(
+            Effect.mapError(() => unavailable())
+          )
+        }
+      }
       if (connection.isEnabled) {
         yield* persistSetupTestHealth(
           persistence,
@@ -1855,10 +1881,11 @@ export const pluginAdministrationLayer = Layer.effect(PluginAdministration, make
 
 /** Live administration layer with browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayer = (
-  publicOrigin: string
+  publicOrigin: string,
+  resourceDiscovery = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(null, publicOrigin)).pipe(
-    Layer.provide(awsResourceDiscoveryLayer)
+    Layer.provide(resourceDiscovery)
   )
 
 /** Live administration layer backed by the same scoped provider registry as synchronization. */
@@ -1873,10 +1900,11 @@ export const pluginAdministrationLayerWithConnections = (
 /** Live administration layer backed by provider runtimes and browser Atlassian OAuth grants. */
 export const pluginAdministrationOAuthLayerWithConnections = (
   pluginConnections: PluginConnectionMapV1,
-  publicOrigin: string
+  publicOrigin: string,
+  resourceDiscovery = awsResourceDiscoveryLayer
 ): Layer.Layer<PluginAdministration, never, Exclude<PluginAdministrationOAuthRequirements, Scope.Scope>> =>
   Layer.effect(PluginAdministration, makePluginAdministrationWithOAuth(pluginConnections, publicOrigin)).pipe(
-    Layer.provide(awsResourceDiscoveryLayer)
+    Layer.provide(resourceDiscovery)
   )
 
 /** Internal factual projection reused by the portfolio adapter. */

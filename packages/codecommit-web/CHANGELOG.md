@@ -1,5 +1,52 @@
 # @knpkv/codecommit-web
 
+## 0.16.0
+
+### Minor Changes
+
+- [#410](https://github.com/knpkv/npm/pull/410) [`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866) Thanks [@konopkov](https://github.com/konopkov)! - Add Claude-native Relay review profiles and persist Relay settings immediately after save.
+
+- [#399](https://github.com/knpkv/npm/pull/399) [`316eff1`](https://github.com/knpkv/npm/commit/316eff159bc44fa46d5d1ec68d4515990fb3d9a1) Thanks [@konopkov](https://github.com/konopkov)! - Prevent sandbox startup reconciliation races and preserve profile identity when an AWS account id is empty.
+
+### Patch Changes
+
+- Updated dependencies [[`161566b`](https://github.com/knpkv/npm/commit/161566bccefc349e99d39734c910605d85cf1866), [`1dcc473`](https://github.com/knpkv/npm/commit/1dcc473ebd14c2a4ac00d7fd67bf9a8d80201f66), [`316eff1`](https://github.com/knpkv/npm/commit/316eff159bc44fa46d5d1ec68d4515990fb3d9a1)]:
+  - @knpkv/ai-claude@0.3.0
+  - @knpkv/codecommit-core@0.16.0
+  - @knpkv/rly@0.5.1
+
+## 0.15.0
+
+### Minor Changes
+
+- [#394](https://github.com/knpkv/npm/pull/394) [`dc18f2c`](https://github.com/knpkv/npm/commit/dc18f2c7149cdf6a0b4eee1461d41170311dd5fc) Thanks [@konopkov](https://github.com/konopkov)! - Preserve exact CodeCommit pull-request coordinates across cache, sandbox,
+  notification, and review routes.
+
+- [#390](https://github.com/knpkv/npm/pull/390) [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead) Thanks [@konopkov](https://github.com/konopkov)! - Add one shared, collapsed Relay dock with durable pull-request threads, visible
+  model and profile selection, and host-to-pull-request continuation.
+
+### Patch Changes
+
+- Updated dependencies [[`dc18f2c`](https://github.com/knpkv/npm/commit/dc18f2c7149cdf6a0b4eee1461d41170311dd5fc), [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead), [`75ece0a`](https://github.com/knpkv/npm/commit/75ece0ab3d666488bc32820aeef56adb0873cead)]:
+  - @knpkv/codecommit-core@0.15.0
+  - @knpkv/relay-product@0.1.0
+  - @knpkv/rly@0.5.0
+  - @knpkv/review@0.2.1
+
+## 0.14.0
+
+### Minor Changes
+
+- [#387](https://github.com/knpkv/npm/pull/387) [`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa) Thanks [@konopkov](https://github.com/konopkov)! - Make Relay profiles own the review kind, skills, provider harness, and model across settings, execution, and restored sessions.
+
+### Patch Changes
+
+- Updated dependencies [[`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa), [`6d42c7c`](https://github.com/knpkv/npm/commit/6d42c7ce69e8b9116df409ec79579bf45d380fad), [`8caea60`](https://github.com/knpkv/npm/commit/8caea601c147b8a1dd0ea9f20155f4e76ff6351e), [`7c982c9`](https://github.com/knpkv/npm/commit/7c982c9f0ec56a65adff1275182a30f43f0eb0ee), [`94ee004`](https://github.com/knpkv/npm/commit/94ee00487f0595cdc16fd8f1332689eb39ecfaf2), [`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa), [`4ad196f`](https://github.com/knpkv/npm/commit/4ad196f7fe5e6ed68b6646681123bc1f603979fa)]:
+  - @knpkv/ai-codex@0.4.0
+  - @knpkv/codecommit-core@0.14.0
+  - @knpkv/rly@0.4.1
+  - @knpkv/review@0.2.0
+
 ## 0.13.0
 
 ### Minor Changes

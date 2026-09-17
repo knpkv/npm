@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from "react-router"
 import type { WorkspaceId } from "../domain/identifiers.js"
 import { type BrowserSessionState, useBrowserSession } from "./BrowserSession.js"
 import { contextualAgentPath, isWorkspaceRouteId } from "./contextualAgentPath.js"
+import { ControlCenterRelayDock } from "./controlCenterRelayDockShell.js"
 import { subscribeWorkspacePresentation } from "./settings/workspaceSettingsSignals.js"
 import styles from "./AppShell.module.css"
 import { WorkspaceScrollRestoration } from "./workspaceScrollRestoration.js"
@@ -31,6 +32,16 @@ const workspaceIdFromPathname = (pathname: string): WorkspaceId | null => {
 /** Decide whether workspace settings belong in the current session's navigation. @internal */
 export const canInspectWorkspaceSettings = (state: BrowserSessionState, workspaceId: WorkspaceId | null): boolean => {
   const session = state._tag === "authenticated" || state._tag === "storage-unavailable" ? state.session : null
+  return (
+    workspaceId !== null &&
+    session?.workspaceId === workspaceId &&
+    (session.permission === "workspace-owner" || session.permission === "workspace-approver")
+  )
+}
+
+/** The narrow PR resolver is available to workspace-wide readers. @internal */
+export const canOpenCodeCommitPullRequest = (state: BrowserSessionState, workspaceId: WorkspaceId | null): boolean => {
+  const session = state._tag === "authenticated" ? state.session : null
   return (
     workspaceId !== null &&
     session?.workspaceId === workspaceId &&
@@ -89,6 +100,7 @@ export const AppShell = (): ReactElement => {
   const agentDestination = contextualAgentPath(location.pathname, location.search, location.hash)
   const workspaceId = workspaceIdFromPathname(location.pathname)
   const includeSettings = canInspectWorkspaceSettings(browserSession.state, workspaceId)
+  const includeOpenPullRequest = canOpenCodeCommitPullRequest(browserSession.state, workspaceId)
   const [density, setDensity] = useState<"comfortable" | "compact">("comfortable")
   useEffect(() => {
     setDensity("comfortable")
@@ -108,7 +120,7 @@ export const AppShell = (): ReactElement => {
     </>
   )
 
-  return (
+  const content = (
     <div className={styles.root} data-workspace-density={density}>
       <header className={styles.header}>
         {isAuthorizedShare ? (
@@ -138,6 +150,11 @@ export const AppShell = (): ReactElement => {
               overviewPath={overviewPath}
             />
             <div className={styles.actions}>
+              {includeOpenPullRequest ? (
+                <NavLink className={styles.agent ?? ""} to="/open-pr">
+                  Open PR
+                </NavLink>
+              ) : null}
               {workspaceId === null ? null : (
                 <Suspense fallback={null}>
                   <CommandSearch workspaceId={workspaceId} />
@@ -161,4 +178,6 @@ export const AppShell = (): ReactElement => {
       <WorkspaceScrollRestoration />
     </div>
   )
+
+  return <ControlCenterRelayDock>{content}</ControlCenterRelayDock>
 }

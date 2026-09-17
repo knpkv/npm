@@ -412,7 +412,7 @@ Bun throws a defect (not typed error) when a port is in use. Convert and retry:
 import * as Predicate from "effect/Predicate"
 
 const startServer = (port: number): Effect.Effect<never> =>
-  makeOwnerSessionSecrets().pipe(
+  makeOwnerSessionSecrets(`http://127.0.0.1:${port}`).pipe(
     Effect.flatMap((security) =>
       Effect.logInfo(`Starting on http://127.0.0.1:${port}`).pipe(
         Effect.andThen(Effect.suspend(() => Layer.launch(makeServer({ port, security })))),

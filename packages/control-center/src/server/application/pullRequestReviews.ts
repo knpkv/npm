@@ -18,6 +18,7 @@ import {
   PublishedReviewComment,
   PullRequestReviewCompleted,
   PullRequestReviewFailed,
+  type PullRequestReviewFailure,
   PullRequestReviewInterrupted,
   PullRequestReviewNotStarted,
   PullRequestReviewPending,
@@ -99,7 +100,7 @@ const PrReviewSubjectEquivalence = Schema.toEquivalence(PrReviewSubject)
 
 const ReviewContextIdentity = Schema.Struct({
   workspaceId: Schema.String,
-  releaseId: Schema.String,
+  releaseId: Schema.NullOr(Schema.String),
   pluginConnectionId: Schema.String,
   subject: PrReviewSubject
 })
@@ -123,12 +124,29 @@ const ReviewThreadRevisionPayload = Schema.Struct({
   validationState: Schema.Literals(["validated", "requires-revalidation"]),
   suggestionState: Schema.optionalKey(PrReviewSuggestion.fields.state)
 })
+
+const presentReviewFailure = (error: AgentProviderError) => {
+  const stage: PullRequestReviewFailure["stage"] = error.reviewStage ?? (
+    error.phase === "protocol"
+      ? "result-validation"
+      : error.phase === "configuration"
+      ? "review-setup"
+      : error.phase === "launch"
+      ? "sandbox-start"
+      : "agent-run"
+  )
+  const failure: Omit<PullRequestReviewFailure, "cause"> = {
+    stage,
+    retryable: error.retryable
+  }
+  return error.reviewCause === undefined ? failure : { ...failure, cause: error.reviewCause }
+}
 const ReviewThreadCancellationPayload = Schema.Struct({ requestedAt: UtcTimestamp })
 
 class AvailableReviewTarget extends Data.TaggedClass("available")<{
   readonly entityId: EntityId
   readonly pluginConnectionId: PluginConnectionId
-  readonly releaseId: ReleaseId
+  readonly releaseId: ReleaseId | null
   readonly sourceRevision: string
   readonly subject: PrReviewSubjectType
 }> {}
@@ -261,7 +279,7 @@ const mapReviewThreadEvent = Effect.fnUntraced(function*(
       if (payload.error.message === PROCESS_RESTART_INTERRUPTION_MESSAGE) {
         return { _tag: "run-interrupted", ...common }
       }
-      return { _tag: "run-failed", ...common, retryable: payload.error.retryable }
+      return { _tag: "run-failed", ...common, ...presentReviewFailure(payload.error) }
     }
     case "cancel-requested": {
       const payload = yield* decodeThreadPayload(
@@ -292,10 +310,6 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
   if (!inspection.isSourceCurrent) {
     return new PullRequestReviewUnavailable({ reason: "source-stale" })
   }
-  const releaseId = inspection.entity.canonicalReleaseId
-  if (releaseId === null) {
-    return new PullRequestReviewUnavailable({ reason: "release-unavailable" })
-  }
   if (details.baseRevision === undefined || details.baseRevision === null) {
     return new PullRequestReviewUnavailable({ reason: "base-revision-unavailable" })
   }
@@ -309,7 +323,7 @@ const deriveTarget = Effect.fn("PullRequestReviews.deriveTarget")(function*(
   return new AvailableReviewTarget({
     entityId: inspection.entity.projection.entityId,
     pluginConnectionId: inspection.source.pluginConnectionId,
-    releaseId,
+    releaseId: inspection.entity.canonicalReleaseId,
     sourceRevision: inspection.source.revision,
     subject
   })
@@ -384,6 +398,7 @@ const presentLatest = Effect.fnUntraced(function*(
         ...common,
         completedAt: record.terminalAt,
         state: record.state,
+        failure: record.failure == null ? null : presentReviewFailure(record.failure),
         report: record.report
       })
     case "interrupted":
@@ -461,7 +476,9 @@ const makePullRequestReviews = Effect.gen(function*() {
       return new PullRequestReviewStale({
         subject: target.subject,
         previousHead: prior.value.report.subject.headRevision,
-        previousJobId: prior.value.jobId
+        previousJobId: prior.value.jobId,
+        previousState: prior.value.state,
+        previousReport: prior.value.report
       })
     }
     return yield* presentLatest(target, Option.none())

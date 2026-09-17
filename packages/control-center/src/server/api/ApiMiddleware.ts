@@ -2,15 +2,23 @@ import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
+import * as Schema from "effect/Schema"
 import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 
-import { CurrentSession, SessionCookieAuth, SessionMutationAuth } from "../../api/session.js"
+import {
+  CurrentSession,
+  CurrentSessionToken,
+  SessionCookieAuth,
+  SessionMutationAuth,
+  SessionToken
+} from "../../api/session.js"
 import { Auth } from "../auth/Auth.js"
+import { CredentialRejectedError } from "../auth/errors.js"
 import type {
   AuthCryptoError,
   AuthPermissionDeniedError,
   AuthPersistenceError,
-  CredentialRejectedError
+  CredentialRejectedError as CredentialRejectedErrorType
 } from "../auth/errors.js"
 import { ServerLifecycle } from "../runtime/ServerLifecycle.js"
 import {
@@ -39,6 +47,11 @@ const requestContract = (request: HttpServerRequest.HttpServerRequest) => ({
   forwardedProto: request.headers["x-forwarded-proto"] ?? null,
   remoteAddress: Option.getOrNull(request.remoteAddress)
 })
+
+const decodeSessionToken = (value: string | undefined): Option.Option<Redacted.Redacted<SessionToken>> =>
+  value === undefined
+    ? Option.none()
+    : Schema.decodeUnknownOption(SessionToken)(value).pipe(Option.map(Redacted.make))
 
 const capabilityFor = (groupIdentifier: string, endpointIdentifier: string): InsecureLanCapability => {
   switch (groupIdentifier) {
@@ -108,8 +121,16 @@ export const sessionCookieAuthLayer = Layer.effect(
                 request: requestContract(request)
               }).pipe(Effect.catchTag("RequestSecurityError", mapReadSecurityFailure))
             }
-            const session = yield* mapAuthenticationFailures(auth.authenticate(credential))
-            return yield* Effect.provideService(effect, CurrentSession, session)
+            const sessionToken = decodeSessionToken(Redacted.value(credential))
+            if (Option.isNone(sessionToken)) {
+              return yield* mapAuthenticationFailures(Effect.fail(new CredentialRejectedError()))
+            }
+            const session = yield* mapAuthenticationFailures(auth.authenticate(sessionToken.value))
+            return yield* Effect.provideService(
+              Effect.provideService(effect, CurrentSession, session),
+              CurrentSessionToken,
+              sessionToken.value
+            )
           })
         ).pipe(
           Effect.catchTag(
@@ -122,7 +143,7 @@ export const sessionCookieAuthLayer = Layer.effect(
 )
 
 const mapMutationAuthenticationFailure = (
-  _error: AuthCryptoError | AuthPermissionDeniedError | AuthPersistenceError | CredentialRejectedError
+  _error: AuthCryptoError | AuthPermissionDeniedError | AuthPersistenceError | CredentialRejectedErrorType
 ) => Effect.flatMap(forbiddenApiError, Effect.fail)
 
 /** Require an independent CSRF credential and re-authorize the cookie-owned session. */
@@ -137,7 +158,8 @@ export const mutationCsrfLayer = Layer.effect(
         lifecycle.runMutation(
           Effect.gen(function*() {
             const request = yield* HttpServerRequest.HttpServerRequest
-            const sessionToken = Redacted.make(request.cookies.cc_session ?? "")
+            const sessionToken = decodeSessionToken(request.cookies.cc_session)
+            if (Option.isNone(sessionToken)) return yield* Effect.flatMap(forbiddenApiError, Effect.fail)
             yield* authorizeAuthenticatedMutation(
               {
                 capability: capabilityFor(group.identifier, endpoint.identifier),
@@ -148,7 +170,7 @@ export const mutationCsrfLayer = Layer.effect(
                 }
               },
               (csrfToken) =>
-                auth.authorizeMutation(sessionToken, csrfToken).pipe(
+                auth.authorizeMutation(sessionToken.value, csrfToken).pipe(
                   Effect.catchTags({
                     AuthCryptoError: mapMutationAuthenticationFailure,
                     AuthPersistenceError: mapMutationAuthenticationFailure,

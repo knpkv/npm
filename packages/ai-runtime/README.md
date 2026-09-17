@@ -1,6 +1,6 @@
 # `@knpkv/ai-runtime`
 
-Provider-neutral Effect protocol for durable local AI-agent runs. Control Center owns durable jobs, leases, authorization, and release context; provider bridges can implement the small streaming adapter without leaking their native protocol.
+Provider-neutral Effect protocol for durable local AI-agent runs. Control Center owns durable jobs, leases, authorization, and immutable workspace context; release-independent work carries a null release identity. Provider bridges can implement the small streaming adapter without leaking their native protocol.
 
 ```ts
 import { AgentRuntime, makeDeterministicAgent } from "@knpkv/ai-runtime"

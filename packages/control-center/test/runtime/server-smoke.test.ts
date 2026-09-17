@@ -445,7 +445,10 @@ const seedAuthorizedRuntimeAction = Effect.fn("ControlCenterServerSmoke.seedAuth
     })
     yield* seedGovernedActionCurrentInputs()
     return current
-  }).pipe(Effect.provide(services))
+  }).pipe(
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(services)
+  )
 })
 
 describe("Control Center closed runtime", () => {
@@ -515,7 +518,11 @@ describe("Control Center closed runtime", () => {
         assert.strictEqual(result.failure.reason, "publication-unavailable")
       }
       assert.strictEqual(yield* Ref.get(proposalLeaseCalls), 0)
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped))
+    }).pipe(
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(NodeServices.layer),
+      Effect.scoped
+    ))
 
   it.effect("serves immutable SPA bytes and generated-client pairing plus portfolio", () =>
     Effect.gen(function*() {
@@ -779,7 +786,10 @@ describe("Control Center closed runtime", () => {
             0,
             FIXTURE_TIME
           )
-        }).pipe(Effect.provide(persistenceLayer(persistenceConfig)))
+        }).pipe(
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(persistenceLayer(persistenceConfig))
+        )
       )
       const currentRuntimeAuthority = yield* seedAuthorizedRuntimeAction(persistenceConfig)
       const pluginConnections = yield* makeFakeConnectionMap
@@ -1046,6 +1056,7 @@ describe("Control Center closed runtime", () => {
           Effect.provideService(PluginConnectionMap, pluginConnections)
         )
       }).pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(seedPersistence.pipe(Layer.provideMerge(DomainEventWakeups.layer))),
         Effect.scoped
       )
@@ -1134,6 +1145,7 @@ describe("Control Center closed runtime", () => {
       const output = JSON.stringify({
         schemaVersion: 3,
         completion: { status: "complete" },
+        orientation: null,
         suggestions: [{
           title: "Disable unsafe review behavior",
           severity: "P2",
@@ -1327,6 +1339,7 @@ describe("Control Center closed runtime", () => {
           createdAt: FIXTURE_TIME
         })
       }).pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
         Effect.provide(Layer.merge(
           seedPersistence,
           seedDatabase
@@ -1434,7 +1447,10 @@ describe("Control Center closed runtime", () => {
           pluginConnectionId: PLUGIN_ID,
           subject
         })
-      }).pipe(Effect.provide(seedPersistence))
+      }).pipe(
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(seedPersistence)
+      )
       assert.isTrue(Option.isSome(queued))
       if (Option.isSome(queued)) {
         assert.strictEqual(queued.value.state, "queued")
@@ -1582,7 +1598,10 @@ describe("Control Center closed runtime", () => {
             RELEASE_ID
           ).pipe(Effect.result)
           assert.strictEqual(missingProjection._tag, "Failure")
-        }).pipe(Effect.provide(persistenceLayer(persistenceConfig)))
+        }).pipe(
+          // @effect-diagnostics-next-line strictEffectProvide:off
+          Effect.provide(persistenceLayer(persistenceConfig))
+        )
       )
       yield* TestClock.adjust("6 minutes")
 

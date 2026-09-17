@@ -120,6 +120,22 @@ export const DeliveryGraphQuery = Schema.TaggedUnion({
     type: Schema.NullOr(DeliveryEntityKind),
     limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 500 }))
   },
+  codeCommitPullRequestCandidates: {
+    region: Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(100),
+      Schema.isPattern(/^[a-z]{2}(?:-gov)?-[a-z0-9-]+-[0-9]+$/u)
+    ),
+    repositoryName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(100)),
+    pullRequestId: Schema.String.check(
+      Schema.isTrimmed(),
+      Schema.isNonEmpty(),
+      Schema.isMaxLength(200),
+      Schema.isPattern(/^[0-9]+$/u)
+    ),
+    limit: Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 128 }))
+  },
   releaseSummary: {
     releaseId: ReleaseId
   }
@@ -231,6 +247,11 @@ const WorkspaceEntityProjections = Schema.Struct({
   )
 )
 
+const CodeCommitPullRequestCandidates = Schema.Struct({
+  entityIds: Schema.Array(EntityId).check(Schema.isMaxLength(128)),
+  truncated: Schema.Boolean
+})
+
 const ReleaseRelationshipSummary = Schema.Struct({
   issues: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   pullRequests: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -250,6 +271,7 @@ export const DeliveryGraphReadResult = Schema.TaggedUnion({
   releaseSlice: { value: ReleaseSlice },
   componentRelationships: { value: ComponentRelationships },
   workspaceEntityProjections: { value: WorkspaceEntityProjections },
+  codeCommitPullRequestCandidates: { value: CodeCommitPullRequestCandidates },
   releaseSummary: { value: ReleaseRelationshipSummary }
 })
 

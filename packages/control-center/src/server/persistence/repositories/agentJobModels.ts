@@ -1,5 +1,11 @@
 /** Durable release-thread and local-agent job contracts. @module */
-import { AgentContextFingerprint, AgentProviderId, AgentRuntimeEvent, AgentSessionRef } from "@knpkv/ai-runtime"
+import {
+  AgentContextFingerprint,
+  AgentProviderError,
+  AgentProviderId,
+  AgentRuntimeEvent,
+  AgentSessionRef
+} from "@knpkv/ai-runtime"
 import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
 
@@ -194,7 +200,7 @@ export type AgentJobState = typeof AgentJobState.Type
 /** Immutable request persisted before a worker may claim it. */
 export const EnqueueAgentJobInput = Schema.Struct({
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   jobId: JobId,
   providerId: AgentProviderId,
   model: AgentModel,
@@ -211,7 +217,7 @@ export type EnqueueAgentJobInput = typeof EnqueueAgentJobInput.Type
 /** Context frozen for one provider attempt. */
 export const AgentContextSnapshotRecord = Schema.Struct({
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   subjectRevision: SubjectRevision,
   fingerprint: AgentContextFingerprint,
   task: AgentJobTask
@@ -221,7 +227,7 @@ export type AgentContextSnapshotRecord = typeof AgentContextSnapshotRecord.Type
 /** Claimed work returned only after the lease and attempt are durable. */
 export const ClaimedAgentJob = Schema.Struct({
   workspaceId: WorkspaceId,
-  releaseId: ReleaseId,
+  releaseId: Schema.NullOr(ReleaseId),
   threadId: AgentThreadId,
   jobId: JobId,
   attemptSequence: AgentAttemptSequence,
@@ -512,7 +518,8 @@ export const LatestAgentReviewInput = Schema.Struct({
   excludeJobId: Schema.optionalKey(JobId),
   excludeSubjectRevision: Schema.optionalKey(Schema.String),
   jobId: Schema.optionalKey(JobId),
-  allowDifferentHead: Schema.optionalKey(Schema.Boolean)
+  allowDifferentHead: Schema.optionalKey(Schema.Boolean),
+  requireReport: Schema.optionalKey(Schema.Boolean)
 })
 export type LatestAgentReviewInput = typeof LatestAgentReviewInput.Type
 
@@ -569,6 +576,7 @@ export const LatestAgentReviewRecord = Schema.Struct({
   state: Schema.Union([AgentJobState, Schema.Literal("interrupted")]),
   createdAt: UtcTimestamp,
   terminalAt: Schema.NullOr(UtcTimestamp),
+  failure: Schema.optionalKey(Schema.NullOr(AgentProviderError)),
   startedAt: Schema.optionalKey(Schema.NullOr(UtcTimestamp)),
   reviewBudgetMillis: Schema.optionalKey(Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 3_600_000 }))),
   reviewBudgetExtensionCount: Schema.optionalKey(

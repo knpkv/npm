@@ -1,10 +1,11 @@
-import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
+import { Button, Dialog, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import { type ChangeEvent, type ReactElement, type ReactNode, useEffect, useId, useRef, useState } from "react"
 import { useParams } from "react-router"
 
 import {
   changedWorkspaceSettingsSections,
+  type GovernedWorkspaceSettingsSection,
   isGovernedWorkspaceSettingsSection,
   WorkspaceSettingsV1
 } from "../../domain/workspaceSettings.js"
@@ -29,6 +30,77 @@ const parseAllowedProviders = (value: string): ReadonlyArray<string> =>
         .filter((provider) => provider.length > 0)
     )
   ].sort()
+
+interface GovernedSettingChange {
+  readonly after: string
+  readonly before: string
+  readonly label: string
+}
+
+const presentedValue = (value: boolean | number | string | null): string => {
+  if (value === null) return "Not set"
+  if (value === true) return "Enabled"
+  if (value === false) return "Disabled"
+  return String(value)
+}
+
+const governedChange = (
+  label: string,
+  before: boolean | number | string | null,
+  after: boolean | number | string | null
+): ReadonlyArray<GovernedSettingChange> =>
+  before === after ? [] : [{ after: presentedValue(after), before: presentedValue(before), label }]
+
+const governedChangeDetails = (
+  section: GovernedWorkspaceSettingsSection,
+  before: WorkspaceSettingsV1,
+  after: WorkspaceSettingsV1
+): ReadonlyArray<GovernedSettingChange> => {
+  switch (section) {
+    case "agent":
+      return [
+        ...governedChange(
+          "Allowed providers",
+          before.agent.allowedProviders.join(", "),
+          after.agent.allowedProviders.join(", ")
+        ),
+        ...governedChange("Default provider", before.agent.defaultProvider, after.agent.defaultProvider),
+        ...governedChange("Default model", before.agent.defaultModel, after.agent.defaultModel),
+        ...governedChange("Tool access", before.agent.toolPolicy, after.agent.toolPolicy),
+        ...governedChange("Runtime isolation", before.agent.profilePolicy, after.agent.profilePolicy)
+      ]
+    case "jira":
+      return [
+        ...governedChange("Comment publishing", before.jira.commentMode, after.jira.commentMode),
+        ...governedChange(
+          "Control Center attribution",
+          before.jira.includeControlCenterAttribution,
+          after.jira.includeControlCenterAttribution
+        )
+      ]
+    case "pipeline":
+      return [
+        ...governedChange("Retry policy", before.pipeline.retryMode, after.pipeline.retryMode),
+        ...governedChange("Maximum attempts", before.pipeline.maximumAttempts, after.pipeline.maximumAttempts)
+      ]
+    case "retention":
+      return [
+        ...governedChange("Evidence (days)", before.retention.evidenceDays, after.retention.evidenceDays),
+        ...governedChange("Content (days)", before.retention.contentDays, after.retention.contentDays),
+        ...governedChange("Audit history (days)", before.retention.auditDays, after.retention.auditDays),
+        ...governedChange(
+          "Agent activity (days)",
+          before.retention.agentActivityDays,
+          after.retention.agentActivityDays
+        ),
+        ...governedChange(
+          "Sandbox artifacts (days)",
+          before.retention.sandboxArtifactDays,
+          after.retention.sandboxArtifactDays
+        )
+      ]
+  }
+}
 
 const SettingsSection = ({
   children,
@@ -401,7 +473,7 @@ export const SettingsForm = ({
       </SettingsSection>
 
       <SettingsSection
-        description="Governed provider and sandbox policy. Provider identifiers are names only, never secrets."
+        description="Choose which server-configured review runners this workspace may use. This does not install or authenticate a runner."
         title="Agent"
       >
         <Field hint="Comma-separated lowercase identifiers; saved in canonical order." label="Allowed providers">
@@ -472,7 +544,7 @@ export const SettingsForm = ({
           }
           options={[
             ["read-only", "Read only"],
-            ["review-sandbox", "Review sandbox"]
+            ["review-sandbox", "Review sandbox, required for PR review"]
           ]}
           value={draft.agent.toolPolicy}
         />
@@ -485,10 +557,14 @@ export const SettingsForm = ({
               profilePolicy
             })
           }
-          options={[
-            ["isolated", "Isolated"],
-            ["local-profile", "Local profile"]
-          ]}
+          options={
+            draft.agent.profilePolicy === "local-profile"
+              ? [
+                  ["isolated", "Isolated, required for PR review"],
+                  ["local-profile", "Local profile (unsupported)"]
+                ]
+              : [["isolated", "Isolated, required for PR review"]]
+          }
           value={draft.agent.profilePolicy}
         />
       </SettingsSection>
@@ -549,7 +625,7 @@ export const WorkspaceSettingsPage = ({
   const sessionKey = routeMatchesSession ? browserReadableSessionKey(browserSession.state) : null
   const controller = useWorkspaceSettings(sessionKey, browserSession.invalidateSession, transport)
   const theme = useAppTheme()
-  const [confirmedGovernedChangeFingerprint, setConfirmedGovernedChangeFingerprint] = useState<string | null>(null)
+  const [governedDialogOpen, setGovernedDialogOpen] = useState(false)
   const canEdit = browserSession.state._tag === "authenticated" && session?.permission === "workspace-owner"
 
   if (!routeMatchesSession) {
@@ -643,11 +719,6 @@ export const WorkspaceSettingsPage = ({
     isGovernedWorkspaceSettingsSection
   )
   const requiresGovernedConfirmation = governedChanges.length > 0
-  const governedChangeFingerprint = requiresGovernedConfirmation
-    ? JSON.stringify([server.revision, ...governedChanges.map((section) => [section, draft[section]])])
-    : null
-  const governedChangeConfirmed =
-    governedChangeFingerprint !== null && confirmedGovernedChangeFingerprint === governedChangeFingerprint
   const draftIsValid = Schema.is(WorkspaceSettingsV1)(draft)
   const localProfileUnavailable = draft.agent.profilePolicy === "local-profile"
   return (
@@ -674,14 +745,10 @@ export const WorkspaceSettingsPage = ({
           </span>
           <Button
             disabled={
-              !canEdit ||
-              (status !== "dirty" && status !== "failed") ||
-              !draftIsValid ||
-              localProfileUnavailable ||
-              (requiresGovernedConfirmation && !governedChangeConfirmed)
+              !canEdit || (status !== "dirty" && status !== "failed") || !draftIsValid || localProfileUnavailable
             }
             loading={status === "saving"}
-            onClick={controller.save}
+            onClick={() => (requiresGovernedConfirmation ? setGovernedDialogOpen(true) : controller.save())}
             variant="primary"
           >
             Save settings
@@ -708,20 +775,37 @@ export const WorkspaceSettingsPage = ({
           added and must be verified before this governed policy can be saved.
         </Text>
       ) : null}
-      {canEdit && requiresGovernedConfirmation ? (
-        <Surface className={styles.governance} padding="default" form="grouped">
-          <Checkbox
-            checked={governedChangeConfirmed}
-            disabled={status === "saving"}
-            label={`I reviewed the governed ${governedChanges.join(
-              ", "
-            )} policy change${governedChanges.length === 1 ? "" : "s"} and authorize this exact revision.`}
-            onChange={(confirmed) =>
-              setConfirmedGovernedChangeFingerprint(confirmed ? governedChangeFingerprint : null)
-            }
-          />
-        </Surface>
-      ) : null}
+      <Dialog.Root onOpenChange={setGovernedDialogOpen} open={governedDialogOpen}>
+        <Dialog.Content
+          description={`Revision ${String(server.revision)} changes policy enforced for every workspace collaborator.`}
+          title="Review governed changes"
+        >
+          <div className={styles.governance}>
+            <Text as="p">Confirm the exact policy changes:</Text>
+            <ul>
+              {governedChanges.map((section) => (
+                <li key={section}>
+                  <strong>
+                    {section[0]?.toUpperCase()}
+                    {section.slice(1)}
+                  </strong>
+                  <ul>
+                    {governedChangeDetails(section, server.settings, draft).map((change) => (
+                      <li key={change.label}>
+                        {change.label}: {change.before} → {change.after}
+                      </li>
+                    ))}
+                  </ul>
+                </li>
+              ))}
+            </ul>
+            <div className={styles.actions}>
+              <Dialog.Close>Cancel</Dialog.Close>
+              <Dialog.Close onClick={controller.save}>Save governed changes</Dialog.Close>
+            </div>
+          </div>
+        </Dialog.Content>
+      </Dialog.Root>
       {session === null || sessionKey === null ? null : (
         <BrowserSessionsPanel
           canManage={canEdit}
@@ -760,7 +844,7 @@ export const WorkspaceSettingsPage = ({
         canEdit={canEdit && status !== "saving"}
         draft={draft}
         onChange={(nextDraft) => {
-          setConfirmedGovernedChangeFingerprint(null)
+          setGovernedDialogOpen(false)
           controller.edit(nextDraft)
         }}
       />

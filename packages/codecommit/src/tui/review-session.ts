@@ -9,6 +9,9 @@ export type FindingDisposition =
   | "posting"
   | "rejected"
 
+/** Persistent ownership warning for the local fallback review deck. */
+export const RELAY_ONLY_REVIEW_LABEL = "Relay-only · non-durable"
+
 export interface RelayReviewReconciliation {
   readonly added: ReadonlyArray<string>
   readonly changed: ReadonlyArray<string>

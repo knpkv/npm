@@ -26,7 +26,7 @@ export type AgentRunId = typeof AgentRunId.Type
 export const AgentSessionRef = boundedIdentifier("AgentSessionRef")
 export type AgentSessionRef = typeof AgentSessionRef.Type
 
-/** Digest binding continuation state to its exact release context. */
+/** Digest binding continuation state to its exact immutable context. */
 export const AgentContextFingerprint = Schema.String.check(
   Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
 ).pipe(Schema.brand("AgentContextFingerprint"))
@@ -38,10 +38,10 @@ const SafeContextIdentifier = Schema.String.check(
   Schema.isMaxLength(500)
 )
 
-/** Immutable context identity captured when a run is requested. */
+/** Immutable context identity; pull-request reviews may have no release. */
 export const AgentContextSnapshot = Schema.Struct({
   workspaceId: SafeContextIdentifier,
-  releaseId: SafeContextIdentifier,
+  releaseId: Schema.NullOr(SafeContextIdentifier),
   subjectRevision: SafeContextIdentifier,
   fingerprint: AgentContextFingerprint
 })
@@ -118,12 +118,44 @@ export const attachAgentRuntimeMetadata = (
     ? { ...event, runtimeMetadata }
     : event
 
+/** Stable redacted cause for one pull-request review failure. */
+export const AgentReviewFailureCause = Schema.Literals([
+  "invalid-configuration",
+  "invalid-request",
+  "source-rejected",
+  "source-unavailable",
+  "sandbox-unavailable",
+  "sandbox-timeout",
+  "command-timeout",
+  "provider-authentication",
+  "provider-rate-limited",
+  "provider-unavailable",
+  "agent-command-failed",
+  "output-rejected",
+  "artifact-unavailable",
+  "session-closed",
+  "cleanup-failed"
+])
+export type AgentReviewFailureCause = typeof AgentReviewFailureCause.Type
+
 /** A provider failed without exposing credentials or provider-native state. */
 export class AgentProviderError extends Schema.TaggedError<AgentProviderError>()(
   "AgentProviderError",
   {
     providerId: AgentProviderId,
     phase: Schema.Literals(["configuration", "launch", "protocol", "execution", "timeout"]),
+    reviewStage: Schema.optionalKey(
+      Schema.Literals([
+        "source-checkout",
+        "review-setup",
+        "sandbox-start",
+        "agent-run",
+        "cleanup",
+        "result-validation",
+        "control-center"
+      ])
+    ),
+    reviewCause: Schema.optionalKey(AgentReviewFailureCause),
     message: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_000)),
     retryable: Schema.Boolean
   }
@@ -144,7 +176,7 @@ export class AgentRuntimeProtocolError extends Schema.TaggedError<AgentRuntimePr
   }
 ) {}
 
-/** A continuation was captured for a different immutable release context. */
+/** A continuation was captured for a different immutable run context. */
 export class AgentContextMismatchError extends Schema.TaggedError<AgentContextMismatchError>()(
   "AgentContextMismatchError",
   {}

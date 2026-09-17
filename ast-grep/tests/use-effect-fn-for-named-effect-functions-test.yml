@@ -17,12 +17,63 @@ valid:
       return yield* Effect.succeed(value)
     })
   - |
+    const fetchJson = Effect.fn("Feature.fetchJson")(function*<A>(schema: Schema.Codec<A>) {
+      return yield* Schema.decodeUnknownEffect(schema)({})
+    })
+  - |
     const publish = Effect.fn("Feature.publish")(function*<Failure, Requirements>(value: string) {
       return yield* Effect.uninterruptibleMask(() => Effect.succeed(value))
     })
   - |
     Effect.uninterruptibleMask(() => Effect.succeed("anonymous callback"))
+  - |
+    const collectOpen: FilterServiceContract["collectOpen"] = Effect.fn("FilterService.collectOpen")(
+      (targets, opts) =>
+        fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
+    )
+  - |
+    const scan: PrOpenServiceContract["scan"] = Effect.fn("PrOpenService.scan")((input) =>
+      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+    )
+  - |
+    const gitOutput = Effect.fn("GitContextService.gitOutput")((path, args) =>
+      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+    )
+  - |
+    const collect: FilterServiceContract["collect"] = Effect.fn("FilterService.collect")((targets) =>
+      Effect.gen(function*() {
+        return yield* fanOut(targets)
+      })
+    )
+  - |
+    const collectMatching = Effect.fn("PrListService.collectMatching")((stream) =>
+      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+    )
+  - |
+    class Store {
+      readonly put = Effect.fn("Store.put")(function*(value: string) {
+        return yield* Effect.succeed(value)
+      })
+      close(): void {}
+    }
 invalid:
+  - |
+    const collect: FilterServiceContract["collect"] = (targets) =>
+      Effect.gen(function*() {
+        return yield* fanOut(targets)
+      })
+  - |
+    const collectMatching = (stream) =>
+      stream.pipe(Stream.filter(keep), Stream.runCollect, Effect.map(Array.from))
+  - |
+    const gitOutput = (path, args) =>
+      spawner.string(command(path, args)).pipe(Effect.map((output) => output.trim()))
+  - |
+    const scan: PrOpenServiceContract["scan"] = input =>
+      source(input).pipe(Effect.map(({ prs }) => ({ prs })))
+  - |
+    const collectOpen: FilterServiceContract["collectOpen"] = (targets, opts) =>
+      fanOut(targets, opts).pipe(Effect.map(({ prs }) => ({ prs })))
   - |
     const load = function loadItem<Value>(value: Value) {
       return Effect.gen(function*() {
@@ -56,8 +107,33 @@ invalid:
         return value
       }).pipe(Effect.provide(layer))
   - |
+    class Store {
+      put() {
+        return Effect.gen(function*() {
+          return yield* Effect.succeed("stored")
+        })
+      }
+    }
+  - |
+    class Store {
+      put() {
+        return Effect.uninterruptibleMask(() => Effect.succeed("stored"))
+      }
+    }
+  - |
+    class Store {
+      put() {
+        return Effect.uninterruptibleMask(() => Effect.succeed("stored")).pipe(Effect.provide(layer))
+      }
+    }
+  - |
     const publish = <Failure, Requirements>(value: string) =>
       Effect.uninterruptibleMask(() => Effect.succeed(value))
+  - |
+    const fetchJson = <A,>(schema: Schema.Codec<A>) =>
+      Effect.gen(function*() {
+        return yield* Schema.decodeUnknownEffect(schema)({})
+      })
   - |
     const publish = function<Failure, Requirements>(value: string) {
       return Effect.uninterruptibleMask(() => Effect.succeed(value)).pipe(Effect.provide(layer))

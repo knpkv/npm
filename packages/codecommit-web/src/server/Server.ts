@@ -30,6 +30,7 @@ import {
   HttpServerResponse
 } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { coordinateRouterMaxParamLength } from "../pull-request-coordinates.js"
 import { CodeCommitApi } from "./Api.js"
 import {
   AccountsLive,
@@ -53,11 +54,10 @@ import {
   ownerSessionOrigin,
   OwnerSessionSecrets,
   type OwnerSessionSecretsContract,
-  ownerSessionUrlForOrigin,
-  requireLoopbackHostname,
-  requireLoopbackOrigin
+  requireLoopbackHostname
 } from "./internal/OwnerSessionSecurity.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
+import { resolveCodeCommitBootstrapUrlForBind } from "./internal/PublicOrigin.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
 export {
@@ -358,7 +358,11 @@ export const makeServer = (options: CodeCommitServerOptions) => {
   return Layer.unwrap(
     requireLoopbackHostname(hostname).pipe(
       Effect.map(() => {
-        const server = HttpRouter.serve(AllRoutes).pipe(
+        const server = HttpRouter.serve(AllRoutes, {
+          // Coordinate tokens include provider-valid repository names up to 100
+          // characters; keep one bounded segment for the review route.
+          routerConfig: { maxParamLength: coordinateRouterMaxParamLength }
+        }).pipe(
           // idleTimeout: 0 disables idle detection — required for long-lived SSE connections
           Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
           Layer.provide(Etag.layer),
@@ -407,27 +411,31 @@ const updatePortOnConflict = (
 
 export const CodeCommitServerLive = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
-  const portRef = yield* Ref.make(yield* Port.pipe(Effect.orDie))
+  const requestedPort = yield* Port.pipe(Effect.orDie)
+  const portRef = yield* Ref.make(requestedPort)
   const retriesRef = yield* Ref.make(10)
   const publicOriginOverride = yield* PublicOrigin.pipe(Effect.orDie)
 
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
+      const directOrigin = ownerSessionOrigin("127.0.0.1", p)
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
-      const security = yield* makeOwnerSessionSecrets()
-      const ready = yield* Deferred.make<void>()
-      const directOrigin = ownerSessionOrigin("127.0.0.1", p)
-      const publicOrigin = yield* requireLoopbackOrigin(
-        Option.getOrElse(publicOriginOverride, () => directOrigin)
+      const security = yield* makeOwnerSessionSecrets(directOrigin)
+      const bootstrapUrl = yield* resolveCodeCommitBootstrapUrlForBind(
+        Option.getOrUndefined(publicOriginOverride),
+        requestedPort,
+        p,
+        security
       )
+      const ready = yield* Deferred.make<void>()
       const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
         Effect.forkChild({ startImmediately: true })
       )
       yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
       yield* Effect.logInfo(`Authenticated server ready at ${ownerSessionOrigin("127.0.0.1", p)}`)
-      yield* Stream.make(`Authenticated bootstrap URL: ${ownerSessionUrlForOrigin(publicOrigin, security)}\n`).pipe(
+      yield* Stream.make(`Authenticated bootstrap URL: ${bootstrapUrl}\n`).pipe(
         Stream.run(stdio.stdout())
       )
       return yield* Fiber.join(serverFiber)

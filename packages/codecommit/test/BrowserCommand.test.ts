@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
-import { assumeConsoleArgs, codecommitConsoleHost, codecommitFileConsoleUrl } from "../src/tui/browser-command.js"
+import {
+  assumeConsoleArgs,
+  codecommitConsoleHost,
+  codecommitFileConsoleUrl,
+  codecommitPullRequestConsoleUrl
+} from "../src/tui/browser-command.js"
 
 describe("Granted browser command", () => {
   it("uses the long console-destination alias without colliding with duration", () => {
@@ -8,6 +13,30 @@ describe("Granted browser command", () => {
       "https://console.aws.amazon.com/codecommit/pr/44",
       "dev-admin"
     ])
+  })
+})
+
+describe("CodeCommit pull request console url", () => {
+  it("builds the PR details destination", () => {
+    expect(
+      codecommitPullRequestConsoleUrl({ prId: "212", region: "eu-central-1", repositoryName: "identity" })
+    ).toBe(
+      "https://eu-central-1.console.aws.amazon.com/codesuite/codecommit/repositories/identity/pull-requests/212?region=eu-central-1"
+    )
+  })
+
+  it("follows the region's partition instead of assuming the commercial host", () => {
+    // This is the difference from `Domain.codecommitConsoleUrl`, which hardcodes
+    // the commercial hostname and would send a GovCloud account somewhere it
+    // cannot reach.
+    expect(
+      codecommitPullRequestConsoleUrl({ prId: "212", region: "us-gov-west-1", repositoryName: "identity" })
+    ).toBe(
+      "https://us-gov-west-1.console.amazonaws-us-gov.com/codesuite/codecommit/repositories/identity/pull-requests/212?region=us-gov-west-1"
+    )
+    expect(
+      codecommitPullRequestConsoleUrl({ prId: "212", region: "us-iso-east-1", repositoryName: "identity" })
+    ).toBeNull()
   })
 })
 

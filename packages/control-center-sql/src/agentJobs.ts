@@ -82,6 +82,7 @@ export interface LatestAgentReviewQueryInput {
   readonly excludeSubjectRevision?: string
   readonly limit?: number
   readonly jobId?: string
+  readonly requireReport?: boolean
   readonly subjectRevision?: string
   readonly taskContextPrefix: string
   readonly workspaceId: string
@@ -148,6 +149,7 @@ const agentThreadEvents = table("agentThreadEvents", {
   occurredAt: Column.text()
 })
 const historyBoundaryEvents = Table.alias(agentThreadEvents, "historyBoundaryEvents")
+const reviewReportEvents = Table.alias(agentThreadEvents, "reviewReportEvents")
 
 const jobProjection = {
   workspaceId: agentJobs.workspaceId,
@@ -460,6 +462,18 @@ export const renderAgentReviewContextEventsQuery = (
 export const renderLatestAgentReviewQuery = (
   input: LatestAgentReviewQueryInput
 ): RenderedSql => {
+  const reportForJob = Query.select({
+    eventSequence: reviewReportEvents.eventSequence
+  }).pipe(
+    Query.from(reviewReportEvents),
+    Query.where(
+      Query.and(
+        Query.eq(reviewReportEvents.workspaceId, agentJobs.workspaceId),
+        Query.eq(reviewReportEvents.jobId, agentJobs.jobId),
+        Query.eq(reviewReportEvents.eventKind, "review-report")
+      )
+    )
+  )
   const subjectAndOptionalJob = input.jobId === undefined
     ? input.subjectRevision === undefined
       ? undefined
@@ -500,6 +514,7 @@ export const renderLatestAgentReviewQuery = (
             )
           ]
           : []),
+        ...(input.requireReport === true ? [Query.exists(reportForJob)] : []),
         Query.eq(
           Query.cast(
             Sqlite.Function.call("substr", agentJobs.taskContextJson, 1, input.taskContextPrefix.length),

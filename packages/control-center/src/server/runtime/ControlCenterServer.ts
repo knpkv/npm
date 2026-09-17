@@ -1,3 +1,4 @@
+import type * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
 import type * as Crypto from "effect/Crypto"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
@@ -22,7 +23,9 @@ import {
   prReviewSandboxSessionsLayer
 } from "../agent/internal/PrReviewSandboxSession.js"
 import {
+  type CodeCommitMockSourceFixture,
   codeCommitPrReviewSourceResolverLayer,
+  codeCommitPrReviewSourceResolverLayerWithFixture,
   type PrReviewSourceError,
   PrReviewSourceWorkspace,
   prReviewSourceWorkspaceLayer,
@@ -45,6 +48,7 @@ import type {
 import { controlCenterApiLayerWithLifecycle } from "../api/ControlCenterApiServer.js"
 import { requestBoundaryLayer } from "../api/RequestBoundary.js"
 import { RequestLimitPolicy, requestRateLimiterLayer } from "../api/RequestLimits.js"
+import { awsResourceDiscoveryLayerWithCodeCommitHttpClient } from "../application/awsResourceDiscovery.js"
 import { governedReviewSuggestionPublicationGatewayLayer } from "../application/GovernedReviewSuggestionPublicationGateway.js"
 import {
   authorizedSharesLayer,
@@ -107,6 +111,7 @@ import {
   firstPartyPluginRuntimeLayers,
   firstPartyPluginRuntimeLayersFromRegistry,
   firstPartyPluginRuntimeRegistryLayer,
+  firstPartyPluginRuntimeRegistryLayerWithCodeCommitHttpClient,
   type FirstPartyPluginRuntimeRegistryOverride
 } from "./FirstPartyPluginRuntime.js"
 import {
@@ -166,6 +171,8 @@ export interface ControlCenterPrReviewWorkerOptions {
   readonly failurePollInterval?: Duration.Input
   readonly maximumSandboxDurationMillis?: number
   readonly maximumSourceDuration?: Duration.Input
+  /** Server-private checkout locator accepted only from the loopback mock CLI configuration. @internal */
+  readonly codeCommitMockSourceFixture?: CodeCommitMockSourceFixture
   /** Deterministic composition seam; production omits it. @internal */
   readonly sourceWorkspace?: PrReviewSourceWorkspace["Service"]
   /** Deterministic composition seam; production omits it. @internal */
@@ -186,6 +193,10 @@ export interface ControlCenterServerOptions<ApplicationError = never, Applicatio
   readonly staticAssets: StaticAssetStoreOptions
   /** Deterministic outbound transport seam; production omits it. @internal */
   readonly outboundHttpClient?: HttpClient.HttpClient
+  /** Dedicated CodeCommit and STS transport; other providers keep the normal outbound client. */
+  readonly codeCommitHttpClient?: HttpClient.HttpClient
+  /** Credential boundary paired with the dedicated CodeCommit transport. */
+  readonly codeCommitAwsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
   readonly bootstrap?: ControlCenterBootstrapOptions | null
   readonly releaseSynchronization?: ReleaseSynchronizationStartupOptions | null
   readonly releaseAgent?: ReleaseAgentRuntimeOptions | null
@@ -230,18 +241,26 @@ const pluginApplicationServices = (
   pluginConnections: PluginConnectionMapV1 | null,
   firstPartyPluginRuntime: boolean,
   publicOrigin: string,
-  firstPartyConnectionsLayer: typeof firstPartyPluginConnectionMapLayer
+  firstPartyConnectionsLayer: typeof firstPartyPluginConnectionMapLayer,
+  codeCommitHttpClient?: HttpClient.HttpClient,
+  codeCommitAwsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
 ) => {
+  const resourceDiscovery = codeCommitHttpClient === undefined
+    ? undefined
+    : awsResourceDiscoveryLayerWithCodeCommitHttpClient(
+      codeCommitHttpClient,
+      codeCommitAwsConfiguration
+    )
   if (pluginConnections !== null) {
     return Layer.mergeAll(
-      pluginAdministrationOAuthLayerWithConnections(pluginConnections, publicOrigin),
+      pluginAdministrationOAuthLayerWithConnections(pluginConnections, publicOrigin, resourceDiscovery),
       completeDiffReadsLayer(pluginConnections),
       codePipelineReadsLayer(pluginConnections)
     )
   }
   if (!firstPartyPluginRuntime) {
     return Layer.mergeAll(
-      pluginAdministrationOAuthLayer(publicOrigin),
+      pluginAdministrationOAuthLayer(publicOrigin, resourceDiscovery),
       completeDiffReadsLayer(null),
       codePipelineReadsLayer(null)
     )
@@ -251,7 +270,7 @@ const pluginApplicationServices = (
       PluginConnectionMap,
       (connections) =>
         Layer.mergeAll(
-          pluginAdministrationOAuthLayerWithConnections(connections, publicOrigin),
+          pluginAdministrationOAuthLayerWithConnections(connections, publicOrigin, resourceDiscovery),
           completeDiffReadsLayer(connections),
           codePipelineReadsLayer(connections)
         )
@@ -264,7 +283,9 @@ export const liveApplicationServices = (
   pluginConnections: PluginConnectionMapV1 | null,
   firstPartyPluginRuntime: boolean,
   publicOrigin: string,
-  firstPartyConnectionsLayer = firstPartyPluginConnectionMapLayer
+  firstPartyConnectionsLayer = firstPartyPluginConnectionMapLayer,
+  codeCommitHttpClient?: HttpClient.HttpClient,
+  codeCommitAwsConfiguration?: Layer.Layer<AwsClientConfig.AwsClientConfig>
 ): Layer.Layer<
   ControlCenterCoreApplicationServices,
   never,
@@ -283,7 +304,9 @@ export const liveApplicationServices = (
       pluginConnections,
       firstPartyPluginRuntime,
       publicOrigin,
-      firstPartyConnectionsLayer
+      firstPartyConnectionsLayer,
+      codeCommitHttpClient,
+      codeCommitAwsConfiguration
     ),
     deliveryGraphInspectionLayer,
     portfolioSnapshotsLayer,
@@ -310,7 +333,14 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
   const firstPartyPluginRuntime = options.firstPartyPluginRuntime ?? false
   const firstPartyRuntime = firstPartyPluginRuntime
     ? options.firstPartyPluginRuntimes === undefined
-      ? firstPartyPluginRuntimeLayers(firstPartyPluginRuntimeRegistryLayer)
+      ? firstPartyPluginRuntimeLayers(
+        options.codeCommitHttpClient === undefined
+          ? firstPartyPluginRuntimeRegistryLayer
+          : firstPartyPluginRuntimeRegistryLayerWithCodeCommitHttpClient(
+            options.codeCommitHttpClient,
+            options.codeCommitAwsConfiguration
+          )
+      )
       : firstPartyPluginRuntimeLayersFromRegistry(options.firstPartyPluginRuntimes)
     : null
   const selectedApplicationServices: Layer.Layer<
@@ -329,7 +359,9 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     configuredPluginConnections,
     firstPartyPluginRuntime,
     options.bindConfig.publicOrigin,
-    firstPartyRuntime?.connections ?? firstPartyPluginConnectionMapLayer
+    firstPartyRuntime?.connections ?? firstPartyPluginConnectionMapLayer,
+    options.codeCommitHttpClient,
+    options.codeCommitAwsConfiguration
   )
   const domainEventWakeups = DomainEventWakeups.layer
   const lifecycle = ServerLifecycle.layer
@@ -524,13 +556,16 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
     )
     : (() => {
       const configured = options.prReviewWorker
+      const sourceResolver = configured.codeCommitMockSourceFixture === undefined
+        ? codeCommitPrReviewSourceResolverLayer
+        : codeCommitPrReviewSourceResolverLayerWithFixture(configured.codeCommitMockSourceFixture)
       const sourceWorkspace = configured.sourceWorkspace === undefined
         ? prReviewSourceWorkspaceLayer({
           workspaceRoot: configured.workspaceRoot,
           ...(!(configured.maximumSourceDuration === undefined) &&
             { maximumDuration: configured.maximumSourceDuration })
         }).pipe(
-          Layer.provide(codeCommitPrReviewSourceResolverLayer.pipe(Layer.provide(persistence))),
+          Layer.provide(sourceResolver.pipe(Layer.provide(persistence))),
           Layer.provide(
             prReviewWorkspaceLeaseGuardLayer(configured.workspaceId).pipe(
               Layer.provide(agentJobRepository)
@@ -544,8 +579,10 @@ const makeApplication = <ApplicationError = never, ApplicationRequirements = nev
           ...(!(configured.sbxTemplate === undefined) && { template: configured.sbxTemplate }),
           ...(!(configured.maximumSandboxDurationMillis === undefined) &&
             { maximumSessionDurationMillis: configured.maximumSandboxDurationMillis })
-        }).pipe(Layer.provide(sourceWorkspace))
-          .pipe(Layer.provide(reviewCommandArtifactRepository))
+        }).pipe(
+          Layer.provide(sourceWorkspace),
+          Layer.provide(reviewCommandArtifactRepository)
+        )
         : Layer.succeed(PrReviewSandboxSessions, configured.sandboxSessions)
       const workerOptions: AgentJobWorkerOptions = {
         leaseOwner: configured.leaseOwner,

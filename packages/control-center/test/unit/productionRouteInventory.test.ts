@@ -118,7 +118,11 @@ describe("Control Center production route presentation inventory", () => {
         const path = yield* Path.Path
         const routerPath = yield* path.fromFileUrl(new URL("../../src/client/router.tsx", import.meta.url))
         return yield* fileSystem.readFileString(routerPath)
-      }).pipe(Effect.provide(NodeServices.layer))
+      }).pipe(
+        // The test owns this isolated Node service boundary.
+        // @effect-diagnostics-next-line strictEffectProvide:off
+        Effect.provide(NodeServices.layer)
+      )
 
       const declared = declaredRouterInventory(routerSource)
 
@@ -154,6 +158,7 @@ describe("Control Center production route presentation inventory", () => {
       "atlassian-oauth-callback",
       "item",
       "items",
+      "open-pr",
       "not-found",
       "overview",
       "pair",
