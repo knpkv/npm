@@ -98,7 +98,7 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
               <dd>
                 {run.cost === undefined
                   ? "Not recorded"
-                  : `${run.cost.currency} ${run.cost.amount.toFixed(2)} · ${run.cost.basis}`}
+                  : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
               </dd>
             </div>
           </dl>
@@ -130,7 +130,9 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
       <article className="review-file" id={id} key={file.path}>
         <header className="review-file-header">
           <StateLabel label={file.status} size="compact" tone="neutral" />
-          <code>{file.status === "renamed" ? `${file.oldPath} → ${file.newPath}` : file.path}</code>
+          <code>
+            {file.status === "renamed" || file.status === "copied" ? `${file.oldPath} → ${file.newPath}` : file.path}
+          </code>
         </header>
         {summary === "" ? null : <Prose text={summary} />}
         <PatchDiffView

@@ -27,6 +27,17 @@ index 1111111..2222222 100644
 \\ No newline at end of file
 `
 
+test("rejects non-UTF-8 path identities while preserving valid octal UTF-8", () => {
+  const file = (name: string) =>
+    `diff --git "a/${name}" "b/${name}"\n--- "a/${name}"\n+++ "b/${name}"\n@@ -1 +1 @@\n-old\n+new\n`
+  assert.equal(parsePatch(file("\\376") + file("\\377"))._tag, "PatchInvalid")
+  assert.equal(parsed(file("\\303\\251.ts")).files[0]?.path, "é.ts")
+  const moved = parsed(
+    "diff --git \"a/\\357\\273\\277source\" b/destination\nsimilarity index 100%\nrename from \"\\357\\273\\277source\"\nrename to destination\n"
+  )
+  assert.equal(moved.files[0]?.oldPath, "\uFEFFsource")
+})
+
 test("rejects surplus body records and misplaced no-newline markers", () => {
   const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n"
   for (

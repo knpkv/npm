@@ -50,6 +50,42 @@ const findings: Findings = {
 }
 
 describe("guide", () => {
+  it("retains the source and destination of copies and renames", () => {
+    for (const status of ["copy", "rename"]) {
+      const moved = parsed(
+        `diff --git a/source.txt b/copy.txt\nsimilarity index 100%\n${status} from source.txt\n${status} to copy.txt\n`
+      )
+      const html = renderToStaticMarkup(
+        <GuidePage
+          guide={{ ...guide, sections: [{ title: "Moved", overview: "", diffs: [{ file: "copy.txt", summary: "" }] }] }}
+          patch={moved}
+          findings={{ checklist: [], issues: [] }}
+        />
+      )
+      expect(html).toContain("source.txt → copy.txt</code>")
+    }
+    const html = renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={findings} />)
+    expect(html).toContain(">a.ts</code>")
+    expect(html).not.toContain("a.ts → a.ts")
+  })
+  it("preserves supplied cost precision without confusing a small charge with zero", () => {
+    for (const [currency, amount, displayed] of [
+      ["USD", 0, "USD 0"],
+      ["USD", 0.001, "USD 0.001"],
+      ["USD", 0.12, "USD 0.12"],
+      ["KWD", 1.234, "KWD 1.234"],
+      ["USD", 1e-25, "USD 1e-25"]
+    ] satisfies Array<[string, number, string]>) {
+      const html = renderToStaticMarkup(
+        <GuideUsage
+          usage={[
+            { label: "Recorded run", scope: "review", source: "receipt", cost: { currency, amount, basis: "reported" } }
+          ]}
+        />
+      )
+      expect(html).toContain(`${displayed} · reported`)
+    }
+  })
   it("keeps pre-existing context and open questions in separately labelled groups", () => {
     const render = (context: Pick<Findings, "preExisting" | "openQuestions">) =>
       renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={{ ...findings, ...context }} />)
@@ -109,9 +145,8 @@ describe("guide", () => {
         ]}
       />
     )
-    expect(html).toContain("USD 0.00 · reported")
-    expect(html).toContain("USD 328.24 · estimated")
-    expect(html).not.toContain("328.2407")
+    expect(html).toContain("USD 0 · reported")
+    expect(html).toContain("USD 328.2407 · estimated")
     expect(html).toContain("2m 5s")
     expect(html).toContain("Not recorded")
     expect(html).toContain("Provider usage receipt")

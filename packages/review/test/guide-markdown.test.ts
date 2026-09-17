@@ -2,6 +2,20 @@ import assert from "node:assert/strict"
 import { test } from "vitest"
 import { renderInline, renderMarkdown } from "../src/guide/markdown.js"
 
+test("fence info accepts punctuated languages and metadata without consuming following prose", () => {
+  for (
+    const [info, language] of [["shell-session", "shell-session"], ["c++", "c--"], [
+      "objective-c title=example",
+      "objective-c"
+    ]]
+  ) {
+    const { html } = renderMarkdown(`\`\`\`${info}\n<x>\n\`\`\`\n\nFollowing paragraph.`)
+    assert.equal(html, `<pre><code class="lang-${language}">&lt;x&gt;</code></pre>\n<p>Following paragraph.</p>`)
+  }
+  const { html } = renderMarkdown("```ts\"onclick=\"bad metadata\ncode\n```")
+  assert.equal(html, "<pre><code class=\"lang-ts-onclick--bad\">code</code></pre>")
+})
+
 test("inline: code wins over other markup, html is escaped, only safe links", () => {
   assert.equal(
     renderInline("a `<b>**x**</b>` **bold** *em* [t](https://x.y)"),

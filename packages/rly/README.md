@@ -508,3 +508,5 @@ configuration fail closed to a full visual run.
 `{ source, destination }` for exact custom Git prefixes; arbitrary prefixes cannot
 be inferred from filenames. Copied files retain both paths and `copied` status,
 but only the destination resolves as a changed file. CRLF patch records are accepted.
+Quoted path bytes must be valid UTF-8; unsupported byte sequences return
+`PatchInvalid` rather than replacing bytes and collapsing distinct file identities.

@@ -10,3 +10,5 @@ records, and copied-file identities. Validate usage subsets and source coordinat
 and replace stale fix guidance when a finding has status.
 
 Reject overlapping or surplus hunk records, retain diagram updates during active rendering, and keep source attribution and review-context categories visible. Standalone test commands build the export assets first.
+
+Preserve recorded cost precision and copied source paths, recognize punctuated code-fence languages, and reject non-UTF-8 path bytes instead of collapsing file identities.

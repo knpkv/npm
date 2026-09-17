@@ -36,7 +36,8 @@ findings. Both lead to the same chapter diffs and source-line anchors.
 The reader uses Rly primitives and patch diffs, with a chapter index, bounded
 prose width, source-side findings, split/unified layouts, code wrapping, and
 light/dark/system themes. Markdown accepts paragraphs, headings, lists, links,
-callouts, fenced code, and Mermaid. Raw HTML stays escaped.
+callouts, fenced code, and Mermaid. Fence language names may contain punctuation
+and be followed by metadata. Raw HTML stays escaped.
 Finding summaries and checklist notes render inline code, emphasis, and links.
 The finding index keeps its own source-line link; links within its label become
 plain labels so anchors never nest. Prose uses softer Rly reading colors; code
@@ -85,6 +86,7 @@ tokens are a subset, never an extra charge to add to the total. Duration is
 elapsed time for the named run. Cost requires an ISO currency code and
 `reported` or `estimated` basis. Supply provider usage or a documented pricing
 calculation; the renderer has no model price table. Missing values display
-as not recorded, while measured zero stays zero. Runs stay separate because
+as not recorded, while measured zero stays zero. Cost display preserves the
+supplied numeric precision, including sub-cent amounts. Runs stay separate because
 implementation, review, and guide sessions may overlap. Product adapters own
 telemetry collection, provider locators, storage, and publishing.

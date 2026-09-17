@@ -88,7 +88,14 @@ const unquote = (path: string): UnquotedPath => {
     offset = match.index + match[0].length
   }
   for (const byte of encoder.encode(source.slice(offset))) bytes.push(byte)
-  return { _tag: "Path", path: new TextDecoder().decode(new Uint8Array(bytes)) }
+  try {
+    return {
+      _tag: "Path",
+      path: new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(new Uint8Array(bytes))
+    }
+  } catch {
+    return invalid("Quoted Git path is not valid UTF-8")
+  }
 }
 
 /** Resolve header boundaries against file markers; spaces in unquoted filenames are legal Git output. */

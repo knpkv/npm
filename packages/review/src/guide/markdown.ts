@@ -66,10 +66,10 @@ export const renderMarkdown = (source: string): Rendered => {
       continue
     }
 
-    const fence = /^```\s*(\w+)?\s*$/.exec(line)
+    const fence = /^```[ \t]*([^`]*)$/.exec(line)
     if (fence !== null) {
       flush()
-      const lang = fence[1] ?? ""
+      const lang = (fence[1] ?? "").trim().split(/\s+/)[0] ?? ""
       const body: Array<string> = []
       index += 1
       while (index < lines.length && !/^```\s*$/.test(lines[index] ?? "")) {
@@ -81,7 +81,8 @@ export const renderMarkdown = (source: string): Rendered => {
         mermaid = true
         out.push(`<pre class="mermaid">${escapeHtml(body.join("\n"))}</pre>`)
       } else {
-        const cls = lang === "" ? "" : ` class="lang-${escapeHtml(lang)}"`
+        const token = lang.replace(/[^a-zA-Z0-9_-]/g, "-")
+        const cls = token === "" ? "" : ` class="lang-${token}"`
         out.push(`<pre><code${cls}>${escapeHtml(body.join("\n"))}</code></pre>`)
       }
       continue
