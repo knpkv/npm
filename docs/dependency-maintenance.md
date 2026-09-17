@@ -46,6 +46,46 @@ pnpm lint
 
 Use `pnpm audit` for a full security gate.
 
+## September 2026 audit remediation
+
+At `de0190543c`, separate production and development audits found six production
+findings and two development findings. The root audit script stops after a failed
+production audit, so run both separately when investigating a failure.
+
+| Dependency                | Baseline | Fixed resolution | Affected workspace paths                                                                    |
+| ------------------------- | -------- | ---------------- | ------------------------------------------------------------------------------------------- |
+| Astro                     | 7.2.1    | 7.2.8            | Docs directly and through Starlight, MDX, and expressive-code                               |
+| sharp                     | 0.35.3   | 0.35.4           | Each docs Astro path                                                                        |
+| js-yaml                   | 4.3.1    | 4.3.2            | Docs Astro, Starlight, markdown helpers, and Jira CLI through gray-matter                   |
+| SVGO                      | 4.0.2    | 4.1.0            | Each docs Astro path                                                                        |
+| Vitest and @vitest/mocker | 4.1.10   | 4.1.11           | Root and workspace test tooling, including Effect Vitest, coverage, and Rly browser tooling |
+
+Official advisories establish the patched versions:
+[Astro AVIF processing](https://github.com/advisories/GHSA-26w7-cxv4-gfx2),
+[Astro base-path authorization](https://github.com/advisories/GHSA-376h-93r7-7g6f),
+[sharp libheif](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c),
+[js-yaml merge sources](https://github.com/advisories/GHSA-2883-xcg3-v3hh),
+[SVGO executable links](https://github.com/advisories/GHSA-w27v-7q3p-w38r),
+[SVGO foreignObject](https://github.com/advisories/GHSA-4vpr-x523-8j87), and
+[Vitest redirect mocks](https://github.com/advisories/GHSA-82fw-gwwq-j7x9).
+
+Astro 7.2.8 requires markdown-remark 7.2.4 and sharp `^0.35.4`; its other
+transitive changes follow the published Astro manifest. SVGO 4.1.0 satisfies
+Astro's `^4.0.1` range, so a targeted lockfile refresh replaces the old SVGO override.
+Vitest's browser and coverage packages require matching Vitest versions and move
+together to 4.1.11.
+
+The existing js-yaml override advances from 4.3.1 to 4.3.2. Astro and its helpers
+accept this patch. Gray-matter still requests `^3.13.1`; Jira CLI already replaces
+its default engine with direct js-yaml `load`/`dump` calls in both frontmatter and
+sync-document handling. Keep the frontmatter and sync tests as compatibility
+coverage. Direct js-yaml 5.2.3 consumers remain unchanged.
+
+The existing CI Audit job guards the resolved graph. Validate with separate
+`pnpm audit --prod` and `pnpm audit --dev` runs, followed by `pnpm run audit`, a
+frozen install, the docs build, and the full formatting, lint, type and test gates.
+No publishable runtime manifest changes are needed for this remediation.
+
 ## Update the Effect Subtree
 
 `repos/effect` is a squash-imported git subtree from the canonical

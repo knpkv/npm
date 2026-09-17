@@ -59,19 +59,19 @@
     "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
-    "happy-dom": "20.11.2",
+    "@effect/platform-node": "4.0.0-rc.109",
     "@effect/vitest": "4.0.0-rc.109",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "esbuild": "^0.28.2",
+    "happy-dom": "20.11.2",
+    "mermaid": "^11.12.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "rimraf": "^6.1.3",
-    "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "catalog:",
-    "esbuild": "^0.27.7",
-    "mermaid": "^11.12.0",
     "tsx": "^4.23.12",
-    "@effect/platform-node": "4.0.0-rc.109"
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "react": "^19.2.8",
