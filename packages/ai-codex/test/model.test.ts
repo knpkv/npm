@@ -1,24 +1,27 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Exit, FileSystem, Layer, Schema, Sink, Stream } from "effect"
+import { ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Schema, Sink, Stream } from "effect"
 import * as Predicate from "effect/Predicate"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { model } from "../src/index.js"
+import { type CodexActivity, type CodexModelOptions, model } from "../src/index.js"
 import { PROMPT_ONLY_DISABLED_FEATURES, PROMPT_ONLY_SAFE_FEATURES } from "../src/internal/configuration.js"
+import { inventory as previousFeatureInventory } from "./fixtures/codex-0.153.4.js"
+import { inventory as completeFeatureInventory } from "./fixtures/codex-0.154.0.js"
+
+// Each test is an entry point composing its model and fake process lifetime.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
 
 interface FakeProcessOptions {
   readonly exitCode?: number
   readonly featureExitCode?: number
   readonly featureInventory?: string
   readonly stderr?: string
-  readonly stdout: string
+  readonly stdout: string | Stream.Stream<string>
+  readonly onRelease?: Effect.Effect<void>
 }
-
-const completeFeatureInventory = [...PROMPT_ONLY_DISABLED_FEATURES, ...PROMPT_ONLY_SAFE_FEATURES]
-  .map((feature) => `${feature} stable false`)
-  .join("\n")
 
 const fakeProcessLayer = (
   calls: Array<ChildProcess.Command>,
@@ -26,14 +29,16 @@ const fakeProcessLayer = (
 ): Layer.Layer<ChildProcessSpawner.ChildProcessSpawner> =>
   Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make((command) => {
+    ChildProcessSpawner.make(Effect.fn(function*(command) {
       calls.push(command)
       const isFeatureInventory = ChildProcess.isStandardCommand(command) && command.args.join(" ") === "features list"
-      const stdout = Stream.make(
-        isFeatureInventory ? (options.featureInventory ?? completeFeatureInventory) : options.stdout
-      ).pipe(Stream.encodeText)
+      if (!isFeatureInventory && options.onRelease !== undefined) {
+        yield* Effect.addFinalizer(() => options.onRelease ?? Effect.void)
+      }
+      const output = isFeatureInventory ? (options.featureInventory ?? completeFeatureInventory) : options.stdout
+      const stdout = (Predicate.isString(output) ? Stream.make(output) : output).pipe(Stream.encodeText)
       const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
-      return Effect.succeed(
+      return (
         ChildProcessSpawner.makeHandle({
           all: Stream.concat(stdout, stderr),
           exitCode: Effect.succeed(
@@ -44,14 +49,13 @@ const fakeProcessLayer = (
           isRunning: Effect.succeed(false),
           kill: () => Effect.void,
           pid: ChildProcessSpawner.ProcessId(42),
-          reref: Effect.void,
           stderr,
           stdin: Sink.drain,
           stdout,
           unref: Effect.succeed(Effect.void)
         })
       )
-    })
+    }))
   )
 
 const successTranscript = (text: string): string =>
@@ -76,6 +80,164 @@ const provideTestRuntime = <Result, Error, Requirements>(
   )
 
 describe("model", () => {
+  it.effect("passes every supported effort as one config override while retaining prompt-only restrictions", () =>
+    Effect.gen(function*() {
+      const efforts: ReadonlyArray<NonNullable<CodexModelOptions["effort"]>> = [
+        "minimal",
+        "low",
+        "medium",
+        "high",
+        "xhigh"
+      ]
+      for (const effort of efforts) {
+        const calls: Array<ChildProcess.Command> = []
+        yield* LanguageModel.generateText({ prompt: "Supplied evidence" }).pipe(
+          Effect.provide(model({ cwd: "/workspace", effort, promptOnly: true })),
+          Effect.provide(fakeProcessLayer(calls, { stdout: successTranscript("ready") })),
+          Effect.provide(NodeFileSystem.layer)
+        )
+        expect(calls).toHaveLength(2)
+        const command = calls[1]
+        if (command === undefined || !ChildProcess.isStandardCommand(command)) {
+          return yield* Effect.die("missing command")
+        }
+        const setting = `model_reasoning_effort=${JSON.stringify(effort)}`
+        expect(command.args[command.args.indexOf(setting) - 1]).toBe("-c")
+        expect(command.args).toContain("--ignore-user-config")
+        expect(command.args).toContain("--ignore-rules")
+        expect(command.args).toContain("shell_tool")
+        expect(command.options.extendEnv).toBe(false)
+      }
+    }))
+
+  it.effect("reports visible activity before completion and only the accepted final answer as response", () =>
+    Effect.gen(function*() {
+      const seen = yield* Deferred.make<void>()
+      const finish = yield* Deferred.make<void>()
+      const activity: Array<CodexActivity> = []
+      const first = [
+        { type: "thread.started", thread_id: "private-thread" },
+        { type: "turn.started" },
+        { type: "system", message: "private-system" },
+        { type: "auth", message: "private-auth" },
+        { type: "item.completed", item: { type: "reasoning", text: "private-reasoning" } },
+        { type: "item.completed", item: { type: "command_execution", text: "private-tool" } },
+        { type: "item.completed", item: { type: "agent_message", text: "Checking supplied evidence" } }
+      ].map((event) => JSON.stringify(event) + "\n").join("")
+      const stdout = Stream.make(first.slice(0, 17), first.slice(17)).pipe(
+        Stream.concat(Stream.fromEffect(
+          Deferred.await(finish).pipe(
+            Effect.as(successTranscript("{\"status\":\"ready\"}"))
+          )
+        ))
+      )
+      const fiber = yield* LanguageModel.generateObject({
+        prompt: "Status",
+        schema: Schema.Struct({ status: Schema.String })
+      }).pipe(
+        Effect.provide(model({
+          cwd: "/workspace",
+          promptOnly: true,
+          onActivity: (event) =>
+            Effect.gen(function*() {
+              activity.push(event)
+              if (event.kind === "text") yield* Deferred.succeed(seen, undefined)
+            })
+        })),
+        Effect.provide(fakeProcessLayer([], { stdout })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.forkChild
+      )
+      yield* Deferred.await(seen)
+      expect(activity[0]?.kind).toBe("request")
+      expect(activity[0]?.text).toContain("Status")
+      expect(activity).toContainEqual({ kind: "text", text: "Checking supplied evidence" })
+      expect(activity.some((event) => event.kind === "response")).toBe(false)
+      yield* Deferred.succeed(finish, undefined)
+      expect((yield* Fiber.join(fiber)).value).toEqual({ status: "ready" })
+      expect(activity.filter((event) => event.kind === "response")).toEqual([{
+        kind: "response",
+        text: "{\"status\":\"ready\"}"
+      }])
+      expect(JSON.stringify(activity)).not.toContain("private-")
+      expect(activity.at(-1)).toEqual({ kind: "status", text: "Answer received" })
+    }))
+
+  it.effect("interrupts an active observed turn and releases its process without emitting a response", () =>
+    Effect.gen(function*() {
+      const seen = yield* Deferred.make<void>()
+      const released = yield* Deferred.make<void>()
+      const activity: Array<CodexActivity> = []
+      const fiber = yield* LanguageModel.generateText({ prompt: "Status" }).pipe(
+        Effect.provide(model({
+          cwd: "/workspace",
+          onActivity: (event) =>
+            Effect.gen(function*() {
+              activity.push(event)
+              if (event.kind === "text") yield* Deferred.succeed(seen, undefined)
+            })
+        })),
+        Effect.provide(fakeProcessLayer([], {
+          stdout: Stream.make(
+            JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Visible" } }) + "\n"
+          ).pipe(Stream.concat(Stream.never)),
+          onRelease: Deferred.succeed(released, undefined).pipe(Effect.asVoid)
+        })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.forkChild
+      )
+      yield* Deferred.await(seen)
+      yield* Fiber.interrupt(fiber)
+      expect(yield* Deferred.isDone(released)).toBe(true)
+      expect(activity.some((event) => event.kind === "response")).toBe(false)
+    }))
+
+  it.effect("withholds the response when process or transcript completion fails", () =>
+    Effect.gen(function*() {
+      const scenarios: ReadonlyArray<FakeProcessOptions> = [
+        { stdout: successTranscript("visible but unsuccessful"), exitCode: 1 },
+        { stdout: JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "incomplete" } }) }
+      ]
+      for (const scenario of scenarios) {
+        const activity: Array<CodexActivity> = []
+        const exit = yield* LanguageModel.generateText({ prompt: "Status" }).pipe(
+          Effect.provide(model({
+            cwd: "/workspace",
+            onActivity: (event) =>
+              Effect.sync(() => {
+                activity.push(event)
+              })
+          })),
+          Effect.provide(fakeProcessLayer([], scenario)),
+          Effect.provide(NodeFileSystem.layer),
+          Effect.exit
+        )
+        expect(Exit.isFailure(exit)).toBe(true)
+        expect(activity.some((event) => event.kind === "text")).toBe(true)
+        expect(activity.some((event) => event.kind === "response")).toBe(false)
+      }
+    }))
+
+  it.effect("bounds observed stdout before publishing oversized agent text", () =>
+    Effect.gen(function*() {
+      const activity: Array<CodexActivity> = []
+      const error = yield* LanguageModel.generateText({ prompt: "Status" }).pipe(
+        Effect.provide(model({
+          cwd: "/workspace",
+          maxOutputBytes: 64,
+          onActivity: (event) =>
+            Effect.sync(() => {
+              activity.push(event)
+            })
+        })),
+        Effect.provide(fakeProcessLayer([], { stdout: successTranscript("x".repeat(65)) })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.flip
+      )
+      expect(error.reason._tag).toBe("InternalProviderError")
+      expect(activity.some((event) => event.kind === "text" || event.kind === "response")).toBe(false)
+    }))
+
   it.effect("generates text with safe bounded defaults", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
@@ -93,6 +255,7 @@ describe("model", () => {
         expect(command.args).toContain("--ephemeral")
         expect(command.args).not.toContain("--ignore-user-config")
         expect(command.args).not.toContain("--disable")
+        expect(command.args.some((arg) => arg.startsWith("model_reasoning_effort="))).toBe(false)
         expect(command.args).toContain("read-only")
         expect(command.args).not.toContain("--cd")
         expect(command.options.cwd).toBe("/workspace")
@@ -204,7 +367,7 @@ describe("model", () => {
       expect(calls).toHaveLength(1)
     }))
 
-  it.effect("removes every host-capable input for prompt-only turns", () =>
+  it.effect("classifies the independent Codex 0.154.0 inventory and removes host capabilities before the turn", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
       yield* LanguageModel.generateText({ prompt: "Review this supplied patch" }).pipe(
@@ -235,12 +398,79 @@ describe("model", () => {
             "recommended_plugins",
             "skill_mcp_dependency_install",
             "skill_search",
-            "view_image"
+            "view_image",
+            "shell_tool",
+            "code_mode",
+            "background_paginated_rollout_migration",
+            "bedrock_setup_wizard",
+            "chronicle",
+            "code_mode_prewarm",
+            "context_management",
+            "guardian_enhanced_node_repl_transcripts",
+            "guardian_ext",
+            "guardian_node_repl_transcript_images",
+            "guardian_reuse_parent_compaction",
+            "in_app_chat",
+            "in_app_dictation",
+            "in_app_local_automation",
+            "mcp_oauth_refresh_coordination",
+            "powershell_shell_version",
+            "psp",
+            "shell_snapshot_v2",
+            "sleep_tool",
+            "step_model_switching",
+            "unified_exec_tty",
+            "worktrees"
           ])
         )
         expect(PROMPT_ONLY_SAFE_FEATURES).toEqual(
-          expect.arrayContaining(["executed_tool_call_metadata", "image_resize_notice"])
+          expect.arrayContaining([
+            "executed_tool_call_metadata",
+            "image_resize_notice",
+            "apply_patch_preserve_line_endings",
+            "code_mode_interrupt",
+            "compaction_image_budget",
+            "content_item_kinds",
+            "cwd_relative_turn_diffs",
+            "local_thread_store_shared_compression",
+            "omit_app_server_notification_media",
+            "retain_client_developer_messages",
+            "send_async_message",
+            "skip_host_skill_discovery",
+            "transcript_v2",
+            "unbounded_connection_retries",
+            "unified_image_budget",
+            "write_stdin_approval",
+            "guardianv2.thread_context",
+            "reasoning_effort_override",
+            "windows_sandbox_service"
+          ])
         )
+        expect(PROMPT_ONLY_DISABLED_FEATURES.filter((feature) => PROMPT_ONLY_SAFE_FEATURES.includes(feature))).toEqual(
+          []
+        )
+        for (const feature of PROMPT_ONLY_SAFE_FEATURES) expect(command.args).not.toContain(feature)
+      }
+    }))
+
+  it.effect("keeps Codex 0.153.4 compatible without passing newer disables", () =>
+    Effect.gen(function*() {
+      const calls: Array<ChildProcess.Command> = []
+      yield* LanguageModel.generateText({ prompt: "Supplied evidence" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true })),
+        Effect.provide(fakeProcessLayer(calls, {
+          featureInventory: previousFeatureInventory,
+          stdout: successTranscript("ready")
+        })),
+        Effect.provide(NodeFileSystem.layer)
+      )
+      expect(calls).toHaveLength(2)
+      const command = calls[1]
+      expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+      if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+        expect(command.args).not.toContain("unified_exec_tty")
+        expect(command.args).not.toContain("worktrees")
+        expect(command.args).toContain("shell_tool")
       }
     }))
 

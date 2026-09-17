@@ -9,7 +9,7 @@ import { resolvePromptOnlyDisabledFeatures, streamCodexLines } from "./internal/
 import type { CodexModelOptions } from "./model.js"
 
 /** Configuration for streaming the Codex CLI's raw JSONL events. */
-export interface CodexEventStreamOptions extends CodexModelOptions {
+export interface CodexEventStreamOptions extends Omit<CodexModelOptions, "onActivity"> {
   /** Prompt sent to the ephemeral Codex turn over stdin. */
   readonly prompt: string
   /** Native JSON Schema constraint passed to `codex exec --output-schema`. */
