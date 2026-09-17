@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Effect, Exit, Layer, Schema, Sink, Stream } from "effect"
+import { ConfigProvider, Deferred, Effect, Exit, Fiber, Layer, Schema, Sink, Stream } from "effect"
 import { PlatformError, SystemError } from "effect/PlatformError"
 import * as Predicate from "effect/Predicate"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
-import { model } from "../src/index.js"
+import { type ClaudeActivity, type ClaudeModelOptions, model } from "../src/index.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and
 // provides them there. Both provide diagnostics are about production wiring, where a Layer
@@ -17,7 +17,7 @@ type FakeProcessOptions = {
   readonly exitCode?: number
   readonly spawnFailure?: PlatformError
   readonly stderr?: string
-  readonly stdout: string
+  readonly stdout: string | Stream.Stream<string>
 }
 
 const fakeProcessLayer = (calls: Array<ChildProcess.Command>, options: FakeProcessOptions) =>
@@ -26,7 +26,9 @@ const fakeProcessLayer = (calls: Array<ChildProcess.Command>, options: FakeProce
     ChildProcessSpawner.make((command) => {
       calls.push(command)
       if (options.spawnFailure !== undefined) return Effect.fail(options.spawnFailure)
-      const stdout = Stream.make(options.stdout).pipe(Stream.encodeText)
+      const stdout = (Predicate.isString(options.stdout) ? Stream.make(options.stdout) : options.stdout).pipe(
+        Stream.encodeText
+      )
       const stderr = Stream.make(options.stderr ?? "").pipe(Stream.encodeText)
       return Effect.succeed(ChildProcessSpawner.makeHandle({
         all: Stream.concat(stdout, stderr),
@@ -60,6 +62,34 @@ const provide = <A, E, R>(effect: Effect.Effect<A, E, R>, calls: Array<ChildProc
   )
 
 describe("model", () => {
+  it.effect("passes every supported effort without weakening prompt-only tools", () =>
+    Effect.gen(function*() {
+      const efforts: ReadonlyArray<NonNullable<ClaudeModelOptions["effort"]>> = [
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+        "max"
+      ]
+      for (const effort of efforts) {
+        const calls: Array<ChildProcess.Command> = []
+        yield* LanguageModel.generateText({ prompt: "Supplied evidence" }).pipe(
+          Effect.provide(model({ cwd: "/workspace", access: "prompt-only", effort })),
+          Effect.provide(fakeProcessLayer(calls, { stdout: success("ready") }))
+        )
+        expect(calls).toHaveLength(1)
+        const command = calls[0]
+        if (command === undefined || !ChildProcess.isStandardCommand(command)) {
+          return yield* Effect.die("missing command")
+        }
+        expect(command.args[command.args.indexOf("--effort") + 1]).toBe(effort)
+        expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
+        expect(command.args).toContain("--safe-mode")
+        expect(command.args[command.args.indexOf("--setting-sources") + 1]).toBe("")
+        expect(command.options.extendEnv).toBe(false)
+      }
+    }))
+
   it.effect("generates text with safe defaults", () =>
     Effect.gen(function*() {
       const calls: Array<ChildProcess.Command> = []
@@ -69,6 +99,7 @@ describe("model", () => {
       expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
       if (command !== undefined && ChildProcess.isStandardCommand(command)) {
         expect(command.args).toContain("plan")
+        expect(command.args).not.toContain("--effort")
         expect(command.options.detached).toBeUndefined()
         expect(command.options.shell).toBe(false)
       }
@@ -329,3 +360,119 @@ describe("model", () => {
       expect(malformedError.reason).toMatchObject({ _tag: "InvalidOutputError" })
     }))
 })
+
+// The final result cannot arrive until the observer receives output. Buffering until exit deadlocks this test.
+it.effect("streams visible structured-output fragments before the validated answer, excluding reasoning and system data", () =>
+  Effect.gen(function*() {
+    const seen = yield* Deferred.make<void>()
+    const finish = yield* Deferred.make<void>()
+    const output: Array<string> = []
+    const calls: Array<ChildProcess.Command> = []
+    const event = (value: Schema.Json) => `${JSON.stringify(value)}\n`
+    const first = [
+      event({
+        type: "stream_event",
+        event: { type: "message_delta", delta: { stop_reason: "tool_use", stop_sequence: null } }
+      }),
+      event({ type: "system", cwd: "private-path", apiKey: "private-key" }),
+      event({
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "thinking_delta", thinking: "private-reasoning" }
+        }
+      }),
+      event({
+        type: "stream_event",
+        event: { type: "content_block_start", index: 1, content_block: { type: "tool_use", name: "StructuredOutput" } }
+      }),
+      event({
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          index: 1,
+          delta: { type: "input_json_delta", partial_json: "{\"status\":\"ready\"}" }
+        }
+      })
+    ].join("")
+    const stdout = Stream.concat(
+      Stream.make(first.slice(0, 23), first.slice(23)),
+      Stream.fromEffect(
+        Deferred.await(finish).pipe(
+          Effect.as(
+            event({ type: "result", subtype: "success", is_error: false, structured_output: { status: "ready" } })
+          )
+        )
+      )
+    )
+    const fiber = yield* LanguageModel.generateObject({
+      prompt: "Status",
+      schema: Schema.Struct({ status: Schema.String })
+    }).pipe(
+      Effect.provide(
+        model({
+          cwd: "/workspace",
+          access: "prompt-only",
+          onActivity: (activity) =>
+            Effect.gen(function*() {
+              output.push(activity.text)
+              if (activity.kind === "text") yield* Deferred.succeed(seen, undefined)
+            })
+        })
+      ),
+      Effect.provide(fakeProcessLayer(calls, { stdout })),
+      Effect.forkChild
+    )
+    yield* Deferred.await(seen)
+    expect(output.join(" ")).toContain("{\"status\":\"ready\"}")
+    expect(output.join(" ")).not.toContain("private-")
+    const command = calls[0]
+    expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+    if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+      expect(command.args).toContain("stream-json")
+      expect(command.args).toContain("--include-partial-messages")
+      expect(command.args[command.args.indexOf("--tools") + 1]).toBe("")
+    }
+    yield* Deferred.succeed(finish, undefined)
+    expect((yield* Fiber.join(fiber)).value).toEqual({ status: "ready" })
+  }))
+
+it.effect("enforces stdout limits during live output before accepting a result", () =>
+  Effect.gen(function*() {
+    const error = yield* LanguageModel.generateText({ prompt: "hello" }).pipe(
+      Effect.provide(model({ cwd: "/workspace", maxOutputBytes: 8, onActivity: () => Effect.void })),
+      Effect.provide(fakeProcessLayer([], { stdout: success("hello") })),
+      Effect.flip
+    )
+    expect(error.reason._tag).toBe("InternalProviderError")
+  }))
+
+it.effect("rejects a live stream that ends without a final result", () =>
+  Effect.gen(function*() {
+    const error = yield* LanguageModel.generateText({ prompt: "hello" }).pipe(
+      Effect.provide(model({ cwd: "/workspace", onActivity: () => Effect.void })),
+      Effect.provide(fakeProcessLayer([], { stdout: JSON.stringify({ type: "system" }) })),
+      Effect.flip
+    )
+    expect(error.reason._tag).toBe("InvalidOutputError")
+  }))
+
+it.effect("reports the request and final response even when the CLI emits no partial messages", () =>
+  Effect.gen(function*() {
+    const events: Array<ClaudeActivity> = []
+    const response = yield* LanguageModel.generateText({ prompt: "Show this request" }).pipe(
+      Effect.provide(model({
+        cwd: "/workspace",
+        onActivity: (event) =>
+          Effect.sync(() => {
+            events.push(event)
+          })
+      })),
+      Effect.provide(fakeProcessLayer([], { stdout: success("Here is the completed response") }))
+    )
+    expect(events[0]?.kind).toBe("request")
+    expect(events[0]?.text).toContain("Show this request")
+    expect(events.find((event) => event.kind === "response")?.text).toBe(response.text)
+    expect(response.text).toBe("Here is the completed response")
+  }))

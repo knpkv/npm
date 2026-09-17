@@ -3,6 +3,7 @@ import type { Duration } from "effect"
 import { LanguageModel, Model } from "effect/unstable/ai"
 import type { AiError, Response } from "effect/unstable/ai"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import type { ClaudeActivity } from "./activity.js"
 import { configurationFailure, invalidInput, invalidOutput, unsupportedSchema } from "./errors.js"
 import { renderPrompt } from "./prompt.js"
 import type { ClaudeResult } from "./protocol.js"
@@ -55,10 +56,14 @@ const childEnvironment = Config.all({
 export interface ClaudeModelOptions {
   /** Working directory exposed to Claude. */
   readonly cwd: string
+  /** Receives live visible output and process status. Backpressure and cancellation follow the call. */
+  readonly onActivity?: ((activity: ClaudeActivity) => Effect.Effect<void>) | undefined
   /** Claude executable name or absolute path. Defaults to `claude`. */
   readonly executable?: string
   /** Claude model identifier. Defaults to the CLI-configured model. */
-  readonly model?: string
+  readonly model?: string | undefined
+  /** Optional CLI effort override. Omission preserves the configured default. */
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max" | undefined
   /**
    * Workspace access granted to Claude. Defaults to `read-only`.
    *
@@ -182,6 +187,8 @@ const schemaArgument = (
 }
 
 interface NormalizedOptions {
+  readonly effort: ClaudeModelOptions["effort"]
+  readonly onActivity: ClaudeModelOptions["onActivity"]
   readonly access: "prompt-only" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
@@ -197,6 +204,8 @@ const normalizeOptions = Effect.fn("ClaudeCliLanguageModel.normalizeOptions")(fu
   method: string
 ): Effect.fn.Return<NormalizedOptions, AiError.AiError> {
   const normalized: NormalizedOptions = {
+    effort: options.effort,
+    onActivity: options.onActivity,
     access: options.access ?? "read-only",
     cwd: options.cwd,
     environment: yield* childEnvironment.pipe(
@@ -235,6 +244,7 @@ const makeService = Effect.fn("ClaudeCliLanguageModel.make")(function*(options: 
       const normalized = yield* normalizeOptions(options, "generateText")
       const result = yield* runClaude({ ...normalized, jsonSchema, prompt }, "generateText", spawner)
       const text = yield* resultText(result, "generateText")
+      if (options.onActivity !== undefined) yield* options.onActivity({ kind: "response", text })
       const parts: Array<Response.PartEncoded> = [
         { type: "text", text },
         { type: "finish", reason: "stop", response: undefined, usage: usageFrom(result.usage) }
@@ -248,6 +258,7 @@ const makeService = Effect.fn("ClaudeCliLanguageModel.make")(function*(options: 
         const normalized = yield* normalizeOptions(options, "streamText")
         const result = yield* runClaude({ ...normalized, jsonSchema, prompt }, "streamText", spawner)
         const text = yield* resultText(result, "streamText")
+        if (options.onActivity !== undefined) yield* options.onActivity({ kind: "response", text })
         const parts: Array<Response.StreamPartEncoded> = [
           { type: "text-start", id: STREAM_TEXT_ID },
           { type: "text-delta", id: STREAM_TEXT_ID, delta: text },
