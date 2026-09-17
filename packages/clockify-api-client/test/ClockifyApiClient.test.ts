@@ -1,4 +1,4 @@
-import { describe, expect, it } from "@effect/vitest"
+import { assert, describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
@@ -48,6 +48,8 @@ describe("ClockifyApiClient", () => {
       expect(requests[0]?.url).toBe("https://clockify.test/api/v1/user")
       expect(requests[0]?.headers["x-api-key"]).toBe("secret")
     }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(clientLayer({
         status: 200,
         body: { id: "user-1", name: "Ada", email: "ada@example.com", status: "ACTIVE" }
@@ -63,6 +65,8 @@ describe("ClockifyApiClient", () => {
       expect(entry?.timeInterval?.end).toBeNull()
       expect(entry?.timeInterval?.duration).toBeNull()
     }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(clientLayer({
         status: 200,
         body: [{
@@ -93,6 +97,8 @@ describe("ClockifyApiClient", () => {
       expect(new Map(requests[1]?.urlParams ?? []).has("hydrated")).toBe(false)
       expect(new Map(requests[2]?.urlParams ?? []).get("hydrated")).toBe("false")
     }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(clientLayer({
         status: 200,
         body: {
@@ -128,6 +134,8 @@ describe("ClockifyApiClient", () => {
       expect(new Map(requests[0]?.urlParams ?? []).get("page")).toBe("2")
       expect(new Map(requests[0]?.urlParams ?? []).get("page-size")).toBe("10")
     }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(clientLayer({ status: 200, body: [] }, requests))
     )
   })
@@ -179,7 +187,11 @@ describe("ClockifyApiClient", () => {
         "ACTIVE,PENDING_EMAIL_VERIFICATION,DELETED,NOT_REGISTERED,LIMITED,LIMITED_DELETED"
       )
       expect(new Map(requests[0]?.urlParams ?? []).get("memberships")).toBe("ALL")
-    }).pipe(Effect.provide(layer))
+    }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(layer)
+    )
   })
 
   it.effect("decodes a created time entry whose optional id references are null", () => {
@@ -197,6 +209,8 @@ describe("ClockifyApiClient", () => {
       expect(entry.taskId).toBeNull()
       expect(entry.tagIds).toBeNull()
     }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(clientLayer({
         status: 201,
         body: {
@@ -229,6 +243,8 @@ describe("ClockifyApiClient", () => {
       expect(entries).toHaveLength(1)
       expect(entries[0]?.tagIds).toBeNull()
     }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(clientLayer({
         status: 200,
         body: [{
@@ -271,10 +287,10 @@ describe("ClockifyApiClient", () => {
       yield* client.uploadImage({ file: new Blob(["avatar bytes"], { type: "image/png" }) })
       expect(requests[0]?.headers["content-type"]).toBeUndefined()
       expect(requests[0]?.body._tag).toBe("FormData")
-      if (requests[0]?.body._tag !== "FormData") throw new Error("Expected a FormData request body")
+      if (requests[0]?.body._tag !== "FormData") return assert.fail("Expected a FormData request body")
       const file = requests[0].body.formData.get("file")
       expect(requests[0].body.formData).toBeInstanceOf(FormData)
-      if (file === null || Predicate.isString(file)) throw new Error("Expected a file field")
+      if (file === null || Predicate.isString(file)) return assert.fail("Expected a file field")
       expect(yield* Effect.promise(() => file.text())).toBe("avatar bytes")
       expect(requests[0]?.headers["x-api-key"]).toBe("secret")
     })
@@ -285,12 +301,20 @@ describe("ClockifyApiClient", () => {
       const client = yield* ClockifyApiClient
       const result = yield* Effect.result(client.getUser())
       expect(result._tag).toBe("Failure")
-    }).pipe(Effect.provide(clientLayer({ status: 200, body: { id: "user-1" } }, []))))
+    }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(clientLayer({ status: 200, body: { id: "user-1" } }, []))
+    ))
 
   it.effect("fails on non-success status codes", () =>
     Effect.gen(function*() {
       const client = yield* ClockifyApiClient
       const result = yield* Effect.result(client.getUser())
       expect(result._tag).toBe("Failure")
-    }).pipe(Effect.provide(clientLayer({ status: 401, body: { message: "Unauthorized" } }, []))))
+    }).pipe(
+      // The test entrypoint owns this isolated client layer and its scope.
+      // @effect-diagnostics-next-line strictEffectProvide:off
+      Effect.provide(clientLayer({ status: 401, body: { message: "Unauthorized" } }, []))
+    ))
 })

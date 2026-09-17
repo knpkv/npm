@@ -66,7 +66,7 @@ const program = Effect.scoped(Effect.gen(function*() {
     ]
   ) {
     if (!listing.split("\n").includes(artifact)) {
-      return yield* Effect.fail(new PackedPackageError({ reason: `Packed asset is missing: ${artifact}` }))
+      return yield* new PackedPackageError({ reason: `Packed asset is missing: ${artifact}` })
     }
   }
   const packedRegistryEntries = listing.split("\n").filter((entry) => entry.startsWith("package/registry/"))
@@ -75,13 +75,13 @@ const program = Effect.scoped(Effect.gen(function*() {
     (entry) => !expectedPackedRegistryEntries.has(entry)
   )
   if (unexpectedRegistryEntries.length > 0) {
-    return yield* Effect.fail(
-      new PackedPackageError({ reason: `Unexpected packed registry artifact: ${unexpectedRegistryEntries.join(", ")}` })
-    )
+    return yield* new PackedPackageError({
+      reason: `Unexpected packed registry artifact: ${unexpectedRegistryEntries.join(", ")}`
+    })
   }
   const diffArtifacts = findPackedDiffArtifacts(listing.split("\n"))
   if (diffArtifacts === undefined) {
-    return yield* Effect.fail(new PackedPackageError({ reason: "Packed diff worker or its WASM runtime is missing" }))
+    return yield* new PackedPackageError({ reason: "Packed diff worker or its WASM runtime is missing" })
   }
   const packedDiffEntry = yield* run("tar", ["-xOf", archive, "package/dist/diff/index.js"], temporary)
   const packedWorkerSource = yield* run("tar", ["-xOf", archive, diffArtifacts.worker], temporary)
@@ -92,7 +92,7 @@ const program = Effect.scoped(Effect.gen(function*() {
     workerSource: packedWorkerSource
   })
   if (diffArtifactFailure !== undefined) {
-    return yield* Effect.fail(new PackedPackageError({ reason: diffArtifactFailure }))
+    return yield* new PackedPackageError({ reason: diffArtifactFailure })
   }
   const packedRegistryFailure = validatePackedRegistry({
     components: yield* run("tar", ["-xOf", archive, "package/registry/components.json"], temporary),
@@ -101,28 +101,28 @@ const program = Effect.scoped(Effect.gen(function*() {
     usage: yield* run("tar", ["-xOf", archive, "package/registry/USAGE.md"], temporary)
   })
   if (packedRegistryFailure !== undefined) {
-    return yield* Effect.fail(new PackedPackageError({ reason: packedRegistryFailure }))
+    return yield* new PackedPackageError({ reason: packedRegistryFailure })
   }
   const leaked = listing.split("\n").filter((entry) =>
     /^package\/(?:src|test|scripts|generated|component-manifest\.ts)(?:\/|$)/.test(entry)
     || /^package\/dist\/dts\/tokens\/(?:colors|model|motion|shape|space|typography)\.d\.ts(?:\.map)?$/.test(entry)
   )
   if (leaked.length > 0) {
-    return yield* Effect.fail(new PackedPackageError({ reason: `Packed source leaked: ${leaked.join(", ")}` }))
+    return yield* new PackedPackageError({ reason: `Packed source leaked: ${leaked.join(", ")}` })
   }
   const packedStyles = yield* run("tar", ["-xOf", archive, "package/dist/styles.css"], temporary)
   const componentImport = "@import \"./components.css\";"
   const componentImportCount = packedStyles.split(componentImport).length - 1
   if (hasComponentStyles && componentImportCount !== 1) {
-    return yield* Effect.fail(new PackedPackageError({ reason: "Packed styles do not include component CSS once" }))
+    return yield* new PackedPackageError({ reason: "Packed styles do not include component CSS once" })
   }
   if (!hasComponentStyles && componentImportCount !== 0) {
-    return yield* Effect.fail(new PackedPackageError({ reason: "Packed styles include undeclared component CSS" }))
+    return yield* new PackedPackageError({ reason: "Packed styles include undeclared component CSS" })
   }
   if (hasComponentStyles) {
     const packedComponentStyles = yield* run("tar", ["-xOf", archive, "package/dist/components.css"], temporary)
     if (packedComponentStyles.trim().length === 0) {
-      return yield* Effect.fail(new PackedPackageError({ reason: "Packed component CSS is empty" }))
+      return yield* new PackedPackageError({ reason: "Packed component CSS is empty" })
     }
   }
 
@@ -557,15 +557,13 @@ void [${references}]
     ["@pierre/diffs"]
   )
   if (forbiddenTypeOrigins.length > 0) {
-    return yield* Effect.fail(
-      new PackedPackageError({
-        reason: `Diff public types expose vendor declarations: ${
-          forbiddenTypeOrigins
-            .map(({ exportName, sourceFile }) => `${exportName} via ${sourceFile}`)
-            .join(", ")
-        }`
-      })
-    )
+    return yield* new PackedPackageError({
+      reason: `Diff public types expose vendor declarations: ${
+        forbiddenTypeOrigins
+          .map(({ exportName, sourceFile }) => `${exportName} via ${sourceFile}`)
+          .join(", ")
+      }`
+    })
   }
   yield* run(
     "node",
@@ -629,14 +627,12 @@ export default {
   )
   const fieldBundleDirectory = path.join(consumer, "dist-field")
   if (!(yield* fs.exists(fieldBundleDirectory))) {
-    return yield* Effect.fail(
-      new PackedPackageError({ reason: `Field-only bundle directory is missing: ${fieldBundleOutput}` })
-    )
+    return yield* new PackedPackageError({ reason: `Field-only bundle directory is missing: ${fieldBundleOutput}` })
   }
   const fieldBundleFile = (yield* fs.readDirectory(fieldBundleDirectory))
     .find((file) => file.endsWith(".js") || file.endsWith(".mjs"))
   if (fieldBundleFile === undefined) {
-    return yield* Effect.fail(new PackedPackageError({ reason: "Field-only bundle emitted no JavaScript" }))
+    return yield* new PackedPackageError({ reason: "Field-only bundle emitted no JavaScript" })
   }
   const fieldOnlyBundle = yield* fs.readFileString(path.join(fieldBundleDirectory, fieldBundleFile))
   for (
@@ -648,11 +644,9 @@ export default {
     ]
   ) {
     if (fieldOnlyBundle.includes(leakedImplementation)) {
-      return yield* Effect.fail(
-        new PackedPackageError({
-          reason: `Field-only bundle retained unrelated implementation: ${leakedImplementation}`
-        })
-      )
+      return yield* new PackedPackageError({
+        reason: `Field-only bundle retained unrelated implementation: ${leakedImplementation}`
+      })
     }
   }
   yield* run("node", [path.join(fieldBundleDirectory, fieldBundleFile)], consumer)
@@ -664,7 +658,7 @@ export default {
     .filter((file) => file.endsWith(".js") || file.endsWith(".mjs"))
   const normalBundleEntry = normalBundleFiles.find((file) => file.startsWith("normal-entries"))
   if (normalBundleEntry === undefined) {
-    return yield* Effect.fail(new PackedPackageError({ reason: "Normal-entry bundle has no executable entry" }))
+    return yield* new PackedPackageError({ reason: "Normal-entry bundle has no executable entry" })
   }
   const normalBundleSources = yield* Effect.forEach(
     normalBundleFiles,
@@ -672,11 +666,9 @@ export default {
   )
   const leakedDiffImplementation = findLeakedDiffImplementation(normalBundleSources.join("\n"))
   if (leakedDiffImplementation !== undefined) {
-    return yield* Effect.fail(
-      new PackedPackageError({
-        reason: `Normal package entries retained diff implementation: ${leakedDiffImplementation}`
-      })
-    )
+    return yield* new PackedPackageError({
+      reason: `Normal package entries retained diff implementation: ${leakedDiffImplementation}`
+    })
   }
   yield* run("node", [path.join(normalBundleDirectory, normalBundleEntry)], consumer)
   for (const entry of componentManifest.entries) {
@@ -711,6 +703,8 @@ export default {
 NodeRuntime.runMain(
   program.pipe(
     Effect.tapError((error) => Console.error(error)),
+    // This executable owns the Node service scope until runMain completes.
+    // @effect-diagnostics-next-line strictEffectProvide:off
     Effect.provide(NodeServices.layer)
   ),
   { disableErrorReporting: false }

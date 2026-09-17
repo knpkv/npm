@@ -203,13 +203,13 @@ import { RelationshipChain, RelationshipTable, StageRail, type RlyRelationship }
 
 const relationships = [
   {
-    id: "jira-rps-6307-pr-291",
+    id: "jira-eng-6307-pr-291",
     kind: "Implemented by",
     direction: "forward",
     lifecycle: "verified",
     source: {
       state: "present",
-      id: "jira-rps-6307",
+      id: "jira-eng-6307",
       title: "ENG-6307",
       reference: "Release candidate",
       service: "jira",
