@@ -55,7 +55,7 @@ export interface Patch {
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/
 const HEADER = /^diff --git (a\/.*|"a\/.*") (b\/.*|"b\/.*")$/
 
-const stripPrefix = (path: string): string => path.startsWith("a/") || path.startsWith("b/") ? path.slice(2) : path
+const stripPrefix = (path: string): string => (path.startsWith("a/") || path.startsWith("b/") ? path.slice(2) : path)
 
 const unquote = (path: string): UnquotedPath => {
   if (!path.startsWith("\"")) return { _tag: "Path", path }
@@ -63,10 +63,17 @@ const unquote = (path: string): UnquotedPath => {
   const source = path.slice(1, -1)
   const bytes: Array<number> = []
   const encoder = new TextEncoder()
-  const escapes = new Map([["a", 7], ["b", 8], ["t", 9], ["n", 10], ["v", 11], ["f", 12], ["r", 13], ["\"", 34], [
-    "\\",
-    92
-  ]])
+  const escapes = new Map([
+    ["a", 7],
+    ["b", 8],
+    ["t", 9],
+    ["n", 10],
+    ["v", 11],
+    ["f", 12],
+    ["r", 13],
+    ["\"", 34],
+    ["\\", 92]
+  ])
   let offset = 0
   for (const match of source.matchAll(/\\([0-7]{3}|.)/g)) {
     for (const byte of encoder.encode(source.slice(offset, match.index))) bytes.push(byte)
@@ -126,14 +133,14 @@ export const parsePatch = (text: string): ParseResult => {
       } else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) {
         binary = true
       } else if (line.startsWith("--- ")) {
-        const source = line.slice(4)
+        const source = line.slice(4).replace(/\t$/, "")
         if (source !== "/dev/null") {
           const unquoted = unquote(source)
           if (unquoted._tag === "PatchInvalid") return unquoted
           oldPath = stripPrefix(unquoted.path)
         }
       } else if (line.startsWith("+++ ")) {
-        const target = line.slice(4)
+        const target = line.slice(4).replace(/\t$/, "")
         if (target !== "/dev/null") {
           const unquoted = unquote(target)
           if (unquoted._tag === "PatchInvalid") return unquoted
@@ -224,4 +231,4 @@ export const pathsOf = (file: FileDiff): ReadonlyArray<string> =>
   file.oldPath === file.newPath ? [file.path] : [file.newPath, file.oldPath]
 
 export const findFile = (patch: Patch, path: string): FileDiff | undefined =>
-  patch.files.find((file) => pathsOf(file).includes(path))
+  patch.files.find((file) => file.path === path) ?? patch.files.find((file) => pathsOf(file).includes(path))

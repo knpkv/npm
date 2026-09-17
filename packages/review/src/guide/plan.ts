@@ -3,7 +3,7 @@
  * enforces, then every Issue resolved to the diff line it sits on, or to the general block
  * when the review pointed outside the diff.
  */
-import { type FileDiff, findFile, type Patch, pathsOf } from "@knpkv/rly/diff/patch"
+import { type FileDiff, findFile, type Patch } from "@knpkv/rly/diff/patch"
 import type { Findings, Guide, GuideSection, Issue, Severity } from "./model.js"
 
 // ── Coverage ──────────────────────────────────────────────────────────────────
@@ -112,7 +112,7 @@ export const sectionSeverity = (
   const paths = new Set(
     section.diffs.flatMap((diff) => {
       const file = findFile(patch, diff.file)
-      return file === undefined ? [] : pathsOf(file)
+      return file === undefined ? [] : [file.path]
     })
   )
   const issues = placed
@@ -125,7 +125,8 @@ export const sectionSeverity = (
 /** Which section a placed file belongs to, for the general block's back-links. */
 export const sectionOf = (guide: Guide, patch: Patch, path: string): number | undefined => {
   const file = findFile(patch, path)
-  const names = file === undefined ? [path] : pathsOf(file)
-  const index = guide.sections.findIndex((section) => section.diffs.some((diff) => names.includes(diff.file)))
+  const index = guide.sections.findIndex((section) =>
+    section.diffs.some((diff) => file === undefined ? diff.file === path : findFile(patch, diff.file) === file)
+  )
   return index === -1 ? undefined : index
 }

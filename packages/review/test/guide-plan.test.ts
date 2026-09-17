@@ -2,7 +2,7 @@ import { parsePatch, type Patch } from "@knpkv/rly/diff/patch"
 import assert from "node:assert/strict"
 import { test } from "vitest"
 import type { Guide, Issue } from "../src/guide/model.js"
-import { anchor, coverageProblems, sectionSeverity } from "../src/guide/plan.js"
+import { anchor, coverageProblems, sectionOf, sectionSeverity } from "../src/guide/plan.js"
 
 /** Unwrap a patch these tests expect to be well formed. */
 const parsed = (text: string): Patch => {
@@ -91,4 +91,28 @@ test("section badge is the worst anchored severity among its files", () => {
   assert.equal(sectionSeverity(section, placed, patch), "P1")
   assert.equal(sectionSeverity(section, [placed[0]!], patch), "P3")
   assert.equal(sectionSeverity(section, [placed[2]!], patch), undefined)
+})
+
+test("renaming a file and replacing its old path keeps chapter ownership separate", () => {
+  const patch = parsed(`diff --git a/a.txt b/b.txt
+similarity index 100%
+rename from a.txt
+rename to b.txt
+diff --git a/a.txt b/a.txt
+new file mode 100644
+--- /dev/null
++++ b/a.txt
+@@ -0,0 +1 @@
++replacement
+`)
+  const renamed = { title: "Renamed", overview: "", diffs: [{ file: "b.txt", summary: "" }] }
+  const added = { title: "Added", overview: "", diffs: [{ file: "a.txt", summary: "" }] }
+  const document = guide([renamed, added])
+  const finding = issue({ file: "a.txt", line: 1 })
+  const placed = [anchor(patch, finding)]
+  assert.deepEqual(coverageProblems(document, patch, { checklist: [], issues: [finding] }), [])
+  assert.equal(sectionOf(document, patch, "a.txt"), 1)
+  assert.equal(sectionOf(document, patch, "b.txt"), 0)
+  assert.equal(sectionSeverity(renamed, placed, patch), undefined)
+  assert.equal(sectionSeverity(added, placed, patch), "P2")
 })

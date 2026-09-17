@@ -95,3 +95,42 @@ Binary files a/pic.png and b/pic.png differ
 test("an empty input is an empty patch", () => {
   assert.deepEqual(parsed(""), { files: [] })
 })
+
+test("Git's tab terminator is not part of a path containing spaces", () => {
+  const patch = parsed(`diff --git a/a b.txt b/a b.txt
+--- a/a b.txt\t
++++ b/a b.txt\t
+@@ -1 +1 @@
+-old
++new
+`)
+  assert.equal(patch.files[0]?.path, "a b.txt")
+  assert.equal(findFile(patch, "a b.txt")?.oldPath, "a b.txt")
+})
+
+test("quoted tabs in filenames remain part of the path", () => {
+  const patch = parsed(`diff --git "a/a\\tb.txt" "b/a\\tb.txt"
+--- "a/a\\tb.txt"
++++ "b/a\\tb.txt"
+@@ -1 +1 @@
+-old
++new
+`)
+  assert.equal(patch.files[0]?.path, "a\tb.txt")
+})
+
+test("a current path takes precedence over another file's rename alias", () => {
+  const patch = parsed(`diff --git a/a.txt b/b.txt
+similarity index 100%
+rename from a.txt
+rename to b.txt
+diff --git a/a.txt b/a.txt
+new file mode 100644
+--- /dev/null
++++ b/a.txt
+@@ -0,0 +1 @@
++replacement
+`)
+  assert.equal(findFile(patch, "a.txt")?.status, "added")
+  assert.equal(findFile(patch, "b.txt")?.status, "renamed")
+})
