@@ -161,14 +161,14 @@ describe("GitContextService", () => {
       // Each answer arrives with the newline `git` prints; the trim is what makes
       // the branch usable as a pull request's source reference.
       expect(context).toEqual({
-        branch: "feat/RPS-2335-thing",
+        branch: "feat/ENG-2335-thing",
         remoteUrl: CODECOMMIT_REMOTE,
         repositoryRoot: "/work/identity"
       })
     }).pipe(
       // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(
-        withSpawner(answering(["/work/identity\n", `${CODECOMMIT_REMOTE}\n`, "feat/RPS-2335-thing\n"]))
+        withSpawner(answering(["/work/identity\n", `${CODECOMMIT_REMOTE}\n`, "feat/ENG-2335-thing\n"]))
       )
     ))
 
