@@ -16,7 +16,7 @@
  *
  * - Jira worklogs carry no Clockify id, so matching is heuristic (ticket + day), never entry-to-entry.
  * - Clockify entries must encode the ticket as `[KEY] …` or `KEY: …` in the description; entries
- *   without a parseable key (or still running) are ignored.
+ *   without a parseable key remain outside reconciliation proposals. Running entries are excluded from totals.
  * - Days are local calendar days so the buckets line up with how a person reads their timesheet.
  *
  * @module
@@ -29,6 +29,7 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import {
   activeWindows,
@@ -49,8 +50,11 @@ import { AgentSessionReader } from "./AgentSessionReader.js"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
+import { jiraWorklogDescription, type RecordedEntry } from "./SavedEntries.js"
 import { type AttributionChoice, SessionAttributor, type SessionDescribeAnswer } from "./SessionAttributor.js"
 import { type JiraWorklogOutcome, TimerService } from "./TimerService.js"
+
+export type { RecordedEntry } from "./SavedEntries.js"
 
 // ---------------------------------------------------------------------------
 // Domain
@@ -71,6 +75,7 @@ export interface ReconcilePeriod {
 
 /** When one recorded entry says the work happened, and which system says so. */
 export interface RecordedInterval {
+  readonly entry?: RecordedEntry
   readonly startMs: number
   readonly endMs: number
   readonly source: "clockify" | "jira"
@@ -182,13 +187,22 @@ export type AttributionOutcome =
   | { readonly _tag: "Unavailable"; readonly message: string }
 
 /**
- * Progress a caller can report while a run is working, so a slow step is never silent.
+ * Progress a caller can report while a run is working, including live visible agent output.
+ * `AgentActivity` carries batch identity while a call is pending; it never advances completion counts.
  *
  * `SessionAttributed` fires per completed call rather than only at the end: the calls take tens of
  * seconds each, so a start-and-finish pair leaves minutes of silence in between — which is
  * indistinguishable from a hang, and was in fact reported as one.
  */
 export type SessionProposalProgress =
+  | {
+    readonly _tag: "AgentActivity"
+    readonly batch: number
+    readonly batches: number
+    readonly kind: "status" | "text" | "request" | "response"
+    readonly text: string
+  }
+  | { readonly _tag: "ReadingRecordedTime"; readonly sides: ReconcileSides }
   | { readonly _tag: "SessionsRead"; readonly count: number }
   | {
     readonly _tag: "AttributingSessions"
@@ -217,7 +231,25 @@ export type SessionProposalProgress =
  * could not be placed, or were placed with too little confidence, stay visible instead of being
  * dropped.
  */
+/** Closed Clockify time without a Jira key. Visible, but never a reconciliation candidate. */
+export interface UnlinkedClockifyEntry {
+  readonly entry?: RecordedEntry
+  readonly day: string
+  readonly seconds: number
+  readonly description: string | null
+  readonly startMs: number
+  readonly endMs: number
+}
+
 export interface SessionProposalReport {
+  /** Original per-session activity windows, before ticket/day merging; retained for saved-entry correlation. */
+  readonly sessionEvidence?: ReadonlyArray<{
+    readonly sessionId: string
+    readonly ticketKey: string | null
+    readonly spans: ReadonlyArray<{ readonly startMs: number; readonly endMs: number }>
+  }>
+  /** Credited session evidence before subtracting logged time or excluding running-timer days. */
+  readonly attributed: ReadonlyArray<TicketDayCredit>
   /** Proposed Worklogs, ready for row-by-row confirmation. */
   readonly proposals: ReadonlyArray<SessionProposal>
   /**
@@ -229,6 +261,7 @@ export interface SessionProposalReport {
    * learn what this one already knows.
    */
   readonly recorded: ReadonlyArray<ReconcileRow>
+  readonly unlinkedClockify: ReadonlyArray<UnlinkedClockifyEntry>
   /** Which systems this run read. A side that is out reports zero because it was never asked. */
   readonly sides: ReconcileSides
   /** Attributed below the confidence floor — reported, never offered. */
@@ -258,6 +291,12 @@ export interface SessionProposalReport {
 }
 
 export interface ReconcileServiceContract {
+  /** Recheck provider totals and running timers using already attributed session evidence. */
+  readonly refreshRecordedTime: (
+    period: ReconcilePeriod,
+    previous: SessionProposalReport
+  ) => Effect.Effect<SessionProposalReport, ReconcileError>
+
   /**
    * Compare Clockify entries and Jira worklogs over the period, bucketed by ticket+day.
    *
@@ -391,7 +430,7 @@ export const expandedStandingMap = (
 /** Parse a ticket key from a Clockify description (`[KEY] summary` or `KEY: summary`). */
 export const parseTicketKey = (description: string | null | undefined): string | null => {
   const desc = description ?? ""
-  const bracket = desc.match(/^\[([^\]]+)\]/)
+  const bracket = desc.match(/^\[\s*([A-Za-z][A-Za-z0-9]*-\d+)\s*\]/)
   const bracketKey = bracket?.[1]
   if (bracketKey !== undefined && bracketKey !== "") return bracketKey.trim()
   const colon = desc.match(/^([A-Za-z][A-Za-z0-9]*-\d+):/)
@@ -434,6 +473,7 @@ export const combineDescriptions = (descriptions: ReadonlyArray<string | null | 
 
 /** A `(ticketKey, day) → seconds` tally accumulated from one side's entries. */
 export type DayTally = ReadonlyArray<{
+  readonly entry?: RecordedEntry
   readonly ticketKey: string
   readonly day: string
   readonly seconds: number
@@ -461,7 +501,12 @@ export const buildReconcileRows = (clockify: DayTally, jira: DayTally): Readonly
     if (entry.startMs === undefined || entry.endMs === undefined) return
     intervalsByKey.set(k, [
       ...(intervalsByKey.get(k) ?? []),
-      { endMs: entry.endMs, source, startMs: entry.startMs }
+      {
+        endMs: entry.endMs,
+        source,
+        startMs: entry.startMs,
+        ...(entry.entry !== undefined && { entry: entry.entry })
+      }
     ])
   }
 
@@ -498,6 +543,8 @@ export const buildReconcileRows = (clockify: DayTally, jira: DayTally): Readonly
 // ---------------------------------------------------------------------------
 
 interface RawWorklog {
+  readonly id?: string
+  readonly comment?: unknown
   readonly author?: { readonly accountId?: string } | undefined
   readonly started?: string | undefined
   readonly timeSpentSeconds?: number | undefined
@@ -514,6 +561,8 @@ const toRawWorklog = <UnparsedInput>(value: UnparsedInput): RawWorklog | null =>
   const author = Predicate.isObject(value.author) ? value.author : undefined
   const accountId = author?.accountId
   return {
+    ...((Predicate.isString(value.id)) && { id: value.id }),
+    comment: value.comment,
     ...((Predicate.isString(accountId)) && { author: { accountId } }),
     ...((Predicate.isString(value.started)) && { started: value.started }),
     ...((Predicate.isNumber(value.timeSpentSeconds)) && { timeSpentSeconds: value.timeSpentSeconds })
@@ -630,31 +679,39 @@ export const layer = Layer.effect(
           day: string
           seconds: number
           description: string | null
+          entry: RecordedEntry
           startMs: number
           endMs: number
         }> = []
+        const unlinked: Array<UnlinkedClockifyEntry> = []
         for (const entry of entries) {
           const ticketKey = parseTicketKey(entry.description)
           const start = entry.timeInterval?.start
           const end = entry.timeInterval?.end
           // Skip running or unparseable entries: a missing end means the time is not yet real.
-          if (ticketKey === null || start === undefined || start === null) continue
+          if (start === undefined || start === null) continue
           if (end === undefined || end === null) continue
           const startMs = new Date(start).getTime()
           const endMs = new Date(end).getTime()
           if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue
           for (const bucket of byLocalDay(startMs, Math.max(startMs, endMs))) {
-            tally.push({
-              ticketKey,
-              day: bucket.day,
-              seconds: bucket.seconds,
+            const slice = {
+              ...bucket,
               description: entry.description ?? null,
-              startMs: bucket.startMs,
-              endMs: bucket.endMs
-            })
+              entry: {
+                id: entry.id,
+                source: "clockify",
+                ticketKey,
+                startMs,
+                endMs,
+                description: entry.description ?? null
+              } satisfies RecordedEntry
+            }
+            if (ticketKey === null) unlinked.push(slice)
+            else tally.push({ ...slice, ticketKey })
           }
         }
-        return tally
+        return { tally, unlinked }
       })
 
     // Tally the current user's Jira worklogs in the period by (ticket, day).
@@ -734,6 +791,7 @@ export const layer = Layer.effect(
           ticketKey: string
           day: string
           seconds: number
+          entry?: RecordedEntry
           startMs: number
           endMs: number
         }> = []
@@ -764,6 +822,19 @@ export const layer = Layer.effect(
             if (startedMs < fromMs || startedMs >= toMs) continue
             tally.push({
               ticketKey: issueKey,
+              ...(wl.id !== undefined && {
+                entry: {
+                  id: wl.id,
+                  source: "jira",
+                  ticketKey: issueKey,
+                  startMs: startedMs,
+                  endMs: startedMs + wl.timeSpentSeconds * 1000,
+                  description: yield* Schema.decodeUnknownEffect(Schema.UndefinedOr(Schema.Json))(wl.comment).pipe(
+                    Effect.flatMap(jiraWorklogDescription),
+                    Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
+                  )
+                } satisfies RecordedEntry
+              }),
               day: localDay(new Date(wl.started)),
               // A worklog states a duration from a start, so this end is derived. Deliberately not
               // split at midnight: the seconds stay on the day the work started, which is the day
@@ -777,7 +848,7 @@ export const layer = Layer.effect(
         return tally
       })
 
-    const compare = (period: ReconcilePeriod, options?: { readonly sides?: ReconcileSides | undefined }) =>
+    const readRecorded = (period: ReconcilePeriod, options?: { readonly sides?: ReconcileSides | undefined }) =>
       Effect.gen(function*() {
         const sides = options?.sides ?? bothSides
         // A side that is out is not called at all. That is the point of the option for someone who
@@ -785,13 +856,16 @@ export const layer = Layer.effect(
         // no request whose failure could stop a run that never needed it.
         const [clockifySide, jiraSide] = yield* Effect.all(
           [
-            sides.clockify ? clockifyTally(period) : Effect.succeed([]),
+            sides.clockify ? clockifyTally(period) : Effect.succeed({ tally: [], unlinked: [] }),
             sides.jira ? jiraTally(period) : Effect.succeed([])
           ],
           { concurrency: 2 }
         )
-        return buildReconcileRows(clockifySide, jiraSide)
+        return { recorded: buildReconcileRows(clockifySide.tally, jiraSide), unlinkedClockify: clockifySide.unlinked }
       })
+
+    const compare = (period: ReconcilePeriod, options?: { readonly sides?: ReconcileSides | undefined }) =>
+      readRecorded(period, options).pipe(Effect.map((result) => result.recorded))
 
     // Noon-local on the bucket's day — the fallback when a caller knows only the day. It keeps the
     // worklog or entry firmly on the right calendar day whatever the reader's timezone.
@@ -931,13 +1005,20 @@ export const layer = Layer.effect(
         // fibers on one thread, so the increment cannot interleave.
         let done = 0
         const batchResults = yield* Effect.all(
-          batches.map((batch) =>
+          batches.map((batch, batchIndex) =>
             attributor.attribute(
               batch.map((session) => ({
                 sessionId: session.sessionId,
                 candidateKeys: session.candidateKeys,
                 digest: session.digest
-              }))
+              })),
+              (activity) =>
+                options.onProgress({
+                  _tag: "AgentActivity",
+                  batch: batchIndex + 1,
+                  batches: batches.length,
+                  ...activity
+                })
             ).pipe(
               Effect.map((answers) => {
                 const bySession = new Map(answers.map((answer) => [answer.sessionId, answer.choice]))
@@ -1052,6 +1133,29 @@ export const layer = Layer.effect(
         return requests.map((request) => byId.get(request.id) ?? null)
       })
 
+    /** Both first reads and post-write refreshes subtract live totals through the same path. */
+    const refreshRecordedTime = Effect.fn("ReconcileService.refreshRecordedTime")(function*(
+      period: ReconcilePeriod,
+      previous: Omit<SessionProposalReport, "proposals" | "recorded" | "unlinkedClockify" | "excludedDays">
+    ) {
+      const { sides } = previous
+      const [{ recorded, unlinkedClockify }, excludedDays] = yield* Effect.all([
+        readRecorded(period, { sides }),
+        sides.clockify ? runningTimerExclusions(period) : Effect.succeed([])
+      ], { concurrency: 2 })
+      return {
+        ...previous,
+        proposals: buildSessionProposals(previous.attributed, recorded, {
+          minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
+          excludedDays: excludedDays.map((excluded) => excluded.day),
+          sides
+        }),
+        recorded,
+        unlinkedClockify,
+        excludedDays
+      }
+    })
+
     const proposeFromSessions = (
       period: ReconcilePeriod,
       options?: {
@@ -1095,32 +1199,24 @@ export const layer = Layer.effect(
         })
 
         const sides = options?.sides ?? bothSides
-        const [recorded, excludedDays] = yield* Effect.all([
-          compare(period, { sides }),
-          // A running Timer is a Clockify fact. With Clockify out of scope nothing is being written
-          // there, and its invisible hours cannot be double-counted, so no day is withheld for it.
-          sides.clockify ? runningTimerExclusions(period) : Effect.succeed([])
-        ])
-
-        return {
-          proposals: buildSessionProposals(split.attributed, recorded, {
-            minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
-            excludedDays: excludedDays.map((excluded) => excluded.day),
-            sides
-          }),
-          recorded,
+        yield* onProgress({ _tag: "ReadingRecordedTime", sides })
+        return yield* refreshRecordedTime(period, {
+          attributed: split.attributed,
+          sessionEvidence: windows.map((window) => ({
+            ...window,
+            ticketKey: attributions.find((attribution) => attribution.sessionId === window.sessionId)?.ticketKey ?? null
+          })),
           sides,
           withheld: split.withheld,
           unattributed: split.unattributed,
-          excludedDays,
           attributorAvailable,
           sessionCount: sessions.length,
           sessionRootCount: cfg.sessionRoots.length,
           attributorCalls,
           digests: new Map(sessions.map((session) => [session.sessionId, session.digest]))
-        }
+        })
       })
 
-    return { compare, applyToJira, applyToClockify, describeProposals, proposeFromSessions }
+    return { compare, applyToJira, applyToClockify, describeProposals, proposeFromSessions, refreshRecordedTime }
   })
 )

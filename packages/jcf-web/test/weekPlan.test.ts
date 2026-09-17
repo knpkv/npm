@@ -45,12 +45,14 @@ const recorded = (
 const report = (
   overrides: Partial<ReconcileService.SessionProposalReport>
 ): ReconcileService.SessionProposalReport => ({
+  attributed: [],
   attributorAvailable: true,
   attributorCalls: 0,
   digests: new Map(),
   excludedDays: [],
   proposals: [],
   recorded: [],
+  unlinkedClockify: [],
   sessionCount: 1,
   sessionRootCount: 1,
   sides: { clockify: true, jira: true },

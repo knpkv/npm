@@ -42,7 +42,12 @@ export function startOfIsoWeek(date: Date): Date {
  * The ISO week containing `date` as a half-open local period `[Monday, next Monday)` — the same
  * shape every jcf period has, so a week is reconciled by exactly the code a day is.
  */
-export function isoWeekPeriod(date: Date): { readonly from: Date; readonly to: Date } {
+export interface WeekPeriod {
+  readonly from: Date
+  readonly to: Date
+}
+
+export function isoWeekPeriod(date: Date): WeekPeriod {
   const from = startOfIsoWeek(date)
   let to = from.getTime()
   // Seven local midnights rather than seven times 24 hours, for the reason startOfIsoWeek gives.

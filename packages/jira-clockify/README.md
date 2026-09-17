@@ -53,6 +53,22 @@ jcf config set session-ticket ~/dev/work/docs KEY # Standing ticket for work wit
 jcf config set idle-cap 300                       # Longest gap still counted as work (seconds)
 ```
 
+JCF web's Agent settings controls the provider used to attribute and describe session
+evidence. `JcfConfig.sessionAgent` defaults to
+`{ "provider": "claude", "model": null, "effort": null }`. Choose `claude` or `codex`;
+the selected executable must be installed and authenticated. This choice does not
+change which session roots are read. Every attribution and description operation
+reads the current settings, so changing them does not require restarting JCF.
+
+The pure `@knpkv/jira-clockify/agent/agentSettings.js` export provides the
+`SessionAgentSettings` schema and type, `defaultSessionAgentSettings`, and
+`agentEfforts(provider)`. Model names must be trimmed, nonblank and at most 200
+characters, or `null` for the CLI default. Effort is `null` for the CLI default or
+a provider-supported value. Claude supports low, medium, high, xhigh and max;
+Codex supports minimal, low, medium, high and xhigh. The selected model must support
+the requested effort. Both adapters use prompt-only execution; unsupported Codex
+features fail closed before attribution starts.
+
 ## CLI Commands
 
 ```bash
@@ -261,6 +277,15 @@ Jira OAuth credentials stored via `@knpkv/atlassian-common` in `~/.config/atlass
 
 MIT
 
+### Reusing session evidence
+
+`ReconcileService.proposeFromSessions` retains attributed credits on its report,
+including credits that currently have no gap or are withheld by a running timer.
+`refreshRecordedTime(period, report)` rereads only the report's selected providers
+and running timers, then recalculates proposals from those credits. It does not
+read transcripts or call the attribution agent. JCF web uses this after writes;
+an explicit full read collects new session evidence.
+
 ### Ticket overlap and live matching
 
 With the default 900-second dwell floor, overlapping attributed work is allocated
@@ -271,3 +296,39 @@ work, idle gaps, wholly unplaced stretches and midnight stay
 separate. Short standalone work is never inflated. Setting dwell to zero retains
 raw overlap sharing. Proposal blocks and confirmed amounts use the same timeline;
 `activeSeconds` retains the original activity duration.
+
+`SessionAttributor.attribute` accepts an optional activity observer. Reconciliation
+forwards visible text and process status as `AgentActivity`, tagged with the batch
+number and batch count. JCF web streams these events during matching, while the CLI
+prints process milestones to stderr. Final matches remain schema-validated.
+
+Closed Clockify entries without a ticket key are retained in the session proposal
+report as `unlinkedClockify`. They remain read-only and never become Jira
+reconciliation candidates. The web calendar includes them in Clockify totals and
+checks suggestion overlap against their intervals. Running entries remain outside
+totals; their days are excluded from proposals until the timer stops.
+
+### Editing recorded entries
+
+`SavedEntries.layer` is included in `Headless.layer`. Its `update` operation takes a
+server-retained `RecordedEntry` snapshot plus new start/end milliseconds and description,
+rechecks provider ownership and the current snapshot, and returns the actual saved
+entry. `SavedEntryError.reason` distinguishes validation, conflict and provider failures.
+Recorded intervals carry optional whole-entry metadata, including exact original
+bounds and description, even when the calendar slices an entry at midnight.
+
+Changed times require whole seconds and positive duration. Jira requires at least
+60 seconds when changing time; description-only edits can retain shorter legacy time.
+Clockify updates preserve project, task, tags, billable state and entry type. Running,
+locked and time-off entries are refused; custom-field entries are refused because the
+generated API schema cannot safely round-trip their values. Jira time-only updates keep
+the original rich comment; changed descriptions become plain paragraphs, replacing
+formatting and embeds. Mention and emoji labels are readable in the editor; cards and
+media have no plain-text representation. Updates leave
+Jira estimates and visibility unchanged. The service serializes local updates, but the
+provider APIs offer no atomic protection from external edits between re-read and save.
+
+Session reports optionally retain `sessionEvidence` with each session's ticket and
+individual active intervals. This lets web description requests correlate saved time
+without another scan. `SessionAttributor.describe` accepts a nullable ticket key for
+unkeyed time. Legacy reports without this evidence cannot support precise correlation.

@@ -13,12 +13,17 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
+import { defaultSessionAgentSettings, SessionAgentSettings } from "../agent/agentSettings.js"
 import { isTicketKey } from "../agent/sessions.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface JcfConfig {
+  /** Provider, model and effort read afresh for each session attribution or description. */
+  readonly sessionAgent: SessionAgentSettings
   readonly defaultJql: string
   readonly refreshInterval: number
   readonly projectMap: Record<string, string>
@@ -80,6 +85,7 @@ export interface JcfConfig {
 
 /** The values every unset field falls back to, and what `jcf config reset` restores. */
 export const defaultJcfConfig: JcfConfig = {
+  sessionAgent: defaultSessionAgentSettings,
   defaultJql: "assignee = currentUser() AND status != Done ORDER BY updated DESC",
   refreshInterval: 30,
   projectMap: {},
@@ -161,6 +167,7 @@ const confidence = <UnparsedInput>(value: UnparsedInput): number | undefined =>
 export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   const parsed: unknown = JSON.parse(content)
   if (!Predicate.isObject(parsed)) return {}
+  const sessionAgent = Option.getOrUndefined(Schema.decodeUnknownOption(SessionAgentSettings)(parsed.sessionAgent))
   const projectMap = stringRecord(parsed.projectMap)
   const sessionRoots = stringArray(parsed.sessionRoots)
   const sessionTicketMap = ticketMap(parsed.sessionTicketMap)
@@ -176,6 +183,7 @@ export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
     : undefined
   const sessionOwnershipOverrides = stringArray(parsed.sessionOwnershipOverrides)?.filter(isTicketKey)
   return {
+    ...((sessionAgent !== undefined) && { sessionAgent }),
     ...((sessionOwnership !== undefined) && { sessionOwnership }),
     ...((sessionOwnershipOverrides !== undefined) && { sessionOwnershipOverrides }),
     ...((sessionRoots !== undefined) && { sessionRoots }),

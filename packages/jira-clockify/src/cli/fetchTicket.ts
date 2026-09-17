@@ -73,7 +73,7 @@ export const fetchTicketByKey = (
       Effect.map((loggedIn): FetchTicketResult | null => (loggedIn ? null : { _tag: "NotLoggedIn" })),
       Effect.catch((e) => Effect.succeed<FetchTicketResult>({ _tag: "FetchError", message: e.message }))
     )
-    if (loginCheck) return loginCheck
+    if (loginCheck !== null) return loginCheck
 
     const jira = yield* JiraApiClient
     return yield* jira.getIssue(key, {

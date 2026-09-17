@@ -24,10 +24,7 @@ import { FAKE_ACCOUNT_ID, makeFakeHeadless } from "../src/testing/fakeHeadless.j
 // @effect-diagnostics strictEffectProvide:off
 
 const issue = (key: string, summary: string, assignee?: string) => ({
-  fields: {
-    summary,
-    ...(assignee === undefined ? {} : { assignee: { accountId: assignee, displayName: assignee } })
-  },
+  fields: assignee === undefined ? { summary } : { summary, assignee: { accountId: assignee, displayName: assignee } },
   id: "1",
   key
 })
@@ -63,8 +60,13 @@ describe("factsFromIssues", () => {
 })
 
 describe("the cache", () => {
-  const cached = (key: string, checkedAtMs: number) =>
-    ({ assignee: null, checkedAtMs, key, mine: true, title: "Cached" }) as const
+  const cached = (key: string, checkedAtMs: number) => ({
+    assignee: null,
+    checkedAtMs,
+    key,
+    mine: true,
+    title: "Cached"
+  })
 
   it("asks only about keys it has never seen or saw too long ago", () => {
     const cache: IssueCache = { accountId: FAKE_ACCOUNT_ID, issues: new Map([["PROJ-1", cached("PROJ-1", 1_000)]]) }

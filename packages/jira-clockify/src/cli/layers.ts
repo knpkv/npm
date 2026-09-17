@@ -15,6 +15,7 @@ import { layer as ConfigLayer } from "../services/ConfigService.js"
 import { layer as HomeDirectoryLayer } from "../services/HomeDirectory.js"
 import { layer as IssueFactsLayer } from "../services/IssueFacts.js"
 import { layer as ReconcileServiceLayer } from "../services/ReconcileService.js"
+import { layer as SavedEntriesLayer } from "../services/SavedEntries.js"
 import { layer as SessionAttributorLayer } from "../services/SessionAttributor.js"
 import { layer as StateWriterLayer } from "../services/StateWriter.js"
 import { layer as TicketServiceLayer } from "../services/TicketService.js"
@@ -158,11 +159,19 @@ export const AgentSessionReaderLive = AgentSessionReaderLayer.pipe(
   Layer.provide(PlatformLayer)
 )
 
-// Constructing this spawns nothing — the Claude CLI is only invoked when a session no
+// Constructing this spawns nothing — the selected CLI is only invoked when a session no
 // deterministic Attribution Signal could place actually needs attributing.
 export const SessionAttributorLive = SessionAttributorLayer.pipe(
   Layer.provide(HomeDirectoryLive),
+  Layer.provide(ConfigLive),
   Layer.provide(PlatformLayer)
+)
+
+export const SavedEntriesLive = SavedEntriesLayer.pipe(
+  Layer.provide(ClockifyApiLive),
+  Layer.provide(ClockifyAuthLive),
+  Layer.provide(JiraApiLive),
+  Layer.provide(JiraAuthLive)
 )
 
 export const ReconcileServiceLive = ReconcileServiceLayer.pipe(
@@ -204,6 +213,7 @@ const FoundationLayer = Layer.mergeAll(
 export const HeadlessLayer = Layer.mergeAll(
   TimerServiceLive,
   ReconcileServiceLive,
+  SavedEntriesLive,
   TicketServiceLive,
   IssueFactsLive
 ).pipe(Layer.provideMerge(FoundationLayer))

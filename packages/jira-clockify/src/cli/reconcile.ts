@@ -386,6 +386,12 @@ const outcomeLabel = (outcome: AttributionOutcome): string => {
  */
 const reportProgress = (agent: string, progress: SessionProposalProgress): Effect.Effect<void> => {
   switch (progress._tag) {
+    case "AgentActivity":
+      return progress.kind === "status"
+        ? Console.error(`    Batch ${progress.batch}/${progress.batches}: ${progress.text}`)
+        : Effect.void
+    case "ReadingRecordedTime":
+      return Console.error("  Reading recorded time and checking running timers.")
     case "SessionsRead":
       return Console.error(`  Read ${progress.count} in-scope session(s).`)
     case "AttributingSessions":

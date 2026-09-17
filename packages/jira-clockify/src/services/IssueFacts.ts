@@ -26,6 +26,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
@@ -94,13 +95,7 @@ export const emptyCache: IssueCache = { accountId: null, issues: new Map() }
 const CACHE_DIR = ".jcf"
 const CACHE_FILE = "issues.json"
 
-const readJson = (content: string): unknown => {
-  try {
-    return JSON.parse(content) as unknown
-  } catch {
-    return null
-  }
-}
+const readJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json))
 
 const JsonObject = Schema.Record(Schema.String, Schema.Json)
 const isJsonObject = Schema.is(JsonObject)
@@ -149,7 +144,7 @@ export const factsFromIssues = (
  * hand-edited badly costs one Jira search rather than a failed page load.
  */
 export const parseIssueCache = (content: string): IssueCache => {
-  const parsed: unknown = readJson(content)
+  const parsed = Option.getOrNull(readJson(content))
   if (!Predicate.isObject(parsed)) return emptyCache
   const accountId = Predicate.isString(parsed.accountId) ? parsed.accountId : null
   const issues = new Map<string, CachedFact>()
@@ -270,7 +265,7 @@ export const layer = Layer.effect(
         params: { fields: ["summary", "assignee"], jql: keyClause(keys), maxResults: keys.length }
       }).pipe(
         Effect.map((result) => result.issues ?? []),
-        Effect.mapError(() => "unavailable" as const)
+        Effect.mapError((): "unavailable" => "unavailable")
       )
 
     return IssueFacts.of({
@@ -290,7 +285,7 @@ export const layer = Layer.effect(
                     key,
                     mine: cached.mine,
                     title: cached.title
-                  }] as const
+                  }] satisfies readonly [string, IssueFact]
                 ]
               })
             )

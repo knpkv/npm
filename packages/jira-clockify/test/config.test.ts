@@ -3,10 +3,13 @@
  * hand-edited file, and `reset`.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { FileSystem, Layer, Path, Schema } from "effect"
 import * as Effect from "effect/Effect"
 import { Command } from "effect/unstable/cli"
+import { agentEfforts, defaultSessionAgentSettings, SessionAgentSettings } from "../src/agent/agentSettings.js"
 import { root } from "../src/cli/root.js"
-import { ConfigService, parseConfigPatch } from "../src/services/ConfigService.js"
+import { ConfigService, layer as ConfigLayer, parseConfigPatch } from "../src/services/ConfigService.js"
+import { HomeDirectory } from "../src/services/HomeDirectory.js"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "../src/testing/fakeHeadless.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and
@@ -46,6 +49,50 @@ describe("jcf config reset", () => {
 })
 
 describe("~/.jcf/config.json", () => {
+  it("validates complete provider settings and their provider-specific efforts", () => {
+    for (const provider of ["claude", "codex"] satisfies ReadonlyArray<SessionAgentSettings["provider"]>) {
+      for (const effort of [null, ...agentEfforts(provider)]) {
+        const settings = { provider, model: "chosen-model", effort }
+        expect(Schema.decodeUnknownSync(SessionAgentSettings)(settings)).toEqual(settings)
+        expect(parseConfigPatch(JSON.stringify({ sessionAgent: settings })).sessionAgent).toEqual(settings)
+      }
+    }
+  })
+
+  it("rejects unsupported providers, efforts and malformed models without accepting partial settings", () => {
+    const invalid = [
+      { provider: "other", model: null, effort: null },
+      { provider: "claude", model: null, effort: "minimal" },
+      { provider: "codex", model: null, effort: "max" },
+      { provider: "codex", model: null, effort: "ultra" },
+      { provider: "claude", model: "", effort: null },
+      { provider: "claude", model: "   ", effort: null },
+      { provider: "claude", model: " model ", effort: null },
+      { provider: "claude", model: "m".repeat(201), effort: null },
+      { provider: "claude", model: 123, effort: null },
+      { provider: "codex" },
+      null
+    ]
+    for (const sessionAgent of invalid) {
+      expect(() => Schema.decodeUnknownSync(SessionAgentSettings)(sessionAgent)).toThrow()
+      expect(parseConfigPatch(JSON.stringify({ sessionAgent, refreshInterval: 60 })))
+        .toEqual({ refreshInterval: 60 })
+    }
+  })
+
+  it.effect("loads omitted settings as Claude with the default model and effort", () =>
+    Effect.gen(function*() {
+      const config = yield* ConfigService
+      expect((yield* config.get).sessionAgent).toEqual(defaultSessionAgentSettings)
+    }).pipe(Effect.provide(ConfigLayer.pipe(
+      Layer.provide(Layer.succeed(HomeDirectory, { path: FAKE_HOME })),
+      Layer.provide(Path.layer),
+      Layer.provide(FileSystem.layerNoop({
+        exists: () => Effect.succeed(true),
+        readFileString: () => Effect.succeed("{}")
+      }))
+    ))))
+
   // The only way to set this field is by hand — there is no `jcf config set` subcommand for it —
   // which is exactly where `70` gets written for "70%". Accepting it would mark every Coding Agent
   // attribution below the floor from then on, permanently, with nothing pointing at the cause.

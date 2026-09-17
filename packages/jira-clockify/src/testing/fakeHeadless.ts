@@ -56,6 +56,7 @@ import * as Stdio from "effect/Stdio"
 import * as Terminal from "effect/Terminal"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import { defaultSessionAgentSettings } from "../agent/agentSettings.js"
 import { LogToStderrLive } from "../cli/layers.js"
 import { layer as agentSessionReaderLayer } from "../services/AgentSessionReader.js"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
@@ -63,6 +64,7 @@ import { ConfigService, type JcfConfig } from "../services/ConfigService.js"
 import { HomeDirectory } from "../services/HomeDirectory.js"
 import { layer as issueFactsLayer } from "../services/IssueFacts.js"
 import { layer as reconcileServiceLayer } from "../services/ReconcileService.js"
+import { layer as savedEntriesLayer } from "../services/SavedEntries.js"
 import { type AttributionChoice, SessionAttributor, SessionAttributorError } from "../services/SessionAttributor.js"
 import { StateWriter } from "../services/StateWriter.js"
 import { layer as ticketServiceLayer } from "../services/TicketService.js"
@@ -104,7 +106,7 @@ const decodeAdfNode = Schema.decodeUnknownOption(AdfNode)
 const WorklogPayload = Schema.Struct({
   started: Schema.optional(Schema.String),
   timeSpentSeconds: Schema.optional(Schema.Number),
-  comment: Schema.optional(Schema.Unknown)
+  comment: Schema.optionalKey(Schema.Json)
 })
 
 type WorklogPayload = typeof WorklogPayload.Type
@@ -141,17 +143,28 @@ export interface PostedJiraWorklog {
 export interface FakeWorld {
   readonly createdClockifyEntries: Array<CreatedClockifyEntry>
   readonly jiraWorklogs: Array<PostedJiraWorklog>
+  readonly updatedClockifyEntries: Array<
+    { readonly id: string; readonly payload: Parameters<ClockifyApiClientContract["updateTimeEntry"]>[2] }
+  >
+  readonly updatedJiraWorklogs: Array<
+    {
+      readonly id: string
+      readonly issueKey: string
+      readonly payload: WorklogPayload
+      readonly adjustEstimate: string | undefined
+    }
+  >
   readonly attributorRequests: Array<{ readonly candidateKeys: ReadonlyArray<string>; readonly digest: string }>
   /** One entry per Coding Agent *call*, holding the session ids that call covered. */
   readonly attributorBatches: Array<ReadonlyArray<string>>
   /** Every work item a note was asked for, and the material it was asked from. */
   readonly describeRequests: Array<{
-    readonly ticketKey: string
+    readonly ticketKey: string | null
     readonly summary: string | null
     readonly digest: string
   }>
   /** One entry per description call, listing the Issue Keys it covered. */
-  readonly describeBatches: Array<ReadonlyArray<string>>
+  readonly describeBatches: Array<ReadonlyArray<string | null>>
   /** High-water mark of overlapping attributor calls. 1 means they ran one after another. */
   maxAttributorInFlight: number
   readonly stdout: Array<string>
@@ -173,6 +186,12 @@ export interface FakeWorld {
 
 /** An existing Clockify entry, in the shape a test wants to write it. */
 export interface ExistingClockifyEntry {
+  readonly id?: string
+  readonly userId?: string
+  readonly billable?: boolean
+  readonly projectId?: string | null
+  readonly taskId?: string | null
+  readonly tagIds?: ReadonlyArray<string> | null
   readonly description: string
   readonly start: string
   /** Omit to model a *running* entry — the case whose time is invisible to the tally. */
@@ -181,6 +200,10 @@ export interface ExistingClockifyEntry {
 
 /** An existing Jira worklog, keyed by issue in {@link FakeHeadlessOptions.jiraWorklogs}. */
 export interface ExistingJiraWorklog {
+  readonly id?: string
+  readonly author?: { readonly accountId: string }
+  readonly comment?: Schema.Json
+  readonly visibility?: { readonly type: "group" | "role"; readonly value: string }
   readonly started: string
   readonly timeSpentSeconds: number
 }
@@ -202,7 +225,7 @@ export interface FakeHeadlessOptions {
    * what a real session with nothing quotable produces.
    */
   readonly describer?:
-    | ((request: { readonly ticketKey: string; readonly digest: string }) => string | null | "fail")
+    | ((request: { readonly ticketKey: string | null; readonly digest: string }) => string | null | "fail")
     | undefined
   /**
    * Which proposal rows to leave checked in the picker, by position. Every row starts checked, so
@@ -249,6 +272,7 @@ export interface FakeHeadlessOptions {
 export const FAKE_ACCOUNT_ID = "acct-me"
 
 const defaultConfig: JcfConfig = {
+  sessionAgent: defaultSessionAgentSettings,
   defaultJql: "",
   refreshInterval: 30,
   projectMap: {},
@@ -266,13 +290,15 @@ const defaultConfig: JcfConfig = {
 }
 
 const makeTimeEntry = (entry: ExistingClockifyEntry, id: string): TimeEntry => ({
-  id,
+  id: entry.id ?? id,
   description: entry.description,
-  billable: true,
-  userId: FAKE_USER_ID,
+  billable: entry.billable ?? true,
+  userId: entry.userId ?? FAKE_USER_ID,
+  ...(entry.projectId !== undefined && { projectId: entry.projectId }),
+  ...(entry.taskId !== undefined && { taskId: entry.taskId }),
   workspaceId: FAKE_WORKSPACE_ID,
   timeInterval: { start: entry.start, ...((entry.end !== undefined) && { end: entry.end }) },
-  tagIds: [],
+  tagIds: entry.tagIds ?? [],
   type: "REGULAR",
   isLocked: false
 })
@@ -516,6 +542,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   const world: FakeWorld = {
     createdClockifyEntries: [],
     jiraWorklogs: [],
+    updatedClockifyEntries: [],
+    updatedJiraWorklogs: [],
     attributorRequests: [],
     attributorBatches: [],
     describeRequests: [],
@@ -574,7 +602,20 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
       return Effect.succeed(all.slice((page - 1) * size, page * size))
     },
     getRunningTimer: () => Effect.succeed(running),
-    getTimeEntry: (_ws, id) => Effect.succeed(makeTimeEntry({ description: "", start: "" }, id)),
+    getTimeEntry: (_ws, id) =>
+      Effect.suspend(() => {
+        const entry = clockifyLedger.find((entry) => entry.id === id)
+        if (entry !== undefined) return Effect.succeed(entry)
+        const request = HttpClientRequest.get(`https://fake.clockify/entries/${id}`)
+        return Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.StatusCodeError({
+              request,
+              response: HttpClientResponse.fromWeb(request, new Response(null, { status: 404 }))
+            })
+          })
+        )
+      }),
     getTags: () => Effect.succeed([]),
     createTag: (_ws, name) =>
       Effect.succeed({ id: `tag-${name}`, name, workspaceId: FAKE_WORKSPACE_ID, archived: false }),
@@ -605,7 +646,19 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           return entry
         }),
     updateTimeEntry: (_ws, id, params) =>
-      Effect.succeed(makeTimeEntry({ description: "", start: params.start ?? "", end: params.end }, id)),
+      Effect.sync(() => {
+        const index = clockifyLedger.findIndex((entry) => entry.id === id)
+        const existing = clockifyLedger[index]
+        const saved = makeTimeEntry({
+          ...existing,
+          ...params,
+          description: params.description ?? existing?.description ?? "",
+          start: params.start
+        }, id)
+        world.updatedClockifyEntries.push({ id, payload: params })
+        if (index >= 0) clockifyLedger[index] = saved
+        return saved
+      }),
     deleteTimeEntry: () => Effect.void,
     stopTimer: (_ws, _user, params) =>
       Effect.succeed(makeTimeEntry({ description: "", start: "", end: params.end }, "stopped-1"))
@@ -642,6 +695,35 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     HttpClient.HttpClient,
     HttpClient.make((request) =>
       Effect.sync(() => {
+        const exactWorklog = request.url.match(/issue\/([^/]+)\/worklog\/([^/?]+)/)
+        if (exactWorklog !== null) {
+          const issueKey = exactWorklog[1] ?? ""
+          const id = exactWorklog[2] ?? ""
+          const entries = jiraLedger.get(issueKey) ?? []
+          const index = entries.findIndex((entry, index) => (entry.id ?? `wl-${index}`) === id)
+          const entry = entries[index]
+          if (entry === undefined) return jsonResponse(request, 404, { errorMessages: ["Worklog not found"] })
+          if (request.method === "PUT") {
+            const payload = requestPayload(request.body)
+            entries[index] = {
+              ...entry,
+              started: payload.started ?? entry.started,
+              timeSpentSeconds: payload.timeSpentSeconds ?? entry.timeSpentSeconds,
+              ...(payload.comment !== undefined && { comment: payload.comment })
+            }
+            world.updatedJiraWorklogs.push({
+              issueKey,
+              id,
+              payload,
+              adjustEstimate: [...request.urlParams].find(([key]) => key === "adjustEstimate")?.[1]
+            })
+          }
+          return jsonResponse(request, 200, {
+            author: { accountId: options.jiraAccountId ?? FAKE_ACCOUNT_ID },
+            ...entries[index],
+            id
+          })
+        }
         const worklogMatch = request.url.match(/issue\/([^/]+)\/worklog/)
         if (request.method === "POST" && worklogMatch !== null) {
           const payload = requestPayload(request.body)
@@ -649,7 +731,11 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const started = payload.started ?? ""
           const timeSpentSeconds = payload.timeSpentSeconds ?? 0
           world.jiraWorklogs.push({ issueKey, started, timeSpentSeconds, comment: commentText(payload.comment) })
-          jiraLedger.set(issueKey, [...(jiraLedger.get(issueKey) ?? []), { started, timeSpentSeconds }])
+          jiraLedger.set(issueKey, [...(jiraLedger.get(issueKey) ?? []), {
+            started,
+            timeSpentSeconds,
+            ...(payload.comment !== undefined && { comment: payload.comment })
+          }])
           return jsonResponse(request, 201, { id: "wl-fake" })
         }
         if (worklogMatch !== null) {
@@ -663,9 +749,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             total: entries.length,
             worklogs: entries.map((worklog, index) => ({
               id: `wl-${index}`,
-              author: { accountId: "acct-fake" },
-              started: worklog.started,
-              timeSpentSeconds: worklog.timeSpentSeconds
+              author: { accountId: options.jiraAccountId ?? FAKE_ACCOUNT_ID },
+              ...worklog
             }))
           })
         }
@@ -892,12 +977,13 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     Layer.provide(TimerLive),
     Layer.provide(ReaderLive)
   )
+  const SavedLive = savedEntriesLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
   const TicketLive = ticketServiceLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
   const IssueFactsLive = issueFactsLayer.pipe(Layer.provide(Externals), Layer.provide(JiraLayer))
 
   // `ReconcileService` is built from the timer, the reader and the Jira client, so those cannot sit
   // beside it in a `mergeAll` — that builds its members in parallel. They go underneath.
-  const layer = Layer.mergeAll(ReconcileLive, TicketLive, IssueFactsLive).pipe(
+  const layer = Layer.mergeAll(ReconcileLive, TicketLive, IssueFactsLive, SavedLive).pipe(
     Layer.provideMerge(Layer.mergeAll(TimerLive, ReaderLive, JiraLayer)),
     Layer.provideMerge(Externals)
   )

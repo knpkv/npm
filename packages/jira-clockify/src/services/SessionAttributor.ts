@@ -29,14 +29,19 @@
  *
  * @module
  */
-import { model as claudeModel } from "@knpkv/ai-claude"
+import { type ClaudeActivity, model as claudeModel } from "@knpkv/ai-claude"
+import { model as codexModel } from "@knpkv/ai-codex"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
+import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import type { SessionAgentSettings } from "../agent/agentSettings.js"
+import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 
 // ---------------------------------------------------------------------------
@@ -67,7 +72,7 @@ export interface SessionAttributorAnswer {
 export interface SessionDescribeRequest {
   /** Identifies the answer in the reply, the same way `sessionId` does for attribution. */
   readonly id: string
-  readonly ticketKey: string
+  readonly ticketKey: string | null
   /** The Jira issue title, when known — context for the sentence, never the sentence itself. */
   readonly summary: string | null
   /** Bounded digests of the sessions behind the work item, already joined. */
@@ -94,9 +99,11 @@ export interface SessionAttributorContract {
    * order of magnitude per session. The caller decides how large a batch to send.
    *
    * A session with no answer in the reply comes back as `None` rather than going missing.
+   * The optional observer receives live visible output and process milestones within this call.
    */
   readonly attribute: (
-    requests: ReadonlyArray<SessionAttributorRequest>
+    requests: ReadonlyArray<SessionAttributorRequest>,
+    onActivity?: (activity: ClaudeActivity) => Effect.Effect<void>
   ) => Effect.Effect<ReadonlyArray<SessionAttributorAnswer>, SessionAttributorError>
 
   /**
@@ -200,7 +207,9 @@ const buildDescribePrompt = (requests: ReadonlyArray<SessionDescribeRequest>): s
     "",
     ...requests.flatMap((request) => [
       `--- item ${request.id} ---`,
-      `Issue: ${request.ticketKey}${request.summary === null ? "" : ` — ${request.summary}`}`,
+      request.ticketKey === null
+        ? "No associated Jira issue"
+        : `Issue: ${request.ticketKey}${request.summary === null ? "" : ` — ${request.summary}`}`,
       "Digest:",
       request.digest,
       ""
@@ -216,7 +225,7 @@ const buildDescribePrompt = (requests: ReadonlyArray<SessionDescribeRequest>): s
  * a run to roughly two rounds. A session that does time out is reported as unattributed, which is
  * the safe direction.
  */
-const ATTRIBUTION_TIMEOUT = "90 seconds"
+const ATTRIBUTION_TIMEOUT = Duration.seconds(90)
 
 const clipNote = (note: string): string =>
   note.length <= MAX_NOTE_CHARS ? note : `${note.slice(0, MAX_NOTE_CHARS - 1).trimEnd()}…`
@@ -234,20 +243,40 @@ export const layer = Layer.effect(
   SessionAttributor,
   Effect.gen(function*() {
     const home = (yield* HomeDirectory).path
-    // The home directory only satisfies the CLI's cwd requirement; with no tools granted, nothing
-    // there is reachable.
-    // Two minutes (the provider default) is a long time to wait for a one-line classification, and
-    // a run may make several of these calls. Fail fast instead: an unanswered session is reported
-    // as unattributed, which is a far better outcome than a command that looks hung.
-    // No tools: the prompt carries the candidates and the digest, so there is nothing on disk to
-    // consult. Given file tools the CLI goes exploring first — measured at 42s over 6 turns against
-    // 15s over 2 with none, which is the difference between fitting the timeout and losing a batch.
-    const provider = claudeModel({ cwd: home, access: "prompt-only", timeout: ATTRIBUTION_TIMEOUT })
-    // Bound here so the spawner stays a requirement of the *layer*, not of every `attribute`
-    // call — the service's error and requirement channels are the whole point of this boundary.
+    const config = yield* ConfigService
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const fileSystem = yield* FileSystem.FileSystem
 
-    const attribute = (requests: ReadonlyArray<SessionAttributorRequest>) =>
+    // Both adapters receive all work material in the prompt and grant no tool authority.
+    // Capture platform services here so operation callers only require SessionAttributor.
+    const provider = (
+      settings: SessionAgentSettings,
+      onActivity?: (activity: ClaudeActivity) => Effect.Effect<void>
+    ) => {
+      const common = {
+        cwd: home,
+        timeout: ATTRIBUTION_TIMEOUT,
+        onActivity,
+        ...(settings.model !== null && { model: settings.model })
+      }
+      return settings.provider === "claude"
+        ? claudeModel({
+          ...common,
+          access: "prompt-only",
+          ...(settings.effort !== null && { effort: settings.effort })
+        })
+        : codexModel({
+          ...common,
+          access: "read-only",
+          promptOnly: true,
+          ...(settings.effort !== null && { effort: settings.effort })
+        })
+    }
+
+    const attribute = (
+      requests: ReadonlyArray<SessionAttributorRequest>,
+      onActivity?: (activity: ClaudeActivity) => Effect.Effect<void>
+    ) =>
       Effect.gen(function*() {
         // Nothing to choose from anywhere — no point spending a call to learn that.
         const askable = requests.filter((request) => request.candidateKeys.length > 0)
@@ -257,6 +286,7 @@ export const layer = Layer.effect(
         })
         if (askable.length === 0) return requests.map((request) => none(request.sessionId))
 
+        const settings = (yield* config.get).sessionAgent
         const response = yield* LanguageModel.generateObject({
           prompt: buildPrompt(askable),
           schema: Answers,
@@ -265,8 +295,9 @@ export const layer = Layer.effect(
           // The provider is built per call and lives exactly as long as the call does, which is the
           // scope this diagnostic exists to protect rather than one it puts at risk.
           // @effect-diagnostics-next-line strictEffectProvide:off
-          Effect.provide(provider),
+          Effect.provide(provider(settings, onActivity)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.mapError((cause) =>
             new SessionAttributorError({ message: `Coding Agent attribution failed: ${cause.message}`, cause })
           )
@@ -296,6 +327,7 @@ export const layer = Layer.effect(
         const silent = (id: string): SessionDescribeAnswer => ({ id, note: null })
         if (askable.length === 0) return requests.map((request) => silent(request.id))
 
+        const settings = (yield* config.get).sessionAgent
         const response = yield* LanguageModel.generateObject({
           prompt: buildDescribePrompt(askable),
           schema: Notes,
@@ -304,8 +336,9 @@ export const layer = Layer.effect(
           // The provider is built per call and lives exactly as long as the call does, which is the
           // scope this diagnostic exists to protect rather than one it puts at risk.
           // @effect-diagnostics-next-line strictEffectProvide:off
-          Effect.provide(provider),
+          Effect.provide(provider(settings)),
           Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
           Effect.mapError((cause) =>
             new SessionAttributorError({ message: `Coding Agent description failed: ${cause.message}`, cause })
           )

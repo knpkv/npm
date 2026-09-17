@@ -41,6 +41,7 @@
     "@effect/platform-node": "4.0.0-rc.109",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/ai-claude": "workspace:^",
+    "@knpkv/ai-codex": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",

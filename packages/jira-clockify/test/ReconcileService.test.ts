@@ -20,6 +20,8 @@ describe("parseTicketKey", () => {
   // A bare colon prefix that isn't a ticket key must not be mistaken for one.
   it("does not treat arbitrary `word:` prefixes as a key", () => {
     expect(parseTicketKey("Meeting: standup")).toBeNull()
+    expect(parseTicketKey("[Meeting] standup")).toBeNull()
+    expect(parseTicketKey("[ PROJ-12 ] widget")).toBe("PROJ-12")
   })
 
   it("returns null for empty / missing descriptions", () => {
