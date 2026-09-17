@@ -52,7 +52,8 @@
     "check": "tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx}\"",
-    "test": "vitest run"
+    "test": "vitest run",
+    "pretest": "pnpm --filter @knpkv/review... build"
   },
   "dependencies": {
     "@knpkv/rly": "workspace:^",

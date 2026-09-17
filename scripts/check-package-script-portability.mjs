@@ -16,9 +16,14 @@ const ignoredWorkspaceSegments = new Set(["generated", "node_modules", "vendor"]
 const safeWorkspaceSegment = /^[A-Za-z0-9._-]+$/u
 const isBuildScript = (name) => name.split(":").some((segment) => buildLifecycleNames.has(segment))
 const browserPairingBuild = /^pnpm\s+--filter\s+"?@knpkv\/browser-pairing"?\s+build\s*$/u
+const reviewGraphBuild = /^pnpm\s+--filter\s+"?@knpkv\/review\.\.\."?\s+build\s*$/u
 const codeCommitWebRoleCheck = /^tsc\s+-p\s+tsconfig\.roles\.json\s+--noEmit$/u
 const protectedExecutableName = (matcher) =>
-  matcher === browserPairingBuild ? "pnpm" : matcher === codeCommitWebRoleCheck ? "tsc" : undefined
+  matcher === browserPairingBuild || matcher === reviewGraphBuild
+    ? "pnpm"
+    : matcher === codeCommitWebRoleCheck
+      ? "tsc"
+      : undefined
 const browserPairingConsumerLifecycleRequirements = [
   {
     script: "predev",
@@ -1498,6 +1503,11 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
     .map(([name]) => `${manifestPath}: scripts.${name} uses a POSIX-only environment assignment`)
 
 export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {
+  if (manifestPath === "package.json" || manifestPath === "packages/review/package.json") {
+    return hasExecutableLifecycleCommand(scripts?.pretest ?? "", reviewGraphBuild)
+      ? []
+      : [`${manifestPath}: scripts.pretest must build the review dependency graph before artifact-importing tests`]
+  }
   if (manifestPath === "packages/codecommit/package.json") {
     return codeCommitLifecycleRequirements
       .filter(({ script, matches }) => !matches(scripts?.[script] ?? ""))
@@ -1516,6 +1526,23 @@ export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependenci
     .filter(({ script, matches }) => !matches(scripts?.[script] ?? ""))
     .map(({ script, description }) => `${manifestPath}: scripts.${script} must include ${description}`)
   return result
+}
+
+// Artifact-importing tests need the same deterministic setup from root and package entry points.
+for (const manifest of ["package.json", "packages/review/package.json"]) {
+  for (const pretest of [
+    undefined,
+    "pnpm --filter @knpkv/browser-pairing build",
+    "echo 'pnpm --filter @knpkv/review... build'"
+  ]) {
+    assert.equal(findCodeCommitWebLifecycleGaps(manifest, { pretest }, {}, {}).length, 1)
+  }
+  for (const pretest of [
+    "pnpm --filter @knpkv/review... build",
+    "pnpm --filter @knpkv/browser-pairing build && pnpm --filter @knpkv/review... build"
+  ]) {
+    assert.deepEqual(findCodeCommitWebLifecycleGaps(manifest, { pretest }, {}, {}), [])
+  }
 }
 
 assert.deepEqual(

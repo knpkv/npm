@@ -1,3 +1,5 @@
+"use client"
+
 import { findFile, type FileDiff, type Patch, PatchDiffView } from "@knpkv/rly/diff/patch"
 import { ThemeProvider } from "@knpkv/rly/foundations"
 import { Button, StateLabel, Surface, Tabs, Text } from "@knpkv/rly/primitives"
@@ -219,7 +221,13 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             <span>{guide.sections.length} chapters</span>
             <code>{guide.review.gitRef}</code>
             {guide.source?.pr === undefined ? null : (
-              <a href={guide.source.pr.url}>PR {guide.source.pr.number ?? ""}</a>
+              <a href={guide.source.pr.url} title={guide.source.pr.title}>
+                {guide.source.pr.number === undefined
+                  ? guide.source.pr.title === undefined || guide.source.pr.title.trim() === ""
+                    ? "Source pull request"
+                    : guide.source.pr.title
+                  : `PR ${guide.source.pr.number}`}
+              </a>
             )}
           </div>
           <Text as="h1" variant="page-title">
@@ -358,12 +366,22 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             ))}
           </section>
         )}
-        {(findings.preExisting?.length ?? 0) + (findings.openQuestions?.length ?? 0) === 0 ? null : (
-          <section className="review-chapter">
-            <Text as="h2" variant="section-title">
-              Pre-existing and open questions
+        {(findings.preExisting?.length ?? 0) === 0 ? null : (
+          <section className="review-chapter" aria-labelledby="pre-existing">
+            <Text as="h2" id="pre-existing" variant="section-title">
+              Pre-existing context
             </Text>
-            {[...(findings.preExisting ?? []), ...(findings.openQuestions ?? [])].map((text, index) => (
+            {findings.preExisting?.map((text, index) => (
+              <Prose key={index} text={text} />
+            ))}
+          </section>
+        )}
+        {(findings.openQuestions?.length ?? 0) === 0 ? null : (
+          <section className="review-chapter" aria-labelledby="open-questions">
+            <Text as="h2" id="open-questions" variant="section-title">
+              Open questions
+            </Text>
+            {findings.openQuestions?.map((text, index) => (
               <Prose key={index} text={text} />
             ))}
           </section>

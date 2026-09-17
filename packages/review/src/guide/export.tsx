@@ -22,7 +22,7 @@ export interface GuideExportInput {
   readonly findings?: unknown
 }
 
-/** Validate all inputs and export one offline HTML document. No provider calls or filesystem access. */
+/** Export one offline document. All guide fields become client-visible; adapters must omit private locators and credentials. */
 export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: GuideExportInput) {
   const guide = yield* Schema.decodeUnknownEffect(Guide)(input.guide).pipe(
     Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) }))

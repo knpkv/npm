@@ -60,8 +60,11 @@ It covers the intended boundary, actual execution, caller-visible results, and t
 ### Execution evidence
 
 The optional `guide.usage` array records attributable runs. Each entry needs
-`label`, `scope` (`implementation`, `review`, or `guide`), and `source` naming
-the telemetry record. Everything else is optional. For example:
+`label`, `scope` (`implementation`, `review`, or `guide`), and `source`, a
+normalized client-visible identifier for the telemetry record, suitable for HTML
+export. Adapters must retain server-private provider locators and credentials
+outside the guide: `exportGuide` serializes every guide field into the portable
+document. Everything else is optional. For example:
 
 ```json
 {

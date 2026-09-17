@@ -27,6 +27,33 @@ index 1111111..2222222 100644
 \\ No newline at end of file
 `
 
+test("rejects surplus body records and misplaced no-newline markers", () => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n"
+  for (
+    const body of [
+      "-old\n+new\n hidden\n",
+      "\\ No newline at end of file\n-old\n+new\n",
+      "-old\n\\ arbitrary text\n+new\n",
+      "-old\n+new\n\\ arbitrary text\n",
+      "-old\n+new\n\\ No newline at end of file\n\\ No newline at end of file\n"
+    ]
+  ) assert.equal(parsePatch(header + body)._tag, "PatchInvalid", body)
+  assert.equal(
+    parsePatch(header + "-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n")._tag,
+    "Patch"
+  )
+  assert.equal(parsePatch("Subject: ordinary pre-diff metadata\n\n" + modified)._tag, "Patch")
+})
+
+test("rejects repeated coordinates on either side while allowing disjoint hunks", () => {
+  const first = "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n"
+  for (const second of ["@@ -1 +2 @@", "@@ -2 +1 @@", "@@ -1 +1 @@"]) {
+    assert.equal(parsePatch(first + second + "\n-old\n+new\n")._tag, "PatchInvalid")
+  }
+  assert.equal(parsePatch(first + "@@ -2 +2 @@\n-old\n+new\n")._tag, "Patch")
+  assert.equal(parsePatch(first + "@@ -1,0 +2 @@\n+inserted\n")._tag, "Patch")
+})
+
 test("numbers both sides of a hunk and keeps the second hunk's own starts", () => {
   const patch = parsed(modified)
   assert.equal(patch.files.length, 1)

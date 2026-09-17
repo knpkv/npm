@@ -1603,6 +1603,45 @@ const containsEntityIdLikeIdentifier = (sourceCode, node) => {
 }
 
 module.exports = {
+  "require-react-hook-client-boundary": {
+    meta: {
+      type: "problem",
+      docs: { description: "mark published React hook modules as client boundaries" },
+      schema: [],
+      messages: { clientBoundary: 'Published React hook modules require a leading "use client" directive.' }
+    },
+    create(context) {
+      for (const statement of context.sourceCode.ast.body) {
+        if (statement.type !== "ExpressionStatement" || statement.directive === undefined) break
+        if (statement.directive === "use client") return {}
+      }
+      const isHook = (name) => Predicate.isString(name) && /^use[A-Z]/u.test(name)
+      return {
+        ImportDeclaration(node) {
+          if (node.source.value !== "react" || node.importKind === "type") return
+          for (const specifier of node.specifiers) {
+            if (
+              specifier.type === "ImportSpecifier" &&
+              specifier.importKind !== "type" &&
+              isHook(staticPropertyName(specifier.imported))
+            )
+              context.report({ node: specifier, messageId: "clientBoundary" })
+          }
+        },
+        CallExpression(node) {
+          const callee = node.callee
+          if (callee.type !== "MemberExpression" || callee.object.type !== "Identifier") return
+          if (callee.computed && callee.property.type === "Identifier") return
+          if (
+            isHook(staticPropertyName(callee.property)) &&
+            (isNamespaceImportFrom(context, callee.object, ["react"]) ||
+              isDefaultImportFrom(context, callee.object, ["react"]))
+          )
+            context.report({ node, messageId: "clientBoundary" })
+        }
+      }
+    }
+  },
   "require-immediate-work-store-cleanup": {
     meta: {
       type: "problem",

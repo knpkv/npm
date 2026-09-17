@@ -50,6 +50,29 @@ const findings: Findings = {
 }
 
 describe("guide", () => {
+  it("keeps pre-existing context and open questions in separately labelled groups", () => {
+    const render = (context: Pick<Findings, "preExisting" | "openQuestions">) =>
+      renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={{ ...findings, ...context }} />)
+    const html = render({ preExisting: ["Existing constraint"], openQuestions: ["Unresolved question?"] })
+    const existing = html.split('aria-labelledby="pre-existing"')[1]?.split("</section>")[0]
+    const questions = html.split('aria-labelledby="open-questions"')[1]?.split("</section>")[0]
+    expect(existing).toContain("Existing constraint")
+    expect(existing).not.toContain("Unresolved question?")
+    expect(questions).toContain("Unresolved question?")
+    expect(questions).not.toContain("Existing constraint")
+    expect(render({ preExisting: ["Existing constraint"] })).not.toContain('id="open-questions"')
+    expect(render({ openQuestions: ["Unresolved question?"] })).not.toContain('id="pre-existing"')
+  })
+  it("identifies source pull requests with their supplied title or number", () => {
+    const render = (source: Guide["source"]) =>
+      renderToStaticMarkup(<GuidePage guide={{ ...guide, source }} patch={patch} findings={findings} />)
+    const pr = { url: "https://example.invalid/pull/7", title: "Signed release approval" }
+    expect(render({ pr })).toContain(">Signed release approval</a>")
+    expect(render({ pr: { ...pr, number: 7 } })).toContain("PR 7")
+    expect(render({ pr: { url: pr.url } })).toContain(">Source pull request</a>")
+    expect(render({ pr: { ...pr, title: "  " } })).toContain(">Source pull request</a>")
+    expect(render(undefined)).not.toContain(pr.url)
+  })
   it("places every finding or explains why it cannot anchor", () => {
     expect(placeAll(patch, findings).map((item) => item.kind)).toEqual(["anchored", "general"])
     const html = renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={findings} />)

@@ -13,6 +13,7 @@ const Count = Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(
 export const Usage = Schema.Struct({
   label: Schema.NonEmptyString,
   scope: Schema.Literals(["implementation", "review", "guide"]),
+  /** Normalized client-visible telemetry identifier; never a server-private locator or credential. */
   source: Schema.NonEmptyString,
   model: Schema.optionalKey(Schema.String),
   inputTokens: Schema.optionalKey(Count),

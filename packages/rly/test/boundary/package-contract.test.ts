@@ -26,7 +26,7 @@ const moduleSpecifiers = (source: string): ReadonlyArray<string> => {
     ) result.push(node.moduleSpecifier.text)
     if (TypeScript.isCallExpression(node) && node.expression.kind === TypeScript.SyntaxKind.ImportKeyword) {
       const argument = node.arguments[0]
-      if (argument !== undefined && TypeScript.isStringLiteral(argument)) result.push(argument.text)
+      if (argument !== undefined && TypeScript.isStringLiteralLike(argument)) result.push(argument.text)
     }
     TypeScript.forEachChild(node, visit)
   }
@@ -38,9 +38,9 @@ describe("package contract", () => {
   it("inspects actual module edges without treating diff metadata as imports", () => {
     expect(
       moduleSpecifiers(
-        `const text = "rename from "; const status = "renamed"; import "react"; export { x } from "./x.js"; import("forbidden")`
+        "const text = \"rename from \"; const status = \"renamed\"; import \"react\"; export { x } from \"./x.js\"; import(\"forbidden\"); import(`template-edge`)"
       )
-    ).toEqual(["react", "./x.js", "forbidden"])
+    ).toEqual(["react", "./x.js", "forbidden", "template-edge"])
   })
   it("keeps runtime dependencies on the exact approved implementation set", () => {
     const manifest: unknown = JSON.parse(packageSource)

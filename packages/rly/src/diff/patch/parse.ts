@@ -148,6 +148,8 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     let status: FileStatus = "modified"
     let binary = false
     const hunks: Array<Hunk> = []
+    const oldCoordinates = new Set<number>()
+    const newCoordinates = new Set<number>()
     index += 1
 
     while (index < lines.length && !(lines[index] ?? "").startsWith(HEADER)) {
@@ -171,10 +173,18 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
       } else if (HUNK.test(line)) {
         const parsed = readHunk(lines, index)
         if (parsed._tag === "PatchInvalid") return parsed
+        for (const record of parsed.hunk.lines) {
+          if (
+            (record.oldNo !== undefined && oldCoordinates.has(record.oldNo)) ||
+            (record.newNo !== undefined && newCoordinates.has(record.newNo))
+          ) return invalid(`Overlapping hunk at line ${index + 1}`)
+          if (record.oldNo !== undefined) oldCoordinates.add(record.oldNo)
+          if (record.newNo !== undefined) newCoordinates.add(record.newNo)
+        }
         hunks.push(parsed.hunk)
         index = parsed.next
         continue
-      } else if (line.startsWith("@@") || line.startsWith("+") || line.startsWith("-")) {
+      } else if (/^(?:@@|[+\- \\])/.test(line)) {
         return invalid(`Unexpected patch body at line ${index + 1}`)
       }
       index += 1
@@ -220,11 +230,6 @@ const readHunk = (
 
   while (index < lines.length && (oldCount > 0 || newCount > 0)) {
     const line = lines[index] ?? ""
-    if (line.startsWith("\\")) {
-      // "\ No newline at end of file" belongs to the line above it.
-      index += 1
-      continue
-    }
     const marker = line[0]
     const text = line.slice(1)
     if (marker === "+") {
@@ -245,10 +250,13 @@ const readHunk = (
       break
     }
     index += 1
+    // A marker belongs to exactly one preceding body record and consumes no coordinate.
+    if ((lines[index] ?? "").startsWith("\\")) {
+      if (lines[index] !== "\\ No newline at end of file") return invalid(`Invalid newline marker at line ${index + 1}`)
+      index += 1
+    }
   }
   if (oldCount !== 0 || newCount !== 0) return invalid(`Incomplete hunk at line ${start + 1}`)
-  // A trailing "\ No newline at end of file" after the last counted line.
-  if ((lines[index] ?? "").startsWith("\\")) index += 1
 
   return {
     _tag: "Hunk",
