@@ -9,7 +9,7 @@ interface ControlCenterThemeController {
   readonly toggleTheme: () => void
 }
 
-const storageKey = "cc:ockto-demo:workspace-engineering:theme"
+const storageKey = "cc:demo:workspace-engineering:theme"
 
 const systemTheme = (browserWindow: Window): ControlCenterTheme =>
   browserWindow.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"

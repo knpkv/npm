@@ -1,7 +1,7 @@
 /**
  * Extract scope from title. Supports:
  * - Conventional commit: feat(scope): message -> scope
- * - Jira-style ticket: RPS-123: message -> RPS-123
+ * - Jira-style ticket: ENG-123: message -> ENG-123
  */
 export const extractScope = (title: string): string | null => {
   // Conventional commit: feat(scope): message

@@ -188,7 +188,7 @@ describe("ClockifyApiClient", () => {
       const client = yield* ClockifyApiClient
       // Clockify returns kioskId/projectId/taskId as explicit null (not absent) when unset.
       const entry = yield* client.createTimeEntry("workspace-1", {
-        description: "[RPS-6169] review transaction mapper",
+        description: "[ENG-6169] review transaction mapper",
         start: "2026-07-20T09:00:00Z"
       })
       expect(entry.id).toBe("entry-1")
@@ -201,7 +201,7 @@ describe("ClockifyApiClient", () => {
         status: 201,
         body: {
           id: "entry-1",
-          description: "[RPS-6169] review transaction mapper",
+          description: "[ENG-6169] review transaction mapper",
           billable: true,
           userId: "user-1",
           workspaceId: "workspace-1",
@@ -233,7 +233,7 @@ describe("ClockifyApiClient", () => {
         status: 200,
         body: [{
           id: "entry-1",
-          description: "[RPS-6169] review transaction mapper",
+          description: "[ENG-6169] review transaction mapper",
           billable: true,
           userId: "user-1",
           workspaceId: "workspace-1",

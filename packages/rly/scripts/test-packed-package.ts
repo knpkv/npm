@@ -229,10 +229,10 @@ const packedRelationships = [{
   source: {
     state: "present",
     id: "packed-jira",
-    title: "RPS-6307",
+    title: "ENG-6307",
     reference: "Release candidate",
     service: "jira",
-    href: "/jira/RPS-6307"
+    href: "/jira/ENG-6307"
   },
   target: {
     state: "present",
@@ -273,11 +273,11 @@ const packedAgentProposal: RlyAgentProposal = {
   },
   capability: "Update Jira release description",
   context: "Release v2.4.0 Copper Orbit",
-  evidence: [{ id: "packed-evidence", label: "Jira revision", reference: "RPS-6307@17" }],
+  evidence: [{ id: "packed-evidence", label: "Jira revision", reference: "ENG-6307@17" }],
   expectedRevision: "17",
   id: "packed-proposal",
   impact: "Replace the Jira issue description only",
-  target: "Jira RPS-6307"
+  target: "Jira ENG-6307"
 }
 ${renderDiffConsumerFixture()}
 const markup = renderToStaticMarkup(
@@ -350,7 +350,7 @@ const markup = renderToStaticMarkup(
       heading="Packed release workset"
       jiraItems={[{
         id: "packed-jira-work",
-        key: "RPS-6307",
+        key: "ENG-6307",
         state: "Candidate",
         title: "Packed Jira release candidate",
         tone: "progress"
@@ -365,7 +365,7 @@ const markup = renderToStaticMarkup(
       }]}
       pullRequestGroups={[{
         id: "packed-pr-group",
-        linkedJiraKeys: ["RPS-6307"],
+        linkedJiraKeys: ["ENG-6307"],
         reference: "PR #291",
         state: "Approved",
         title: "Packed implementation",

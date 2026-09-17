@@ -65,7 +65,7 @@ describe("parseCodeCommitRemote", () => {
     // Answering null rather than guessing is what keeps a four-account scan from
     // running for a repository that does not live in CodeCommit at all.
     const declined = [
-      "https://dev.azure.com/ockto/Ockto/_git/MessageWorker",
+      "https://dev.azure.com/acme/Acme/_git/ExampleRepo",
       "git@github.com:Effect-TS/effect.git",
       "https://git-codecommit.eu-central-1.amazonaws.com/v1/repos/",
       "https://git-codecommit.eu-central-1.amazonaws.com/v2/repos/identity",
@@ -89,8 +89,8 @@ describe("redactRemoteUserInfo", () => {
     // and a token in the userinfo would go to the terminal and the popup with it.
     expect(redactRemoteUserInfo("https://alice:ghp_secret@github.com/org/repo.git"))
       .toBe("https://***@github.com/org/repo.git")
-    expect(redactRemoteUserInfo("https://ockto@dev.azure.com/ockto/Ockto/_git/MessageWorker"))
-      .toBe("https://***@dev.azure.com/ockto/Ockto/_git/MessageWorker")
+    expect(redactRemoteUserInfo("https://acme@dev.azure.com/acme/Acme/_git/ExampleRepo"))
+      .toBe("https://***@dev.azure.com/acme/Acme/_git/ExampleRepo")
     expect(redactRemoteUserInfo("  https://alice:ghp_secret@github.com/org/repo.git"))
       .toBe("  https://***@github.com/org/repo.git")
     expect(redactRemoteUserInfo("https://alice:p@ss@example.com/org/repo.git"))
@@ -106,7 +106,7 @@ describe("redactRemoteUserInfo", () => {
     for (
       const url of [
         "git@github.com:Effect-TS/effect.git",
-        "https://dev.azure.com/ockto/Ockto/_git/MessageWorker",
+        "https://dev.azure.com/acme/Acme/_git/ExampleRepo",
         "  https://github.com/org/repo.git",
         "codecommit::eu-central-1://core-code@identity",
         ""

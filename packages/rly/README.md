@@ -210,10 +210,10 @@ const relationships = [
     source: {
       state: "present",
       id: "jira-rps-6307",
-      title: "RPS-6307",
+      title: "ENG-6307",
       reference: "Release candidate",
       service: "jira",
-      href: "/jira/RPS-6307"
+      href: "/jira/ENG-6307"
     },
     target: {
       state: "present",
