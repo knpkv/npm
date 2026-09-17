@@ -37,22 +37,50 @@ const dependencyClosureDiagnostics = (
   })
 }
 
+const generatedClientNames = new Set([
+  "@knpkv/clockify-api-client",
+  "@knpkv/confluence-api-client",
+  "@knpkv/jira-api-client"
+])
+
 const patchGuidanceDiagnostics = (source: string): ReadonlyArray<string> => {
   const workflow: unknown = parse(source)
   if (!isRecord(workflow) || !isRecord(workflow.jobs)) return []
 
   return Object.values(workflow.jobs).flatMap((job) => {
     if (!isRecord(job) || !Array.isArray(job.steps)) return []
-    return job.steps.flatMap((step) => {
-      if (!isRecord(step) || !isRecord(step.with) || !Predicate.isString(step.with.body)) return []
-      const sentences = step.with.body.replace(/\s+/gu, " ").split(/[.!?]/u)
-      return sentences.flatMap((sentence) =>
+    const steps = job.steps.filter(isRecord)
+    const bodies = steps.flatMap((step) =>
+      isRecord(step.with) && Predicate.isString(step.with.body) ? [step.with.body.replace(/\s+/gu, " ")] : []
+    )
+    const hasUnchangedContractGuidance = bodies.some((body) => /\bpublic contract is unchanged\b/iu.test(body))
+    const guidanceDiagnostics = bodies.flatMap((body) =>
+      body.split(/[.!?]/u).flatMap((sentence) =>
         /\bpatch (?:is appropriate|(?:only )?when)\b/iu.test(sentence)
           && !/\bpublic contract is unchanged\b/iu.test(sentence)
           ? ["Patch release guidance must require an unchanged public contract"]
           : []
       )
+    )
+    const defaultDiagnostics = steps.flatMap((step) => {
+      if (!Predicate.isString(step.run) || !/cat\s+>\s+\.changeset\//u.test(step.run)) return []
+      const heredocs = [...step.run.matchAll(
+        /cat\s+>\s+\.changeset\/[^\s]+\.md\s+<<['"]?(\w+)['"]?\s*\n([\s\S]*?)\n\1(?:\n|$)/gu
+      )]
+      if (heredocs.length === 0) return ["Generated changeset heredoc could not be inspected"]
+      return heredocs.flatMap((heredoc) => {
+        const frontmatter = heredoc[2]?.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/u)?.[1]
+        if (frontmatter === undefined) return ["Generated changeset must contain release frontmatter"]
+        const releases: unknown = parse(frontmatter)
+        if (!isRecord(releases)) return ["Generated changeset must contain release frontmatter"]
+        return Object.entries(releases).flatMap(([name, release]) =>
+          generatedClientNames.has(name) && release === "patch" && !hasUnchangedContractGuidance
+            ? [`Generated client ${name} defaults to patch without unchanged-contract guidance`]
+            : []
+        )
+      })
     })
+    return [...guidanceDiagnostics, ...defaultDiagnostics]
   })
 }
 
@@ -81,12 +109,45 @@ jobs:
     ))).toEqual([])
   })
 
-  it.effect("reserves API update patch guidance for unchanged public contracts", () =>
-    Effect.gen(function*() {
-      for (const name of ["clockify-api-update.yml", "jira-api-update.yml", "confluence-api-update.yml"]) {
+  it("rejects an unqualified generated-client patch default", () => {
+    const workflow = (name: string, release: string, guidance: string) => `
+jobs:
+  update:
+    steps:
+      - name: Create changeset
+        run: |
+          cat > .changeset/api-update.md <<'CHANGESET'
+          ---
+          "${name}": ${release}
+          ---
+          Update generated API schemas. Apply the JSON patch before generation.
+          CHANGESET
+      - name: Create pull request
+        with:
+          body: ${guidance}
+`
+    expect(patchGuidanceDiagnostics(workflow("@knpkv/jira-api-client", "patch", "Review the generated API.")))
+      .toEqual(["Generated client @knpkv/jira-api-client defaults to patch without unchanged-contract guidance"])
+    expect(patchGuidanceDiagnostics(workflow("@knpkv/jira-api-client", "minor", "Review the generated API.")))
+      .toEqual([])
+    expect(patchGuidanceDiagnostics(workflow(
+      "@knpkv/jira-api-client",
+      "patch",
+      "Patch is appropriate only when the generated public contract is unchanged."
+    ))).toEqual([])
+    expect(patchGuidanceDiagnostics(workflow("@fixture/private-client", "patch", "Apply the JSON patch.")))
+      .toEqual([])
+    expect(patchGuidanceDiagnostics(workflow("@knpkv/jira-clockify", "patch", "Consumer dependency update.")))
+      .toEqual([])
+  })
+
+  it.effect.each(["clockify-api-update.yml", "jira-api-update.yml", "confluence-api-update.yml"])(
+    "reserves patch guidance for unchanged public contracts in %s",
+    (name) =>
+      Effect.gen(function*() {
         expect(patchGuidanceDiagnostics(yield* loadWorkflow(name))).toEqual([])
-      }
-    }))
+      })
+  )
 
   it("rejects a bare consumer build and accepts a dependency-closed build", () => {
     const invalid = `

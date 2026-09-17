@@ -72,7 +72,7 @@ jobs:
           mkdir -p .changeset
           cat > .changeset/jira-api-spec-update.md <<'CHANGESET'
           ---
-          "@knpkv/jira-api-client": patch
+          "@knpkv/jira-api-client": minor
           "@knpkv/jira-cli": patch
           "@knpkv/jira-clockify": patch
           ---
@@ -103,7 +103,10 @@ jobs:
             - `packages/jira-api-client/src/JiraApiClient.ts`
             - `packages/jira-api-client/src/generated/JiraApi.ts`
 
-            This PR includes a patch changeset so the release workflow can create the version plan.
+            Review the published generated exports before merging. The client
+            changeset defaults to minor; use major for removed exports or
+            incompatible schemas in this stable package. Patch is appropriate
+            only when the generated public contract is unchanged.
           branch: chore/jira-api-spec-update
           delete-branch: true
           labels: |

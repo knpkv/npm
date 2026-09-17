@@ -61,7 +61,7 @@ jobs:
           mkdir -p .changeset
           cat > .changeset/confluence-api-spec-update.md <<'CHANGESET'
           ---
-          "@knpkv/confluence-api-client": patch
+          "@knpkv/confluence-api-client": minor
           "@knpkv/confluence-to-markdown": patch
           ---
 
@@ -85,6 +85,11 @@ jobs:
             The workflow compared the complete raw specifications, applied the
             committed JSON patches, regenerated both Schema-backed Effect
             clients, and built and tested their confluence-to-markdown consumer.
+
+            Review the published generated exports before merging. The client
+            changeset defaults to minor; use major for removed exports or
+            incompatible schemas in this stable package. Patch is appropriate
+            only when the generated public contract is unchanged.
 
             Review these files closely:
             - `packages/confluence-api-client/.specs/confluence-v1.json`
