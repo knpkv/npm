@@ -1,0 +1,26 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-herdr-work-root-import-in-coordinator
+language: tsx
+severity: error
+message: "Coordinator runtime source must import a headless @knpkv/herdr-work subpath"
+
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^["'']@knpkv/herdr-work["'']$'
+    - kind: export_statement
+      has:
+        field: source
+        regex: '^["'']@knpkv/herdr-work["'']$'
+    - pattern: import("@knpkv/herdr-work")
+
+files:
+  - "packages/herdr-coordinator/src/**/*.ts"
+
+note: |
+  The Work root barrel exports React/Rly UI modules. Runtime-only coordinator
+  source must use the model or SQL subpath so a headless server never loads the
+  browser dependency graph.

@@ -113,6 +113,12 @@ row may cover several flows only when each is named, and a checklist cannot pass
 owning plugin/barrels, runtime documentation, package README, source requirements, and governing ADR;
 an alternate authorization path must not contradict a provider-enforced prerequisite.
 
+Keep Herdr worker-relationship behavior synchronized across
+`packages/herdr-fleet/README.md`, `packages/herdr-coordinator/README.md`, and
+`packages/herdr-fleet/src/service.ts`: `consult` and `transition_summary` accept
+relationship-free coordinator roots; `review` and `work` require the exact child
+relationship.
+
 The remediation pass must implement the proposed guardrail with the defect fix whenever the proposal is stable. It must run the narrow rule fixtures first and then the complete lint/test gate. If implementation reveals that the proposal is brittle, record that evidence and replace it with the next most durable enforcement layer instead of silently dropping prevention work.
 
 GitHub workflow guards must compare external action owner/repository names

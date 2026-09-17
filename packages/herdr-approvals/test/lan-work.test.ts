@@ -8,14 +8,19 @@ import {
   makeFleetService
 } from "@knpkv/herdr-fleet"
 import type { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work"
-import { Effect, Redacted, Schema } from "effect"
+import { Crypto, Effect, PlatformError, Redacted, Schema } from "effect"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { renderToStaticMarkup } from "react-dom/server"
 import { startHttpServer, type UiAssets } from "../src/http.js"
 import { LanWorkPage, LanWorkPairPage } from "../src/lan-work-view.js"
-import { LanWorkConfigurationError, LanWorkPairingCode, lanWorkPairingLifetimeMs } from "../src/lan-work.js"
+import {
+  LanWorkConfigurationError,
+  LanWorkPairingCode,
+  lanWorkPairingLifetimeMs,
+  makeLanWorkPairing
+} from "../src/lan-work.js"
 
 // @effect-diagnostics-next-line strictEffectProvide:off
 const provideNodeServices = Effect.provide(NodeServices.layer)
@@ -131,6 +136,40 @@ const expectLanConfigurationFailure = (
 }
 
 describe("LAN Work pairing boundary", () => {
+  it.effect("keeps the pairing code usable after transient session-token entropy failure", () =>
+    Effect.gen(function*() {
+      const cryptoService = yield* Crypto.Crypto
+      let randomBytesCalls = 0
+      const transientCrypto = Crypto.Crypto.of({
+        ...cryptoService,
+        randomBytes: (size) => {
+          randomBytesCalls += 1
+          return randomBytesCalls === 2
+            ? Effect.fail(
+              new PlatformError.PlatformError(
+                new PlatformError.SystemError({
+                  _tag: "Unknown",
+                  description: "entropy temporarily unavailable",
+                  method: "randomBytes",
+                  module: "Crypto"
+                })
+              )
+            )
+            : cryptoService.randomBytes(size)
+        }
+      })
+      const pairing = yield* makeLanWorkPairing(() => 0).pipe(
+        Effect.provideService(Crypto.Crypto, transientCrypto)
+      )
+      const code = LanWorkPairingCode.make(Redacted.value(pairing.pairingCode))
+      expect(yield* Effect.result(pairing.consume(code))).toMatchObject({
+        failure: { _tag: "LanWorkCryptoError", operation: "lan_work.random_token" }
+      })
+      const session = yield* pairing.consume(code)
+      yield* pairing.authorizeSession(Redacted.value(session))
+      expect(randomBytesCalls).toBe(3)
+    }).pipe(provideNodeServices))
+
   it.effect("rejects unpaired and cross-origin access, then permits paired Work reads only", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-lan-work-"))
     return Effect.gen(function*() {

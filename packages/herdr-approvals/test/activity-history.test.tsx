@@ -75,6 +75,31 @@ describe("activity history", () => {
     expect(projection).not.toContain("raw terminal failure")
   })
 
+  it("projects transition summaries distinctly from consultations and delegated work", () => {
+    const items = activityItemsFor([
+      {
+        ...delegated,
+        connectTarget: undefined,
+        id: "job-transition-summary",
+        payload: {
+          kind: "agent.delegate",
+          mode: "transition_summary",
+          prompt: sensitivePrompt,
+          repository: "/repo"
+        },
+        status: "succeeded",
+        worker: undefined
+      }
+    ])
+    expect(items).toMatchObject([
+      {
+        approvalRequest: null,
+        summary: "Requested a bounded transition summary.",
+        title: "Summarize a transition"
+      }
+    ])
+  })
+
   it("filters exceptions, human decisions, work, and search text independently", () => {
     const items = activityItemsFor([delegated, failedMessage])
     expect(filterActivityItems(items, "exceptions", "").map((item) => item.id)).toEqual(["job-message"])

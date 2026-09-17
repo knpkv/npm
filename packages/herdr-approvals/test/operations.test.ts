@@ -102,12 +102,40 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
             }
           })
 
+          const transitionSummary = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-transition-summary"),
+            now: Effect.succeed(1_001),
+            operations: hostOperations,
+            store
+          })
+          const transitionSummaryJob = yield* transitionSummary.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "transition_summary",
+              prompt: "summarize transition",
+              repository: root
+            }
+          }, "owner")
+          expect(yield* transitionSummary.run(transitionSummaryJob.id)).toMatchObject({
+            error: null,
+            result: "fleet healthy",
+            status: "succeeded",
+            worker: {
+              agentId: "agent-host-coordinator",
+              host: "SER8",
+              name: "host-coordinator",
+              paneId: "w8:p1"
+            }
+          })
+
           const chat = yield* makeFleetService({
             approvalEnabled: true,
             host: "SER8",
             id: Effect.succeed("job-chat"),
             nonce: Effect.succeed("nonce-chat"),
-            now: Effect.succeed(1_001),
+            now: Effect.succeed(1_002),
             operations: hostOperations,
             store
           })
@@ -124,21 +152,44 @@ printf '%s\\n' "{\\"jobId\\":\\"$job_id\\",\\"protocol\\":\\"herdr.coordinator.c
             hash: chatJob.hash,
             nonce: "nonce-chat"
           }, "owner")
-          expect(yield* chat.runCoordinatorChat(chatJob.id)).toMatchObject({
-            error: null,
-            result: "fleet healthy",
-            status: "succeeded",
-            worker: {
-              agentId: "agent-host-coordinator"
-            }
+          const completedChatWork = yield* chat.runCoordinatorChat(chatJob.id)
+          expect(completedChatWork).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
           })
+          expect(completedChatWork.worker).toBeUndefined()
+
+          const delegatedReview = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-review"),
+            now: Effect.succeed(1_003),
+            operations: hostOperations,
+            store
+          })
+          const reviewJob = yield* delegatedReview.submit({
+            payload: {
+              kind: "agent.delegate",
+              mode: "review",
+              prompt: "review fleet",
+              repository: root
+            }
+          }, "owner")
+          const completedReview = yield* delegatedReview.run(reviewJob.id)
+          expect(completedReview).toMatchObject({
+            error: "FleetOperationError",
+            result: null,
+            status: "failed"
+          })
+          expect(completedReview.worker).toBeUndefined()
 
           const delegatedWork = yield* makeFleetService({
             approvalEnabled: true,
             host: "SER8",
             id: Effect.succeed("job-work"),
             nonce: Effect.succeed("nonce-work"),
-            now: Effect.succeed(1_002),
+            now: Effect.succeed(1_004),
             operations: hostOperations,
             store
           })

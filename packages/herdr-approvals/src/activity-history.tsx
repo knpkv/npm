@@ -1,5 +1,5 @@
 import { Button, StateLabel, Surface, Text } from "@knpkv/rly/primitives"
-import { requiresApproval, type JobStatus } from "@knpkv/herdr-fleet/model"
+import { requiresApproval, type DelegateMode, type JobStatus } from "@knpkv/herdr-fleet/model"
 import { Predicate } from "effect"
 import { useMemo, useState, type KeyboardEvent, type ReactElement } from "react"
 import { approvalRequestFor, type ApprovalRequest, type SanitizedJobRecord } from "./approval-request.js"
@@ -41,6 +41,30 @@ const filterOptions: ReadonlyArray<ActivityFilterOption> = [
 ]
 
 const pageSize = 24
+
+const delegateTitle = (mode: DelegateMode): string => {
+  switch (mode) {
+    case "consult":
+      return "Ask the coordinator"
+    case "transition_summary":
+      return "Summarize a transition"
+    case "review":
+    case "work":
+      return "Delegate agent work"
+  }
+}
+
+const delegateSummary = (mode: DelegateMode): string => {
+  switch (mode) {
+    case "consult":
+      return "Asked the persistent coordinator for an answer."
+    case "transition_summary":
+      return "Requested a bounded transition summary."
+    case "review":
+    case "work":
+      return "Assigned typed work through the persistent coordinator."
+  }
+}
 
 export const statusLabel = (status: JobStatus): string => {
   switch (status) {
@@ -90,7 +114,7 @@ export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string =>
     case "nix.apply":
       return "Apply Nix configuration"
     case "agent.delegate":
-      return record.payload.mode === "consult" ? "Ask the coordinator" : "Delegate agent work"
+      return delegateTitle(record.payload.mode)
     case "agent.message":
       return "Message an agent"
   }
@@ -106,9 +130,7 @@ const safeSummary = (record: SanitizedJobRecord): string => {
       return "Processed a requested configuration deployment."
     case "agent.delegate":
       return record.worker === undefined
-        ? record.payload.mode === "consult"
-          ? "Asked the persistent coordinator for an answer."
-          : "Assigned typed work through the persistent coordinator."
+        ? delegateSummary(record.payload.mode)
         : `Started ${record.worker.name} through the persistent coordinator.`
     case "agent.message":
       return `Sent a typed message to ${record.payload.session}.`

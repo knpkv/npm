@@ -1,6 +1,6 @@
 import { StateLabel, Text } from "@knpkv/rly/primitives"
 import { Schema } from "effect"
-import { useState, type ReactNode, type Ref } from "react"
+import { useId, useState, type ReactNode, type Ref } from "react"
 import type { ConnectAgent } from "./model.js"
 import {
   serializeTerminalKey,
@@ -286,6 +286,8 @@ export const AgentDirectory = ({
   selectedKey,
   timeZone
 }: AgentDirectoryProps) => {
+  const hostFilterLabelId = useId()
+  const statusFilterLabelId = useId()
   const hosts = connectAgentHosts(agents)
   const rows = connectLineageRows(agents).filter(({ agent }) => {
     const activity = activityFor(agent.state)
@@ -298,27 +300,37 @@ export const AgentDirectory = ({
   return (
     <>
       <div className="connect-filter-row">
-        <div aria-label="Filter agents by host" className="connect-group-filter" role="group">
-          <button aria-pressed={hostFilter === null} onClick={() => onHostFilter(null)} type="button">
-            All hosts
-          </button>
-          {hosts.map((host) => (
-            <button aria-pressed={hostFilter === host} key={host} onClick={() => onHostFilter(host)} type="button">
-              {host}
+        <div className="connect-filter-set">
+          <span className="connect-filter-label" id={hostFilterLabelId}>
+            Host
+          </span>
+          <div aria-labelledby={hostFilterLabelId} className="connect-group-filter" role="group">
+            <button aria-pressed={hostFilter === null} onClick={() => onHostFilter(null)} type="button">
+              All hosts
             </button>
-          ))}
+            {hosts.map((host) => (
+              <button aria-pressed={hostFilter === host} key={host} onClick={() => onHostFilter(host)} type="button">
+                {host}
+              </button>
+            ))}
+          </div>
         </div>
-        <div aria-label="Filter agents by status" className="connect-status-filter" role="group">
-          {activityFilters.map((activity) => (
-            <button
-              aria-pressed={activityFilter === activity}
-              key={activity}
-              onClick={() => onActivityFilter(activity)}
-              type="button"
-            >
-              {activityFilterLabel(activity)}
-            </button>
-          ))}
+        <div className="connect-filter-set">
+          <span className="connect-filter-label" id={statusFilterLabelId}>
+            Status
+          </span>
+          <div aria-labelledby={statusFilterLabelId} className="connect-status-filter" role="group">
+            {activityFilters.map((activity) => (
+              <button
+                aria-pressed={activityFilter === activity}
+                key={activity}
+                onClick={() => onActivityFilter(activity)}
+                type="button"
+              >
+                {activityFilterLabel(activity)}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
       <div className="connect-agent-tree">
@@ -362,15 +374,30 @@ export const AgentDirectory = ({
 }
 
 type ConnectWorkspaceProps = {
+  readonly directoryViewportRef?: Ref<HTMLDivElement>
   readonly directory: ReactNode
   readonly mode: "directory" | "terminal"
   readonly terminal: ReactNode
   readonly terminalViewportRef?: Ref<HTMLDivElement>
+  readonly workspaceRef?: Ref<HTMLDivElement>
 }
 
-export const ConnectWorkspace = ({ directory, mode, terminal, terminalViewportRef }: ConnectWorkspaceProps) => (
-  <div className="connect-workspace" data-mode={mode}>
-    <div aria-hidden={mode === "terminal"} className="connect-directory-screen" inert={mode === "terminal"}>
+export const ConnectWorkspace = ({
+  directory,
+  directoryViewportRef,
+  mode,
+  terminal,
+  terminalViewportRef,
+  workspaceRef
+}: ConnectWorkspaceProps) => (
+  <div className="connect-workspace" data-mode={mode} ref={workspaceRef} tabIndex={-1}>
+    <div
+      aria-hidden={mode === "terminal"}
+      className="connect-directory-screen"
+      inert={mode === "terminal"}
+      ref={directoryViewportRef}
+      tabIndex={-1}
+    >
       {directory}
     </div>
     <div

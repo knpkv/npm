@@ -96,6 +96,19 @@
     block-size: auto;
     min-block-size: 38rem;
   }
+
+  .fleet-shell-main .connect-shell-embedded .connect-terminal-screen {
+    --fleet-shell-terminal-offset: max(
+      0px,
+      calc(var(--fleet-shell-tab-bottom, var(--rly-space-48)) - var(--connect-visual-viewport-offset, 0px))
+    );
+
+    block-size: calc(var(--connect-visual-viewport-height, 100dvh) - var(--fleet-shell-terminal-offset));
+    inset-block-start: max(
+      var(--connect-visual-viewport-offset, 0px),
+      var(--fleet-shell-tab-bottom, var(--rly-space-48))
+    );
+  }
   .fleet-workspace {
     display: grid;
     gap: var(--rly-space-24);
