@@ -94,10 +94,12 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
         // and a URL may name a pull request the queue hides. Queue-shaped views
         // filter it through `queuePullRequests`. Deliberately no fallback to
         // `state.pullRequests`: that one is account-filtered, so serving it here
-        // would dead-end exactly those routes. A failed read instead falls to the
-        // catch below, which emits an SSE comment rather than a `data:` frame —
-        // clients keep the snapshot they have and pick up the next change event.
+        // would dead-end exactly those routes. Retry failed reads for the
+        // request's lifetime: an idle app may emit no further change event when
+        // the database recovers. Request interruption cancels the retry.
         const pullRequests = yield* prRepo.findAll().pipe(
+          Effect.tapError((cause) => Effect.logWarning("SSE cache read failed, retrying", cause)),
+          Effect.retry(Schedule.spaced(Duration.seconds(1))),
           Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row)))
         )
         const enabledProfiles = yield* prService.enabledAccountProfiles
