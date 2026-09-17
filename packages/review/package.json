@@ -20,10 +20,24 @@
     "./react": {
       "types": "./dist/view.d.ts",
       "import": "./dist/view.js"
-    }
+    },
+    "./guide": {
+      "types": "./dist/guide/index.d.ts",
+      "import": "./dist/guide/index.js"
+    },
+    "./guide/react": {
+      "types": "./dist/guide/view.d.ts",
+      "import": "./dist/guide/view.js"
+    },
+    "./guide/export": {
+      "types": "./dist/guide/export.d.ts",
+      "import": "./dist/guide/export.js"
+    },
+    "./guide/styles.css": "./dist/guide/style.css"
   },
   "files": [
     "dist",
+    "examples",
     "README.md"
   ],
   "publishConfig": {
@@ -33,10 +47,11 @@
     "node": ">=26"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b --force",
+    "example:guide": "pnpm build && tsx scripts/example-guide.ts",
+    "build": "rimraf dist && tsc -b --force && tsx scripts/build-guide-assets.ts",
     "check": "tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
+    "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx}\"",
     "test": "vitest run"
   },
   "dependencies": {
@@ -44,6 +59,7 @@
     "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
+    "happy-dom": "20.11.2",
     "@effect/vitest": "4.0.0-rc.109",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
@@ -51,9 +67,14 @@
     "react-dom": "^19.2.8",
     "rimraf": "^6.1.3",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "esbuild": "^0.27.7",
+    "mermaid": "^11.12.0",
+    "tsx": "^4.23.12",
+    "@effect/platform-node": "4.0.0-rc.109"
   },
   "peerDependencies": {
-    "react": "^19.2.8"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }
