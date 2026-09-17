@@ -335,6 +335,35 @@ When writing Effect code:
   silently degrades to exact-case clearing. The folding is unconditional on every
   platform, which is broader than POSIX strictly needs; that is deliberate and
   documented in the module rather than gated on a platform read.
+- CodeCommit pull-request queues must hide accounts the user switched off. The
+  cache deliberately keeps their rows so re-enabling needs no provider round
+  trip, so hiding happens on read, per surface, never by pruning the cache.
+  In the TUI that is `AppState.pullRequests`, filtered by `PRService` at every
+  publication; in the browser it is `queuePullRequests`, used by the PR queue
+  and its filter sidebar. URL-addressable surfaces resolve against the whole
+  cached list and stay unfiltered — the PR detail route, the Relay dock's
+  locator lookup, the stats lists, and the cache text search — because a URL may
+  name a pull request the queue hides; do not filter the SSE payload or its
+  failure path, or those views dead-end. Enablement is always the persisted
+  config, never `AppState.accounts`, which is a profile-detection snapshot and
+  is empty without a readable `~/.aws/config`; the browser gets it as the SSE
+  payload's `enabledProfiles`, which the client's own wire schema in `useSSE.ts`
+  must decode — it is a separate schema from the server's, and a field missing
+  there is silently dropped. Distinguish "not known" from "none enabled":
+  absent or `undefined` lists everything rather than blanking the queue, an
+  empty set hides everything. At publication time the config is re-read after
+  the cache read, so long-running work does not filter with the set it opened
+  with, and an unreadable config skips the publish and records a stale-list
+  error rather than reporting a clean refresh. The two reads that precede their
+  cache read are deliberate: `resolveAccounts` opens the refresh, where an
+  unreadable config is fatal, and the `PRService` seed publishes nothing until
+  the first refresh. Enforced by
+  `packages/codecommit-core/test/PRService.visibility.test.ts` and
+  `packages/codecommit-web/test/queue-pull-requests.test.ts` rather than
+  statically: `PullRequestRepo.findAll` and `AppState.pullRequests` have many
+  legitimate callers, and what distinguishes a violation is whether the rows
+  reach a queue, which no syntactic matcher can decide without flagging all of
+  them.
 - When CodeCommit TUI changes add an AWS operation, Git transport behavior, or a
   required local executable, update `packages/codecommit/README.md` in the same
   change with the corresponding IAM action and runtime prerequisite. Pure
