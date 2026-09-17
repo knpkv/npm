@@ -293,14 +293,14 @@ describe("CodeCommitReadClient", () => {
           Effect.succeed({
             pullRequest: {
               ...pullRequestResponse(pullRequestId).pullRequest,
-              title: "chore(RPS-6255): patch dependency vulnerabilities\n"
+              title: "chore(ENG-6255): patch dependency vulnerabilities\n"
             }
           })
       }),
       Effect.gen(function*() {
         const client = yield* CodeCommitReadClient
         const revision = yield* client.getPullRequest({ account, pullRequestId: "17" })
-        assert.strictEqual(revision.title, "chore(RPS-6255): patch dependency vulnerabilities")
+        assert.strictEqual(revision.title, "chore(ENG-6255): patch dependency vulnerabilities")
       })
     ))
 

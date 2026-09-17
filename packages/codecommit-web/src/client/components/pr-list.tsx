@@ -15,6 +15,7 @@ import { ServiceMark } from "@knpkv/rly/patterns"
 import { Button, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import { LogInIcon } from "lucide-react"
 import { useCallback, useMemo } from "react"
+import { queuePullRequests } from "../utils/queuePullRequests.js"
 import { useSearchParams } from "react-router"
 import { appStateAtom, notificationsSsoLoginAtom } from "../atoms/app.js"
 import { useFilterParams } from "../hooks/useFilterParams.js"
@@ -54,7 +55,14 @@ export function PRList() {
   const { state: filterState, toggleFilter } = useFilterParams()
   const [, setSearchParams] = useSearchParams()
 
-  const prs = appState.pullRequests
+  // The queue hides accounts the user switched off; their rows stay cached so
+  // re-enabling needs no refetch, and URL-addressable views still resolve them.
+  const prs = useMemo(
+    () => queuePullRequests(appState),
+    // Keyed on the queue's own inputs rather than the whole state object, which
+    // the SSE hook replaces on every payload.
+    [appState.enabledProfiles, appState.pullRequests]
+  )
   const isLoading = appState.status === "loading"
 
   const summary = useMemo(() => {

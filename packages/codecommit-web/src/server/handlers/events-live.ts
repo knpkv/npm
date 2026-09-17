@@ -14,9 +14,9 @@
  * @module
  */
 import { CacheService, PRService } from "@knpkv/codecommit-core"
-import { AppStatus, needsMyReview, PullRequest } from "@knpkv/codecommit-core/Domain.js"
+import { AppStatus, listedForEnabledAccounts, needsMyReview, PullRequest } from "@knpkv/codecommit-core/Domain.js"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
-import { Duration, Effect, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
+import { Duration, Effect, Option, Ref, Schedule, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpServerResponse } from "effect/unstable/http"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { CodeCommitApi, NotificationResponse, SandboxResponse } from "../Api.js"
@@ -31,6 +31,11 @@ const AccountState = Schema.Struct({
 const SsePayload = Schema.Struct({
   pullRequests: Schema.Array(PullRequest),
   accounts: Schema.Array(AccountState),
+  // Which accounts are switched on, from the persisted config. Absent means the
+  // config could not be read, and the browser then lists everything rather than
+  // blanking the queue. `accounts` above is a profile-detection snapshot and is
+  // not authoritative for this.
+  enabledProfiles: Schema.optional(Schema.Array(Schema.String)),
   status: AppStatus,
   statusDetail: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
@@ -85,10 +90,19 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
     const buildPayload = (refreshNotifs: boolean) =>
       Effect.gen(function*() {
         const prState = yield* SubscriptionRef.get(prService.state)
+        // The whole cache: the browser resolves a PR detail route from this list,
+        // and a URL may name a pull request the queue hides. Queue-shaped views
+        // filter it through `queuePullRequests`. Deliberately no fallback to
+        // `state.pullRequests`: that one is account-filtered, so serving it here
+        // would dead-end exactly those routes. Retry failed reads for the
+        // request's lifetime: an idle app may emit no further change event when
+        // the database recovers. Request interruption cancels the retry.
         const pullRequests = yield* prRepo.findAll().pipe(
-          Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row))),
-          Effect.catch(() => SubscriptionRef.get(prService.state).pipe(Effect.map((s) => s.pullRequests)))
+          Effect.tapError((cause) => Effect.logWarning("SSE cache read failed, retrying", cause)),
+          Effect.retry(Schedule.spaced(Duration.seconds(1))),
+          Effect.map((rows) => rows.map((row) => PRService.decodeCachedPR(row)))
         )
+        const enabledProfiles = yield* prService.enabledAccountProfiles
         const unreadCount = refreshNotifs
           ? yield* notificationRepo.unreadCount().pipe(
             Effect.tap((c) => Ref.set(lastUnreadRef, c)),
@@ -110,16 +124,19 @@ export const EventsLive = HttpApiBuilder.group(CodeCommitApi, "events", (handler
           })
         )
 
-        const pendingPrompt = yield* permGate.getFirstPending().pipe(
-          Effect.catchIf(() => true, () => Effect.succeed(undefined))
-        )
+        const pendingPrompt = yield* permGate.getFirstPending()
 
-        const pendingReviewCount = prState.currentUser
-          ? pullRequests.filter((pr) => needsMyReview(pr, prState.currentUser)).length
+        // Counts the queue, not the cache: a switched-off account must not keep
+        // the review badge lit.
+        const pendingReviewCount = prState.currentUser !== undefined && prState.currentUser.length > 0
+          ? listedForEnabledAccounts(pullRequests, Option.getOrUndefined(enabledProfiles))
+            .filter((pr) => needsMyReview(pr, prState.currentUser))
+            .length
           : 0
 
         const payload = yield* encode({
           accounts: prState.accounts,
+          ...(Option.isSome(enabledProfiles) && { enabledProfiles: [...enabledProfiles.value] }),
           status: prState.status,
           pullRequests,
           statusDetail: prState.statusDetail,
