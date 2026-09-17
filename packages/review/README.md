@@ -16,7 +16,11 @@ source-line placement. `@knpkv/review/guide/react` exports `GuidePage` and
 `GuideUsage`; import `@knpkv/review/guide/styles.css` once when embedding them.
 `@knpkv/review/guide/export` exports `exportGuide`, an Effect returning the HTML
 and placement counts or a typed `GuideExportError`. It validates inputs and
-requires each changed file to appear exactly once.
+requires each changed file to appear exactly once. Default Git prefixes and
+`--no-prefix` work directly. For custom prefixes, pass `prefixes: { source, destination }`
+with the exact `--src-prefix` and `--dst-prefix` values; filenames alone cannot
+unambiguously identify arbitrary prefixes. Copies retain their original source
+but only their destination is a changed-file identity. CRLF patch records are accepted.
 
 ```ts
 import { exportGuide } from "@knpkv/review/guide/export"
@@ -46,6 +50,7 @@ spans have subtle backgrounds while fenced examples remain separate blocks.
 `verdict` (`Yes`, `No`, `N/A`), and optional `note`; plus `issues` with unique
 numeric `id`, `severity` (`P1` through `P4`), `file`, `summary`, and optional
 `line`, `side` (`old` or `new`, default new), `explanation`, `recommendation`, and `status`.
+`line` must be a positive integer. A supplied `status` replaces the fix recommendation.
 Keep `summary` short; put the trigger, code path, and consequence in Markdown `explanation`.
 Optional `source`, `preExisting`, and `openQuestions` retain review context.
 

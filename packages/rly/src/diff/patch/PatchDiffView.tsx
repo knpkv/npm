@@ -3,7 +3,17 @@ import styles from "../bounded/BoundedDiffCodeView.module.css"
 import type { DiffLine, FileDiff, Hunk } from "./parse.js"
 
 export { findFile, parsePatch, pathsOf } from "./parse.js"
-export type { DiffLine, FileDiff, FileStatus, Hunk, LineKind, ParseResult, Patch, PatchInvalid } from "./parse.js"
+export type {
+  DiffLine,
+  FileDiff,
+  FileStatus,
+  Hunk,
+  LineKind,
+  ParseResult,
+  Patch,
+  PatchInvalid,
+  PatchPrefixes
+} from "./parse.js"
 
 export interface PatchDiffViewProps {
   readonly file: FileDiff

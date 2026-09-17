@@ -174,6 +174,7 @@ export const componentManifest = {
         { kind: "value", name: "pathsOf" },
         { kind: "type", name: "PatchDiffViewProps" },
         { kind: "type", name: "ParseResult" },
+        { kind: "type", name: "PatchPrefixes" },
         { kind: "type", name: "PatchInvalid" },
         { kind: "type", name: "Patch" },
         { kind: "type", name: "FileDiff" },

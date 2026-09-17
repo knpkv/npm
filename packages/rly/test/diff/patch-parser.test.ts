@@ -134,3 +134,60 @@ new file mode 100644
   assert.equal(findFile(patch, "a.txt")?.status, "added")
   assert.equal(findFile(patch, "b.txt")?.status, "renamed")
 })
+
+test("accepts no-prefix and explicit custom-prefix patches without changing canonical paths", () => {
+  assert.deepEqual(
+    parsed(modified.replaceAll("a/src/a.ts", "src/a.ts").replaceAll("b/src/a.ts", "src/a.ts")),
+    parsed(modified)
+  )
+  const custom = modified.replaceAll("a/src/a.ts", "before/tree/src/a.ts").replaceAll(
+    "b/src/a.ts",
+    "after/tree/src/a.ts"
+  )
+  assert.deepEqual(parsePatch(custom, { source: "before/tree/", destination: "after/tree/" }), parsePatch(modified))
+  assert.equal(parsePatch(modified.replace("+++ b/src/a.ts", "+++ b/wrong.ts"))._tag, "PatchInvalid")
+  assert.equal(parsePatch("diff --git missing\n")._tag, "PatchInvalid")
+})
+
+test("normalizes CRLF patch records and still rejects incomplete hunks", () => {
+  assert.deepEqual(parsePatch(modified.replaceAll("\n", "\r\n")), parsePatch(modified))
+  assert.equal(parsePatch("diff --git a/a b/a\r\n--- a/a\r\n+++ b/a\r\n@@ -1 +1 @@\r\n-old\r\n")._tag, "PatchInvalid")
+})
+
+test("copies retain their source identity without treating it as a changed alias", () => {
+  const copy = `diff --git a/source.txt b/copy.txt
+similarity index 100%
+copy from source.txt
+copy to copy.txt
+`
+  const patch = parsed(copy)
+  assert.equal(patch.files[0]?.status, "copied")
+  assert.equal(patch.files[0]?.oldPath, "source.txt")
+  assert.equal(findFile(patch, "copy.txt")?.path, "copy.txt")
+  assert.equal(findFile(patch, "source.txt"), undefined)
+  assert.equal(parsePatch(copy.replace("copy to copy.txt\n", ""))._tag, "PatchInvalid")
+  const edited = parsed(copy + "--- a/source.txt\n+++ b/copy.txt\n@@ -1 +1 @@\n-old\n+new\n")
+  assert.equal(edited.files[0]?.hunks.length, 1)
+  assert.equal(parsed(copy + "Binary files a/source.txt and b/copy.txt differ\n").files[0]?.binary, true)
+})
+
+test("no-prefix names with spaces remain exact, including directories named a", () => {
+  const patch = parsed(
+    "diff --git a/my file.ts a/my file.ts\n--- a/my file.ts\t\n+++ a/my file.ts\t\n@@ -1 +1 @@\n-old\n+new\n"
+  )
+  assert.equal(patch.files[0]?.path, "a/my file.ts")
+})
+
+test("CR in source content survives an LF-encoded patch", () => {
+  const patch = parsed("diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\r\n+new\r\n")
+  assert.equal(patch.files[0]?.hunks[0]?.lines[0]?.text, "old\r")
+  assert.equal(patch.files[0]?.hunks[0]?.lines[1]?.text, "new\r")
+})
+
+test("paired markers identify different files in no-index patches", () => {
+  const patch = parsed(
+    "diff --git a/first.txt b/second.txt\n--- a/first.txt\n+++ b/second.txt\n@@ -1 +1 @@\n-old\n+new\n"
+  )
+  assert.equal(patch.files[0]?.oldPath, "first.txt")
+  assert.equal(patch.files[0]?.newPath, "second.txt")
+})

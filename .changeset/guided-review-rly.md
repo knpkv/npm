@@ -4,3 +4,7 @@
 ---
 
 Add patch-based diff presentation and a reusable guided review reader with portable HTML export. Guides retain chapter coverage and source-line findings, use Rly presentation, and display attributable token usage, cost, and execution time.
+
+Accept no-prefix and explicitly configured custom-prefix Git patches, CRLF patch
+records, and copied-file identities. Validate usage subsets and source coordinates,
+and replace stale fix guidance when a finding has status.

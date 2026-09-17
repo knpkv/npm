@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { type Patch, parsePatch } from "@knpkv/rly/diff/patch"
 import type { Findings, Guide } from "../src/guide/model.js"
-import { Usage } from "../src/guide/model.js"
+import { Issue, Usage } from "../src/guide/model.js"
 import { coverageProblems, placeAll } from "../src/guide/plan.js"
 import { GuidePage, GuideUsage } from "../src/guide/view.js"
 
@@ -104,4 +104,34 @@ describe("guide", () => {
     ])
       expect(Schema.is(Usage)({ ...base, ...extra })).toBe(false)
   })
+})
+
+it("rejects impossible cached counts while allowing unknown totals", () => {
+  const base = { label: "Review", scope: "review", source: "receipt" }
+  expect(Schema.is(Usage)({ ...base, inputTokens: 1000, cachedInputTokens: 1001 })).toBe(false)
+  expect(Schema.is(Usage)({ ...base, inputTokens: 1000, cachedInputTokens: 800 })).toBe(true)
+  expect(Schema.is(Usage)({ ...base, cachedInputTokens: 1001 })).toBe(true)
+})
+
+it("requires positive integral source coordinates, including lines outside the hunks", () => {
+  const base = { id: 1, severity: "P2", file: "a.ts", summary: "Check signature" }
+  for (const line of [0, -1, 1.5]) expect(Schema.is(Issue)({ ...base, line })).toBe(false)
+  for (const line of [1, 99]) expect(Schema.is(Issue)({ ...base, line })).toBe(true)
+  expect(placeAll(patch, findings)[1]).toMatchObject({ kind: "general", reason: "outside-hunks" })
+})
+
+it("status replaces obsolete fix instructions, while unresolved findings retain them", () => {
+  const issue = {
+    id: 1,
+    severity: "P2",
+    file: "a.ts",
+    summary: "Check signature",
+    recommendation: "Compare both revisions."
+  } satisfies Issue
+  const render = (finding: Issue) =>
+    renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={{ checklist: [], issues: [finding] }} />)
+  expect(render(issue)).toContain("Compare both revisions.")
+  expect(render({ ...issue, status: "Resolved" })).toContain("Resolved")
+  expect(render({ ...issue, status: "Resolved" })).not.toContain("Compare both revisions.")
+  expect(render({ ...issue, status: "Resolved" })).not.toContain(">Fix<")
 })

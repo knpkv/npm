@@ -36,7 +36,7 @@ export interface Hunk {
   readonly lines: ReadonlyArray<DiffLine>
 }
 
-export type FileStatus = "added" | "deleted" | "modified" | "renamed"
+export type FileStatus = "added" | "deleted" | "modified" | "renamed" | "copied"
 
 export interface FileDiff {
   /** The path a guide refers to: the new path, or the old one when the file was deleted. */
@@ -53,9 +53,13 @@ export interface Patch {
 }
 
 const HUNK = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/
-const HEADER = /^diff --git (a\/.*|"a\/.*") (b\/.*|"b\/.*")$/
+const HEADER = "diff --git "
 
-const stripPrefix = (path: string): string => (path.startsWith("a/") || path.startsWith("b/") ? path.slice(2) : path)
+/** Custom Git prefixes cannot be inferred reliably from filenames; supply the exact producer options. */
+export interface PatchPrefixes {
+  readonly source: string
+  readonly destination: string
+}
 
 const unquote = (path: string): UnquotedPath => {
   if (!path.startsWith("\"")) return { _tag: "Path", path }
@@ -87,65 +91,83 @@ const unquote = (path: string): UnquotedPath => {
   return { _tag: "Path", path: new TextDecoder().decode(new Uint8Array(bytes)) }
 }
 
-/**
- * Parse a git unified diff, preserving source line numbers.
- *
- * Returns `PatchInvalid` rather than throwing, so a malformed patch is a value the caller
- * has to handle instead of an exception it can forget.
- */
-export const parsePatch = (text: string): ParseResult => {
-  const lines = text.split("\n")
+/** Resolve header boundaries against file markers; spaces in unquoted filenames are legal Git output. */
+const headerPaths = (
+  header: string,
+  source: string | undefined,
+  destination: string | undefined,
+  prefixes: PatchPrefixes | undefined,
+  moved: { readonly source: string; readonly destination: string } | undefined
+): { readonly _tag: "Paths"; readonly oldPath: string; readonly newPath: string } | PatchInvalid => {
+  const candidates: Array<{ readonly oldPath: string; readonly newPath: string }> = []
+  for (let index = 0; index < header.length; index++) {
+    if (header[index] !== " ") continue
+    const left = unquote(header.slice(0, index))
+    const right = unquote(header.slice(index + 1))
+    if (left._tag === "PatchInvalid" || right._tag === "PatchInvalid") continue
+    if (left.path === "" || right.path === "") continue
+    if (source !== undefined && source !== "/dev/null" && source !== left.path) continue
+    if (destination !== undefined && destination !== "/dev/null" && destination !== right.path) continue
+    const selected = prefixes ?? (left.path.startsWith("a/") && right.path.startsWith("b/")
+      ? { source: "a/", destination: "b/" }
+      : { source: "", destination: "" })
+    if (!left.path.startsWith(selected.source) || !right.path.startsWith(selected.destination)) continue
+    const oldPath = left.path.slice(selected.source.length)
+    const newPath = right.path.slice(selected.destination.length)
+    if (oldPath === "" || newPath === "") continue
+    if (moved !== undefined && (oldPath !== moved.source || newPath !== moved.destination)) continue
+    if (moved === undefined && source === undefined && destination === undefined && oldPath !== newPath) continue
+    candidates.push({ oldPath, newPath })
+  }
+  const paths = candidates[0]
+  return candidates.length === 1 && paths !== undefined
+    ? { _tag: "Paths", ...paths }
+    : invalid("Inconsistent or ambiguous Git file headers; custom prefixes must be supplied explicitly")
+}
+
+/** Parse Git unified diffs with default or no prefixes; custom producer prefixes must be explicit. */
+export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult => {
+  // A CR on a Git header identifies transport line endings; body-only CR belongs to the source.
+  const records = text.split("\n")
+  const converted = records.some((line) => line.startsWith(HEADER) && line.endsWith("\r"))
+  const lines = converted ? records.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line) : records
   const files: Array<FileDiff> = []
   let index = 0
 
   while (index < lines.length) {
-    const header = HEADER.exec(lines[index] ?? "")
-    if (header === null) {
+    const line = lines[index] ?? ""
+    if (!line.startsWith(HEADER)) {
       index += 1
       continue
     }
-    const oldHeader = unquote(header[1] ?? "")
-    if (oldHeader._tag === "PatchInvalid") return oldHeader
-    const newHeader = unquote(header[2] ?? "")
-    if (newHeader._tag === "PatchInvalid") return newHeader
-    let oldPath = stripPrefix(oldHeader.path)
-    let newPath = stripPrefix(newHeader.path)
+    const header = line.slice(HEADER.length)
+    let source: string | undefined
+    let destination: string | undefined
+    let movedSource: string | undefined
+    let movedDestination: string | undefined
     let status: FileStatus = "modified"
     let binary = false
     const hunks: Array<Hunk> = []
     index += 1
 
-    // Extended headers up to the first hunk or the next file.
-    while (index < lines.length && !HEADER.test(lines[index] ?? "")) {
+    while (index < lines.length && !(lines[index] ?? "").startsWith(HEADER)) {
       const line = lines[index] ?? ""
       if (line.startsWith("new file mode")) status = "added"
       else if (line.startsWith("deleted file mode")) status = "deleted"
-      else if (line.startsWith("rename from ")) {
-        status = "renamed"
-        const renamed = unquote(line.slice("rename from ".length))
-        if (renamed._tag === "PatchInvalid") return renamed
-        oldPath = renamed.path
-      } else if (line.startsWith("rename to ")) {
-        status = "renamed"
-        const renamed = unquote(line.slice("rename to ".length))
-        if (renamed._tag === "PatchInvalid") return renamed
-        newPath = renamed.path
-      } else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) {
-        binary = true
-      } else if (line.startsWith("--- ")) {
-        const source = line.slice(4).replace(/\t$/, "")
-        if (source !== "/dev/null") {
-          const unquoted = unquote(source)
-          if (unquoted._tag === "PatchInvalid") return unquoted
-          oldPath = stripPrefix(unquoted.path)
-        }
-      } else if (line.startsWith("+++ ")) {
-        const target = line.slice(4).replace(/\t$/, "")
-        if (target !== "/dev/null") {
-          const unquoted = unquote(target)
-          if (unquoted._tag === "PatchInvalid") return unquoted
-          newPath = stripPrefix(unquoted.path)
-        }
+      else if (/^(rename|copy) (from|to) /.test(line)) {
+        const kind = line.startsWith("copy ") ? "copied" : "renamed"
+        if (status !== "modified" && status !== kind) return invalid("Conflicting file status headers")
+        status = kind
+        const path = unquote(line.replace(/^(rename|copy) (from|to) /, ""))
+        if (path._tag === "PatchInvalid") return path
+        if (/^(rename|copy) from /.test(line)) movedSource = path.path
+        else movedDestination = path.path
+      } else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) binary = true
+      else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+        const path = unquote(line.slice(4).replace(/\t$/, ""))
+        if (path._tag === "PatchInvalid") return path
+        if (line.startsWith("--- ")) source = path.path
+        else destination = path.path
       } else if (HUNK.test(line)) {
         const parsed = readHunk(lines, index)
         if (parsed._tag === "PatchInvalid") return parsed
@@ -157,17 +179,26 @@ export const parsePatch = (text: string): ParseResult => {
       }
       index += 1
     }
-
+    if ((source === undefined) !== (destination === undefined)) return invalid("Unpaired file markers")
+    if ((movedSource === undefined) !== (movedDestination === undefined)) {
+      return invalid("Unpaired rename or copy headers")
+    }
+    const moved = movedSource === undefined || movedDestination === undefined
+      ? undefined
+      : { source: movedSource, destination: movedDestination }
+    const paths = headerPaths(header, source, destination, prefixes, moved)
+    if (paths._tag === "PatchInvalid") return paths
+    if (source === "/dev/null") status = "added"
+    if (destination === "/dev/null") status = "deleted"
     files.push({
-      path: status === "deleted" ? oldPath : newPath,
-      oldPath,
-      newPath,
+      path: status === "deleted" ? paths.oldPath : paths.newPath,
+      oldPath: paths.oldPath,
+      newPath: paths.newPath,
       status,
       binary,
       hunks
     })
   }
-
   if (files.length === 0 && text.trim() !== "") return invalid("Expected a git unified diff")
   return { _tag: "Patch", patch: { files } }
 }
@@ -228,7 +259,7 @@ const readHunk = (
 
 /** Every path a guide may use for this file: the new one first, the old one for renames. */
 export const pathsOf = (file: FileDiff): ReadonlyArray<string> =>
-  file.oldPath === file.newPath ? [file.path] : [file.newPath, file.oldPath]
+  file.status === "renamed" ? [file.newPath, file.oldPath] : [file.path]
 
 export const findFile = (patch: Patch, path: string): FileDiff | undefined =>
   patch.files.find((file) => file.path === path) ?? patch.files.find((file) => pathsOf(file).includes(path))

@@ -51,3 +51,15 @@ it.effect("includes offline diagram support only for guides containing Mermaid",
     expect(diagram.html).toContain("class=\"mermaid\"")
     expect(diagram.html).not.toMatch(/<script[^>]+src=/)
   }))
+
+it.effect("exports custom-prefix paths and retains options for hydration", () =>
+  Effect.gen(function*() {
+    const prefixes = { source: "old/tree/", destination: "new/tree/" }
+    const page = yield* exportGuide({
+      guide,
+      patch: patch.replaceAll("a/release.ts", "old/tree/release.ts").replaceAll("b/release.ts", "new/tree/release.ts"),
+      prefixes
+    })
+    expect(page.files).toBe(1)
+    expect(page.html).toContain("\"prefixes\":{\"source\":\"old/tree/\",\"destination\":\"new/tree/\"}")
+  }))

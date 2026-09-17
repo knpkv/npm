@@ -503,3 +503,8 @@ pnpm --filter @knpkv/rly visual:classify --base origin/main --head HEAD
 The command emits deterministic JSON. Missing refs, malformed Git output,
 unknown paths, catalog drift, or changes to foundations and shared visual
 configuration fail closed to a full visual run.
+
+`parsePatch(text, prefixes?)` accepts default Git prefixes or `--no-prefix`. Pass
+`{ source, destination }` for exact custom Git prefixes; arbitrary prefixes cannot
+be inferred from filenames. Copied files retain both paths and `copied` status,
+but only the destination resolves as a changed file. CRLF patch records are accepted.

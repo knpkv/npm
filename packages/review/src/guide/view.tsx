@@ -38,7 +38,7 @@ const FindingCard = ({ issue, onReview }: { readonly issue: Issue; readonly onRe
       <Inline text={issue.summary} />
     </h3>
     {issue.explanation === undefined ? null : <Prose text={issue.explanation} />}
-    {issue.recommendation === undefined ? null : (
+    {issue.status !== undefined || issue.recommendation === undefined ? null : (
       <>
         <Text as="strong" variant="label">
           Fix

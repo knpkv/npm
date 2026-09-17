@@ -24,8 +24,15 @@ export const Usage = Schema.Struct({
     currency: Schema.String.check(Schema.isPattern(/^[A-Z]{3}$/)),
     basis: Schema.Literals(["reported", "estimated"])
   }))
-})
+}).check(Schema.makeFilter(
+  (usage) =>
+    usage.inputTokens === undefined || usage.cachedInputTokens === undefined ||
+    usage.cachedInputTokens <= usage.inputTokens,
+  { expected: "cached input tokens no greater than total input tokens" }
+))
 export type Usage = typeof Usage.Type
+
+export const PatchPrefixes = Schema.Struct({ source: Schema.String, destination: Schema.String })
 
 // ── guide.json ────────────────────────────────────────────────────────────────
 
@@ -94,7 +101,7 @@ export const Issue = Schema.Struct({
   /** Exact path as it appears in the patch. */
   file: Schema.String,
   /** Line in the file; `side` says which version of it. Absent means the whole file. */
-  line: Schema.optionalKey(Schema.Number),
+  line: Schema.optionalKey(Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))),
   /** Default `new`: the line number counts in the changed file. */
   side: Schema.optionalKey(Schema.Literals(["new", "old"])),
   summary: Schema.String,
