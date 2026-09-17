@@ -13,13 +13,13 @@ import {
 describe("external navigation and egress URL policy", () => {
   it("accepts HTTPS navigation but rejects active, credentialed, insecure, and bidi-obscured URLs", () => {
     const accepted = Schema.decodeUnknownResult(ExternalNavigationUrl)(
-      "https://jira.example/browse/RPS-6307?q=1#activity"
+      "https://jira.example/browse/PROJ-6307?q=1#activity"
     )
     assert.isTrue(Result.isSuccess(accepted))
     const rejected = [
       "javascript:alert(1)",
       "data:text/html,active-content",
-      "http://jira.example/browse/RPS-6307",
+      "http://jira.example/browse/PROJ-6307",
       "https://user:secret@jira.example/",
       "https://jira.example/\u202eevil"
     ]

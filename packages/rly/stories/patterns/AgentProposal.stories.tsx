@@ -18,7 +18,7 @@ const proposal = {
   context: "Release v2.4.0 · Copper Finch · PR-184 · six Jira items",
   evidence: [
     { id: "commit", label: "CodeCommit revision", reference: "8fa21c71af41ed69947f9b9f8c7cd4a8d614a760" },
-    { id: "approval", label: "Jira approval", reference: "RPS-6307 / approval-119" }
+    { id: "approval", label: "Jira approval", reference: "PROJ-6307 / approval-119" }
   ],
   expectedRevision: "8fa21c71af41ed69947f9b9f8c7cd4a8d614a760",
   impact: "Deploy one immutable artifact to production-eu-west-1; customer traffic may change.",

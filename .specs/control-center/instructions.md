@@ -93,7 +93,7 @@ As an agent, I need a typed, scoped release context and governed plugin actions 
 - Working local provider package locations/names: `packages/cdx` / `@knpkv/cdx` for Codex and `packages/cld` / `@knpkv/cld` for Claude. Each SHALL independently provide an Effect AI-compatible server-side layer and SHALL NOT depend on Control Center or rly.
 - Add indexed Astro/Starlight documentation-site pages for Control Center, rly, cdx, and cld with installation, exports, examples, safety/capability notes, and cross-links from the package index; READMEs alone are insufficient.
 - Language/runtime: strict TypeScript, React web client, Effect-based application server and services, Vite client build, and Vitest tests.
-- Follow repository Effect guardrails, Ockto TypeScript guidelines, package export rules, and existing workspace conventions.
+- Follow repository Effect guardrails, the repository TypeScript guidelines, package export rules, and existing workspace conventions.
 - Use named exports and define both `main` and `exports` in every new package manifest.
 - Use Effect Platform services for server I/O, time, HTTP, configuration, filesystem, and process access.
 - Decode untrusted HTTP, plugin, configuration, and persisted data at boundaries before assigning domain types.

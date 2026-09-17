@@ -20,7 +20,7 @@ const proposal = {
   context: "Release v2.4.0 · Copper Finch",
   evidence: [
     { id: "commit", label: "CodeCommit revision", reference: "8fa21c7" },
-    { id: "approval", label: "Jira approval", reference: "RPS-6307 / approval-119" }
+    { id: "approval", label: "Jira approval", reference: "PROJ-6307 / approval-119" }
   ],
   expectedRevision: "8fa21c7",
   impact: "Deploy one immutable artifact to production-eu-west-1.",

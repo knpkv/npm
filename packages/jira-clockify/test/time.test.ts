@@ -1,11 +1,15 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
   formatClock,
+  formatDuration,
   formatElapsed,
   isFullIsoTimestamp,
+  isoWeekPeriod,
+  localDay,
   parseDuration,
   parseStartTime,
-  resolveCorrectedEnd
+  resolveCorrectedEnd,
+  startOfIsoWeek
 } from "../src/utils/time.js"
 
 describe("parseDuration", () => {
@@ -26,11 +30,28 @@ describe("parseDuration", () => {
     expect(parseDuration("  15m ")).toBe(900)
   })
 
+  // Whatever formatDuration writes has to read back, or a form pre-filled with a credited amount
+  // rejects its own contents. These three are exactly its output shapes.
+  it("parses what formatDuration prints", () => {
+    expect(parseDuration(formatDuration(3396))).toBe(3396)
+    expect(parseDuration(formatDuration(45))).toBe(45)
+    expect(parseDuration(formatDuration(5400))).toBe(5400)
+  })
+
+  it("parses spaced parts and a seconds component", () => {
+    expect(parseDuration("1h 30m")).toBe(5400)
+    expect(parseDuration("56m 36s")).toBe(3396)
+    expect(parseDuration("30s")).toBe(30)
+    expect(parseDuration("1h 0m 5s")).toBe(3605)
+  })
+
   it("rejects empty or malformed input", () => {
     expect(parseDuration("")).toBeNull()
     expect(parseDuration("abc")).toBeNull()
     expect(parseDuration("1h30")).toBeNull()
-    expect(parseDuration("30s")).toBeNull()
+    // Units out of order stay malformed: a unit that already passed cannot come round again.
+    expect(parseDuration("30s 5m")).toBeNull()
+    expect(parseDuration("m")).toBeNull()
   })
 })
 
@@ -180,5 +201,53 @@ describe("resolveCorrectedEnd", () => {
     expect(resolveCorrectedEnd({ start, input: "   ", now }).ok).toBe(false)
     expect(resolveCorrectedEnd({ start, input: "later", now }).ok).toBe(false)
     expect(resolveCorrectedEnd({ start, input: "25:00", now }).ok).toBe(false)
+  })
+})
+
+describe("startOfIsoWeek", () => {
+  // Constructed from local components, so these hold in any timezone.
+  const monday = new Date(2025, 5, 16, 14, 30)
+  const sunday = new Date(2025, 5, 22, 23, 59)
+
+  it("returns the day itself for a Monday, at local midnight", () => {
+    const start = startOfIsoWeek(monday)
+    expect(localDay(start)).toBe(localDay(monday))
+    expect(start.getHours()).toBe(0)
+    expect(start.getMinutes()).toBe(0)
+    expect(start.getSeconds()).toBe(0)
+    expect(start.getMilliseconds()).toBe(0)
+  })
+
+  it("reaches back to Monday from a Sunday, not forward", () => {
+    // Sunday is the last day of its ISO week, which a Sunday-first weekday index gets wrong by six.
+    expect(localDay(startOfIsoWeek(sunday))).toBe(localDay(monday))
+  })
+
+  it("puts every day of one week on the same Monday", () => {
+    const mondays = [...new Array(7).keys()].map((offset) =>
+      localDay(startOfIsoWeek(new Date(2025, 5, 16 + offset, 9, 0)))
+    )
+    expect(new Set(mondays).size).toBe(1)
+  })
+})
+
+describe("isoWeekPeriod", () => {
+  it("spans Monday to the following Monday, half-open", () => {
+    const period = isoWeekPeriod(new Date(2025, 5, 18, 11, 0))
+    expect(localDay(period.from)).toBe("2025-06-16")
+    expect(localDay(period.to)).toBe("2025-06-23")
+    expect(period.to.getHours()).toBe(0)
+  })
+
+  it("lands on a local midnight across a daylight-saving change", () => {
+    // Both European and American transitions, so whichever the test host observes is covered. A
+    // week containing one is 167 or 169 hours long, which is what clock arithmetic gets wrong.
+    for (const date of [new Date(2025, 2, 27, 12, 0), new Date(2025, 9, 29, 12, 0)]) {
+      const period = isoWeekPeriod(date)
+      expect(period.from.getHours()).toBe(0)
+      expect(period.to.getHours()).toBe(0)
+      expect(period.from.getDay()).toBe(1)
+      expect(period.to.getDay()).toBe(1)
+    }
   })
 })

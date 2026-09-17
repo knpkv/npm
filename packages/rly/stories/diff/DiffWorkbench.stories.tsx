@@ -59,7 +59,7 @@ const codeItems = [
   },
   {
     after: {
-      contents: 'export const evidence = ["PR-184", "RPS-6307"]\n',
+      contents: 'export const evidence = ["PR-184", "PROJ-6307"]\n',
       name: "src/audit/payment-evidence.ts"
     },
     before: {

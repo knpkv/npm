@@ -5,17 +5,22 @@ import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
-import type * as Schema from "effect/Schema"
+import * as Schema from "effect/Schema"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
-import { ConfigService } from "../src/services/ConfigService.js"
+import { ConfigService, defaultJcfConfig } from "../src/services/ConfigService.js"
 import { StateWriter } from "../src/services/StateWriter.js"
 import type { JiraTicket } from "../src/services/TicketService.js"
 import { layer as timerLayer, TimerError, TimerService } from "../src/services/TimerService.js"
+
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -49,12 +54,10 @@ const resetCaptures = () => {
   stoppedTimers = []
 }
 
-const paramsRecord = <UnparsedInput>(value: UnparsedInput): Record<string, Schema.Json> => {
-  if (!Predicate.isObject(value)) {
-    throw new Error("Expected captured params to be a record")
-  }
-  return value
-}
+/** Captured request params, decoded into the JSON record the assertions read. */
+const decodeParams = Schema.decodeUnknownSync(Schema.Record(Schema.String, Schema.Json))
+
+const paramsRecord = <UnparsedInput>(value: UnparsedInput): Record<string, Schema.Json> => decodeParams(value)
 
 const makeTimeEntry = (id: string, description: string, startedAt: Date, projectId?: string): TimeEntry => ({
   id,
@@ -123,12 +126,9 @@ const MockClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
 
 const MockConfigLayer = Layer.succeed(ConfigService, {
   get: Effect.succeed({
+    ...defaultJcfConfig,
     defaultJql: "",
-    refreshInterval: 30,
     projectMap: {},
-    workspaceId: null,
-    defaultProjectId: null,
-    defaultProjectName: null,
     defaultBillable: true
   }),
   set: () => Effect.void,

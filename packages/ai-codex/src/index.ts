@@ -5,4 +5,4 @@
  */
 
 export { type CodexEventStreamOptions, streamEvents } from "./events.js"
-export { type CodexModelOptions, model } from "./model.js"
+export { type CodexActivity, type CodexModelOptions, model } from "./model.js"

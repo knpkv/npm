@@ -4,6 +4,57 @@
  * @module
  */
 
+/**
+ * Local calendar day (`YYYY-MM-DD`) of an instant — matches how a person reads their
+ * timesheet, and the single definition every day bucket in jcf is keyed by.
+ */
+export function localDay(date: Date): string {
+  const y = date.getFullYear()
+  const m = String(date.getMonth() + 1).padStart(2, "0")
+  const d = String(date.getDate()).padStart(2, "0")
+  return `${y}-${m}-${d}`
+}
+
+/**
+ * Local midnight following `atMs`, as epoch milliseconds — how every day-by-day walk in jcf
+ * advances. Built from local calendar fields rather than by adding 24 hours, so it lands on
+ * midnight across a daylight-saving change too.
+ */
+export function nextLocalMidnight(atMs: number): number {
+  const at = new Date(atMs)
+  return new Date(at.getFullYear(), at.getMonth(), at.getDate() + 1, 0, 0, 0, 0).getTime()
+}
+
+/**
+ * Local Monday 00:00 of the ISO week containing `date`.
+ *
+ * Built from local calendar fields, never by subtracting days in milliseconds: a week containing a
+ * daylight-saving change is 167 or 169 hours long, so arithmetic on the clock lands an hour either
+ * side of midnight and the week then starts on Sunday night or Monday morning.
+ */
+export function startOfIsoWeek(date: Date): Date {
+  // getDay() is Sunday-first; ISO weeks start on Monday, so Sunday is six days into its week.
+  const daysSinceMonday = (date.getDay() + 6) % 7
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate() - daysSinceMonday, 0, 0, 0, 0)
+}
+
+/**
+ * The ISO week containing `date` as a half-open local period `[Monday, next Monday)` — the same
+ * shape every jcf period has, so a week is reconciled by exactly the code a day is.
+ */
+export interface WeekPeriod {
+  readonly from: Date
+  readonly to: Date
+}
+
+export function isoWeekPeriod(date: Date): WeekPeriod {
+  const from = startOfIsoWeek(date)
+  let to = from.getTime()
+  // Seven local midnights rather than seven times 24 hours, for the reason startOfIsoWeek gives.
+  for (let day = 0; day < 7; day++) to = nextLocalMidnight(to)
+  return { from, to: new Date(to) }
+}
+
 /** Format a `Date` as local `HH:MM` — the canonical clock format for prompts and confirmations. */
 export function formatClock(date: Date): string {
   return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`
@@ -28,16 +79,23 @@ export function formatDuration(seconds: number): string {
 }
 
 /**
- * Parse a duration string like `1h30m`, `2h`, `45m`, or `90m` into seconds.
+ * Parse a duration string like `1h30m`, `2h`, `45m`, `90m`, or `56m 36s` into seconds.
  * Returns `null` when the input is empty or malformed (unlike the loose regex
  * that previously lived in the `log` command, which silently matched garbage).
+ *
+ * Spaces between the parts, and a trailing seconds component, are accepted because
+ * {@link formatDuration} *writes* both: a form pre-filled with `56m 36s` that its own parser then
+ * rejects is a row nobody can accept. Parse what we print.
  */
 export function parseDuration(input: string): number | null {
-  const match = input.trim().match(/^(?:(\d+)h)?(?:(\d+)m)?$/)
-  if (!match || (!match[1] && !match[2])) return null
+  const match = input.trim().match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/)
+  if (match === null) return null
+  const parts = [match[1] ?? "", match[2] ?? "", match[3] ?? ""]
+  if (parts.every((part) => part === "")) return null
   const hours = parseInt(match[1] ?? "0", 10)
   const minutes = parseInt(match[2] ?? "0", 10)
-  return hours * 3600 + minutes * 60
+  const seconds = parseInt(match[3] ?? "0", 10)
+  return hours * 3600 + minutes * 60 + seconds
 }
 
 /** Full ISO-8601 timestamp: `YYYY-MM-DDTHH:MM[:SS[.sss]][Z|±HH:MM]`. */
@@ -64,7 +122,7 @@ export function isFullIsoTimestamp(input: string): boolean {
 export function parseStartTime(input: string, now: Date = new Date()): Date | null {
   const trimmed = input.trim()
   const hm = trimmed.match(/^(\d{1,2}):(\d{2})$/)
-  if (hm) {
+  if (hm !== null) {
     const hours = parseInt(hm[1]!, 10)
     const minutes = parseInt(hm[2]!, 10)
     if (hours > 23 || minutes > 59) return null
@@ -123,21 +181,21 @@ export function resolveCorrectedEnd(params: {
   readonly now: Date
 }): CorrectedEnd {
   const trimmed = params.input.trim()
-  if (!trimmed) {
+  if (trimmed === "") {
     return { ok: false, error: "Enter an end time as HH:MM (today) or a full ISO timestamp." }
   }
 
   let end: Date
   if (HH_MM.test(trimmed)) {
     const parsed = parseStartTime(trimmed, params.now)
-    if (!parsed) return { ok: false, error: "Invalid time. Use HH:MM (24-hour), e.g. 17:30." }
+    if (parsed === null) return { ok: false, error: "Invalid time. Use HH:MM (24-hour), e.g. 17:30." }
     // Bare HH:MM lands on today by default; if that is still in the future the
     // user means the same clock time yesterday (they forgot overnight).
     if (parsed.getTime() > params.now.getTime()) parsed.setDate(parsed.getDate() - 1)
     end = parsed
   } else if (isFullIsoTimestamp(trimmed)) {
     const parsed = parseStartTime(trimmed, params.now)
-    if (!parsed) return { ok: false, error: "Invalid ISO timestamp." }
+    if (parsed === null) return { ok: false, error: "Invalid ISO timestamp." }
     end = parsed
   } else {
     return { ok: false, error: "Unrecognised time. Use HH:MM (today) or a full ISO timestamp." }

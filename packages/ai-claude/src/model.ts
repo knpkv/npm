@@ -3,6 +3,7 @@ import type { Duration } from "effect"
 import { LanguageModel, Model } from "effect/unstable/ai"
 import type { AiError, Response } from "effect/unstable/ai"
 import { ChildProcessSpawner } from "effect/unstable/process"
+import type { ClaudeActivity } from "./activity.js"
 import { configurationFailure, invalidInput, invalidOutput, unsupportedSchema } from "./errors.js"
 import { renderPrompt } from "./prompt.js"
 import type { ClaudeResult } from "./protocol.js"
@@ -16,6 +17,15 @@ const JsonString = Schema.fromJsonString(Schema.Json)
 
 const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
 
+/**
+ * The reviewed environment handed to the Claude CLI. Deliberately an allowlist: the child gets
+ * what it needs to find its own configuration and credentials, and nothing else.
+ *
+ * `USER` is load-bearing on macOS. Credentials live in the login Keychain, whose items are scoped
+ * to the account name, so without `USER` the CLI reports "Not logged in · Please run /login" and
+ * every call fails — even though the user is signed in. It carries no secret; it is the account
+ * name the process already runs as.
+ */
 const childEnvironment = Config.all({
   anthropicApiKey: optionalEnvironmentValue("ANTHROPIC_API_KEY"),
   anthropicAuthToken: optionalEnvironmentValue("ANTHROPIC_AUTH_TOKEN"),
@@ -23,6 +33,7 @@ const childEnvironment = Config.all({
   claudeConfigDirectory: optionalEnvironmentValue("CLAUDE_CONFIG_DIR"),
   home: optionalEnvironmentValue("HOME"),
   path: optionalEnvironmentValue("PATH"),
+  user: optionalEnvironmentValue("USER"),
   userProfile: optionalEnvironmentValue("USERPROFILE"),
   xdgConfigHome: optionalEnvironmentValue("XDG_CONFIG_HOME")
 }).pipe(
@@ -35,6 +46,7 @@ const childEnvironment = Config.all({
       { CLAUDE_CONFIG_DIR: configured.claudeConfigDirectory.value }),
     ...((Option.isSome(configured.home)) && { HOME: configured.home.value }),
     ...((Option.isSome(configured.path)) && { PATH: configured.path.value }),
+    ...((Option.isSome(configured.user)) && { USER: configured.user.value }),
     ...((Option.isSome(configured.userProfile)) && { USERPROFILE: configured.userProfile.value }),
     ...((Option.isSome(configured.xdgConfigHome)) && { XDG_CONFIG_HOME: configured.xdgConfigHome.value })
   }))
@@ -44,11 +56,22 @@ const childEnvironment = Config.all({
 export interface ClaudeModelOptions {
   /** Working directory exposed to Claude. */
   readonly cwd: string
+  /** Receives live visible output and process status. Backpressure and cancellation follow the call. */
+  readonly onActivity?: ((activity: ClaudeActivity) => Effect.Effect<void>) | undefined
   /** Claude executable name or absolute path. Defaults to `claude`. */
   readonly executable?: string
   /** Claude model identifier. Defaults to the CLI-configured model. */
-  readonly model?: string
-  /** Workspace access granted to Claude. Defaults to `read-only`; `prompt-only` disables all tools. */
+  readonly model?: string | undefined
+  /** Optional CLI effort override. Omission preserves the configured default. */
+  readonly effort?: "low" | "medium" | "high" | "xhigh" | "max" | undefined
+  /**
+   * Workspace access granted to Claude. Defaults to `read-only`.
+   *
+   * `prompt-only` withholds every tool. Use it for self-contained prompts: given file tools, the CLI
+   * will often go exploring before answering, which costs turns and wall clock for nothing. Measured
+   * on a classification prompt that needed no files at all — 42s over 6 turns with `Read,Glob,Grep`
+   * against 15s over 2 turns with no tools.
+   */
   readonly access?: "prompt-only" | "read-only" | "workspace-write"
   /** Maximum duration of one CLI invocation. Defaults to two minutes. */
   readonly timeout?: Duration.Input
@@ -80,6 +103,9 @@ const encodeJson = <UnparsedInput>(value: UnparsedInput, method: string): Effect
   Schema.encodeUnknownEffect(JsonString)(value).pipe(
     Effect.mapError((cause) => unsupportedSchema(cause, method))
   )
+
+/** What a text response passes for the schema argument: nothing. */
+const noSchemaArgument: string | undefined = undefined
 
 interface JsonSchemaObject {
   readonly [key: string]: Schema.Json
@@ -135,11 +161,18 @@ const schemaArgument = (
   options: LanguageModel.ProviderOptions,
   method: string
 ): Effect.Effect<string | undefined, AiError.AiError> => {
-  if (options.responseFormat.type === "text") return Effect.map(Effect.succeed(true), () => undefined)
+  // Named rather than a bare `undefined`: this is "no `--json-schema` argument at all", which is a
+  // different outcome from an empty one, and `Effect.void` cannot carry it in a `string | undefined`.
+  if (options.responseFormat.type === "text") return Effect.succeed(noSchemaArgument)
   const responseSchema = options.responseFormat.schema
   return Effect.try({
     try: () => {
       const document = Schema.toJsonSchemaDocument(responseSchema)
+      // No `$schema`: the Claude CLI validates `--json-schema` against its own registered
+      // meta-schemas, and it has only draft-07. Declaring 2020-12 makes it reject the argument
+      // outright ("no schema with key or ref ..."), which fails *every* structured-output call.
+      // Omitting the dialect lets the CLI apply its default, which accepts the shapes Effect
+      // Schema emits.
       return flattenJsonSchemaAllOf(
         Schema.decodeUnknownSync(Schema.Json)({
           $defs: document.definitions,
@@ -154,6 +187,8 @@ const schemaArgument = (
 }
 
 interface NormalizedOptions {
+  readonly effort: ClaudeModelOptions["effort"]
+  readonly onActivity: ClaudeModelOptions["onActivity"]
   readonly access: "prompt-only" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
@@ -169,6 +204,8 @@ const normalizeOptions = Effect.fn("ClaudeCliLanguageModel.normalizeOptions")(fu
   method: string
 ): Effect.fn.Return<NormalizedOptions, AiError.AiError> {
   const normalized: NormalizedOptions = {
+    effort: options.effort,
+    onActivity: options.onActivity,
     access: options.access ?? "read-only",
     cwd: options.cwd,
     environment: yield* childEnvironment.pipe(
@@ -207,6 +244,7 @@ const makeService = Effect.fn("ClaudeCliLanguageModel.make")(function*(options: 
       const normalized = yield* normalizeOptions(options, "generateText")
       const result = yield* runClaude({ ...normalized, jsonSchema, prompt }, "generateText", spawner)
       const text = yield* resultText(result, "generateText")
+      if (options.onActivity !== undefined) yield* options.onActivity({ kind: "response", text })
       const parts: Array<Response.PartEncoded> = [
         { type: "text", text },
         { type: "finish", reason: "stop", response: undefined, usage: usageFrom(result.usage) }
@@ -220,6 +258,7 @@ const makeService = Effect.fn("ClaudeCliLanguageModel.make")(function*(options: 
         const normalized = yield* normalizeOptions(options, "streamText")
         const result = yield* runClaude({ ...normalized, jsonSchema, prompt }, "streamText", spawner)
         const text = yield* resultText(result, "streamText")
+        if (options.onActivity !== undefined) yield* options.onActivity({ kind: "response", text })
         const parts: Array<Response.StreamPartEncoded> = [
           { type: "text-start", id: STREAM_TEXT_ID },
           { type: "text-delta", id: STREAM_TEXT_ID, delta: text },

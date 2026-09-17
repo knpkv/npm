@@ -14,7 +14,13 @@ import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import { resolveStopBillable, resolveStopProject } from "../src/cli/timer/stop.js"
 import { ClockifyAuth } from "../src/services/ClockifyAuth.js"
-import { ConfigService } from "../src/services/ConfigService.js"
+import { ConfigService, defaultJcfConfig } from "../src/services/ConfigService.js"
+
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
 
 const WORKSPACE_ID = "ws-1"
 
@@ -54,12 +60,9 @@ const MockClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
 
 const MockConfigLayer = Layer.succeed(ConfigService, {
   get: Effect.succeed({
+    ...defaultJcfConfig,
     defaultJql: "",
-    refreshInterval: 30,
     projectMap: {},
-    workspaceId: null,
-    defaultProjectId: null,
-    defaultProjectName: null,
     defaultBillable: true
   }),
   set: (patch) =>
