@@ -1,5 +1,5 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
-import { describe, expect, it } from "@effect/vitest"
+import { expect, layer } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
@@ -99,7 +99,7 @@ const loadContracts = Effect.gen(function*() {
     vitest: yield* fileSystem.readFileString(vitestPath),
     workflow
   }
-}).pipe(Effect.provide(NodeServices.layer))
+})
 
 const stepsAppearInOrder = (
   workflow: string,
@@ -130,7 +130,7 @@ const grantsOidcDuringBuild = (job: string): boolean =>
     job.includes("- name: Build Control Center and workspace dependencies")
   )
 
-describe("Control Center live integration workflow", () => {
+layer(NodeServices.layer)("Control Center live integration workflow", (it) => {
   it.effect("keeps the live suite outside ordinary tests and behind its explicit command", () =>
     Effect.gen(function*() {
       const contracts = yield* loadContracts
@@ -216,7 +216,7 @@ describe("Control Center live integration workflow", () => {
       )
       expect(workflow).toContain("persist-credentials: false")
       expect(workflow).toContain(
-        "aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c"
+        "aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c"
       )
       expect(workflow).toContain(
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"

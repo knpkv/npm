@@ -19,9 +19,9 @@
     "clean": "rimraf dist .astro"
   },
   "dependencies": {
-    "@astrojs/markdown-remark": "7.2.2",
+    "@astrojs/markdown-remark": "7.2.4",
     "@astrojs/starlight": "^0.41.7",
-    "astro": "7.2.1"
+    "astro": "7.2.8"
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.10",

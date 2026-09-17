@@ -24,6 +24,7 @@ import { makeRefresh, type RefreshDeps } from "./refresh.js"
 import { makeRefreshSinglePR, type RefreshSinglePRCoordinates } from "./refreshSinglePR.js"
 import { makeSetAllAccounts } from "./setAllAccounts.js"
 import { makeToggleAccount } from "./toggleAccount.js"
+import { currentEnabledProfiles, enabledProfiles, retainEnabledAccountRows } from "./visibility.js"
 
 export type { SearchResult } from "../CacheService/repos/PullRequestRepo/index.js"
 export { CachedPRToPullRequest, decodeCachedPR, PullRequestToUpsertInput } from "./internal.js"
@@ -55,14 +56,31 @@ const makePRService = Effect.gen(function*() {
       Effect.provideService(EventsHub, eventsHub)
     )
 
-  // Load cached PRs to show immediately
-  const cachedPRs = yield* prRepo.findAll().pipe(Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([])))
+  // Load cached PRs to show immediately. The cache keeps rows for accounts the
+  // user switched off, so an unreadable config hides everything until the first
+  // refresh reports the real failure — never the other way round.
+  const seedEnabled = yield* enabledProfiles.pipe(
+    Effect.tapError((cause) => Effect.logWarning("PRService: enabled accounts unreadable at startup", cause)),
+    Effect.catch(() => Effect.succeed<ReadonlySet<string>>(new Set()))
+  )
+  const cachedPRs = retainEnabledAccountRows(
+    yield* prRepo.findAll().pipe(Effect.catch(() => Effect.succeed<Array<CachedPullRequest>>([]))),
+    seedEnabled
+  )
 
   const state = yield* SubscriptionRef.make<AppState>({
     pullRequests: cachedPRs.map((pr) => decodeCachedPR(pr)),
     accounts: [],
     status: "idle"
   })
+
+  /**
+   * Which accounts are switched on, straight from the persisted config, or
+   * `None` when it cannot be read. Queue-shaped surfaces outside this process —
+   * the browser — filter with this rather than with `AppState.accounts`, which
+   * is a profile-detection snapshot and comes back empty on a bad read.
+   */
+  const enabledAccountProfiles: Effect.Effect<Option.Option<ReadonlySet<string>>> = provide(currentEnabledProfiles)
 
   const refreshSem = yield* Semaphore.make(1)
   const refreshEffect: Effect.Effect<void, never, RefreshDeps> = makeRefresh(state)
@@ -73,6 +91,7 @@ const makePRService = Effect.gen(function*() {
 
   return {
     state,
+    enabledAccountProfiles,
     refresh,
     toggleAccount: (profile: AwsProfileName) => provide(toggleAccount(profile)),
     setAllAccounts: (enabled: boolean, profiles?: Array<AwsProfileName>) => provide(setAllAccounts(enabled, profiles)),

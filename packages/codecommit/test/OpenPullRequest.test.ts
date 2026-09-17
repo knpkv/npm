@@ -50,7 +50,7 @@ const pullRequest = (o: {
 }
 
 describe("matchOpenPullRequest", () => {
-  const target = { branch: "feat/RPS-2335-thing", repositoryName: "identity" }
+  const target = { branch: "feat/ENG-2335-thing", repositoryName: "identity" }
 
   it("finds nothing when no PR sources the branch", () => {
     expect(

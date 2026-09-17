@@ -258,6 +258,32 @@ export const needsMyReview = (
   )
 }
 
+/**
+ * Pull requests a queue or list may show.
+ *
+ * A disabled account keeps its cached rows so re-enabling it needs no provider
+ * round trip, so every queue drops them on read. URL-addressable surfaces — the
+ * PR detail route, a notification link, a stats jump — keep resolving against
+ * the whole cache, which is why this is a list filter rather than a filter on
+ * the cache itself.
+ *
+ * `enabledProfiles` must come from the persisted config, never from
+ * `AppState.accounts`: that snapshot is rebuilt from AWS profile detection,
+ * which comes back empty when there is no readable `~/.aws/config` and would
+ * silently un-hide everything. `undefined` says enablement is not known — the
+ * list passes through, because showing one pull request too many beats blanking
+ * the queue — while an empty set says nothing is enabled and hides everything.
+ *
+ * @category Domain
+ */
+export const listedForEnabledAccounts = <A extends { readonly account: { readonly profile: string } }>(
+  pullRequests: ReadonlyArray<A>,
+  enabledProfiles: ReadonlySet<string> | undefined
+): ReadonlyArray<A> =>
+  enabledProfiles === undefined
+    ? pullRequests
+    : pullRequests.filter((pullRequest) => enabledProfiles.has(pullRequest.account.profile))
+
 const consoleDomainForRegion = (region: string): string =>
   region.startsWith("cn-")
     ? "console.amazonaws.cn"

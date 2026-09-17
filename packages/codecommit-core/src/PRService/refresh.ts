@@ -2,8 +2,9 @@
  * @internal
  */
 
-import { Clock, DateTime, Effect, Predicate, Result, SubscriptionRef } from "effect"
+import { Clock, DateTime, Effect, Option, Predicate, Result, SubscriptionRef } from "effect"
 import type { AwsClient } from "../AwsClient/index.js"
+import type { CacheError } from "../CacheService/CacheError.js"
 import { EventsHub } from "../CacheService/EventsHub.js"
 import type { CommentRepo } from "../CacheService/repos/CommentRepo.js"
 import type { NotificationRepo } from "../CacheService/repos/NotificationRepo.js"
@@ -18,6 +19,7 @@ import { enrichComments } from "./refreshEnrich.js"
 import { fetchAndUpsertPRs } from "./refreshFetch.js"
 import { resolveAccounts } from "./refreshResolve.js"
 import { calculateHealthScores } from "./refreshScore.js"
+import { currentEnabledProfiles, retainEnabledAccountRows, staleListMessage } from "./visibility.js"
 
 const idleStatus: AppStatus = "idle"
 const errorStatus: AppStatus = "error"
@@ -34,11 +36,27 @@ const transitionToRefreshError = <UnparsedInput>(state: PRState, error: Unparsed
     error: refreshErrorMessage(error)
   }))
 
-const publishCachedPullRequests = (state: PRState) =>
+/**
+ * Publishes the freshly enriched cache, and reports whether it got there.
+ *
+ * Enablement is re-read here rather than reused from the refresh's opening
+ * snapshot: a toggle during a long refresh saves the config and then queues
+ * behind the refresh semaphore, so the captured set would republish rows the
+ * user has already switched off. When it cannot be read at all, nothing is
+ * published — the last correctly filtered list stands.
+ */
+const publishCachedPullRequests = (
+  state: PRState
+): Effect.Effect<boolean, CacheError, PullRequestRepo | ConfigService> =>
   Effect.gen(function*() {
     const prRepo = yield* PullRequestRepo
-    const pullRequests = (yield* prRepo.findAll()).map((row) => decodeCachedPR(row))
+    const rows = yield* prRepo.findAll()
+    // After the cache read, so a toggle during a slow read still applies.
+    const enabled = yield* currentEnabledProfiles
+    if (Option.isNone(enabled)) return false
+    const pullRequests = retainEnabledAccountRows(rows, enabled.value).map((row) => decodeCachedPR(row))
     yield* SubscriptionRef.update(state, (current) => ({ ...current, pullRequests }))
+    return true
   })
 
 export type RefreshDeps =
@@ -57,13 +75,13 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
     const syncMetadataRepo = yield* SyncMetadataRepo
 
     const resolved = yield* resolveAccounts(state)
-    if (!resolved) return
+    if (resolved === undefined) return
 
     const { accountIdMap, currentUser, enabledAccounts, subscribedRef } = resolved
     const staleNow = yield* Clock.currentTimeMillis
     const staleThreshold = DateTime.toDate(DateTime.makeUnsafe(staleNow)).toISOString().slice(0, 19) + "Z"
 
-    const successfulRefreshScopes = yield* hub.batch(
+    const { published, scopes: successfulRefreshScopes } = yield* hub.batch(
       Effect.gen(function*() {
         const scopes = yield* fetchAndUpsertPRs({
           state,
@@ -78,18 +96,21 @@ export const makeRefresh = Effect.fn("PRService.refresh")(
         yield* calculateHealthScores(state)
         // All enrichment writes land in the cache. Publish that final snapshot
         // during this refresh so newly fetched PRs do not require a second run.
-        yield* publishCachedPullRequests(state)
-        return scopes
+        const published = yield* publishCachedPullRequests(state)
+        return { published, scopes }
       })
     )
 
-    // Set idle
+    // A refresh that could not publish is not a successful one: it keeps neither
+    // the fresh timestamp nor the scope list, and says why, rather than
+    // reporting a list the user is not looking at.
     const now = yield* Clock.currentTimeMillis
     yield* SubscriptionRef.update(state, ({ statusDetail: _, ...s }) => ({
       ...s,
       status: idleStatus,
-      lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)),
-      successfulRefreshScopes
+      ...(published
+        ? { lastUpdated: DateTime.toDate(DateTime.makeUnsafe(now)), successfulRefreshScopes }
+        : { error: staleListMessage })
     }))
 
     // Sync metadata

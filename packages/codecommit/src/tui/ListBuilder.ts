@@ -8,16 +8,16 @@ export type TuiView = "prs" | "settings" | "notifications" | "details"
 /**
  * Extract scope from title. Supports:
  * - Conventional commit: feat(scope): message -> scope
- * - Jira-style ticket: RPS-123: message -> RPS-123
+ * - Jira-style ticket: ENG-123: message -> ENG-123
  */
 export const extractScope = (title: string): string | null => {
   // Conventional commit: feat(scope): message
   const conventional = title.match(/^\w+\(([^)]+)\):/)
-  if (conventional?.[1]) return conventional[1]
+  if (conventional?.[1] !== undefined) return conventional[1]
 
   // Jira-style: ABC-123: message
   const jira = title.match(/^([A-Z]+-\d+):/)
-  if (jira?.[1]) return jira[1]
+  if (jira?.[1] !== undefined) return jira[1]
 
   return null
 }
@@ -58,7 +58,7 @@ export interface QuickFilter {
 }
 
 const applyTextFilter = (prs: ReadonlyArray<Domain.PullRequest>, filterText: string): Array<Domain.PullRequest> => {
-  if (!filterText) return [...prs]
+  if (filterText === "") return [...prs]
   const search = filterText.toLowerCase()
   return prs.filter((pr) =>
     pr.repositoryName.toLowerCase().includes(search) ||
@@ -95,13 +95,13 @@ export const buildListItems = (
       let filteredPRs = group.prs
 
       // Apply quick filter first
-      if (quickFilter && quickFilter.type !== "all" && quickFilter.type !== "hot") {
+      if (quickFilter !== undefined && quickFilter.type !== "all" && quickFilter.type !== "hot") {
         filteredPRs = filteredPRs.filter((pr) => {
           switch (quickFilter.type) {
             case "mine":
               // Filter by current user, optionally by selected scope
               if (pr.author !== quickFilter.currentUser) return false
-              return !quickFilter.value || extractScope(pr.title) === quickFilter.value
+              return quickFilter.value === "" || extractScope(pr.title) === quickFilter.value
             case "account":
               return pr.account.profile === quickFilter.value
             case "author":

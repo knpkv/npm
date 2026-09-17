@@ -3,7 +3,7 @@ import * as Schema from "effect/Schema"
 import { useEffect, useState } from "react"
 import type { WorkflowEvent } from "./control-center-foundation.js"
 
-const namespace = "cc:ockto-demo:workspace-engineering:control-center:v2"
+const namespace = "cc:demo:workspace-engineering:control-center:v2"
 
 export type ReviewState = "not-requested" | "requested" | "reviewed"
 export interface AgentCodeReview {
