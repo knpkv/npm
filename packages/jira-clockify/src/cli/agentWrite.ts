@@ -16,10 +16,13 @@
  * @module
  */
 import * as Effect from "effect/Effect"
-import type { CreditedSpan, SessionProposal } from "../agent/sessions.js"
+import type { SessionProposal } from "../agent/sessions.js"
+import { type PlannedWrite, writeAnchor, type WriteTargets } from "../agent/writePlanning.js"
 import type { ReconcileServiceContract } from "../services/ReconcileService.js"
 import { NOT_LOGGED_IN_HINT } from "../utils/hints.js"
 import { formatDuration } from "../utils/time.js"
+
+export { writeAnchor, type WriteTargets } from "../agent/writePlanning.js"
 
 /** Clip `text` to `width`, marking that something was dropped. */
 export const clip = (text: string, width: number): string =>
@@ -122,40 +125,6 @@ export const entryDescription = (options: {
 }
 
 /**
- * Where a write should say the work began, given what that side already holds.
- *
- * A proposal covers a whole `(Issue Key, day)` bucket, but the amount written is only the gap. Under
- * `jcf watch` that gap arrives block by block: the morning is written when it settles, and the
- * afternoon follows as its own write against the same bucket. Anchoring both at the bucket's first
- * instant would file the afternoon's hours at 09:00 — a second Clockify entry laid directly over the
- * first, and a Jira worklog dated to work that had not started yet.
- *
- * So the anchor skips the blocks that side already accounts for and starts at the first one it does
- * not. Approximate where work ran in parallel, because `seconds` is a *share* of those blocks rather
- * than their wall clock — but the error is then bounded by one block, against a whole day before.
- */
-export const writeAnchor = (
-  spans: ReadonlyArray<CreditedSpan>,
-  alreadyRecordedSeconds: number
-): Date | undefined => {
-  const ordered = [...spans].sort((a, b) => a.startMs - b.startMs)
-  let remaining = alreadyRecordedSeconds
-  for (const span of ordered) {
-    const seconds = (span.endMs - span.startMs) / 1000
-    if (remaining >= seconds) {
-      remaining -= seconds
-      continue
-    }
-    return new Date(span.startMs + remaining * 1000)
-  }
-  // Every block is already spoken for. Reached only when a side is not short, so nothing is written
-  // with this anchor — but the end of the last block is the one instant that cannot overlap what is
-  // already recorded, where the first block is the one instant guaranteed to.
-  const last = ordered[ordered.length - 1]
-  return last === undefined ? undefined : new Date(last.endMs)
-}
-
-/**
  * What one side of a write did.
  *
  * `NothingOwed` is not a failure and not a write: the side already holds the proposal's time, which
@@ -171,19 +140,6 @@ export type SideOutcome =
   | { readonly _tag: "Refused"; readonly message: string }
   /** Jira only: the session expired, so every later Jira write would fail the same way. */
   | { readonly _tag: "NotLoggedIn" }
-
-/**
- * Which systems a write may touch.
- *
- * Both by default, because a gap in one system is usually a gap in both and the point of the tool is
- * that they agree. One side alone is a deliberate choice — someone whose team reads only Jira, or a
- * day already tracked in Clockify by hand — so it is stated per write rather than configured once
- * and forgotten.
- */
-export interface WriteTargets {
-  readonly clockify: boolean
-  readonly jira: boolean
-}
 
 /** Both systems: what a write means unless someone says otherwise. */
 export const bothTargets: WriteTargets = { clockify: true, jira: true }
@@ -241,38 +197,38 @@ const nothingOwed: SideOutcome = { _tag: "NothingOwed" }
 const skipped: SideOutcome = { _tag: "Skipped" }
 
 /**
- * Write one confirmed proposal, sizing each side to its own gap.
+ * Execute concrete per-side amounts and starts without reinterpreting their evidence.
  *
- * `targets` narrows which systems are touched. A side left out is reported as `Skipped` and its gap
+ * The plan's targets narrow which systems are touched. A side left out is reported as `Skipped` and its gap
  * is left exactly as it was — so asking for Jira alone today and both tomorrow writes the Clockify
  * half tomorrow, rather than treating the skipped side as settled.
  */
-export const applyProposal = (
+export const applyPlannedWrite = (
   service: Pick<ReconcileServiceContract, "applyToClockify" | "applyToJira">,
-  proposal: SessionProposal,
-  description: string,
-  targets: WriteTargets = bothTargets
+  plan: PlannedWrite,
+  description: string
 ): Effect.Effect<WriteOutcome, never, never> =>
   Effect.gen(function*() {
+    const { targets } = plan
     if (!targets.clockify && !targets.jira) return { clockify: skipped, jira: skipped }
     // Anchored to real activity rather than left to the service's local-noon fallback, which files a
     // 00:17 session as a lunchtime block — wrong on its face to anyone reading the timesheet later.
     // Per side, because the two can already hold different amounts and so start in different blocks.
     const clockify: SideOutcome = !targets.clockify
       ? skipped
-      : proposal.clockifyDelta > 0
+      : plan.clockify.seconds > 0
       ? yield* service
         .applyToClockify(
-          proposal.ticketKey,
-          proposal.day,
-          proposal.clockifyDelta,
+          plan.ticketKey,
+          plan.day,
+          plan.clockify.seconds,
           description,
-          writeAnchor(proposal.blocks, proposal.clockifySeconds)
+          plan.clockify.startedAt
         )
         .pipe(
           Effect.map((created): SideOutcome =>
             created
-              ? { _tag: "Written", seconds: proposal.clockifyDelta }
+              ? { _tag: "Written", seconds: plan.clockify.seconds }
               : { _tag: "Refused", message: "the entry was not created" }
           ),
           Effect.catch((error) => Effect.succeed<SideOutcome>({ _tag: "Refused", message: error.message }))
@@ -280,19 +236,41 @@ export const applyProposal = (
       : nothingOwed
 
     if (!targets.jira) return { clockify, jira: skipped }
-    if (proposal.jiraDelta <= 0) return { clockify, jira: nothingOwed }
+    if (plan.jira.seconds <= 0) return { clockify, jira: nothingOwed }
 
     const posted = yield* service.applyToJira(
-      proposal.ticketKey,
-      proposal.day,
-      proposal.jiraDelta,
+      plan.ticketKey,
+      plan.day,
+      plan.jira.seconds,
       description,
-      writeAnchor(proposal.blocks, proposal.jiraSeconds)
+      plan.jira.startedAt
     )
     const jira: SideOutcome = posted._tag === "Posted"
-      ? { _tag: "Written", seconds: proposal.jiraDelta }
+      ? { _tag: "Written", seconds: plan.jira.seconds }
       : posted._tag === "NotLoggedIn"
       ? { _tag: "NotLoggedIn" }
       : { _tag: "Refused", message: posted.message }
     return { clockify, jira }
   })
+
+/** Execute CLI/watch proposals with their existing deltas and whole-row anchoring. */
+export const applyProposal = (
+  service: Pick<ReconcileServiceContract, "applyToClockify" | "applyToJira">,
+  proposal: SessionProposal,
+  description: string,
+  targets: WriteTargets = bothTargets
+): Effect.Effect<WriteOutcome> =>
+  applyPlannedWrite(service, {
+    _tag: "Write",
+    ticketKey: proposal.ticketKey,
+    day: proposal.day,
+    targets,
+    clockify: {
+      seconds: proposal.clockifyDelta,
+      startedAt: writeAnchor(proposal.blocks, proposal.clockifySeconds)
+    },
+    jira: {
+      seconds: proposal.jiraDelta,
+      startedAt: writeAnchor(proposal.blocks, proposal.jiraSeconds)
+    }
+  }, description)

@@ -74,3 +74,19 @@ A session with a single recorded event is credited nothing, because one event ca
 Because proposals are `session − (already recorded)`, the feature needs no persisted decision state and
 inherits `reconcile`'s idempotency. The cost is that a proposal declined on purpose reappears on the
 next run.
+
+## Amendment, 9 September 2026: sequential review allocations
+
+The web review exposed a limit of drawing every equal share at its original instant:
+several parallel tickets produced narrow cards that could not be read or selected.
+The approved allocation policy now divides each connected, continuous active stretch
+into sequential blocks, with a fifteen-minute dwell floor by default. When fewer
+blocks fit than there are tickets, the tickets with the strongest credited evidence
+receive the available time, divided evenly between them. Ties use stable ticket order.
+
+Unplaced credit is reserved before allocating known tickets. Idle gaps, wholly
+unplaced stretches, separate work and local midnight remain boundaries. A standalone
+stretch shorter than the floor keeps its actual duration; the floor never invents
+time. The calendar position is an allocation of evidenced presence, not a claim that
+one ticket was worked at precisely those instants. This supersedes the shared-minute
+calendar consequence above while retaining the total-under-wall-clock invariant.

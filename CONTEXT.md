@@ -129,7 +129,7 @@ An Agent Session that no Attribution Signal could credit to an Issue Key, report
 _Avoid_: Ignored session, unmatched session, noise
 
 **Attributed Interval**:
-A span of wall-clock time an Issue Key was actively worked in, whose duration is divided equally between every Issue Key active during it, so that no instant is ever credited twice.
+A portion of evidenced active time credited to an Issue Key, without counting any instant twice. Concurrent work may be allocated into sequential review blocks within a continuous active stretch; those blocks do not claim exact per-ticket activity timestamps.
 _Avoid_: Session span, session duration, overlap
 
 **Idle Cap**:

@@ -1,3 +1,4 @@
+import { scheduleRuns } from "./schedule.js"
 /**
  * Pure core for turning Agent Session evidence into Proposed Worklogs.
  *
@@ -717,7 +718,7 @@ interface BucketDayCredit {
 }
 
 /**
- * Share time between buckets, dividing every overlap equally.
+ * Share time between buckets, scheduling overlapping attributed work into sequential blocks.
  *
  * Where several buckets were active at the same instant, that instant is divided equally between
  * them, so an hour spent on three tickets at once credits twenty minutes to each rather than an
@@ -726,7 +727,8 @@ interface BucketDayCredit {
  * Issue Key that time belongs to.
  *
  * A slice's duration is divided, never duplicated, so the total across every bucket can never
- * exceed the wall clock of the day.
+ * exceed the wall clock of the day. With a positive dwell floor, overlapping attributed runs
+ * are scheduled evenly among the strongest tickets that fit; zero preserves raw shares.
  */
 const shareBetweenBuckets = (
   spansByBucket: ReadonlyMap<string, ReadonlyArray<CreditedSpan>>,
@@ -746,7 +748,11 @@ const shareBetweenBuckets = (
   // Ownership is coalesced first, so the hours and the picture come from the same timeline. Deriving
   // the totals from the runs and the spans from the original windows would put a row's seconds and
   // its blocks at odds — and the blocks are what a person checks the seconds against.
-  const runs = applyDwellFloor(overlapSlices(spansByBucket), options)
+  const originalRuns = applyDwellFloor(overlapSlices(spansByBucket), options)
+  const runs = scheduleRuns(originalRuns, options.dwellSeconds, options.attributed)
+  for (const run of originalRuns) {
+    for (const id of run.bucketIds) add(id, localDay(new Date(run.startMs)), 0, run.endMs - run.startMs)
+  }
   const runSpans = new Map<string, Array<PricedSpan>>()
   for (const run of runs) {
     // Windows are already day-bounded, so a run never straddles two days.
@@ -755,12 +761,12 @@ const shareBetweenBuckets = (
     // Divided, never duplicated: this is the one place an instant becomes seconds, and it is the
     // same number that reaches the row's total and the block a person accepts.
     const creditedMs = duration / run.bucketIds.length
-    for (const bucketId of run.bucketIds) {
-      add(bucketId, day, creditedMs, duration)
+    for (const [index, bucketId] of run.bucketIds.entries()) {
+      add(bucketId, day, creditedMs, 0)
       runSpans.set(bucketId, [...(runSpans.get(bucketId) ?? []), {
         creditedMs,
-        endMs: run.endMs,
-        startMs: run.startMs
+        endMs: options.dwellSeconds > 0 ? run.startMs + creditedMs * (index + 1) : run.endMs,
+        startMs: options.dwellSeconds > 0 ? run.startMs + creditedMs * index : run.startMs
       }])
     }
   }
@@ -782,7 +788,7 @@ const shareBetweenBuckets = (
         activeSeconds: Math.floor(sums.activeMs / 1000),
         // The blocks are the row: the same runs, coalesced for reading, sharing out the same total.
         blocks: wholeSeconds(
-          coalesceBlocks(spansByDay.get(day) ?? [], Math.max(0, options.dwellSeconds) * 1000),
+          coalesceBlocks(spansByDay.get(day) ?? [], 0),
           seconds
         ),
         seconds

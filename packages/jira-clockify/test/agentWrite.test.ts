@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Effect } from "effect"
+import type { SessionProposal } from "../src/agent/sessions.js"
 import {
   applyProposal,
   asProposed,
@@ -95,7 +96,7 @@ describe("written seconds", () => {
 })
 
 describe("applyProposal targets", () => {
-  const proposal = {
+  const proposal: SessionProposal = {
     activeSeconds: 3600,
     clockifyDelta: 3600,
     clockifySeconds: 0,
@@ -105,7 +106,7 @@ describe("applyProposal targets", () => {
     jiraSeconds: 0,
     sessionIds: ["s1"],
     sessionSeconds: 3600,
-    signal: "branch" as const,
+    signal: "branch",
     blocks: [{ endMs: 2, seconds: 3600, startMs: 1 }],
     ticketKey: "PROJ-1"
   }
@@ -113,20 +114,50 @@ describe("applyProposal targets", () => {
   /** Captures what each side was asked to write, so "not asked" is assertable rather than implied. */
   const fakeService = () => {
     const calls: Array<string> = []
+    const starts: Array<Date | undefined> = []
     return {
       calls,
+      starts,
       service: {
-        applyToClockify: (ticketKey: string, _day: string, seconds: number) => {
+        applyToClockify: (
+          ticketKey: string,
+          _day: string,
+          seconds: number,
+          _description?: string,
+          startedAt?: Date
+        ) => {
           calls.push(`clockify ${ticketKey} ${seconds}`)
+          starts.push(startedAt)
           return Effect.succeed(true)
         },
-        applyToJira: (ticketKey: string, _day: string, seconds: number) => {
+        applyToJira: (ticketKey: string, _day: string, seconds: number, _description?: string, startedAt?: Date) => {
           calls.push(`jira ${ticketKey} ${seconds}`)
+          starts.push(startedAt)
           return Effect.succeed<JiraWorklogOutcome>({ _tag: "Posted" })
         }
       }
     }
   }
+
+  // CLI/watch own their deltas; execution retains sub-minute amounts and per-provider offsets.
+  it.effect("preserves CLI/watch deltas and independent whole-row anchors", () =>
+    Effect.gen(function*() {
+      const fake = fakeService()
+      yield* applyProposal(fake.service, {
+        ...proposal,
+        blocks: [
+          { startMs: 0, endMs: 3600000, seconds: 3600 },
+          { startMs: 18000000, endMs: 21600000, seconds: 3600 }
+        ],
+        sessionSeconds: 7200,
+        clockifySeconds: 3600,
+        jiraSeconds: 1800,
+        clockifyDelta: 30,
+        jiraDelta: 900
+      }, "note")
+      expect(fake.calls).toEqual(["clockify PROJ-1 30", "jira PROJ-1 900"])
+      expect(fake.starts).toEqual([new Date(18000000), new Date(1800000)])
+    }))
 
   it.effect("writes both sides by default", () =>
     Effect.gen(function*() {

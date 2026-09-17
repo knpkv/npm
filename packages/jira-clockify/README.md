@@ -260,3 +260,14 @@ Jira OAuth credentials stored via `@knpkv/atlassian-common` in `~/.config/atlass
 ## License
 
 MIT
+
+### Ticket overlap and live matching
+
+With the default 900-second dwell floor, overlapping attributed work is allocated
+in sequential blocks of at least fifteen minutes when the stretch permits it.
+Tickets share the stretch evenly; if fewer slots fit, the strongest credited
+tickets retain them. Mixed stretches reserve unplaced credit before allocating known tickets. Separate
+work, idle gaps, wholly unplaced stretches and midnight stay
+separate. Short standalone work is never inflated. Setting dwell to zero retains
+raw overlap sharing. Proposal blocks and confirmed amounts use the same timeline;
+`activeSeconds` retains the original activity duration.
