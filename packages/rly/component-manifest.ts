@@ -9,6 +9,7 @@ export type EntryId =
   | "patterns"
   | "diff"
   | "diff/bounded"
+  | "diff/patch"
   | "diff/workbench"
 
 /** A JavaScript module entry generated into the published package. */
@@ -99,6 +100,13 @@ export const componentManifest = {
   registryMetadata: COMPONENT_REGISTRY_METADATA,
   entries: [
     {
+      aggregates: [],
+      environment: "universal",
+      id: "diff/patch",
+      source: "src/diff/patch/index.ts",
+      subpath: "./diff/patch"
+    },
+    {
       aggregates: ["tokens", "foundations", "primitives", "patterns"],
       environment: "client",
       id: "root",
@@ -157,6 +165,35 @@ export const componentManifest = {
   ],
   components: [
     // scaffold:components:insert
+    {
+      category: "diff",
+      exports: [
+        { kind: "value", name: "PatchDiffView" },
+        { kind: "value", name: "parsePatch" },
+        { kind: "value", name: "findFile" },
+        { kind: "value", name: "pathsOf" },
+        { kind: "type", name: "PatchDiffViewProps" },
+        { kind: "type", name: "ParseResult" },
+        { kind: "type", name: "PatchPrefixes" },
+        { kind: "type", name: "PatchInvalid" },
+        { kind: "type", name: "Patch" },
+        { kind: "type", name: "FileDiff" },
+        { kind: "type", name: "Hunk" },
+        { kind: "type", name: "DiffLine" }
+      ],
+      name: "PatchDiffView",
+      publicEntry: "diff/patch",
+      registry: false,
+      source: "src/diff/patch/PatchDiffView.tsx",
+      status: "experimental",
+      styles: [],
+      variants: [{ defaultValue: "split", name: "mode", values: ["split", "stacked"] }],
+      visual: {
+        story: "stories/diff/PatchDiffView.stories.tsx",
+        storyId: "diff-patchdiffview--split",
+        tests: ["test/diff/PatchDiffView.test.tsx"]
+      }
+    },
     {
       category: "diff",
       exports: [

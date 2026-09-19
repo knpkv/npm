@@ -1,0 +1,44 @@
+diff --git a/src/release.ts b/src/release.ts
+--- a/src/release.ts
++++ b/src/release.ts
+@@ -1,4 +1,10 @@
+-export async function release(revision: string) {
+-  await ship(revision)
+-  return { _tag: "Released", revision }
++import { verifyApproval } from "./approval"
++
++export async function release(requestedRevision: string, approval: SignedApproval) {
++  const verified = await verifyApproval(approval)
++  if (verified._tag === "Invalid") {
++    return { _tag: "Rejected", reason: "invalid-approval" }
++  }
++  await ship(requestedRevision)
++  return { _tag: "Released", revision: requestedRevision }
+ }
+diff --git a/src/release-route.ts b/src/release-route.ts
+--- a/src/release-route.ts
++++ b/src/release-route.ts
+@@ -12,4 +12,4 @@ POST /releases
+ export async function postRelease(request: ReleaseRequest) {
+-  await release(request.revision)
+-  return Response.json({ ok: true })
++  const result = await release(request.revision, request.approval)
++  return Response.json(result)
+ }
+diff --git a/test/release.test.ts b/test/release.test.ts
+new file mode 100644
+--- /dev/null
++++ b/test/release.test.ts
+@@ -0,0 +1,12 @@
++it("rejects an invalid signature without shipping", async () => {
++  verifyApproval.mockResolvedValue({ _tag: "Invalid" })
++  const result = await release("revision-b", invalidApproval)
++  expect(result._tag).toBe("Rejected")
++  expect(ship).not.toHaveBeenCalled()
++})
++
++it("ships the requested revision after verification", async () => {
++  verifyApproval.mockResolvedValue({ _tag: "Valid", revision: "revision-a" })
++  await release("revision-a", signedApproval)
++  expect(ship).toHaveBeenCalledWith("revision-a")
++})

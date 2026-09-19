@@ -1,0 +1,158 @@
+/**
+ * The markdown a section overview may use: the same subset the guides.show viewer renders
+ * (paragraphs, `###`, `- ` bullets, `> [!NOTE|IMPORTANT|WARNING]` callouts, fenced code, and
+ * inline bold, italic, code and links) plus one addition: a ```mermaid fence becomes a
+ * diagram. Keeping to that subset means the same guide.json still exports through
+ * plannotator unchanged.
+ */
+
+export const escapeHtml = (text: string): string =>
+  text
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\"", "&quot;")
+
+const SAFE_HREF = /^(https?:\/\/|#|\.{0,2}\/|[\w./-]+$)/
+
+/** Escape source text and render inline markup. Disable links inside an existing navigation link. */
+export const renderInline = (raw: string, { links = true }: { readonly links?: boolean } = {}): string => {
+  // Code spans first: nothing inside them is markup.
+  const parts = raw.split(/(`[^`]*`)/)
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) return `<code>${escapeHtml(part.slice(1, -1))}</code>`
+      return escapeHtml(part)
+        .replace(
+          /\[([^\]]+)\]\(([^)\s]+)\)/g,
+          (match, label: string, href: string) =>
+            !links ? label : SAFE_HREF.test(href) ? `<a href="${href}">${label}</a>` : match
+        )
+        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+        .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")
+        .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")
+    })
+    .join("")
+}
+
+const CALLOUT = /^\[!(NOTE|IMPORTANT|WARNING)\]\s*$/
+
+export interface Rendered {
+  readonly html: string
+  /** True when a mermaid fence was rendered, so the page knows to load the library. */
+  readonly mermaid: boolean
+}
+
+export const renderMarkdown = (source: string): Rendered => {
+  const lines = source.replace(/\r\n/g, "\n").split("\n")
+  const out: Array<string> = []
+  let mermaid = false
+  let index = 0
+
+  const paragraph: Array<string> = []
+  const flush = () => {
+    if (paragraph.length > 0) {
+      out.push(`<p>${renderInline(paragraph.join(" "))}</p>`)
+      paragraph.length = 0
+    }
+  }
+
+  while (index < lines.length) {
+    const line = lines[index] ?? ""
+
+    if (line.trim() === "") {
+      flush()
+      index += 1
+      continue
+    }
+
+    const fence = /^```[ \t]*([^`]*)$/.exec(line)
+    if (fence !== null) {
+      flush()
+      const lang = (fence[1] ?? "").trim().split(/\s+/)[0] ?? ""
+      const body: Array<string> = []
+      index += 1
+      while (index < lines.length && !/^```\s*$/.test(lines[index] ?? "")) {
+        body.push(lines[index] ?? "")
+        index += 1
+      }
+      index += 1 // closing fence
+      if (lang === "mermaid") {
+        mermaid = true
+        out.push(`<pre class="mermaid">${escapeHtml(body.join("\n"))}</pre>`)
+      } else {
+        const token = lang.replace(/[^a-zA-Z0-9_-]/g, "-")
+        const cls = token === "" ? "" : ` class="lang-${token}"`
+        out.push(`<pre><code${cls}>${escapeHtml(body.join("\n"))}</code></pre>`)
+      }
+      continue
+    }
+
+    const heading = /^(#{1,6})\s+(.*)$/.exec(line)
+    if (heading !== null) {
+      flush()
+      const level = Math.min(6, (heading[1]?.length ?? 3) + 1) // `###` in a section renders as h4
+      out.push(`<h${level}>${renderInline(heading[2] ?? "")}</h${level}>`)
+      index += 1
+      continue
+    }
+
+    if (/^[-*]\s+/.test(line)) {
+      flush()
+      const items: Array<string> = []
+      while (index < lines.length && /^[-*]\s+/.test(lines[index] ?? "")) {
+        let item = (lines[index] ?? "").replace(/^[-*]\s+/, "")
+        index += 1
+        // Continuation lines indented under the bullet.
+        while (
+          index < lines.length && /^\s{2,}\S/.test(lines[index] ?? "") && !/^\s*[-*]\s+/.test(lines[index] ?? "")
+        ) {
+          item += ` ${(lines[index] ?? "").trim()}`
+          index += 1
+        }
+        items.push(`<li>${renderInline(item)}</li>`)
+      }
+      out.push(`<ul>${items.join("")}</ul>`)
+      continue
+    }
+
+    if (/^\d+\.\s+/.test(line)) {
+      flush()
+      const items: Array<string> = []
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index] ?? "")) {
+        items.push(`<li>${renderInline((lines[index] ?? "").replace(/^\d+\.\s+/, ""))}</li>`)
+        index += 1
+      }
+      out.push(`<ol>${items.join("")}</ol>`)
+      continue
+    }
+
+    if (line.startsWith(">")) {
+      flush()
+      const quoted: Array<string> = []
+      while (index < lines.length && (lines[index] ?? "").startsWith(">")) {
+        quoted.push((lines[index] ?? "").replace(/^>\s?/, ""))
+        index += 1
+      }
+      const kind = CALLOUT.exec(quoted[0] ?? "")
+      if (kind !== null) {
+        const label = kind[1] ?? "NOTE"
+        const body = renderMarkdown(quoted.slice(1).join("\n"))
+        mermaid ||= body.mermaid
+        out.push(
+          `<aside class="callout callout-${label.toLowerCase()}"><span class="callout-label">${label}</span>${body.html}</aside>`
+        )
+      } else {
+        const body = renderMarkdown(quoted.join("\n"))
+        mermaid ||= body.mermaid
+        out.push(`<blockquote>${body.html}</blockquote>`)
+      }
+      continue
+    }
+
+    paragraph.push(line.trim())
+    index += 1
+  }
+  flush()
+  return { html: out.join("\n"), mermaid }
+}

@@ -3,6 +3,7 @@ export const moduleEntrySources = {
   "root": "src/index.ts",
   "diff": "src/diff/index.ts",
   "diff/bounded": "src/diff/bounded/index.ts",
+  "diff/patch": "src/diff/patch/index.ts",
   "diff/workbench": "src/diff/workbench/index.ts",
   "foundations": "src/foundations/index.ts",
   "patterns": "src/patterns/index.ts",

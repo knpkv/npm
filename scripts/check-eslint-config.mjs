@@ -4206,3 +4206,33 @@ await assertRuleDiagnostics({
   filePath: "packages/codecommit-core/src/eslint-child-env-makealias-valid.ts",
   ruleId: "local-rules/require-explicit-child-process-env-inheritance"
 })
+
+// Published UI hook imports need their own RSC boundary; foreign and type-only imports remain valid.
+for (const code of [
+  'import { useState as state } from "react"; export const View = () => state(0)',
+  'import * as React from "react"; export const View = () => React.useState(0)',
+  'import React from "react"; export const View = () => React["useState"](0)',
+  'import { default as React } from "react"; export const View = () => React.useState(0)',
+  'import { useState } from "react"; const x = 1; "use client"; export const View = () => useState(x)'
+])
+  await assertRuleDiagnostics({
+    code,
+    expected: 1,
+    filePath: "packages/review/src/guide/view.tsx",
+    ruleId: "local-rules/require-react-hook-client-boundary"
+  })
+for (const code of [
+  '"use client"; import { useState } from "react"; export const View = () => useState(0)',
+  '"use client"; import { default as React } from "react"; export const View = () => React.useState(0)',
+  'import { default as React } from "other"; export const View = () => React.useState(0)',
+  'import type { useState } from "react"; export type Hook = typeof useState',
+  'import { use } from "react"; export const View = () => use(resource)',
+  'import { useState } from "other"; export const View = () => useState(0)',
+  'import * as React from "react"; const other = { useState: () => 0 }; export const View = (React = other) => React.useState()'
+])
+  await assertRuleDiagnostics({
+    code,
+    expected: 0,
+    filePath: "packages/review/src/guide/view.tsx",
+    ruleId: "local-rules/require-react-hook-client-boundary"
+  })
