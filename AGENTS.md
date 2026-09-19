@@ -191,6 +191,14 @@ For `packages/control-center/README.md`, `packages/control-center/src/api/**`, a
 - **Breaking Classification**: An incompatible exported type or schema change requires at least a `minor` bump, with `major` retained for packages whose stability contract requires it. A `Stream<Uint8Array>` to `Uint8Array` change in an exported service result paired with `patch` is invalid; the same change in an unexported internal result may remain a patch. Private, generated, and vendor packages are excluded, while structurally exposed types still require judgment.
 - **Automated Releases**: The CI/CD pipeline automates the release process. When a version PR is merged, the packages are automatically published to `npm`.
 
+Generated source exposed through a publishable package's `exports` remains a
+public contract. Before merging a spec update, compare those exports and their
+types against the base. Removing a public generated model or changing
+`Schema.Never` to `Schema.Struct` cannot ship as patch; description-only changes
+with unchanged contracts may. The changeset checker's generated-source exclusion
+does not prove compatibility. Review release classification explicitly and use
+major for incompatible changes to stable packages.
+
 ### Agent Management
 
 - **Sync Agent Commands**:

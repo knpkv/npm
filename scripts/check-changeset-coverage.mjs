@@ -10036,12 +10036,22 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
 
   const unrelatedBase = yield* resolveMergeBase(git, "HEAD", undefined, pending).pipe(Effect.flip)
   yield* equal(unrelatedBase.reason.includes("must exactly match"), true)
-  yield* git(["branch", "-m", "main", "released"])
+  yield* git(["branch", "-m", "main", "release/x"])
   const noExactImplicitBase = yield* resolveMergeBase(git, undefined, undefined, pending).pipe(Effect.flip)
   yield* equal(noExactImplicitBase.reason.includes("exact pending merge head"), true)
   const missingBase = yield* resolveMergeBase(git, "missing", undefined, pending).pipe(Effect.flip)
   yield* equal(missingBase.reason.includes("Could not resolve"), true)
-  yield* git(["branch", "-m", "released", "main"])
+  // Non-main release baselines require an explicit choice, preserving coverage
+  // for the feature's own changes while excluding already-released changes.
+  const releaseBase = yield* resolveMergeBase(git, "release/x", undefined, pending)
+  yield* equal(releaseBase, released)
+  yield* write("packages/upstream/src/index.ts", "export const value = 2\n")
+  const featureChangeset = yield* fileSystem.readFileString(path.join(root, ".changeset/feature.md"))
+  yield* fileSystem.remove(path.join(root, ".changeset/feature.md"))
+  yield* equal(yield* missingCoverage(releaseBase), ["@fixture/feature"])
+  yield* write(".changeset/feature.md", featureChangeset)
+  yield* equal(yield* missingCoverage(releaseBase), [])
+  yield* git(["branch", "-m", "release/x", "main"])
   const mergeHeadPath = yield* git(["rev-parse", "--path-format=absolute", "--git-path", "MERGE_HEAD"])
   for (const invalid of ["", "not-a-commit\n", `${released}\n${initial}\n`, `${"0".repeat(40)}\n`]) {
     yield* fileSystem.writeFileString(mergeHeadPath, invalid)
