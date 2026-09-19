@@ -22,6 +22,9 @@ real paths such as `a/file.txt` and `b/file.txt` otherwise resemble default
 prefixes. Other custom producers must pass `prefixes: { source, destination }`
 with their exact `--src-prefix` and `--dst-prefix` values. Copies retain their original source
 but only their destination is a changed-file identity. CRLF patch records are accepted.
+Duplicate current paths, contradictory status headers, incomplete text records and
+mixed binary/text bodies are rejected. Empty-file additions and deletions, mode changes,
+and pure renames or copies remain valid Git change evidence.
 
 Printing includes both change intent and review verdict, regardless of the selected
 tab. Screen reading retains one visible panel and keyboard tab navigation.
@@ -45,7 +48,8 @@ The reader uses Rly primitives and patch diffs, with a chapter index, bounded
 prose width, source-side findings, split/unified layouts, code wrapping, and
 light/dark/system themes. Markdown accepts paragraphs, headings, lists, links,
 callouts, fenced code, and Mermaid. Fence language names may contain punctuation
-and be followed by metadata. Raw HTML stays escaped.
+and be followed by metadata. Raw HTML stays escaped. A failed Mermaid block displays
+its own error without preventing adjacent diagrams from rendering.
 Finding summaries and checklist notes render inline code, emphasis, and links.
 The finding index keeps its own source-line link; links within its label become
 plain labels so anchors never nest. Prose uses softer Rly reading colors; code
@@ -53,7 +57,8 @@ spans have subtle backgrounds while fenced examples remain separate blocks.
 
 `guide` retains the Plannotator shape: `title`, `intent`, `sections` containing
 `title`, Markdown `overview`, and `diffs` containing `file` and `summary`;
-`unplacedFiles`; and `review.gitRef` with optional `review.base`. Optional
+`unplacedFiles`; and `review.gitRef` with optional `review.base`. The header shows the
+head and any supplied comparison base. Optional
 `source.pr` contains `url`, `number`, and `title`; optional `generator` contains
 `engine` and `model`. Findings contain `checklist` entries with `item`,
 `verdict` (`Yes`, `No`, `N/A`), and optional `note`; plus `issues` with unique

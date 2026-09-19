@@ -50,6 +50,18 @@ const findings: Findings = {
 }
 
 describe("guide", () => {
+  it("shows the supplied comparison base and keeps head-only reviews without a placeholder", () => {
+    const render = (review: Guide["review"]) =>
+      renderToStaticMarkup(<GuidePage guide={{ ...guide, review }} patch={patch} findings={findings} />)
+    const comparison = render({ base: "main", gitRef: "feature" })
+    expect(comparison).toContain("Base: ")
+    expect(comparison).toContain(">main</code>")
+    expect(comparison).toContain("Head: ")
+    expect(comparison).toContain(">feature</code>")
+    const headOnly = render({ gitRef: "feature" })
+    expect(headOnly).toContain(">feature</code>")
+    expect(headOnly).not.toContain("Base: ")
+  })
   it("retains the source and destination of copies and renames", () => {
     for (const status of ["copy", "rename"]) {
       const moved = parsed(

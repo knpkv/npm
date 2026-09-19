@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
+import mermaid from "mermaid"
 import { expect, it } from "vitest"
+import { makeDiagramRenderer } from "../src/guide/diagram-renderer.js"
 import { makeMermaidDrawer } from "../src/guide/mermaid-drawer.js"
 
 it.each(["none", "block"])("measures initial and replacement diagrams with tab display %s", async (display) => {
@@ -32,5 +34,50 @@ it.each(["none", "block"])("measures initial and replacement diagrams with tab d
     expect(new Set(ids).size).toBe(2)
   } finally {
     panel.remove()
+  }
+})
+
+/** Real Mermaid failures must clean their body containers; valid sibling SVGs use the existing renderer seam. */
+it.each(["invalid-first", "valid-first"])("keeps %s errors inline without orphan Mermaid SVGs", async (order) => {
+  const root = document.createElement("div")
+  const invalid = "deliberately invalid Mermaid syntax"
+  const sources = order === "invalid-first"
+    ? [invalid, "valid", "valid", invalid]
+    : ["valid", invalid, invalid, "valid"]
+  const nodes = sources.map((source) => {
+    const node = document.createElement("pre")
+    node.className = "mermaid"
+    node.textContent = source
+    root.append(node)
+    return node
+  })
+  document.body.append(root)
+  try {
+    // Happy DOM sanitizes Mermaid's completed SVG to empty; the visible browser covers real successful rendering.
+    const draw = makeMermaidDrawer({
+      initialize: mermaid.initialize,
+      render: async (id, source, container) =>
+        source === "valid"
+          ? { svg: "<svg viewBox=\"0 0 300 100\"></svg>", diagramType: "synthetic" }
+          : mermaid.render(id, source, container)
+    })
+    const render = makeDiagramRenderer(root, { matches: false }, draw, { matches: false })
+    await render()
+    expect(root.querySelectorAll("[role=\"alert\"]")).toHaveLength(2)
+    for (const [index, source] of sources.entries()) {
+      const node = nodes[index]
+      if (source === "valid") {
+        expect(node?.querySelector("svg")).not.toBeNull()
+        expect(node?.dataset.diagramTheme).toBe("neutral")
+      } else {
+        expect(node?.querySelector("[role=\"alert\"]")?.textContent).toBe(
+          `Diagram rendering failed: UnknownDiagramError: No diagram type detected matching given configuration for text: ${invalid}`
+        )
+      }
+    }
+    expect(document.body.querySelectorAll("svg[aria-roledescription=\"error\"]")).toHaveLength(0)
+    expect([...document.body.children]).toEqual([root])
+  } finally {
+    root.remove()
   }
 })

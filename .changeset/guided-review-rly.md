@@ -16,3 +16,5 @@ Preserve recorded cost precision and copied source paths, recognize punctuated c
 Require file markers for text hunks, document explicit empty prefixes for ambiguous no-prefix paths, and print both guide and review panels through opt-in tab content retention.
 Retain completed diagrams during print media transitions instead of clearing them for an asynchronous system-theme redraw.
 Measure diagrams outside hidden tabs so theme changes preserve their printable dimensions.
+
+Reject duplicate or contradictory patch records, isolate diagram failures, and display a supplied comparison base.

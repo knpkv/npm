@@ -1,0 +1,53 @@
+[
+  {
+    "name": "binary-summary",
+    "diff": "diff --git a/added.txt b/added.txt\nnew file mode 100644\nindex 0000000..d5f7fc3\n--- /dev/null\n+++ b/added.txt\n@@ -0,0 +1 @@\n+added\ndiff --git a/binary.dat b/binary.dat\nindex 85371f2..d2b944c 100644\nBinary files a/binary.dat and b/binary.dat differ\ndiff --git a/copy.txt b/copied.txt\nsimilarity index 100%\ncopy from copy.txt\ncopy to copied.txt\ndiff --git a/deleted.txt b/deleted.txt\ndeleted file mode 100644\nindex 71779d2..0000000\n--- a/deleted.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted\ndiff --git a/edited-copy.txt b/edited-copied.txt\nsimilarity index 74%\ncopy from edited-copy.txt\ncopy to edited-copied.txt\nindex 53f1df8..01f9fe1 100644\n--- a/edited-copy.txt\n+++ b/edited-copied.txt\n@@ -1,4 +1,4 @@\n line one\n line two\n line three\n-line four\n+changed\ndiff --git a/empty-deleted.txt b/empty-added.txt\nsimilarity index 100%\nrename from empty-deleted.txt\nrename to empty-added.txt\ndiff --git a/mode.txt b/mode.txt\nold mode 100644\nnew mode 100755\ndiff --git a/rename.txt b/rename.txt\nindex 825e9cc..4804f74 100644\n--- a/rename.txt\n+++ b/rename.txt\n@@ -1 +1 @@\n-rename original\n+replacement\ndiff --git a/rename.txt b/renamed.txt\nsimilarity index 100%\ncopy from rename.txt\ncopy to renamed.txt\n",
+    "expected": [
+      ["added.txt", "added", false],
+      ["binary.dat", "modified", true],
+      ["copied.txt", "copied", false],
+      ["deleted.txt", "deleted", false],
+      ["edited-copied.txt", "copied", false],
+      ["empty-added.txt", "renamed", false],
+      ["mode.txt", "modified", false],
+      ["rename.txt", "modified", false],
+      ["renamed.txt", "copied", false]
+    ]
+  },
+  {
+    "name": "binary-payload",
+    "diff": "diff --git a/added.txt b/added.txt\nnew file mode 100644\nindex 0000000..d5f7fc3\n--- /dev/null\n+++ b/added.txt\n@@ -0,0 +1 @@\n+added\ndiff --git a/binary.dat b/binary.dat\nindex 85371f28269e95b7ebc156df3ceb24b3285f3ead..d2b944c56a472bbd91c2dfb8b5334cf24ac3064f 100644\nGIT binary patch\nliteral 10\nRcmc~xEoVr|%u6h)1OOB)1JD2f\n\nliteral 10\nRcmd1LNnuFJ%u6h)1OOA=1H}LU\n\ndiff --git a/copy.txt b/copied.txt\nsimilarity index 100%\ncopy from copy.txt\ncopy to copied.txt\ndiff --git a/deleted.txt b/deleted.txt\ndeleted file mode 100644\nindex 71779d2..0000000\n--- a/deleted.txt\n+++ /dev/null\n@@ -1 +0,0 @@\n-deleted\ndiff --git a/edited-copy.txt b/edited-copied.txt\nsimilarity index 74%\ncopy from edited-copy.txt\ncopy to edited-copied.txt\nindex 53f1df8..01f9fe1 100644\n--- a/edited-copy.txt\n+++ b/edited-copied.txt\n@@ -1,4 +1,4 @@\n line one\n line two\n line three\n-line four\n+changed\ndiff --git a/empty-deleted.txt b/empty-added.txt\nsimilarity index 100%\nrename from empty-deleted.txt\nrename to empty-added.txt\ndiff --git a/mode.txt b/mode.txt\nold mode 100644\nnew mode 100755\ndiff --git a/rename.txt b/rename.txt\nindex 825e9cc..4804f74 100644\n--- a/rename.txt\n+++ b/rename.txt\n@@ -1 +1 @@\n-rename original\n+replacement\ndiff --git a/rename.txt b/renamed.txt\nsimilarity index 100%\ncopy from rename.txt\ncopy to renamed.txt\n",
+    "expected": [
+      ["added.txt", "added", false],
+      ["binary.dat", "modified", true],
+      ["copied.txt", "copied", false],
+      ["deleted.txt", "deleted", false],
+      ["edited-copied.txt", "copied", false],
+      ["empty-added.txt", "renamed", false],
+      ["mode.txt", "modified", false],
+      ["rename.txt", "modified", false],
+      ["renamed.txt", "copied", false]
+    ]
+  },
+  {
+    "name": "empty-add-delete",
+    "diff": "diff --git a/empty-added.txt b/empty-added.txt\nnew file mode 100644\nindex 0000000..e69de29\ndiff --git a/empty-deleted.txt b/empty-deleted.txt\ndeleted file mode 100644\nindex e69de29..0000000\n",
+    "expected": [
+      ["empty-added.txt", "added", false],
+      ["empty-deleted.txt", "deleted", false]
+    ]
+  },
+  {
+    "name": "pure-rename",
+    "diff": "diff --git a/original.txt b/renamed.txt\nsimilarity index 100%\nrename from original.txt\nrename to renamed.txt\n",
+    "expected": [["renamed.txt", "renamed", false]]
+  },
+  {
+    "name": "rename-with-replacement-below-detection-threshold",
+    "diff": "diff --git a/original.txt b/original.txt\nindex 2fd0152..4804f74 100644\n--- a/original.txt\n+++ b/original.txt\n@@ -1 +1 @@\n-original content\n+replacement\ndiff --git a/renamed.txt b/renamed.txt\nnew file mode 100644\nindex 0000000..2fd0152\n--- /dev/null\n+++ b/renamed.txt\n@@ -0,0 +1 @@\n+original content\n",
+    "expected": [
+      ["original.txt", "modified", false],
+      ["renamed.txt", "added", false]
+    ]
+  }
+]

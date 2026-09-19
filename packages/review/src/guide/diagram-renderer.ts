@@ -35,14 +35,18 @@ export const makeDiagramRenderer = (
     renderedTheme = theme
     rendering = true
     try {
-      await draw(pending, theme)
-      for (const node of pending) node.dataset.diagramTheme = theme
-    } catch (cause) {
-      const message = document.createElement("p")
-      message.setAttribute("role", "alert")
-      message.textContent = `Diagram rendering failed: ${String(cause)}`
-      root.prepend(message)
-      for (const node of pending) node.dataset.processed = "true"
+      for (const node of pending) {
+        try {
+          await draw([node], theme)
+          node.dataset.diagramTheme = theme
+        } catch (cause) {
+          const message = document.createElement("span")
+          message.setAttribute("role", "alert")
+          message.textContent = `Diagram rendering failed: ${String(cause)}`
+          node.replaceChildren(message)
+          node.dataset.processed = "true"
+        }
+      }
     } finally {
       rendering = false
       if (renderPending) {

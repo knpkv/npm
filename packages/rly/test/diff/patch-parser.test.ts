@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "vitest"
 import { findFile, parsePatch, type Patch } from "../../src/diff/patch/parse.js"
+import gitPatches from "./git-generated-patches.json" with { type: "json" }
 
 /** Unwrap a patch these tests expect to be well formed. */
 const parsed = (text: string): Patch => {
@@ -280,3 +281,49 @@ test("paired markers identify different files in no-index patches", () => {
   assert.equal(patch.files[0]?.oldPath, "first.txt")
   assert.equal(patch.files[0]?.newPath, "second.txt")
 })
+
+/** Git-generated fixtures cover -M/-C/--find-copies-harder, --binary, --no-renames and -B -M replacement output. */
+test.each(gitPatches)("retains Git-generated $name changes", ({ diff, expected }) => {
+  const files = parsed(diff).files
+  assert.deepEqual(files.map(({ binary, path, status }) => [path, status, binary]), expected)
+})
+
+test("rejects duplicate canonical current paths, including differently quoted identities", () => {
+  assert.equal(parsePatch(modified + modified)._tag, "PatchInvalid")
+  const equivalent = modified.replaceAll("a/src/a.ts", "\"a/src/a.ts\"").replaceAll("b/src/a.ts", "\"b/src/a.ts\"")
+  assert.equal(parsePatch(modified + equivalent)._tag, "PatchInvalid")
+})
+
+test.each([
+  ["added with ordinary source", "new file mode 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"],
+  [
+    "deleted with ordinary destination",
+    "deleted file mode 100644\n--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+  ],
+  ["added then deleted", "new file mode 100644\ndeleted file mode 100644\n"],
+  ["deleted then added", "deleted file mode 100644\nnew file mode 100644\n"],
+  ["conflicting repeated mode", "new file mode 100644\nnew file mode 100755\n"],
+  ["unpaired old mode", "old mode 100644\n"],
+  ["unpaired new mode", "new mode 100755\n"],
+  ["conflicting old mode", "old mode 100644\nold mode 100755\nnew mode 100755\n"],
+  ["added with mode transition", "new file mode 100644\nold mode 100644\nnew mode 100755\n"],
+  ["both sides null", "--- /dev/null\n+++ /dev/null\n@@ -0,0 +0,0 @@\n"],
+  ["added with old-side lines", "new file mode 100644\n--- /dev/null\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"],
+  ["deleted with new-side lines", "deleted file mode 100644\n--- a/a.txt\n+++ /dev/null\n@@ -1 +1 @@\n-old\n+new\n"],
+  ["header only", ""],
+  ["index only", "index 1111111..2222222 100644\n"],
+  ["markers without hunks", "--- a/a.txt\n+++ b/a.txt\n"],
+  ["mode plus truncated text", "old mode 100644\nnew mode 100755\n--- a/a.txt\n+++ b/a.txt\n"]
+])("rejects contradictory or truncated %s records", (_name, body) => {
+  assert.equal(parsePatch(`diff --git a/a.txt b/a.txt\n${body}`)._tag, "PatchInvalid")
+})
+
+test.each(["Binary files a/a.txt and b/a.txt differ", "GIT binary patch"])(
+  "rejects text mixed with %s in either order",
+  (binary) => {
+    const text = "--- a/a.txt\n+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"
+    for (const body of [binary + "\n" + text, text + binary + "\n", binary + "\n--- a/a.txt\n+++ b/a.txt\n"]) {
+      assert.equal(parsePatch(`diff --git a/a.txt b/a.txt\n${body}`)._tag, "PatchInvalid")
+    }
+  }
+)

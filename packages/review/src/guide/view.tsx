@@ -221,7 +221,14 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           <div className="review-inline review-muted">
             <span>{patch.files.length} files</span>
             <span>{guide.sections.length} chapters</span>
-            <code>{guide.review.gitRef}</code>
+            {guide.review.base === undefined ? null : (
+              <span>
+                Base: <code>{guide.review.base}</code>
+              </span>
+            )}
+            <span>
+              Head: <code>{guide.review.gitRef}</code>
+            </span>
             {guide.source?.pr === undefined ? null : (
               <a href={guide.source.pr.url} title={guide.source.pr.title}>
                 {guide.source.pr.number === undefined

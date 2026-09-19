@@ -12,6 +12,7 @@ import { ConfigService } from "../ConfigService/index.js"
 import type { AccountConfig } from "../ConfigService/internal.js"
 import { type AppStatus, AwsRegion } from "../Domain.js"
 import { decodeCachedPR, type PRState } from "./internal.js"
+import { enabledProfilesOf, retainEnabledAccountRows } from "./visibility.js"
 
 export const subscriptionKey = (
   awsAccountId: string,
@@ -102,18 +103,24 @@ export const resolveAccounts = (state: PRState) =>
     const subscriptionRepo = yield* SubscriptionRepo
 
     // --- Phase 1: Load cached PRs immediately ---
-    const cachedPRs = yield* prRepo.findAll().pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
+    // Config first: the cache keeps rows for accounts the user switched off, and
+    // they must not reappear in the published snapshot.
+    const config = yield* configService.load.pipe(Effect.orDie)
+    const enabled = enabledProfilesOf(config.accounts)
+    const cachedPRs = retainEnabledAccountRows(
+      yield* prRepo.findAll().pipe(Effect.catchIf(() => true, () => Effect.succeed([]))),
+      enabled
+    )
 
     yield* SubscriptionRef.update(state, ({ error: _, statusDetail: __, ...s }) => ({
       ...s,
-      pullRequests: cachedPRs.map(decodeCachedPR),
+      pullRequests: cachedPRs.map((row) => decodeCachedPR(row)),
       refreshGeneration: (s.refreshGeneration ?? 0) + 1,
       status: loadingStatus,
       successfulRefreshScopes: [],
       ...((cachedPRs.length > 0) && { statusDetail: "loading from cache..." })
     }))
 
-    const config = yield* configService.load.pipe(Effect.orDie)
     const detected = yield* configService.detectProfiles.pipe(Effect.catchIf(() => true, () => Effect.succeed([])))
 
     const accountsState = detected.map((d) => {

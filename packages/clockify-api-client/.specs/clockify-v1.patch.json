@@ -1,11 +1,24 @@
 [
   {
+    "op": "remove",
+    "path": "/components/schemas/FeaturePlan/oneOf"
+  },
+  {
     "op": "replace",
     "path": "/components/schemas/AccountStatus",
     "value": {
       "type": "string",
       "description": "Represents account status enum.",
       "enum": ["ACTIVE", "PENDING_EMAIL_VERIFICATION", "DELETED", "NOT_REGISTERED", "LIMITED", "LIMITED_DELETED"]
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/SchedulingAssignmentCreators",
+    "value": {
+      "type": "string",
+      "description": "Represents the entity who can create assignments.",
+      "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "ANYONE", "EVERYONE"]
     }
   },
   {

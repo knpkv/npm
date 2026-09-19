@@ -2,8 +2,8 @@
  * A `git diff` parsed into files, hunks and numbered lines.
  *
  * Only what the renderer and the anchoring need: which files changed and how, and for
- * every line in a hunk its number on the old and the new side. Anything git adds that we do
- * not render (index lines, modes, similarity) is skipped, never rejected.
+ * every line in a hunk its number on the old and the new side. Status, mode and body
+ * evidence must agree; index and similarity values are not used for line anchoring.
  */
 
 /** A malformed patch cannot supply trustworthy source line positions. */
@@ -139,6 +139,7 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
   const converted = records.some((line) => line.startsWith(HEADER) && line.endsWith("\r"))
   const lines = converted ? records.map((line) => line.endsWith("\r") ? line.slice(0, -1) : line) : records
   const files: Array<FileDiff> = []
+  const currentPaths = new Set<string>()
   let index = 0
 
   while (index < lines.length) {
@@ -153,6 +154,9 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     let movedSource: string | undefined
     let movedDestination: string | undefined
     let status: FileStatus = "modified"
+    let fileMode: string | undefined
+    let oldMode: string | undefined
+    let newMode: string | undefined
     let binary = false
     const hunks: Array<Hunk> = []
     const oldCoordinates = new Set<number>()
@@ -161,9 +165,24 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
 
     while (index < lines.length && !(lines[index] ?? "").startsWith(HEADER)) {
       const line = lines[index] ?? ""
-      if (line.startsWith("new file mode")) status = "added"
-      else if (line.startsWith("deleted file mode")) status = "deleted"
-      else if (/^(rename|copy) (from|to) /.test(line)) {
+      if (/^(new file|deleted file|old|new) mode/.test(line)) {
+        const mode = /^(new file|deleted file|old|new) mode ([0-7]{6})$/.exec(line)
+        if (mode === null) return invalid("Invalid file mode header")
+        const value = mode[2]
+        if (mode[1] === "old") {
+          if (oldMode !== undefined && oldMode !== value) return invalid("Conflicting old modes")
+          oldMode = value
+        } else if (mode[1] === "new") {
+          if (newMode !== undefined && newMode !== value) return invalid("Conflicting new modes")
+          newMode = value
+        } else {
+          const kind = mode[1] === "new file" ? "added" : "deleted"
+          if (status !== "modified" && status !== kind) return invalid("Conflicting file status headers")
+          if (fileMode !== undefined && fileMode !== value) return invalid("Conflicting file modes")
+          status = kind
+          fileMode = value
+        }
+      } else if (/^(rename|copy) (from|to) /.test(line)) {
         const kind = line.startsWith("copy ") ? "copied" : "renamed"
         if (status !== "modified" && status !== kind) return invalid("Conflicting file status headers")
         status = kind
@@ -208,15 +227,41 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     if ((movedSource === undefined) !== (movedDestination === undefined)) {
       return invalid("Unpaired rename or copy headers")
     }
+    if ((oldMode === undefined) !== (newMode === undefined)) return invalid("Unpaired mode transition")
+    if (fileMode !== undefined && oldMode !== undefined) return invalid("Conflicting file mode headers")
+    if (binary && source !== undefined) return invalid("Mixed binary and text bodies")
+    if (source !== undefined && hunks.length === 0) return invalid("Text markers require hunks")
+    if (source === "/dev/null" && destination === "/dev/null") return invalid("Both file sides are absent")
+    if (
+      hunks.some((hunk) =>
+        hunk.lines.some((line) =>
+          (source === "/dev/null" && line.oldNo !== undefined) ||
+          (destination === "/dev/null" && line.newNo !== undefined)
+        )
+      )
+    ) return invalid("Absent file side contains text lines")
+    if (source !== undefined) {
+      const markerStatus = source === "/dev/null" ? "added" : destination === "/dev/null" ? "deleted" : "modified"
+      if (
+        (status === "added" || status === "deleted" || markerStatus !== "modified") &&
+        status !== "modified" && status !== markerStatus
+      ) return invalid("File status disagrees with file markers")
+      if (markerStatus !== "modified") status = markerStatus
+    }
+    if (
+      hunks.length === 0 && !binary && movedSource === undefined && fileMode === undefined &&
+      (oldMode === undefined || oldMode === newMode)
+    ) return invalid("File block has no change evidence")
     const moved = movedSource === undefined || movedDestination === undefined
       ? undefined
       : { source: movedSource, destination: movedDestination }
     const paths = headerPaths(header, source, destination, prefixes, moved)
     if (paths._tag === "PatchInvalid") return paths
-    if (source === "/dev/null") status = "added"
-    if (destination === "/dev/null") status = "deleted"
+    const path = status === "deleted" ? paths.oldPath : paths.newPath
+    if (currentPaths.has(path)) return invalid("Duplicate canonical current file path")
+    currentPaths.add(path)
     files.push({
-      path: status === "deleted" ? paths.oldPath : paths.newPath,
+      path,
       oldPath: paths.oldPath,
       newPath: paths.newPath,
       status,

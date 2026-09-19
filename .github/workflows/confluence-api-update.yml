@@ -61,7 +61,7 @@ jobs:
           mkdir -p .changeset
           cat > .changeset/confluence-api-spec-update.md <<'CHANGESET'
           ---
-          "@knpkv/confluence-api-client": patch
+          "@knpkv/confluence-api-client": minor
           "@knpkv/confluence-to-markdown": patch
           ---
 
@@ -71,6 +71,10 @@ jobs:
       - name: Create pull request
         if: steps.check.outputs.updated == 'true'
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        # The husky pre-commit gate needs the effect-upstream remote and a full
+        # local toolchain; this workflow already ran the focused build and tests.
+        env:
+          HUSKY: "0"
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(confluence-api-client): update OpenAPI clients"
@@ -81,6 +85,11 @@ jobs:
             The workflow compared the complete raw specifications, applied the
             committed JSON patches, regenerated both Schema-backed Effect
             clients, and built and tested their confluence-to-markdown consumer.
+
+            Review the published generated exports before merging. The client
+            changeset defaults to minor; use major for removed exports or
+            incompatible schemas in this stable package. Patch is appropriate
+            only when the generated public contract is unchanged.
 
             Review these files closely:
             - `packages/confluence-api-client/.specs/confluence-v1.json`

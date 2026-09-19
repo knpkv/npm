@@ -4,7 +4,7 @@ import type { Mermaid } from "mermaid"
 export const makeMermaidDrawer = (mermaid: Pick<Mermaid, "initialize" | "render">) => {
   let sequence = 0
   return async (nodes: Array<HTMLElement>, theme: "dark" | "neutral"): Promise<void> => {
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme })
+    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", suppressErrorRendering: true, theme })
     for (const node of nodes) {
       const { bindFunctions, svg } = await mermaid.render(`review-diagram-${++sequence}`, node.textContent)
       node.innerHTML = svg

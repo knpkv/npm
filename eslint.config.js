@@ -218,7 +218,8 @@ export default tseslint.config(
     files: [
       "packages/*/src/**/*.{ts,tsx}",
       "packages/*/test/**/*.{ts,tsx}",
-      "packages/*/scripts/**/*.ts"
+      "packages/*/scripts/**/*.ts",
+      "scripts/**/*.mjs"
     ],
     rules: {
       "local-rules/require-explicit-child-process-env-inheritance": "error"
