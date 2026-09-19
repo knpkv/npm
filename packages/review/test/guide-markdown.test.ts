@@ -1,3 +1,4 @@
+import { Window } from "happy-dom"
 import assert from "node:assert/strict"
 import { test } from "vitest"
 import { renderInline, renderMarkdown } from "../src/guide/markdown.js"
@@ -36,6 +37,50 @@ test("inline navigation keeps code and emphasis but cannot create nested links o
     renderInline("`[not a link](https://example.com)`", { links: false }),
     "<code>[not a link](https://example.com)</code>"
   )
+})
+
+test("link destinations stay literal while labels and surrounding text retain emphasis", () => {
+  assert.equal(renderInline("[x](https://example.com/**foo**)"), "<a href=\"https://example.com/**foo**\">x</a>")
+  assert.equal(
+    renderInline("[*italic*](https://example.com/path)"),
+    "<a href=\"https://example.com/path\"><em>italic</em></a>"
+  )
+  assert.equal(renderInline("[x](&#106;avascript:bad)"), "[x](&amp;#106;avascript:bad)")
+  for (
+    const href of [
+      "https://example.com/**foo**",
+      "https://example.com/*foo*",
+      "https://example.com/_foo_",
+      "/**foo**",
+      "#**foo**"
+    ]
+  ) {
+    assert.equal(renderInline(`[**bold**](${href})`), `<a href="${href}"><strong>bold</strong></a>`)
+  }
+  assert.equal(
+    renderInline("**[plain](https://example.com/path)**"),
+    "<strong><a href=\"https://example.com/path\">plain</a></strong>"
+  )
+  assert.equal(
+    renderInline("[<label>](https://example.com/?q=**a**&x=\"quoted\")"),
+    "<a href=\"https://example.com/?q=**a**&amp;x=&quot;quoted&quot;\">&lt;label&gt;</a>"
+  )
+  assert.equal(renderInline("[**bold**](https://example.com/**foo**)", { links: false }), "<strong>bold</strong>")
+  assert.equal(renderInline("`[x](https://example.com/**foo**)`"), "<code>[x](https://example.com/**foo**)</code>")
+})
+
+test("unsafe destinations stay non-navigable with formatted labels", () => {
+  const window = new Window()
+  try {
+    for (const href of ["javascript:bad", "data:text/html,bad", "&#106;avascript:bad"]) {
+      window.document.body.innerHTML = renderInline(`[**safe label**](${href})`)
+      assert.equal(window.document.querySelectorAll("a").length, 0)
+      assert.equal(window.document.querySelector("strong")?.textContent, "safe label")
+      assert.equal(window.document.body.textContent, `[safe label](${href})`)
+    }
+  } finally {
+    window.close()
+  }
 })
 
 test("blocks: paragraphs, headings, bullets, callouts, fences", () => {

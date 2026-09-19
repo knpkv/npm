@@ -1504,9 +1504,13 @@ export const findNonPortableBuildScripts = (manifestPath, scripts) =>
 
 export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependencies, devDependencies) => {
   if (manifestPath === "package.json" || manifestPath === "packages/review/package.json") {
-    return hasExecutableLifecycleCommand(scripts?.pretest ?? "", reviewGraphBuild)
-      ? []
-      : [`${manifestPath}: scripts.pretest must build the review dependency graph before artifact-importing tests`]
+    const lifecycles = manifestPath === "package.json" ? ["pretest", "precoverage"] : ["pretest"]
+    return lifecycles
+      .filter((lifecycle) => !hasExecutableLifecycleCommand(scripts?.[lifecycle] ?? "", reviewGraphBuild))
+      .map(
+        (lifecycle) =>
+          `${manifestPath}: scripts.${lifecycle} must build the review dependency graph before artifact-importing tests`
+      )
   }
   if (manifestPath === "packages/codecommit/package.json") {
     return codeCommitLifecycleRequirements
@@ -1528,20 +1532,28 @@ export const findCodeCommitWebLifecycleGaps = (manifestPath, scripts, dependenci
   return result
 }
 
-// Artifact-importing tests need the same deterministic setup from root and package entry points.
+// Artifact-importing tests need deterministic setup from every test and coverage entry point.
 for (const manifest of ["package.json", "packages/review/package.json"]) {
-  for (const pretest of [
-    undefined,
-    "pnpm --filter @knpkv/browser-pairing build",
-    "echo 'pnpm --filter @knpkv/review... build'"
-  ]) {
-    assert.equal(findCodeCommitWebLifecycleGaps(manifest, { pretest }, {}, {}).length, 1)
-  }
-  for (const pretest of [
-    "pnpm --filter @knpkv/review... build",
-    "pnpm --filter @knpkv/browser-pairing build && pnpm --filter @knpkv/review... build"
-  ]) {
-    assert.deepEqual(findCodeCommitWebLifecycleGaps(manifest, { pretest }, {}, {}), [])
+  for (const lifecycle of manifest === "package.json" ? ["pretest", "precoverage"] : ["pretest"]) {
+    const validScripts = {
+      pretest: "pnpm --filter @knpkv/review... build",
+      precoverage: "pnpm --filter @knpkv/browser-pairing build && pnpm --filter @knpkv/review... build"
+    }
+    for (const command of [
+      undefined,
+      "pnpm --filter @knpkv/browser-pairing build",
+      "echo 'pnpm --filter @knpkv/review... build'"
+    ]) {
+      assert.deepEqual(findCodeCommitWebLifecycleGaps(manifest, { ...validScripts, [lifecycle]: command }, {}, {}), [
+        `${manifest}: scripts.${lifecycle} must build the review dependency graph before artifact-importing tests`
+      ])
+    }
+    for (const command of [
+      "pnpm --filter @knpkv/review... build",
+      "pnpm --filter @knpkv/browser-pairing build && pnpm --filter @knpkv/review... build"
+    ]) {
+      assert.deepEqual(findCodeCommitWebLifecycleGaps(manifest, { ...validScripts, [lifecycle]: command }, {}, {}), [])
+    }
   }
 }
 

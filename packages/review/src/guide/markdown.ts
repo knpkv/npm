@@ -15,23 +15,39 @@ export const escapeHtml = (text: string): string =>
 
 const SAFE_HREF = /^(https?:\/\/|#|\.{0,2}\/|[\w./-]+$)/
 
+/** Render source tokens once; generated tags and link destinations never enter a later markup pass. */
+const renderMarkup = (escaped: string, links: boolean): string =>
+  escaped.replace(
+    /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)|(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g,
+    (
+      match: string,
+      label: string | undefined,
+      href: string | undefined,
+      strong: string | undefined,
+      starPrefix: string | undefined,
+      star: string | undefined,
+      underscorePrefix: string | undefined,
+      underscore: string | undefined
+    ) => {
+      if (label !== undefined && href !== undefined) {
+        const content = renderMarkup(label, false)
+        return !links ? content : SAFE_HREF.test(href) ? `<a href="${href}">${content}</a>` : `[${content}](${href})`
+      }
+      if (strong !== undefined) return `<strong>${renderMarkup(strong, links)}</strong>`
+      if (star !== undefined) return `${starPrefix ?? ""}<em>${renderMarkup(star, links)}</em>`
+      if (underscore !== undefined) return `${underscorePrefix ?? ""}<em>${renderMarkup(underscore, links)}</em>`
+      return match
+    }
+  )
+
 /** Escape source text and render inline markup. Disable links inside an existing navigation link. */
 export const renderInline = (raw: string, { links = true }: { readonly links?: boolean } = {}): string => {
   // Code spans first: nothing inside them is markup.
   const parts = raw.split(/(`[^`]*`)/)
   return parts
-    .map((part, index) => {
-      if (index % 2 === 1) return `<code>${escapeHtml(part.slice(1, -1))}</code>`
-      return escapeHtml(part)
-        .replace(
-          /\[([^\]]+)\]\(([^)\s]+)\)/g,
-          (match, label: string, href: string) =>
-            !links ? label : SAFE_HREF.test(href) ? `<a href="${href}">${label}</a>` : match
-        )
-        .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-        .replace(/(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")
-        .replace(/(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")
-    })
+    .map((part, index) =>
+      index % 2 === 1 ? `<code>${escapeHtml(part.slice(1, -1))}</code>` : renderMarkup(escapeHtml(part), links)
+    )
     .join("")
 }
 
