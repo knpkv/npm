@@ -13,6 +13,15 @@
     }
   },
   {
+    "op": "replace",
+    "path": "/components/schemas/SchedulingAssignmentCreators",
+    "value": {
+      "type": "string",
+      "description": "Represents the entity who can create assignments.",
+      "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "ANYONE", "EVERYONE"]
+    }
+  },
+  {
     "op": "add",
     "path": "/components/schemas/UserDto/properties/activeWorkspace",
     "value": { "type": "string" }
