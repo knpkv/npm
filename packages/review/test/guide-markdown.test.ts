@@ -120,3 +120,38 @@ test("a mermaid fence becomes a diagram and flags the page", () => {
   assert.equal(mermaid, true)
   assert.equal(html, "<pre class=\"mermaid\">sequenceDiagram\n  A-&gt;&gt;B: hi</pre>")
 })
+
+test("balanced and escaped destination parentheses preserve exact URLs", () => {
+  const cases = [
+    ["https://en.wikipedia.org/wiki/Function_(mathematics)", "https://en.wikipedia.org/wiki/Function_(mathematics)"],
+    [String.raw`https://example.com/one\(two\)`, "https://example.com/one(two)"],
+    [String.raw`https://example.com/one\)two`, "https://example.com/one)two"],
+    ["https://example.com/a(b(c(d)))", "https://example.com/a(b(c(d)))"],
+    [String.raw`https://example.com/a\\(b)`, String.raw`https://example.com/a\(b)`],
+    ["https://example.com/**star**(suffix)", "https://example.com/**star**(suffix)"],
+    ["https://example.com/?q=(a)&v=\"b\"", "https://example.com/?q=(a)&amp;v=&quot;b&quot;"],
+    ["https://example.com/plain", "https://example.com/plain"]
+  ]
+  for (const [source, href] of cases) {
+    assert.equal(renderInline(`[**label**](${source}) tail`), `<a href="${href}"><strong>label</strong></a> tail`)
+    assert.equal(renderInline(`[**label**](${source})`, { links: false }), "<strong>label</strong>")
+  }
+  assert.equal(
+    renderInline("**[label](https://example.com/a(b))**"),
+    "<strong><a href=\"https://example.com/a(b)\">label</a></strong>"
+  )
+  assert.equal(
+    renderInline("[one](https://example.com/a(b))[two](https://example.com/c(d))"),
+    "<a href=\"https://example.com/a(b)\">one</a><a href=\"https://example.com/c(d)\">two</a>"
+  )
+  for (
+    const source of [
+      "[label](https://example.com/a(b)",
+      "[label](https://example.com/a b)",
+      "[label](javascript:alert(1))",
+      String.raw`[label](javascript:alert\(1\))`
+    ]
+  ) {
+    assert.equal(renderInline(source).includes("<a "), false, source)
+  }
+})

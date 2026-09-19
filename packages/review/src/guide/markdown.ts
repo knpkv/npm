@@ -15,30 +15,65 @@ export const escapeHtml = (text: string): string =>
 
 const SAFE_HREF = /^(https?:\/\/|#|\.{0,2}\/|[\w./-]+$)/
 
-/** Render source tokens once; generated tags and link destinations never enter a later markup pass. */
-const renderMarkup = (escaped: string, links: boolean): string =>
-  escaped.replace(
-    /\[([^\]]+)\]\(([^)\s]+)\)|\*\*([^*]+)\*\*|(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)|(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g,
-    (
-      match: string,
-      label: string | undefined,
-      href: string | undefined,
-      strong: string | undefined,
-      starPrefix: string | undefined,
-      star: string | undefined,
-      underscorePrefix: string | undefined,
-      underscore: string | undefined
-    ) => {
-      if (label !== undefined && href !== undefined) {
-        const content = renderMarkup(label, false)
-        return !links ? content : SAFE_HREF.test(href) ? `<a href="${href}">${content}</a>` : `[${content}](${href})`
-      }
-      if (strong !== undefined) return `<strong>${renderMarkup(strong, links)}</strong>`
-      if (star !== undefined) return `${starPrefix ?? ""}<em>${renderMarkup(star, links)}</em>`
-      if (underscore !== undefined) return `${underscorePrefix ?? ""}<em>${renderMarkup(underscore, links)}</em>`
-      return match
+/** Read one destination; balanced parentheses and escaped parentheses/backslashes belong to the URL. */
+const readDestination = (
+  source: string,
+  start: number
+): { readonly href: string; readonly next: number } | undefined => {
+  let depth = 0
+  let href = ""
+  for (let index = start; index < source.length; index++) {
+    const character = source[index] ?? ""
+    if (/\s/.test(character)) return undefined
+    const next = source[index + 1]
+    if (character === "\\" && (next === "(" || next === ")" || next === "\\")) {
+      href += next
+      index++
+      continue
     }
-  )
+    if (character === "(") depth++
+    if (character === ")") {
+      if (depth === 0) return href === "" ? undefined : { href, next: index + 1 }
+      depth--
+    }
+    href += character
+  }
+  return undefined
+}
+
+/** Render source tokens once; generated tags and link destinations never enter a later markup pass. */
+const renderMarkup = (escaped: string, links: boolean): string => {
+  const tokens =
+    /\[([^\]]+)\]\(|\*\*([^*]+)\*\*|(^|[\s(])\*([^*\s][^*]*?)\*(?=[\s).,;:!?]|$)|(^|[\s(])_([^_\s][^_]*?)_(?=[\s).,;:!?]|$)/g
+  let html = ""
+  let offset = 0
+  for (let match = tokens.exec(escaped); match !== null; match = tokens.exec(escaped)) {
+    html += escaped.slice(offset, match.index)
+    const [, label, strong, starPrefix, star, underscorePrefix, underscore] = match
+    if (label !== undefined) {
+      const destination = readDestination(escaped, tokens.lastIndex)
+      if (destination === undefined) {
+        html += match[0]
+      } else {
+        const content = renderMarkup(label, false)
+        html += !links
+          ? content
+          : SAFE_HREF.test(destination.href)
+          ? `<a href="${destination.href}">${content}</a>`
+          : `[${content}](${escaped.slice(tokens.lastIndex, destination.next - 1)})`
+        tokens.lastIndex = destination.next
+      }
+    } else if (strong !== undefined) {
+      html += `<strong>${renderMarkup(strong, links)}</strong>`
+    } else if (star !== undefined) {
+      html += `${starPrefix ?? ""}<em>${renderMarkup(star, links)}</em>`
+    } else if (underscore !== undefined) {
+      html += `${underscorePrefix ?? ""}<em>${renderMarkup(underscore, links)}</em>`
+    }
+    offset = tokens.lastIndex
+  }
+  return html + escaped.slice(offset)
+}
 
 /** Escape source text and render inline markup. Disable links inside an existing navigation link. */
 export const renderInline = (raw: string, { links = true }: { readonly links?: boolean } = {}): string => {

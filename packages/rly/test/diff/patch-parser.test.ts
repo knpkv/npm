@@ -469,3 +469,106 @@ test("accepts Git-generated zero-context insertion, deletion and mixed boundarie
   ]
   for (const patch of controls) expect(parsePatch(patch)._tag).toBe("Patch")
 })
+
+test("EOF markers end only their own file sides across records and hunks", () => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
+  for (
+    const [name, hunks, valid] of [
+      ["old-side-context", "@@ -1,2 +1,2 @@\n-old\n\\ No newline at end of file\n+new\n next\n", false],
+      ["new-side-context", "@@ -1,2 +1,2 @@\n-old\n+new\n\\ No newline at end of file\n next\n", false],
+      ["context-then-replacement", "@@ -1,2 +1,2 @@\n same\n\\ No newline at end of file\n-old\n+new\n", false],
+      [
+        "old-side-next-hunk",
+        "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n@@ -3 +3 @@\n-last\n+LAST\n",
+        false
+      ],
+      [
+        "new-side-next-hunk",
+        "@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file\n@@ -3 +3 @@\n-last\n+LAST\n",
+        false
+      ],
+      ["context-next-hunk", "@@ -1 +1 @@\n same\n\\ No newline at end of file\n@@ -3 +3 @@\n-last\n+LAST\n", false],
+      ["old-eof-replacement-additions", "@@ -1 +1,2 @@\n-old\n\\ No newline at end of file\n+new\n+extra\n", true],
+      [
+        "new-eof-replacement-deletions",
+        "@@ -1,2 +1 @@\n+new\n\\ No newline at end of file\n-old\n-extra\n\\ No newline at end of file\n",
+        true
+      ],
+      ["both-eof", "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", true],
+      ["context-final-eof", "@@ -1,2 +1,2 @@\n-old\n+new\n tail\n\\ No newline at end of file\n", true],
+      [
+        "old-eof-next-hunk-only-additions",
+        "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n@@ -1,0 +2 @@\n+extra\n",
+        true
+      ],
+      [
+        "new-eof-next-hunk-only-deletions",
+        "@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file\n@@ -2 +1,0 @@\n-extra\n",
+        true
+      ]
+    ] satisfies ReadonlyArray<readonly [string, string, boolean]>
+  ) {
+    expect.soft(parsePatch(header + hunks)._tag, name).toBe(valid ? "Patch" : "PatchInvalid")
+  }
+})
+
+test("EOF terminality resets at the next file", () => {
+  const patch =
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n"
+    + "diff --git a/b b/b\n--- a/b\n+++ b/b\n@@ -1 +1 @@\n-old\n+new\n"
+  expect(parsePatch(patch)._tag).toBe("Patch")
+})
+
+test("NUL path identities fail closed while tabs UTF8 and literal backslashes remain valid", () => {
+  for (const name of [String.raw`zero\000x`, "zero\u0000x"]) {
+    const quoted = `"${name}"`
+    const left = `"a/${name}"`
+    const right = `"b/${name}"`
+    for (
+      const patch of [
+        `diff --git ${left} ${right}\n--- ${left}\n+++ ${right}\n@@ -1 +1 @@\n-old\n+new\n`,
+        `diff --git ${left} ${right}\nold mode 100644\nnew mode 100755\n`,
+        `diff --git ${left} b/target\nrename from ${quoted}\nrename to target\n`,
+        `diff --git ${left} b/target\ncopy from ${quoted}\ncopy to target\n`,
+        `diff --git ${left} ${right}\nBinary files ${left} and ${right} differ\n`
+      ]
+    ) expect.soft(parsePatch(patch)._tag, patch).toBe("PatchInvalid")
+  }
+  const literal = "zero\u0000x"
+  expect(
+    parsePatch(`diff --git a/${literal} b/${literal}\n--- a/${literal}\n+++ b/${literal}\n@@ -1 +1 @@\n-old\n+new\n`)
+      ._tag
+  ).toBe("PatchInvalid")
+  for (
+    const [encoded, decoded] of [
+      [String.raw`tab\tname`, "tab\tname"],
+      [String.raw`\303\251`, "é"],
+      [String.raw`slash\\000name`, String.raw`slash\000name`]
+    ]
+  ) {
+    const patch = parsed(
+      `diff --git "a/${encoded}" "b/${encoded}"\n--- "a/${encoded}"\n+++ "b/${encoded}"\n@@ -1 +1 @@\n-old\n+new\n`
+    )
+    expect(patch.files[0]?.path).toBe(decoded)
+  }
+})
+
+test("accepts Git-generated EOF transitions and context records", () => {
+  for (
+    const patch of [
+      "diff --git a/left/a b/right/a\nindex 489ce0f..3e75765 100644\n--- a/left/a\n+++ b/right/a\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n",
+      "diff --git a/left/a b/right/a\nindex 3367afd..3e5126c 100644\n--- a/left/a\n+++ b/right/a\n@@ -1 +1 @@\n-old\n+new\n\\ No newline at end of file\n",
+      "diff --git a/left/a b/right/a\nindex 489ce0f..3e5126c 100644\n--- a/left/a\n+++ b/right/a\n@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
+      "diff --git a/left/a b/right/a\nindex 6944e85..03c6d8d 100644\n--- a/left/a\n+++ b/right/a\n@@ -1,2 +1,2 @@\n-old\n+new\n tail\n\\ No newline at end of file\n",
+      "diff --git a/left/a b/right/a\nindex 489ce0f..f5162bb 100644\n--- a/left/a\n+++ b/right/a\n@@ -1 +1,2 @@\n-old\n\\ No newline at end of file\n+new\n+extra\n",
+      "diff --git a/left/a b/right/a\nindex 1b2e365..3e5126c 100644\n--- a/left/a\n+++ b/right/a\n@@ -1,2 +1 @@\n-old\n-extra\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n"
+    ]
+  ) expect(parsePatch(patch)._tag).toBe("Patch")
+})
+
+test("unquoted backslash digits remain a literal path rather than an octal escape", () => {
+  const name = String.raw`zero\000x`
+  const file =
+    parsed(`diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old\n+new\n`).files[0]
+  expect(file?.path).toBe(name)
+})

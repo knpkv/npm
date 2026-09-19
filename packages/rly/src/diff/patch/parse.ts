@@ -67,6 +67,7 @@ export interface PatchPrefixes {
 }
 
 const unquote = (path: string): UnquotedPath => {
+  if (path.includes("\u0000")) return invalid("Git paths cannot contain NUL")
   if (!path.startsWith("\"")) return { _tag: "Path", path }
   if (!path.endsWith("\"")) return invalid("Unclosed quoted path")
   const source = path.slice(1, -1)
@@ -88,7 +89,7 @@ const unquote = (path: string): UnquotedPath => {
     for (const byte of encoder.encode(source.slice(offset, match.index))) bytes.push(byte)
     const code = match[1] ?? ""
     const byte = /^[0-7]{3}$/.test(code) ? parseInt(code, 8) : escapes.get(code)
-    if (byte === undefined || byte > 255) return invalid("Invalid quoted path escape")
+    if (byte === undefined || byte === 0 || byte > 255) return invalid("Invalid quoted path escape")
     bytes.push(byte)
     offset = match.index + match[0].length
   }
@@ -200,6 +201,8 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     const hunks: Array<Hunk> = []
     let oldEnd = 0
     let newEnd = 0
+    let oldEof = false
+    let newEof = false
     const oldCoordinates = new Set<number>()
     const newCoordinates = new Set<number>()
     index += 1
@@ -269,6 +272,13 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
         oldEnd = parsed.oldEnd
         newEnd = parsed.newEnd
         for (const record of parsed.hunk.lines) {
+          if ((oldEof && record.oldNo !== undefined) || (newEof && record.newNo !== undefined)) {
+            return invalid("Patch records follow an EOF marker on the same side")
+          }
+          if (record.noNewline === true) {
+            oldEof ||= record.oldNo !== undefined
+            newEof ||= record.newNo !== undefined
+          }
           if (
             (record.oldNo !== undefined && oldCoordinates.has(record.oldNo)) ||
             (record.newNo !== undefined && newCoordinates.has(record.newNo))

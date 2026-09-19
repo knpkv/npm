@@ -164,6 +164,22 @@ describe("guide", () => {
     expect(html).toContain("Provider usage receipt")
     expect(renderToStaticMarkup(<GuideUsage usage={undefined} />)).toContain("were not recorded")
   })
+  it("retains nonzero sub-millisecond duration evidence", () => {
+    for (const [durationMs, displayed] of [
+      [0, "0 ms"],
+      [0.4, "0.4 ms"],
+      [0.000001, "0.000001 ms"],
+      [Number.MIN_VALUE, "5e-324 ms"],
+      [1, "1 ms"],
+      [999, "999 ms"],
+      [2500, "0m 2s"],
+      [125000, "2m 5s"]
+    ] satisfies ReadonlyArray<readonly [number, string]>) {
+      const usage = Schema.decodeUnknownSync(Usage)({ label: "Duration", scope: "review", source: "timer", durationMs })
+      const html = renderToStaticMarkup(<GuideUsage usage={[usage]} />)
+      expect.soft(html).toContain(`>${displayed}<`)
+    }
+  })
   it("rejects negative, fractional token counters and invalid costs", () => {
     const base = { label: "Review", scope: "review", source: "receipt" }
     for (const extra of [

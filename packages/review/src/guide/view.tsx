@@ -57,7 +57,7 @@ const duration = (value: number | undefined) =>
   value === undefined
     ? "Not recorded"
     : value < 1000
-      ? `${Math.round(value)} ms`
+      ? `${value < 1 ? value : Math.round(value)} ms`
       : `${Math.floor(value / 60000)}m ${Math.floor((value % 60000) / 1000)}s`
 
 /** Each run retains its evidence; printing opens the disclosure temporarily and restores the screen state. */
