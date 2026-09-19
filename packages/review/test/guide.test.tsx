@@ -205,3 +205,15 @@ it("status replaces obsolete fix instructions, while unresolved findings retain 
   expect(render({ ...issue, status: "Resolved" })).not.toContain("Compare both revisions.")
   expect(render({ ...issue, status: "Resolved" })).not.toContain(">Fix<")
 })
+
+it("requires positive JSON-safe issue IDs and meaningful optional status", () => {
+  const issue = { id: 1, severity: "P2", file: "a.ts", summary: "Check evidence" }
+  const decode = Schema.decodeUnknownSync(Issue)
+  for (const id of [NaN, Infinity, -Infinity, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    expect.soft(() => decode({ ...issue, id })).toThrow()
+  }
+  for (const status of ["", " ", "\t\n"]) expect.soft(() => decode({ ...issue, status })).toThrow()
+  expect(decode(issue).id).toBe(1)
+  expect(decode({ ...issue, id: Number.MAX_SAFE_INTEGER }).id).toBe(Number.MAX_SAFE_INTEGER)
+  expect(decode({ ...issue, status: "Resolved" }).status).toBe("Resolved")
+})

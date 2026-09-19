@@ -49,5 +49,15 @@
       ["original.txt", "modified", false],
       ["renamed.txt", "added", false]
     ]
+  },
+  {
+    "name": "oracle-literal",
+    "diff": "diff --git a/blob b/blob\nindex 85371f28269e95b7ebc156df3ceb24b3285f3ead..d2b944c56a472bbd91c2dfb8b5334cf24ac3064f 100644\nGIT binary patch\nliteral 10\nRcmc~xEoVr|%u6h)1OOB)1JD2f\n\nliteral 10\nRcmd1LNnuFJ%u6h)1OOA=1H}LU\n\n",
+    "expected": [["blob", "modified", true]]
+  },
+  {
+    "name": "oracle-delta",
+    "diff": "diff --git a/blob b/blob\nindex e4b0769e8d23e491e1c668a1e304b9178b7d7aeb..406d8ec5a034a093113dce681e4f894649a006ff 100644\nGIT binary patch\ndelta 18\nZcmZoT!PtI+ae)zgaz<iadTPo7BLGEb2M+)M\n\ndelta 14\nVcmZoa!Pszuae>hyM#Dvni~uXy1mpk!\n\n",
+    "expected": [["blob", "modified", true]]
   }
 ]

@@ -1,8 +1,5 @@
 @import "@knpkv/rly/styles.css";
 
-body {
-  margin: 0;
-}
 .review-guide {
   --review-reading-ink: color-mix(in srgb, var(--rly-color-text-1) 60%, var(--rly-color-text-2));
   background: var(--rly-color-surface-2);

@@ -188,9 +188,23 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
         status = kind
         const path = unquote(line.replace(/^(rename|copy) (from|to) /, ""))
         if (path._tag === "PatchInvalid") return path
-        if (/^(rename|copy) from /.test(line)) movedSource = path.path
-        else movedDestination = path.path
-      } else if (line.startsWith("Binary files ") || line.startsWith("GIT binary patch")) binary = true
+        if (/^(rename|copy) from /.test(line)) {
+          if (movedSource !== undefined && movedSource !== path.path) return invalid("Conflicting move source paths")
+          movedSource = path.path
+        } else {
+          if (movedDestination !== undefined && movedDestination !== path.path) {
+            return invalid("Conflicting move destination paths")
+          }
+          movedDestination = path.path
+        }
+      } else if (line.startsWith("GIT binary patch")) {
+        if (line !== "GIT binary patch") return invalid("Invalid binary patch marker")
+        const payload = readBinary(lines, index + 1)
+        if (payload._tag === "PatchInvalid") return payload
+        binary = true
+        index = payload.next
+        continue
+      } else if (line.startsWith("Binary files ")) binary = true
       else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
         const path = unquote(line.slice(4).replace(/\t$/, ""))
         if (path._tag === "PatchInvalid") return path
@@ -273,6 +287,37 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
   return { _tag: "Patch", patch: { files } }
 }
 
+/** Validate Git's literal/delta record framing without inflating or applying binary content. */
+const readBinary = (
+  lines: ReadonlyArray<string>,
+  start: number
+): { readonly _tag: "Binary"; readonly next: number } | PatchInvalid => {
+  let index = start
+  let chunks = 0
+  do {
+    const header = /^(literal|delta) (\d+)$/.exec(lines[index] ?? "")
+    if (header === null || !Number.isSafeInteger(Number(header[2]))) return invalid("Invalid binary chunk header")
+    index += 1
+    const first = index
+    while (index < lines.length && lines[index] !== "") {
+      const line = lines[index] ?? ""
+      const lead = line.charCodeAt(0)
+      const length = lead >= 65 && lead <= 90 ? lead - 64 : lead >= 97 && lead <= 122 ? lead - 70 : 0
+      if (
+        length === 0 || line.length !== 1 + Math.ceil(length / 4) * 5 ||
+        !/^[0-9A-Za-z!#$%&()*+;<=>?@^_`{|}~-]+$/.test(line.slice(1))
+      ) return invalid("Invalid binary chunk data")
+      index += 1
+    }
+    // A final split sentinel is not the blank record that terminates a Git payload.
+    if (index === first || index >= lines.length - 1) return invalid("Incomplete binary chunk")
+    index += 1
+    chunks += 1
+  } while (chunks < 2 && /^(literal|delta)(?:\s|$)/.test(lines[index] ?? ""))
+  if (/^(literal|delta)(?:\s|$)/.test(lines[index] ?? "")) return invalid("Surplus binary chunk")
+  return { _tag: "Binary", next: index }
+}
+
 const readHunk = (
   lines: ReadonlyArray<string>,
   start: number
@@ -283,6 +328,12 @@ const readHunk = (
   const newStart = Number(match[3])
   let oldCount = match[2] === undefined ? 1 : Number(match[2])
   let newCount = match[4] === undefined ? 1 : Number(match[4])
+  if (![oldStart, newStart, oldCount, newCount].every(Number.isSafeInteger)) return invalid("Unsafe hunk integers")
+  if (oldCount === 0 && newCount === 0) return invalid("Empty hunk")
+  if (
+    (oldCount > 0 && !Number.isSafeInteger(oldStart + (oldCount - 1))) ||
+    (newCount > 0 && !Number.isSafeInteger(newStart + (newCount - 1)))
+  ) return invalid("Hunk coordinates overflow")
   let oldNo = oldStart
   let newNo = newStart
   const body: Array<DiffLine> = []

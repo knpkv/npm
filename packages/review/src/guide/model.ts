@@ -96,8 +96,8 @@ export const ChecklistItem = Schema.Struct({
 export type ChecklistItem = typeof ChecklistItem.Type
 
 export const Issue = Schema.Struct({
-  /** The review's own number, so "Issue 2" here is "Issue 2" in the document. */
-  id: Schema.Number,
+  /** The review's positive safe integer, so "Issue 2" survives the JSON export and hydration round trip. */
+  id: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
   severity: Severity,
   /** Exact path as it appears in the patch. */
   file: Schema.String,
@@ -110,7 +110,7 @@ export const Issue = Schema.Struct({
   /** Existing review evidence: trigger, path through the code, and consequence. */
   explanation: Schema.optionalKey(Schema.String),
   /** Set when the author acknowledged or resolved the Issue; shown in place of the fix. */
-  status: Schema.optionalKey(Schema.String)
+  status: Schema.optionalKey(Schema.String.check(Schema.isPattern(/\S/)))
 })
 export type Issue = typeof Issue.Type
 

@@ -192,3 +192,19 @@ it("retains a rendered diagram when diff mode and wrapping change", async () => 
     host.remove()
   }
 })
+
+it("keeps embedded guide styles inside the host document layout", async () => {
+  const page = new Window()
+  try {
+    // Happy DOM does not resolve package CSS imports; this assertion covers the guide-owned rules.
+    const ownedStyles = guideStyles.replace(/^@import[^;]+;/, "")
+    page.document.head.innerHTML = `<style>body { margin: 23px; }</style><style>${ownedStyles}</style>`
+    page.document.body.innerHTML = '<main class="review-guide">Embedded guide</main>'
+    expect(page.getComputedStyle(page.document.body).marginTop).toBe("23px")
+    const guide = page.document.querySelector(".review-guide")
+    if (guide === null) throw new TypeError("Missing guide fixture")
+    expect(page.getComputedStyle(guide).minHeight).toBe(`${page.innerHeight}px`)
+  } finally {
+    await page.happyDOM.close()
+  }
+})

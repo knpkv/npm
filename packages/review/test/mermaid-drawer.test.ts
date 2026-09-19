@@ -81,3 +81,39 @@ it.each(["invalid-first", "valid-first"])("keeps %s errors inline without orphan
     root.remove()
   }
 })
+
+/** Production initialization retains Mermaid's default protection against diagram-supplied configuration. */
+it.each(["directive", "frontmatter"])("retains protected config through real Mermaid %s parsing", async (kind) => {
+  const config = JSON.stringify({
+    secure: [],
+    securityLevel: "loose",
+    startOnLoad: true,
+    maxTextSize: 999999,
+    suppressErrorRendering: false,
+    maxEdges: 999999,
+    fontSize: 31
+  })
+  const diagram = "flowchart LR; A-->B"
+  const source = kind === "directive"
+    ? `%%{init: ${config}}%%\n${diagram}`
+    : `---\nconfig: ${config}\n---\n${diagram}`
+  const node = document.createElement("pre")
+  node.textContent = source
+  const draw = makeMermaidDrawer({
+    initialize: mermaid.initialize,
+    render: async (_id, text) => {
+      await mermaid.parse(text)
+      return { svg: "<svg></svg>", diagramType: "flowchart-v2" }
+    }
+  })
+  await draw([node], "neutral")
+  expect(mermaid.mermaidAPI.getConfig()).toMatchObject({
+    secure: ["secure", "securityLevel", "startOnLoad", "maxTextSize", "suppressErrorRendering", "maxEdges"],
+    securityLevel: "strict",
+    startOnLoad: false,
+    maxTextSize: 50000,
+    suppressErrorRendering: true,
+    maxEdges: 500,
+    fontSize: 31
+  })
+})

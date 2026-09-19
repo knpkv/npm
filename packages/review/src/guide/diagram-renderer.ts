@@ -8,12 +8,11 @@ export const makeDiagramRenderer = (
   const sources = new WeakMap<Element, string>()
   let rendering = false
   let renderPending = false
-  let renderedTheme = ""
 
   /** Re-render newly mounted tab content and theme changes after React has committed. */
   const render = async (): Promise<void> => {
     // Printing may change the system color preference; retain the completed SVG for synchronous capture.
-    if (printing.matches) return
+    if (printing.matches && root.querySelector(".mermaid:not([data-processed=\"true\"])") === null) return
     if (rendering) {
       renderPending = true
       return
@@ -25,20 +24,18 @@ export const makeDiagramRenderer = (
     for (const node of nodes) {
       const source = sources.get(node)
       if (source === undefined) sources.set(node, node.textContent)
-      else if (renderedTheme !== theme) {
+      else if (!printing.matches && node.dataset.diagramTheme !== theme) {
         node.textContent = source
         delete node.dataset.processed
       }
     }
     const pending = nodes.filter((node) => node.dataset.processed !== "true")
     if (pending.length === 0) return
-    renderedTheme = theme
     rendering = true
     try {
       for (const node of pending) {
         try {
           await draw([node], theme)
-          node.dataset.diagramTheme = theme
         } catch (cause) {
           const message = document.createElement("span")
           message.setAttribute("role", "alert")
@@ -46,6 +43,7 @@ export const makeDiagramRenderer = (
           node.replaceChildren(message)
           node.dataset.processed = "true"
         }
+        node.dataset.diagramTheme = theme
       }
     } finally {
       rendering = false

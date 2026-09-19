@@ -47,7 +47,7 @@ export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: Gui
         "\\u003c"
       )
       const inlineScript = (text: string) => text.replaceAll(/<\/script/gi, "<\\/script")
-      return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(guide.title)}</title><style>${css}</style></head><body><div id="review-root">${content}</div><script id="review-data" type="application/json">${payload}</script><script>${inlineScript(client)}</script>${content.includes('class="mermaid"') ? `<script>${inlineScript(diagrams)}</script>` : ""}</body></html>`
+      return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(guide.title)}</title><style>body{margin:0}${css}</style></head><body><div id="review-root">${content}</div><script id="review-data" type="application/json">${payload}</script><script>${inlineScript(client)}</script>${content.includes('class="mermaid"') ? `<script>${inlineScript(diagrams)}</script>` : ""}</body></html>`
     },
     catch: (cause) => new GuideExportError({ stage: "render", detail: String(cause) })
   })

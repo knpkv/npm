@@ -102,3 +102,36 @@ it.each([
   await render()
   expect(root.querySelectorAll("[role=\"alert\"]")).toHaveLength(first === "invalid" || second === "invalid" ? 1 : 0)
 })
+
+it("renders initial hidden diagrams during print and preserves completed SVGs until print exits", async () => {
+  const root = document.createElement("div")
+  const themed = document.createElement("section")
+  themed.dataset.theme = "dark"
+  themed.style.display = "none"
+  const node = diagram("flowchart LR; A-->B")
+  themed.append(node)
+  root.append(themed)
+  const printing = { matches: true }
+  const themes: Array<string> = []
+  const render = makeDiagramRenderer(root, { matches: false }, async (nodes, theme) => {
+    themes.push(theme)
+    for (const node of nodes) {
+      node.dataset.processed = "true"
+      node.textContent = `${theme} diagram`
+    }
+  }, printing)
+  await render()
+  expect(node.textContent).toBe("dark diagram")
+  themed.dataset.theme = "light"
+  await render()
+  expect(themes).toEqual(["dark"])
+  const second = diagram("flowchart LR; B-->C")
+  themed.append(second)
+  await render()
+  expect(node.textContent).toBe("dark diagram")
+  expect(second.textContent).toBe("neutral diagram")
+  printing.matches = false
+  await render()
+  expect(node.textContent).toBe("neutral diagram")
+  expect(second.textContent).toBe("neutral diagram")
+})

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict"
-import { test } from "vitest"
+import { expect, test } from "vitest"
 import { findFile, parsePatch, type Patch } from "../../src/diff/patch/parse.js"
 import gitPatches from "./git-generated-patches.json" with { type: "json" }
 
@@ -327,3 +327,57 @@ test.each(["Binary files a/a.txt and b/a.txt differ", "GIT binary patch"])(
     }
   }
 )
+
+/** Invalid patch evidence must fail without allocating from attacker-supplied counts. */
+test("rejects zero-record and unsafe hunks but retains safe boundary and zero-context insertions", () => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
+  const invalid = [
+    "@@ -1,0 +1,0 @@\n",
+    "@@ -9007199254740992 +1 @@\n-old\n+new\n",
+    "@@ -1 +9007199254740993 @@\n-old\n+new\n",
+    "@@ -1,9007199254740992 +1 @@\n-old\n+new\n",
+    "@@ -1 +1,9007199254740993 @@\n-old\n+new\n",
+    `@@ -${"9".repeat(310)} +1 @@\n-old\n+new\n`,
+    "@@ -9007199254740991,2 +1,2 @@\n old\n next\n",
+    "@@ -1,2 +9007199254740991,2 @@\n old\n next\n"
+  ]
+  for (const hunk of invalid) expect.soft(parsePatch(header + hunk)._tag, hunk).toBe("PatchInvalid")
+  assert.equal(parsePatch(header + "@@ -1,0 +2 @@\n+inserted\n")._tag, "Patch")
+  const boundary = parsed(header + "@@ -9007199254740991 +9007199254740991 @@\n-old\n+new\n")
+  assert.equal(boundary.files[0]?.hunks[0]?.lines[1]?.newNo, Number.MAX_SAFE_INTEGER)
+})
+
+test.each(["rename", "copy"])("rejects conflicting repeated %s paths while matching repeats remain valid", (kind) => {
+  const header = "diff --git a/old b/new\n"
+  for (const side of ["from", "to"]) {
+    const original = `${kind} from old\n${kind} to new\n`
+    assert.equal(parsePatch(header + `${kind} ${side} other\n` + original)._tag, "PatchInvalid")
+    assert.equal(parsePatch(header + original + `${kind} ${side} other\n`)._tag, "PatchInvalid")
+    assert.equal(parsePatch(header + original + original)._tag, "Patch")
+  }
+})
+
+test("requires complete binary chunks and their terminating blank records", () => {
+  const header = "diff --git a/binary.dat b/binary.dat\nGIT binary patch\n"
+  const chunk = "literal 10\nRcmc~xEoVr|%u6h)1OOB)1JD2f\n\n"
+  for (
+    const body of [
+      "",
+      "literal 10\n",
+      chunk.trimEnd() + "\n",
+      "literal 10\n\n",
+      chunk + "literal 10\n",
+      chunk + "literal\n",
+      chunk + "delta\n",
+      chunk + chunk.trimEnd() + "\n",
+      chunk + chunk + chunk,
+      chunk.replace("literal 10", "literal 9007199254740992"),
+      chunk.replace("Rcmc~", "Rcm~"),
+      chunk.replace("Rcmc~", "Rcmc:")
+    ]
+  ) {
+    expect.soft(parsePatch(header + body)._tag, body).toBe("PatchInvalid")
+  }
+  assert.equal(parsePatch(header + chunk)._tag, "Patch")
+  assert.equal(parsePatch(header + chunk + chunk)._tag, "Patch")
+})

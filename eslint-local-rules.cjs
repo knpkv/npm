@@ -41,7 +41,8 @@ const isDefaultImportFrom = (context, identifier, sources) => {
   const definition = importedBinding(context, identifier)
   return (
     isValueImport(definition) &&
-    definition.node.type === "ImportDefaultSpecifier" &&
+    (definition.node.type === "ImportDefaultSpecifier" ||
+      (definition.node.type === "ImportSpecifier" && staticPropertyName(definition.node.imported) === "default")) &&
     sources.includes(importSource(definition))
   )
 }

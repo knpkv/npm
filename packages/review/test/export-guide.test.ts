@@ -1,6 +1,9 @@
 import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import * as Schema from "effect/Schema"
+import { Window } from "happy-dom"
 import { exportGuide } from "../dist/guide/export.js"
+import { Findings } from "../src/guide/model.js"
 
 const guide = {
   title: "Guard </script><script>alert(1)</script>",
@@ -75,4 +78,35 @@ it.effect("exports custom-prefix paths and retains options for hydration", () =>
     })
     expect(page.files).toBe(1)
     expect(page.html).toContain("\"prefixes\":{\"source\":\"old/tree/\",\"destination\":\"new/tree/\"}")
+  }))
+
+it.effect("rejects non-JSON-safe issue IDs before export and decodes accepted hydration data", () =>
+  Effect.gen(function*() {
+    const issue = { id: 1, severity: "P2", file: "release.ts", summary: "Check evidence" }
+    for (const id of [NaN, Infinity, -Infinity, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const error = yield* Effect.flip(
+        exportGuide({ guide, patch, findings: { checklist: [], issues: [{ ...issue, id }] } })
+      )
+      expect(error.stage).toBe("input")
+    }
+    const page = yield* exportGuide({ guide, patch, findings: { checklist: [], issues: [issue] } })
+    const payload = page.html.match(/<script id="review-data" type="application\/json">(.*?)<\/script>/)?.[1]
+    if (payload === undefined) throw new TypeError("Missing exported hydration data")
+    const decoded = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({ findings: Findings })))(payload)
+    expect(decoded.findings.issues[0]?.id).toBe(1)
+  }))
+
+it.effect("keeps the standalone export document reset", () =>
+  Effect.gen(function*() {
+    const exported = yield* exportGuide({ guide, patch })
+    const page = new Window()
+    try {
+      const style = exported.html.match(/<style>(.*?)<\/style>/s)?.[1]
+      if (style === undefined) throw new TypeError("Missing exported stylesheet")
+      page.document.head.innerHTML = `<style>body { margin: 23px; }</style><style>${style}</style>`
+      page.document.body.innerHTML = "<main class=\"review-guide\">Standalone guide</main>"
+      expect(page.getComputedStyle(page.document.body).marginTop).toBe("0px")
+    } finally {
+      yield* Effect.promise(() => page.happyDOM.close())
+    }
   }))
