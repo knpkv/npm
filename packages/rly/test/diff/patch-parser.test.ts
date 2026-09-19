@@ -426,3 +426,46 @@ test("accepts installed Git binary summaries with quoting, separator text, prefi
     })
   }
 })
+
+test("rejects backward hunk ranges on either side, including empty anchors", () => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
+  for (
+    const hunks of [
+      "@@ -3 +3 @@\n-three\n+THREE\n@@ -1 +1 @@\n-one\n+ONE\n",
+      "@@ -3 +1 @@\n-three\n+ONE\n@@ -1 +3 @@\n-one\n+THREE\n",
+      "@@ -1 +3 @@\n-one\n+THREE\n@@ -3 +1 @@\n-three\n+ONE\n",
+      "@@ -3,0 +4 @@\n+insert\n@@ -2,0 +5 @@\n+next\n",
+      "@@ -4 +3,0 @@\n-delete\n@@ -5 +2,0 @@\n-next\n",
+      "@@ -2 +2 @@\n-two\n+TWO\n@@ -1,0 +3 @@\n+insert-before-consumed-old-line\n",
+      "@@ -2 +2 @@\n-two\n+TWO\n@@ -3 +1,0 @@\n-delete-before-consumed-new-line\n"
+    ]
+  ) expect.soft(parsePatch(header + hunks)._tag, hunks).toBe("PatchInvalid")
+})
+
+test("accepts ascending hunks and exact zero-length boundaries on both sides", () => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
+  for (
+    const hunks of [
+      "@@ -1 +1 @@\n-one\n+ONE\n@@ -3 +3 @@\n-three\n+THREE\n",
+      "@@ -0,0 +1 @@\n+insert\n@@ -1 +2 @@\n-one\n+ONE\n",
+      "@@ -1 +0,0 @@\n-one\n@@ -2 +1 @@\n-two\n+TWO\n",
+      "@@ -1 +1 @@\n-one\n+ONE\n@@ -1,0 +2 @@\n+insert\n",
+      "@@ -1 +1 @@\n-one\n+ONE\n@@ -2 +1,0 @@\n-two\n",
+      "@@ -0,0 +1 @@\n+first\n@@ -0,0 +2 @@\n+second\n",
+      "@@ -1 +0,0 @@\n-first\n@@ -2 +0,0 @@\n-second\n",
+      "@@ -2,0 +3 @@\n+insert\n@@ -3 +4 @@\n-three\n+THREE\n",
+      "@@ -3 +2,0 @@\n-three\n@@ -4 +3 @@\n-four\n+FOUR\n"
+    ]
+  ) expect(parsePatch(header + hunks)._tag, hunks).toBe("Patch")
+})
+
+test("accepts Git-generated zero-context insertion, deletion and mixed boundaries", () => {
+  const controls = [
+    "diff --git a/left/a b/right/a\nindex 814f4a4..af9184c 100644\n--- a/left/a\n+++ b/right/a\n@@ -0,0 +1 @@\n+zero\n",
+    "diff --git a/left/a b/right/a\nindex af9184c..814f4a4 100644\n--- a/left/a\n+++ b/right/a\n@@ -1 +0,0 @@\n-zero\n",
+    "diff --git a/left/a b/right/a\nindex f384549..b470cad 100644\n--- a/left/a\n+++ b/right/a\n@@ -0,0 +1 @@\n+ONE\n@@ -2,0 +4 @@ two\n+THREE\n",
+    "diff --git a/left/a b/right/a\nindex f384549..8c05df4 100644\n--- a/left/a\n+++ b/right/a\n@@ -1 +0,0 @@\n-one\n@@ -3 +1,0 @@ two\n-three\n",
+    "diff --git a/left/a b/right/a\nindex f384549..ae95719 100644\n--- a/left/a\n+++ b/right/a\n@@ -0,0 +1 @@\n+zero\n@@ -2 +3 @@ one\n-two\n+TWO\n@@ -4 +4,0 @@ three\n-four\n"
+  ]
+  for (const patch of controls) expect(parsePatch(patch)._tag).toBe("Patch")
+})

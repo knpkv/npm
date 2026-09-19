@@ -198,6 +198,8 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     let binary = false
     let binarySummary: string | undefined
     const hunks: Array<Hunk> = []
+    let oldEnd = 0
+    let newEnd = 0
     const oldCoordinates = new Set<number>()
     const newCoordinates = new Set<number>()
     index += 1
@@ -263,6 +265,9 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
         if (source === undefined || destination === undefined) return invalid("Text hunks require paired file markers")
         const parsed = readHunk(lines, index)
         if (parsed._tag === "PatchInvalid") return parsed
+        if (parsed.oldOffset < oldEnd || parsed.newOffset < newEnd) return invalid("Hunk ranges move backwards")
+        oldEnd = parsed.oldEnd
+        newEnd = parsed.newEnd
         for (const record of parsed.hunk.lines) {
           if (
             (record.oldNo !== undefined && oldCoordinates.has(record.oldNo)) ||
@@ -375,7 +380,15 @@ const readBinary = (
 const readHunk = (
   lines: ReadonlyArray<string>,
   start: number
-): { readonly _tag: "Hunk"; readonly hunk: Hunk; readonly next: number } | PatchInvalid => {
+): {
+  readonly _tag: "Hunk"
+  readonly hunk: Hunk
+  readonly next: number
+  readonly oldOffset: number
+  readonly newOffset: number
+  readonly oldEnd: number
+  readonly newEnd: number
+} | PatchInvalid => {
   const match = HUNK.exec(lines[start] ?? "")
   if (match === null) return invalid(`not a hunk header at line ${start + 1}`)
   const oldStart = Number(match[1])
@@ -388,6 +401,11 @@ const readHunk = (
     (oldCount > 0 && !Number.isSafeInteger(oldStart + (oldCount - 1))) ||
     (newCount > 0 && !Number.isSafeInteger(newStart + (newCount - 1)))
   ) return invalid("Hunk coordinates overflow")
+  // Half-open zero-based ranges: empty Git ranges anchor after the named line.
+  const oldOffset = oldStart - (oldCount === 0 ? 0 : 1)
+  const newOffset = newStart - (newCount === 0 ? 0 : 1)
+  const oldEnd = oldOffset + oldCount
+  const newEnd = newOffset + newCount
   let oldNo = oldStart
   let newNo = newStart
   const body: Array<DiffLine> = []
@@ -427,6 +445,10 @@ const readHunk = (
 
   return {
     _tag: "Hunk",
+    oldOffset,
+    newOffset,
+    oldEnd,
+    newEnd,
     hunk: { header: match[5]?.trim() ?? "", oldStart, newStart, lines: body },
     next: index
   }

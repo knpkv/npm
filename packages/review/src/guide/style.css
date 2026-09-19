@@ -383,7 +383,17 @@
 #reading > [role="tabpanel"][data-state="inactive"] {
   display: none;
 }
+/* A static receipt also prints before hydration and when scripts are disabled. */
+.review-usage-print {
+  display: none;
+}
 @media print {
+  .review-usage {
+    display: none;
+  }
+  .review-usage-print {
+    display: block;
+  }
   .review-prose .mermaid[data-diagram-theme="dark"] {
     background: #1f2020;
   }

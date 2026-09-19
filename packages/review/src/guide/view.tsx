@@ -89,52 +89,60 @@ export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | u
       after()
     }
   }, [])
+  const receipt =
+    usage === undefined || usage.length === 0 ? (
+      <p>Usage, cost, and execution time were not recorded.</p>
+    ) : (
+      usage.map((run, index) => (
+        <Surface padding="compact" key={index}>
+          <Text as="h3" variant="card-title">
+            {run.label}
+          </Text>
+          <p className="review-muted">
+            {run.scope}
+            {run.model === undefined ? "" : ` · ${run.model}`}
+          </p>
+          <dl className="review-metrics">
+            <div>
+              <dt>Input tokens</dt>
+              <dd>{number(run.inputTokens)}</dd>
+            </div>
+            <div>
+              <dt>Output tokens</dt>
+              <dd>{number(run.outputTokens)}</dd>
+            </div>
+            <div>
+              <dt>Cached input</dt>
+              <dd>{number(run.cachedInputTokens)}</dd>
+            </div>
+            <div>
+              <dt>Execution time</dt>
+              <dd>{duration(run.durationMs)}</dd>
+            </div>
+            <div>
+              <dt>Cost</dt>
+              <dd>
+                {run.cost === undefined
+                  ? "Not recorded"
+                  : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
+              </dd>
+            </div>
+          </dl>
+          <p className="review-muted">Source: {run.source}</p>
+        </Surface>
+      ))
+    )
   return (
-    <details className="review-usage" ref={ref}>
-      <summary>Execution · tokens, cost, and time</summary>
-      {usage === undefined || usage.length === 0 ? (
-        <p>Usage, cost, and execution time were not recorded.</p>
-      ) : (
-        usage.map((run, index) => (
-          <Surface padding="compact" key={index}>
-            <Text as="h3" variant="card-title">
-              {run.label}
-            </Text>
-            <p className="review-muted">
-              {run.scope}
-              {run.model === undefined ? "" : ` · ${run.model}`}
-            </p>
-            <dl className="review-metrics">
-              <div>
-                <dt>Input tokens</dt>
-                <dd>{number(run.inputTokens)}</dd>
-              </div>
-              <div>
-                <dt>Output tokens</dt>
-                <dd>{number(run.outputTokens)}</dd>
-              </div>
-              <div>
-                <dt>Cached input</dt>
-                <dd>{number(run.cachedInputTokens)}</dd>
-              </div>
-              <div>
-                <dt>Execution time</dt>
-                <dd>{duration(run.durationMs)}</dd>
-              </div>
-              <div>
-                <dt>Cost</dt>
-                <dd>
-                  {run.cost === undefined
-                    ? "Not recorded"
-                    : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
-                </dd>
-              </div>
-            </dl>
-            <p className="review-muted">Source: {run.source}</p>
-          </Surface>
-        ))
-      )}
-    </details>
+    <>
+      <details className="review-usage" ref={ref}>
+        <summary>Execution · tokens, cost, and time</summary>
+        {receipt}
+      </details>
+      <section className="review-usage-print" aria-label="Execution evidence">
+        <h2>Execution · tokens, cost, and time</h2>
+        {receipt}
+      </section>
+    </>
   )
 }
 

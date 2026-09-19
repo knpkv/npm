@@ -2,6 +2,7 @@
 import { type Patch, parsePatch } from "@knpkv/rly/diff/patch"
 import { Window } from "happy-dom"
 import { act } from "react"
+import { renderToStaticMarkup } from "react-dom/server"
 import { createRoot } from "react-dom/client"
 import { expect, it } from "vitest"
 import { GuidePage, GuideUsage } from "../src/guide/view.js"
@@ -251,5 +252,43 @@ it("temporarily exposes closed usage for print and restores both screen disclosu
   } finally {
     await act(async () => root.unmount())
     host.remove()
+  }
+})
+
+it("server-renders a print-only receipt outside the closed screen disclosure", async () => {
+  const html = renderToStaticMarkup(
+    <GuideUsage
+      usage={[
+        {
+          label: "Static receipt",
+          scope: "review",
+          source: "SSR source",
+          model: "SSR model",
+          inputTokens: 1234,
+          outputTokens: 567,
+          durationMs: 2500,
+          cost: { amount: 0.125, currency: "USD", basis: "reported" }
+        }
+      ]}
+    />
+  )
+  for (const mediaType of ["screen", "print"]) {
+    const page = new Window({ settings: { device: { mediaType } } })
+    try {
+      page.document.body.innerHTML = `<style>${guideStyles}</style>${html}`
+      const receipt = page.document.querySelector(".review-usage-print")
+      const disclosure = page.document.querySelector("details")
+      if (receipt === null || disclosure === null) throw new TypeError("Missing static receipt")
+      expect(disclosure.open).toBe(false)
+      expect(receipt.closest("details")).toBeNull()
+      expect(page.getComputedStyle(receipt).display).toBe(mediaType === "print" ? "block" : "none")
+      expect(page.getComputedStyle(disclosure).display === "none").toBe(mediaType === "print")
+      expect(receipt.textContent).toContain("SSR source")
+      expect(receipt.textContent).toContain("SSR model")
+      expect(receipt.textContent).toContain("1,234")
+      expect(receipt.textContent).toContain("USD 0.125")
+    } finally {
+      await page.happyDOM.close()
+    }
   }
 })
