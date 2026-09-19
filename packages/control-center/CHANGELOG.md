@@ -1,5 +1,21 @@
 # @knpkv/control-center
 
+## 0.9.0
+
+### Minor Changes
+
+- [#408](https://github.com/knpkv/npm/pull/408) [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e) Thanks [@konopkov](https://github.com/konopkov)! - Share typed, redacted browser-pairing credentials and transport primitives between Control Center and CodeCommit.
+
+### Patch Changes
+
+- Updated dependencies [[`adfad78`](https://github.com/knpkv/npm/commit/adfad78662f20b698a2c6d76a70e824c52e22029), [`bd45f8c`](https://github.com/knpkv/npm/commit/bd45f8cdeb1e8301bfcde42254792a488734d7e5), [`b2d229d`](https://github.com/knpkv/npm/commit/b2d229d2208fb9e7f2d9dc174ff12d769c5b8225), [`fa377ce`](https://github.com/knpkv/npm/commit/fa377ce975cccd594da8f7a370eb14f7f48d0039), [`fa695f0`](https://github.com/knpkv/npm/commit/fa695f0179c67701e468fcedcd07c4b738c9734a), [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e)]:
+  - @knpkv/rly@0.6.0
+  - @knpkv/clockify-api-client@2.0.0
+  - @knpkv/codecommit-core@0.17.0
+  - @knpkv/browser-pairing@0.2.0
+  - @knpkv/relay-product@0.1.1
+  - @knpkv/review@0.2.2
+
 ## 0.8.1
 
 ### Patch Changes

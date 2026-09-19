@@ -1,5 +1,19 @@
 # @knpkv/rly
 
+## 0.6.0
+
+### Minor Changes
+
+- [#424](https://github.com/knpkv/npm/pull/424) [`fa695f0`](https://github.com/knpkv/npm/commit/fa695f0179c67701e468fcedcd07c4b738c9734a) Thanks [@konopkov](https://github.com/konopkov)! - Keep Fleet tabs in one compact iPhone row, preserve terminal pointer access, and distinguish Work loading and failure states.
+
+### Patch Changes
+
+- [#425](https://github.com/knpkv/npm/pull/425) [`adfad78`](https://github.com/knpkv/npm/commit/adfad78662f20b698a2c6d76a70e824c52e22029) Thanks [@konopkov](https://github.com/konopkov)! - Remove the scrollbar-like selection line from stacked mobile tabs.
+
+- [#432](https://github.com/knpkv/npm/pull/432) [`b2d229d`](https://github.com/knpkv/npm/commit/b2d229d2208fb9e7f2d9dc174ff12d769c5b8225) Thanks [@konopkov](https://github.com/konopkov)! - Replace employer-specific names in fixtures, comments and prototype storage keys with neutral placeholders.
+
+  The Control Center prototype uses a new demo storage namespace. Saved prototype state and theme preferences from the previous namespace are not loaded.
+
 ## 0.5.1
 
 ### Patch Changes
