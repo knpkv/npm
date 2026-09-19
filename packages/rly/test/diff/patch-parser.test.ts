@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { expect, test } from "vitest"
 import { findFile, parsePatch, type Patch } from "../../src/diff/patch/parse.js"
+import binarySummaries from "./git-binary-summaries.json" with { type: "json" }
 import gitPatches from "./git-generated-patches.json" with { type: "json" }
 
 /** Unwrap a patch these tests expect to be well formed. */
@@ -380,4 +381,48 @@ test("requires complete binary chunks and their terminating blank records", () =
   }
   assert.equal(parsePatch(header + chunk)._tag, "Patch")
   assert.equal(parsePatch(header + chunk + chunk)._tag, "Patch")
+})
+
+test("rejects incomplete or mismatched binary summaries", () => {
+  const header = "diff --git a/a b/a\n"
+  for (
+    const summary of [
+      "Binary files a/a and b/a diffe",
+      "Binary files a/other and b/other differ",
+      "Binary files a/a and b/a differ trailing",
+      "Binary files /dev/null and /dev/null differ",
+      "Binary files a/a and b/other differ"
+    ]
+  ) {
+    expect.soft(parsePatch(header + summary + "\n")._tag, summary).toBe("PatchInvalid")
+  }
+})
+
+test("retains EOF absence per side and leaves neighboring coordinates unchanged", () => {
+  const result = parsed(
+    "diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -7,2 +9,2 @@\n-old\n+new\n tail\n\\ No newline at end of file\n"
+  )
+  expect(result.files[0]?.hunks[0]?.lines).toEqual([
+    { kind: "del", text: "old", oldNo: 7 },
+    { kind: "add", text: "new", newNo: 9 },
+    { kind: "context", text: "tail", oldNo: 8, newNo: 10, noNewline: true }
+  ])
+})
+
+test("accepts installed Git binary summaries with quoting, separator text, prefixes and null sides", () => {
+  for (const fixture of binarySummaries) {
+    const prefixes = fixture.prefix === "custom"
+      ? { source: "old/", destination: "new/" }
+      : fixture.prefix === "none"
+      ? { source: "", destination: "" }
+      : undefined
+    const result = parsePatch(fixture.patch, prefixes)
+    expect(result._tag, JSON.stringify(fixture)).toBe("Patch")
+    if (result._tag !== "Patch") continue
+    expect(result.patch.files[0]).toMatchObject({
+      binary: true,
+      status: fixture.kind,
+      path: `${fixture.kind === "deleted" ? "left" : "right"}/${fixture.name}`
+    })
+  }
 })

@@ -3,7 +3,7 @@ import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
 import { Window } from "happy-dom"
 import { exportGuide } from "../dist/guide/export.js"
-import { Findings } from "../src/guide/model.js"
+import { Findings, Guide } from "../src/guide/model.js"
 
 const guide = {
   title: "Guard </script><script>alert(1)</script>",
@@ -108,5 +108,32 @@ it.effect("keeps the standalone export document reset", () =>
       expect(page.getComputedStyle(page.document.body).marginTop).toBe("0px")
     } finally {
       yield* Effect.promise(() => page.happyDOM.close())
+    }
+  }))
+
+it.effect("rejects unsafe PR numbers and preserves provider-native identifiers through JSON hydration", () =>
+  Effect.gen(function*() {
+    for (const number of [NaN, Infinity, -Infinity, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      const error = yield* Effect.flip(
+        exportGuide({ guide: { ...guide, source: { pr: { url: "https://example.test/pr", number } } }, patch })
+      )
+      expect(error.stage).toBe("input")
+    }
+    for (const number of [1, Number.MAX_SAFE_INTEGER, "001", "team/repo!42", "change:α-7"]) {
+      const page = yield* exportGuide({
+        guide: { ...guide, source: { pr: { url: "https://example.test/pr", number } } },
+        patch,
+        findings: {
+          checklist: [],
+          issues: [{ id: 1, severity: "P2", file: "release.ts", line: 1, summary: "Evidence" }]
+        }
+      })
+      const payload = page.html.match(/<script id="review-data" type="application\/json">(.*?)<\/script>/)?.[1]
+      if (payload === undefined) throw new TypeError("Missing hydration data")
+      const decoded = Schema.decodeUnknownSync(
+        Schema.fromJsonString(Schema.Struct({ guide: Guide, findings: Findings }))
+      )(payload)
+      expect(decoded.guide.source?.pr?.number).toBe(number)
+      expect(decoded.findings.issues[0]).toMatchObject({ id: 1, line: 1 })
     }
   }))

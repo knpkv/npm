@@ -68,3 +68,53 @@ Binary files a/icon.png and b/icon.png differ
     ])
   })
 })
+
+it("shows newline absence on the affected sides without inventing source coordinates", () => {
+  for (const body of [
+    "-same\n\\ No newline at end of file\n+same\n",
+    "-same\n+same\n\\ No newline at end of file\n",
+    "-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
+    " same\n\\ No newline at end of file\n"
+  ]) {
+    const file = parsed(`diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n${body}`).files[0]
+    if (file === undefined) throw new TypeError("Missing fixture")
+    for (const mode of ["split", "stacked"] satisfies ReadonlyArray<"split" | "stacked">) {
+      const html = renderToStaticMarkup(<PatchDiffView file={file} id="eof" mode={mode} />)
+      expect(html).toContain("No newline at end of file")
+      expect(html).not.toContain('id="eof-old-2"')
+      expect(html).not.toContain('id="eof-new-2"')
+      const before = body.startsWith(" same") || body.includes("-same\n\\") || body.includes("-old\n\\")
+      const after =
+        body.startsWith(" same") ||
+        body.endsWith("+same\n\\ No newline at end of file\n") ||
+        body.endsWith("+new\n\\ No newline at end of file\n")
+      expect(html.includes("Before: no newline")).toBe(before)
+      expect(html.includes("After: no newline")).toBe(after)
+    }
+  }
+  const file = parsed(patch).files[0]
+  if (file === undefined) throw new TypeError("Missing fixture")
+  expect(renderToStaticMarkup(<PatchDiffView file={file} id="normal" />)).not.toContain("No newline at end of file")
+})
+
+it("shows supplied file modes for mode-only, content, addition, and deletion changes", () => {
+  for (const body of ["", "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n"]) {
+    const file = parsed(`diff --git a/a b/a\nold mode 100644\nnew mode 100755\n${body}`).files[0]
+    if (file === undefined) throw new TypeError("Missing fixture")
+    expect(file).toMatchObject({ oldMode: "100644", newMode: "100755" })
+    const html = renderToStaticMarkup(<PatchDiffView file={file} id="mode" />)
+    expect(html).toContain("100644 → 100755")
+  }
+  for (const header of ["new file", "deleted file"]) {
+    const file = parsed(`diff --git a/a b/a\n${header} mode 100755\n`).files[0]
+    if (file === undefined) throw new TypeError("Missing fixture")
+    expect(renderToStaticMarkup(<PatchDiffView file={file} id="mode" />)).toContain(
+      header === "new file" ? "Mode added: 100755" : "Mode removed: 100755"
+    )
+  }
+  const file = parsed(patch).files[0]
+  if (file === undefined) throw new TypeError("Missing fixture")
+  expect(file).not.toHaveProperty("oldMode")
+  expect(file).not.toHaveProperty("newMode")
+  expect(renderToStaticMarkup(<PatchDiffView file={file} id="normal" />)).not.toContain("Mode")
+})

@@ -23,6 +23,8 @@ export type LineKind = "context" | "add" | "del"
 export interface DiffLine {
   readonly kind: LineKind
   readonly text: string
+  /** Git EOF marker on this record: old side for deletions, new for additions, both for context. */
+  readonly noNewline?: boolean
   /** Line number in the old file; absent on added lines. */
   readonly oldNo?: number
   /** Line number in the new file; absent on deleted lines. */
@@ -45,6 +47,9 @@ export interface FileDiff {
   readonly newPath: string
   readonly status: FileStatus
   readonly binary: boolean
+  /** Explicit mode headers only; an absent side or unreported mode stays absent. */
+  readonly oldMode?: string
+  readonly newMode?: string
   readonly hunks: ReadonlyArray<Hunk>
 }
 
@@ -132,6 +137,39 @@ const headerPaths = (
     : invalid("Inconsistent or ambiguous Git file headers; custom prefixes must be supplied explicitly")
 }
 
+/** Match every possible summary separator against the authoritative header, including quoted and spaced paths. */
+const binaryPaths = (
+  header: string,
+  summary: string,
+  prefixes: PatchPrefixes | undefined,
+  moved: { readonly source: string; readonly destination: string } | undefined,
+  status: FileStatus
+): ReturnType<typeof headerPaths> => {
+  if (!summary.endsWith(" differ")) return invalid("Incomplete binary summary")
+  const body = summary.slice("Binary files ".length, -" differ".length)
+  // Auto mode tries Git's standard prefixes before an unprefixed producer.
+  // Otherwise a filename ending in " and" can fabricate a second no-prefix interpretation.
+  const selections = prefixes === undefined
+    ? [{ source: "a/", destination: "b/" }, { source: "", destination: "" }]
+    : [prefixes]
+  for (const selected of selections) {
+    const candidates: Array<Extract<ReturnType<typeof headerPaths>, { readonly _tag: "Paths" }>> = []
+    for (const match of body.matchAll(/(?= and )/g)) {
+      const source = unquote(body.slice(0, match.index))
+      const destination = unquote(body.slice(match.index + " and ".length))
+      if (source._tag === "PatchInvalid" || destination._tag === "PatchInvalid") continue
+      if ((source.path === "/dev/null") !== (status === "added")) continue
+      if ((destination.path === "/dev/null") !== (status === "deleted")) continue
+      const paths = headerPaths(header, source.path, destination.path, selected, moved)
+      if (paths._tag === "Paths") candidates.push(paths)
+    }
+    const paths = candidates[0]
+    if (candidates.length === 1 && paths !== undefined) return paths
+    if (candidates.length > 1) return invalid("Ambiguous binary summary paths")
+  }
+  return invalid("Binary summary paths disagree with Git headers")
+}
+
 /** Infer default a/b prefixes when present; pass explicit empty prefixes for unambiguous --no-prefix parsing. */
 export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult => {
   // A CR on a Git header identifies transport line endings; body-only CR belongs to the source.
@@ -158,6 +196,7 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     let oldMode: string | undefined
     let newMode: string | undefined
     let binary = false
+    let binarySummary: string | undefined
     const hunks: Array<Hunk> = []
     const oldCoordinates = new Set<number>()
     const newCoordinates = new Set<number>()
@@ -204,8 +243,11 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
         binary = true
         index = payload.next
         continue
-      } else if (line.startsWith("Binary files ")) binary = true
-      else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
+      } else if (line.startsWith("Binary files ")) {
+        if (binarySummary !== undefined && binarySummary !== line) return invalid("Conflicting binary summaries")
+        binarySummary = line
+        binary = true
+      } else if (line.startsWith("--- ") || line.startsWith("+++ ")) {
         const path = unquote(line.slice(4).replace(/\t$/, ""))
         if (path._tag === "PatchInvalid") return path
         if (line.startsWith("--- ")) {
@@ -269,7 +311,9 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     const moved = movedSource === undefined || movedDestination === undefined
       ? undefined
       : { source: movedSource, destination: movedDestination }
-    const paths = headerPaths(header, source, destination, prefixes, moved)
+    const paths = binarySummary === undefined
+      ? headerPaths(header, source, destination, prefixes, moved)
+      : binaryPaths(header, binarySummary, prefixes, moved, status)
     if (paths._tag === "PatchInvalid") return paths
     const path = status === "deleted" ? paths.oldPath : paths.newPath
     if (currentPaths.has(path)) return invalid("Duplicate canonical current file path")
@@ -280,6 +324,16 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
       newPath: paths.newPath,
       status,
       binary,
+      ...(status === "deleted" && fileMode !== undefined
+        ? { oldMode: fileMode }
+        : oldMode === undefined
+        ? {}
+        : { oldMode }),
+      ...(status === "added" && fileMode !== undefined
+        ? { newMode: fileMode }
+        : newMode === undefined
+        ? {}
+        : { newMode }),
       hunks
     })
   }
@@ -364,6 +418,8 @@ const readHunk = (
     // A marker belongs to exactly one preceding body record and consumes no coordinate.
     if ((lines[index] ?? "").startsWith("\\")) {
       if (lines[index] !== "\\ No newline at end of file") return invalid(`Invalid newline marker at line ${index + 1}`)
+      const previous = body[body.length - 1]
+      if (previous !== undefined) body[body.length - 1] = { ...previous, noNewline: true }
       index += 1
     }
   }

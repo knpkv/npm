@@ -4,7 +4,7 @@ import { Window } from "happy-dom"
 import { act } from "react"
 import { createRoot } from "react-dom/client"
 import { expect, it } from "vitest"
-import { GuidePage } from "../src/guide/view.js"
+import { GuidePage, GuideUsage } from "../src/guide/view.js"
 import guideStyles from "../src/guide/style.css?raw"
 
 it("prints intent and verdict from either tab while screen navigation exposes one panel", async () => {
@@ -206,5 +206,50 @@ it("keeps embedded guide styles inside the host document layout", async () => {
     expect(page.getComputedStyle(guide).minHeight).toBe(`${page.innerHeight}px`)
   } finally {
     await page.happyDOM.close()
+  }
+})
+
+it("temporarily exposes closed usage for print and restores both screen disclosure states", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  try {
+    await act(async () =>
+      root.render(
+        <GuideUsage
+          usage={[
+            {
+              label: "Print receipt",
+              scope: "review",
+              source: "Synthetic receipt",
+              model: "Synthetic model",
+              inputTokens: 1234,
+              outputTokens: 567,
+              durationMs: 2500,
+              cost: { amount: 0.125, currency: "USD", basis: "reported" }
+            }
+          ]}
+        />
+      )
+    )
+    const details = host.querySelector("details")
+    if (details === null) throw new TypeError("Missing usage disclosure")
+    expect(details.open).toBe(false)
+    for (const open of [false, true, false]) {
+      details.open = open
+      await act(async () => window.dispatchEvent(new Event("beforeprint")))
+      expect(details.open).toBe(true)
+      expect(details.textContent).toContain("Synthetic receipt")
+      expect(details.textContent).toContain("Synthetic model")
+      expect(details.textContent).toContain("1,234")
+      expect(details.textContent).toContain("USD 0.125")
+      // Some engines notify more than once; the second notification must not overwrite the saved state.
+      await act(async () => window.dispatchEvent(new Event("beforeprint")))
+      await act(async () => window.dispatchEvent(new Event("afterprint")))
+      expect(details.open).toBe(open)
+    }
+  } finally {
+    await act(async () => root.unmount())
+    host.remove()
   }
 })

@@ -3,7 +3,7 @@
 import { findFile, type FileDiff, type Patch, PatchDiffView } from "@knpkv/rly/diff/patch"
 import { ThemeProvider } from "@knpkv/rly/foundations"
 import { Button, StateLabel, Surface, Tabs, Text } from "@knpkv/rly/primitives"
-import { memo, type ReactElement, useState } from "react"
+import { memo, type ReactElement, useEffect, useRef, useState } from "react"
 import { renderInline, renderMarkdown } from "./markdown.js"
 import type { Findings, Guide, Issue, Usage } from "./model.js"
 import { bySeverity, placeAll, type Placed } from "./plan.js"
@@ -60,54 +60,83 @@ const duration = (value: number | undefined) =>
       ? `${Math.round(value)} ms`
       : `${Math.floor(value / 60000)}m ${Math.floor((value % 60000) / 1000)}s`
 
-/** Each run retains its scope and evidence source; overlapping runs are never silently summed. */
-export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | undefined }): ReactElement => (
-  <details className="review-usage">
-    <summary>Execution · tokens, cost, and time</summary>
-    {usage === undefined || usage.length === 0 ? (
-      <p>Usage, cost, and execution time were not recorded.</p>
-    ) : (
-      usage.map((run, index) => (
-        <Surface padding="compact" key={index}>
-          <Text as="h3" variant="card-title">
-            {run.label}
-          </Text>
-          <p className="review-muted">
-            {run.scope}
-            {run.model === undefined ? "" : ` · ${run.model}`}
-          </p>
-          <dl className="review-metrics">
-            <div>
-              <dt>Input tokens</dt>
-              <dd>{number(run.inputTokens)}</dd>
-            </div>
-            <div>
-              <dt>Output tokens</dt>
-              <dd>{number(run.outputTokens)}</dd>
-            </div>
-            <div>
-              <dt>Cached input</dt>
-              <dd>{number(run.cachedInputTokens)}</dd>
-            </div>
-            <div>
-              <dt>Execution time</dt>
-              <dd>{duration(run.durationMs)}</dd>
-            </div>
-            <div>
-              <dt>Cost</dt>
-              <dd>
-                {run.cost === undefined
-                  ? "Not recorded"
-                  : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
-              </dd>
-            </div>
-          </dl>
-          <p className="review-muted">Source: {run.source}</p>
-        </Surface>
-      ))
-    )}
-  </details>
-)
+/** Each run retains its evidence; printing opens the disclosure temporarily and restores the screen state. */
+export const GuideUsage = ({ usage }: { readonly usage: ReadonlyArray<Usage> | undefined }): ReactElement => {
+  const ref = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    const details = ref.current
+    if (details === null) return
+    const media = window.matchMedia("print")
+    let screenOpen: boolean | undefined
+    const before = () => {
+      if (screenOpen === undefined) screenOpen = details.open
+      details.open = true
+    }
+    const after = () => {
+      if (screenOpen === undefined) return
+      details.open = screenOpen
+      screenOpen = undefined
+    }
+    const changed = () => (media.matches ? before() : after())
+    window.addEventListener("beforeprint", before)
+    window.addEventListener("afterprint", after)
+    media.addEventListener("change", changed)
+    if (media.matches) before()
+    return () => {
+      window.removeEventListener("beforeprint", before)
+      window.removeEventListener("afterprint", after)
+      media.removeEventListener("change", changed)
+      after()
+    }
+  }, [])
+  return (
+    <details className="review-usage" ref={ref}>
+      <summary>Execution · tokens, cost, and time</summary>
+      {usage === undefined || usage.length === 0 ? (
+        <p>Usage, cost, and execution time were not recorded.</p>
+      ) : (
+        usage.map((run, index) => (
+          <Surface padding="compact" key={index}>
+            <Text as="h3" variant="card-title">
+              {run.label}
+            </Text>
+            <p className="review-muted">
+              {run.scope}
+              {run.model === undefined ? "" : ` · ${run.model}`}
+            </p>
+            <dl className="review-metrics">
+              <div>
+                <dt>Input tokens</dt>
+                <dd>{number(run.inputTokens)}</dd>
+              </div>
+              <div>
+                <dt>Output tokens</dt>
+                <dd>{number(run.outputTokens)}</dd>
+              </div>
+              <div>
+                <dt>Cached input</dt>
+                <dd>{number(run.cachedInputTokens)}</dd>
+              </div>
+              <div>
+                <dt>Execution time</dt>
+                <dd>{duration(run.durationMs)}</dd>
+              </div>
+              <div>
+                <dt>Cost</dt>
+                <dd>
+                  {run.cost === undefined
+                    ? "Not recorded"
+                    : `${run.cost.currency} ${String(run.cost.amount)} · ${run.cost.basis}`}
+                </dd>
+              </div>
+            </dl>
+            <p className="review-muted">Source: {run.source}</p>
+          </Surface>
+        ))
+      )}
+    </details>
+  )
+}
 
 export interface GuidePageProps {
   readonly guide: Guide

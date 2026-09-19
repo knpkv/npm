@@ -76,9 +76,16 @@ export const PatchDiffView = ({
         <td className={styles.lineNumber}>{number}</td>
         <td className={side === "old" ? styles.deletionCode : styles.additionCode}>
           {line === undefined ? null : (
-            <code className={wrap ? styles.wrappedCode : styles.code} id={`${id}-${side}-${number}`} tabIndex={-1}>
-              {line.text || " "}
-            </code>
+            <>
+              <code className={wrap ? styles.wrappedCode : styles.code} id={`${id}-${side}-${number}`} tabIndex={-1}>
+                {line.text || " "}
+              </code>
+              {line.noNewline === true ? (
+                <small aria-label={`${side === "old" ? "Before" : "After"}: no newline`}>
+                  No newline at end of file
+                </small>
+              ) : null}
+            </>
           )}
         </td>
       </>
@@ -97,6 +104,15 @@ export const PatchDiffView = ({
   }
   return (
     <div className={styles.root} data-rly-patch-diff="" data-rly-diff-mode={mode}>
+      {file.oldMode === undefined && file.newMode === undefined ? null : (
+        <p className={styles.noChanges}>
+          {file.oldMode === undefined
+            ? `Mode added: ${file.newMode}`
+            : file.newMode === undefined
+              ? `Mode removed: ${file.oldMode}`
+              : `Mode: ${file.oldMode} → ${file.newMode}`}
+        </p>
+      )}
       {file.binary || file.hunks.length === 0 ? (
         <p className={styles.noChanges}>{file.binary ? "Binary file." : "No content change."}</p>
       ) : (
@@ -169,6 +185,19 @@ export const PatchDiffView = ({
                             </td>
                             <td>
                               <code className={wrap ? styles.wrappedCode : styles.code}>{line.text || " "}</code>
+                              {line.noNewline === true ? (
+                                <small
+                                  aria-label={
+                                    line.kind === "del"
+                                      ? "Before: no newline"
+                                      : line.kind === "add"
+                                        ? "After: no newline"
+                                        : "Before: no newline; After: no newline"
+                                  }
+                                >
+                                  No newline at end of file
+                                </small>
+                              ) : null}
                             </td>
                           </tr>
                           {annotation(line, "old")}

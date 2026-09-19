@@ -66,7 +66,9 @@ export const Guide = Schema.Struct({
       pr: Schema.optionalKey(
         Schema.Struct({
           url: Schema.String.check(Schema.isPattern(/^https?:\/\/[^\s]+$/)),
-          number: Schema.optionalKey(Schema.Union([Schema.Number, Schema.String])),
+          number: Schema.optionalKey(
+            Schema.Union([Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)), Schema.String])
+          ),
           title: Schema.optionalKey(Schema.String)
         })
       )
