@@ -1,5 +1,13 @@
 # @knpkv/clockify-api-client
 
+## 2.0.0
+
+### Major Changes
+
+- [#377](https://github.com/knpkv/npm/pull/377) [`bd45f8c`](https://github.com/knpkv/npm/commit/bd45f8cdeb1e8301bfcde42254792a488734d7e5) Thanks [@konopkov](https://github.com/konopkov)! - Update the generated Clockify API client from the latest OpenAPI specification and decode workspace feature plans as objects.
+
+  Breaking: the published `./generated` entry point removes upstream models including `AmountDto`, `AttendanceDto`, `BalanceDtoV1`, `SharedReportDtoV1`, and `TimeEntryDto`. Consumers importing generated models must update their imports and check the regenerated request and response schemas before upgrading.
+
 ## 1.1.1
 
 ### Patch Changes

@@ -1,5 +1,11 @@
 # @knpkv/codecommit-core
 
+## 0.17.0
+
+### Minor Changes
+
+- [#434](https://github.com/knpkv/npm/pull/434) [`fa377ce`](https://github.com/knpkv/npm/commit/fa377ce975cccd594da8f7a370eb14f7f48d0039) Thanks [@konopkov](https://github.com/konopkov)! - Hide pull requests of accounts you switched off. Their rows stay cached, so re-enabling an account brings its pull requests back without a provider round trip, and a URL naming one still resolves — the TUI list, the web queue, and its filter sidebar simply stop listing them, and the review badge stops counting them.
+
 ## 0.16.0
 
 ### Minor Changes
