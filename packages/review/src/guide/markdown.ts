@@ -170,7 +170,8 @@ export const renderMarkdown = (source: string): Rendered => {
       continue
     }
 
-    if (/^\d+\.\s+/.test(line)) {
+    const orderedStart = /^(\d+)\.\s+/.exec(line)?.[1]
+    if (orderedStart !== undefined) {
       flush()
       const items: Array<string> = []
       while (index < lines.length && /^\d+\.\s+/.test(lines[index] ?? "")) {
@@ -185,7 +186,8 @@ export const renderMarkdown = (source: string): Rendered => {
         }
         items.push(`<li>${renderInline(item)}</li>`)
       }
-      out.push(`<ol>${items.join("")}</ol>`)
+      const start = orderedStart === "1" ? "" : ` start="${orderedStart}"`
+      out.push(`<ol${start}>${items.join("")}</ol>`)
       continue
     }
 

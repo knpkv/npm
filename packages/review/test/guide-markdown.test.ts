@@ -195,3 +195,36 @@ test("ordered continuations preserve the procedural sequence and item ownership"
     window.close()
   }
 })
+
+/** The first decimal marker sets semantic numbering; continuation content stays in that item. */
+test("ordered lists preserve their starting marker and supported continuation content", () => {
+  for (const [marker, expected] of [["3", 3], ["1", 1], ["0", 0], ["003", 3], ["42", 42]]) {
+    const window = new Window()
+    try {
+      window.document.body.innerHTML = renderMarkdown(
+        `${marker}. Deploy **canary**\n   Check \`health\`\n4. Expand rollout\n\nFollowing paragraph.`
+      ).html
+      const list = window.document.querySelector("ol")
+      assert.equal(list?.start, expected, String(marker))
+      assert.deepEqual(
+        [...window.document.querySelectorAll("ol > li")].map((item) => item.textContent),
+        ["Deploy canary Check health", "Expand rollout"]
+      )
+      assert.equal(list?.querySelector("strong")?.textContent, "canary")
+      assert.equal(list?.querySelector("code")?.textContent, "health")
+      assert.equal(window.document.querySelector("p")?.textContent, "Following paragraph.")
+      assert.equal(list?.getAttribute("start"), marker === "1" ? null : marker)
+    } finally {
+      window.close()
+    }
+  }
+  assert.equal(
+    renderMarkdown("3. Third\n\n8. Eighth").html,
+    "<ol start=\"3\"><li>Third</li></ol>\n<ol start=\"8\"><li>Eighth</li></ol>"
+  )
+  assert.equal(renderMarkdown("3\" onclick=\"bad. Text").html, "<p>3&quot; onclick=&quot;bad. Text</p>")
+  assert.equal(
+    renderMarkdown("9007199254740993. Exact decimal").html,
+    "<ol start=\"9007199254740993\"><li>Exact decimal</li></ol>"
+  )
+})

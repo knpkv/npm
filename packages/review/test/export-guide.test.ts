@@ -145,3 +145,19 @@ it("ships the documented embedded diagram initializer as a self-contained packag
   const diagrams = await import("@knpkv/review/guide/diagrams")
   expect(diagrams.mountGuideDiagrams).toBeTypeOf("function")
 })
+
+it.effect("exports ordered-list starting numbers before client hydration", () =>
+  Effect.gen(function*() {
+    const page = yield* exportGuide({ guide: { ...guide, intent: "3. Deploy canary\n4. Expand rollout" }, patch })
+    const window = new Window()
+    try {
+      window.document.body.innerHTML = page.html
+      expect(window.document.querySelector(".review-prose ol")?.getAttribute("start")).toBe("3")
+      expect([...window.document.querySelectorAll(".review-prose ol > li")].map((item) => item.textContent)).toEqual([
+        "Deploy canary",
+        "Expand rollout"
+      ])
+    } finally {
+      window.close()
+    }
+  }))
