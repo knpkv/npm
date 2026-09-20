@@ -572,3 +572,23 @@ test("unquoted backslash digits remain a literal path rather than an octal escap
     parsed(`diff --git a/${name} b/${name}\n--- a/${name}\n+++ b/${name}\n@@ -1 +1 @@\n-old\n+new\n`).files[0]
   expect(file?.path).toBe(name)
 })
+
+test("mode transitions require both text sides while creation and deletion modes remain valid", () => {
+  const added = "--- /dev/null\n+++ b/a\n@@ -0,0 +1 @@\n+new\n"
+  const deleted = "--- a/a\n+++ /dev/null\n@@ -1 +0,0 @@\n-old\n"
+  const header = "diff --git a/a b/a\n"
+  for (const body of [added, deleted]) {
+    expect.soft(parsePatch(header + "old mode 100644\nnew mode 100755\n" + body)._tag).toBe("PatchInvalid")
+  }
+  assert.equal(parsed(header + "new file mode 100644\n" + added).files[0]?.status, "added")
+  assert.equal(parsed(header + "deleted file mode 100644\n" + deleted).files[0]?.status, "deleted")
+  for (const oldMode of ["100644", "120000"]) {
+    const file =
+      parsed(header + `old mode ${oldMode}\nnew mode 100755\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+new\n`).files[0]
+    assert.equal(file?.status, "modified")
+    assert.equal(file?.oldMode, oldMode)
+    assert.equal(file?.newMode, "100755")
+  }
+  assert.equal(parsed(header + "old mode 100644\nnew mode 100755\n").files[0]?.status, "modified")
+  assert.equal(parsed(header + "new file mode 100644\n").files[0]?.status, "added")
+})

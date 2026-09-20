@@ -117,13 +117,16 @@ export const renderMarkdown = (source: string): Rendered => {
       continue
     }
 
-    const fence = /^```[ \t]*([^`]*)$/.exec(line)
+    const fence = /^(`{3,})[ \t]*([^`]*)$/.exec(line)
     if (fence !== null) {
       flush()
-      const lang = (fence[1] ?? "").trim().split(/\s+/)[0] ?? ""
+      const delimiter = fence[1] ?? "```"
+      const lang = (fence[2] ?? "").trim().split(/\s+/)[0] ?? ""
       const body: Array<string> = []
       index += 1
-      while (index < lines.length && !/^```\s*$/.test(lines[index] ?? "")) {
+      while (index < lines.length) {
+        const closing = /^(`{3,})[ \t]*$/.exec(lines[index] ?? "")
+        if (closing !== null && (closing[1]?.length ?? 0) >= delimiter.length) break
         body.push(lines[index] ?? "")
         index += 1
       }
@@ -171,8 +174,16 @@ export const renderMarkdown = (source: string): Rendered => {
       flush()
       const items: Array<string> = []
       while (index < lines.length && /^\d+\.\s+/.test(lines[index] ?? "")) {
-        items.push(`<li>${renderInline((lines[index] ?? "").replace(/^\d+\.\s+/, ""))}</li>`)
+        let item = (lines[index] ?? "").replace(/^\d+\.\s+/, "")
         index += 1
+        while (
+          index < lines.length && /^\s{2,}\S/.test(lines[index] ?? "") &&
+          !/^\s*(?:[-*]|\d+\.)\s+/.test(lines[index] ?? "")
+        ) {
+          item += ` ${(lines[index] ?? "").trim()}`
+          index += 1
+        }
+        items.push(`<li>${renderInline(item)}</li>`)
       }
       out.push(`<ol>${items.join("")}</ol>`)
       continue

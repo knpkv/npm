@@ -27,7 +27,7 @@ const program = Effect.gen(function*() {
     format: "iife",
     define: { "process.env.NODE_ENV": "\"production\"" }
   })
-  const diagrams = yield* bundle("src/guide/diagrams.ts", { platform: "browser", format: "iife" })
+  const diagrams = yield* bundle("src/guide/diagram-client.ts", { platform: "browser", format: "iife" })
   yield* fs.writeFileString(
     "dist/guide/assets.js",
     `export const css = ${JSON.stringify(css)};\nexport const client = ${
@@ -36,6 +36,8 @@ const program = Effect.gen(function*() {
       )
     };\nexport const diagrams = ${JSON.stringify(diagrams)};\n`
   )
+  const embeddedDiagrams = yield* bundle("src/guide/diagrams.ts", { platform: "browser", format: "esm" })
+  yield* fs.writeFileString("dist/guide/diagrams.js", embeddedDiagrams)
   yield* fs.copyFile("src/guide/style.css", "dist/guide/style.css")
 })
 

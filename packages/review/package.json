@@ -33,6 +33,10 @@
       "types": "./dist/guide/export.d.ts",
       "import": "./dist/guide/export.js"
     },
+    "./guide/diagrams": {
+      "types": "./dist/guide/diagrams.d.ts",
+      "import": "./dist/guide/diagrams.js"
+    },
     "./guide/styles.css": "./dist/guide/style.css"
   },
   "files": [

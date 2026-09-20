@@ -14,6 +14,32 @@ import { ReviewProfileControl, ReviewResultStatus } from "@knpkv/review/react"
 `@knpkv/review/guide` owns the guide and findings schemas, chapter coverage, and
 source-line placement. `@knpkv/review/guide/react` exports `GuidePage` and
 `GuideUsage`; import `@knpkv/review/guide/styles.css` once when embedding them.
+For Mermaid in an embedded page, mount the bundled initializer on a wrapper after
+React commits, and return its cleanup when the wrapper unmounts. No separate
+Mermaid dependency or security configuration is needed:
+
+```tsx
+import { mountGuideDiagrams } from "@knpkv/review/guide/diagrams"
+import { GuidePage } from "@knpkv/review/guide/react"
+import { useEffect, useRef, type ComponentProps } from "react"
+
+export const EmbeddedGuide = (props: ComponentProps<typeof GuidePage>) => {
+  const root = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (root.current !== null) return mountGuideDiagrams(root.current)
+  }, [])
+  return (
+    <div ref={root}>
+      <GuidePage {...props} />
+    </div>
+  )
+}
+```
+
+The initializer handles newly mounted content, theme changes and print lifecycle;
+ordinary fenced code does not start a Mermaid render. Without JavaScript, Mermaid
+remains source text. Standalone exports initialize diagrams automatically.
+
 `@knpkv/review/guide/export` exports `exportGuide`, an Effect returning the HTML
 and placement counts or a typed `GuideExportError`. It validates inputs and
 requires each changed file to appear exactly once. Default Git prefixes work

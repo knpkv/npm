@@ -6,6 +6,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { createRoot } from "react-dom/client"
 import { expect, it } from "vitest"
 import { GuidePage, GuideUsage } from "../src/guide/view.js"
+import { observeGuideDiagrams } from "../src/guide/diagram-mount.js"
 import guideStyles from "../src/guide/style.css?raw"
 
 it("prints intent and verdict from either tab while screen navigation exposes one panel", async () => {
@@ -290,5 +291,55 @@ it("server-renders a print-only receipt outside the closed screen disclosure", a
     } finally {
       await page.happyDOM.close()
     }
+  }
+})
+
+it("mounts embedded diagrams, skips ordinary code, and retains sources through cleanup and remount", async () => {
+  const host = document.createElement("div")
+  document.body.append(host)
+  const root = createRoot(host)
+  const calls: Array<{ readonly source: string; readonly theme: string }> = []
+  const draw = async (nodes: Array<HTMLElement>, theme: "dark" | "neutral") => {
+    for (const node of nodes) {
+      calls.push({ source: node.textContent, theme })
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg")
+      svg.setAttribute("viewBox", "0 0 100 50")
+      node.replaceChildren(svg)
+      node.dataset.processed = "true"
+    }
+  }
+  const page = (intent: string) => (
+    <GuidePage
+      guide={{ title: "Embedded", intent, sections: [], unplacedFiles: [], review: { gitRef: "head" } }}
+      patch={parsed("")}
+      findings={{ checklist: [], issues: [] }}
+    />
+  )
+  let stop = () => {}
+  try {
+    await act(async () => root.render(page("```ts\nconst value = 1\n```")))
+    stop = observeGuideDiagrams(host, draw)
+    expect(calls).toHaveLength(0)
+    expect(host.querySelector("pre code")?.textContent).toBe("const value = 1")
+    const source = "flowchart LR; A-->B"
+    await act(async () => root.render(page(`\`\`\`mermaid\n${source}\n\`\`\``)))
+    await expect.poll(() => host.querySelectorAll(".mermaid svg").length).toBe(1)
+    expect(calls).toEqual([{ source, theme: "neutral" }])
+    stop()
+    const dark = [...host.querySelectorAll<HTMLButtonElement>("button")].find((button) => button.textContent === "Dark")
+    if (dark === undefined) throw new TypeError("Missing dark theme control")
+    await act(async () => dark.click())
+    expect(calls).toHaveLength(1)
+    stop = observeGuideDiagrams(host, draw)
+    await expect.poll(() => calls.length).toBe(2)
+    expect(calls[1]).toEqual({ source, theme: "dark" })
+    expect(host.querySelectorAll(".mermaid svg")).toHaveLength(1)
+    stop()
+    stop = observeGuideDiagrams(host, draw)
+    expect(calls).toHaveLength(2)
+  } finally {
+    stop()
+    await act(async () => root.unmount())
+    host.remove()
   }
 })

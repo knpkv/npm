@@ -137,3 +137,8 @@ it.effect("rejects unsafe PR numbers and preserves provider-native identifiers t
       expect(decoded.findings.issues[0]).toMatchObject({ id: 1, line: 1 })
     }
   }))
+
+it("ships the documented embedded diagram initializer as a self-contained package export", async () => {
+  const diagrams = await import("@knpkv/review/guide/diagrams")
+  expect(diagrams.mountGuideDiagrams).toBeTypeOf("function")
+})

@@ -155,3 +155,43 @@ test("balanced and escaped destination parentheses preserve exact URLs", () => {
     assert.equal(renderInline(source).includes("<a "), false, source)
   }
 })
+
+test("variable-length backtick fences retain shorter runs and terminate before following prose", () => {
+  for (
+    const [opening, closing, code] of [
+      ["```ts", "````", "const value = 1"],
+      ["````markdown", "````", "```ts\nvalue\n```"],
+      ["`````c++ metadata", "``````  ", "````\nvalue"],
+      ["```", "```", "plain"]
+    ]
+  ) {
+    const window = new Window()
+    try {
+      window.document.body.innerHTML = renderMarkdown(`${opening}\n${code}\n${closing}\n\nFollowing prose.`).html
+      assert.equal(window.document.querySelectorAll("pre").length, 1)
+      assert.equal(window.document.querySelector("pre")?.textContent, code)
+      assert.equal(window.document.querySelector("p")?.textContent, "Following prose.")
+    } finally {
+      window.close()
+    }
+  }
+  assert.equal(renderMarkdown("````mermaid\nflowchart LR; A-->B\n````").mermaid, true)
+  assert.equal(renderMarkdown("```ts\nunclosed").html, "<pre><code class=\"lang-ts\">unclosed</code></pre>")
+})
+
+test("ordered continuations preserve the procedural sequence and item ownership", () => {
+  const window = new Window()
+  try {
+    window.document.body.innerHTML =
+      renderMarkdown("1. Prepare\n   Verify `input`\n   Keep the **lock**\n2. Publish\n\nFollowing paragraph.").html
+    assert.equal(window.document.querySelectorAll("ol").length, 1)
+    const items = [...window.document.querySelectorAll("ol > li")]
+    assert.deepEqual(items.map((item) => item.textContent), ["Prepare Verify input Keep the lock", "Publish"])
+    assert.equal(items[0]?.querySelector("code")?.textContent, "input")
+    assert.equal(window.document.querySelector("p")?.textContent, "Following paragraph.")
+    assert.equal(renderMarkdown("1. One\n2. Two").html, "<ol><li>One</li><li>Two</li></ol>")
+    assert.equal(renderMarkdown("1. One\nUnindented prose.").html, "<ol><li>One</li></ol>\n<p>Unindented prose.</p>")
+  } finally {
+    window.close()
+  }
+})

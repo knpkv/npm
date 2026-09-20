@@ -300,6 +300,9 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
     }
     if ((oldMode === undefined) !== (newMode === undefined)) return invalid("Unpaired mode transition")
     if (fileMode !== undefined && oldMode !== undefined) return invalid("Conflicting file mode headers")
+    if (oldMode !== undefined && (source === "/dev/null" || destination === "/dev/null")) {
+      return invalid("Mode transition requires both file sides")
+    }
     if (binary && source !== undefined) return invalid("Mixed binary and text bodies")
     if (source !== undefined && hunks.length === 0) return invalid("Text markers require hunks")
     if (source === "/dev/null" && destination === "/dev/null") return invalid("Both file sides are absent")

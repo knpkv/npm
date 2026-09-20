@@ -18,3 +18,5 @@ Retain completed diagrams during print media transitions instead of clearing the
 Measure diagrams outside hidden tabs so theme changes preserve their printable dimensions.
 
 Reject duplicate or contradictory patch records, isolate diagram failures, and display a supplied comparison base.
+
+Expose a bundled diagram initializer for embedded guides, with host-owned cleanup, theme updates and print preservation. Retain variable-length code fences and ordered-list continuations; reject mode transitions on absent patch sides.
