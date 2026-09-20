@@ -123,9 +123,8 @@ export class ReconcileError extends Data.TaggedError("ReconcileError")<{
 }> {}
 
 /**
- * Gaps below this are noise, not work: Jira floors worklogs to the minute, so a shorter
- * proposal could not be written faithfully even if it were offered. No other rounding applies —
- * proposals are exact to the minute rather than tidied to a quarter hour.
+ * Jira floors worklogs to the minute. Clockify proposals retain exact positive seconds;
+ * each provider's proposal floor matches its own confirmation floor.
  */
 const MINIMUM_PROPOSAL_SECONDS = 60
 

@@ -1163,7 +1163,7 @@ export const buildSessionProposals = (
   credits: ReadonlyArray<TicketDayCredit>,
   recorded: ReadonlyArray<RecordedBucket>,
   options: {
-    /** Below this, a gap is noise and is not offered. Matches the 60s Jira worklog floor. */
+    /** Jira's minimum worklog duration; Clockify accepts exact positive seconds. */
     readonly minimumSeconds: number
     /** Days withheld from proposals entirely — e.g. a day with a Timer still running. */
     readonly excludedDays: ReadonlyArray<string>
@@ -1183,9 +1183,9 @@ export const buildSessionProposals = (
     ...(options.consumptionRows ?? [])
   ]
 
-  const gap = (sessionSeconds: number, recordedSeconds: number): number => {
+  const gap = (sessionSeconds: number, recordedSeconds: number, minimumSeconds: number): number => {
     const delta = sessionSeconds - recordedSeconds
-    return delta >= options.minimumSeconds ? delta : 0
+    return delta >= minimumSeconds ? delta : 0
   }
 
   return credits
@@ -1234,8 +1234,8 @@ export const buildSessionProposals = (
         ),
         // Zero for a side that is out of scope, never the whole day: its tally was not read, so the
         // only defensible statement about its gap is that this run makes none.
-        clockifyDelta: sides.clockify ? gap(credit.seconds, clockifySeconds + correctedClockifySeconds) : 0,
-        jiraDelta: sides.jira ? gap(credit.seconds, jiraSeconds + correctedJiraSeconds) : 0,
+        clockifyDelta: sides.clockify ? gap(credit.seconds, clockifySeconds + correctedClockifySeconds, 1) : 0,
+        jiraDelta: sides.jira ? gap(credit.seconds, jiraSeconds + correctedJiraSeconds, options.minimumSeconds) : 0,
         sessionIds: credit.sessionIds
       }
     })

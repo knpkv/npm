@@ -1014,9 +1014,22 @@ describe("buildSessionProposals", () => {
     expect(proposals).toEqual([])
   })
 
-  it("drops sub-minute gaps, which Jira could not record faithfully anyway", () => {
-    const proposals = buildSessionProposals(credit(45), [], { minimumSeconds: 60, excludedDays: [] })
-    expect(proposals).toEqual([])
+  it("offers exact sub-minute Clockify credit without offering an unwritable Jira gap", () => {
+    const options = { minimumSeconds: 60, excludedDays: [] }
+    expect(buildSessionProposals(credit(0), [], options)).toEqual([])
+    expect(buildSessionProposals(credit(45), [], options)[0]).toMatchObject({
+      sessionSeconds: 45,
+      clockifyDelta: 45,
+      jiraDelta: 0
+    })
+    expect(buildSessionProposals(credit(45), [], { ...options, sides: { clockify: true, jira: false } })[0])
+      .toMatchObject({ clockifyDelta: 45, jiraDelta: 0 })
+    expect(buildSessionProposals(credit(45), [], { ...options, sides: { clockify: false, jira: true } }))
+      .toEqual([])
+    expect(buildSessionProposals(credit(60), [], options)[0]).toMatchObject({
+      clockifyDelta: 60,
+      jiraDelta: 60
+    })
   })
 
   it("withholds an excluded day entirely", () => {

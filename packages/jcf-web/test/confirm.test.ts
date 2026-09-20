@@ -133,6 +133,63 @@ const rowFor = (plan: HeldPlan, ticketKey: string, day: string) =>
   plan.plan.rows.find((row) => row.rowId === rowId(ticketKey, day))
 
 describe("preview and provider agreement", () => {
+  it.effect("discovers 45 credited seconds and previews exactly the Clockify write it confirms", () =>
+    Effect.gen(function*() {
+      const options: FakeHeadlessOptions = {
+        config: { sessionIdleCapSeconds: 45 },
+        transcripts: {
+          "repo/session-a.jsonl": transcript({
+            branch: `feature/${TICKET}-otel`,
+            minutes: 0,
+            sessionId: "session-a",
+            startMs: at(10, 0)
+          })
+        }
+      }
+      const { value, world } = yield* run(
+        Effect.gen(function*() {
+          const plan = yield* readPlan
+          const preview = previewWrite({ plan: plan.plan, entries: [] }, {
+            kind: "confirm",
+            request: { planId: plan.planId, rowId: rowId(TICKET, DAY) }
+          })
+          return { plan, preview, outcome: yield* confirm(plan) }
+        }),
+        options
+      )
+      expect(value.plan.plan.rows.find((row) => row.rowId === rowId(TICKET, DAY))?.proposal)
+        .toMatchObject({ activeSeconds: 45, clockifyDelta: 45, jiraDelta: 0 })
+      expect(value.preview.map((entry) => ({ source: entry.source, seconds: (entry.endMs - entry.startMs) / 1000 })))
+        .toEqual([{ source: "clockify", seconds: 45 }])
+      expect(value.outcome._tag).toBe("Written")
+      if (value.outcome._tag !== "Written") return
+      expect(value.outcome.result.clockify).toMatchObject({ _tag: "Written", seconds: 45 })
+      expect(value.outcome.result.jira._tag).toBe("NothingOwed")
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toEqual([])
+
+      const onlyClockify = yield* run(
+        Effect.gen(function*() {
+          const plan = yield* readClockifyOnlyPlan
+          const preview = previewWrite({ plan: plan.plan, entries: [] }, {
+            kind: "confirm",
+            request: { planId: plan.planId, rowId: rowId(TICKET, DAY) }
+          })
+          return { preview, outcome: yield* confirm(plan) }
+        }),
+        options
+      )
+      expect(onlyClockify.value.preview.map((entry) => entry.source)).toEqual(["clockify"])
+      expect(onlyClockify.value.outcome._tag).toBe("Written")
+      expect(onlyClockify.world.createdClockifyEntries).toHaveLength(1)
+      expect(onlyClockify.world.jiraWorklogs).toEqual([])
+
+      const onlyJira = yield* run(readJiraOnlyPlan, options)
+      expect(onlyJira.value.plan.rows).toEqual([])
+      expect(onlyJira.world.createdClockifyEntries).toEqual([])
+      expect(onlyJira.world.jiraWorklogs).toEqual([])
+    }))
+
   for (
     const scenario of [
       {

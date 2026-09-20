@@ -2,6 +2,8 @@ import { expect, type Page, test } from "@playwright/test"
 import { Schema } from "effect"
 
 const open = async (page: Page) => {
+  // Start every tab on the saved-entry fixture's week, regardless of today's date.
+  await page.context().addInitScript(() => window.localStorage.setItem("jcf_web_week", "2026-09-07"))
   const response = await page.request.post("/__test/reset?savedEditing=true")
   expect(response.status(), await response.text()).toBe(200)
   const setup = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(await response.json())

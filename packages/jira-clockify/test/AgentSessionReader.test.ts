@@ -51,31 +51,32 @@ const withTranscripts = (files: Readonly<Record<string, string>>, sessionRoots: 
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer))
 
 describe("Claude and Codex session discovery", () => {
+  // Literal Claude Code Windows project slug; the fixture must not derive it from our prefilter.
   it.effect("discovers Windows Claude roots without admitting sibling, drive, or POSIX case variants", () =>
     withTranscripts(
       {
-        ".claude/projects/C:-Work-Repo/case.jsonl": JSON.stringify({
+        ".claude/projects/C--Work-Repo/case.jsonl": JSON.stringify({
           type: "user",
           sessionId: "windows-case",
           cwd: "C:/Work/Repo/src",
           timestamp: at(10),
           message: { content: "Case variant" }
         }),
-        ".claude/projects/C:-Work-Repo/backslash.jsonl": JSON.stringify({
+        ".claude/projects/C--Work-Repo/backslash.jsonl": JSON.stringify({
           type: "user",
           sessionId: "windows-backslash",
           cwd: "C:\\Work\\Repo\\src",
           timestamp: at(11),
           message: { content: "Separator variant" }
         }),
-        ".claude/projects/C:-Work-Repo/sibling.jsonl": JSON.stringify({
+        ".claude/projects/C--Work-Repo/sibling.jsonl": JSON.stringify({
           type: "user",
           sessionId: "windows-sibling",
           cwd: "C:/Work/Repository",
           timestamp: at(12),
           message: { content: "Out of root" }
         }),
-        ".claude/projects/C:-Work-Repo/drive.jsonl": JSON.stringify({
+        ".claude/projects/C--Work-Repo/drive.jsonl": JSON.stringify({
           type: "user",
           sessionId: "windows-other-drive",
           cwd: "D:/Work/Repo",
@@ -100,7 +101,7 @@ describe("Claude and Codex session discovery", () => {
   it.effect("discovers a Claude project beneath a backslash-configured Windows root", () =>
     withTranscripts(
       {
-        ".claude/projects/C:-Work-Repo/nested.jsonl": JSON.stringify({
+        ".claude/projects/C--Work-Repo/nested.jsonl": JSON.stringify({
           type: "user",
           sessionId: "windows-root",
           cwd: "c:/work/repo/src",
@@ -119,14 +120,14 @@ describe("Claude and Codex session discovery", () => {
     Effect.forEach(["C:/", "C:\\"], (root) =>
       withTranscripts(
         {
-          ".claude/projects/C:-Work-Repo/inside.jsonl": JSON.stringify({
+          ".claude/projects/C--Work-Repo/inside.jsonl": JSON.stringify({
             type: "user",
             sessionId: "same-drive",
             cwd: "c:\\Work\\Repo",
             timestamp: at(16),
             message: { content: "In opted-in drive" }
           }),
-          ".claude/projects/D:-Work-Repo/outside.jsonl": JSON.stringify({
+          ".claude/projects/D--Work-Repo/outside.jsonl": JSON.stringify({
             type: "user",
             sessionId: "other-drive",
             cwd: "D:/Work/Repo",
@@ -144,14 +145,14 @@ describe("Claude and Codex session discovery", () => {
 
   it.effect("discovers a non-root Windows prefix with a trailing separator", () =>
     withTranscripts({
-      ".claude/projects/C:-Work-Repo/nested.jsonl": JSON.stringify({
+      ".claude/projects/C--Work-Repo/nested.jsonl": JSON.stringify({
         type: "user",
         sessionId: "trailing-root",
         cwd: "C:/Work/Repo/src",
         timestamp: at(18),
         message: { content: "Inside" }
       }),
-      ".claude/projects/C:-Work-Repo2/sibling.jsonl": JSON.stringify({
+      ".claude/projects/C--Work-Repo2/sibling.jsonl": JSON.stringify({
         type: "user",
         sessionId: "sibling",
         cwd: "C:/Work/Repo2",

@@ -10,6 +10,7 @@ const decodeObservations = Schema.decodeUnknownSync(Schema.Struct({
 
 // Real application, owner authentication, provider reads and manual writes. No route response stubs.
 test("first load without a scan shows saved time and permits manual logging without reading sessions", async ({ page }) => {
+  await page.context().addInitScript(() => window.localStorage.setItem("jcf_web_week", "2026-09-07"))
   const reset = await page.request.post("/__test/reset?seed=false")
   expect(reset.ok()).toBe(true)
   const setup = decodeSetup(await reset.json())

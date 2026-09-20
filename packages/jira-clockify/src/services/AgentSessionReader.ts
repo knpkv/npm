@@ -292,9 +292,9 @@ const TRANSCRIPT_SUFFIX = ".jsonl"
 
 /**
  * A working directory as the Claude CLI names the project directory holding its transcripts:
- * every `/` and `.` replaced by `-`, so `/Users/me/dev/knpkv.dev` becomes `-Users-me-dev-knpkv-dev`.
+ * `/`, `.`, and the Windows drive colon become `-`, so `C:/Work/Repo` becomes `C--Work-Repo`.
  */
-const encodeProjectDir = (cwd: string): string => cwd.replace(/[/.]/g, "-")
+const encodeProjectDir = (cwd: string): string => cwd.replace(/[/:.]/g, "-")
 
 /**
  * True when a project directory could hold a session inside one of the Session Roots.
