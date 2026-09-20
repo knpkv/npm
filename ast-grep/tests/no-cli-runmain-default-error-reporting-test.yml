@@ -1,0 +1,15 @@
+id: no-cli-runmain-default-error-reporting
+valid:
+  - |
+    NodeRuntime.runMain(program, { disableErrorReporting: true })
+  - |
+    NodeRuntime.runMain(program, { disableErrorReporting: true, teardown: forceExitTeardown })
+invalid:
+  - |
+    NodeRuntime.runMain(program)
+  - |
+    NodeRuntime.runMain(program, { teardown: forceExitTeardown })
+  - |
+    NodeRuntime.runMain(program, { disableErrorReporting: false })
+  - |
+    NodeRuntime.runMain(makeProgram({ disableErrorReporting: true }), { teardown: forceExitTeardown })

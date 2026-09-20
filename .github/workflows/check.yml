@@ -53,6 +53,11 @@ jobs:
           node-version: 26.7.0
       - name: Configure canonical Effect remote
         run: git remote add effect-upstream https://github.com/Effect-TS/effect.git
+      # Workspace packages publish their types from `dist`, so without a build every `@knpkv/*`
+      # import resolves to `any`, and the Effect diagnostics then report requirements they cannot
+      # see through — and reject the suppressions for the rules that only fire once types are real.
+      # Linting unbuilt lints a program that does not exist.
+      - run: pnpm check
       - run: pnpm lint
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}

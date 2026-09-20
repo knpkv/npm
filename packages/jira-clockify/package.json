@@ -5,11 +5,23 @@
   "license": "MIT",
   "author": "knpkv",
   "type": "module",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing.js": "./src/testing/fakeHeadless.ts",
+    "./*.js": "./src/*.ts"
+  },
   "bin": {
     "jcf": "dist/src/bin.js"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "main": "dist/src/index.js",
+    "exports": {
+      ".": "./dist/src/index.js",
+      "./testing.js": "./dist/src/testing/fakeHeadless.js",
+      "./*.js": "./dist/src/*.js"
+    }
   },
   "files": [
     "dist",
@@ -20,7 +32,7 @@
   "scripts": {
     "start": "tsx src/bin.ts",
     "build": "tsc -b && chmod +x dist/src/bin.js",
-    "check": "tsc -b tsconfig.json",
+    "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
   },
@@ -28,6 +40,8 @@
     "@effect/atom-react": "4.0.0-rc.109",
     "@effect/platform-node": "4.0.0-rc.109",
     "@knpkv/agent-skills": "workspace:^",
+    "@knpkv/ai-claude": "workspace:^",
+    "@knpkv/ai-codex": "workspace:^",
     "@knpkv/atlassian-common": "workspace:^",
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",

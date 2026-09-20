@@ -3,10 +3,17 @@ import { JiraApiClient, make } from "@knpkv/jira-api-client"
 import { JiraAuth, type JiraAuthService } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
+import { systemError } from "effect/PlatformError"
 import * as Redacted from "effect/Redacted"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
+
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -61,7 +68,21 @@ const makeAuthService = (isLoggedIn: JiraAuthService["isLoggedIn"]): JiraAuthSer
 const makeAuthLayer = (loggedIn: boolean) => Layer.succeed(JiraAuth, makeAuthService(() => Effect.succeed(loggedIn)))
 
 // JiraAuth whose isLoggedIn fails with a platform error (e.g. unreadable token file).
-const makeAuthFailLayer = (message: string) => Layer.succeed(JiraAuth, makeAuthService(() => Effect.fail({ message })))
+const makeAuthFailLayer = (message: string) =>
+  Layer.succeed(
+    JiraAuth,
+    makeAuthService(() =>
+      Effect.fail(
+        systemError({
+          _tag: "PermissionDenied",
+          module: "FileSystem",
+          method: "readFileString",
+          description: message,
+          pathOrDescriptor: "~/.jira/token"
+        })
+      )
+    )
+  )
 
 const LoggedIn = makeAuthLayer(true)
 
@@ -145,7 +166,8 @@ describe("fetchTicketByKey", () => {
       const result = yield* fetchTicketByKey("PROJ-7")
       expect(result._tag).toBe("FetchError")
       if (result._tag !== "FetchError") return
-      expect(result.message).toBe("token file unreadable")
+      // The platform error is surfaced verbatim, so the cause survives into the message.
+      expect(result.message).toContain("token file unreadable")
     }).pipe(
       Effect.provide(makeJiraLayer(() => ({ data: issueFixture, response: { ok: true, status: 200 } }))),
       Effect.provide(makeAuthFailLayer("token file unreadable"))

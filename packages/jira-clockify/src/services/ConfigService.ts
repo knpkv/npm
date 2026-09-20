@@ -4,7 +4,7 @@
  * **Mental model**
  *
  * - **File-backed with defaults**: Reads `~/.jcf/config.json`, merging stored values over
- *   {@link defaultConfig}. Missing or corrupt files silently fall back to defaults.
+ *   {@link defaultJcfConfig}. Missing or corrupt files silently fall back to defaults.
  * - **Partial updates**: {@link ConfigServiceContract.set} merges a patch over the current config.
  *
  * @module
@@ -13,11 +13,17 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
+import { defaultSessionAgentSettings, SessionAgentSettings } from "../agent/agentSettings.js"
+import { isTicketKey } from "../agent/sessions.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 
 export interface JcfConfig {
+  /** Provider, model and effort read afresh for each session attribution or description. */
+  readonly sessionAgent: SessionAgentSettings
   readonly defaultJql: string
   readonly refreshInterval: number
   readonly projectMap: Record<string, string>
@@ -25,16 +31,75 @@ export interface JcfConfig {
   readonly defaultProjectId: string | null
   readonly defaultProjectName: string | null
   readonly defaultBillable: boolean
+  /**
+   * Session Roots: directory prefixes (`~` allowed) whose Agent Sessions may become Proposed
+   * Worklogs. Empty means nothing is opted in, so `reconcile --agent` finds nothing — an
+   * allowlist, because a denylist grows with every side project.
+   */
+  readonly sessionRoots: ReadonlyArray<string>
+  /**
+   * Standing Attributions: directory prefix → Issue Key, for recurring work with no natural
+   * ticket (release notes, known-issues documents). Matched longest-prefix-first, and always
+   * loses to a branch or path signal, so adding one can only ever add attribution.
+   */
+  readonly sessionTicketMap: Record<string, string>
+  /**
+   * Idle Cap in seconds: the longest gap between two Session Activity events still counted as
+   * work. 5 minutes is the only setting that produced defensible daily totals over the author's
+   * transcripts; 15 gave 6–12h days and 30 gave 11–13h.
+   */
+  readonly sessionIdleCapSeconds: number
+  /**
+   * Below this Coding Agent confidence, an attribution is reported but never offered for
+   * confirmation, so "yes" at the confirm prompt stays usually-correct.
+   */
+  readonly sessionConfidenceFloor: number
+  /**
+   * Dwell Floor in seconds: the shortest stretch that may own time on its own.
+   *
+   * Concurrent sessions interleave their prompts, and read literally that says the work changed
+   * ticket every few minutes. It did not. Fifteen minutes is a working granularity; zero turns the
+   * rule off and reports the raw interleaving, which is a day of unreadable slivers.
+   */
+  readonly sessionDwellSeconds: number
+  /**
+   * Whether a proposal may name an Issue Key that is not assigned to you.
+   *
+   * `"assigned"` offers only your own tickets, because a branch cannot tell authoring from
+   * reviewing: checking out a colleague's PR puts their key on the branch, and that key then arrives
+   * as a proposal for your timesheet. `"any"` offers whatever the signals placed — right for someone
+   * who works on tickets assigned to a team rather than a person.
+   *
+   * Withheld, never dropped: an unowned row is still reported, with its hours, and
+   * {@link JcfConfig.sessionOwnershipOverrides} is how one becomes proposable for good.
+   */
+  readonly sessionOwnership: "assigned" | "any"
+  /**
+   * Issue Keys to treat as yours whatever Jira says — your work on somebody else's ticket.
+   *
+   * Per key rather than a switch, because the honest answer to "is this mine?" differs ticket by
+   * ticket, and answering it once should not have to be answered again next week.
+   */
+  readonly sessionOwnershipOverrides: ReadonlyArray<string>
 }
 
-const defaultConfig: JcfConfig = {
+/** The values every unset field falls back to, and what `jcf config reset` restores. */
+export const defaultJcfConfig: JcfConfig = {
+  sessionAgent: defaultSessionAgentSettings,
   defaultJql: "assignee = currentUser() AND status != Done ORDER BY updated DESC",
   refreshInterval: 30,
   projectMap: {},
   workspaceId: null,
   defaultProjectId: null,
   defaultProjectName: null,
-  defaultBillable: true
+  defaultBillable: true,
+  sessionRoots: [],
+  sessionTicketMap: {},
+  sessionIdleCapSeconds: 300,
+  sessionConfidenceFloor: 0.7,
+  sessionDwellSeconds: 900,
+  sessionOwnership: "assigned",
+  sessionOwnershipOverrides: []
 }
 
 export interface ConfigServiceContract {
@@ -48,6 +113,13 @@ export class ConfigService extends Context.Service<ConfigService, ConfigServiceC
 const CONFIG_DIR = ".jcf"
 const CONFIG_FILE = "config.json"
 
+/** A directory-prefix → Issue Key map, keeping only the entries whose value is a real Issue Key. */
+const ticketMap = <UnparsedInput>(value: UnparsedInput): Record<string, string> | undefined => {
+  const record = stringRecord(value)
+  if (record === undefined) return undefined
+  return Object.fromEntries(Object.entries(record).filter(([, ticketKey]) => isTicketKey(ticketKey)))
+}
+
 const stringRecord = <UnparsedInput>(value: UnparsedInput): Record<string, string> | undefined => {
   if (!Predicate.isObject(value)) return undefined
   const result: Record<string, string> = {}
@@ -58,11 +130,67 @@ const stringRecord = <UnparsedInput>(value: UnparsedInput): Record<string, strin
   return result
 }
 
-const parseConfigPatch = (content: string): Partial<JcfConfig> => {
+const stringArray = <UnparsedInput>(value: UnparsedInput): ReadonlyArray<string> | undefined => {
+  if (!Array.isArray(value)) return undefined
+  return value.every((entry) => Predicate.isString(entry)) ? value : undefined
+}
+
+/**
+ * A finite, positive number of seconds.
+ *
+ * Zero is rejected rather than merely odd: an Idle Cap of zero makes every presence window
+ * zero-length, so both `reconcile --agent` and `watch` report nothing to propose, forever, with
+ * nothing on screen to explain it. `jcf config set idle-cap` already refuses it — this is the same
+ * rule for the file, which is the other way in.
+ */
+const positiveSeconds = <UnparsedInput>(value: UnparsedInput): number | undefined =>
+  Predicate.isNumber(value) && Number.isFinite(value) && value > 0 ? value : undefined
+
+/**
+ * A confidence in `[0, 1]`, or nothing.
+ *
+ * Narrower than {@link nonNegativeNumber} because the value is compared against a confidence that is
+ * itself clamped to `[0, 1]`. There is no `jcf config set` subcommand for this field, so hand-editing
+ * the file is the only way to set it — which is exactly where `70` gets written for "70%". Accepting
+ * it would withhold every Coding Agent attribution from then on, permanently and with nothing to
+ * point at. Out of range falls back to the default instead.
+ */
+const confidence = <UnparsedInput>(value: UnparsedInput): number | undefined =>
+  Predicate.isNumber(value) && Number.isFinite(value) && value >= 0 && value <= 1 ? value : undefined
+
+/**
+ * The stored fields worth keeping, out of whatever `~/.jcf/config.json` happens to contain.
+ *
+ * Exported for testing: this is the one place a hand-edited file meets the rest of jcf, and a value
+ * that gets through here wrongly is one that changes behaviour with nothing on screen to explain it.
+ */
+export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
   const parsed: unknown = JSON.parse(content)
   if (!Predicate.isObject(parsed)) return {}
+  const sessionAgent = Option.getOrUndefined(Schema.decodeUnknownOption(SessionAgentSettings)(parsed.sessionAgent))
   const projectMap = stringRecord(parsed.projectMap)
+  const sessionRoots = stringArray(parsed.sessionRoots)
+  const sessionTicketMap = ticketMap(parsed.sessionTicketMap)
+  const sessionIdleCapSeconds = positiveSeconds(parsed.sessionIdleCapSeconds)
+  // Zero is meaningful here, unlike an Idle Cap: it turns the Dwell Floor off.
+  const sessionDwellSeconds = Predicate.isNumber(parsed.sessionDwellSeconds) &&
+      Number.isFinite(parsed.sessionDwellSeconds) && parsed.sessionDwellSeconds >= 0
+    ? parsed.sessionDwellSeconds
+    : undefined
+  const sessionConfidenceFloor = confidence(parsed.sessionConfidenceFloor)
+  const sessionOwnership = parsed.sessionOwnership === "assigned" || parsed.sessionOwnership === "any"
+    ? parsed.sessionOwnership
+    : undefined
+  const sessionOwnershipOverrides = stringArray(parsed.sessionOwnershipOverrides)?.filter(isTicketKey)
   return {
+    ...((sessionAgent !== undefined) && { sessionAgent }),
+    ...((sessionOwnership !== undefined) && { sessionOwnership }),
+    ...((sessionOwnershipOverrides !== undefined) && { sessionOwnershipOverrides }),
+    ...((sessionRoots !== undefined) && { sessionRoots }),
+    ...((sessionTicketMap !== undefined) && { sessionTicketMap }),
+    ...((sessionIdleCapSeconds !== undefined) && { sessionIdleCapSeconds }),
+    ...((sessionDwellSeconds !== undefined) && { sessionDwellSeconds }),
+    ...((sessionConfidenceFloor !== undefined) && { sessionConfidenceFloor }),
     ...((Predicate.isString(parsed.defaultJql)) && { defaultJql: parsed.defaultJql }),
     ...((Predicate.isNumber(parsed.refreshInterval)) && { refreshInterval: parsed.refreshInterval }),
     ...((projectMap !== undefined) && { projectMap }),
@@ -91,14 +219,14 @@ export const layer = Layer.effect(
 
     const read: Effect.Effect<JcfConfig> = Effect.gen(function*() {
       const exists = yield* fs.exists(filePath)
-      if (!exists) return defaultConfig
+      if (!exists) return defaultJcfConfig
       const content = yield* fs.readFileString(filePath)
       const parsed = yield* Effect.try({
         try: () => parseConfigPatch(content),
         catch: () => ({})
       })
-      return { ...defaultConfig, ...parsed }
-    }).pipe(Effect.catch(() => Effect.succeed(defaultConfig)))
+      return { ...defaultJcfConfig, ...parsed }
+    }).pipe(Effect.catch(() => Effect.succeed(defaultJcfConfig)))
 
     const write = (config: JcfConfig) =>
       Effect.gen(function*() {

@@ -23,6 +23,21 @@ authentication, state-location, certificate, path, and temporary-directory
 variables are forwarded. Use the explicit `environment` option for a custom
 provider key named by Codex `env_key` configuration.
 
+Set `effort` to `minimal`, `low`, `medium`, `high` or `xhigh` to pass an explicit
+`model_reasoning_effort` override. Omitting it preserves the CLI-configured
+default. Availability depends on the selected model; see the
+[Codex configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+Pass `onActivity` to `model` to receive `CodexActivity` during generation,
+including `generateObject`: the supplied prompt, fixed milestones, completed
+visible agent messages, and the final answer after successful process and
+transcript validation. Reasoning, tool, system and authentication events are
+excluded. Prompt events belong within the same authorization boundary as the
+supplied prompt. The callback applies backpressure to the bounded stdout stream;
+cancellation releases the same scoped process. Effect AI response streaming
+remains buffered; this callback supplies live progress. Raw `streamEvents`
+continues to expose native events separately.
+
 Set `promptOnly: true` when the complete input is already present in the prompt.
 This mode ignores user configuration, repository instructions, and command
 rules; removes inherited shell variables; and disables the CLI's shell, code,
@@ -32,6 +47,14 @@ supported disables, and rejects any feature this package has not explicitly
 classified. Inventory discovery must exit successfully and uses the turn's
 timeout and output limits. It is intended for reviewing untrusted text without
 granting that text a host-read path.
+
+The reviewed inventory is **Codex CLI 0.154.0** (140 features), with compatibility
+coverage for 0.153.4 (135 features). The
+[feature decisions](docs/prompt-only-features.md) record every new classification
+and the independent captured fixture. Unknown features still reject the turn;
+compatibility with a newer CLI requires another explicit review. Inventory
+compatibility is tested without generation and does not claim a real-provider
+smoke run.
 
 Structured output uses Codex's `--output-schema` support:
 

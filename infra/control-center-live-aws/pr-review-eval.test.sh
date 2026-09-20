@@ -682,7 +682,8 @@ test_recovery_path_boundary() {
   [[ "$(wc -l <"${calls_file}")" -eq "${calls_before}" ]]
 
   load_recovery_state "${journal}"
-  [[ "${state_root}" == "${original_state_root}" ]]
+  # Recovery returns the physical path; macOS exposes the same temp directory through /var and /private/var.
+  [[ "${state_root}" == "$(cd "${original_state_root}" && pwd -P)" ]]
   cleanup
 }
 

@@ -1,15 +1,15 @@
-import { Effect, Predicate, Stream } from "effect"
+import { Cause, Effect, Predicate, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import type * as Response from "effect/unstable/ai/Response"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import type { CodexModelOptions } from "../model.js"
 import { makeArguments, normalizeOptions, validatePrompt } from "./configuration.js"
-import { invalidRequest, transportToAiError } from "./errors.js"
+import { CodexFailureCause, CodexTransportError, invalidRequest, transportToAiError } from "./errors.js"
 import { makeOutputSchemaFile } from "./outputSchema.js"
-import { resolvePromptOnlyDisabledFeatures, runCodex } from "./process.js"
+import { resolvePromptOnlyDisabledFeatures, streamCodexLines } from "./process.js"
 import { renderPrompt } from "./prompt.js"
-import { type CodexTurn, decodeTranscript } from "./protocol.js"
+import { type CodexTurn, decodeLine, decodeTranscript } from "./protocol.js"
 
 const makeMetadataPart = (turn: CodexTurn, modelId: string | undefined): Response.ResponseMetadataPartEncoded => ({
   id: turn.threadId,
@@ -88,7 +88,9 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
     const schemaFile = providerOptions.responseFormat.type === "json"
       ? yield* makeOutputSchemaFile(dependencies.fileSystem, providerOptions.responseFormat.schema)
       : undefined
-    const stdout = yield* runCodex({
+    const report = modelOptions.onActivity
+    if (report !== undefined) yield* report({ kind: "request", text: prompt })
+    const stdout = yield* streamCodexLines({
       args: makeArguments(options, schemaFile, promptOnlyDisabledFeatures),
       cwd: options.cwd,
       environment: options.environment,
@@ -98,12 +100,43 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
       prompt,
       spawner: dependencies.spawner,
       timeout: options.timeout
-    })
-    return yield* decodeTranscript(stdout)
+    }).pipe(
+      Stream.tap((line) =>
+        Effect.gen(function*() {
+          if (report === undefined) return
+          const event = yield* decodeLine(line)
+          if (event.type === "thread.started") yield* report({ kind: "status", text: "Agent started" })
+          if (event.type === "turn.started") yield* report({ kind: "status", text: "Agent responding" })
+          if (
+            event.type === "item.completed" && event.item?.type === "agent_message" && event.item.text !== undefined
+          ) {
+            yield* report({ kind: "text", text: event.item.text })
+          }
+        })
+      ),
+      Stream.intersperse("\n"),
+      Stream.mkString
+    )
+    const turn = yield* decodeTranscript(stdout)
+    if (report !== undefined) {
+      yield* report({ kind: "response", text: turn.text })
+      yield* report({ kind: "status", text: "Answer received" })
+    }
+    return turn
   })).pipe(
+    Effect.timeout(options.timeout),
     Effect.mapError((error) =>
       Predicate.isTagged(error, "CodexTransportError")
         ? transportToAiError(method, error)
+        : Cause.isTimeoutError(error)
+        ? transportToAiError(
+          method,
+          new CodexTransportError({
+            cause: new CodexFailureCause({ reason: "timeout" }),
+            diagnostic: "Codex turn exceeded its timeout",
+            phase: "timeout"
+          })
+        )
         : error
     )
   )

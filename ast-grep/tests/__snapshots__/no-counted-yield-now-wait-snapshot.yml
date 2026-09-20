@@ -1,0 +1,18 @@
+id: no-counted-yield-now-wait
+snapshots:
+  ? |
+    for (let index = 0; index < 200; index++) {
+      yield* Effect.yieldNow
+    }
+  : labels:
+      - source: |-
+          for (let index = 0; index < 200; index++) {
+            yield* Effect.yieldNow
+          }
+        style: primary
+        start: 0
+        end: 70
+      - source: yield* Effect.yieldNow
+        style: secondary
+        start: 46
+        end: 68
