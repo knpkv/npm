@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { vi } from "vitest"
 import { clockAtOffset, DEFAULT_HOUR_WINDOW, hourWindow, minutesIntoDay, placeBlocks } from "../src/client/layout.js"
 
 const DAY = "2026-07-01"
@@ -80,19 +81,54 @@ describe("placeBlocks", () => {
   })
 
   it("places a block crossing the repeated autumn hour with positive height", () => {
-    const repeated = {
-      id: "fall-back",
-      startMs: Date.parse("2026-10-25T02:50:00+02:00"),
-      endMs: Date.parse("2026-10-25T02:10:00+01:00")
+    vi.stubEnv("TZ", "Europe/Berlin")
+    try {
+      const repeated = {
+        id: "fall-back",
+        startMs: Date.parse("2026-10-25T02:50:00+02:00"),
+        endMs: Date.parse("2026-10-25T02:10:00+01:00")
+      }
+      const placed = placeBlocks([repeated], "2026-10-25")
+      expect(placed).toEqual([{
+        block: repeated,
+        column: 0,
+        columns: 1,
+        startMinutes: 2 * 60 + 50,
+        endMinutes: 3 * 60 + 10
+      }])
+    } finally {
+      vi.unstubAllEnvs()
     }
-    const placed = placeBlocks([repeated], "2026-10-25")
-    expect(placed).toEqual([{
-      block: repeated,
-      column: 0,
-      columns: 1,
-      startMinutes: 2 * 60 + 50,
-      endMinutes: 3 * 60 + 10
-    }])
+  })
+
+  it("keeps spring-forward blocks at their actual elapsed height", () => {
+    vi.stubEnv("TZ", "Europe/Berlin")
+    try {
+      const skipped = {
+        id: "spring-forward",
+        startMs: Date.parse("2026-03-29T01:50:00+01:00"),
+        endMs: Date.parse("2026-03-29T03:10:00+02:00")
+      }
+      expect(placeBlocks([skipped], "2026-03-29")[0]).toMatchObject({
+        startMinutes: 110,
+        endMinutes: 130
+      })
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+
+  it("uses ordinary UTC clock geometry when there is no local transition", () => {
+    vi.stubEnv("TZ", "UTC")
+    try {
+      const ordinary = {
+        startMs: Date.parse("2026-03-29T01:50:00+01:00"),
+        endMs: Date.parse("2026-03-29T03:10:00+02:00")
+      }
+      expect(placeBlocks([ordinary], "2026-03-29")[0]).toMatchObject({ startMinutes: 50, endMinutes: 70 })
+    } finally {
+      vi.unstubAllEnvs()
+    }
   })
 })
 

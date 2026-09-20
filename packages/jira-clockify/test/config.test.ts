@@ -28,6 +28,14 @@ const run = (args: ReadonlyArray<string>, config: FakeHeadlessOptions["config"])
 }
 
 describe("jcf config reset", () => {
+  it.effect("accepts a Windows absolute session root without interpreting it as a relative path", () =>
+    Effect.gen(function*() {
+      const { stored } = yield* run(["config", "set", "session-root", "C:\\Work\\Repo"], {})
+      expect(stored.sessionRoots).toEqual(["C:\\Work\\Repo"])
+      const drive = yield* run(["config", "set", "session-root", "C:\\"], {})
+      expect(drive.stored.sessionRoots).toEqual(["C:\\"])
+    }))
+
   // `jcf config show` lists the session settings, so leaving them behind was invisible: a user
   // chasing a bad idle cap or a stale Standing Attribution would reset, see them still there, and
   // have nothing to go on. Reset means reset.

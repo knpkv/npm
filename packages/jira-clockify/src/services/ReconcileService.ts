@@ -1390,7 +1390,7 @@ export const layer = Layer.effect(
             fromMs: period.from.getTime(),
             toMs: period.to.getTime()
           },
-          observed.length,
+          observed.map((entry) => ({ entryId: entry.id, startMs: entry.startMs })),
           verified
         ).pipe(
           Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))

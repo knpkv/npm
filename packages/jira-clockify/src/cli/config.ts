@@ -136,9 +136,13 @@ const configSetJql = Command.make(
  * is rejected rather than resolved into a surprising path.
  */
 const normalisePrefix = (input: string): { readonly path: string } | { readonly error: string } => {
-  const trimmed = input.trim().replace(/\/+$/, "")
+  const raw = input.trim()
+  const trimmed = /^[A-Za-z]:[\\/]+$/.test(raw) ? raw.slice(0, 3) : raw.replace(/[\\/]+$/, "")
   if (trimmed.length === 0) return { error: "Provide a directory." }
-  if (!trimmed.startsWith("/") && !trimmed.startsWith("~")) {
+  if (
+    !trimmed.startsWith("/") && !trimmed.startsWith("~") && !/^[A-Za-z]:[\\/]/.test(trimmed) &&
+    !/^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(trimmed)
+  ) {
     return { error: `Use an absolute path or one starting with ~ (got "${input}").` }
   }
   return { path: trimmed }

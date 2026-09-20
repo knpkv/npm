@@ -12,7 +12,7 @@ it("does not preview a refused selection, amount or provider scope", () => {
       { blocks: [] },
       { blocks: [9] },
       { blocks: [1], seconds: 3601 },
-      { seconds: 59 },
+      { seconds: 59, targets: { clockify: false, jira: true } },
       { targets: { clockify: false, jira: false } }
     ]
   ) {
@@ -20,6 +20,24 @@ it("does not preview a refused selection, amount or provider scope", () => {
       kind: "confirm",
       request: { planId: plan.planId, rowId: "row-one", ...request }
     })).toEqual([])
+  }
+})
+
+it("previews exact sub-minute Clockify time without inventing a Jira write", () => {
+  const plan = fixtureWeek()
+  for (
+    const request of [
+      { seconds: 59 },
+      { seconds: 59, targets: { clockify: true, jira: false } }
+    ]
+  ) {
+    const entries = previewWrite({ plan, entries: [] }, {
+      kind: "confirm",
+      request: { planId: plan.planId, rowId: "row-one", ...request }
+    })
+    expect(entries).toHaveLength(1)
+    expect(entries[0]?.source).toBe("clockify")
+    expect(entries[0]!.endMs - entries[0]!.startMs).toBe(59_000)
   }
 })
 

@@ -51,9 +51,10 @@ const clampToDay = <A extends Timed>(
   if (endMs <= startMs) return null
   const startMinutes = minutesIntoDay(startMs)
   const clockEnd = endMs >= bounds.endMs ? 24 * 60 : minutesIntoDay(endMs)
-  // A backward DST transition can make the end's clock minute earlier than the start's. This grid
-  // has one 02h row, so project the real elapsed duration forward rather than emit a reversed block.
-  const endMinutes = clockEnd <= startMinutes
+  // The grid has one row per clock hour. Across a DST jump, project actual elapsed time from the
+  // start instead of stretching a short spring block or reversing a repeated autumn hour.
+  const crossedOffset = new Date(startMs).getTimezoneOffset() !== new Date(endMs).getTimezoneOffset()
+  const endMinutes = crossedOffset && endMs < bounds.endMs
     ? Math.min(24 * 60, startMinutes + (endMs - startMs) / 60_000)
     : clockEnd
   return {

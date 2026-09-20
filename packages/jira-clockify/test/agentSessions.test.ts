@@ -126,6 +126,15 @@ describe("prefix matching", () => {
     expect(isWithinPrefix("/a/b/c", "/a/b/")).toBe(true)
   })
 
+  it("matches Windows roots across separator styles and case without admitting siblings", () => {
+    expect(isWithinPrefix("C:\\Work\\Repo\\src", "c:/work/repo")).toBe(true)
+    expect(isWithinPrefix("C:/Work/Repo", "c:\\work\\repo\\")).toBe(true)
+    expect(isWithinPrefix("C:\\Work\\Repository", "c:/work/repo")).toBe(false)
+    expect(isWithinPrefix("D:\\Work\\Repo", "c:/work/repo")).toBe(false)
+    expect(isWithinPrefix("\\\\Server\\Share\\Repo", "//server/share")).toBe(true)
+    expect(isWithinPrefix("/work/a\\b", "/work/a")).toBe(false)
+  })
+
   it("treats an empty prefix as matching nothing rather than everything", () => {
     expect(isWithinPrefix("/a/b", "")).toBe(false)
   })
@@ -134,6 +143,7 @@ describe("prefix matching", () => {
     expect(expandHomePath("~/dev/work", "/home/me")).toBe("/home/me/dev/work")
     expect(expandHomePath("~", "/home/me")).toBe("/home/me")
     expect(expandHomePath("/absolute", "/home/me")).toBe("/absolute")
+    expect(expandHomePath("~\\dev\\work", "C:\\Users\\me")).toBe("C:\\Users\\me\\dev\\work")
   })
 
   it("keeps out-of-scope directories out of scope", () => {

@@ -20,6 +20,8 @@ const claude: SessionAgentSettings = { provider: "claude", model: null, effort: 
 const codex: SessionAgentSettings = { provider: "codex", model: "test-codex", effort: "high" }
 type RoutePayload =
   | SessionAgentSettings
+  | { readonly cwd: string; readonly ticketKey: string }
+  | { readonly ticketKey: string }
   | Schema.Schema.Type<typeof ConfirmPayload>
   | Schema.Schema.Type<typeof ManualPayload>
   | Omit<DescribeRowRequest, "rowId">
@@ -28,11 +30,13 @@ type RoutePayload =
 const makeApplication = async (
   describer: FakeHeadlessOptions["describer"] = () => note,
   beforeDescribe: () => Effect.Effect<void> = () => Effect.void,
-  beforeRefresh: () => Effect.Effect<void> = () => Effect.void
+  beforeRefresh: () => Effect.Effect<void> = () => Effect.void,
+  delayConfigReads = false
 ) => {
   const secrets = await Effect.runPromise(makeOwnerSessionSecrets(origin).pipe(Effect.provide(NodeCrypto.layer)))
   const fake = makeFakeHeadless({
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`], sessionOwnership: "any" },
+    delayConfigReads,
     issueSummaries: { "PROJ-5662": "Weekly approval review" },
     describer,
     transcripts: {
@@ -118,6 +122,30 @@ const makeApplication = async (
   }
   return { web, fake, calls, post, get, read, describe }
 }
+
+it("keeps concurrent standing and ownership decisions without losing unrelated config", async () => {
+  const app = await makeApplication(undefined, undefined, undefined, true)
+  try {
+    const requests = [
+      app.post("/api/config/standing", { cwd: "/work/one", ticketKey: "PROJ-101" }),
+      app.post("/api/config/standing", { cwd: "/work/two", ticketKey: "PROJ-102" }),
+      app.post("/api/config/mine", { ticketKey: "PROJ-101" }),
+      app.post("/api/config/mine", { ticketKey: "PROJ-102" }),
+      app.post("/api/config/agent", codex)
+    ]
+    const responses = await Promise.all(requests)
+    expect(responses.map((response) => response.status)).toEqual([200, 200, 200, 200, 200])
+    const standing = await app.post("/api/config/standing", { cwd: "/work/one", ticketKey: "PROJ-101" })
+    const mine = await app.post("/api/config/mine", { ticketKey: "PROJ-101" })
+    expect(await standing.json()).toMatchObject({
+      sessionTicketMap: { "/work/one": "PROJ-101", "/work/two": "PROJ-102" }
+    })
+    expect(await mine.json()).toMatchObject({ ownershipOverrides: ["PROJ-101", "PROJ-102"] })
+    expect(await (await app.get("/api/config/agent")).json()).toEqual(codex)
+  } finally {
+    await app.web.dispose()
+  }
+})
 
 it("authenticates descriptions, uses retained row evidence, and leaves confirmation edits authoritative", async () => {
   const app = await makeApplication()

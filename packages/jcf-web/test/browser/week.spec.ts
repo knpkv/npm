@@ -725,6 +725,27 @@ test("optimistic manual entry keeps Clockify success when Jira creation fails", 
   await expect(page.locator(".jcf-block-logged[data-source=\"jira\"]").filter({ hasText: "PROJ-999" })).toHaveCount(0)
 })
 
+test("Clockify-only manual time keeps exact sub-minute seconds while Jira retains its floor", async ({ page }) => {
+  await open(page)
+  await page.getByRole("button", { name: "Log time", exact: true }).first().click()
+  const editor = page.getByRole("complementary", { name: "Time entry editor" })
+  await editor.getByRole("textbox", { name: "Issue key", exact: true }).fill("PROJ-999")
+  await editor.getByRole("textbox", { name: "Amount", exact: true }).fill("45s")
+  await expect(editor.getByRole("button", { name: "Log time", exact: true })).toBeDisabled()
+  await editor.getByRole("checkbox", { name: "Jira" }).uncheck()
+  await expect(editor.getByRole("button", { name: "Log time", exact: true })).toBeEnabled()
+  const submitted = page.waitForResponse((response) => response.url().includes("/api/rows/manual"))
+  await editor.getByRole("button", { name: "Log time", exact: true }).click()
+  expect((await submitted).status()).toBe(200)
+  await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
+  const observations = Schema.decodeUnknownSync(Schema.Struct({
+    clockifyWriteSeconds: Schema.Array(Schema.Number),
+    jiraWriteSeconds: Schema.Array(Schema.Number)
+  }))(await (await page.request.get("/__test/observations")).json())
+  expect(observations.clockifyWriteSeconds).toEqual([45])
+  expect(observations.jiraWriteSeconds).toEqual([])
+})
+
 test("missing plans do not start an agent or fall back to a full read", async ({ page }) => {
   const reset = await page.request.post("/__test/reset?seed=false")
   const setup = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(await reset.json())

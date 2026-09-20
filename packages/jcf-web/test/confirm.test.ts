@@ -133,6 +133,61 @@ const rowFor = (plan: HeldPlan, ticketKey: string, day: string) =>
   plan.plan.rows.find((row) => row.rowId === rowId(ticketKey, day))
 
 describe("preview and provider agreement", () => {
+  for (
+    const scenario of [
+      {
+        name: "Clockify alone",
+        request: { seconds: 59, targets: { clockify: true, jira: false } },
+        clockifyWrites: 1,
+        jiraOutcome: "Skipped"
+      },
+      {
+        name: "Jira alone",
+        request: { seconds: 59, targets: { clockify: false, jira: true } },
+        clockifyWrites: 0,
+        jiraOutcome: "BelowMinimum"
+      },
+      { name: "both providers by default", request: { seconds: 59 }, clockifyWrites: 1, jiraOutcome: "NothingOwed" },
+      {
+        name: "both providers explicitly",
+        request: { seconds: 59, targets: { clockify: true, jira: true } },
+        clockifyWrites: 1,
+        jiraOutcome: "NothingOwed"
+      }
+    ]
+  ) {
+    it.effect(`agrees on 59 seconds for ${scenario.name}`, () =>
+      Effect.gen(function*() {
+        const { value, world } = yield* run(
+          Effect.gen(function*() {
+            const plan = yield* readPlan
+            const request = scenario.request
+            const preview = previewWrite({ plan: plan.plan, entries: [] }, {
+              kind: "confirm",
+              request: { planId: plan.planId, rowId: rowId(TICKET, DAY), ...request }
+            })
+            return { preview, outcome: yield* confirm(plan, request) }
+          }),
+          {}
+        )
+        expect(value.preview.map((entry) => ({ source: entry.source, seconds: (entry.endMs - entry.startMs) / 1000 })))
+          .toEqual(scenario.clockifyWrites === 0 ? [] : [{ source: "clockify", seconds: 59 }])
+        expect(world.createdClockifyEntries).toHaveLength(scenario.clockifyWrites)
+        expect(world.jiraWorklogs).toHaveLength(0)
+        if (scenario.clockifyWrites === 0) {
+          expect(value.outcome).toEqual({ _tag: "BelowMinimum", minimumSeconds: 60 })
+          return
+        }
+        expect(value.outcome._tag).toBe("Written")
+        if (value.outcome._tag !== "Written") return
+        expect(value.outcome.result.clockify).toMatchObject({ _tag: "Written", seconds: 59 })
+        expect(value.outcome.result.jira._tag).toBe(scenario.jiraOutcome)
+        const created = world.createdClockifyEntries[0]!
+        expect(created.end).toBeDefined()
+        expect(new Date(created.end ?? created.start).getTime() - new Date(created.start).getTime()).toBe(59_000)
+      }))
+  }
+
   const cases: ReadonlyArray<{ readonly name: string; readonly request: Omit<PreviewRequest, "planId" | "rowId"> }> = [
     { name: "selected afternoon after recorded morning", request: { blocks: [1], seconds: 900 } },
     { name: "whole row with asymmetric provider totals", request: {} },

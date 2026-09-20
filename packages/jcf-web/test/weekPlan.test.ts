@@ -486,13 +486,13 @@ describe("proposeWrite", () => {
   })
 
   it("refuses an amount Jira could not record faithfully", () => {
-    expect(proposeWrite({ ...held, credited: 3600, requested: 30 }))
+    expect(proposeWrite({ ...held, credited: 3600, requested: 30, targets: { clockify: false, jira: true } }))
       .toEqual({ _tag: "BelowMinimum", minimumSeconds: MINIMUM_WRITE_SECONDS })
   })
 
-  it("drops a side whose remaining gap is under a minute rather than writing a rounding artefact", () => {
+  it("retains Clockify's exact sub-minute remainder while Jira keeps its minute floor", () => {
     expect(proposeWrite({ credited: 3600, heldClockifySeconds: 3570, heldJiraSeconds: 0, requested: undefined }))
-      .toEqual({ _tag: "Write", clockifyDelta: 0, jiraDelta: 3600 })
+      .toEqual({ _tag: "Write", clockifyDelta: 30, jiraDelta: 3600 })
   })
 
   it("proposes nothing for a system that is out of scope", () => {

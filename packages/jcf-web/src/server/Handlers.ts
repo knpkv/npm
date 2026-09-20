@@ -7,7 +7,7 @@
  * @module
  */
 import { ConfigService, FetchTicket, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
-import { Effect } from "effect"
+import { Effect, Semaphore } from "effect"
 import { HttpApiBuilder } from "effect/unstable/httpapi"
 import type { ReadProgress, WeekScopeName } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
@@ -132,11 +132,12 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
   Effect.gen(function*() {
     const config = yield* ConfigService.ConfigService
     const plans = yield* WeekPlans
+    const configWrites = yield* Semaphore.make(1)
 
     return handlers
       .handle("agent", () => config.get.pipe(Effect.map((settings) => settings.sessionAgent)))
       .handle("saveAgent", ({ payload }) =>
-        Effect.gen(function*() {
+        configWrites.withPermits(1)(Effect.gen(function*() {
           yield* plans.invalidateDescriptions
           yield* config.set({ sessionAgent: payload }).pipe(Effect.ensuring(plans.invalidateDescriptions))
           const stored = (yield* config.get).sessionAgent
@@ -146,9 +147,9 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
             return yield* failed("Agent settings could not be saved. Retry the save.")
           }
           return stored
-        }))
+        })))
       .handle("standing", ({ payload }) =>
-        Effect.gen(function*() {
+        configWrites.withPermits(1)(Effect.gen(function*() {
           const current = yield* config.get
           const next = { ...current.sessionTicketMap, [payload.cwd]: payload.ticketKey }
           yield* config.set({ sessionTicketMap: next })
@@ -159,9 +160,9 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
             return yield* failed("The Standing Attribution could not be saved to ~/.jcf/config.json")
           }
           return { sessionTicketMap: stored }
-        }))
+        })))
       .handle("mine", ({ payload }) =>
-        Effect.gen(function*() {
+        configWrites.withPermits(1)(Effect.gen(function*() {
           const current = yield* config.get
           const next = current.sessionOwnershipOverrides.includes(payload.ticketKey)
             ? current.sessionOwnershipOverrides
@@ -174,7 +175,7 @@ export const ConfigLive = HttpApiBuilder.group(JcfWebApi, "config", (handlers) =
             return yield* failed("That ticket could not be saved to ~/.jcf/config.json")
           }
           return { ownershipOverrides: stored }
-        }))
+        })))
   }))
 
 export const EntriesLive = HttpApiBuilder.group(JcfWebApi, "entries", (handlers) =>

@@ -269,8 +269,7 @@ export type ProposedWrite =
   | { readonly _tag: "BelowMinimum"; readonly minimumSeconds: number }
 
 /**
- * Below this a gap is noise rather than work: Jira floors worklogs to the minute, so a shorter write
- * could not be made faithfully even if it were offered. The same bound the engine proposes on.
+ * Jira's minimum worklog duration. Clockify retains exact positive seconds below this floor.
  */
 export const MINIMUM_WRITE_SECONDS = 60
 
@@ -291,23 +290,28 @@ export const proposeWrite = (options: {
   const selected = Math.min(options.selected ?? options.credited, options.credited)
   const requested = options.requested ?? selected
   if (requested > selected) return { _tag: "PastEvidence", maxSeconds: selected }
-  if (requested < MINIMUM_WRITE_SECONDS) {
-    return { _tag: "BelowMinimum", minimumSeconds: MINIMUM_WRITE_SECONDS }
+  if (requested < (targets.clockify ? 1 : MINIMUM_WRITE_SECONDS)) {
+    return { _tag: "BelowMinimum", minimumSeconds: targets.clockify ? 1 : MINIMUM_WRITE_SECONDS }
   }
-  const owed = (held: number, heldSelected: number, asked: boolean): number => {
+  const owed = (held: number, heldSelected: number, asked: boolean, minimum: number): number => {
     if (!asked) return 0
     // Room left in the day, then as much of it as this selection asks for.
     const room = Math.max(0, options.credited - held)
     const delta = Math.min(Math.max(0, requested - heldSelected), room)
-    // Under a minute is a rounding artefact rather than work: Jira floors worklogs to the minute.
-    return delta < MINIMUM_WRITE_SECONDS ? 0 : delta
+    return delta < minimum ? 0 : delta
   }
   const clockifyDelta = owed(
     options.heldClockifySeconds,
     options.heldSelectedClockifySeconds ?? 0,
-    targets.clockify
+    targets.clockify,
+    1
   )
-  const jiraDelta = owed(options.heldJiraSeconds, options.heldSelectedJiraSeconds ?? 0, targets.jira)
+  const jiraDelta = owed(
+    options.heldJiraSeconds,
+    options.heldSelectedJiraSeconds ?? 0,
+    targets.jira,
+    MINIMUM_WRITE_SECONDS
+  )
   // Nothing left on either side asked for: the ordinary outcome of confirming a row twice, or of a
   // watch having taken it in between. Not a failure, and not a write.
   if (clockifyDelta === 0 && jiraDelta === 0) return { _tag: "NothingOwed" }

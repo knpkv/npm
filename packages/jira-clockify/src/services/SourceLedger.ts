@@ -3,6 +3,7 @@ import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import { ConfigService } from "./ConfigService.js"
@@ -41,21 +42,74 @@ const ReviewedWindow = Schema.Struct({
 }).check(Schema.makeFilter((value) => value.toMs > value.fromMs, { expected: "non-empty review window" }))
 export interface SourceWindow extends Schema.Schema.Type<typeof ReviewedWindow> {}
 
-const LedgerFile = Schema.Struct({
+const ObservedUnbound = Schema.Struct({
+  provider: Schema.Literals(["clockify", "jira"]),
+  scope: Schema.NonEmptyString,
+  entryId: Schema.NonEmptyString,
+  startMs: Schema.Finite
+})
+
+const LegacyLedgerFile = Schema.Struct({
   version: Schema.Literal(1),
   reviewedWindows: Schema.Array(ReviewedWindow),
   pending: Schema.Array(Identity),
   bindings: Schema.Array(Binding)
+})
+
+const LedgerFile = Schema.Struct({
+  version: Schema.Literal(2),
+  reviewedWindows: Schema.Array(ReviewedWindow),
+  pending: Schema.Array(Identity),
+  bindings: Schema.Array(Binding),
+  observedUnbound: Schema.Array(ObservedUnbound)
 }).check(Schema.makeFilter((value) => {
   const keys = value.bindings.map((binding) => JSON.stringify([binding.provider, binding.scope, binding.entryId]))
+  const observedKeys = value.observedUnbound.map((entry) =>
+    JSON.stringify([entry.provider, entry.scope, entry.entryId])
+  )
   return new Set(keys).size === keys.length &&
+    new Set(observedKeys).size === observedKeys.length &&
+    observedKeys.every((key) => !keys.includes(key)) &&
+    value.observedUnbound.every((entry) =>
+      entry.entryId.trim() !== "" &&
+      value.reviewedWindows.some((window) =>
+        window.provider === entry.provider && window.scope === entry.scope &&
+        window.fromMs <= entry.startMs && entry.startMs < window.toMs
+      )
+    ) &&
     value.pending.every(validDuration) && value.bindings.every(validDuration)
-}, { expected: "unique provider entry bindings with valid source duration" }))
+}, { expected: "valid reviewed observations, unique provider entries and source durations" }))
 
 export type LedgerFile = typeof LedgerFile.Type
 
-const empty: LedgerFile = { version: 1, reviewedWindows: [], pending: [], bindings: [] }
-const decode = Schema.decodeUnknownEffect(Schema.fromJsonString(LedgerFile), { onExcessProperty: "error" })
+const empty: LedgerFile = { version: 2, reviewedWindows: [], pending: [], bindings: [], observedUnbound: [] }
+const decodeStored = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, LedgerFile])),
+  { onExcessProperty: "error" }
+)
+const decode = (content: string) =>
+  decodeStored(content).pipe(
+    Effect.flatMap((stored) =>
+      stored.version === 2
+        ? Effect.succeed(stored)
+        : Schema.decodeEffect(LedgerFile)({
+          ...stored,
+          version: 2,
+          observedUnbound: []
+        })
+    )
+  )
+const positiveProcessNumber = Schema.Number.check(Schema.makeFilter(
+  (value) => Number.isSafeInteger(value) && value > 0,
+  { expected: "positive process identity" }
+))
+const LockOwner = Schema.Struct({
+  version: Schema.Literal(1),
+  pid: positiveProcessNumber,
+  namespace: positiveProcessNumber
+})
+const decodeLockOwner = Schema.decodeUnknownEffect(Schema.fromJsonString(LockOwner), { onExcessProperty: "error" })
+const lockOwner = (pid: number, namespace: number): typeof LockOwner.Type => ({ version: 1, pid, namespace })
 
 export class SourceLedgerError extends Schema.TaggedError<SourceLedgerError>()("SourceLedgerError", {
   message: Schema.String,
@@ -69,7 +123,7 @@ export interface SourceLedgerContract {
   readonly release: (identity: SourceIdentity) => Effect.Effect<void, SourceLedgerError>
   readonly ensureWindow: (
     window: SourceWindow,
-    observedCount: number,
+    observed: ReadonlyArray<{ readonly entryId: string; readonly startMs: number }>,
     markerBindings: ReadonlyArray<SourceBinding>
   ) => Effect.Effect<void, SourceLedgerError>
 }
@@ -92,6 +146,69 @@ export const layer = Layer.effect(
     const file = path.join(dir, "source-consumption.v1.json")
     const temporary = `${file}.tmp`
     const lock = `${file}.lock`
+    const recovery = `${lock}.recovery`
+
+    const ownLockIdentity = Effect.gen(function*() {
+      const stat = yield* fs.readFileString("/proc/self/stat")
+      const pid = Number(/^\d+/u.exec(stat)?.[0])
+      const namespace = Option.getOrUndefined((yield* fs.stat("/proc/self/ns/pid")).ino)
+      if (
+        !Number.isSafeInteger(pid) || pid <= 0 || namespace === undefined ||
+        !Number.isSafeInteger(namespace) || namespace <= 0
+      ) return null
+      return lockOwner(pid, namespace)
+    }).pipe(Effect.catch(() => Effect.succeed(null)))
+
+    const acquireLock = Effect.gen(function*() {
+      // On hosts without a verifiable process namespace, exclusive creation still works; a
+      // leftover lock requires manual recovery rather than a guessed liveness decision.
+      const owner = yield* ownLockIdentity
+      const content = owner === null ? "held" : JSON.stringify(owner)
+      yield* fs.writeFileString(lock, content, { flag: "wx", mode: 0o600 }).pipe(
+        Effect.catch((cause) =>
+          Effect.gen(function*() {
+            if (!(yield* fs.exists(lock))) return yield* cause
+            yield* fs.writeFileString(recovery, "recovering", { flag: "wx", mode: 0o600 })
+            return yield* Effect.gen(function*() {
+              const info = yield* fs.stat(lock)
+              const realDirectory = yield* fs.realPath(dir)
+              if (
+                info.type !== "File" || (info.mode & 0o077) !== 0 ||
+                (yield* fs.realPath(lock)) !== path.join(realDirectory, "source-consumption.v1.json.lock")
+              ) {
+                return yield* new SourceLedgerError({
+                  message: "Private consumption lock has unsafe type or permissions"
+                })
+              }
+              const previous = yield* decodeLockOwner(yield* fs.readFileString(lock)).pipe(
+                Effect.mapError((decodeCause) =>
+                  new SourceLedgerError({
+                    message: "Private consumption lock needs manual recovery",
+                    cause: decodeCause
+                  })
+                )
+              )
+              if (owner === null || owner.namespace !== previous.namespace || owner.pid === previous.pid) {
+                return yield* new SourceLedgerError({ message: "Private consumption lock may have a live holder" })
+              }
+              const holderGone = yield* fs.stat(`/proc/${previous.pid}/stat`).pipe(
+                Effect.map(() => false),
+                Effect.catch((probeCause) =>
+                  probeCause.reason._tag === "NotFound"
+                    ? Effect.succeed(true)
+                    : Effect.fail(probeCause)
+                )
+              )
+              if (!holderGone) {
+                return yield* new SourceLedgerError({ message: "Private consumption lock may have a live holder" })
+              }
+              yield* fs.remove(lock)
+              yield* fs.writeFileString(lock, content, { flag: "wx", mode: 0o600 })
+            }).pipe(Effect.onExit(() => fs.remove(recovery)))
+          })
+        )
+      )
+    })
 
     const syncPath = (target: string) =>
       Effect.scoped(Effect.gen(function*() {
@@ -131,7 +248,7 @@ export const layer = Layer.effect(
         if (directory.type !== "Directory" || (directory.mode & 0o022) !== 0) {
           return yield* new SourceLedgerError({ message: "Private consumption directory is writable by others" })
         }
-        yield* fs.writeFileString(lock, "held", { flag: "wx", mode: 0o600 })
+        yield* acquireLock
         return yield* Effect.gen(function*() {
           const next = yield* change(yield* read)
           yield* Schema.decodeEffect(LedgerFile)(next).pipe(
@@ -215,32 +332,64 @@ export const layer = Layer.effect(
         })
       )
 
-    const ensureWindow = (window: SourceWindow, observedCount: number, markerBindings: ReadonlyArray<SourceBinding>) =>
+    const ensureWindow = (
+      window: SourceWindow,
+      observed: ReadonlyArray<{ readonly entryId: string; readonly startMs: number }>,
+      markerBindings: ReadonlyArray<SourceBinding>
+    ) =>
       update((current) =>
         Effect.gen(function*() {
-          if (window.toMs <= window.fromMs || observedCount < 0 || !Number.isInteger(observedCount)) {
+          if (
+            window.toMs <= window.fromMs ||
+            observed.some((entry) => entry.entryId.trim() === "" || !Number.isFinite(entry.startMs))
+          ) {
             return yield* new SourceLedgerError({ message: "Invalid provider review window" })
           }
+          const priorWindows = current.reviewedWindows.filter((known) =>
+            known.provider === window.provider && known.scope === window.scope
+          )
+          const latestReviewedEnd = priorWindows.reduce((latest, known) => Math.max(latest, known.toMs), -Infinity)
+          const knownBindings = [...current.bindings, ...markerBindings].filter((binding) =>
+            binding.provider === window.provider && binding.scope === window.scope
+          )
+          const knownBoundIds = new Set(knownBindings.map((binding) => binding.entryId))
+          const previousOrdinary = current.observedUnbound.filter((entry) =>
+            entry.provider === window.provider && entry.scope === window.scope
+          )
+          const ordinaryById = new Map(previousOrdinary.map((entry) => [entry.entryId, entry.startMs]))
           if (
-            current.reviewedWindows.some((known) =>
-              known.provider === window.provider &&
-              known.scope === window.scope && known.fromMs <= window.fromMs && known.toMs >= window.toMs
+            new Set(observed.map((entry) => entry.entryId)).size !== observed.length ||
+            markerBindings.some((binding) =>
+              binding.provider !== window.provider || binding.scope !== window.scope ||
+              binding.entryId.trim() === "" ||
+              ordinaryById.has(binding.entryId)
+            ) ||
+            observed.some((entry) =>
+              ordinaryById.has(entry.entryId) && ordinaryById.get(entry.entryId) !== entry.startMs
             )
-          ) {
-            return current
-          }
-          const unique = new Set(markerBindings.map((binding) => binding.entryId))
-          if (
-            unique.size !== observedCount ||
-            markerBindings.some((binding) => binding.provider !== window.provider || binding.scope !== window.scope)
           ) {
             return yield* new SourceLedgerError({
               message: "Unlinked earlier provider entries need private manual review before session writes"
             })
           }
+          const newlyOrdinary = observed.filter((entry) =>
+            !knownBoundIds.has(entry.entryId) && !ordinaryById.has(entry.entryId)
+          )
+          if (
+            newlyOrdinary.some((entry) =>
+              priorWindows.length === 0 || window.fromMs > latestReviewedEnd ||
+              entry.startMs < latestReviewedEnd ||
+              entry.startMs < window.fromMs || entry.startMs >= window.toMs
+            )
+          ) {
+            return yield* new SourceLedgerError({
+              message: "Unlinked earlier provider entries need private manual review before session writes"
+            })
+          }
+          const covered = priorWindows.some((known) => known.fromMs <= window.fromMs && known.toMs >= window.toMs)
           return {
             ...current,
-            reviewedWindows: [...current.reviewedWindows, window],
+            reviewedWindows: covered ? current.reviewedWindows : [...current.reviewedWindows, window],
             bindings: [
               ...current.bindings,
               ...markerBindings.filter((binding) =>
@@ -249,6 +398,10 @@ export const layer = Layer.effect(
                   known.scope === binding.scope && known.entryId === binding.entryId
                 )
               )
+            ],
+            observedUnbound: [
+              ...current.observedUnbound,
+              ...newlyOrdinary.map((entry) => ({ provider: window.provider, scope: window.scope, ...entry }))
             ]
           }
         })

@@ -145,6 +145,26 @@ describe("confirmation planning", () => {
     })
   })
 
+  it("writes exact sub-minute Clockify credit without making a Jira worklog", () => {
+    const short = { startMs: 0, endMs: 45000, seconds: 45 }
+    const shortEvidence = { ...evidence, credited: 45, blocks: [short] }
+    for (const selectedTargets of [{ clockify: true, jira: false }, { clockify: true, jira: true }]) {
+      const prepared = prepareProposal({ evidence: shortEvidence, targets: selectedTargets, request: {} })
+      expect(prepared._tag).toBe("Prepared")
+      if (prepared._tag !== "Prepared") return
+      expect(prepared.plan([])).toMatchObject({
+        _tag: "Write",
+        clockify: { seconds: 45, segments: [{ seconds: 45, startedAt: new Date(0) }] },
+        jira: { seconds: 0, segments: [] }
+      })
+    }
+    const jiraOnly = prepareProposal({ evidence: shortEvidence, targets: { clockify: false, jira: true }, request: {} })
+    expect(jiraOnly._tag).toBe("Prepared")
+    if (jiraOnly._tag === "Prepared") {
+      expect(jiraOnly.plan([])).toEqual({ _tag: "BelowMinimum", minimumSeconds: 60 })
+    }
+  })
+
   it("keeps a Jira debt when every disjoint gap is below its floor", () => {
     const blocks = [
       { startMs: 0, endMs: 40000, seconds: 40 },
@@ -215,12 +235,11 @@ describe("confirmation planning", () => {
       .toEqual({ _tag: "NoTargets" })
   })
 
-  // The selected evidence and minute floor constrain requested time, even when the day has room.
-  it("refuses amounts outside the selection and drops sub-minute provider gaps", () => {
+  // The selected evidence and Jira's minute floor constrain requested time, even when the day has room.
+  it("refuses amounts outside the selection while preserving Clockify's sub-minute room", () => {
     for (
       const [seconds, expected] of [
-        [3601, { _tag: "PastEvidence", maxSeconds: 3600 }],
-        [59, { _tag: "BelowMinimum", minimumSeconds: 60 }]
+        [3601, { _tag: "PastEvidence", maxSeconds: 3600 }]
       ] satisfies ReadonlyArray<readonly [number, Exclude<ProposedWrite, { readonly _tag: "Write" }>]>
     ) {
       const prepared = prepareProposal({ evidence, targets, request: { blocks: [1], seconds } })
@@ -231,6 +250,10 @@ describe("confirmation planning", () => {
     const prepared = prepareProposal({ evidence, targets, request: {} })
     expect(prepared._tag).toBe("Prepared")
     if (prepared._tag !== "Prepared") return
-    expect(prepared.plan([{ ...held, clockifySeconds: 7141, jiraSeconds: 7200 }])).toEqual({ _tag: "NothingOwed" })
+    expect(prepared.plan([{ ...held, clockifySeconds: 7141, jiraSeconds: 7200 }])).toMatchObject({
+      _tag: "Write",
+      clockify: { seconds: 59 },
+      jira: { seconds: 0 }
+    })
   })
 })

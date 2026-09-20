@@ -224,6 +224,10 @@ export interface FakeHeadlessOptions {
   /** Private file snapshot carried into a fresh fake process for restart tests. */
   readonly writtenFiles?: Readonly<Record<string, string>> | undefined
   readonly config?: Partial<JcfConfig> | undefined
+  /** Let concurrent HTTP fixtures observe the same config snapshot before either saves. */
+  readonly delayConfigReads?: boolean | undefined
+  /** Synthetic Linux namespace for crash-recovery tests; absent keeps the fake fail-closed. */
+  readonly pidNamespaceInode?: number | undefined
   /**
    * Transcripts to serve from `~/.claude/projects`, keyed `"<project-dir>/<file>.jsonl"`.
    */
@@ -381,7 +385,8 @@ const fakeFileSystemLayer = (
   written: Record<string, string>,
   unwritable: ReadonlyArray<string>,
   unreadable: ReadonlyArray<string>,
-  afterFileWrite: (path: string) => Effect.Effect<void>
+  afterFileWrite: (path: string) => Effect.Effect<void>,
+  pidNamespaceInode?: number
 ) => {
   /**
    * The project directory a transcript really lives in: the Claude CLI derives it from the working
@@ -458,7 +463,11 @@ const fakeFileSystemLayer = (
         : notFound("open", path),
     exists: (path) => Effect.succeed(directories().has(path) || files().has(path) || written[path] !== undefined),
     stat: (path) =>
-      directories().has(path)
+      unreadable.includes(path)
+        ? permissionDenied("stat", path)
+        : path === "/proc/self/ns/pid" && pidNamespaceInode !== undefined
+        ? Effect.succeed({ ...fileInfo("File"), ino: Option.some(pidNamespaceInode) })
+        : directories().has(path)
         ? Effect.succeed(fileInfo("Directory"))
         : files().has(path) || written[path] !== undefined
         ? Effect.succeed(fileInfo("File"))
@@ -1084,7 +1093,11 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   // fake that discards it can only ever assert what was printed, not what was stored.
   let config: JcfConfig = { ...defaultConfig, ...options.config }
   const ConfigLayer = Layer.succeed(ConfigService, {
-    get: Effect.sync(() => config),
+    get: Effect.gen(function*() {
+      const snapshot = config
+      if (options.delayConfigReads === true) yield* Effect.sleep("10 millis")
+      return snapshot
+    }),
     set: (patch) =>
       Effect.sync(() => {
         config = { ...config, ...patch }
@@ -1147,7 +1160,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     world.writtenFiles,
     options.unwritablePaths ?? [],
     options.unreadableTranscripts ?? [],
-    options.afterFileWrite ?? (() => Effect.void)
+    options.afterFileWrite ?? (() => Effect.void),
+    options.pidNamespaceInode
   )
 
   const Externals = Layer.mergeAll(

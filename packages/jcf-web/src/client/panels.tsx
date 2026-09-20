@@ -150,9 +150,12 @@ export const ConfirmPanel = (props: {
   if (proposal === undefined || block === undefined) return null
 
   const requested = parseDuration(amount.trim())
+  const minimumSeconds = targets.jira && !targets.clockify ? 60 : 1
   const amountProblem =
-    requested === null || requested < 60 || requested > 86400
-      ? "Enter between 1m and 24h, for example 45m or 1h30m."
+    requested === null || requested < minimumSeconds || requested > 86400
+      ? targets.clockify
+        ? "Enter between 1s and 24h, for example 45s or 1h30m."
+        : "Enter between 1m and 24h, for example 45m or 1h30m."
       : requested > selected
         ? `This block contains ${exactDuration(selected)}. Use Log time to add other work.`
         : null
@@ -343,7 +346,7 @@ export const ManualPanel = (props: {
   const seconds = parseDuration(amount.trim())
   const ticketOk = /^[A-Z][A-Z0-9]{1,9}-\d{1,6}$/.test(ticketKey)
   const clockOk = startClock.trim() === "" || /^([01]\d|2[0-3]):[0-5]\d$/.test(startClock.trim())
-  const amountOk = seconds !== null && seconds >= 60 && seconds <= 86400
+  const amountOk = seconds !== null && seconds >= (targets.jira ? 60 : 1) && seconds <= 86400
 
   return (
     <section aria-label={`Log time by hand on ${day}`} className="jcf-panel">
@@ -380,7 +383,13 @@ export const ManualPanel = (props: {
           onChange={setAmount}
           placeholder="45m"
           value={amount}
-          error={amount !== "" && !amountOk ? "Enter between 1m and 24h, for example 45m." : undefined}
+          error={
+            amount !== "" && !amountOk
+              ? targets.jira
+                ? "Enter between 1m and 24h, for example 45m."
+                : "Enter between 1s and 24h, for example 45s."
+              : undefined
+          }
         />
         <TextField
           label="Started (optional)"

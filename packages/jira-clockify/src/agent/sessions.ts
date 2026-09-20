@@ -181,16 +181,26 @@ const withoutTrailingSlash = (path: string): string => path.length > 1 && path.e
 export const expandHomePath = (path: string, home: string): string => {
   if (path === "~") return home
   if (path.startsWith("~/")) return `${withoutTrailingSlash(home)}/${path.slice(2)}`
+  if (path.startsWith("~\\")) return `${home.replace(/[\\/]+$/, "")}\\${path.slice(2)}`
   return path
 }
+
+const windowsAbsolute = (value: string): boolean =>
+  /^[A-Za-z]:[\\/]/.test(value) || /^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(value)
 
 /**
  * True when `path` is `prefix` or sits beneath it. Compares on a path *separator boundary*, so
  * `/a/bc` is not inside `/a/b` — the bug a bare `startsWith` would introduce.
  */
 export const isWithinPrefix = (path: string, prefix: string): boolean => {
-  const normalisedPath = withoutTrailingSlash(path)
-  const normalisedPrefix = withoutTrailingSlash(prefix)
+  const windows = windowsAbsolute(path)
+  if (windows !== windowsAbsolute(prefix)) return false
+  const normalise = (value: string) =>
+    windows
+      ? value.replaceAll("\\", "/").replace(/\/+$/, "").toLowerCase()
+      : withoutTrailingSlash(value)
+  const normalisedPath = normalise(path)
+  const normalisedPrefix = normalise(prefix)
   if (normalisedPrefix.length === 0) return false
   return normalisedPath === normalisedPrefix || normalisedPath.startsWith(`${normalisedPrefix}/`)
 }

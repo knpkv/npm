@@ -79,9 +79,7 @@ export interface AgentSessionReaderContract {
    * Every in-scope Agent Session with activity inside the period. Codex files are decoded locally
    * to check their working directories; only in-scope segments become evidence.
    */
-  readonly read: (
-    period: ReconcilePeriod
-  ) => Effect.Effect<ReadonlyArray<AgentSessionRecord>, AgentSessionError>
+  readonly read: (period: ReconcilePeriod) => Effect.Effect<ReadonlyArray<AgentSessionRecord>, AgentSessionError>
 }
 
 export class AgentSessionReader extends Context.Service<AgentSessionReader, AgentSessionReaderContract>()(
@@ -158,18 +156,17 @@ const messageText = <UnparsedInput>(message: UnparsedInput): string => {
  * every Idle Cap gap. That is the one thing the Idle Cap exists to stop, and under `jcf watch` the
  * result would be written unattended.
  */
-const isHumanPrompt = <UnparsedInput>(
-  line: TranscriptLineFields,
-  message: UnparsedInput
-): boolean => {
+const isHumanPrompt = <UnparsedInput>(line: TranscriptLineFields, message: UnparsedInput): boolean => {
   if (line.type !== "user" || line.isSidechain === true) return false
   const decoded = decodeContent(message)
   if (Option.isNone(decoded)) return false
   const content = decoded.value.content
   if (content === undefined) return false
   if (Predicate.isString(content)) return content.trim().length > 0
-  return content.length > 0 &&
+  return (
+    content.length > 0 &&
     content.every((block) => block.type === undefined || !MACHINE_BLOCK_TYPES.includes(block.type))
+  )
 }
 
 /** What one transcript file contributes, before scope and window filtering. */
@@ -305,8 +302,8 @@ const encodeProjectDir = (cwd: string): string => cwd.replace(/[/.]/g, "-")
  * A *filter*, not a decision. The encoding is many-to-one — a root `/a/b-c` and an out-of-root
  * `/a/b/c` both become `-a-b-c` — so a directory it admits may still turn out to be elsewhere, and
  * the authoritative check on the decoded `cwd` runs afterwards regardless. What it cannot do is
- * exclude one wrongly: the substitution is character-by-character, so every path beneath a root
- * encodes to a name beneath the root's.
+ * exclude one wrongly: separators encode character-by-character after a trailing root separator
+ * is removed, and Windows root spelling is folded. The decoded `cwd` still decides scope.
  *
  * So the guarantee is bounded, and worth stating exactly: a transcript whose project directory
  * cannot encode from any Session Root is never opened, which in a working set of any size is nearly
@@ -315,8 +312,12 @@ const encodeProjectDir = (cwd: string): string => cwd.replace(/[/.]/g, "-")
  */
 export const mayHoldSessionRoot = (projectDir: string, roots: ReadonlyArray<string>): boolean =>
   roots.some((root) => {
-    const encoded = encodeProjectDir(root)
-    return encoded.length > 0 && (projectDir === encoded || projectDir.startsWith(`${encoded}-`))
+    const windows = /^[A-Za-z]:[\\/]/.test(root) || /^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(root)
+    const canonicalRoot = (windows ? root.replaceAll("\\", "/") : root).replace(/\/+$/, "")
+    const encoded = encodeProjectDir(canonicalRoot)
+    const candidate = windows ? projectDir.toLowerCase() : projectDir
+    const prefix = windows ? encoded.toLowerCase() : encoded
+    return prefix.length > 0 && (candidate === prefix || candidate.startsWith(`${prefix}-`))
   })
 
 export const layer = Layer.effect(
@@ -342,23 +343,23 @@ export const layer = Layer.effect(
      */
     const transcriptPaths = (roots: ReadonlyArray<string>) =>
       Effect.gen(function*() {
-        const exists = yield* fs.exists(transcriptRoot).pipe(
-          Effect.catch(asAgentSessionError("Checking for Claude transcripts failed"))
-        )
+        const exists = yield* fs
+          .exists(transcriptRoot)
+          .pipe(Effect.catch(asAgentSessionError("Checking for Claude transcripts failed")))
         if (!exists) return []
 
-        const projectDirs = yield* fs.readDirectory(transcriptRoot).pipe(
-          Effect.catch(asAgentSessionError("Listing Claude projects failed"))
-        )
+        const projectDirs = yield* fs
+          .readDirectory(transcriptRoot)
+          .pipe(Effect.catch(asAgentSessionError("Listing Claude projects failed")))
 
         const paths: Array<string> = []
         for (const projectDir of projectDirs) {
           // Before the directory is even listed: a project outside every Session Root is not opened.
           if (!mayHoldSessionRoot(projectDir, roots)) continue
           const dir = path.join(transcriptRoot, projectDir)
-          const entries = yield* fs.readDirectory(dir).pipe(
-            Effect.catch(asAgentSessionError(`Listing Claude project ${projectDir} failed`))
-          )
+          const entries = yield* fs
+            .readDirectory(dir)
+            .pipe(Effect.catch(asAgentSessionError(`Listing Claude project ${projectDir} failed`)))
           for (const entry of entries) {
             if (entry.endsWith(TRANSCRIPT_SUFFIX)) paths.push(path.join(dir, entry))
           }
@@ -416,25 +417,26 @@ export const layer = Layer.effect(
           // is credited whole to whichever session happened to be readable, and `watch` writes it.
           // An out-of-scope path never reaches here; `transcriptPaths` has already excluded it.
           const content = yield* fs.readFileString(filePath).pipe(
-            Effect.mapError((error) =>
-              new AgentSessionError({
-                message: `Could not read the session transcript ${filePath}: ${error.message}`,
-                cause: error
-              })
+            Effect.mapError(
+              (error) =>
+                new AgentSessionError({
+                  message: `Could not read the session transcript ${filePath}: ${error.message}`,
+                  cause: error
+                })
             )
           )
 
           addSegments(decodeTranscript(content, { fromMs, toMs }))
         }
 
-        const hasCodex = yield* fs.exists(codexRoot).pipe(
-          Effect.catch(asAgentSessionError("Checking Codex sessions failed"))
-        )
+        const hasCodex = yield* fs
+          .exists(codexRoot)
+          .pipe(Effect.catch(asAgentSessionError("Checking Codex sessions failed")))
         if (hasCodex) {
           // Date directories name creation time, not last activity: resumed old rollouts still count.
-          const entries = yield* fs.readDirectory(codexRoot, { recursive: true }).pipe(
-            Effect.catch(asAgentSessionError("Listing Codex sessions failed"))
-          )
+          const entries = yield* fs
+            .readDirectory(codexRoot, { recursive: true })
+            .pipe(Effect.catch(asAgentSessionError("Listing Codex sessions failed")))
           for (const entry of entries) {
             if (!entry.endsWith(TRANSCRIPT_SUFFIX)) continue
             const filePath = path.join(codexRoot, entry)

@@ -175,11 +175,21 @@ edits, including removal of the source suffix, do not reset its consumed seconds
 read still observes genuine duration changes and deletions. The suffix can import a legacy entry on
 first read, but text alone does not override an existing ID binding.
 
+The same private file now stores version 2: it also remembers the IDs and original starts of ordinary
+entries seen in a newly reviewed forward interval, separately by provider and account. Repeated or
+overlapping review can recognize those entries. A new unmarked entry in older coverage or a changed
+start for a remembered ID needs manual review; the tool does not infer its origin from a timestamp.
+Version 1 loads without inventing ordinary entries and upgrades only on a successful atomic write.
+
 First use with earlier unmarked entries fails closed. Review the affected provider/window privately,
-back up the ledger, then add the exact reviewed window and any recoverable entry-ID bindings to its
-versioned JSON; do not guess links or paste account and entry IDs into tickets or logs. A pending
-intent means a create may have succeeded before its ID was recorded: verify the provider entry before
+back up the ledger, then record the exact reviewed window, provider/account-scoped ordinary entry
+IDs and starts, and any recoverable entry-ID bindings in its versioned JSON. If those facts cannot
+be recovered, leave the window held; do not guess links or paste account and entry IDs into tickets
+or logs. A pending intent means a create may have succeeded before its ID was recorded: verify the provider entry before
 resolving it, or leave the window held. Removing the ledger or pending intent is not a safe retry.
+On Linux, a lock whose recorded process has ended in the same PID namespace can be recovered under
+an exclusive recovery guard. Legacy, unreadable, or uncertain locks and leftover temporary ledger
+files still need private manual review; never remove a lock while its holder may be running.
 
 ### Watching as you work
 

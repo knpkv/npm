@@ -29,7 +29,7 @@
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
-    "test:browser": "vite build && playwright test"
+    "test:browser": "pnpm --filter '@knpkv/jcf-web^...' --sort run build && vite build && playwright test"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0-rc.109",
