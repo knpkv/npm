@@ -375,11 +375,16 @@ describe("jcf sync reconcile --agent: proposals", () => {
           },
           writtenFiles: {
             [`${FAKE_HOME}/.jcf/source-consumption.v1.json`]: JSON.stringify({
-              version: 1,
+              version: 3,
               reviewedWindows: [
                 {
                   provider: "clockify",
-                  scope: JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID]),
+                  scope: JSON.stringify([
+                    "clockify-v3",
+                    "https://api.clockify.me/api",
+                    FAKE_WORKSPACE_ID,
+                    FAKE_USER_ID
+                  ]),
                   fromMs: 0,
                   toMs: 4_102_444_800_000
                 },
@@ -391,10 +396,16 @@ describe("jcf sync reconcile --agent: proposals", () => {
                 }
               ],
               pending: [],
+              observedUnbound: [],
               bindings: [
                 {
                   provider: "clockify",
-                  scope: JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID]),
+                  scope: JSON.stringify([
+                    "clockify-v3",
+                    "https://api.clockify.me/api",
+                    FAKE_WORKSPACE_ID,
+                    FAKE_USER_ID
+                  ]),
                   entryId: "corrected-clockify",
                   rowId: "2026-07-01:PROJ-1",
                   sourceStartMs: morning,
@@ -1871,6 +1882,89 @@ describe("jcf sync reconcile --agent: standing attributions", () => {
 // ---------------------------------------------------------------------------
 
 describe("jcf sync reconcile --agent: unreadable recorded state", () => {
+  it.effect("fails closed when Jira search reports another page without a token", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          jiraSearchClaimsMoreWithoutToken: true,
+          jiraWorklogs: {
+            "PROJ-5662": [{
+              started: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)),
+              timeSpentSeconds: 1800
+            }]
+          },
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-review",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          },
+          keep: [true]
+        })
+      )
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+      expect(output(world.stderr)).toContain("incomplete Jira search")
+    }))
+
+  it.effect("fails closed on a completed Clockify entry with an invalid start", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          clockifyEntries: [{
+            description: "[PROJ-5662] existing",
+            start: "invalid-start",
+            end: iso(at(DAY.year, DAY.month, DAY.day, 10, 30))
+          }],
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-review",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          },
+          keep: [true]
+        })
+      )
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+      expect(output(world.stderr)).toContain("Clockify returned an incomplete entry")
+    }))
+
+  it.effect("fails closed when the Jira account identity is unavailable", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          jiraCachedUserMissing: true,
+          jiraWorklogs: {
+            "PROJ-5662": [{
+              author: { accountId: "acct-other" },
+              started: iso(at(DAY.year, DAY.month, DAY.day, 10, 0)),
+              timeSpentSeconds: 1800
+            }]
+          },
+          transcripts: {
+            "work-repo/s1.jsonl": transcript({
+              sessionId: "s1",
+              cwd: `${WORK_ROOT}/repo`,
+              gitBranch: "feat/PROJ-5662-review",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 10, 0), 30)
+            })
+          },
+          keep: [true]
+        })
+      )
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+      expect(output(world.stderr)).toContain("Jira account")
+    }))
+
   // Every proposal is `session − (already recorded)`. An unread Jira worklog is indistinguishable
   // from an absent one, so swallowing the error into an empty list would re-log hours that are
   // already there. Failing costs a run; guessing costs someone else's timesheet.

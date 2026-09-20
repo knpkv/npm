@@ -175,11 +175,16 @@ edits, including removal of the source suffix, do not reset its consumed seconds
 read still observes genuine duration changes and deletions. The suffix can import a legacy entry on
 first read, but text alone does not override an existing ID binding.
 
-The same private file now stores version 2: it also remembers the IDs and original starts of ordinary
+The same private file now stores version 3: it also remembers the IDs and original starts of ordinary
 entries seen in a newly reviewed forward interval, separately by provider and account. Repeated or
 overlapping review can recognize those entries. A new unmarked entry in older coverage or a changed
 start for a remembered ID needs manual review; the tool does not infer its origin from a timestamp.
-Version 1 loads without inventing ordinary entries and upgrades only on a successful atomic write.
+Versions 1 and 2 load without inventing ordinary entries and upgrade only on a successful atomic
+write. New Clockify evidence is scoped to the configured endpoint, workspace, and user verified by
+that credential. Older Clockify scopes cannot prove the endpoint: affected windows, observations,
+pending intents, and bindings remain intact and held for private manual review. Neither switching
+the endpoint nor editing a description turns them into a fresh empty account. Jira evidence remains
+independent.
 
 First use with earlier unmarked entries fails closed. Review the affected provider/window privately,
 back up the ledger, then record the exact reviewed window, provider/account-scoped ordinary entry
@@ -339,7 +344,9 @@ prints process milestones to stderr. Final matches remain schema-validated.
 Closed Clockify entries without a ticket key are retained in the session proposal
 report as `unlinkedClockify`. They remain read-only and never become Jira
 reconciliation candidates. The web calendar includes them in Clockify totals and
-checks suggestion overlap against their intervals. Running entries remain outside
+holds the Clockify side of any overlapping proposed block for manual review, without
+guessing that the entry consumed that session's time. Jira and nonoverlapping blocks
+remain independently writable. Running entries remain outside
 totals; their days are excluded from proposals until the timer stops.
 
 ### Editing recorded entries

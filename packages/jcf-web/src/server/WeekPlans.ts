@@ -119,11 +119,28 @@ export const layer = Layer.effect(
         if (current !== expected || (yield* Ref.get(readGeneration)) !== generation) {
           return yield* new PlanExpiredError({ message: "Saved entries changed during refresh. Retry Refresh totals." })
         }
+        if (
+          (current.boundScopes.clockify !== null && replacement.boundScopes.clockify !== null &&
+            current.boundScopes.clockify !== replacement.boundScopes.clockify) ||
+          (current.boundScopes.jira !== null && replacement.boundScopes.jira !== null &&
+            current.boundScopes.jira !== replacement.boundScopes.jira)
+        ) {
+          return yield* new PlanExpiredError({
+            message: "The provider account changed during refresh. Reload this week before confirming."
+          })
+        }
+        const retained = {
+          ...replacement,
+          boundScopes: {
+            clockify: current.boundScopes.clockify ?? replacement.boundScopes.clockify,
+            jira: current.boundScopes.jira ?? replacement.boundScopes.jira
+          }
+        }
         yield* Ref.update(
           plans,
-          (held) => held.map((retained) => retained.plan === expected ? { ...retained, plan: replacement } : retained)
+          (held) => held.map((entry) => entry.plan === expected ? { ...entry, plan: retained } : entry)
         )
-        return replacement
+        return retained
       }, mutations.withPermit),
       updateSaved: Effect.fn("WeekPlans.updateSaved")(function*(request) {
         const plan = yield* find(request.planId)
@@ -233,6 +250,10 @@ export const layer = Layer.effect(
             ? plan
             : {
               ...withProjectedConsumption(plan, reconcileConsumption(plan.report, consumptionOwner.plan.consumption)),
+              boundScopes: {
+                clockify: plan.boundScopes.clockify ?? consumptionOwner.plan.boundScopes.clockify,
+                jira: plan.boundScopes.jira ?? consumptionOwner.plan.boundScopes.jira
+              },
               jiraReceiptIssueKeys: consumptionOwner.plan.jiraReceiptIssueKeys
             }
           return [

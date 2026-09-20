@@ -143,6 +143,7 @@ export interface PostedJiraWorklog {
 /** Everything a test can observe after running a command. */
 export interface FakeWorld {
   readonly createdClockifyEntries: Array<CreatedClockifyEntry>
+  readonly clockifyRequests: Array<{ readonly method: string; readonly url: string }>
   readonly jiraWorklogs: Array<PostedJiraWorklog>
   readonly updatedClockifyEntries: Array<
     { readonly id: string; readonly payload: Parameters<ClockifyApiClientContract["updateTimeEntry"]>[2] }
@@ -181,6 +182,10 @@ export interface FakeWorld {
   readonly transcriptReads: Array<string>
   /** Files the command wrote, by path — the watch lease among them. */
   readonly writtenFiles: Record<string, string>
+  /** Mutable synthetic auth file, independent of the startup client. */
+  clockifyAuth: { baseUrl: string; workspaceId: string; userId: string; apiKey: string }
+  clockifyVerifiedUserId: string
+  clockifyUserReadFailuresRemaining: number
   /** Whether Jira accepts worklogs. Flip it mid-test to model logging back in between two runs. */
   jiraLoggedIn: boolean
   /** Running Clockify timer. Flip it mid-test to model one starting after a retained read. */
@@ -223,6 +228,9 @@ export interface ExistingJiraWorklog {
 export interface FakeHeadlessOptions {
   /** Private file snapshot carried into a fresh fake process for restart tests. */
   readonly writtenFiles?: Readonly<Record<string, string>> | undefined
+  readonly clockifyAuth?: Partial<FakeWorld["clockifyAuth"]> | undefined
+  readonly clockifyVerifiedUserId?: string | undefined
+  readonly clockifyUserReadFails?: boolean | undefined
   readonly config?: Partial<JcfConfig> | undefined
   /** Let concurrent HTTP fixtures observe the same config snapshot before either saves. */
   readonly delayConfigReads?: boolean | undefined
@@ -263,10 +271,16 @@ export interface FakeHeadlessOptions {
   /** Existing worklogs whose provider read omits its optional identity field. */
   readonly jiraReadOmitsId?: boolean | undefined
   readonly jiraCloudId?: string | undefined
+  /** Synthetic OAuth credential, readable through a getter to switch it at a reservation boundary. */
+  readonly jiraAccessToken?: string | undefined
+  /** Omit the account cached in Jira auth while provider reads remain available. */
+  readonly jiraCachedUserMissing?: boolean | undefined
   /** Make Jira's current-user endpoint fail while the stored auth session remains present. */
   readonly jiraCurrentUserFails?: boolean | undefined
   /** Make every worklog *read* fail, to model a transient Jira outage mid-run. */
   readonly jiraWorklogReadFails?: boolean | undefined
+  /** Search reports a further page but supplies no continuation token. */
+  readonly jiraSearchClaimsMoreWithoutToken?: boolean | undefined
   /** Limit each Jira worklog read page while retaining the provider's total count. */
   readonly jiraWorklogPageSize?: number | undefined
   /** Return invalid or failed evidence on a later Jira worklog page. */
@@ -636,6 +650,16 @@ const captureConsoleLayer = (world: FakeWorld) =>
 export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   const world: FakeWorld = {
     createdClockifyEntries: [],
+    clockifyRequests: [],
+    clockifyAuth: {
+      baseUrl: "https://api.clockify.me/api",
+      workspaceId: FAKE_WORKSPACE_ID,
+      userId: FAKE_USER_ID,
+      apiKey: "key",
+      ...options.clockifyAuth
+    },
+    clockifyVerifiedUserId: options.clockifyVerifiedUserId ?? FAKE_USER_ID,
+    clockifyUserReadFailuresRemaining: 0,
     jiraWorklogs: [],
     updatedClockifyEntries: [],
     updatedJiraWorklogs: [],
@@ -654,11 +678,16 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     writtenFiles: options.writtenFiles === undefined ?
       {
         [`${FAKE_HOME}/.jcf/source-consumption.v1.json`]: JSON.stringify({
-          version: 1,
+          version: 3,
           reviewedWindows: [
             {
               provider: "clockify",
-              scope: JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID]),
+              scope: JSON.stringify([
+                "clockify-v3",
+                options.clockifyAuth?.baseUrl ?? "https://api.clockify.me/api",
+                options.clockifyAuth?.workspaceId ?? FAKE_WORKSPACE_ID,
+                options.clockifyVerifiedUserId ?? FAKE_USER_ID
+              ]),
               fromMs: 0,
               toMs: 4_102_444_800_000
             },
@@ -670,7 +699,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             }
           ],
           pending: [],
-          bindings: []
+          bindings: [],
+          observedUnbound: []
         })
       } :
       { ...options.writtenFiles },
@@ -844,6 +874,66 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     HttpClient.HttpClient,
     HttpClient.make((request) =>
       Effect.sync(() => {
+        if (request.url.includes("/v1/user") && request.method === "GET") {
+          world.clockifyRequests.push({ method: request.method, url: request.url })
+          if (options.clockifyUserReadFails === true) {
+            return jsonResponse(request, 503, { message: "synthetic verification failure" })
+          }
+          if (world.clockifyUserReadFailuresRemaining > 0) {
+            world.clockifyUserReadFailuresRemaining--
+            return jsonResponse(request, 503, { message: "synthetic verification failure" })
+          }
+          return jsonResponse(request, 200, {
+            id: world.clockifyVerifiedUserId,
+            name: "Fake",
+            email: "fake@example.com",
+            profilePicture: "",
+            status: "ACTIVE"
+          })
+        }
+        const clockifyEntries = request.url.match(/\/v1\/workspaces\/([^/]+)\/user\/([^/]+)\/time-entries/)
+        if (clockifyEntries !== null && request.method === "GET") {
+          world.clockifyRequests.push({ method: request.method, url: request.url })
+          if (
+            options.clockifyRunningTimerReadFails === true &&
+            request.urlParams.params.some(([name]) => name === "in-progress")
+          ) {
+            return jsonResponse(request, 503, { message: "synthetic timer read failure" })
+          }
+          const page = Number(request.urlParams.params.find(([name]) => name === "page")?.[1] ?? 1)
+          const cap = options.clockifyPageSize
+          const size = Math.min(
+            Number(request.urlParams.params.find(([name]) => name === "page-size")?.[1] ?? 200),
+            cap ?? 200
+          )
+          const running = runningEntry()
+          const all = request.urlParams.params.some(([name]) => name === "in-progress")
+            ? running === null ? [] : [running]
+            : running === null
+            ? clockifyLedger
+            : [...clockifyLedger, running]
+          return jsonResponse(request, 200, all.slice((page - 1) * size, page * size))
+        }
+        if (request.url.match(/\/v1\/workspaces\/[^/]+\/time-entries$/) !== null && request.method === "POST") {
+          world.clockifyRequests.push({ method: request.method, url: request.url })
+          if (options.clockifyWritesFail === true) return jsonResponse(request, 503, { message: "synthetic failure" })
+          const body = request.body
+          if (body._tag !== "Uint8Array" || !("body" in body) || !Predicate.isUint8Array(body.body)) {
+            return jsonResponse(request, 400, { message: "missing body" })
+          }
+          const payload = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Struct({
+            description: Schema.String,
+            start: Schema.String,
+            end: Schema.String,
+            billable: Schema.Boolean
+          })))(new TextDecoder().decode(body.body))
+          if (Option.isNone(payload)) return jsonResponse(request, 400, { message: "invalid body" })
+          const entry = makeTimeEntry(payload.value, `created-${clockifyLedger.length}`)
+          clockifyLedger.push(entry)
+          world.createdClockifyEntries.push(payload.value)
+          options.afterClockifyWrite?.(world)
+          return jsonResponse(request, 201, entry)
+        }
         const exactWorklog = request.url.match(/issue\/([^/]+)\/worklog\/([^/?]+)/)
         if (exactWorklog !== null) {
           const issueKey = exactWorklog[1] ?? ""
@@ -1010,6 +1100,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             })
           }
           return jsonResponse(request, 200, {
+            ...(options.jiraSearchClaimsMoreWithoutToken === true && { isLast: false }),
             issues: [...jiraLedger.keys()]
               .filter((key) => !world.jiraSearchHiddenIssues.has(key))
               .map((key, index) => ({ id: String(index), key }))
@@ -1105,12 +1196,10 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     configDir: Effect.succeed(`${FAKE_HOME}/.jcf`)
   })
   const ClockifyAuthLayer = Layer.succeed(ClockifyAuth, {
-    getConfig: Effect.succeed({
-      apiKey: Redacted.make("key"),
-      workspaceId: FAKE_WORKSPACE_ID,
-      userId: FAKE_USER_ID,
-      baseUrl: "https://api.clockify.me/api"
-    }),
+    getConfig: Effect.sync(() => ({
+      ...world.clockifyAuth,
+      apiKey: Redacted.make(world.clockifyAuth.apiKey)
+    })),
     save: () => Effect.void,
     isConfigured: Effect.succeed(true)
   })
@@ -1119,16 +1208,41 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     isConfigured: () => Effect.succeed(loggedIn()),
     login: () => Effect.void,
     logout: () => Effect.void,
-    getAccessToken: () => Effect.succeed(Redacted.make(loggedIn() ? "jira-token" : "")),
+    getAccessToken: () => Effect.succeed(Redacted.make(loggedIn() ? options.jiraAccessToken ?? "jira-token" : "")),
     getCloudId: () => Effect.succeed(options.jiraCloudId ?? "cloud-fake"),
     getSiteUrl: () => Effect.succeed("https://fake.atlassian.net"),
     getCurrentUser: () =>
-      Effect.succeed({
-        account_id: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
-        name: "Fake User",
-        email: "fake@example.com"
-      }),
-    getActiveProfile: () => Effect.succeed(null),
+      Effect.succeed(
+        options.jiraCachedUserMissing === true ? null : {
+          account_id: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
+          name: "Fake User",
+          email: "fake@example.com"
+        }
+      ),
+    getActiveProfile: () =>
+      Effect.succeed(
+        loggedIn() ?
+          {
+            id: "synthetic-profile",
+            name: "Synthetic",
+            token: {
+              access_token: options.jiraAccessToken ?? "jira-token",
+              refresh_token: "synthetic-refresh",
+              expires_at: 4_102_444_800_000,
+              scope: "write:jira-work",
+              cloud_id: options.jiraCloudId ?? "cloud-fake",
+              site_url: "https://fake.atlassian.net",
+              user: {
+                account_id: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
+                name: "Fake User",
+                email: "fake@example.com"
+              }
+            },
+            created_at: "2026-01-01T00:00:00.000Z",
+            updated_at: "2026-01-01T00:00:00.000Z"
+          } :
+          null
+      ),
     listProfiles: () => Effect.succeed([]),
     switchProfile: () => Effect.succeed(null),
     removeProfile: () => Effect.succeed(null),

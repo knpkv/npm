@@ -4,6 +4,7 @@ import type { SavedEntry, UpdateSavedEntryRequest } from "../shared/contracts.js
 import * as Predicate from "effect/Predicate"
 import { describeSavedEntry } from "./api.js"
 import { formatDuration } from "./format.js"
+import { resolveLocalDateTime } from "./localDateTime.js"
 
 /** Local controls include seconds; an unchanged field keeps the original instant, including a DST fold. */
 const localDateTime = (milliseconds: number): string => {
@@ -40,15 +41,24 @@ export const SavedEntryPanel = (props: {
       setGenerationStatus("Agent settings changed. Generate the description again.")
     }
   }, [props.descriptionDisabled])
-  const startMs = start === localDateTime(entry.startMs) ? entry.startMs : new Date(start).getTime()
-  const endMs = end === localDateTime(entry.endMs) ? entry.endMs : new Date(end).getTime()
+  const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+  const parsedStart: ReturnType<typeof resolveLocalDateTime> =
+    start === localDateTime(entry.startMs)
+      ? { _tag: "Valid", instantMs: entry.startMs }
+      : resolveLocalDateTime(start, timeZone)
+  const parsedEnd: ReturnType<typeof resolveLocalDateTime> =
+    end === localDateTime(entry.endMs) ? { _tag: "Valid", instantMs: entry.endMs } : resolveLocalDateTime(end, timeZone)
+  const startMs = parsedStart._tag === "Valid" ? parsedStart.instantMs : NaN
+  const endMs = parsedEnd._tag === "Valid" ? parsedEnd.instantMs : NaN
   const changedTime = startMs !== entry.startMs || endMs !== entry.endMs
   const invalid =
-    !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs
-      ? "End must be after start."
-      : entry.source === "jira" && changedTime && endMs - startMs < 60_000
-        ? "Jira time must be at least one minute."
-        : undefined
+    parsedStart._tag === "Invalid" || parsedEnd._tag === "Invalid"
+      ? "Choose local times that exist only once."
+      : endMs <= startMs
+        ? "End must be after start."
+        : entry.source === "jira" && changedTime && endMs - startMs < 60_000
+          ? "Jira time must be at least one minute."
+          : undefined
   const provider = entry.source === "jira" ? "Jira" : "Clockify"
 
   const generate = async () => {

@@ -147,6 +147,24 @@ it("keeps concurrent standing and ownership decisions without losing unrelated c
   }
 })
 
+it("rejects relative standing paths without saving them and accepts supported root forms", async () => {
+  const app = await makeApplication()
+  try {
+    const invalid = await app.post("/api/config/standing", { cwd: "work/repo", ticketKey: "PROJ-101" })
+    expect(invalid.status).toBe(400)
+    const prefixes = ["/work/repo", "~/work/repo", "C:\\work\\repo", "\\\\server\\share\\repo"]
+    for (const [index, cwd] of prefixes.entries()) {
+      const response = await app.post("/api/config/standing", { cwd, ticketKey: `PROJ-${101 + index}` })
+      expect(response.status).toBe(200)
+      const saved = await response.json()
+      expect(saved.sessionTicketMap).not.toHaveProperty("work/repo")
+      expect(saved.sessionTicketMap).toHaveProperty(cwd, `PROJ-${101 + index}`)
+    }
+  } finally {
+    await app.web.dispose()
+  }
+})
+
 it("authenticates descriptions, uses retained row evidence, and leaves confirmation edits authoritative", async () => {
   const app = await makeApplication()
   try {

@@ -530,6 +530,25 @@ describe("splitCredits", () => {
     ...overrides
   })
 
+  it("keeps distinct allocations in one cluster stable when source sessions are reordered", () => {
+    const windows = [
+      credited("early", "2026-07-01", [[10, 0, 10, 40]]),
+      credited("late", "2026-07-01", [[11, 20, 12, 0]]),
+      credited("middle", "2026-07-01", [[10, 20, 11, 40]])
+    ]
+    const attributions = [
+      attribution({ sessionId: "early", ticketKey: "PROJ-1", signal: "branch" }),
+      attribution({ sessionId: "late", ticketKey: "PROJ-1", signal: "branch" }),
+      attribution({ sessionId: "middle", ticketKey: "PROJ-2", signal: "branch" })
+    ]
+    const forward = splitCredits(windows, attributions, { dwellSeconds: 900 })
+    const reversed = splitCredits([...windows].reverse(), [...attributions].reverse(), { dwellSeconds: 900 })
+    const blocks = (result: typeof forward) => result.attributed.find((row) => row.ticketKey === "PROJ-1")?.blocks
+    expect(blocks(forward)?.map((block) => block.seconds)).toEqual([1200, 2400])
+    expect(blocks(reversed)).toEqual(blocks(forward))
+    expect(blocks(forward)?.map((block) => block.allocationIndex)).toEqual([0, 1])
+  })
+
   it("folds several sessions onto one Issue Key and keeps the weakest signal", () => {
     const split = splitCredits(
       [
@@ -553,6 +572,44 @@ describe("splitCredits", () => {
     expect(split.attributed[0]!.blocks).toHaveLength(2)
     // And they add up to the row, so accepting them one at a time writes what accepting the row does.
     expect(split.attributed[0]!.blocks.reduce((sum, block) => sum + block.seconds, 0)).toBe(900)
+  })
+
+  it("uses only each day's attribution evidence for that day's signal", () => {
+    const split = splitCredits(
+      [
+        credited("s1", "2026-07-01", [[10, 0, 10, 10]]),
+        credited("s2", "2026-07-02", [[10, 0, 10, 10]])
+      ],
+      [
+        attribution({ sessionId: "s1", ticketKey: "PROJ-1", signal: "branch" }),
+        attribution({ sessionId: "s2", ticketKey: "PROJ-1", signal: "agent", confidence: 0.8 })
+      ]
+    )
+    expect(split.attributed.map((row) => [row.day, row.signal, row.confidence])).toEqual([
+      ["2026-07-01", "branch", null],
+      ["2026-07-02", "agent", 0.8]
+    ])
+  })
+
+  it("does not halve deterministic same-ticket time against weak overlapping evidence", () => {
+    const split = splitCredits(
+      [
+        credited("certain", "2026-07-01", [[10, 0, 10, 20]]),
+        credited("weak", "2026-07-01", [[10, 0, 10, 40]])
+      ],
+      [
+        attribution({ sessionId: "certain", ticketKey: "PROJ-1", signal: "branch" }),
+        attribution({
+          sessionId: "weak",
+          ticketKey: "PROJ-1",
+          signal: "agent",
+          confidence: 0.2,
+          belowConfidenceFloor: true
+        })
+      ]
+    )
+    expect(split.attributed.map((row) => row.seconds)).toEqual([1200])
+    expect(split.withheld.map((row) => row.seconds)).toEqual([1200])
   })
 
   it("keeps below-floor credit out of the proposable set but still reports it", () => {
@@ -847,6 +904,74 @@ describe("buildSessionProposals", () => {
     const proposals = buildSessionProposals(credit(3600), [], { minimumSeconds: 60, excludedDays: [] })
     expect(proposals).toHaveLength(1)
     expect(proposals[0]).toMatchObject({ clockifyDelta: 3600, jiraDelta: 3600 })
+  })
+
+  it("keeps an overlapping ordinary unlinked entry ambiguous instead of consuming its seconds", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const proposals = buildSessionProposals(credit(3600), [], {
+      excludedDays: [],
+      minimumSeconds: 60,
+      consumptionRows: [{
+        day: "2026-07-01",
+        intervals: [{
+          entry: {
+            source: "clockify",
+            id: "synthetic-unlinked",
+            startMs,
+            endMs: startMs + 3600_000,
+            description: "ordinary entry"
+          }
+        }]
+      }]
+    })
+    expect(proposals[0]?.clockifyDelta).toBe(3600)
+    expect(proposals[0]?.jiraDelta).toBe(3600)
+    expect(proposals[0]?.blocks[0]).toMatchObject({ clockifyRefusal: "unlinked-overlap" })
+    expect(proposals[0]?.blocks[0]?.clockifyConsumedSeconds).toBeUndefined()
+  })
+
+  it("holds only intersecting blocks, not adjacent time or a verified source binding", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const base = credit(7200)[0]!
+    const credits = [{
+      ...base,
+      blocks: [
+        { startMs, endMs: startMs + 3600_000, seconds: 3600 },
+        { startMs: startMs + 3600_000, endMs: startMs + 7200_000, seconds: 3600 }
+      ]
+    }]
+    const proposalWith = (entryStartMs: number, entryEndMs: number, bound = false) => {
+      const source: "clockify" = "clockify"
+      const entry = {
+        source,
+        id: "synthetic-unlinked",
+        startMs: entryStartMs,
+        endMs: entryEndMs,
+        description: "ordinary entry"
+      }
+      return buildSessionProposals(credits, [], {
+        excludedDays: [],
+        minimumSeconds: 60,
+        consumptionRows: [{ day: "2026-07-01", intervals: [{ entry }] }],
+        ...(bound && {
+          sourceEntries: [{
+            source,
+            id: entry.id,
+            rowId: "2026-07-01:PROJ-1",
+            sourceStartMs: startMs,
+            startMs: entryStartMs,
+            endMs: entryEndMs
+          }]
+        })
+      })[0]
+    }
+    expect(proposalWith(startMs + 1800_000, startMs + 5400_000)?.blocks.map((block) => block.clockifyRefusal))
+      .toEqual(["unlinked-overlap", "unlinked-overlap"])
+    expect(proposalWith(startMs, startMs + 3600_000)?.blocks.map((block) => block.clockifyRefusal))
+      .toEqual(["unlinked-overlap", undefined])
+    expect(proposalWith(startMs + 7200_000, startMs + 9000_000)?.blocks.map((block) => block.clockifyRefusal))
+      .toEqual([undefined, undefined])
+    expect(proposalWith(startMs, startMs + 3600_000, true)?.blocks[0]?.clockifyRefusal).toBeUndefined()
   })
 
   // Each side is sized to its own gap, so an hour already in Jira does not shrink the Clockify row.

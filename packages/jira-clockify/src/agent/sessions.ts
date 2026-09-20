@@ -1,3 +1,4 @@
+import { Data } from "effect"
 import { scheduleRuns } from "./schedule.js"
 import * as SourceConsumption from "./sourceConsumption.js"
 /**
@@ -344,8 +345,12 @@ export interface CreditedBlock {
   readonly seconds: number
   /** Stable start of the source cluster, even when scheduling moves this rendered block. */
   readonly sourceStartMs?: number | undefined
+  /** Position within one source cluster, for server-held allocation accounting only. */
+  readonly allocationIndex?: number | undefined
   /** Provider seconds already written under a corrected ticket for this source block. */
   readonly clockifyConsumedSeconds?: number | undefined
+  /** Ordinary unlinked provider time intersects this block; its source is not known. */
+  readonly clockifyRefusal?: "unlinked-overlap" | undefined
   /** Provider seconds already written under a corrected ticket for this source block. */
   readonly jiraConsumedSeconds?: number | undefined
 }
@@ -750,12 +755,18 @@ const wholeSeconds = (spans: ReadonlyArray<PricedSpan>, totalSeconds: number): R
     entry.seconds += 1
     spare -= 1
   }
-  return floored.map((entry) => ({
-    endMs: entry.span.endMs,
-    seconds: entry.seconds,
-    startMs: entry.span.startMs,
-    sourceStartMs: entry.span.sourceStartMs
-  }))
+  const nextIndex = new Map<number, number>()
+  return floored.map((entry) => {
+    const allocationIndex = nextIndex.get(entry.span.sourceStartMs) ?? 0
+    nextIndex.set(entry.span.sourceStartMs, allocationIndex + 1)
+    return {
+      allocationIndex,
+      endMs: entry.span.endMs,
+      seconds: entry.seconds,
+      startMs: entry.span.startMs,
+      sourceStartMs: entry.span.sourceStartMs
+    }
+  })
 }
 
 /** Credited and wall-clock seconds for one bucket on one day. */
@@ -787,6 +798,7 @@ const shareBetweenBuckets = (
   options: {
     readonly dwellSeconds: number
     readonly attributed: (bucketId: string) => boolean
+    readonly coveredByCertain: (bucketId: string, activeIds: ReadonlyArray<string>) => boolean
   }
 ): ReadonlyMap<string, ReadonlyMap<string, BucketDayCredit>> => {
   const totals = new Map<string, Map<string, { creditedMs: number; activeMs: number }>>()
@@ -800,7 +812,13 @@ const shareBetweenBuckets = (
   // Ownership is coalesced first, so the hours and the picture come from the same timeline. Deriving
   // the totals from the runs and the spans from the original windows would put a row's seconds and
   // its blocks at odds — and the blocks are what a person checks the seconds against.
-  const originalRuns = applyDwellFloor(overlapSlices(spansByBucket), options)
+  const originalRuns = applyDwellFloor(
+    overlapSlices(spansByBucket).map((run) => ({
+      ...run,
+      bucketIds: run.bucketIds.filter((id) => !options.coveredByCertain(id, run.bucketIds))
+    })),
+    options
+  )
   const runs = scheduleRuns(originalRuns, options.dwellSeconds, options.attributed)
   for (const run of originalRuns) {
     for (const id of run.bucketIds) add(id, localDay(new Date(run.startMs)), 0, run.endMs - run.startMs)
@@ -937,6 +955,8 @@ type BucketKind = "attributed" | "withheld" | "unattributed"
 
 const bucketId = (kind: BucketKind, ticketKey: string | null): string => `${kind}\u0000${ticketKey ?? ""}`
 
+class MissingDayAttributionError extends Data.TaggedError("MissingDayAttributionError")<{ readonly message: string }> {}
+
 /**
  * Fold per-session active windows onto Issue Keys, dividing every overlap between *distinct* keys.
  *
@@ -966,8 +986,6 @@ export const splitCredits = (
     {
       kind: BucketKind
       ticketKey: string | null
-      signal: AttributionSignal
-      confidence: number | null
       sessions: Set<string>
     }
   >()
@@ -978,6 +996,7 @@ export const splitCredits = (
   // bucket's whole session set would ask a Coding Agent to describe Monday's work from Friday's
   // prompts — and that sentence is written verbatim into a Clockify description and a Jira worklog.
   const sessionsByBucketDay = new Map<string, Set<string>>()
+  const evidenceByBucketDay = new Map<string, { signal: AttributionSignal; confidence: number | null }>()
   const dayKey = (bucketId: string, day: string) => `${bucketId}\u0000${day}`
 
   for (const session of windows) {
@@ -995,16 +1014,18 @@ export const splitCredits = (
     for (const span of session.spans) {
       const key = dayKey(id, localDay(new Date(span.startMs)))
       sessionsByBucketDay.set(key, (sessionsByBucketDay.get(key) ?? new Set()).add(session.sessionId))
+      const previous = evidenceByBucketDay.get(key)
+      const signal = attribution?.signal ?? "none"
+      const confidence = attribution?.confidence ?? null
+      evidenceByBucketDay.set(key, {
+        signal: previous === undefined || signalRank(signal) > signalRank(previous.signal) ? signal : previous.signal,
+        confidence: previous === undefined ? confidence : weakerConfidence(previous.confidence, confidence)
+      })
     }
     const existing = metaByBucket.get(id)
-    const signal = attribution?.signal ?? "none"
-    const confidence = attribution?.confidence ?? null
     metaByBucket.set(id, {
       kind,
       ticketKey,
-      // A bucket is only as trustworthy as its weakest evidence.
-      signal: existing === undefined || signalRank(signal) > signalRank(existing.signal) ? signal : existing.signal,
-      confidence: existing === undefined ? confidence : weakerConfidence(existing.confidence, confidence),
       sessions: new Set([...(existing?.sessions ?? []), session.sessionId])
     })
   }
@@ -1013,6 +1034,13 @@ export const splitCredits = (
     new Map([...spansByBucket.entries()].map(([id, spans]) => [id, mergeSpansWithinDays(spans)])),
     {
       attributed: (id) => metaByBucket.get(id)?.kind === "attributed",
+      coveredByCertain: (id, activeIds) => {
+        const held = metaByBucket.get(id)
+        return held?.kind === "withheld" && activeIds.some((other) => {
+          const certain = metaByBucket.get(other)
+          return certain?.kind === "attributed" && certain.ticketKey === held.ticketKey
+        })
+      },
       dwellSeconds: options?.dwellSeconds ?? DEFAULT_DWELL_SECONDS
     }
   )
@@ -1027,6 +1055,10 @@ export const splitCredits = (
     for (const [day, credit] of perDay) {
       if (credit.seconds <= 0) continue
       const daySessions = sessionsByBucketDay.get(dayKey(id, day)) ?? meta.sessions
+      const dayEvidence = evidenceByBucketDay.get(dayKey(id, day))
+      if (dayEvidence === undefined) {
+        throw new MissingDayAttributionError({ message: "Scheduled credit has no same-day evidence" })
+      }
       if (meta.kind === "unattributed") {
         const cwds = [
           ...new Set(
@@ -1043,8 +1075,8 @@ export const splitCredits = (
         ticketKey: meta.ticketKey ?? "",
         day,
         seconds: credit.seconds,
-        signal: meta.signal,
-        confidence: meta.confidence,
+        signal: dayEvidence.signal,
+        confidence: dayEvidence.confidence,
         activeSeconds: credit.activeSeconds,
         blocks: credit.blocks,
         sourceStartMs: credit.sourceStartMs,
@@ -1202,10 +1234,16 @@ export const buildSessionProposals = (
         sides,
         options.sourceEntries
       )
-      const blocks = credit.blocks.map((block, index) => {
+      const ambiguousClockify = SourceConsumption.unlinkedClockifyOverlaps(
+        credit.blocks,
+        options.consumptionRows ?? [],
+        options.sourceEntries
+      )
+      const blocks: ReadonlyArray<CreditedBlock> = credit.blocks.map((block, index) => {
         const held = heldByBlock[index] ?? { clockify: 0, jira: 0 }
         return {
           ...block,
+          ...(sides.clockify && ambiguousClockify[index] && { clockifyRefusal: "unlinked-overlap" }),
           ...(held.clockify > 0 && { clockifyConsumedSeconds: Math.min(block.seconds, held.clockify) }),
           ...(held.jira > 0 && { jiraConsumedSeconds: Math.min(block.seconds, held.jira) })
         }

@@ -270,10 +270,17 @@ export const ConfirmPanel = (props: {
       ) : null}
       {preview?._tag === "Write" ? (
         <p className="jcf-muted">
-          Will add {targets.clockify ? `Clockify ${exactDuration(preview.clockify.seconds)}` : ""}
+          Will add{" "}
+          {targets.clockify
+            ? preview.clockify.refusal === "unlinked-overlap"
+              ? "Clockify 0s (held for review)"
+              : `Clockify ${exactDuration(preview.clockify.seconds)}`
+            : ""}
           {targets.clockify && targets.jira ? " · " : ""}
           {targets.jira ? `Jira ${exactDuration(preview.jira.seconds)}` : ""}.
-          {(targets.clockify && preview.clockify.seconds < (requested ?? selected)) ||
+          {(targets.clockify &&
+            preview.clockify.refusal === undefined &&
+            preview.clockify.seconds < (requested ?? selected)) ||
           (targets.jira && preview.jira.seconds < (requested ?? selected))
             ? " Reduced to the time this block can still write in the current read."
             : ""}
@@ -281,6 +288,11 @@ export const ConfirmPanel = (props: {
       ) : preview === undefined ? null : (
         <p className="jcf-muted">No additional time from this block in the current read.</p>
       )}
+      {preview?._tag === "Write" && preview.clockify.refusal === "unlinked-overlap" ? (
+        <p className="jcf-note" data-tone="warning" role="status">
+          An unlinked Clockify entry overlaps this block. Review it before logging Clockify time; Jira can proceed.
+        </p>
+      ) : null}
       <div className="jcf-actions">
         <Button
           disabled={props.unavailable || amountProblem !== null || ticketProblem !== null || noTargets}

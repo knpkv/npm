@@ -7,7 +7,7 @@ const file = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
 const lock = `${file}.lock`
 const identity: SourceIdentity = {
   provider: "clockify",
-  scope: JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID]),
+  scope: JSON.stringify(["clockify-v3", "https://api.clockify.me/api", FAKE_WORKSPACE_ID, FAKE_USER_ID]),
   rowId: "2026-07-01:PROJ-1",
   sourceStartMs: 1_000,
   startMs: 1_000,
@@ -44,6 +44,74 @@ it.effect("persists a pending write and its provider binding across service rest
       }))
   })
 })
+
+it.effect("holds legacy Clockify evidence without discarding unrelated Jira or new-scope state", () => {
+  const oldScope = JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID])
+  const legacy = JSON.stringify({
+    version: 2,
+    reviewedWindows: [{ provider: "clockify", scope: oldScope, fromMs: 0, toMs: 2_000_000 }],
+    observedUnbound: [],
+    pending: [],
+    bindings: []
+  })
+  const fake = makeFakeHeadless({ writtenFiles: { [file]: legacy } })
+  return withLedger(fake, (ledger) =>
+    Effect.gen(function*() {
+      expect((yield* Effect.flip(ledger.assertNoLegacyClockify(oldScope))).message).toContain("manual")
+      expect((yield* Effect.flip(ledger.reserve(identity, oldScope))).message).toContain("manual")
+      expect(fake.world.writtenFiles[file]).toBe(legacy)
+      expect((yield* ledger.read).reviewedWindows[0]?.scope).toBe(oldScope)
+    }))
+})
+
+it.effect("preserves all four legacy Clockify evidence classes through a strict v2 read and failed v3 write", () => {
+  const oldScope = JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID])
+  const oldIdentity = { ...identity, scope: oldScope }
+  const window = { provider: "clockify", scope: oldScope, fromMs: 0, toMs: 2_000_000 }
+  const stored = JSON.stringify({
+    version: 2,
+    reviewedWindows: [window],
+    observedUnbound: [{ provider: "clockify", scope: oldScope, entryId: "ordinary-old", startMs: 1_000 }],
+    pending: [oldIdentity],
+    bindings: [{ ...oldIdentity, entryId: "bound-old" }]
+  })
+  const fake = makeFakeHeadless({ writtenFiles: { [file]: stored }, unwritablePaths: [`${file}.tmp`] })
+  return withLedger(fake, (ledger) =>
+    Effect.gen(function*() {
+      const loaded = yield* ledger.read
+      expect(loaded.version).toBe(3)
+      expect(loaded.reviewedWindows).toEqual([window])
+      expect(loaded.observedUnbound).toHaveLength(1)
+      expect(loaded.pending).toEqual([oldIdentity])
+      expect(loaded.bindings).toHaveLength(1)
+      expect((yield* Effect.flip(ledger.assertNoLegacyClockify(oldScope))).message).toContain("manual")
+      expect((yield* Effect.flip(ledger.reserve(identity, oldScope))).message).toContain("manual")
+      expect(fake.world.writtenFiles[file]).toBe(stored)
+      expect(fake.world.writtenFiles[`${file}.tmp`]).toBeUndefined()
+    }))
+})
+
+it.effect("holds legacy pending and binding records even without a reviewed window", () =>
+  Effect.gen(function*() {
+    const oldScope = JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID])
+    const fields: ReadonlyArray<"pending" | "bindings"> = ["pending", "bindings"]
+    for (const field of fields) {
+      const oldIdentity = { ...identity, scope: oldScope }
+      const stored = JSON.stringify({
+        version: 2,
+        reviewedWindows: [],
+        observedUnbound: [],
+        pending: field === "pending" ? [oldIdentity] : [],
+        bindings: field === "bindings" ? [{ ...oldIdentity, entryId: "bound-old" }] : []
+      })
+      const fake = makeFakeHeadless({ writtenFiles: { [file]: stored } })
+      yield* withLedger(fake, (ledger) =>
+        Effect.gen(function*() {
+          expect((yield* Effect.flip(ledger.assertNoLegacyClockify(oldScope))).message).toContain("manual")
+          expect(fake.world.writtenFiles[file]).toBe(stored)
+        }))
+    }
+  }))
 
 it.effect("does not repeat a pending remote write or treat malformed storage as empty", () => {
   const fake = makeFakeHeadless()
@@ -199,7 +267,7 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
   return withLedger(fake, (ledger) =>
     Effect.gen(function*() {
       const loaded = yield* ledger.read
-      expect(loaded.version).toBe(2)
+      expect(loaded.version).toBe(3)
       expect(loaded.observedUnbound).toEqual([])
       expect(fake.world.writtenFiles[file]).toBe(v1)
       expect(
@@ -214,7 +282,7 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
         { entryId: "ordinary-tail", startMs: 3_000_000 }
       ], [marker])
       const migrated = yield* ledger.read
-      expect(migrated.version).toBe(2)
+      expect(migrated.version).toBe(3)
       expect(migrated.pending).toEqual([identity])
       expect(migrated.bindings).toEqual([marker])
       expect(migrated.observedUnbound).toEqual([{
@@ -226,12 +294,18 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
     }))
 })
 
-it.effect("does not admit a forward tail if the version migration cannot persist", () => {
+it.effect("does not admit a forward tail if v2-to-v3 migration cannot persist", () => {
   const initial: SourceWindow = { provider: "clockify", scope: identity.scope, fromMs: 0, toMs: 2_000_000 }
   const marker = { ...identity, entryId: "marked-entry" }
-  const v1 = JSON.stringify({ version: 1, reviewedWindows: [initial], pending: [], bindings: [marker] })
+  const v2 = JSON.stringify({
+    version: 2,
+    reviewedWindows: [initial],
+    pending: [],
+    bindings: [marker],
+    observedUnbound: []
+  })
   const fake = makeFakeHeadless({
-    writtenFiles: { [file]: v1 },
+    writtenFiles: { [file]: v2 },
     unwritablePaths: [`${file}.tmp`]
   })
   return withLedger(fake, (ledger) =>
@@ -241,7 +315,7 @@ it.effect("does not admit a forward tail if the version migration cannot persist
         { entryId: "ordinary-tail", startMs: 3_000_000 }
       ], [marker]))
       expect(result._tag).toBe("SourceLedgerError")
-      expect(fake.world.writtenFiles[file]).toBe(v1)
+      expect(fake.world.writtenFiles[file]).toBe(v2)
       expect(fake.world.writtenFiles[`${file}.tmp`]).toBeUndefined()
       expect((yield* Effect.flip(ledger.reserve({ ...identity, startMs: 3_000_000, endMs: 4_800_000 })))._tag)
         .toBe("SourceLedgerError")

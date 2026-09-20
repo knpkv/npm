@@ -207,6 +207,50 @@ describe("model", () => {
       }
     }))
 
+  it.effect("emits draft-07 positional tuple schemas without changing bounds or tail", () =>
+    Effect.gen(function*() {
+      for (
+        const scenario of [
+          {
+            schema: Schema.Tuple([Schema.String, Schema.Finite]),
+            output: ["ready", 2],
+            expected: {
+              type: "array",
+              items: [{ type: "string" }, { type: "number" }],
+              additionalItems: false,
+              minItems: 2,
+              maxItems: 2
+            }
+          },
+          {
+            schema: Schema.TupleWithRest(Schema.Tuple([Schema.String]), [Schema.Finite]),
+            output: ["ready", 2, 3],
+            expected: {
+              type: "array",
+              items: [{ type: "string" }],
+              additionalItems: { type: "number" },
+              minItems: 1
+            }
+          }
+        ]
+      ) {
+        const calls: Array<ChildProcess.Command> = []
+        yield* provide(
+          LanguageModel.generateObject({ prompt: "Tuple", schema: scenario.schema }),
+          calls,
+          JSON.stringify({ is_error: false, structured_output: scenario.output, subtype: "success", type: "result" })
+        )
+        const command = calls[0]
+        expect(command !== undefined && ChildProcess.isStandardCommand(command)).toBe(true)
+        if (command !== undefined && ChildProcess.isStandardCommand(command)) {
+          const schema = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown))(
+            command.args[command.args.indexOf("--json-schema") + 1] ?? "null"
+          )
+          expect(schema).toEqual({ $defs: {}, ...scenario.expected })
+        }
+      }
+    }))
+
   // Given file tools the CLI explores before answering, which costs turns and wall clock on a prompt
   // that is already self-contained: 42s over 6 turns with Read,Glob,Grep against 15s over 2 turns
   // with none. `access: "prompt-only"` is how a caller says the prompt needs nothing from disk.

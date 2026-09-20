@@ -14,13 +14,14 @@
  */
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { Layers } from "@knpkv/jira-clockify"
-import { Config, Deferred, Effect, Layer } from "effect"
+import { Config, Deferred, Effect, Layer, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
 import { createServer } from "node:http"
 import { application } from "./HttpApplication.js"
 import { activateOwnerSessionBootstrap, OwnerSessionSecrets, type OwnerSessionSecretsContract } from "./OwnerSession.js"
 
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))
+const LoopbackHostname = Schema.Literals(["127.0.0.1", "localhost", "::1"])
 
 export interface JcfWebServerOptions {
   readonly hostname?: string
@@ -30,19 +31,23 @@ export interface JcfWebServerOptions {
 }
 
 export const makeServer = (options: JcfWebServerOptions) =>
-  HttpRouter.serve(application.pipe(Layer.provide(Layers.HeadlessLayer))).pipe(
-    Layer.provide(
-      NodeHttpServer.layerServer(createServer, { host: options.hostname ?? "127.0.0.1", port: options.port })
-    ),
-    Layer.provide(Etag.layer),
-    Layer.provide(HttpPlatformLive),
-    Layer.provide(NodeServices.layer),
-    Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security)),
-    Layer.tap(() =>
-      activateOwnerSessionBootstrap(options.security).pipe(
-        Effect.andThen(options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, undefined))
+  Layer.unwrap(
+    Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1").pipe(Effect.map((hostname) =>
+      HttpRouter.serve(application.pipe(Layer.provide(Layers.HeadlessLayer))).pipe(
+        Layer.provide(
+          NodeHttpServer.layerServer(createServer, { host: hostname, port: options.port })
+        ),
+        Layer.provide(Etag.layer),
+        Layer.provide(HttpPlatformLive),
+        Layer.provide(NodeServices.layer),
+        Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security)),
+        Layer.tap(() =>
+          activateOwnerSessionBootstrap(options.security).pipe(
+            Effect.andThen(options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, undefined))
+          )
+        )
       )
-    )
+    ))
   )
 
 /** The port to bind. Deliberately not 3000: the CodeCommit web app already lives there. */

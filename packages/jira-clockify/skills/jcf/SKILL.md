@@ -1,6 +1,6 @@
 ---
 name: jcf
-description: Use the @knpkv/jira-clockify CLI to track work across Jira and Clockify. Trigger when the user asks an agent to start, stop, discard, edit, inspect, or manually log time for Jira tickets; reconcile Clockify against Jira or recover forgotten time from local Claude Code sessions; configure Jira OAuth or Clockify API access; list current Jira tickets; set default Clockify project, billable flag, or JQL; or launch the jcf TUI.
+description: Use the @knpkv/jira-clockify CLI to track work across Jira and Clockify. Trigger when the user asks an agent to start, stop, discard, edit, inspect, or manually log time for Jira tickets; reconcile Clockify against Jira or recover forgotten time from local Claude Code and Codex sessions; configure Jira OAuth or Clockify API access; list current Jira tickets; set default Clockify project, billable flag, or JQL; or launch the jcf TUI.
 ---
 
 # Jcf
@@ -38,7 +38,7 @@ jcf config set jql 'assignee = currentUser() AND status != Done ORDER BY updated
 jcf config reset
 ```
 
-Configure which directories' Claude Code sessions may become proposed worklogs:
+Configure which directories' Claude Code and Codex sessions may become proposed worklogs:
 
 ```bash
 jcf config set session-root ~/dev/work
@@ -108,7 +108,7 @@ jcf sync reconcile jira-to-clockify --week
 jcf sync reconcile clockify-to-jira --since 2026-07-01 --until 2026-07-07
 ```
 
-Recover time neither side recorded, using local Claude Code sessions as evidence:
+Recover time neither side recorded, using local Claude Code and Codex sessions as evidence:
 
 ```bash
 jcf sync reconcile --agent claude --day
@@ -118,7 +118,8 @@ jcf sync reconcile --agent claude --day --calendar
 ```
 
 - `--agent` is a mode switch, not a direction. Passing both is a usage error.
-- `claude` is the only supported agent; `--agent codex` fails.
+- `claude` is the only supported agent mode; `--agent codex` fails. That mode reads in-scope Claude Code
+  and Codex sessions as evidence.
 - `--agent claude --json` is the read-only form: it writes exactly one JSON value to stdout, sends
   everything human-facing to stderr, and creates no Clockify entry or Jira worklog. Use it to
   inspect proposals before asking the user which to accept.

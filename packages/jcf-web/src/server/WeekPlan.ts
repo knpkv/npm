@@ -61,14 +61,17 @@ export interface HeldPlan {
   readonly createdAtMillis: number
   readonly plan: WeekPlanResponse
   readonly evidence: ReadonlyMap<string, RowEvidence>
+  /** Server-only scopes bound by a complete read or first explicitly enabled confirmation. */
+  readonly boundScopes: { clockify: string | null; jira: string | null }
   /** Source blocks consumed under corrected ticket labels, independently for each provider. */
   readonly consumption: SourceConsumption.Consumption
   /** Jira targets with successful writes that bypass eventually consistent JQL discovery. */
   readonly jiraReceiptIssueKeys: Set<string>
 }
 
+/** In-memory allocation position; the durable provider binding still names only the source cluster. */
 export const evidenceBlockKey = (row: string, block: AgentSessions.CreditedBlock): string =>
-  SourceConsumption.blockKey(row, block.sourceStartMs ?? block.startMs)
+  JSON.stringify([row, block.sourceStartMs ?? block.startMs, block.allocationIndex ?? 0])
 
 /** Durable source identity carried by entries written under a corrected ticket. */
 export const evidenceMarker = (row: string, block: AgentSessions.CreditedBlock): string =>
@@ -197,6 +200,7 @@ const toWire = (draft: RowDraft, consumption: HeldPlan["consumption"]): WeekRowR
   proposal: draft.proposal === undefined ? undefined : {
     activeSeconds: draft.proposal.activeSeconds,
     blocks: draft.proposal.blocks.map((block) => ({
+      ...(block.clockifyRefusal !== undefined && { clockifyRefusal: block.clockifyRefusal }),
       consumed: consumedForBlock(rowId(draft.ticketKey, draft.day), block, consumption),
       endMs: block.endMs,
       seconds: block.seconds,
@@ -325,6 +329,10 @@ export const buildWeekPlan = (options: {
 
   return {
     report: options.report,
+    boundScopes: {
+      clockify: options.report.sourceScopes?.clockify ?? null,
+      jira: options.report.sourceScopes?.jira ?? null
+    },
     ownership,
     createdAtMillis: options.createdAtMillis,
     evidence,

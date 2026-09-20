@@ -29,13 +29,13 @@ import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as HttpClient from "effect/unstable/http/HttpClient"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
+import { postJiraWorklog as postWithClient } from "./internal/JiraWorklogPost.js"
 import { StateWriter, type TimerStateFile } from "./StateWriter.js"
 import type { JiraTicket } from "./TicketService.js"
 
@@ -107,15 +107,6 @@ const emptyState: TimerState = {
   projectName: null,
   billable: null,
   startedViaJcf: false
-}
-
-const formatJiraFailure = <UnparsedInput>(error: UnparsedInput): string => {
-  if (!Predicate.isReadonlyObject(error)) return String(error)
-  const response = Predicate.isReadonlyObject(error.response) ? error.response : undefined
-  const status = Predicate.isNumber(response?.status) ? `HTTP ${response.status}` : "Jira request failed"
-  if (!("cause" in error)) return status
-  const detail = Predicate.isString(error.cause) ? error.cause : JSON.stringify(error.cause)
-  return detail.length === 0 ? status : `${status}: ${detail}`
 }
 
 // ---------------------------------------------------------------------------
@@ -275,11 +266,6 @@ export const layer = Layer.effect(
       comment?: string
     ): Effect.Effect<JiraWorklogOutcome> =>
       Effect.gen(function*() {
-        // Jira rejects worklogs <60s — floor to 60s. Clockify keeps actual elapsed.
-        const timeSpent = Math.max(60, Math.floor(durationSeconds))
-        const started = startedAt.toISOString().replace("Z", "+0000")
-        yield* Effect.logDebug(`Jira worklog: ${ticketKey} ${timeSpent}s`)
-
         const loggedIn = yield* jiraAuth.isLoggedIn().pipe(Effect.orElseSucceed(() => false))
         if (!loggedIn) {
           yield* Effect.logDebug("Jira worklog skipped: missing access token or cloudId")
@@ -299,27 +285,7 @@ export const layer = Layer.effect(
           baseUrl: "",
           auth: { type: "oauth2", ...auth.value }
         })
-        return yield* jira.addWorklog(ticketKey, {
-          payload: {
-            started,
-            timeSpentSeconds: timeSpent,
-            ...(comment && {
-              comment: {
-                type: "doc",
-                version: 1,
-                content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }]
-              }
-            })
-          }
-        }).pipe(
-          Effect.map((worklog): JiraWorklogOutcome => ({ _tag: "Posted", entryId: worklog.id })),
-          Effect.catchTag("AddWorklog401", () => Effect.succeed<JiraWorklogOutcome>({ _tag: "NotLoggedIn" })),
-          Effect.catch((error) =>
-            Effect.logDebug(`Jira worklog failed: ${formatJiraFailure(error)}`).pipe(
-              Effect.as<JiraWorklogOutcome>({ _tag: "Failed", message: formatJiraFailure(error) })
-            )
-          )
-        )
+        return yield* postWithClient(jira, { ticketKey, startedAt, durationSeconds, comment })
       })
 
     const start = (ticket: JiraTicket, options?: StartOptions) =>

@@ -85,6 +85,65 @@ describe("weekDays", () => {
 })
 
 describe("evidenceBlockKey", () => {
+  it("keeps confirmed time on the first of two allocations from one source cluster", () => {
+    const sourceRow = rowId("PROJ-1", "2025-06-16")
+    const sourceStartMs = at(16, 9)
+    const first = {
+      allocationIndex: 0,
+      endMs: sourceStartMs + 20 * 60_000,
+      seconds: 1200,
+      sourceStartMs,
+      startMs: sourceStartMs
+    }
+    const later = {
+      allocationIndex: 1,
+      endMs: sourceStartMs + 120 * 60_000,
+      seconds: 2400,
+      sourceStartMs,
+      startMs: sourceStartMs + 80 * 60_000
+    }
+    const credit: AgentSessions.TicketDayCredit = {
+      activeSeconds: 4800,
+      blocks: [first, later],
+      confidence: null,
+      day: "2025-06-16",
+      seconds: 3600,
+      sessionIds: ["s1"],
+      settlementEndMs: later.endMs,
+      signal: "branch",
+      sourceStartMs,
+      ticketKey: "PROJ-1"
+    }
+    const confirmed: ReconcileService.RecordedEntry = {
+      description: "corrected",
+      endMs: first.endMs,
+      id: "synthetic-confirmed",
+      source: "clockify",
+      startMs: first.startMs,
+      ticketKey: "PROJ-2"
+    }
+    const consumption = reconcileConsumption(report({
+      attributed: [credit],
+      recorded: [recorded({
+        clockifySeconds: 1200,
+        day: "2025-06-16",
+        intervals: [{ entry: confirmed, endMs: first.endMs, source: "clockify", startMs: first.startMs }],
+        ticketKey: "PROJ-2"
+      })],
+      sourceEntries: [{
+        endMs: first.endMs,
+        id: confirmed.id,
+        rowId: sourceRow,
+        source: "clockify",
+        sourceStartMs,
+        startMs: first.startMs
+      }]
+    }))
+    expect(evidenceBlockKey(sourceRow, first)).not.toBe(evidenceBlockKey(sourceRow, later))
+    expect(consumption.get(evidenceBlockKey(sourceRow, first))?.clockify).toBe(1200)
+    expect(consumption.get(evidenceBlockKey(sourceRow, later))).toBeUndefined()
+  })
+
   it("retains consumption when a live block grows, without merging a later block", () => {
     const sourceStartMs = at(16, 9)
     const initial = { startMs: at(16, 10), endMs: at(16, 11), seconds: 3600, sourceStartMs }

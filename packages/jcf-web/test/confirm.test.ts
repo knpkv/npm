@@ -8,14 +8,27 @@
 import { NodeCrypto } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { ReconcileService, SourceConsumption, Time } from "@knpkv/jira-clockify"
-import { FAKE_ACCOUNT_ID, FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
-import { Effect, Layer, Schema } from "effect"
+import {
+  FAKE_ACCOUNT_ID,
+  FAKE_HOME,
+  FAKE_USER_ID,
+  FAKE_WORKSPACE_ID,
+  type FakeHeadlessOptions,
+  makeFakeHeadless
+} from "@knpkv/jira-clockify/testing.js"
+import { Deferred, Effect, Fiber, Layer, Schema } from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import type { ConfirmRequest as PreviewRequest } from "../src/client/api.js"
 import { previewWrite } from "../src/client/weekAtoms.js"
-import { confirmProposal, type ConfirmRequest, logManualEntry } from "../src/server/Confirm.js"
+import {
+  confirmProposal,
+  type ConfirmRequest,
+  logManualEntry,
+  type WriteCapableService
+} from "../src/server/Confirm.js"
 import { buildWeekPlan, type HeldPlan, rowId } from "../src/server/WeekPlan.js"
 import { layer as weekPlansLayer, WeekPlans } from "../src/server/WeekPlans.js"
+import { refreshWeekPlan } from "../src/server/WeekRead.js"
 import { WeekPlan } from "../src/shared/contracts.js"
 
 // Each case composes exactly the layer it needs and provides it at its own entry point.
@@ -133,6 +146,85 @@ const rowFor = (plan: HeldPlan, ticketKey: string, day: string) =>
   plan.plan.rows.find((row) => row.rowId === rowId(ticketKey, day))
 
 describe("preview and provider agreement", () => {
+  it.effect("holds overlapping unlinked Clockify time while Jira remains independently writable", () => {
+    const fake = makeFakeHeadless(baseOptions({
+      clockifyEntries: [{
+        id: "synthetic-unlinked",
+        description: "ordinary unlinked time",
+        start: iso(at(10, 0)),
+        end: iso(at(11, 0))
+      }]
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const plan = yield* readPlan
+      const row = rowFor(plan, TICKET, DAY)
+      expect(row?.proposal?.blocks[0]?.clockifyRefusal).toBe("unlinked-overlap")
+      expect(row?.proposal?.blocks[0]?.consumed.clockify).toBe(0)
+      const wire = Schema.encodeSync(WeekPlan)(plan.plan)
+      expect(
+        Schema.decodeSync(WeekPlan)(wire).rows.find((candidate) => candidate.rowId === rowId(TICKET, DAY))
+          ?.proposal?.blocks[0]?.clockifyRefusal
+      ).toBe("unlinked-overlap")
+      const preview = previewWrite({ plan: plan.plan, entries: [] }, {
+        kind: "confirm",
+        request: { planId: plan.planId, rowId: rowId(TICKET, DAY) }
+      })
+      expect(preview.map((entry) => entry.source)).toEqual(["jira"])
+      const outcome = yield* confirm(plan)
+      expect(outcome._tag).toBe("Written")
+      if (outcome._tag !== "Written") return
+      expect(outcome.result.clockify).toMatchObject({ _tag: "Refused" })
+      expect(outcome.result.jira).toMatchObject({ _tag: "Written", seconds: 3900 })
+      expect(fake.world.createdClockifyEntries).toEqual([])
+      expect(fake.world.jiraWorklogs).toHaveLength(1)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("writes a separate nonoverlapping Clockify block while holding the ambiguous block", () => {
+    const fake = makeFakeHeadless(baseOptions({
+      transcripts: {
+        "repo/session-a.jsonl": transcript({
+          branch: `feature/${TICKET}-first`,
+          minutes: 60,
+          sessionId: "session-a",
+          startMs: at(10, 0)
+        }),
+        "repo/session-b.jsonl": transcript({
+          branch: `feature/${TICKET}-second`,
+          minutes: 60,
+          sessionId: "session-b",
+          startMs: at(12, 0)
+        })
+      },
+      clockifyEntries: [{
+        id: "synthetic-unlinked",
+        description: "ordinary unlinked time",
+        start: iso(at(10, 0)),
+        end: iso(at(11, 0))
+      }]
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const plan = yield* readPlan
+      const blocks = rowFor(plan, TICKET, DAY)?.proposal?.blocks
+      expect(blocks?.map((block) => block.clockifyRefusal)).toEqual(["unlinked-overlap", undefined])
+      const preview = previewWrite({ plan: plan.plan, entries: [] }, {
+        kind: "confirm",
+        request: { planId: plan.planId, rowId: rowId(TICKET, DAY) }
+      })
+      expect(preview.filter((entry) => entry.source === "clockify")).toHaveLength(1)
+      expect(preview.filter((entry) => entry.source === "jira")).toHaveLength(2)
+      const outcome = yield* confirm(plan)
+      expect(outcome._tag).toBe("Written")
+      if (outcome._tag !== "Written") return
+      expect(outcome.result.clockify).toMatchObject({ _tag: "PartiallyWritten", seconds: 3900 })
+      expect(outcome.result.jira).toMatchObject({ _tag: "Written", seconds: 7800 })
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      expect(fake.world.jiraWorklogs).toHaveLength(2)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
   it.effect("discovers 45 credited seconds and previews exactly the Clockify write it confirms", () =>
     Effect.gen(function*() {
       const options: FakeHeadlessOptions = {
@@ -794,6 +886,455 @@ it.effect("rebuilds corrected-ticket consumption from provider entries after a r
     expect(world.jiraWorklogs).toHaveLength(1)
   }))
 
+it.effect("keeps two allocations from one source cluster independent after a corrected write and restart", () => {
+  const sessions = {
+    "repo/session-a.jsonl": transcript({
+      branch: `feature/${TICKET}-early`,
+      minutes: 35,
+      sessionId: "session-a",
+      startMs: at(10, 0)
+    }),
+    "repo/session-b.jsonl": transcript({
+      branch: `feature/${TICKET}-late`,
+      minutes: 35,
+      sessionId: "session-b",
+      startMs: at(11, 20)
+    }),
+    "repo/session-c.jsonl": transcript({
+      branch: `feature/${OTHER_TICKET}-middle`,
+      minutes: 75,
+      sessionId: "session-c",
+      startMs: at(10, 20)
+    })
+  }
+  const first = makeFakeHeadless(baseOptions({ transcripts: sessions }))
+  return Effect.gen(function*() {
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const plan = yield* readPlan
+      const blocks = rowFor(plan, TICKET, DAY)?.proposal?.blocks
+      expect(blocks?.map((block) => block.seconds)).toEqual([1200, 2400])
+      expect((yield* confirm(plan, { blocks: [0], ticketKey: OTHER_TICKET }))._tag).toBe("Written")
+    }).pipe(Effect.provide(first.layer))
+    const clockifyWrite = first.world.createdClockifyEntries[0]!
+    const jiraWrite = first.world.jiraWorklogs[0]!
+    const restarted = makeFakeHeadless(baseOptions({
+      transcripts: sessions,
+      writtenFiles: { ...first.world.writtenFiles },
+      clockifyEntries: [{
+        id: "created-0",
+        description: `[${OTHER_TICKET}] edited`,
+        start: clockifyWrite.start,
+        end: clockifyWrite.end
+      }],
+      jiraWorklogs: {
+        [OTHER_TICKET]: [{
+          id: "wl-created-0",
+          started: jiraWrite.started,
+          timeSpentSeconds: jiraWrite.timeSpentSeconds,
+          comment: "edited"
+        }]
+      }
+    }))
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const plan = yield* readPlan
+      const blocks = rowFor(plan, TICKET, DAY)?.proposal?.blocks
+      expect(blocks?.map((block) => block.consumed)).toEqual([
+        { clockify: 1200, jira: 1200 },
+        { clockify: 0, jira: 0 }
+      ])
+      expect((yield* confirm(plan, { blocks: [0] }))._tag).toBe("NothingOwed")
+      expect((yield* confirm(plan, { blocks: [0], ticketKey: OTHER_TICKET }))._tag).toBe("NothingOwed")
+      expect(restarted.world.createdClockifyEntries).toHaveLength(0)
+      expect(restarted.world.jiraWorklogs).toHaveLength(0)
+      const later = yield* confirm(plan, { blocks: [1] })
+      expect(later._tag).toBe("Written")
+      if (later._tag === "Written") {
+        expect(later.result.clockify).toMatchObject({ _tag: "Written", seconds: 2400 })
+        expect(later.result.jira).toMatchObject({ _tag: "Written", seconds: 2400 })
+      }
+      expect(restarted.world.createdClockifyEntries).toHaveLength(1)
+      expect(restarted.world.jiraWorklogs).toHaveLength(1)
+    }).pipe(Effect.provide(restarted.layer))
+  })
+})
+
+it.effect("pins Clockify reads and writes to the current verified endpoint, not the startup client", () => {
+  const endpoint = "https://synthetic-b.example/api"
+  const fake = makeFakeHeadless(baseOptions({
+    clockifyAuth: { baseUrl: endpoint, apiKey: "synthetic-rotated-key" }
+  }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readClockifyOnlyPlan
+    expect((yield* confirm(plan, { ticketKey: OTHER_TICKET }))._tag).toBe("Written")
+    expect(fake.world.createdClockifyEntries).toHaveLength(1)
+    expect(fake.world.clockifyRequests.length).toBeGreaterThan(2)
+    expect(fake.world.clockifyRequests.every((request) => request.url.startsWith(endpoint))).toBe(true)
+    expect(fake.world.clockifyRequests.some((request) => request.method === "POST")).toBe(true)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("refuses a retained Clockify plan after an endpoint switch without changing private evidence", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const held = yield* readClockifyOnlyPlan
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    const before = fake.world.writtenFiles[ledgerPath]
+    fake.world.clockifyAuth = { ...fake.world.clockifyAuth, baseUrl: "https://synthetic-b.example/api" }
+    expect((yield* Effect.result(confirm(held, { ticketKey: OTHER_TICKET })))._tag).toBe("Failure")
+    expect(fake.world.writtenFiles[ledgerPath]).toBe(before)
+    expect(fake.world.createdClockifyEntries).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("keeps a retained Clockify scope across a harmless endpoint trailing slash", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const held = yield* readClockifyOnlyPlan
+    fake.world.clockifyAuth = { ...fake.world.clockifyAuth, baseUrl: `${fake.world.clockifyAuth.baseUrl}/` }
+    expect((yield* confirm(held))._tag).toBe("Written")
+    expect(fake.world.createdClockifyEntries).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("holds legacy Clockify windows before source planning and leaves private bytes unchanged", () => {
+  const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+  const stored = JSON.stringify({
+    version: 2,
+    reviewedWindows: [{
+      provider: "clockify",
+      scope: JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID]),
+      fromMs: 0,
+      toMs: 4_102_444_800_000
+    }],
+    pending: [],
+    bindings: [],
+    observedUnbound: []
+  })
+  const fake = makeFakeHeadless(baseOptions({ writtenFiles: { [ledgerPath]: stored } }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    expect((yield* Effect.flip(readClockifyOnlyPlan)).message).toContain("manual")
+    expect(fake.world.writtenFiles[ledgerPath]).toBe(stored)
+    expect(fake.world.createdClockifyEntries).toEqual([])
+    expect((yield* confirm(yield* readJiraOnlyPlan))._tag).toBe("Written")
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
+    const migrated = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({
+      version: Schema.Literal(3),
+      reviewedWindows: Schema.Array(Schema.Struct({ provider: Schema.String, scope: Schema.String }))
+    })))(fake.world.writtenFiles[ledgerPath])
+    expect(
+      migrated.reviewedWindows.some((window) =>
+        window.provider === "clockify" && window.scope === JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID])
+      )
+    ).toBe(true)
+    const restarted = makeFakeHeadless(baseOptions({ writtenFiles: { ...fake.world.writtenFiles } }))
+    yield* Effect.gen(function*() {
+      expect((yield* Effect.flip(readClockifyOnlyPlan)).message).toContain("manual")
+      expect(restarted.world.createdClockifyEntries).toEqual([])
+    }).pipe(Effect.provide(restarted.layer))
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("rejects a configured Clockify user that the current credential cannot verify", () => {
+  const fake = makeFakeHeadless(baseOptions({ clockifyVerifiedUserId: "synthetic-other-user" }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    expect((yield* Effect.flip(readClockifyOnlyPlan)).message).toContain("does not match")
+    expect(fake.world.createdClockifyEntries).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("treats a failed Clockify identity read as unknown, not a blank account", () => {
+  const fake = makeFakeHeadless(baseOptions({ clockifyUserReadFails: true }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    expect((yield* Effect.flip(readClockifyOnlyPlan)).message).toContain("Cannot verify")
+    expect(fake.world.createdClockifyEntries).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("does not write through a Clockify endpoint switched during private reservation", () => {
+  return Effect.gen(function*() {
+    const reserved = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    let stopped = false
+    const fake = makeFakeHeadless(baseOptions({
+      afterFileWrite: (path) =>
+        Effect.gen(function*() {
+          const saved = fake.world.writtenFiles[path]
+          if (
+            !stopped && path.includes("source-consumption") && saved !== undefined &&
+            saved.includes("\"pending\":[{")
+          ) {
+            stopped = true
+            yield* Deferred.succeed(reserved, undefined)
+            yield* Deferred.await(resume)
+          }
+        })
+    }))
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const held = yield* readClockifyOnlyPlan
+      const writer = yield* confirm(held).pipe(Effect.forkChild)
+      yield* Deferred.await(reserved)
+      fake.world.clockifyAuth = { ...fake.world.clockifyAuth, baseUrl: "https://synthetic-b.example/api" }
+      yield* Deferred.succeed(resume, undefined)
+      const result = yield* Effect.result(Fiber.join(writer))
+      expect(result._tag).toBe("Success")
+      if (result._tag === "Success" && result.success._tag === "Written") {
+        expect(result.success.result.clockify._tag).not.toBe("Written")
+      }
+      expect(fake.world.createdClockifyEntries).toEqual([])
+      const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
+        fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+      )
+      expect(stored.pending).toEqual([])
+      expect(stored.bindings).toEqual([])
+    }).pipe(Effect.provide(fake.layer))
+  })
+})
+
+it.effect("releases a reserved Clockify intent when the second identity read fails before POST", () => {
+  const transcripts = {
+    "repo/afternoon.jsonl": transcript({
+      branch: `feature/${TICKET}-later`,
+      minutes: 30,
+      sessionId: "afternoon",
+      startMs: at(15, 0)
+    })
+  }
+  let failNextVerification = false
+  const fake = makeFakeHeadless(baseOptions({
+    transcripts,
+    afterFileWrite: (path) =>
+      Effect.sync(() => {
+        if (
+          failNextVerification && path.includes("source-consumption") &&
+          fake.world.writtenFiles[path]?.includes("\"pending\":[{") === true
+        ) {
+          fake.world.clockifyUserReadFailuresRemaining = 1
+          failNextVerification = false
+        }
+      })
+  }))
+  return Effect.gen(function*() {
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const held = yield* readClockifyOnlyPlan
+      expect((yield* confirm(held, { blocks: [0] }))._tag).toBe("Written")
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      const before = yield* Schema.decodeUnknownEffect(StoredConsumption)(fake.world.writtenFiles[ledgerPath])
+      expect(before.bindings).toHaveLength(1)
+      const beforeConsumption = [...held.consumption.entries()]
+      failNextVerification = true
+      const failed = yield* confirm(held, { blocks: [1] })
+      expect(failed._tag).toBe("Written")
+      if (failed._tag === "Written") expect(failed.result.clockify._tag).toBe("Refused")
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+      const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(fake.world.writtenFiles[ledgerPath])
+      expect(stored.pending).toEqual([])
+      expect(stored.bindings).toEqual(before.bindings)
+      expect([...held.consumption.entries()]).toEqual(beforeConsumption)
+    }).pipe(Effect.provide(fake.layer))
+    const restarted = makeFakeHeadless(baseOptions({
+      transcripts,
+      writtenFiles: { ...fake.world.writtenFiles },
+      clockifyEntries: fake.world.createdClockifyEntries.map((entry, index) => ({
+        id: `created-${index}`,
+        description: entry.description,
+        start: entry.start,
+        end: entry.end
+      }))
+    }))
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const retriedPlan = yield* readClockifyOnlyPlan
+      expect(rowFor(retriedPlan, TICKET, DAY)?.proposal?.blocks[0]?.consumed.clockify).toBe(3900)
+      const retried = yield* confirm(retriedPlan, { blocks: [1] })
+      expect(retried._tag).toBe("Written")
+      if (retried._tag === "Written") expect(retried.result.clockify).toMatchObject({ _tag: "Written" })
+      expect(restarted.world.createdClockifyEntries).toHaveLength(1)
+      expect((yield* confirm(retriedPlan, { blocks: [1] }))._tag).toBe("NothingOwed")
+      expect(restarted.world.createdClockifyEntries).toHaveLength(1)
+    }).pipe(Effect.provide(restarted.layer))
+  })
+})
+
+it.effect("releases a reserved Clockify intent when the verified user changes before POST", () => {
+  let switched = false
+  const fake = makeFakeHeadless(baseOptions({
+    afterFileWrite: (path) =>
+      Effect.sync(() => {
+        if (
+          !switched && path.includes("source-consumption") &&
+          fake.world.writtenFiles[path]?.includes("\"pending\":[{") === true
+        ) {
+          fake.world.clockifyVerifiedUserId = "synthetic-other-user"
+          switched = true
+        }
+      })
+  }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const first = yield* confirm(yield* readClockifyOnlyPlan)
+    expect(switched).toBe(true)
+    expect(first._tag).toBe("Written")
+    if (first._tag === "Written") expect(first.result.clockify._tag).toBe("Refused")
+    expect(fake.world.createdClockifyEntries).toEqual([])
+    const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
+      fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+    )
+    expect(stored.pending).toEqual([])
+    expect(stored.bindings).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("keeps a manual hold if releasing a known-no-write Clockify intent fails", () => {
+  const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+  const unwritablePaths: Array<string> = []
+  let failedRead = false
+  const fake = makeFakeHeadless(baseOptions({
+    unwritablePaths,
+    afterFileWrite: (path) =>
+      Effect.sync(() => {
+        const saved = fake.world.writtenFiles[path]
+        if (!failedRead && path.includes("source-consumption") && saved?.includes("\"pending\":[{") === true) {
+          fake.world.clockifyUserReadFailuresRemaining = 1
+          failedRead = true
+        } else if (
+          failedRead && path.includes("source-consumption") && saved?.includes("\"pending\":[]") === true &&
+          fake.world.writtenFiles[ledgerPath]?.includes("\"pending\":[{") === true
+        ) {
+          unwritablePaths.push(ledgerPath)
+        }
+      })
+  }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const first = yield* confirm(yield* readClockifyOnlyPlan)
+    expect(failedRead).toBe(true)
+    expect(first._tag).toBe("Written")
+    if (first._tag === "Written") {
+      expect(first.result.clockify).toMatchObject({ _tag: "Refused" })
+      expect(first.result.lines.join(" ")).toContain("manual recovery")
+    }
+    expect(fake.world.createdClockifyEntries).toEqual([])
+    const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(fake.world.writtenFiles[ledgerPath])
+    expect(stored.pending).toHaveLength(1)
+    expect(stored.bindings).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("allows a Clockify key rotation only while the verified account and endpoint stay fixed", () => {
+  let rotated = false
+  const fake = makeFakeHeadless(baseOptions({
+    afterFileWrite: (path) =>
+      Effect.sync(() => {
+        const saved = fake.world.writtenFiles[path]
+        if (!rotated && path.includes("source-consumption") && saved?.includes("\"pending\":[{") === true) {
+          fake.world.clockifyAuth = { ...fake.world.clockifyAuth, apiKey: "synthetic-rotated-key" }
+          rotated = true
+        }
+      })
+  }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const result = yield* confirm(yield* readClockifyOnlyPlan)
+    expect(rotated).toBe(true)
+    expect(result._tag).toBe("Written")
+    expect(fake.world.createdClockifyEntries).toHaveLength(1)
+    const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
+      fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+    )
+    expect(stored.pending).toEqual([])
+    expect(stored.bindings).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("does not post a Jira worklog under a profile switched during private reservation", () => {
+  let accountId = FAKE_ACCOUNT_ID
+  return Effect.gen(function*() {
+    const reserved = yield* Deferred.make<void>()
+    const resume = yield* Deferred.make<void>()
+    let stopped = false
+    const fake = makeFakeHeadless({
+      ...baseOptions(),
+      get jiraAccountId() {
+        return accountId
+      },
+      afterFileWrite: (path) =>
+        Effect.gen(function*() {
+          const saved = fake.world.writtenFiles[path]
+          if (
+            !stopped && path.includes("source-consumption") && saved !== undefined &&
+            saved.includes("\"pending\":[{")
+          ) {
+            stopped = true
+            yield* Deferred.succeed(reserved, undefined)
+            yield* Deferred.await(resume)
+          }
+        })
+    })
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const plan = yield* readJiraOnlyPlan
+      const writer = yield* confirm(plan).pipe(Effect.forkChild)
+      yield* Deferred.await(reserved)
+      accountId = "synthetic-other-account"
+      yield* Deferred.succeed(resume, undefined)
+      const result = yield* Fiber.join(writer)
+      expect(stopped).toBe(true)
+      if (result._tag === "Written") expect(result.result.jira._tag).not.toBe("Written")
+      expect(fake.world.jiraWorklogs).toEqual([])
+      expect(fake.world.createdClockifyEntries).toEqual([])
+      const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
+        fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+      )
+      expect(stored.pending).toEqual([])
+      expect(stored.bindings).toEqual([])
+    }).pipe(Effect.provide(fake.layer))
+  })
+})
+
+it.effect("keeps the verified Jira account on a same-identity token rotation", () => {
+  let token = "synthetic-token-a"
+  let rotated = false
+  const fake = makeFakeHeadless({
+    ...baseOptions(),
+    get jiraAccessToken() {
+      return token
+    },
+    afterFileWrite: (path) =>
+      Effect.sync(() => {
+        const saved = fake.world.writtenFiles[path]
+        if (
+          !rotated && path.includes("source-consumption") && saved !== undefined && saved.includes("\"pending\":[{")
+        ) {
+          token = "synthetic-token-b"
+          rotated = true
+        }
+      })
+  })
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const result = yield* confirm(yield* readJiraOnlyPlan)
+    expect(rotated).toBe(true)
+    expect(result._tag).toBe("Written")
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
+    const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
+      fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+    )
+    expect(stored.pending).toEqual([])
+    expect(stored.bindings).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
 it.effect("keeps confirmed corrected time consumed after both provider descriptions lose their source suffix", () => {
   const fake = makeFakeHeadless(baseOptions())
   return Effect.gen(function*() {
@@ -1215,6 +1756,315 @@ it.effect("never credits another account's durable Jira binding", () => {
       expect(rowFor(plan, TICKET, DAY)?.proposal?.blocks[0]?.consumed.jira).toBe(0)
       expect(otherAccount.world.jiraWorklogs).toEqual([])
     }).pipe(Effect.provide(otherAccount.layer))
+  })
+})
+
+it.effect("refuses a retained Jira plan when the provider identity changes before confirmation", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readJiraOnlyPlan
+    const reconcile = yield* ReconcileService.ReconcileService
+    let writes = 0
+    const switched = {
+      refreshRecordedTime: () =>
+        Effect.succeed({
+          ...plan.report,
+          sourceScopes: { clockify: null, jira: "synthetic-other-account" }
+        }),
+      applyToClockify: reconcile.applyToClockify,
+      applyToJira: () =>
+        Effect.sync(() => {
+          writes++
+          const posted: "Posted" = "Posted"
+          return { _tag: posted }
+        })
+    }
+    const result = yield* Effect.result(confirmProposal({
+      plan,
+      request: {
+        rowId: rowId(TICKET, DAY),
+        blocks: undefined,
+        seconds: undefined,
+        ticketKey: undefined,
+        note: undefined,
+        targets: { clockify: false, jira: true }
+      },
+      service: switched,
+      summaryOf: noSummary
+    }))
+    expect(result._tag).toBe("Failure")
+    expect(writes).toBe(0)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+for (const provider of ["jira", "clockify"] satisfies ReadonlyArray<"jira" | "clockify">) {
+  it.effect(`retains the first verified ${provider} identity when a previously unread side is enabled`, () => {
+    const fake = makeFakeHeadless(baseOptions({
+      transcripts: {
+        "repo/afternoon.jsonl": transcript({
+          branch: `feature/${TICKET}-later`,
+          minutes: 30,
+          sessionId: "afternoon",
+          startMs: at(15, 0)
+        })
+      }
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const plan = yield* (provider === "jira" ? readClockifyOnlyPlan : readJiraOnlyPlan)
+      const targets = { clockify: provider === "clockify", jira: provider === "jira" }
+      const first = yield* confirm(plan, { blocks: [0], targets })
+      expect(first._tag).toBe("Written")
+      const reconcile = yield* ReconcileService.ReconcileService
+      let attemptedWrites = 0
+      const switched: WriteCapableService = {
+        refreshRecordedTime: (period, previous, options) =>
+          reconcile.refreshRecordedTime(period, previous, options).pipe(
+            Effect.map((fresh) => ({
+              ...fresh,
+              sourceScopes: {
+                clockify: fresh.sourceScopes?.clockify ?? null,
+                jira: fresh.sourceScopes?.jira ?? null,
+                [provider]: "synthetic-other-account"
+              }
+            }))
+          ),
+        applyToClockify: (...args) => {
+          attemptedWrites++
+          return reconcile.applyToClockify(...args)
+        },
+        applyToJira: (...args) => {
+          attemptedWrites++
+          return reconcile.applyToJira(...args)
+        }
+      }
+      const switchedResult = yield* Effect.result(confirmProposal({
+        plan,
+        request: {
+          blocks: [1],
+          note: undefined,
+          rowId: rowId(TICKET, DAY),
+          seconds: undefined,
+          targets,
+          ticketKey: undefined
+        },
+        service: switched,
+        summaryOf: noSummary
+      }))
+      expect(switchedResult._tag).toBe("Failure")
+      expect(attemptedWrites).toBe(0)
+      const same = yield* confirm(plan, { blocks: [1], targets })
+      expect(same._tag).toBe("Written")
+      expect(fake.world.createdClockifyEntries).toHaveLength(provider === "clockify" ? 2 : 0)
+      expect(fake.world.jiraWorklogs).toHaveLength(provider === "jira" ? 2 : 0)
+    }).pipe(Effect.provide(fake.layer))
+  })
+}
+
+for (const provider of ["jira", "clockify"] satisfies ReadonlyArray<"jira" | "clockify">) {
+  it.effect(`keeps the first enabled ${provider} account when an older Refresh totals finishes`, () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless(baseOptions({
+        transcripts: {
+          "repo/afternoon.jsonl": transcript({
+            branch: `feature/${TICKET}-later`,
+            minutes: 30,
+            sessionId: "afternoon",
+            startMs: at(15, 0)
+          })
+        }
+      }))
+      yield* Effect.gen(function*() {
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        const plans = yield* WeekPlans
+        const reconcile = yield* ReconcileService.ReconcileService
+        const initial = yield* plans.keep(
+          yield* (provider === "jira" ? readClockifyOnlyPlan : readJiraOnlyPlan),
+          yield* plans.readGeneration
+        )
+        expect(initial.boundScopes[provider]).toBeNull()
+        const readFinished = yield* Deferred.make<void>()
+        const finishRefresh = yield* Deferred.make<void>()
+        const stalled: ReconcileService.ReconcileServiceContract = {
+          ...reconcile,
+          refreshRecordedTime: (period, previous, options) =>
+            Effect.gen(function*() {
+              const fresh = yield* reconcile.refreshRecordedTime(period, previous, options)
+              yield* Deferred.succeed(readFinished, undefined)
+              yield* Deferred.await(finishRefresh)
+              return fresh
+            })
+        }
+        const refresh = yield* refreshWeekPlan({
+          planId: initial.planId,
+          plans,
+          reconcile: stalled,
+          report: () => Effect.void
+        }).pipe(Effect.forkChild)
+        yield* Deferred.await(readFinished)
+        const targets = { clockify: provider === "clockify", jira: provider === "jira" }
+        expect((yield* plans.withConfirmationPermit(confirm(initial, { blocks: [0], targets })))._tag).toBe("Written")
+        yield* Deferred.succeed(finishRefresh, undefined)
+        const refreshed = yield* Fiber.join(refresh)
+        expect(refreshed.planId).toBe(initial.planId)
+        const held = yield* plans.find(initial.planId)
+        expect(held?.boundScopes[provider]).toBe(initial.boundScopes[provider])
+        expect(held?.boundScopes[provider]).not.toBeNull()
+        expect(held?.report.sides[provider]).toBe(false)
+        const separate = buildWeekPlan({
+          createdAtMillis: initial.createdAtMillis,
+          monday: new Date(`${initial.plan.monday}T00:00:00`),
+          planId: `separate-${provider}`,
+          report: initial.report,
+          scope: initial.plan.scope
+        })
+        expect(separate.boundScopes[provider]).toBeNull()
+        if (held === undefined) return
+        const switched: WriteCapableService = {
+          refreshRecordedTime: (period, previous, options) =>
+            reconcile.refreshRecordedTime(period, previous, options).pipe(
+              Effect.map((fresh) => ({
+                ...fresh,
+                sourceScopes: {
+                  clockify: fresh.sourceScopes?.clockify ?? null,
+                  jira: fresh.sourceScopes?.jira ?? null,
+                  [provider]: "synthetic-other-account"
+                }
+              }))
+            ),
+          applyToClockify: reconcile.applyToClockify,
+          applyToJira: reconcile.applyToJira
+        }
+        const request: ConfirmRequest = {
+          blocks: [1],
+          note: undefined,
+          rowId: rowId(TICKET, DAY),
+          seconds: undefined,
+          targets,
+          ticketKey: undefined
+        }
+        const denied = yield* Effect.result(plans.withConfirmationPermit(confirmProposal({
+          plan: held,
+          request,
+          service: switched,
+          summaryOf: noSummary
+        })))
+        expect(denied._tag).toBe("Failure")
+        expect(fake.world.createdClockifyEntries).toHaveLength(provider === "clockify" ? 1 : 0)
+        expect(fake.world.jiraWorklogs).toHaveLength(provider === "jira" ? 1 : 0)
+        const same = yield* plans.withConfirmationPermit(confirm(held, { blocks: [1], targets }))
+        expect(same._tag).toBe("Written")
+        expect(fake.world.createdClockifyEntries).toHaveLength(provider === "clockify" ? 2 : 0)
+        expect(fake.world.jiraWorklogs).toHaveLength(provider === "jira" ? 2 : 0)
+      }).pipe(Effect.provide(weekPlansLayer.pipe(Layer.provideMerge(fake.layer), Layer.provideMerge(NodeCrypto.layer))))
+    }))
+}
+
+it.effect("rejects a refresh that tries to rebind a held provider account", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plans = yield* WeekPlans
+    const reconcile = yield* ReconcileService.ReconcileService
+    const initial = yield* plans.keep(yield* readPlan, yield* plans.readGeneration)
+    const switched: ReconcileService.ReconcileServiceContract = {
+      ...reconcile,
+      refreshRecordedTime: (period, previous, options) =>
+        reconcile.refreshRecordedTime(period, previous, options).pipe(
+          Effect.map((fresh) => ({
+            ...fresh,
+            sourceScopes: {
+              clockify: "synthetic-other-account",
+              jira: fresh.sourceScopes?.jira ?? null
+            }
+          }))
+        )
+    }
+    const outcome = yield* Effect.result(refreshWeekPlan({
+      planId: initial.planId,
+      plans,
+      reconcile: switched,
+      report: () => Effect.void
+    }))
+    expect(outcome._tag).toBe("Failure")
+    expect(yield* plans.find(initial.planId)).toBe(initial)
+    expect(fake.world.createdClockifyEntries).toEqual([])
+    expect(fake.world.jiraWorklogs).toEqual([])
+  }).pipe(Effect.provide(weekPlansLayer.pipe(Layer.provideMerge(fake.layer), Layer.provideMerge(NodeCrypto.layer))))
+})
+
+it.effect("checks the retained provider identity again at each write adapter", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readPlan
+    const scopes = plan.report.sourceScopes
+    if (
+      scopes?.clockify === null || scopes?.clockify === undefined ||
+      scopes.jira === null || scopes.jira === undefined
+    ) return yield* Effect.die("missing synthetic provider scope")
+    const reconcile = yield* ReconcileService.ReconcileService
+    const changed = yield* Effect.result(reconcile.refreshRecordedTime(
+      Time.isoWeekPeriod(new Date(at(12, 0))),
+      { ...plan.report, sourceScopes: { ...scopes, jira: "synthetic-other-account" } }
+    ))
+    expect(changed._tag).toBe("Failure")
+    const source = {
+      rowId: rowId(TICKET, DAY),
+      sourceStartMs: at(10, 0),
+      startMs: at(10, 0),
+      endMs: at(10, 1),
+      seconds: 60
+    }
+    const wrong = { ...source, expectedScope: "synthetic-other-account" }
+    expect(
+      (yield* Effect.result(reconcile.applyToClockify(TICKET, DAY, 60, "synthetic", new Date(at(10, 0)), wrong)))
+        ._tag
+    ).toBe("Failure")
+    expect((yield* reconcile.applyToJira(TICKET, DAY, 60, "synthetic", new Date(at(10, 0)), wrong))._tag)
+      .toBe("Failed")
+    expect(fake.world.createdClockifyEntries).toEqual([])
+    expect(fake.world.jiraWorklogs).toEqual([])
+    expect(
+      yield* reconcile.applyToClockify(TICKET, DAY, 60, "synthetic", new Date(at(10, 0)), {
+        ...source,
+        expectedScope: scopes.clockify
+      })
+    ).toBe(true)
+    expect(
+      (yield* reconcile.applyToJira(TICKET, DAY, 60, "synthetic", new Date(at(10, 0)), {
+        ...source,
+        expectedScope: scopes.jira
+      }))._tag
+    ).toBe("Posted")
+    expect(fake.world.createdClockifyEntries).toHaveLength(1)
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("does not carry a retained plan to another Jira account after a service restart", () => {
+  const first = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    const plan = yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      return yield* readJiraOnlyPlan
+    }).pipe(Effect.provide(first.layer))
+    const files = { ...first.world.writtenFiles }
+    const switched = makeFakeHeadless(baseOptions({ jiraAccountId: "acct-other", writtenFiles: files }))
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const result = yield* Effect.result(confirm(plan, { targets: { clockify: false, jira: true } }))
+      expect(result._tag).toBe("Failure")
+      expect(switched.world.jiraWorklogs).toEqual([])
+    }).pipe(Effect.provide(switched.layer))
+    const same = makeFakeHeadless(baseOptions({ writtenFiles: files }))
+    yield* Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const result = yield* confirm(plan, { targets: { clockify: false, jira: true } })
+      expect(result._tag).toBe("Written")
+      expect(same.world.jiraWorklogs).toHaveLength(1)
+    }).pipe(Effect.provide(same.layer))
   })
 })
 

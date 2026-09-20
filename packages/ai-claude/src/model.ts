@@ -145,6 +145,20 @@ const flattenJsonSchemaAllOf = (value: Schema.Json): Schema.Json => {
       }
     }
   }
+  if (value.prefixItems !== undefined) {
+    const positional = flattened.prefixItems
+    const tail = flattened.items
+    if (
+      !Array.isArray(positional) ||
+      positional.some((item) => !isJsonSchemaObject(item) && !Predicate.isBoolean(item)) ||
+      (tail !== undefined && !isJsonSchemaObject(tail) && !Predicate.isBoolean(tail)) ||
+      flattened.additionalItems !== undefined
+    ) throw new Error("Unsupported positional JSON Schema tuple")
+    flattened.items = positional
+    if (tail !== undefined) flattened.additionalItems = tail
+    else if (flattened.maxItems === positional.length) flattened.additionalItems = false
+    delete flattened.prefixItems
+  }
   if (value.allOf === undefined) return flattened
   if (!Array.isArray(value.allOf)) throw new Error("JSON Schema allOf must be an array")
   for (const clause of value.allOf) {

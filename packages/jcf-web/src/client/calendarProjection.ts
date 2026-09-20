@@ -239,11 +239,13 @@ const suggestedTotal = (plan: WeekPlanResponse | null, source: "jira" | "clockif
   if (plan === null || (plan.scope !== "both" && plan.scope !== source)) return 0
   return plan.rows.reduce((total, row) => {
     const delta = source === "jira" ? (row.proposal?.jiraDelta ?? 0) : (row.proposal?.clockifyDelta ?? 0)
-    if (delta < minimumSuggestionSeconds) return total
     const credit = (row.proposal?.blocks ?? []).reduce((sum, block, index) => {
-      if (!isSuggestionBlock(block)) return sum
+      if (
+        !isSuggestionBlock(block) ||
+        selectedBlockSeconds(plan, row.rowId, index, defaultCalendarLayers) < minimumSuggestionSeconds
+      ) return sum
       const executable = executableBlockSeconds(plan, row.rowId, index, source)
-      return sum + (executable >= minimumSuggestionSeconds ? executable : 0)
+      return sum + executable
     }, 0)
     return total + Math.min(credit, delta)
   }, 0)

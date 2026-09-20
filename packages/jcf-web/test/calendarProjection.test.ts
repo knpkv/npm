@@ -246,8 +246,18 @@ it.each([16, 899, 900])("applies the suggestion floor to the selected provider's
   expect(projectCalendar(plan, [], { ...defaultCalendarLayers, clockify: false, jira: false }).counts.available).toBe(0)
   // Scope also limits authority when a restored plan contains a delta for an excluded provider.
   expect(projectCalendar({ ...plan, scope: "clockify" }, []).counts.available).toBe(remaining >= 900 ? 2 : 0)
-  expect(weekTotals(plan)).toMatchObject({ jiraSuggested: 1800, clockifySuggested: remaining >= 900 ? remaining : 0 })
+  expect(weekTotals(plan)).toMatchObject({ jiraSuggested: 1800, clockifySuggested: remaining })
   expect(weekTotals({ ...plan, scope: "clockify" }).jiraSuggested).toBe(0)
+  const queued = previewWrite({ plan, entries: [] }, {
+    kind: "confirm",
+    request: { planId: plan.planId, rowId: "row-one", blocks: [0], targets: { jira: true, clockify: true } }
+  })
+  expect(
+    queued.filter((entry) => entry.source === "clockify").reduce(
+      (seconds, entry) => seconds + (entry.endMs - entry.startMs) / 1000,
+      0
+    )
+  ).toBe(remaining)
 })
 
 it("hides a block when its selected provider has less than fifteen executable minutes", () => {
@@ -273,7 +283,7 @@ it("hides a block when its selected provider has less than fifteen executable mi
   const clockify = projectCalendar(plan, [], { ...defaultCalendarLayers, jira: false })
   const suggestions = clockify.placements.get(plan.monday)?.filter(({ block }) => block.kind === "proposable")
   expect(suggestions?.map(({ block }) => block.id)).toEqual(["row-one:gap:1"])
-  expect(weekTotals(plan).clockifySuggested).toBe(3600)
+  expect(weekTotals(plan).clockifySuggested).toBe(3900)
 })
 
 it("keeps an exact-threshold block for its provider without reviving the shorter side or hiding saved time", () => {
@@ -313,7 +323,7 @@ it("keeps an exact-threshold block for its provider without reviving the shorter
   expect(
     clockify.placements.get(plan.monday)?.some(({ block }) => block.kind === "logged" && block.source === "clockify")
   ).toBe(true)
-  expect(weekTotals(plan)).toMatchObject({ clockify: 16, clockifySuggested: 4500, jiraSuggested: 0 })
+  expect(weekTotals(plan)).toMatchObject({ clockify: 16, clockifySuggested: 4500, jiraSuggested: 300 })
 })
 
 // The fifteen-minute policy governs offers, never real Jira or Clockify records, including ticketless time.

@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import assert from "node:assert/strict"
 import { URL } from "node:url"
 
+import * as Clock from "effect/Clock"
 import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
@@ -53,7 +54,7 @@ const launchWaves = (files, concurrency = diagnosticConcurrency) =>
     files.slice(index * concurrency, (index + 1) * concurrency)
   )
 
-const decodeInspectionOutput = (file, stdout, stderr, exitCode) => {
+export const decodeInspectionOutput = (file, stdout, stderr, exitCode) => {
   let decoded
   try {
     decoded = Schema.decodeUnknownSync(DiagnosticsOutput)(stdout)
@@ -198,7 +199,7 @@ const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function
   return [...new Set(outputs.flatMap((output) => output.split("\0")).filter(isCheckedSource))].toSorted()
 })
 
-const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
+export const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
   function* (spawner, executable, repositoryRoot, file) {
     const handle = yield* spawner.spawn(
       ChildProcess.make(executable, ["diagnostics", "--file", file, "--format", "json"], {
@@ -223,15 +224,17 @@ const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
   }
 )
 
-const inspectFiles = Effect.fn("ChangedEffectDiagnostics.inspectFiles")(
-  function* (spawner, executable, repositoryRoot, files) {
+export const inspectFiles = Effect.fn("ChangedEffectDiagnostics.inspectFiles")(
+  function* (files, inspect, clock, report) {
     const records = []
-    for (const wave of launchWaves(files)) {
-      const waveRecords = yield* Effect.forEach(
-        wave,
-        (file) => inspectFile(spawner, executable, repositoryRoot, file),
-        { concurrency: "unbounded" }
-      )
+    const waves = launchWaves(files)
+    for (const [index, wave] of waves.entries()) {
+      const started = yield* clock
+      const label = `Changed Effect diagnostics wave ${index + 1}/${waves.length}`
+      yield* report(`${label} START: ${wave.length} files`)
+      const waveRecords = yield* Effect.forEach(wave, inspect, { concurrency: "unbounded" })
+      const elapsedMs = Number(((yield* clock) - started) / 1_000_000n)
+      yield* report(`${label} COMPLETE: ${wave.length} files, ${elapsedMs}ms`)
       for (const record of waveRecords) records.push(record)
     }
     return records
@@ -247,7 +250,12 @@ const program = Effect.gen(function* () {
   const git = yield* makeGit(repositoryRoot)
   const mergeBase = yield* resolveMergeBase(git)
   const files = yield* changedFiles(git, mergeBase)
-  const records = yield* inspectFiles(spawner, executable, repositoryRoot, files)
+  const records = yield* inspectFiles(
+    files,
+    (file) => inspectFile(spawner, executable, repositoryRoot, file),
+    Clock.monotonicTimeNanos,
+    Console.error
+  )
   const diagnostics = validateDiagnostics(records)
   if (diagnostics.length > 0) {
     return yield* fail(`Changed Effect diagnostics failed:\n- ${diagnostics.join("\n- ")}`)
@@ -255,4 +263,4 @@ const program = Effect.gen(function* () {
   yield* Console.log(`Changed Effect diagnostics checked ${files.length} TypeScript files`)
 })
 
-NodeRuntime.runMain(program.pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+if (import.meta.main) NodeRuntime.runMain(program.pipe(Effect.scoped, Effect.provide(NodeServices.layer)))

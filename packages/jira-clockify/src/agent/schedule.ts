@@ -1,3 +1,4 @@
+import { Data } from "effect"
 import { localDay } from "../utils/time.js"
 
 interface Run {
@@ -5,6 +6,8 @@ interface Run {
   readonly endMs: number
   readonly bucketIds: ReadonlyArray<string>
 }
+
+class ScheduleAllocationError extends Data.TaggedError("ScheduleAllocationError")<{ readonly message: string }> {}
 
 export interface ScheduledRun extends Run {
   /** Earliest source instant needed to reconstruct this allocation. */
@@ -90,30 +93,65 @@ export const scheduleRuns = (
       allocations.set(id, allocated + seconds)
       remaining -= seconds
     }
-    let offset = 0
-    for (const [id] of rankedOwners) {
-      const seconds = allocations.get(id) ?? 0
-      if (seconds <= 0) continue
-      result.push({
-        bucketIds: [id],
-        startMs: first.startMs + offset * 1000,
-        endMs: first.startMs + (offset + seconds) * 1000,
-        sourceStartMs: first.startMs,
-        settlementEndMs
-      })
-      offset += seconds
-    }
-    offset = available
-    for (const [index, [id, weight]] of unplaced.entries()) {
-      const seconds = index === unplaced.length - 1 ? duration - offset : Math.floor(weight / 1000)
-      if (seconds > 0) {
+    const remainingMs = new Map([...allocations].map(([id, seconds]) => [id, seconds * 1000]))
+    const futureActiveMs = new Map(active)
+    const lastActiveMs = new Map<string, number>()
+    for (const run of cluster) for (const id of run.bucketIds) lastActiveMs.set(id, run.endMs)
+    const placementOrder = rankedOwners.map(([id]) => id).sort((a, b) =>
+      (lastActiveMs.get(a) ?? 0) - (lastActiveMs.get(b) ?? 0)
+    )
+    const gaps: Array<{ readonly startMs: number; readonly endMs: number }> = []
+    for (const run of cluster) {
+      const runMs = run.endMs - run.startMs
+      for (const id of run.bucketIds) futureActiveMs.set(id, (futureActiveMs.get(id) ?? 0) - runMs)
+      const present = placementOrder.filter((id) => run.bucketIds.includes(id) && (remainingMs.get(id) ?? 0) > 0)
+      let cursor = run.startMs
+      for (const id of present) {
+        const reservedForOthers = present.reduce((sum, other) =>
+          other === id ?
+            sum :
+            sum + Math.max(0, (remainingMs.get(other) ?? 0) - (futureActiveMs.get(other) ?? 0)), 0)
+        const placedMs = Math.min(remainingMs.get(id) ?? 0, Math.max(0, run.endMs - cursor - reservedForOthers))
+        if (placedMs <= 0) continue
         result.push({
           bucketIds: [id],
-          startMs: first.startMs + offset * 1000,
-          endMs: first.startMs + (offset + seconds) * 1000,
+          startMs: cursor,
+          endMs: cursor + placedMs,
           sourceStartMs: first.startMs,
           settlementEndMs
         })
+        remainingMs.set(id, (remainingMs.get(id) ?? 0) - placedMs)
+        cursor += placedMs
+      }
+      if (cursor < run.endMs) gaps.push({ startMs: cursor, endMs: run.endMs })
+    }
+    if ([...remainingMs.values()].some((milliseconds) => milliseconds > 0)) {
+      throw new ScheduleAllocationError({ message: "Attribution cannot fit inside its source activity" })
+    }
+    let gapIndex = 0
+    let gapCursor = gaps[0]?.startMs ?? last.endMs
+    const nextGap = () => {
+      gapIndex++
+      gapCursor = gaps[gapIndex]?.startMs ?? last.endMs
+    }
+    let offset = available
+    for (const [index, [id, weight]] of unplaced.entries()) {
+      const seconds = index === unplaced.length - 1 ? duration - offset : Math.floor(weight / 1000)
+      let milliseconds = seconds * 1000
+      while (milliseconds > 0) {
+        const gap = gaps[gapIndex]
+        if (gap === undefined) throw new ScheduleAllocationError({ message: "Unplaced credit exceeds source activity" })
+        const placedMs = Math.min(milliseconds, gap.endMs - gapCursor)
+        result.push({
+          bucketIds: [id],
+          startMs: gapCursor,
+          endMs: gapCursor + placedMs,
+          sourceStartMs: first.startMs,
+          settlementEndMs
+        })
+        milliseconds -= placedMs
+        gapCursor += placedMs
+        if (gapCursor === gap.endMs) nextGap()
       }
       offset += seconds
     }

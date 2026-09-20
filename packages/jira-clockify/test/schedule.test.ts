@@ -56,6 +56,17 @@ describe("proposed schedule", () => {
     expect(rows[1]?.blocks[0]?.startMs).toBeGreaterThanOrEqual(start + 45 * 60_000)
   })
 
+  it("keeps a dominant late ticket inside its own active span", () => {
+    const rows = credit([{ ticket: "PROJ-7000", from: 0, to: 20 }, { ticket: "PROJ-7001", from: 10, to: 60 }])
+    expect(rows.map((row) => [row.ticketKey, row.seconds])).toEqual([
+      ["PROJ-7000", 900],
+      ["PROJ-7001", 2700]
+    ])
+    expect(rows[0]?.blocks.every((block) => block.startMs >= start && block.endMs <= start + 20 * 60_000)).toBe(true)
+    expect(rows[1]?.blocks.every((block) => block.startMs >= start + 10 * 60_000 && block.endMs <= start + 60 * 60_000))
+      .toBe(true)
+  })
+
   it("redistributes capped residual time instead of dropping it", () => {
     const rows = credit([
       { ticket: "PROJ-7000", from: 0, to: 16 },

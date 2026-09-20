@@ -124,6 +124,21 @@ export interface ResolvedEntry {
   readonly endMs: number
 }
 
+/** Ambiguous ordinary Clockify time holds only the credited blocks it intersects. */
+export const unlinkedClockifyOverlaps = (
+  blocks: ReadonlyArray<{ readonly startMs: number; readonly endMs: number }>,
+  unlinked: ReadonlyArray<RecordedRow>,
+  resolved: ReadonlyArray<ResolvedEntry> = []
+): ReadonlyArray<boolean> => {
+  const bound = new Set(resolved.filter((entry) => entry.source === "clockify").map((entry) => entry.id))
+  const ordinary = unlinked.flatMap((row) =>
+    row.intervals.flatMap(({ entry }) => entry?.source === "clockify" && !bound.has(entry.id) ? [entry] : [])
+  )
+  return blocks.map((block) =>
+    ordinary.some((entry) => Math.min(block.endMs, entry.endMs) > Math.max(block.startMs, entry.startMs))
+  )
+}
+
 /** Marker-bearing provider entries, deduplicated across day slices and omitted from their source row. */
 const markedEntries = (
   recorded: ReadonlyArray<RecordedRow>,
@@ -202,7 +217,17 @@ export const consumptionForBlocks = (
   const result = blocks.map((): ConsumedSeconds => ({ clockify: 0, jira: 0 }))
   for (const entry of markedEntries(recorded, resolved)) {
     if (entry.rowId !== rowId || !sides[entry.source]) continue
-    let index = blocks.findIndex((block) => (block.sourceStartMs ?? block.startMs) === entry.sourceStartMs)
+    let index = -1
+    let bestOverlap = 0
+    for (const [candidate, block] of blocks.entries()) {
+      if ((block.sourceStartMs ?? block.startMs) !== entry.sourceStartMs) continue
+      const overlap = Math.max(0, Math.min(block.endMs, entry.entryEndMs) - Math.max(block.startMs, entry.entryStartMs))
+      if (overlap > bestOverlap) {
+        bestOverlap = overlap
+        index = candidate
+      }
+    }
+    if (index < 0) index = blocks.findIndex((block) => (block.sourceStartMs ?? block.startMs) === entry.sourceStartMs)
     if (index < 0) {
       index = blocks.findIndex((block) => {
         const sourceStartMs = block.sourceStartMs ?? block.startMs

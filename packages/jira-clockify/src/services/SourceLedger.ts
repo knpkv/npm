@@ -56,8 +56,16 @@ const LegacyLedgerFile = Schema.Struct({
   bindings: Schema.Array(Binding)
 })
 
-const LedgerFile = Schema.Struct({
+const V2LedgerFile = Schema.Struct({
   version: Schema.Literal(2),
+  reviewedWindows: Schema.Array(ReviewedWindow),
+  pending: Schema.Array(Identity),
+  bindings: Schema.Array(Binding),
+  observedUnbound: Schema.Array(ObservedUnbound)
+})
+
+const LedgerFile = Schema.Struct({
+  version: Schema.Literal(3),
   reviewedWindows: Schema.Array(ReviewedWindow),
   pending: Schema.Array(Identity),
   bindings: Schema.Array(Binding),
@@ -82,20 +90,20 @@ const LedgerFile = Schema.Struct({
 
 export type LedgerFile = typeof LedgerFile.Type
 
-const empty: LedgerFile = { version: 2, reviewedWindows: [], pending: [], bindings: [], observedUnbound: [] }
+const empty: LedgerFile = { version: 3, reviewedWindows: [], pending: [], bindings: [], observedUnbound: [] }
 const decodeStored = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, LedgerFile])),
+  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, V2LedgerFile, LedgerFile])),
   { onExcessProperty: "error" }
 )
 const decode = (content: string) =>
   decodeStored(content).pipe(
     Effect.flatMap((stored) =>
-      stored.version === 2
+      stored.version === 3
         ? Effect.succeed(stored)
         : Schema.decodeEffect(LedgerFile)({
           ...stored,
-          version: 2,
-          observedUnbound: []
+          version: 3,
+          observedUnbound: stored.version === 1 ? [] : stored.observedUnbound
         })
     )
   )
@@ -118,13 +126,15 @@ export class SourceLedgerError extends Schema.TaggedError<SourceLedgerError>()("
 
 export interface SourceLedgerContract {
   readonly read: Effect.Effect<LedgerFile, SourceLedgerError>
-  readonly reserve: (identity: SourceIdentity) => Effect.Effect<void, SourceLedgerError>
+  readonly assertNoLegacyClockify: (legacyScope: string) => Effect.Effect<void, SourceLedgerError>
+  readonly reserve: (identity: SourceIdentity, legacyScope?: string) => Effect.Effect<void, SourceLedgerError>
   readonly bind: (identity: SourceIdentity, entryId: string) => Effect.Effect<void, SourceLedgerError>
   readonly release: (identity: SourceIdentity) => Effect.Effect<void, SourceLedgerError>
   readonly ensureWindow: (
     window: SourceWindow,
     observed: ReadonlyArray<{ readonly entryId: string; readonly startMs: number }>,
-    markerBindings: ReadonlyArray<SourceBinding>
+    markerBindings: ReadonlyArray<SourceBinding>,
+    legacyScope?: string
   ) => Effect.Effect<void, SourceLedgerError>
 }
 
@@ -134,6 +144,17 @@ const sameIdentity = (left: SourceIdentity, right: SourceIdentity): boolean =>
   left.provider === right.provider && left.scope === right.scope && left.rowId === right.rowId &&
   left.sourceStartMs === right.sourceStartMs && left.startMs === right.startMs &&
   left.endMs === right.endMs && left.seconds === right.seconds && left.ticketKey === right.ticketKey
+
+const hasLegacyClockify = (current: LedgerFile, legacyScope: string): boolean =>
+  current.reviewedWindows.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
+  current.observedUnbound.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
+  current.pending.some((value) => value.provider === "clockify" && value.scope === legacyScope) ||
+  current.bindings.some((value) => value.provider === "clockify" && value.scope === legacyScope)
+
+const rejectLegacyClockify = (current: LedgerFile, legacyScope: string) =>
+  hasLegacyClockify(current, legacyScope)
+    ? Effect.fail(new SourceLedgerError({ message: "Earlier Clockify scope needs private manual consumption review" }))
+    : Effect.void
 
 /** A pending remote create never becomes permission to repeat it after a crash. */
 export const layer = Layer.effect(
@@ -268,9 +289,15 @@ export const layer = Layer.effect(
         )
       )
 
-    const reserve = (identity: SourceIdentity) =>
+    const assertNoLegacyClockify = (legacyScope: string) =>
+      read.pipe(Effect.flatMap((current) => rejectLegacyClockify(current, legacyScope)))
+
+    const reserve = (identity: SourceIdentity, legacyScope?: string) =>
       update((current) =>
         Effect.gen(function*() {
+          if (identity.provider === "clockify" && legacyScope !== undefined) {
+            yield* rejectLegacyClockify(current, legacyScope)
+          }
           yield* Schema.decodeEffect(Identity)(identity).pipe(
             Effect.mapError((cause) => new SourceLedgerError({ message: "Invalid source identity", cause }))
           )
@@ -335,10 +362,14 @@ export const layer = Layer.effect(
     const ensureWindow = (
       window: SourceWindow,
       observed: ReadonlyArray<{ readonly entryId: string; readonly startMs: number }>,
-      markerBindings: ReadonlyArray<SourceBinding>
+      markerBindings: ReadonlyArray<SourceBinding>,
+      legacyScope?: string
     ) =>
       update((current) =>
         Effect.gen(function*() {
+          if (window.provider === "clockify" && legacyScope !== undefined) {
+            yield* rejectLegacyClockify(current, legacyScope)
+          }
           if (
             window.toMs <= window.fromMs ||
             observed.some((entry) => entry.entryId.trim() === "" || !Number.isFinite(entry.startMs))
@@ -407,6 +438,6 @@ export const layer = Layer.effect(
         })
       )
 
-    return SourceLedger.of({ read, reserve, bind, release, ensureWindow })
+    return SourceLedger.of({ read, assertNoLegacyClockify, reserve, bind, release, ensureWindow })
   })
 )

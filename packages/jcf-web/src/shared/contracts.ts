@@ -135,6 +135,8 @@ export class ProposalRejectedError extends Schema.TaggedError<ProposalRejectedEr
 export const ProposalBlock = Schema.Struct({
   /** Normalized seconds this source block already supplied to each provider, including corrected-ticket writes. */
   consumed: Schema.Struct({ clockify: Schema.Number, jira: Schema.Number }),
+  /** A provider-specific safety hold, never a consumed-seconds estimate. */
+  clockifyRefusal: Schema.optionalKey(Schema.Literal("unlinked-overlap")),
   endMs: Schema.Number,
   seconds: Schema.Number,
   startMs: Schema.Number,
@@ -395,7 +397,7 @@ export const OwnershipResult = Schema.Struct({
 
 /** Map a directory prefix to an Issue Key, so recurring ticket-less work stops being unplaced. */
 export const StandingPayload = Schema.Struct({
-  cwd: Schema.String.pipe(Schema.check(Schema.isNonEmpty())),
+  cwd: Schema.String.pipe(Schema.check(Schema.isPattern(/^(?:\/|~|[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+)/))),
   ticketKey: TicketKey
 })
 

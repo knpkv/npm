@@ -21,8 +21,12 @@
  *
  * @module
  */
-import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient } from "@knpkv/jira-api-client"
+import {
+  type AuthenticatedClockifyApi,
+  type ClockifyApiConfigContract,
+  make as makeClockifyApi
+} from "@knpkv/clockify-api-client"
+import { JiraApiClient, make as makeJiraApi } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
@@ -30,8 +34,9 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
+import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import * as SubscriptionRef from "effect/SubscriptionRef"
+import * as HttpClient from "effect/unstable/http/HttpClient"
 import {
   activeWindows,
   type AgentChoice,
@@ -52,6 +57,7 @@ import { AgentSessionReader } from "./AgentSessionReader.js"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
+import { postJiraWorklog } from "./internal/JiraWorklogPost.js"
 import { jiraWorklogDescription, type RecordedEntry } from "./SavedEntries.js"
 import { type AttributionChoice, SessionAttributor, type SessionDescribeAnswer } from "./SessionAttributor.js"
 import { type SourceIdentity, SourceLedger } from "./SourceLedger.js"
@@ -66,6 +72,14 @@ export interface SourceSegment {
   readonly startMs: number
   readonly endMs: number
   readonly seconds: number
+  /** Server-held identity expected by a retained confirmation, never a browser field. */
+  readonly expectedScope?: string | undefined
+}
+
+/** Private provider/account identity for a retained read. Never serialize it to the week DTO. */
+export interface ProviderScopes {
+  readonly clockify: string | null
+  readonly jira: string | null
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +289,8 @@ export interface SessionProposalReport {
   readonly unlinkedClockify: ReadonlyArray<UnlinkedClockifyEntry>
   /** Server-private ID-verified source links, projected without provider/account identifiers. */
   readonly sourceEntries?: ReadonlyArray<SourceConsumption.ResolvedEntry> | undefined
+  /** Provider identities used by this read, held only on the server. */
+  readonly sourceScopes?: ProviderScopes | undefined
   /** Which systems this run read. A side that is out reports zero because it was never asked. */
   readonly sides: ReconcileSides
   /** Attributed below the confidence floor — reported, never offered. */
@@ -605,10 +621,10 @@ const toRawWorklog = <UnparsedInput>(value: UnparsedInput): RawWorklog | null =>
 export const layer = Layer.effect(
   ReconcileService,
   Effect.gen(function*() {
-    const clockify = yield* ClockifyApiClient
     const clockifyAuth = yield* ClockifyAuth
     const jira = yield* JiraApiClient
     const jiraAuth = yield* JiraAuth
+    const httpClient = yield* HttpClient.HttpClient
     const config = yield* ConfigService
     const home = (yield* HomeDirectory).path
     const timer = yield* TimerService
@@ -619,6 +635,65 @@ export const layer = Layer.effect(
     const getAuth = clockifyAuth.getConfig.pipe(
       Effect.mapError((e) => new ReconcileError({ message: e.message }))
     )
+
+    interface ClockifyWriteSnapshot {
+      readonly auth: ClockifyApiConfigContract
+      readonly client: AuthenticatedClockifyApi
+      readonly scope: string
+      readonly legacyScope: string
+    }
+
+    /** One decoded credential and endpoint back every Clockify read and write in this operation. */
+    const clockifyWriteSnapshot: Effect.Effect<ClockifyWriteSnapshot, ReconcileError> = Effect.gen(function*() {
+      const auth = yield* getAuth
+      const endpoint = yield* Effect.try({
+        try: () => new URL(auth.baseUrl),
+        catch: (cause) => new ReconcileError({ message: "Configured Clockify endpoint is invalid", cause })
+      })
+      if (
+        !["https:", "http:"].includes(endpoint.protocol) || endpoint.username !== "" ||
+        endpoint.password !== "" || endpoint.search !== "" || endpoint.hash !== ""
+      ) return yield* new ReconcileError({ message: "Configured Clockify endpoint is invalid" })
+      const canonicalEndpoint = `${endpoint.origin}${endpoint.pathname.replace(/\/+$/u, "")}`
+      const pinnedAuth = { ...auth, baseUrl: canonicalEndpoint }
+      const client = makeClockifyApi(httpClient, pinnedAuth)
+      const user = yield* client.getLoggedUser(undefined).pipe(
+        Effect.mapError((cause) => new ReconcileError({ message: "Cannot verify the Clockify account", cause }))
+      )
+      if (user.id === "" || auth.userId !== user.id || auth.workspaceId === "" || auth.baseUrl === "") {
+        return yield* new ReconcileError({ message: "Configured Clockify account does not match the credential" })
+      }
+      return {
+        auth: pinnedAuth,
+        client,
+        scope: JSON.stringify(["clockify-v3", canonicalEndpoint, auth.workspaceId, user.id]),
+        legacyScope: JSON.stringify([auth.workspaceId, user.id])
+      }
+    })
+
+    /** Bind verification and worklog POST to one OAuth credential and selected site. */
+    const jiraWriteSnapshot = Effect.gen(function*() {
+      const token = yield* jiraAuth.getAccessToken().pipe(Effect.orElseSucceed(() => null))
+      const profile = yield* jiraAuth.getActiveProfile().pipe(Effect.orElseSucceed(() => null))
+      if (
+        token === null || profile === null || profile.token.cloud_id === "" || profile.token.site_url === "" ||
+        profile.token.access_token !== Redacted.value(token)
+      ) return null
+      const client = makeJiraApi(httpClient, {
+        baseUrl: "",
+        auth: { type: "oauth2", accessToken: token, cloudId: profile.token.cloud_id }
+      })
+      const live = yield* client.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
+      if (live?.accountId === undefined || live.accountId === "") return null
+      return {
+        client,
+        ledgerScope: JSON.stringify([profile.token.cloud_id, live.accountId]),
+        heldScope: JSON.stringify([profile.token.cloud_id, profile.token.site_url, live.accountId]),
+        accountId: live.accountId,
+        cloudId: profile.token.cloud_id,
+        siteUrl: profile.token.site_url
+      }
+    })
 
     /**
      * How many entries to ask Clockify for at a time, and how many pages to accept.
@@ -632,16 +707,18 @@ export const layer = Layer.effect(
     const CLOCKIFY_MAX_PAGES = 50
 
     // Tally Clockify entries in the period by (ticket, day).
-    const clockifyTally = (period: ReconcilePeriod) =>
+    const clockifyTally = (period: ReconcilePeriod, pinned?: ClockifyWriteSnapshot) =>
       Effect.gen(function*() {
-        const auth = yield* getAuth
+        const { auth, client } = pinned ?? (yield* clockifyWriteSnapshot)
 
         const getPage = (page: number) =>
-          clockify.getTimeEntries(auth.workspaceId, auth.userId, {
-            start: period.from.toISOString(),
-            end: period.to.toISOString(),
-            page,
-            pageSize: CLOCKIFY_PAGE_SIZE
+          client.getTimeEntries(auth.workspaceId, auth.userId, {
+            params: {
+              start: period.from.toISOString(),
+              end: period.to.toISOString(),
+              page,
+              "page-size": CLOCKIFY_PAGE_SIZE
+            }
           }).pipe(
             Effect.mapError((e) => new ReconcileError({ message: `Clockify fetch failed: ${e.message}`, cause: e }))
           )
@@ -679,12 +756,17 @@ export const layer = Layer.effect(
           const ticketKey = parseTicketKey(entry.description)
           const start = entry.timeInterval?.start
           const end = entry.timeInterval?.end
-          // Skip running or unparseable entries: a missing end means the time is not yet real.
-          if (start === undefined || start === null) continue
+          // A missing end is a running timer. A completed entry with missing or malformed bounds
+          // cannot be treated as absent: doing so makes its time look available for another write.
           if (end === undefined || end === null) continue
+          if (start === undefined || start === null) {
+            return yield* new ReconcileError({ message: "Clockify returned an incomplete entry" })
+          }
           const startMs = new Date(start).getTime()
           const endMs = new Date(end).getTime()
-          if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) continue
+          if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs) {
+            return yield* new ReconcileError({ message: "Clockify returned an incomplete entry" })
+          }
           if (endMs <= fromMs || startMs >= toMs) continue
           for (
             const bucket of splitIntervalByLocalDay(
@@ -767,8 +849,15 @@ export const layer = Layer.effect(
     // Tally the current user's Jira worklogs in the period by (ticket, day).
     const jiraTally = (period: ReconcilePeriod, requiredIssueKeys: ReadonlyArray<string> = []) =>
       Effect.gen(function*() {
-        const user = yield* jiraAuth.getCurrentUser().pipe(Effect.orElseSucceed(() => null))
-        const accountId = user?.account_id ?? null
+        const user = yield* jiraAuth.getCurrentUser().pipe(
+          Effect.mapError((cause) => new ReconcileError({ message: "Could not read the Jira account", cause }))
+        )
+        const accountId = user?.account_id
+        if (accountId === undefined || accountId === "") {
+          return yield* new ReconcileError({
+            message: "Jira account identity is unavailable; recorded time cannot be tallied"
+          })
+        }
 
         const fromMs = period.from.getTime()
         const from = period.from
@@ -819,6 +908,9 @@ export const layer = Layer.effect(
           const next: string | undefined = Predicate.isObject(result) && Predicate.isString(result["nextPageToken"])
             ? result["nextPageToken"]
             : undefined
+          if (Predicate.isObject(result) && result["isLast"] === false && (next === undefined || next.trim() === "")) {
+            return yield* new ReconcileError({ message: "Jira returned an incomplete Jira search page" })
+          }
           pageToken = next
           if (next === undefined) break
         }
@@ -859,7 +951,7 @@ export const layer = Layer.effect(
           for (const wl of worklogs) {
             // Only this user's worklogs (the JQL narrows issues, not individual worklog authors).
             const author = wl.author?.accountId
-            if (accountId !== null && author !== undefined && author !== accountId) continue
+            if (author !== accountId) continue
             const startedMs = new Date(wl.started).getTime()
             const endedMs = startedMs + wl.timeSpentSeconds * 1000
             if (endedMs <= fromMs || startedMs >= toMs) continue
@@ -901,6 +993,7 @@ export const layer = Layer.effect(
       options?: {
         readonly sides?: ReconcileSides | undefined
         readonly jiraIssueKeys?: ReadonlyArray<string> | undefined
+        readonly clockifySnapshot?: ClockifyWriteSnapshot | undefined
       }
     ) =>
       Effect.gen(function*() {
@@ -910,7 +1003,9 @@ export const layer = Layer.effect(
         // no request whose failure could stop a run that never needed it.
         const [clockifySide, jiraSide] = yield* Effect.all(
           [
-            sides.clockify ? clockifyTally(period) : Effect.succeed({ tally: [], unlinked: [] }),
+            sides.clockify
+              ? clockifyTally(period, options?.clockifySnapshot)
+              : Effect.succeed({ tally: [], unlinked: [] }),
             sides.jira ? jiraTally(period, options?.jiraIssueKeys) : Effect.succeed([])
           ],
           { concurrency: 2 }
@@ -943,34 +1038,54 @@ export const layer = Layer.effect(
       source?: SourceSegment
     ): Effect.Effect<JiraWorklogOutcome> =>
       Effect.gen(function*() {
-        const identity: SourceIdentity | undefined = source === undefined ? undefined : yield* Effect.gen(function*() {
-          const account = yield* jiraAuth.getCurrentUser().pipe(Effect.orElseSucceed(() => null))
-          const liveAccount = yield* jira.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
-          const cloud = yield* jiraAuth.getCloudId().pipe(Effect.orElseSucceed(() => ""))
-          if (
-            account === null || liveAccount?.accountId !== account.account_id ||
-            account.account_id === "" || cloud === ""
-          ) return undefined
-          return {
-            ...source,
-            ticketKey,
-            provider: "jira",
-            scope: JSON.stringify([cloud, account.account_id])
-          } satisfies SourceIdentity
-        })
+        const snapshot = source === undefined ? null : yield* jiraWriteSnapshot
+        const identity: SourceIdentity | undefined = source === undefined || snapshot === null ? undefined : {
+          rowId: source.rowId,
+          sourceStartMs: source.sourceStartMs,
+          startMs: source.startMs,
+          endMs: source.endMs,
+          seconds: source.seconds,
+          ticketKey,
+          provider: "jira",
+          scope: snapshot.ledgerScope
+        }
         if (source !== undefined && identity === undefined) {
-          return { _tag: "Failed", message: "Could not identify the Jira account for a durable source write" }
+          const loggedIn = yield* jiraAuth.isLoggedIn().pipe(Effect.orElseSucceed(() => false))
+          return loggedIn
+            ? { _tag: "Failed", message: "Could not identify the Jira account for a durable source write" }
+            : { _tag: "NotLoggedIn" }
+        }
+        if (source?.expectedScope !== undefined && snapshot?.heldScope !== source.expectedScope) {
+          return { _tag: "Failed", message: "The Jira account changed since this plan was read" }
         }
         if (identity !== undefined) {
           const reserved = yield* Effect.result(sourceLedger.reserve(identity))
           if (reserved._tag === "Failure") return { _tag: "Failed", message: reserved.failure.message }
         }
-        const posted = yield* timer.logWorklog({
+        if (snapshot !== null && identity !== undefined) {
+          const active = yield* jiraAuth.getActiveProfile().pipe(Effect.orElseSucceed(() => null))
+          if (
+            active?.token.cloud_id !== snapshot.cloudId || active.token.site_url !== snapshot.siteUrl ||
+            active.token.user?.account_id !== snapshot.accountId
+          ) {
+            const released = yield* Effect.result(sourceLedger.release(identity))
+            return {
+              _tag: "Failed",
+              message: released._tag === "Failure"
+                ? "The Jira account changed and the private write intent needs manual review"
+                : "The Jira account changed before the worklog write"
+            }
+          }
+        }
+        const params = {
           ticketKey,
           startedAt: startOf(day, startedAt),
           durationSeconds: seconds,
           comment: comment !== undefined && comment.trim() !== "" ? comment.trim() : "Reconciled from Clockify"
-        })
+        }
+        const posted = snapshot === null
+          ? yield* timer.logWorklog(params)
+          : yield* postJiraWorklog(snapshot.client, params)
         if (identity === undefined) return posted
         if (posted._tag === "NotLoggedIn") {
           const released = yield* Effect.result(sourceLedger.release(identity))
@@ -1000,32 +1115,64 @@ export const layer = Layer.effect(
       source?: SourceSegment
     ) =>
       Effect.gen(function*() {
-        const auth = yield* getAuth
+        const snapshot = yield* clockifyWriteSnapshot
+        const { auth } = snapshot
         const cfg = yield* config.get
         const start = startOf(day, startedAt)
         const end = new Date(start.getTime() + seconds * 1000)
         const identity: SourceIdentity | undefined = source === undefined ? undefined : {
-          ...source,
+          rowId: source.rowId,
+          sourceStartMs: source.sourceStartMs,
+          startMs: source.startMs,
+          endMs: source.endMs,
+          seconds: source.seconds,
           provider: "clockify",
-          scope: JSON.stringify([auth.workspaceId, auth.userId]),
+          scope: snapshot.scope,
           ticketKey
         }
+        if (source?.expectedScope !== undefined && identity?.scope !== source.expectedScope) {
+          return yield* new ReconcileError({ message: "The Clockify account changed since this plan was read" })
+        }
         if (identity !== undefined) {
-          yield* sourceLedger.reserve(identity).pipe(
+          yield* sourceLedger.reserve(identity, snapshot.legacyScope).pipe(
             Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
           )
         }
-        const created = yield* clockify.createTimeEntry(auth.workspaceId, {
-          description: `[${ticketKey}] ${
-            note !== undefined && note.trim() !== "" ? note.trim() : "Reconciled from Jira"
-          }`,
-          start: start.toISOString(),
-          end: end.toISOString(),
-          // Stated, not left to Clockify's own default. `jcf timer start` already sends it, so
-          // omitting it here made a reconciled entry's billable flag differ from a timed one's for
-          // the same ticket — visible only later, on an invoice.
-          billable: cfg.defaultBillable,
-          ...((cfg.defaultProjectId) && { projectId: cfg.defaultProjectId })
+        const verified = yield* Effect.result(clockifyWriteSnapshot)
+        if (verified._tag === "Failure") {
+          if (identity !== undefined) {
+            const released = yield* Effect.result(sourceLedger.release(identity))
+            if (released._tag === "Failure") {
+              return yield* new ReconcileError({
+                message: "Clockify was not called but its private write intent needs manual recovery",
+                cause: released.failure
+              })
+            }
+          }
+          return yield* verified.failure
+        }
+        const current = verified.success
+        if (current.scope !== snapshot.scope) {
+          if (identity !== undefined) {
+            yield* sourceLedger.release(identity).pipe(
+              Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
+            )
+          }
+          return yield* new ReconcileError({ message: "The Clockify account changed before the write" })
+        }
+        const created = yield* snapshot.client.createTimeEntry(auth.workspaceId, {
+          payload: {
+            description: `[${ticketKey}] ${
+              note !== undefined && note.trim() !== "" ? note.trim() : "Reconciled from Jira"
+            }`,
+            start: start.toISOString(),
+            end: end.toISOString(),
+            // Stated, not left to Clockify's own default. `jcf timer start` already sends it, so
+            // omitting it here made a reconciled entry's billable flag differ from a timed one's for
+            // the same ticket — visible only later, on an invoice.
+            billable: cfg.defaultBillable,
+            ...((cfg.defaultProjectId) && { projectId: cfg.defaultProjectId })
+          }
         }).pipe(
           Effect.mapError((e) => new ReconcileError({ message: `Clockify create failed: ${e.message}`, cause: e }))
         )
@@ -1053,18 +1200,21 @@ export const layer = Layer.effect(
      * overnight hides time on each day it crosses, and the day it happened to start is no safer than
      * the others — it is simply the one a shorter rule noticed.
      */
-    const runningTimerExclusions = (period: ReconcilePeriod) =>
+    const runningTimerExclusions = (period: ReconcilePeriod, snapshot: ClockifyWriteSnapshot) =>
       Effect.gen(function*() {
         // Fails the run rather than logging and carrying on. An unknown running-timer state is not
         // an absent one, and every caller of this subtracts before writing the difference.
-        yield* timer.detectRunning.pipe(
-          Effect.mapError((error) =>
-            new ReconcileError({ message: `Could not rule out a running timer: ${error.message}`, cause: error })
-          )
+        const running = yield* snapshot.client.getTimeEntries(snapshot.auth.workspaceId, snapshot.auth.userId, {
+          params: { "in-progress": "true", "page-size": 1 }
+        }).pipe(
+          Effect.mapError((cause) => new ReconcileError({ message: "Could not rule out a running timer", cause }))
         )
-        const state = yield* SubscriptionRef.get(timer.state)
-        if (!state.active || state.startedAt === null) return []
-        const startedMs = state.startedAt.getTime()
+        if (running.length === 0) return []
+        const started = running[0]?.timeInterval.start
+        const startedMs = started === undefined ? Number.NaN : new Date(started).getTime()
+        if (!Number.isFinite(startedMs)) {
+          return yield* new ReconcileError({ message: "Running Clockify timer has no valid start" })
+        }
         // Clamped to the window on both sides: a Timer running since last week makes nothing outside
         // this period any less proposable, and the period's own end is as far as the run can look.
         const fromMs = Math.max(startedMs, period.from.getTime())
@@ -1269,19 +1419,43 @@ export const layer = Layer.effect(
       const stored = yield* sourceLedger.read.pipe(
         Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
       )
-      const clockifyScope = sides.clockify
-        ? yield* getAuth.pipe(Effect.map((auth) => JSON.stringify([auth.workspaceId, auth.userId])))
-        : null
-      const jiraScope = sides.jira
+      const clockifySnapshot = sides.clockify ? yield* clockifyWriteSnapshot : null
+      if (clockifySnapshot !== null) {
+        yield* sourceLedger.assertNoLegacyClockify(clockifySnapshot.legacyScope).pipe(
+          Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
+        )
+      }
+      const clockifyScope = clockifySnapshot?.scope ?? null
+      const jiraSnapshot = sides.jira ? yield* jiraWriteSnapshot : null
+      // A missing write credential does not erase a readable Jira side: an independent Clockify
+      // write may still succeed. Jira posting itself requires the verified snapshot above.
+      const readableJira = sides.jira && jiraSnapshot === null
         ? yield* Effect.gen(function*() {
           const account = yield* jiraAuth.getCurrentUser().pipe(Effect.orElseSucceed(() => null))
-          const liveAccount = yield* jira.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
+          const live = yield* jira.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
           const cloud = yield* jiraAuth.getCloudId().pipe(Effect.orElseSucceed(() => ""))
-          return account === null || liveAccount?.accountId !== account.account_id || cloud === ""
-            ? null
-            : JSON.stringify([cloud, account.account_id])
+          const site = yield* jiraAuth.getSiteUrl().pipe(Effect.orElseSucceed(() => ""))
+          if (
+            account === null || account.account_id === "" || live?.accountId !== account.account_id ||
+            cloud === "" || site === ""
+          ) return null
+          return {
+            ledgerScope: JSON.stringify([cloud, account.account_id]),
+            heldScope: JSON.stringify([cloud, site, account.account_id])
+          }
         })
         : null
+      const jiraScope = jiraSnapshot?.ledgerScope ?? readableJira?.ledgerScope ?? null
+      const jiraHeldScope = jiraSnapshot?.heldScope ?? readableJira?.heldScope ?? null
+      const sourceScopes: ProviderScopes = { clockify: clockifyScope, jira: jiraHeldScope }
+      if (
+        previous.sourceScopes !== undefined &&
+        ((sides.clockify && previous.sourceScopes.clockify !== null &&
+          previous.sourceScopes.clockify !== clockifyScope) ||
+          (sides.jira && previous.sourceScopes.jira !== null && previous.sourceScopes.jira !== jiraHeldScope))
+      ) {
+        return yield* new ReconcileError({ message: "The provider account changed since this plan was read" })
+      }
       if (
         previous.attributed.length > 0 && sides.jira && jiraScope === null &&
         stored.bindings.some((binding) => binding.provider === "jira")
@@ -1307,8 +1481,8 @@ export const layer = Layer.effect(
         ])
       ]
       const [{ recorded, unlinkedClockify }, excludedDays] = yield* Effect.all([
-        readRecorded(period, { sides, jiraIssueKeys }),
-        sides.clockify ? runningTimerExclusions(period) : Effect.succeed([])
+        readRecorded(period, { sides, jiraIssueKeys, clockifySnapshot: clockifySnapshot ?? undefined }),
+        clockifySnapshot === null ? Effect.succeed([]) : runningTimerExclusions(period, clockifySnapshot)
       ], { concurrency: 2 })
       if (
         previous.attributed.length > 0 &&
@@ -1390,7 +1564,8 @@ export const layer = Layer.effect(
             toMs: period.to.getTime()
           },
           observed.map((entry) => ({ entryId: entry.id, startMs: entry.startMs })),
-          verified
+          verified,
+          provider === "clockify" ? clockifySnapshot?.legacyScope : undefined
         ).pipe(
           Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
         )
@@ -1442,6 +1617,7 @@ export const layer = Layer.effect(
         recorded,
         unlinkedClockify,
         sourceEntries,
+        sourceScopes,
         excludedDays
       }
     })

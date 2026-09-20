@@ -12,6 +12,8 @@ export interface SideWrite {
   readonly seconds: number
   /** Owed seconds that cannot be represented by this provider's minimum segment size. */
   readonly withheldSeconds?: number | undefined
+  /** A safety hold on selected source blocks; not an amount already logged. */
+  readonly refusal?: "unlinked-overlap" | undefined
   readonly startedAt: Date | undefined
   /** Uncovered source pieces to write in order; kept separate across recorded gaps and blocks. */
   readonly segments: ReadonlyArray<{
@@ -171,6 +173,7 @@ export const prepareProposal = (options: {
       if (sized._tag !== "Write") return sized
       const side = (seconds: number, source: "clockify" | "jira"): SideWrite => {
         let remaining = seconds
+        let refused = false
         const segments: Array<{ block: CreditedBlock; seconds: number; startedAt: Date }> = []
         for (const block of blocks) {
           if (remaining <= 0) break
@@ -178,6 +181,10 @@ export const prepareProposal = (options: {
           const consumed = options.consumed?.(block, source) ?? 0
           let skip = Math.max(0, consumed - recorded)
           let availableCredit = Math.max(0, block.seconds - Math.max(recorded, consumed))
+          if (source === "clockify" && block.clockifyRefusal === "unlinked-overlap" && availableCredit > 0) {
+            refused = true
+            continue
+          }
           for (const range of uncovered(block, bucket?.intervals ?? [], source)) {
             const rangeSeconds = (range.endMs - range.startMs) / 1000
             const skipped = Math.min(skip, rangeSeconds)
@@ -203,13 +210,14 @@ export const prepareProposal = (options: {
         return {
           seconds: executableSeconds,
           withheldSeconds: Math.max(0, seconds - executableSeconds),
+          ...(refused && { refusal: "unlinked-overlap" }),
           segments,
           startedAt: segments[0]?.startedAt
         }
       }
       const clockify = side(sized.clockifyDelta, "clockify")
       const jira = side(sized.jiraDelta, "jira")
-      if (clockify.seconds === 0 && jira.seconds === 0) {
+      if (clockify.seconds === 0 && jira.seconds === 0 && clockify.refusal === undefined) {
         return { _tag: "BelowMinimum", minimumSeconds: MINIMUM_WRITE_SECONDS }
       }
       return {

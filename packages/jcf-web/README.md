@@ -103,6 +103,13 @@ Two things may be overruled, and both are said out loud in what gets written:
 - Every write re-reads what Jira and Clockify hold at that moment and combines their current entry
   durations with private provider-ID source bindings. Confirming the same row twice writes once;
   editing its description does not reset consumption. Nothing is remembered about what was declined.
+- An ordinary unlinked Clockify entry overlapping a proposed source block is ambiguous, not consumed
+  time. The plan and preview mark that block's Clockify side held; Confirm checks the fresh read and
+  refuses that side while independent Jira or nonoverlapping blocks may proceed. The browser sees
+  only the normalized hold, never provider entry IDs or account scopes.
+- A retained plan keeps its provider account/site identity on the server. Confirm refuses a changed
+  identity before writing, and the provider adapters check it again at the write boundary. A provider
+  not read in the original scope is bound when an explicit confirmation first reads that side.
 - A provider create with an uncertain result is held for manual recovery, not retried. Older
   unlinked entries also require private review before first use; a missing or unreadable ledger is
   never treated as proof that historical time was not written.

@@ -15,8 +15,7 @@
  *
  * @module
  */
-import { AgentWrite, Time } from "@knpkv/jira-clockify"
-import type { ReconcileService } from "@knpkv/jira-clockify"
+import { AgentWrite, ReconcileService, SourceConsumption, Time } from "@knpkv/jira-clockify"
 import { Effect } from "effect"
 import { MINIMUM_WRITE_SECONDS, prepareProposal } from "../shared/writePlanning.js"
 import type { WriteResultResponse } from "./Api.js"
@@ -105,6 +104,26 @@ export const confirmProposal = (options: {
       { ...options.plan.report, sides: prepared.targets },
       { jiraIssueKeys: [...options.plan.jiraReceiptIssueKeys, prepared.ticketKey] }
     )
+    const retainedScopes = options.plan.boundScopes
+    const currentScopes = refreshed.sourceScopes
+    const expectedScopes = currentScopes === undefined
+      ? undefined
+      : {
+        clockify: retainedScopes.clockify ?? currentScopes.clockify,
+        jira: retainedScopes.jira ?? currentScopes.jira
+      }
+    if (
+      expectedScopes === undefined || currentScopes === undefined ||
+      (prepared.targets.clockify &&
+        (expectedScopes.clockify === null || expectedScopes.clockify !== currentScopes.clockify)) ||
+      (prepared.targets.jira && (expectedScopes.jira === null || expectedScopes.jira !== currentScopes.jira))
+    ) {
+      return yield* new ReconcileService.ReconcileError({
+        message: "The provider account changed or could not be verified; reload the week before confirming"
+      })
+    }
+    if (prepared.targets.clockify) options.plan.boundScopes.clockify = expectedScopes.clockify
+    if (prepared.targets.jira) options.plan.boundScopes.jira = expectedScopes.jira
     consumption = reconcileConsumption(refreshed, consumption)
     options.plan.consumption.clear()
     for (const [key, value] of consumption) options.plan.consumption.set(key, value)
@@ -112,18 +131,41 @@ export const confirmProposal = (options: {
     if (excluded !== undefined) {
       return { _tag: "RunningTimer", reason: excluded.reason } satisfies ConfirmOutcome
     }
-    const write = prepared.plan(refreshed.recorded)
+    const unlinkedRows = refreshed.unlinkedClockify.map((slice) => ({
+      intervals: slice.entry === undefined ? [] : [{ entry: slice.entry }]
+    }))
+    const ambiguous = SourceConsumption.unlinkedClockifyOverlaps(
+      proposal.blocks,
+      unlinkedRows,
+      refreshed.sourceEntries
+    )
+    const freshPrepared = prepareProposal({
+      evidence: {
+        ...proposal,
+        blocks: proposal.blocks.map((block, index) => ({
+          ...block,
+          clockifyRefusal: ambiguous[index] === true ? "unlinked-overlap" : undefined
+        })),
+        credited: proposal.sessionSeconds
+      },
+      request: options.request,
+      targets: planSides(options.plan),
+      consumed: (block, source) => consumption.get(evidenceBlockKey(evidence.rowId, block))?.[source] ?? 0
+    })
+    if (freshPrepared._tag !== "Prepared") return freshPrepared
+    const write = freshPrepared.plan(refreshed.recorded)
     if (write._tag === "PastEvidence" || write._tag === "BelowMinimum") return write
 
     const retainedTitle = options.plan.ownership.facts.get(prepared.ticketKey)?.title ?? null
-    const summary = retainedTitle ?? (prepared.targets.jira ? yield* options.summaryOf(prepared.ticketKey) : null)
+    const summary = retainedTitle ??
+      (freshPrepared.targets.jira ? yield* options.summaryOf(freshPrepared.ticketKey) : null)
     const description = AgentWrite.entryDescription({
       note: options.request.note ?? null,
-      provenance: prepared.provenance,
+      provenance: freshPrepared.provenance,
       summary
     })
     if (write._tag === "NothingOwed") {
-      return { _tag: "NothingOwed", result: nothingOwed(description, prepared.targets) } satisfies ConfirmOutcome
+      return { _tag: "NothingOwed", result: nothingOwed(description, freshPrepared.targets) } satisfies ConfirmOutcome
     }
 
     // The suffix helps import legacy writes. The private provider-ID binding remains authoritative
@@ -145,7 +187,13 @@ export const confirmProposal = (options: {
         }))
       }
     }
-    const outcome = yield* AgentWrite.applyPlannedWrite(options.service, providerWrite, description, evidence.rowId)
+    const outcome = yield* AgentWrite.applyPlannedWrite(
+      options.service,
+      providerWrite,
+      description,
+      evidence.rowId,
+      expectedScopes
+    )
     for (const source of ["clockify", "jira"] satisfies ReadonlyArray<keyof AgentWrite.WriteOutcome>) {
       const side = outcome[source]
       if (side._tag !== "Written" && side._tag !== "PartiallyWritten") continue

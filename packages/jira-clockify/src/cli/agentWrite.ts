@@ -19,7 +19,7 @@ import * as Effect from "effect/Effect"
 import type { SessionProposal } from "../agent/sessions.js"
 import * as SourceConsumption from "../agent/sourceConsumption.js"
 import { MINIMUM_WRITE_SECONDS, type PlannedWrite, prepareProposal, type WriteTargets } from "../agent/writePlanning.js"
-import type { ReconcileServiceContract, SourceSegment } from "../services/ReconcileService.js"
+import type { ProviderScopes, ReconcileServiceContract, SourceSegment } from "../services/ReconcileService.js"
 import { NOT_LOGGED_IN_HINT } from "../utils/hints.js"
 import { formatDuration } from "../utils/time.js"
 
@@ -35,7 +35,12 @@ export const clip = (text: string, width: number): string =>
  * Collapsed to "to both" when the two gaps are equal, which is the usual case for time neither
  * side ever recorded — spelling the same number out twice reads like a mistake.
  */
-export const proposalTargets = (proposal: Pick<SessionProposal, "clockifyDelta" | "jiraDelta">): string => {
+export const proposalTargets = (proposal: Pick<SessionProposal, "blocks" | "clockifyDelta" | "jiraDelta">): string => {
+  if (proposal.blocks.some((block) => block.clockifyRefusal === "unlinked-overlap")) {
+    return proposal.jiraDelta > 0
+      ? `+${formatDuration(proposal.jiraDelta)} Jira · Clockify overlap held`
+      : "Clockify overlap held"
+  }
   if (proposal.clockifyDelta > 0 && proposal.clockifyDelta === proposal.jiraDelta) {
     return `+${formatDuration(proposal.clockifyDelta)} to both`
   }
@@ -226,6 +231,7 @@ export const writeOutcomeLines = (outcome: WriteOutcome): ReadonlyArray<string> 
 
 const nothingOwed: SideOutcome = { _tag: "NothingOwed" }
 const skipped: SideOutcome = { _tag: "Skipped" }
+const unlinkedOverlap = "an unlinked Clockify entry overlaps this session block; review it before logging time"
 
 /**
  * Execute concrete per-side amounts and starts without reinterpreting their evidence.
@@ -238,16 +244,22 @@ export const applyPlannedWrite = (
   service: Pick<ReconcileServiceContract, "applyToClockify" | "applyToJira">,
   plan: PlannedWrite,
   description: string,
-  sourceRowId?: string
+  sourceRowId?: string,
+  expectedScopes?: ProviderScopes
 ): Effect.Effect<WriteOutcome, never, never> =>
   Effect.gen(function*() {
-    const sourceOf = (segment: PlannedWrite["clockify"]["segments"][number]): SourceSegment | undefined =>
+    const sourceOf = (
+      segment: PlannedWrite["clockify"]["segments"][number],
+      provider: "clockify" | "jira"
+    ): SourceSegment | undefined =>
       sourceRowId === undefined ? undefined : {
         rowId: sourceRowId,
         sourceStartMs: segment.block.sourceStartMs ?? segment.block.startMs,
         startMs: segment.startedAt.getTime(),
         endMs: segment.startedAt.getTime() + segment.seconds * 1000,
-        seconds: segment.seconds
+        seconds: segment.seconds,
+        ...(expectedScopes?.[provider] !== null && expectedScopes?.[provider] !== undefined &&
+          { expectedScope: expectedScopes[provider] })
       }
     const { targets } = plan
     if (!targets.clockify && !targets.jira) return { clockify: skipped, jira: skipped }
@@ -266,7 +278,7 @@ export const applyPlannedWrite = (
             segment.seconds,
             segment.description ?? description,
             segment.startedAt,
-            sourceOf(segment)
+            sourceOf(segment, "clockify")
           )
           .pipe(
             Effect.map((created) => created ? null : "the entry was not created"),
@@ -283,6 +295,9 @@ export const applyPlannedWrite = (
         })
       }
     }
+    if (clockifyFailure === null && plan.clockify.refusal === "unlinked-overlap") {
+      clockifyFailure = unlinkedOverlap
+    }
     const clockify: SideOutcome = !targets.clockify
       ? skipped
       : clockifyWrittenSeconds > 0 && clockifyFailure !== null
@@ -294,7 +309,7 @@ export const applyPlannedWrite = (
       }
       : clockifyWrittenSeconds > 0
       ? { _tag: "Written", seconds: clockifyWrittenSeconds, segments: clockifySegments }
-      : plan.clockify.seconds <= 0
+      : plan.clockify.seconds <= 0 && clockifyFailure === null
       ? nothingOwed
       : { _tag: "Refused", message: clockifyFailure ?? "the entry was not created" }
 
@@ -319,7 +334,7 @@ export const applyPlannedWrite = (
         segment.seconds,
         segment.description ?? description,
         segment.startedAt,
-        sourceOf(segment)
+        sourceOf(segment, "jira")
       )
       if (posted._tag !== "Posted") {
         jiraFailure = posted._tag === "NotLoggedIn"
@@ -411,6 +426,7 @@ export const applyProposal = (
       return {
         seconds,
         withheldSeconds: Math.max(0, requested - seconds),
+        ...(side.refusal !== undefined && { refusal: side.refusal }),
         segments,
         startedAt: segments[0]?.startedAt
       }
