@@ -430,7 +430,15 @@ export const runWatch = (options: {
           // Only what each side actually took. A Clockify failure or a Jira refusal still returns
           // here, and a closing summary that claimed hours neither system holds would be wrong in the
           // one direction this command must never be wrong in.
-          const written = yield* applyProposal(svc, proposal, description)
+          const written = yield* applyProposal(
+            svc,
+            proposal,
+            description,
+            refreshed.sourceScopes ?? {
+              clockify: null,
+              jira: null
+            }
+          )
           yield* Effect.forEach(writeOutcomeLines(written), (line) => Console.log(`    ${line}`))
           const clockifySeconds = clockifyWritten(written)
           const jiraSeconds = jiraWritten(written)

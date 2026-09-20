@@ -257,6 +257,8 @@ export interface FakeHeadlessOptions {
   readonly beforeDescribe?: ((world: FakeWorld) => void) | undefined
   /** Test synchronization hook after a prompt is shown but before its scripted input is read. */
   readonly beforePromptInput?: ((world: FakeWorld) => void) | undefined
+  /** Test synchronization after a command prints its final pre-write summary. */
+  readonly afterConsoleLog?: ((line: string, world: FakeWorld) => void) | undefined
   /**
    * Which proposal rows to leave checked in the picker, by position. Every row starts checked, so
    * `[true, false]` unchecks the second. Omit entirely to send no input — the no-TTY case.
@@ -616,10 +618,12 @@ const fakeTerminalLayer = (
   )
 
 /** A console that keeps stdout and stderr apart, which is what the JSON Output Contract needs. */
-const captureConsoleLayer = (world: FakeWorld) =>
+const captureConsoleLayer = (world: FakeWorld, afterLog?: (line: string, world: FakeWorld) => void) =>
   Layer.succeed(Console.Console, {
     log: (...args: ReadonlyArray<unknown>) => {
-      world.stdout.push(args.map(String).join(" "))
+      const line = args.map(String).join(" ")
+      world.stdout.push(line)
+      afterLog?.(line, world)
     },
     error: (...args: ReadonlyArray<unknown>) => {
       world.stderr.push(args.map(String).join(" "))
@@ -1297,7 +1301,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
       columns: options.columns ?? DEFAULT_COLUMNS,
       beforePromptInput: options.beforePromptInput
     }, world),
-    captureConsoleLayer(world),
+    captureConsoleLayer(world, options.afterConsoleLog),
     SpawnerLayer,
     // Mirrors HeadlessLayer: warnings must land on stderr, or they corrupt --json output.
     LogToStderrLive

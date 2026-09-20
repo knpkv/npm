@@ -232,6 +232,7 @@ export const writeOutcomeLines = (outcome: WriteOutcome): ReadonlyArray<string> 
 const nothingOwed: SideOutcome = { _tag: "NothingOwed" }
 const skipped: SideOutcome = { _tag: "Skipped" }
 const unlinkedOverlap = "an unlinked Clockify entry overlaps this session block; review it before logging time"
+const missingSourceScope = "the provider account for this session was not verified; refresh before writing"
 
 /**
  * Execute concrete per-side amounts and starts without reinterpreting their evidence.
@@ -268,8 +269,11 @@ export const applyPlannedWrite = (
     // Per side, because the two can already hold different amounts and so start in different blocks.
     let clockifyWrittenSeconds = 0
     const clockifySegments: Array<WrittenSegment> = []
-    let clockifyFailure: string | null = null
-    if (targets.clockify) {
+    let clockifyFailure: string | null = targets.clockify && plan.clockify.segments.length > 0 &&
+        sourceRowId !== undefined && expectedScopes?.clockify == null
+      ? missingSourceScope
+      : null
+    if (targets.clockify && clockifyFailure === null) {
       for (const segment of plan.clockify.segments) {
         const result = yield* service
           .applyToClockify(
@@ -326,8 +330,10 @@ export const applyPlannedWrite = (
 
     let jiraWrittenSeconds = 0
     const jiraSegments: Array<WrittenSegment> = []
-    let jiraFailure: SideOutcome | null = null
-    for (const segment of plan.jira.segments) {
+    let jiraFailure: SideOutcome | null = sourceRowId !== undefined && expectedScopes?.jira == null
+      ? { _tag: "Refused", message: missingSourceScope }
+      : null
+    for (const segment of jiraFailure === null ? plan.jira.segments : []) {
       const posted = yield* service.applyToJira(
         plan.ticketKey,
         plan.day,
@@ -364,6 +370,7 @@ export const applyProposal = (
   service: Pick<ReconcileServiceContract, "applyToClockify" | "applyToJira">,
   proposal: SessionProposal,
   description: string,
+  sourceScopes: ProviderScopes,
   targets: WriteTargets = bothTargets
 ): Effect.Effect<WriteOutcome> => {
   const prepared = prepareProposal({
@@ -399,7 +406,8 @@ export const applyProposal = (
         jira: { seconds: 0, segments: [], startedAt: undefined }
       },
       description,
-      `${proposal.day}:${proposal.ticketKey}`
+      `${proposal.day}:${proposal.ticketKey}`,
+      sourceScopes
     )
   }
   const planned = prepared.plan([{
@@ -451,7 +459,8 @@ export const applyProposal = (
         jira: sourceMarked(cap(planned.jira, proposal.jiraDelta, MINIMUM_WRITE_SECONDS))
       },
       description,
-      `${proposal.day}:${proposal.ticketKey}`
+      `${proposal.day}:${proposal.ticketKey}`,
+      sourceScopes
     )
   }
   const belowMinimum = planned._tag === "BelowMinimum"
@@ -471,6 +480,7 @@ export const applyProposal = (
       }
     },
     description,
-    `${proposal.day}:${proposal.ticketKey}`
+    `${proposal.day}:${proposal.ticketKey}`,
+    sourceScopes
   )
 }

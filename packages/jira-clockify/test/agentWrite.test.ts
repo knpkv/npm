@@ -16,9 +16,11 @@ import {
   type WriteOutcome,
   writeOutcomeLines
 } from "../src/cli/agentWrite.js"
+import type { SourceSegment } from "../src/services/ReconcileService.js"
 import type { JiraWorklogOutcome } from "../src/services/TimerService.js"
 
 const outcome = (clockify: WriteOutcome["clockify"], jira: WriteOutcome["jira"]): WriteOutcome => ({ clockify, jira })
+const sourceScopes = { clockify: "clockify-account", jira: "jira-account" }
 
 describe("provenanceText", () => {
   it("cites the evidence when nothing was overruled", () => {
@@ -178,27 +180,39 @@ describe("applyProposal targets", () => {
     const calls: Array<string> = []
     const descriptions: Array<string | undefined> = []
     const starts: Array<Date | undefined> = []
+    const sources: Array<SourceSegment | undefined> = []
     return {
       calls,
       descriptions,
       starts,
+      sources,
       service: {
         applyToClockify: (
           ticketKey: string,
           _day: string,
           seconds: number,
           description?: string,
-          startedAt?: Date
+          startedAt?: Date,
+          source?: SourceSegment
         ) => {
           calls.push(`clockify ${ticketKey} ${seconds}`)
           descriptions.push(description)
           starts.push(startedAt)
+          sources.push(source)
           return Effect.succeed(true)
         },
-        applyToJira: (ticketKey: string, _day: string, seconds: number, description?: string, startedAt?: Date) => {
+        applyToJira: (
+          ticketKey: string,
+          _day: string,
+          seconds: number,
+          description?: string,
+          startedAt?: Date,
+          source?: SourceSegment
+        ) => {
           calls.push(`jira ${ticketKey} ${seconds}`)
           descriptions.push(description)
           starts.push(startedAt)
+          sources.push(source)
           return Effect.succeed<JiraWorklogOutcome>({ _tag: "Posted" })
         }
       }
@@ -209,22 +223,27 @@ describe("applyProposal targets", () => {
   it.effect("preserves CLI/watch deltas and independent whole-row anchors", () =>
     Effect.gen(function*() {
       const fake = fakeService()
-      yield* applyProposal(fake.service, {
-        ...proposal,
-        blocks: [
-          { startMs: 0, endMs: 3600000, seconds: 3600 },
-          { startMs: 18000000, endMs: 21600000, seconds: 3600 }
-        ],
-        sessionSeconds: 7200,
-        clockifySeconds: 3600,
-        jiraSeconds: 1800,
-        recordedIntervals: [
-          { source: "clockify", startMs: 0, endMs: 3600000 },
-          { source: "jira", startMs: 0, endMs: 1800000 }
-        ],
-        clockifyDelta: 30,
-        jiraDelta: 900
-      }, "note")
+      yield* applyProposal(
+        fake.service,
+        {
+          ...proposal,
+          blocks: [
+            { startMs: 0, endMs: 3600000, seconds: 3600 },
+            { startMs: 18000000, endMs: 21600000, seconds: 3600 }
+          ],
+          sessionSeconds: 7200,
+          clockifySeconds: 3600,
+          jiraSeconds: 1800,
+          recordedIntervals: [
+            { source: "clockify", startMs: 0, endMs: 3600000 },
+            { source: "jira", startMs: 0, endMs: 1800000 }
+          ],
+          clockifyDelta: 30,
+          jiraDelta: 900
+        },
+        "note",
+        sourceScopes
+      )
       expect(fake.calls).toEqual(["clockify PROJ-1 30", "jira PROJ-1 900"])
       expect(fake.starts).toEqual([new Date(18000000), new Date(1800000)])
     }))
@@ -232,18 +251,46 @@ describe("applyProposal targets", () => {
   it.effect("writes both sides by default", () =>
     Effect.gen(function*() {
       const fake = fakeService()
-      const outcome = yield* applyProposal(fake.service, proposal, "note")
+      const outcome = yield* applyProposal(fake.service, proposal, "note", sourceScopes)
       expect(fake.calls).toEqual(["clockify PROJ-1 3600", "jira PROJ-1 3600"])
       const marker = SourceConsumption.marker("2026-07-01:PROJ-1", 0)
       expect(fake.descriptions).toEqual([`note\n${marker}`, `note\n${marker}`])
+      expect(fake.sources.map((source) => source?.expectedScope)).toEqual([
+        sourceScopes.clockify,
+        sourceScopes.jira
+      ])
       expect(outcome.clockify).toMatchObject({ _tag: "Written", seconds: 3600 })
       expect(outcome.jira).toMatchObject({ _tag: "Written", seconds: 3600 })
+    }))
+
+  it.effect("refuses only the source-backed side whose account was not verified", () =>
+    Effect.gen(function*() {
+      const clockifyMissing = fakeService()
+      const first = yield* applyProposal(clockifyMissing.service, proposal, "note", {
+        clockify: null,
+        jira: sourceScopes.jira
+      })
+      expect(clockifyMissing.calls).toEqual(["jira PROJ-1 3600"])
+      expect(first.clockify).toMatchObject({ _tag: "Refused" })
+      expect(first.jira).toMatchObject({ _tag: "Written", seconds: 3600 })
+
+      const jiraMissing = fakeService()
+      const second = yield* applyProposal(jiraMissing.service, proposal, "note", {
+        clockify: sourceScopes.clockify,
+        jira: null
+      })
+      expect(jiraMissing.calls).toEqual(["clockify PROJ-1 3600"])
+      expect(second.clockify).toMatchObject({ _tag: "Written", seconds: 3600 })
+      expect(second.jira).toMatchObject({ _tag: "Refused" })
     }))
 
   it.effect("leaves a side alone when it is not asked for, and says so", () =>
     Effect.gen(function*() {
       const fake = fakeService()
-      const outcome = yield* applyProposal(fake.service, proposal, "note", { clockify: false, jira: true })
+      const outcome = yield* applyProposal(fake.service, proposal, "note", sourceScopes, {
+        clockify: false,
+        jira: true
+      })
       expect(fake.calls).toEqual(["jira PROJ-1 3600"])
       // Not `NothingOwed`: the Clockify gap is still there, and next time it may be asked for.
       expect(outcome.clockify).toEqual({ _tag: "Skipped" })
@@ -254,22 +301,27 @@ describe("applyProposal targets", () => {
     Effect.gen(function*() {
       const fake = fakeService()
       const later = 18000000
-      yield* applyProposal(fake.service, {
-        ...proposal,
-        blocks: [
-          {
-            startMs: 0,
-            endMs: 3600000,
-            seconds: 3600,
-            clockifyConsumedSeconds: 3600,
-            jiraConsumedSeconds: 3600
-          },
-          { startMs: later, endMs: later + 3600000, seconds: 3600 }
-        ],
-        sessionSeconds: 7200,
-        clockifyDelta: 3600,
-        jiraDelta: 3600
-      }, "note")
+      yield* applyProposal(
+        fake.service,
+        {
+          ...proposal,
+          blocks: [
+            {
+              startMs: 0,
+              endMs: 3600000,
+              seconds: 3600,
+              clockifyConsumedSeconds: 3600,
+              jiraConsumedSeconds: 3600
+            },
+            { startMs: later, endMs: later + 3600000, seconds: 3600 }
+          ],
+          sessionSeconds: 7200,
+          clockifyDelta: 3600,
+          jiraDelta: 3600
+        },
+        "note",
+        sourceScopes
+      )
       expect(fake.calls).toEqual(["clockify PROJ-1 3600", "jira PROJ-1 3600"])
       expect(fake.starts).toEqual([new Date(later), new Date(later)])
     }))
@@ -278,29 +330,34 @@ describe("applyProposal targets", () => {
     Effect.gen(function*() {
       const fake = fakeService()
       const later = 18000000
-      yield* applyProposal(fake.service, {
-        ...proposal,
-        blocks: [
-          {
-            startMs: 0,
-            endMs: 3600000,
-            seconds: 3600,
-            clockifyConsumedSeconds: 3600,
-            jiraConsumedSeconds: 3600
-          },
-          { startMs: later, endMs: later + 3600000, seconds: 3600 }
-        ],
-        sessionSeconds: 7200,
-        activeSeconds: 7200,
-        clockifySeconds: 1800,
-        jiraSeconds: 1800,
-        recordedIntervals: [
-          { source: "clockify", startMs: later, endMs: later + 1800000 },
-          { source: "jira", startMs: later, endMs: later + 1800000 }
-        ],
-        clockifyDelta: 1800,
-        jiraDelta: 1800
-      }, "note")
+      yield* applyProposal(
+        fake.service,
+        {
+          ...proposal,
+          blocks: [
+            {
+              startMs: 0,
+              endMs: 3600000,
+              seconds: 3600,
+              clockifyConsumedSeconds: 3600,
+              jiraConsumedSeconds: 3600
+            },
+            { startMs: later, endMs: later + 3600000, seconds: 3600 }
+          ],
+          sessionSeconds: 7200,
+          activeSeconds: 7200,
+          clockifySeconds: 1800,
+          jiraSeconds: 1800,
+          recordedIntervals: [
+            { source: "clockify", startMs: later, endMs: later + 1800000 },
+            { source: "jira", startMs: later, endMs: later + 1800000 }
+          ],
+          clockifyDelta: 1800,
+          jiraDelta: 1800
+        },
+        "note",
+        sourceScopes
+      )
       expect(fake.calls).toEqual(["clockify PROJ-1 1800", "jira PROJ-1 1800"])
       expect(fake.starts).toEqual([new Date(later + 1800000), new Date(later + 1800000)])
     }))
@@ -350,7 +407,7 @@ describe("applyProposal targets", () => {
       const proposal = proposals[0]!
       expect(proposal).toMatchObject({ clockifyDelta: 2400, jiraDelta: 2400 })
 
-      yield* applyProposal(fake.service, proposal, "note")
+      yield* applyProposal(fake.service, proposal, "note", sourceScopes)
       expect(fake.calls).toEqual(["clockify PROJ-1 2400", "jira PROJ-1 2400"])
       expect(fake.starts).toEqual([new Date(1200000), new Date(1200000)])
     }))
@@ -359,23 +416,28 @@ describe("applyProposal targets", () => {
     Effect.gen(function*() {
       const fake = fakeService()
       const later = 18000000
-      yield* applyProposal(fake.service, {
-        ...proposal,
-        blocks: [
-          { startMs: 0, endMs: 3600000, seconds: 3600 },
-          { startMs: later, endMs: later + 3600000, seconds: 3600 }
-        ],
-        sessionSeconds: 7200,
-        activeSeconds: 7200,
-        clockifySeconds: 3600,
-        jiraSeconds: 3600,
-        clockifyDelta: 3600,
-        jiraDelta: 3600,
-        recordedIntervals: [
-          { source: "clockify", startMs: later, endMs: later + 3600000 },
-          { source: "jira", startMs: later, endMs: later + 3600000 }
-        ]
-      }, "note")
+      yield* applyProposal(
+        fake.service,
+        {
+          ...proposal,
+          blocks: [
+            { startMs: 0, endMs: 3600000, seconds: 3600 },
+            { startMs: later, endMs: later + 3600000, seconds: 3600 }
+          ],
+          sessionSeconds: 7200,
+          activeSeconds: 7200,
+          clockifySeconds: 3600,
+          jiraSeconds: 3600,
+          clockifyDelta: 3600,
+          jiraDelta: 3600,
+          recordedIntervals: [
+            { source: "clockify", startMs: later, endMs: later + 3600000 },
+            { source: "jira", startMs: later, endMs: later + 3600000 }
+          ]
+        },
+        "note",
+        sourceScopes
+      )
       expect(fake.calls).toEqual(["clockify PROJ-1 3600", "jira PROJ-1 3600"])
       expect(fake.starts).toEqual([new Date(0), new Date(0)])
     }))
@@ -384,17 +446,22 @@ describe("applyProposal targets", () => {
     Effect.gen(function*() {
       const fake = fakeService()
       const later = 18000000
-      yield* applyProposal(fake.service, {
-        ...proposal,
-        blocks: [
-          { startMs: 0, endMs: 3600000, seconds: 3600 },
-          { startMs: later, endMs: later + 3600000, seconds: 3600 }
-        ],
-        sessionSeconds: 7200,
-        activeSeconds: 7200,
-        clockifyDelta: 7200,
-        jiraDelta: 7200
-      }, "note")
+      yield* applyProposal(
+        fake.service,
+        {
+          ...proposal,
+          blocks: [
+            { startMs: 0, endMs: 3600000, seconds: 3600 },
+            { startMs: later, endMs: later + 3600000, seconds: 3600 }
+          ],
+          sessionSeconds: 7200,
+          activeSeconds: 7200,
+          clockifyDelta: 7200,
+          jiraDelta: 7200
+        },
+        "note",
+        sourceScopes
+      )
       expect(fake.calls).toEqual([
         "clockify PROJ-1 3600",
         "clockify PROJ-1 3600",
@@ -422,6 +489,7 @@ describe("applyProposal targets", () => {
           jiraDelta: 90
         },
         "note",
+        sourceScopes,
         { clockify: false, jira: true }
       )
       expect(fake.calls).toEqual(["jira PROJ-1 60"])
@@ -461,7 +529,10 @@ describe("applyProposal targets", () => {
       const proposal = proposals[0]!
       expect(proposal.jiraDelta).toBe(150)
 
-      const outcome = yield* applyProposal(fake.service, proposal, "note", { clockify: false, jira: true })
+      const outcome = yield* applyProposal(fake.service, proposal, "note", sourceScopes, {
+        clockify: false,
+        jira: true
+      })
       expect(fake.calls).toEqual(["jira PROJ-1 60", "jira PROJ-1 60"])
       expect(outcome.jira).toMatchObject({
         _tag: "PartiallyWritten",
@@ -489,6 +560,7 @@ describe("applyProposal targets", () => {
           settlementEndMs: 300000
         },
         "note",
+        sourceScopes,
         { clockify: false, jira: true }
       )
       expect(fake.calls).toEqual(["jira PROJ-1 60", "jira PROJ-1 60", "jira PROJ-1 60"])
@@ -512,6 +584,7 @@ describe("applyProposal targets", () => {
           jiraDelta: 90
         },
         "note",
+        sourceScopes,
         { clockify: false, jira: true }
       )
       expect(fake.calls).toEqual([])
@@ -521,7 +594,10 @@ describe("applyProposal targets", () => {
   it.effect("writes nowhere when neither side is asked for", () =>
     Effect.gen(function*() {
       const fake = fakeService()
-      const outcome = yield* applyProposal(fake.service, proposal, "note", { clockify: false, jira: false })
+      const outcome = yield* applyProposal(fake.service, proposal, "note", sourceScopes, {
+        clockify: false,
+        jira: false
+      })
       expect(fake.calls).toEqual([])
       expect(outcome).toEqual({ clockify: { _tag: "Skipped" }, jira: { _tag: "Skipped" } })
     }))

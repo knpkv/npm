@@ -329,6 +329,80 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs[0]!.timeSpentSeconds).toBe(1800 + IDLE_CAP)
     }))
 
+  it.effect("refuses the switched Clockify account after the final CLI provider read", () =>
+    Effect.gen(function*() {
+      const otherUser = "user-other"
+      const clockifyScope = (user: string) =>
+        JSON.stringify([
+          "clockify-v3",
+          "https://api.clockify.me/api",
+          FAKE_WORKSPACE_ID,
+          user
+        ])
+      const fake = makeFakeHeadless(baseOptions({
+        transcripts: branchSession(),
+        keep: [true],
+        writtenFiles: {
+          [`${FAKE_HOME}/.jcf/source-consumption.v1.json`]: JSON.stringify({
+            version: 3,
+            reviewedWindows: [FAKE_USER_ID, otherUser].map((user) => ({
+              provider: "clockify",
+              scope: clockifyScope(user),
+              fromMs: 0,
+              toMs: 4_102_444_800_000
+            })).concat([{
+              provider: "jira",
+              scope: JSON.stringify(["cloud-fake", FAKE_ACCOUNT_ID]),
+              fromMs: 0,
+              toMs: 4_102_444_800_000
+            }]),
+            pending: [],
+            bindings: [],
+            observedUnbound: []
+          })
+        },
+        afterConsoleLog: (line, world) => {
+          if (
+            !line.includes("PROJ-5662") || world.describeRequests.length === 0 ||
+            world.clockifyVerifiedUserId === otherUser
+          ) return
+          world.clockifyAuth.userId = otherUser
+          world.clockifyVerifiedUserId = otherUser
+        }
+      }))
+      const exit = yield* TestClock.setTime(HISTORICAL_NOW).pipe(
+        Effect.andThen(Command.runWith(root, { version: "0.0.0-test" })(agent())),
+        Effect.exit,
+        Effect.provide(fake.layer)
+      )
+
+      expect(exit._tag).toBe("Success")
+      expect(fake.world.clockifyVerifiedUserId).toBe(otherUser)
+      expect(fake.world.createdClockifyEntries).toEqual([])
+      expect(fake.world.jiraWorklogs).toHaveLength(1)
+      expect(output(fake.world.stdout)).toContain("Clockify")
+    }))
+
+  it.effect("accepts a rotated credential for the same verified account", () =>
+    Effect.gen(function*() {
+      const { exit, world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: branchSession(),
+          keep: [true],
+          afterConsoleLog: (line, current) => {
+            if (line.includes("PROJ-5662") && current.describeRequests.length > 0) {
+              current.clockifyAuth.apiKey = "rotated-synthetic-key"
+            }
+          }
+        })
+      )
+      expect(exit._tag).toBe("Success")
+      expect(world.clockifyAuth.apiKey).toBe("rotated-synthetic-key")
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toHaveLength(1)
+    }))
+
   it.effect("anchors ordinary provider time after corrected source consumption", () =>
     Effect.gen(function*() {
       const morning = at(DAY.year, DAY.month, DAY.day, 10, 0)

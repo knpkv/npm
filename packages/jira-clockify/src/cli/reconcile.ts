@@ -699,7 +699,15 @@ const runAgentMode = (options: {
             // Printed before the write, and in full: this text lands in two systems other people read,
             // so it should never be a surprise found later in Clockify.
             yield* say(`    ${description}`)
-            const written = yield* applyProposal(svc, approved, description)
+            const written = yield* applyProposal(
+              svc,
+              approved,
+              description,
+              refreshed.sourceScopes ?? {
+                clockify: null,
+                jira: null
+              }
+            )
             yield* Effect.forEach(writeOutcomeLines(written), (line) => say(`    ${line}`))
             if (!keepGoing(written)) return
           }

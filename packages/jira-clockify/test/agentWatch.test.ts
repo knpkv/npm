@@ -21,7 +21,14 @@ import {
 import { decideWatchWrites, SETTLE_GRACE_SECONDS, settlesAt } from "../src/agent/watch.js"
 import { writeAnchor } from "../src/cli/agentWrite.js"
 import { root } from "../src/cli/root.js"
-import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "../src/testing/fakeHeadless.js"
+import {
+  FAKE_ACCOUNT_ID,
+  FAKE_HOME,
+  FAKE_USER_ID,
+  FAKE_WORKSPACE_ID,
+  type FakeHeadlessOptions,
+  makeFakeHeadless
+} from "../src/testing/fakeHeadless.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and
 // provides them there. Both provide diagnostics are about production wiring, where a Layer
@@ -352,6 +359,57 @@ describe("jcf watch claude", () => {
 
       yield* Fiber.interrupt(fiber)
       expect(output(world.stdout)).toContain("Wrote 1 block(s)")
+    }))
+
+  it.effect("refuses the switched Clockify account after the final watch provider read", () =>
+    Effect.gen(function*() {
+      const otherUser = "user-other"
+      const clockifyScope = (user: string) =>
+        JSON.stringify([
+          "clockify-v3",
+          "https://api.clockify.me/api",
+          FAKE_WORKSPACE_ID,
+          user
+        ])
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: branchWork({
+          writtenFiles: {
+            [`${FAKE_HOME}/.jcf/source-consumption.v1.json`]: JSON.stringify({
+              version: 3,
+              reviewedWindows: [FAKE_USER_ID, otherUser].map((user) => ({
+                provider: "clockify",
+                scope: clockifyScope(user),
+                fromMs: 0,
+                toMs: 4_102_444_800_000
+              })).concat([{
+                provider: "jira",
+                scope: JSON.stringify(["cloud-fake", FAKE_ACCOUNT_ID]),
+                fromMs: 0,
+                toMs: 4_102_444_800_000
+              }]),
+              pending: [],
+              bindings: [],
+              observedUnbound: []
+            })
+          },
+          afterConsoleLog: (line, current) => {
+            if (
+              !line.includes("PROJ-1") || current.describeRequests.length === 0 ||
+              current.clockifyVerifiedUserId === otherUser
+            ) return
+            current.clockifyAuth.userId = otherUser
+            current.clockifyVerifiedUserId = otherUser
+          }
+        })
+      })
+      yield* advance(Duration.minutes(20))
+      yield* Fiber.interrupt(fiber)
+
+      expect(world.clockifyVerifiedUserId).toBe(otherUser)
+      expect(output(world.stdout)).toContain("The Clockify account changed since this plan was read")
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toHaveLength(1)
     }))
 
   for (
