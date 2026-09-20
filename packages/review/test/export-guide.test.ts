@@ -38,7 +38,10 @@ it.effect("reports malformed input, coverage, and patch failures through the typ
       { guide: { ...guide, source: { pr: { url: "javascript:alert(1)" } } }, patch, stage: "input" },
       { guide: { ...guide, sections: [] }, patch, stage: "coverage" },
       { guide, patch: patch.replace("--- a/release.ts\n+++ b/release.ts\n", ""), stage: "patch" },
-      { guide, patch: patch.replace("+if (approved) ship()\n", ""), stage: "patch" }
+      { guide, patch: patch.replace("+if (approved) ship()\n", ""), stage: "patch" },
+      { guide, patch: patch.slice(0, -1), stage: "patch" },
+      { guide, patch: patch.replace("@@ -1 +1 @@", "@@ -0 +1 @@"), stage: "patch" },
+      { guide, patch: patch.replace("@@ -1 +1 @@", "@@ -1 +0 @@"), stage: "patch" }
     ]
     for (const input of inputs) {
       const error = yield* Effect.flip(exportGuide(input))

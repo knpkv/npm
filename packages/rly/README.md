@@ -515,5 +515,10 @@ paths begin with `a/` and `b/`; those names are indistinguishable from prefixed
 headers. Other custom producers must supply their exact `{ source, destination }`.
 Copied files retain both paths and `copied` status,
 but only the destination resolves as a changed file. CRLF patch records are accepted.
+Nonempty patch input must end with a complete LF or CRLF record, including a final
+`\ No newline at end of file` marker. That marker describes source-file content,
+not the patch record terminator. Empty input remains an empty patch. Nonempty
+hunk ranges require positive line numbers; zero is allowed only for an empty
+side. These parsing constraints do not prove that Git can apply a patch.
 Quoted path bytes must be valid UTF-8; unsupported byte sequences return
 `PatchInvalid` rather than replacing bytes and collapsing distinct file identities.

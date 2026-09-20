@@ -173,6 +173,7 @@ const binaryPaths = (
 
 /** Infer default a/b prefixes when present; pass explicit empty prefixes for unambiguous --no-prefix parsing. */
 export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult => {
+  if (text !== "" && !text.endsWith("\n")) return invalid("Unterminated patch record")
   // A CR on a Git header identifies transport line endings; body-only CR belongs to the source.
   const records = text.split("\n")
   const converted = records.some((line) => line.startsWith(HEADER) && line.endsWith("\r"))

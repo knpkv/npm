@@ -136,6 +136,44 @@ test("an empty input is an empty patch", () => {
   assert.deepEqual(parsed(""), { files: [] })
 })
 
+/** Patch record terminators are required even when the source file itself has no final newline. */
+test.each(["\n", "\r\n"])("requires a complete final patch record with %j endings", (ending) => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
+  const complete = [
+    header + "@@ -1 +1 @@\n-old\n+new\n",
+    header + "@@ -1 +0,0 @@\n-old\n",
+    header + "@@ -1,2 +1,2 @@\n-old\n+new\n tail\n",
+    header + "@@ -1 +1 @@\n-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
+    "diff --git a/a b/a\nold mode 100644\nnew mode 100755\n"
+  ]
+  for (const patch of complete) {
+    const transported = patch.replaceAll("\n", ending)
+    assert.deepEqual(parsePatch(transported), parsePatch(patch))
+    assert.equal(parsePatch(transported)._tag, "Patch")
+    expect.soft(parsePatch(transported.slice(0, -ending.length))._tag, patch).toBe("PatchInvalid")
+    if (ending === "\r\n") expect.soft(parsePatch(transported.slice(0, -1))._tag, patch).toBe("PatchInvalid")
+  }
+  assert.deepEqual(parsed(""), { files: [] })
+})
+
+/** Only an empty side may use line zero; populated lines must retain positive coordinates. */
+test("rejects nonempty zero-start ranges while retaining empty anchors on either side", () => {
+  const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
+  for (const range of ["-0 +1", "-1 +0", "-0,1 +1,1", "-1,1 +0,1", "-0,1 +0,1"]) {
+    expect.soft(parsePatch(header + `@@ ${range} @@\n-old\n+new\n`)._tag, range).toBe("PatchInvalid")
+  }
+  for (const range of ["-0,2 +1,2", "-1,2 +0,2"]) {
+    expect.soft(parsePatch(header + `@@ ${range} @@\n-old\n+new\n tail\n`)._tag, range).toBe("PatchInvalid")
+  }
+  for (const anchor of [0, 1]) {
+    const insertion = parsed(header + `@@ -${anchor},0 +${anchor + 1} @@\n+new\n`)
+    assert.deepEqual(insertion.files[0]?.hunks[0]?.lines, [{ kind: "add", text: "new", newNo: anchor + 1 }])
+    const deletion = parsed(header + `@@ -${anchor + 1} +${anchor},0 @@\n-old\n`)
+    assert.deepEqual(deletion.files[0]?.hunks[0]?.lines, [{ kind: "del", text: "old", oldNo: anchor + 1 }])
+  }
+  assert.equal(parsePatch(header + "@@ -1 +1 @@\n-old\n+new\n")._tag, "Patch")
+})
+
 test("Git's tab terminator is not part of a path containing spaces", () => {
   const patch = parsed(`diff --git a/a b.txt b/a b.txt
 --- a/a b.txt\t
