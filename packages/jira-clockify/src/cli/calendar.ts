@@ -17,7 +17,7 @@
  *
  * @module
  */
-import { localDay } from "../utils/time.js"
+import { localDay, nextLocalMidnight } from "../utils/time.js"
 
 /** One Issue Key's credited spans on the day being drawn. */
 export interface CalendarRow {
@@ -85,11 +85,28 @@ export const renderDayCalendar = (options: {
   readonly day: string
   readonly rows: ReadonlyArray<CalendarRow>
 }): ReadonlyArray<string> => {
-  const minutes = new Array<string>(MINUTES_PER_DAY).fill(IDLE)
+  const representative = options.rows
+    .flatMap((row) => row.spans)
+    .find((span) => localDay(new Date(span.startMs)) === options.day)
+  if (representative === undefined) return []
+  const representativeStart = new Date(representative.startMs)
+  const dayStartMs = new Date(
+    representativeStart.getFullYear(),
+    representativeStart.getMonth(),
+    representativeStart.getDate()
+  ).getTime()
+  const dayEndMs = nextLocalMidnight(dayStartMs)
+  const dayDurationMs = dayEndMs - dayStartMs
+  // A fall-back day contains 25 elapsed hours. Give its repeated local hour a second row so every
+  // instant keeps chronological order and the final local hour remains visible. Ordinary and
+  // spring-forward days retain the familiar 24-row wall-clock grid.
+  const elapsedTimeline = dayDurationMs > DAY_MS
+  const gridMinutes = elapsedTimeline ? Math.round(dayDurationMs / 60_000) : MINUTES_PER_DAY
+  const minutes = new Array<string>(gridMinutes).fill(IDLE)
   // Who owns each minute, tracked by Issue Key rather than by glyph. There are only so many glyphs,
   // and a day with more Issue Keys than glyphs would otherwise have two of them compare equal — so a
   // minute genuinely split between them would read as exclusively one ticket's.
-  const owners = new Array<string | null>(MINUTES_PER_DAY).fill(null)
+  const owners = new Array<string | null>(gridMinutes).fill(null)
   const glyphs = new Map<string, string>()
   let anyShared = false
 
@@ -100,23 +117,18 @@ export const renderDayCalendar = (options: {
       // Spans never cross a local midnight, but a caller may pass a whole period's worth of rows,
       // so anything outside this day is skipped rather than wrapped onto it.
       if (localDay(new Date(span.startMs)) !== options.day) continue
-      // Read off the local clock rather than measured from midnight. On a daylight-saving day the
-      // two disagree: after a spring-forward, work at 03:00 sits 2 hours from midnight and would be
-      // drawn in the `02h` row, and after a fall-back every later block shifts by an hour and the
-      // last of them runs off the end of the grid and disappears — exactly when the grid is being
-      // used to decide whether a proposal is right.
-      const from = localMinuteOfDay(span.startMs)
-      const clockEnd = localMinuteOfDay(span.endMs, "up")
-      // The autumn clock repeats an hour. Across that transition a later instant can have an earlier
-      // wall-clock minute (02:50 DST -> 02:10 standard). The 24-hour grid has no second 02h row, so
-      // project the positive elapsed duration forward from the start instead of dropping the span.
-      const elapsedEnd = from + Math.ceil((span.endMs - span.startMs) / 60_000)
-      const to = span.endMs - span.startMs >= DAY_MS
-        ? MINUTES_PER_DAY
-        : clockEnd <= from && span.endMs > span.startMs
-        ? Math.min(MINUTES_PER_DAY, elapsedEnd)
-        : clockEnd
-      for (let minute = Math.max(0, from); minute < Math.min(MINUTES_PER_DAY, to); minute++) {
+      // Read ordinary and spring-forward days off the local clock: after a spring-forward, work at
+      // 03:00 sits only 2 elapsed hours from midnight. Fall-back days instead use the 25-hour
+      // timeline above, because two different instants share each minute of the repeated hour.
+      const from = elapsedTimeline
+        ? Math.floor((span.startMs - dayStartMs) / 60_000)
+        : localMinuteOfDay(span.startMs)
+      const to = span.endMs - span.startMs >= dayDurationMs
+        ? gridMinutes
+        : elapsedTimeline
+        ? Math.ceil((span.endMs - dayStartMs) / 60_000)
+        : localMinuteOfDay(span.endMs, "up")
+      for (let minute = Math.max(0, from); minute < Math.min(gridMinutes, to); minute++) {
         const owner = owners[minute]
         if (owner === null || owner === undefined) {
           minutes[minute] = glyph
@@ -133,7 +145,7 @@ export const renderDayCalendar = (options: {
     }
   })
 
-  const activeHours = [...new Array(24).keys()].filter((hour) =>
+  const activeHours = [...new Array(Math.ceil(gridMinutes / MINUTES_PER_HOUR)).keys()].filter((hour) =>
     minutes.slice(hour * MINUTES_PER_HOUR, (hour + 1) * MINUTES_PER_HOUR).some((cell) => cell !== IDLE)
   )
   if (activeHours.length === 0) return []
@@ -149,7 +161,10 @@ export const renderDayCalendar = (options: {
     if (previous !== null && hour > previous + 1) {
       lines.push(`${" ".repeat(LABEL_WIDTH)}${SKIPPED.repeat(3)} ${hour - previous - 1}h with nothing credited`)
     }
-    const label = `  ${String(hour).padStart(2, "0")}h  `.padEnd(LABEL_WIDTH)
+    const localHour = elapsedTimeline
+      ? new Date(dayStartMs + hour * MINUTES_PER_HOUR * 60_000).getHours()
+      : hour
+    const label = `  ${String(localHour).padStart(2, "0")}h  `.padEnd(LABEL_WIDTH)
     lines.push(label + minutes.slice(hour * MINUTES_PER_HOUR, (hour + 1) * MINUTES_PER_HOUR).join(""))
     previous = hour
   }

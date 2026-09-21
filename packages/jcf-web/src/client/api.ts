@@ -86,14 +86,14 @@ const failureFrom = async (response: Response): Promise<RequestFailure> => {
 export const bootstrapSession = async (): Promise<void> => {
   const token = new URLSearchParams(window.location.hash.slice(1)).get("bootstrap_token")
   if (token === null) return
+  // Remove the authority-bearing fragment before imports or transport can suspend or reject. The
+  // extracted one-time token stays only in this function's memory for the exchange below.
+  window.history.replaceState(null, "", window.location.pathname)
   const { request } = await import("./transport.js")
   await request("/auth/bootstrap", {
     headers: { authorization: `Bearer ${token}` },
     method: "POST"
   }, async (response) => {
-    // Cleared whether or not it worked: a code that failed is spent, and one that worked must not sit
-    // in the address bar to be pasted into a chat window.
-    window.history.replaceState(null, "", window.location.pathname)
     if (!response.ok) throw await failureFrom(response)
     const { decodeBootstrap } = await import("./decoding.js")
     const body = await decodeBootstrap(await response.json())

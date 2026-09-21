@@ -9,9 +9,9 @@
  *   should have.
  * - **The URL is the handshake.** The bootstrap code is printed once, in a fragment the browser
  *   never sends upstream, and is spent the first time it is exchanged for the session cookie.
- * - **A read needs the cookie; a write needs the cookie, the origin, and the CSRF header.** Another
- *   page in the same browser can make the browser send a cookie, but it cannot forge an origin or
- *   read a token out of this page's storage.
+ * - **A read needs the cookie and must not be a browser cross-origin request; a write also needs the
+ *   expected origin and CSRF header.** Another page in the same browser can make the browser send a
+ *   cookie, but Fetch Metadata keeps that page from starting agent-backed reads without an Origin.
  *
  * The rules are those of `@knpkv/codecommit-web`'s owner session, over the same
  * `@knpkv/browser-pairing` credential primitives. They are re-stated here rather than imported
@@ -176,9 +176,12 @@ export const ownerSessionCookie = (secrets: Pick<OwnerSessionSecretsContract, "o
 interface OwnerRequest {
   readonly credential: string
   readonly csrfToken: string | undefined
+  readonly fetchSite: string | undefined
   readonly method: string
   readonly origin: string | undefined
 }
+
+const fetchSites = new Set(["cross-site", "none", "same-origin", "same-site"])
 
 export const authorizeOwnerRequest = Effect.fn("OwnerSession.authorizeRequest")(
   function*(request: OwnerRequest, secrets: OwnerSessionSecretsContract) {
@@ -189,8 +192,18 @@ export const authorizeOwnerRequest = Effect.fn("OwnerSession.authorizeRequest")(
     if (request.origin !== undefined && !sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Request origin does not match this jcf-web server" })
     }
-    // A read from a script or a curl has no Origin and no CSRF token, and is allowed: it still had
-    // to present the process-scoped session cookie, and it changes nothing.
+    if (request.fetchSite !== undefined && !fetchSites.has(request.fetchSite)) {
+      return yield* new ForbiddenApiError({ message: "Request carries invalid browser site metadata" })
+    }
+    if (
+      request.fetchSite === "cross-site" ||
+      (!sameOrigin && (request.fetchSite === "same-site" || request.fetchSite === "none"))
+    ) {
+      return yield* new ForbiddenApiError({ message: "Browser request is not from this jcf-web page" })
+    }
+    // An explicit client such as curl carries neither Origin nor Fetch Metadata and remains allowed:
+    // it still has to present the process-scoped session cookie. Browser-marked cross-origin reads
+    // are rejected before their handler can start provider or agent work.
     if (safeMethods.has(request.method.toUpperCase())) return
     if (!sameOrigin) {
       return yield* new ForbiddenApiError({ message: "Mutation origin does not match this jcf-web server" })
@@ -282,6 +295,7 @@ export const ownerSessionAuthLayer = Layer.effect(
             {
               credential: Redacted.value(credential),
               csrfToken: request.headers["x-csrf-token"],
+              fetchSite: request.headers["sec-fetch-site"],
               method: request.method,
               origin: request.headers.origin
             },

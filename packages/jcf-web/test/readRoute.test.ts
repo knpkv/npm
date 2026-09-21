@@ -74,8 +74,24 @@ it("authenticates streamed reads and sends real engine stages before the retaine
     expect((await web.handler(bootstrapRequest())).status).toBe(401)
     const url = "http://127.0.0.1:4179/api/week/stream?monday=2026-09-07&only=clockify"
     expect((await web.handler(new Request(url))).status).toBe(401)
+    const crossOrigin = await web.handler(
+      new Request(url, {
+        headers: { cookie: ownerSessionCookie(secrets), "sec-fetch-site": "same-site" }
+      })
+    )
+    expect(crossOrigin.status).toBe(403)
+    expect(fake.world.attributorBatches).toHaveLength(0)
+    expect(fake.world.transcriptReads).toHaveLength(0)
     const progress: Array<ReadProgress> = []
-    const response = await web.handler(new Request(url, { headers: { cookie: ownerSessionCookie(secrets) } }))
+    const response = await web.handler(
+      new Request(url, {
+        headers: {
+          cookie: ownerSessionCookie(secrets),
+          origin: secrets.browserOrigin,
+          "sec-fetch-site": "same-origin"
+        }
+      })
+    )
     expect(response.status).toBe(200)
     expect(response.headers.get("content-type")).toContain("application/x-ndjson")
     const plan = await readWeekStream(response, (event) => progress.push(event))

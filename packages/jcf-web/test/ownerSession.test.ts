@@ -77,6 +77,7 @@ it.layer(NodeCrypto.layer)("OwnerSession", (it) => {
       const request = {
         credential: Redacted.value(secrets.ownerToken),
         csrfToken: Redacted.value(secrets.csrfToken),
+        fetchSite: undefined,
         method: "POST"
       }
       const allowed = yield* Effect.result(authorizeOwnerRequest({ ...request, origin: DEV_PROXY }, secrets))
@@ -84,5 +85,34 @@ it.layer(NodeCrypto.layer)("OwnerSession", (it) => {
 
       const rejected = yield* Effect.result(authorizeOwnerRequest({ ...request, origin: AUTHORITY }, secrets))
       expect(rejected._tag === "Failure" && rejected.failure._tag).toBe("ForbiddenApiError")
+    }))
+
+  it.effect("rejects browser-marked cross-origin reads while retaining explicit client access", () =>
+    Effect.gen(function*() {
+      const secrets = yield* secretsFor(DEV_PROXY)
+      const request = {
+        credential: Redacted.value(secrets.ownerToken),
+        csrfToken: undefined,
+        method: "GET",
+        origin: undefined
+      }
+      const cases: ReadonlyArray<{
+        readonly expected: "Failure" | "Success"
+        readonly fetchSite: string | undefined
+        readonly origin: string | undefined
+      }> = [
+        { expected: "Success", fetchSite: undefined, origin: undefined },
+        { expected: "Success", fetchSite: "same-origin", origin: DEV_PROXY },
+        { expected: "Success", fetchSite: "same-site", origin: DEV_PROXY },
+        { expected: "Failure", fetchSite: "same-site", origin: undefined },
+        { expected: "Failure", fetchSite: "cross-site", origin: undefined },
+        { expected: "Failure", fetchSite: "none", origin: undefined },
+        { expected: "Failure", fetchSite: "other", origin: undefined },
+        { expected: "Failure", fetchSite: "cross-site", origin: DEV_PROXY }
+      ]
+      for (const testCase of cases) {
+        const result = yield* Effect.result(authorizeOwnerRequest({ ...request, ...testCase }, secrets))
+        expect(result._tag, JSON.stringify(testCase)).toBe(testCase.expected)
+      }
     }))
 })

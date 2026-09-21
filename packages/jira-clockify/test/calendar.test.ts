@@ -190,4 +190,30 @@ describe("daylight saving", () => {
     const cells = gridLines(lines).flatMap((line) => [...line.slice(8)]).filter((cell) => cell === "#")
     expect(cells).toHaveLength(20)
   })
+
+  it("keeps later work after a span crossing the repeated autumn hour", () => {
+    const lines = renderDayCalendar({
+      day: "2026-11-01",
+      rows: [
+        {
+          ticketKey: "PROJ-1",
+          spans: [{
+            startMs: Date.parse("2026-11-01T01:50:00-04:00"),
+            endMs: Date.parse("2026-11-01T01:10:00-05:00")
+          }]
+        },
+        {
+          ticketKey: "PROJ-2",
+          spans: [{
+            startMs: Date.parse("2026-11-01T01:20:00-05:00"),
+            endMs: Date.parse("2026-11-01T01:30:00-05:00")
+          }]
+        }
+      ]
+    })
+    const cells = gridLines(lines).map((line) => line.slice(8)).join("")
+    expect(cells.match(/#/gu)).toHaveLength(20)
+    expect(cells.match(/=/gu)).toHaveLength(10)
+    expect(cells.indexOf("#")).toBeLessThan(cells.indexOf("="))
+  })
 })
