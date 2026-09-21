@@ -24,13 +24,26 @@ This directory contains automated CI/CD workflows for the @knpkv npm monorepo.
 - **Timeout**: 10 minutes
 - **Node Version**: 26.7.0
 
-#### Lint
+#### Lint static
 
-- Runs ESLint on all TypeScript and JavaScript files
-- Ensures code style consistency
-- **Command**: `pnpm lint`
+- Builds workspace types with `pnpm check`, then runs the non-changeset lint checks
+- **Command**: `pnpm lint:static`
+- **Timeout**: 15 minutes
+- **Node Version**: 26.7.0
+
+#### Changeset coverage
+
+- Builds workspace types with `pnpm check`, then validates release and public-callable coverage
+- **Command**: `pnpm lint:changeset-coverage`
 - **Timeout**: 10 minutes
 - **Node Version**: 26.7.0
+
+#### Lint
+
+- Keeps the existing `Lint` check identity. It depends on both jobs above and runs even when either fails or is skipped.
+- Succeeds only when both dependency results are `success`; failure, cancellation, skip, or a missing result fails closed.
+- Local `pnpm lint` still runs both partitions, with all original checks.
+- **Timeout**: 2 minutes
 
 #### Audit
 

@@ -29,8 +29,8 @@ jobs:
           node-version: 26.7.0
       - run: pnpm format
 
-  lint:
-    name: Lint
+  lint-static:
+    name: Lint static
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -58,9 +58,59 @@ jobs:
       # see through — and reject the suppressions for the rules that only fire once types are real.
       # Linting unbuilt lints a program that does not exist.
       - run: pnpm check
-      - run: pnpm lint
+      - run: pnpm lint:static
         env:
           GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+
+  changeset-coverage:
+    name: Changeset coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify checkout credentials were not persisted
+        shell: bash
+        run: |
+          if git config --local --get-regexp '^http\..*\.extraheader$'; then
+            echo "actions/checkout persisted an HTTP authorization header"
+            exit 1
+          fi
+      - name: Install dependencies
+        uses: ./.github/actions/setup
+        with:
+          node-version: 26.7.0
+      - name: Configure canonical Effect remote
+        run: git remote add effect-upstream https://github.com/Effect-TS/effect.git
+      # The checker resolves workspace types through built package outputs.
+      - run: pnpm check
+      - run: pnpm lint:changeset-coverage
+        env:
+          GITHUB_EVENT_BEFORE: ${{ github.event.before }}
+
+  lint:
+    name: Lint
+    needs: [lint-static, changeset-coverage]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 2
+    steps:
+      - name: Require both lint partitions
+        env:
+          LINT_STATIC_RESULT: ${{ needs.lint-static.result }}
+          CHANGESET_COVERAGE_RESULT: ${{ needs.changeset-coverage.result }}
+        run: |
+          set -euo pipefail
+          if [ "${LINT_STATIC_RESULT:-}" != "success" ] || [ "${CHANGESET_COVERAGE_RESULT:-}" != "success" ]; then
+            echo "Both lint partitions must succeed"
+            exit 1
+          fi
 
   audit:
     name: Audit
