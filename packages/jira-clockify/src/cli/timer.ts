@@ -9,7 +9,15 @@ import { discard, edit, log, start, statusCmd, stop } from "./timer/index.js"
 
 export { discard, edit, log, start, statusCmd, stop } from "./timer/index.js"
 
-export const timer = Command.make(
+type TimerSubcommand = typeof start | typeof stop | typeof discard | typeof statusCmd | typeof log | typeof edit
+
+export const timer: Command.Command<
+  "timer",
+  {},
+  {},
+  Command.Error<TimerSubcommand>,
+  Command.Services<TimerSubcommand>
+> = Command.make(
   "timer",
   {},
   () => Console.log("Usage: jcf timer <start|stop|discard|status|log|edit>")

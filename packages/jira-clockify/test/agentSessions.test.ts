@@ -1,0 +1,1203 @@
+import { describe, expect, it } from "@effect/vitest"
+import {
+  activeWindows,
+  applyDwellFloor,
+  attributeSession,
+  buildSessionDigest,
+  buildSessionProposals,
+  deterministicAttribution,
+  expandHomePath,
+  isPlaceholderTicketKey,
+  isWithinPrefix,
+  isWithinSessionRoots,
+  mergeSpansWithinDays,
+  mineTicketKeys,
+  type SessionAttribution,
+  splitCredits,
+  standingAttribution,
+  type TicketDayCredit,
+  ticketKeyFromBranch,
+  ticketKeyFromPath
+} from "../src/agent/sessions.js"
+import { marker } from "../src/agent/sourceConsumption.js"
+
+// Timezone-independent: build instants from local components so a day boundary is a *local*
+// midnight wherever the suite runs.
+const at = (year: number, month: number, day: number, hour: number, minute: number, second = 0): number =>
+  new Date(year, month - 1, day, hour, minute, second, 0).getTime()
+
+const activity = (sessionId: string, atMs: number) => ({ sessionId, atMs })
+
+describe("mineTicketKeys", () => {
+  it("dedupes and preserves first-appearance order", () => {
+    expect(mineTicketKeys("fix PROJ-42 then ABC-7 then PROJ-42 again")).toEqual(["PROJ-42", "ABC-7"])
+  })
+
+  it("ignores lowercase and single-letter look-alikes", () => {
+    expect(mineTicketKeys("branch feat/jcf-ai bumped to v2-3 and x-9")).toEqual([])
+  })
+
+  // Frequency is anti-correlated with what should be billed, so a key mentioned once ranks
+  // exactly like one mentioned fifty times.
+  it("does not rank by frequency", () => {
+    const text = `${"KNOWN-99 ".repeat(50)} plus WORKED-1`
+    expect(mineTicketKeys(text)).toEqual(["KNOWN-99", "WORKED-1"])
+  })
+
+  it("drops placeholder keys so documentation examples cannot generate worklogs", () => {
+    expect(mineTicketKeys("see PROJ-123, PROJ-1234, PROJ-333 and the real PROJ-5662")).toEqual(["PROJ-5662"])
+  })
+
+  it("caps the candidate list so a prompt stays bounded", () => {
+    const text = Array.from({ length: 40 }, (_, i) => `PROJ-${5000 + i}`).join(" ")
+    expect(mineTicketKeys(text, { limit: 5 })).toHaveLength(5)
+  })
+
+  it("finds nothing in a transcript that mentions no key", () => {
+    expect(mineTicketKeys("just refactoring the parser today")).toEqual([])
+  })
+})
+
+describe("isPlaceholderTicketKey", () => {
+  it.each([
+    ["PROJ-123", true],
+    ["PROJ-1234", true],
+    ["PROJ-333", true],
+    ["PROJ-4444", true],
+    ["PROJ-12", false],
+    ["PROJ-1", false],
+    ["PROJ-5662", false],
+    ["PROJ-100", false]
+  ])("%s -> %s", (key, expected) => {
+    expect(isPlaceholderTicketKey(key)).toBe(expected)
+  })
+})
+
+describe("deterministic signals", () => {
+  it("takes the key from a branch", () => {
+    expect(ticketKeyFromBranch("feat/PROJ-5662-otel")).toBe("PROJ-5662")
+  })
+
+  it("returns null for a branch template with no number", () => {
+    expect(ticketKeyFromBranch("feat/PROJ-XXXX-otel")).toBeNull()
+  })
+
+  it("returns null for an integration branch", () => {
+    expect(ticketKeyFromBranch("release-candidate")).toBeNull()
+    expect(ticketKeyFromBranch("develop")).toBeNull()
+    expect(ticketKeyFromBranch(null)).toBeNull()
+  })
+
+  // A branch is a deliberate act, so a low ticket number in one is not treated as filler.
+  it("does not apply the placeholder filter to a branch", () => {
+    expect(ticketKeyFromBranch("feat/PROJ-123-early-days")).toBe("PROJ-123")
+  })
+
+  it("takes the deepest key from a path, which is what makes worktrees attributable", () => {
+    expect(ticketKeyFromPath("/dev/repo/worktrees/PROJ-1/PROJ-2/src")).toBe("PROJ-2")
+    expect(ticketKeyFromPath("/dev/repo/plain")).toBeNull()
+  })
+
+  // `_` is a word character, so `\b` put no boundary between it and the key. Underscore-delimited
+  // branch and directory names are ordinary, and every session in one was left unattributed —
+  // which under `jcf watch` means never logged at all.
+  it("reads a key delimited by underscores", () => {
+    expect(ticketKeyFromBranch("feature_PROJ-42_work")).toBe("PROJ-42")
+    expect(ticketKeyFromPath("/dev/repo/worktrees/feature_PROJ-42_work/src")).toBe("PROJ-42")
+    expect(mineTicketKeys("landed in feature_PROJ-5662_otel today")).toEqual(["PROJ-5662"])
+  })
+
+  // The boundary still has to stop at letters and digits, or prose starts producing keys.
+  it("still refuses a key run together with other text", () => {
+    expect(ticketKeyFromBranch("feat/xPROJ-42")).toBeNull()
+    expect(mineTicketKeys("bumped to v2-3 and bumped PROJ-42x")).toEqual([])
+  })
+})
+
+describe("prefix matching", () => {
+  it("matches on a separator boundary, not a bare string prefix", () => {
+    expect(isWithinPrefix("/a/b/c", "/a/b")).toBe(true)
+    expect(isWithinPrefix("/a/b", "/a/b")).toBe(true)
+    expect(isWithinPrefix("/a/bc", "/a/b")).toBe(false)
+  })
+
+  it("tolerates trailing slashes on either side", () => {
+    expect(isWithinPrefix("/a/b/", "/a/b")).toBe(true)
+    expect(isWithinPrefix("/a/b/c", "/a/b/")).toBe(true)
+  })
+
+  it("matches Windows roots across separator styles and case without admitting siblings", () => {
+    expect(isWithinPrefix("C:\\Work\\Repo\\src", "c:/work/repo")).toBe(true)
+    expect(isWithinPrefix("C:/Work/Repo", "c:\\work\\repo\\")).toBe(true)
+    expect(isWithinPrefix("C:\\Work\\Repository", "c:/work/repo")).toBe(false)
+    expect(isWithinPrefix("D:\\Work\\Repo", "c:/work/repo")).toBe(false)
+    expect(isWithinPrefix("\\\\Server\\Share\\Repo", "//server/share")).toBe(true)
+    expect(isWithinPrefix("/work/a\\b", "/work/a")).toBe(false)
+  })
+
+  it("treats an empty prefix as matching nothing rather than everything", () => {
+    expect(isWithinPrefix("/a/b", "")).toBe(false)
+  })
+
+  it("expands a leading tilde", () => {
+    expect(expandHomePath("~/dev/work", "/home/me")).toBe("/home/me/dev/work")
+    expect(expandHomePath("~", "/home/me")).toBe("/home/me")
+    expect(expandHomePath("/absolute", "/home/me")).toBe("/absolute")
+    expect(expandHomePath("~\\dev\\work", "C:\\Users\\me")).toBe("C:\\Users\\me\\dev\\work")
+  })
+
+  it("keeps out-of-scope directories out of scope", () => {
+    const roots = ["/home/me/dev/work"]
+    expect(isWithinSessionRoots("/home/me/dev/work/repo", roots)).toBe(true)
+    expect(isWithinSessionRoots("/private/tmp/scratch", roots)).toBe(false)
+    expect(isWithinSessionRoots("/home/me/dev/work/repo", [])).toBe(false)
+  })
+})
+
+describe("standingAttribution", () => {
+  const map = {
+    "/home/me/dev/docs": "DOCS-1",
+    "/home/me/dev/docs/interviews": "HIRE-1"
+  }
+
+  it("prefers the longest matching prefix", () => {
+    expect(standingAttribution("/home/me/dev/docs/interviews/round-2", map)).toBe("HIRE-1")
+    expect(standingAttribution("/home/me/dev/docs/releases", map)).toBe("DOCS-1")
+  })
+
+  it("leaves unmapped directories unattributed rather than absorbing them", () => {
+    expect(standingAttribution("/home/me/dev/other", map)).toBeNull()
+  })
+})
+
+describe("attributeSession", () => {
+  const session = {
+    sessionId: "s1",
+    cwd: "/home/me/dev/docs",
+    gitBranch: null,
+    candidateKeys: ["PROJ-7", "PROJ-8"]
+  }
+
+  it("prefers a branch over every weaker signal", () => {
+    const result = attributeSession(
+      { ...session, gitBranch: "feat/PROJ-1-x", cwd: "/dev/PROJ-2" },
+      { standingMap: { "/dev": "PROJ-3" }, agentChoice: { ticketKey: "PROJ-7", confidence: 1 }, confidenceFloor: 0.7 }
+    )
+    expect(result).toMatchObject({ ticketKey: "PROJ-1", signal: "branch", confidence: null })
+  })
+
+  it("falls back to the path when the branch names nothing", () => {
+    const result = attributeSession(
+      { ...session, gitBranch: "HEAD", cwd: "/dev/PROJ-2" },
+      { standingMap: { "/dev": "PROJ-3" }, confidenceFloor: 0.7 }
+    )
+    expect(result).toMatchObject({ ticketKey: "PROJ-2", signal: "path" })
+  })
+
+  // Adding a Standing Attribution can only ever add attribution, never redirect existing work.
+  it("uses a Standing Attribution only when branch and path are silent", () => {
+    const result = deterministicAttribution(session, { standingMap: { "/home/me/dev/docs": "DOCS-1" } })
+    expect(result).toEqual({ ticketKey: "DOCS-1", signal: "standing" })
+  })
+
+  it("accepts a Coding Agent choice drawn from the transcript's own keys", () => {
+    const result = attributeSession(session, {
+      standingMap: {},
+      agentChoice: { ticketKey: "PROJ-8", confidence: 0.9 },
+      confidenceFloor: 0.7
+    })
+    expect(result).toMatchObject({ ticketKey: "PROJ-8", signal: "agent", confidence: 0.9 })
+    expect(result.belowConfidenceFloor).toBe(false)
+  })
+
+  // The closed choice set is what makes an invented key impossible rather than merely unlikely.
+  it("rejects a key the transcript never mentioned, however confident", () => {
+    const result = attributeSession(session, {
+      standingMap: {},
+      agentChoice: { ticketKey: "INVENTED-1", confidence: 1 },
+      confidenceFloor: 0.7
+    })
+    expect(result).toMatchObject({ ticketKey: null, signal: "none" })
+  })
+
+  it("marks a below-floor choice so it can be reported without being offered", () => {
+    const result = attributeSession(session, {
+      standingMap: {},
+      agentChoice: { ticketKey: "PROJ-7", confidence: 0.4 },
+      confidenceFloor: 0.7
+    })
+    expect(result).toMatchObject({ ticketKey: "PROJ-7", signal: "agent", belowConfidenceFloor: true })
+  })
+
+  it("reports a session with no signal at all as unattributed", () => {
+    const result = attributeSession(
+      { sessionId: "s2", cwd: "/dev/plain", gitBranch: "develop", candidateKeys: [] },
+      { standingMap: {}, confidenceFloor: 0.7 }
+    )
+    expect(result).toMatchObject({ ticketKey: null, signal: "none" })
+  })
+})
+
+describe("activeWindows and sharing", () => {
+  /** Far past every fixture, so a trailing window is bounded by the Idle Cap rather than by sight. */
+  const OBSERVED_AT = at(2027, 1, 1, 0, 0)
+
+  const idleCapSeconds = 300
+
+  /**
+   * The real composition: discover windows, attribute sessions, then share overlaps. Sharing is
+   * only meaningful once sessions have Issue Keys, so testing the two steps together is what
+   * actually pins the behaviour.
+   */
+  const creditFor = (
+    events: ReadonlyArray<{ sessionId: string; atMs: number }>,
+    tickets: Readonly<Record<string, string | null>>,
+    dwellSeconds?: number
+  ) => {
+    const attributions: ReadonlyArray<SessionAttribution> = Object.entries(tickets).map(([sessionId, ticketKey]) => ({
+      sessionId,
+      ticketKey,
+      signal: ticketKey === null ? "none" : "branch",
+      confidence: null,
+      belowConfidenceFloor: false
+    }))
+    // Every case in this block predates the Dwell Floor and is written at minute scale, so the floor
+    // is off by default here and the cases that are about it pass their own.
+    return splitCredits(activeWindows(events, { idleCapSeconds, observedAtMs: OBSERVED_AT }), attributions, {
+      dwellSeconds: dwellSeconds ?? 0
+    })
+  }
+
+  const ticketSeconds = (split: ReturnType<typeof creditFor>, ticketKey: string, day: string): number =>
+    split.attributed.find((row) => row.ticketKey === ticketKey && row.day === day)?.seconds ?? 0
+
+  it("finds no window for no events", () => {
+    expect(activeWindows([], { idleCapSeconds, observedAtMs: OBSERVED_AT })).toEqual([])
+  })
+
+  // A single prompt is still presence: someone typed, and the Idle Cap is exactly how long that is
+  // allowed to count for. Crediting it only once a *second* prompt arrived is what let a late
+  // prompt conjure a window over a block that had already been written.
+  it("credits one Idle Cap for a single prompt, once that long has passed", () => {
+    const only = [activity("s1", at(2026, 7, 1, 10, 0))]
+    expect(activeWindows(only, { idleCapSeconds, observedAtMs: at(2026, 7, 1, 10, 0) })).toEqual([])
+    const [session] = activeWindows(only, { idleCapSeconds, observedAtMs: OBSERVED_AT })
+    expect(session?.spans).toEqual([{
+      startMs: at(2026, 7, 1, 10, 0),
+      endMs: at(2026, 7, 1, 10, 0) + idleCapSeconds * 1000
+    }])
+  })
+
+  // Duration comes from the gap between a session's *own* events. Borrowing another session's next
+  // event to invent one is what the old last-touch rule did.
+  it("credits each single prompt its capped tail, shared where they overlap", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 10, 0)), activity("s2", at(2026, 7, 1, 10, 2))],
+      { s1: "PROJ-1", s2: "PROJ-2" }
+    )
+    // s1 alone from 10:00, then both until s1's cap runs out at 10:05, then s2 alone to 10:07.
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + 180 / 2)
+    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(180 / 2 + 120)
+  })
+
+  it("credits a session's own gap to its ticket", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 2))],
+      { s1: "PROJ-1" }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds)
+  })
+
+  // The bug this ordering exists to prevent: two sessions on ONE ticket must not halve each other.
+  // Splitting per session instead of per Issue Key silently lost that overlap.
+  it("unions two concurrent sessions on the same ticket, losing nothing", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 0)),
+        activity("s2", at(2026, 7, 1, 10, 4))
+      ],
+      { s1: "PROJ-1", s2: "PROJ-1" }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(240 + idleCapSeconds)
+    expect(split.attributed[0]?.activeSeconds).toBe(240 + idleCapSeconds)
+  })
+
+  // The request: an hour on two tickets at once is half an hour each, not an hour to whichever
+  // session happened to be chattier.
+  it("splits a fully overlapping window equally between two tickets", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 0)),
+        activity("s2", at(2026, 7, 1, 10, 4))
+      ],
+      { s1: "PROJ-1", s2: "PROJ-2" }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
+    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
+  })
+
+  it("splits a three-way overlap into thirds", () => {
+    const events = ["s1", "s2", "s3"].flatMap((id) => [
+      activity(id, at(2026, 7, 1, 10, 0)),
+      activity(id, at(2026, 7, 1, 10, 3))
+    ])
+    const split = creditFor(events, { s1: "PROJ-1", s2: "PROJ-2", s3: "PROJ-3" })
+    for (const key of ["PROJ-1", "PROJ-2", "PROJ-3"]) {
+      expect(ticketSeconds(split, key, "2026-07-01")).toBe(60 + idleCapSeconds / 3)
+    }
+  })
+
+  // The Dwell Floor is off here: dividing an overlap is a question about instants, and a
+  // fifteen-minute fixture would say nothing more about it. `applyDwellFloor` has its own cases.
+  it("divides only the overlapping part, leaving solo stretches whole", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 2)),
+        activity("s2", at(2026, 7, 1, 10, 4))
+      ],
+      { s1: "PROJ-1", s2: "PROJ-2" }
+    )
+    // 10:00-10:02 is PROJ-1 alone (120s); 10:02-10:04 is shared (60s each).
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(180 + idleCapSeconds / 2)
+    expect(ticketSeconds(split, "PROJ-2", "2026-07-01")).toBe(60 + idleCapSeconds / 2)
+  })
+
+  // A block is what a person accepts on its own, so the parts have to add up to the whole they were
+  // offered under — including where sharing made the arithmetic fractional, which is where flooring
+  // each block independently would have quietly lost seconds.
+  it("gives every block credit that sums to the row exactly", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 2)),
+        activity("s2", at(2026, 7, 1, 10, 4)),
+        // A second stretch after a long gap, so this row has more than one block to add up.
+        activity("s1", at(2026, 7, 1, 14, 0)),
+        activity("s1", at(2026, 7, 1, 14, 7))
+      ],
+      { s1: "PROJ-1", s2: "PROJ-2" }
+    )
+    for (const row of [...split.attributed, ...split.withheld]) {
+      expect(row.blocks.reduce((sum, block) => sum + block.seconds, 0)).toBe(row.seconds)
+    }
+    const row = split.attributed.find((entry) => entry.ticketKey === "PROJ-1")
+    // Morning, then the afternoon in two: the 7-minute gap between its prompts passes the Idle Cap,
+    // and with the Dwell Floor off nothing joins the halves back up.
+    expect(row?.blocks).toHaveLength(3)
+    // Credit, not wall clock: the morning block spans four minutes but two of them were shared.
+    const morning = row?.blocks[0]
+    expect(morning?.endMs).toBe(at(2026, 7, 1, 10, 4) + idleCapSeconds * 1000)
+    expect(morning?.seconds).toBeLessThan((morning!.endMs - morning!.startMs) / 1000)
+  })
+
+  it("reports wall-clock active seconds next to the shared credit", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 0)),
+        activity("s2", at(2026, 7, 1, 10, 4))
+      ],
+      { s1: "PROJ-1", s2: "PROJ-2" }
+    )
+    const row = split.attributed.find((entry) => entry.ticketKey === "PROJ-1")
+    expect(row?.seconds).toBe(120 + idleCapSeconds / 2)
+    expect(row?.activeSeconds).toBe(240 + idleCapSeconds)
+  })
+
+  // Unplaced time occupied the clock too, so it takes part in the split rather than letting an
+  // attributed ticket claim a moment it was only half responsible for.
+  it("shares with unattributed time as well", () => {
+    const split = creditFor(
+      [
+        activity("s1", at(2026, 7, 1, 10, 0)),
+        activity("s1", at(2026, 7, 1, 10, 4)),
+        activity("s2", at(2026, 7, 1, 10, 0)),
+        activity("s2", at(2026, 7, 1, 10, 4))
+      ],
+      { s1: "PROJ-1", s2: null }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120 + idleCapSeconds / 2)
+    expect(split.unattributed).toEqual([{
+      cwds: [],
+      day: "2026-07-01",
+      seconds: 120 + idleCapSeconds / 2,
+      sessionCount: 1
+    }])
+  })
+
+  it("caps a long gap at the Idle Cap, so lunch is not billed", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 12, 0)), activity("s1", at(2026, 7, 1, 13, 0))],
+      { s1: "PROJ-1" }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300 + idleCapSeconds)
+  })
+
+  it("credits an interval exactly equal to the Idle Cap in full", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 5))],
+      { s1: "PROJ-1" }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300 + idleCapSeconds)
+  })
+
+  it("credits one Idle Cap for adjacent identical timestamps", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 0))],
+      { s1: "PROJ-1" }
+    )
+    // The duplicate contributes no gap, but the prompt itself still evidences presence.
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(idleCapSeconds)
+  })
+
+  it("splits an interval crossing local midnight at midnight", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 23, 58)), activity("s1", at(2026, 7, 2, 0, 1))],
+      { s1: "PROJ-1" }
+    )
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(120)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-02")).toBe(60 + idleCapSeconds)
+  })
+
+  it("credits an overnight gap to nobody", () => {
+    const split = creditFor(
+      [activity("s1", at(2026, 7, 1, 14, 30)), activity("s1", at(2026, 7, 2, 9, 0))],
+      { s1: "PROJ-1" }
+    )
+    // The evening keeps its cap; the next morning gets its own, and the night between neither.
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-01")).toBe(300)
+    expect(ticketSeconds(split, "PROJ-1", "2026-07-02")).toBe(idleCapSeconds)
+  })
+
+  it("credits nothing when the Idle Cap is zero", () => {
+    const split = splitCredits(
+      activeWindows(
+        [activity("s1", at(2026, 7, 1, 10, 0)), activity("s1", at(2026, 7, 1, 10, 5))],
+        { idleCapSeconds: 0, observedAtMs: OBSERVED_AT }
+      ),
+      [{ sessionId: "s1", ticketKey: "PROJ-1", signal: "branch", confidence: null, belowConfidenceFloor: false }]
+    )
+    expect(split.attributed).toEqual([])
+  })
+
+  // Sharing divides an instant, never duplicates it, so a day of heavy parallel work still totals
+  // the wall clock it occupied — the property that keeps a multi-session day off twenty hours.
+  it("totals the wall clock of the union, however many tickets overlap", () => {
+    const events = ["s1", "s2", "s3"].flatMap((id) => [
+      activity(id, at(2026, 7, 1, 10, 0)),
+      activity(id, at(2026, 7, 1, 10, 2)),
+      activity(id, at(2026, 7, 1, 10, 4))
+    ])
+    const split = creditFor(events, { s1: "PROJ-1", s2: "PROJ-2", s3: "PROJ-3" })
+    const total = split.attributed.reduce((sum, row) => sum + row.seconds, 0)
+    expect(total).toBe(240 + idleCapSeconds)
+  })
+})
+
+describe("splitCredits", () => {
+  /** A credited bucket from `[fromH, fromM, toH, toM]` spans on `day`, seconds derived from them. */
+  const credited = (
+    sessionId: string,
+    day: string,
+    spans: ReadonlyArray<readonly [number, number, number, number]>
+  ) => {
+    const [year, month, dayOfMonth] = day.split("-").map(Number)
+    const built = spans.map(([fromH, fromM, toH, toM]) => ({
+      startMs: new Date(year!, month! - 1, dayOfMonth!, fromH, fromM, 0, 0).getTime(),
+      endMs: new Date(year!, month! - 1, dayOfMonth!, toH, toM, 0, 0).getTime()
+    }))
+    return {
+      sessionId,
+      day,
+      seconds: built.reduce((total, span) => total + (span.endMs - span.startMs) / 1000, 0),
+      spans: built
+    }
+  }
+
+  const attribution = (overrides: Partial<SessionAttribution> & { sessionId: string }): SessionAttribution => ({
+    ticketKey: null,
+    signal: "none",
+    confidence: null,
+    belowConfidenceFloor: false,
+    ...overrides
+  })
+
+  it("keeps distinct allocations in one cluster stable when source sessions are reordered", () => {
+    const windows = [
+      credited("early", "2026-07-01", [[10, 0, 10, 40]]),
+      credited("late", "2026-07-01", [[11, 20, 12, 0]]),
+      credited("middle", "2026-07-01", [[10, 20, 11, 40]])
+    ]
+    const attributions = [
+      attribution({ sessionId: "early", ticketKey: "PROJ-1", signal: "branch" }),
+      attribution({ sessionId: "late", ticketKey: "PROJ-1", signal: "branch" }),
+      attribution({ sessionId: "middle", ticketKey: "PROJ-2", signal: "branch" })
+    ]
+    const forward = splitCredits(windows, attributions, { dwellSeconds: 900 })
+    const reversed = splitCredits([...windows].reverse(), [...attributions].reverse(), { dwellSeconds: 900 })
+    const blocks = (result: typeof forward) => result.attributed.find((row) => row.ticketKey === "PROJ-1")?.blocks
+    expect(blocks(forward)?.map((block) => block.seconds)).toEqual([1200, 2400])
+    expect(blocks(reversed)).toEqual(blocks(forward))
+    expect(blocks(forward)?.map((block) => block.allocationIndex)).toEqual([0, 1])
+  })
+
+  it("folds several sessions onto one Issue Key and keeps the weakest signal", () => {
+    const split = splitCredits(
+      [
+        credited("s1", "2026-07-01", [[10, 0, 10, 10]]),
+        credited("s2", "2026-07-01", [[11, 0, 11, 5]])
+      ],
+      [
+        attribution({ sessionId: "s1", ticketKey: "PROJ-1", signal: "branch" }),
+        attribution({ sessionId: "s2", ticketKey: "PROJ-1", signal: "agent", confidence: 0.8 })
+      ]
+    )
+    expect(split.attributed).toHaveLength(1)
+    expect(split.attributed[0]).toMatchObject({
+      ticketKey: "PROJ-1",
+      day: "2026-07-01",
+      seconds: 900,
+      signal: "agent",
+      confidence: 0.8
+    })
+    // Two separate blocks of work, kept separate because they are not contiguous.
+    expect(split.attributed[0]!.blocks).toHaveLength(2)
+    // And they add up to the row, so accepting them one at a time writes what accepting the row does.
+    expect(split.attributed[0]!.blocks.reduce((sum, block) => sum + block.seconds, 0)).toBe(900)
+  })
+
+  it("uses only each day's attribution evidence for that day's signal", () => {
+    const split = splitCredits(
+      [
+        credited("s1", "2026-07-01", [[10, 0, 10, 10]]),
+        credited("s2", "2026-07-02", [[10, 0, 10, 10]])
+      ],
+      [
+        attribution({ sessionId: "s1", ticketKey: "PROJ-1", signal: "branch" }),
+        attribution({ sessionId: "s2", ticketKey: "PROJ-1", signal: "agent", confidence: 0.8 })
+      ]
+    )
+    expect(split.attributed.map((row) => [row.day, row.signal, row.confidence])).toEqual([
+      ["2026-07-01", "branch", null],
+      ["2026-07-02", "agent", 0.8]
+    ])
+  })
+
+  it("does not halve deterministic same-ticket time against weak overlapping evidence", () => {
+    const split = splitCredits(
+      [
+        credited("certain", "2026-07-01", [[10, 0, 10, 20]]),
+        credited("weak", "2026-07-01", [[10, 0, 10, 40]])
+      ],
+      [
+        attribution({ sessionId: "certain", ticketKey: "PROJ-1", signal: "branch" }),
+        attribution({
+          sessionId: "weak",
+          ticketKey: "PROJ-1",
+          signal: "agent",
+          confidence: 0.2,
+          belowConfidenceFloor: true
+        })
+      ]
+    )
+    expect(split.attributed.map((row) => row.seconds)).toEqual([1200])
+    expect(split.withheld.map((row) => row.seconds)).toEqual([1200])
+  })
+
+  it("keeps below-floor credit out of the proposable set but still reports it", () => {
+    const split = splitCredits(
+      [credited("s1", "2026-07-01", [[10, 0, 10, 10]])],
+      [attribution({
+        sessionId: "s1",
+        ticketKey: "PROJ-1",
+        signal: "agent",
+        confidence: 0.2,
+        belowConfidenceFloor: true
+      })]
+    )
+    expect(split.attributed).toEqual([])
+    expect(split.withheld).toHaveLength(1)
+  })
+
+  it("reports unplaced hours per day with the session count", () => {
+    const split = splitCredits(
+      [
+        credited("s1", "2026-07-01", [[10, 0, 10, 10]]),
+        credited("s2", "2026-07-01", [[11, 0, 11, 5]])
+      ],
+      [attribution({ sessionId: "s1" }), attribution({ sessionId: "s2" })]
+    )
+    expect(split.unattributed).toEqual([{ cwds: [], day: "2026-07-01", seconds: 900, sessionCount: 2 }])
+  })
+
+  it("names the distinct directories behind unplaced hours, deduped and sorted", () => {
+    const split = splitCredits(
+      [
+        credited("s1", "2026-07-01", [[10, 0, 10, 10]]),
+        credited("s2", "2026-07-01", [[11, 0, 11, 5]]),
+        credited("s3", "2026-07-01", [[13, 0, 13, 5]])
+      ],
+      [attribution({ sessionId: "s1" }), attribution({ sessionId: "s2" }), attribution({ sessionId: "s3" })],
+      {
+        cwdBySession: new Map([
+          ["s1", "/dev/docs/releases"],
+          // Two sessions in one directory are one directory to map, not two.
+          ["s2", "/dev/docs/releases"],
+          ["s3", "/dev/docs/interviews"]
+        ])
+      }
+    )
+    expect(split.unattributed[0]!.cwds).toEqual(["/dev/docs/interviews", "/dev/docs/releases"])
+  })
+
+  it("omits a directory for a session the caller did not place", () => {
+    const split = splitCredits(
+      [credited("s1", "2026-07-01", [[10, 0, 10, 10]]), credited("s2", "2026-07-01", [[11, 0, 11, 5]])],
+      [attribution({ sessionId: "s1" }), attribution({ sessionId: "s2" })],
+      { cwdBySession: new Map([["s1", "/dev/docs/releases"]]) }
+    )
+    expect(split.unattributed[0]!.cwds).toEqual(["/dev/docs/releases"])
+    // Still both sessions: a missing directory must not quietly reduce the count behind the hours.
+    expect(split.unattributed[0]!.sessionCount).toBe(2)
+  })
+
+  it("treats credit for an unknown session as unattributed rather than dropping it", () => {
+    const split = splitCredits([credited("ghost", "2026-07-01", [[10, 0, 10, 1]])], [])
+    expect(split.unattributed).toEqual([{ cwds: [], day: "2026-07-01", seconds: 60, sessionCount: 1 }])
+  })
+})
+
+// Regression guard: merging welded two windows that met at midnight into one, whose start decided
+// the day — silently moving a morning's work onto the previous day. It recurred once at a second
+// merge site, which is why every merge now goes through the day-aware helper.
+describe("mergeSpansWithinDays", () => {
+  it("merges touching spans", () => {
+    const merged = mergeSpansWithinDays([
+      { startMs: at(2026, 7, 1, 10, 0), endMs: at(2026, 7, 1, 10, 10) },
+      { startMs: at(2026, 7, 1, 10, 10), endMs: at(2026, 7, 1, 10, 20) }
+    ])
+    expect(merged).toEqual([{ startMs: at(2026, 7, 1, 10, 0), endMs: at(2026, 7, 1, 10, 20) }])
+  })
+
+  it("never merges across a local midnight", () => {
+    const merged = mergeSpansWithinDays([
+      { startMs: at(2026, 7, 1, 23, 50), endMs: at(2026, 7, 2, 0, 0) },
+      { startMs: at(2026, 7, 2, 0, 0), endMs: at(2026, 7, 2, 0, 10) }
+    ])
+    expect(merged).toEqual([
+      { startMs: at(2026, 7, 1, 23, 50), endMs: at(2026, 7, 2, 0, 0) },
+      { startMs: at(2026, 7, 2, 0, 0), endMs: at(2026, 7, 2, 0, 10) }
+    ])
+  })
+
+  it("cuts a multi-day span into one span per day", () => {
+    const merged = mergeSpansWithinDays([{ startMs: at(2026, 7, 1, 23, 0), endMs: at(2026, 7, 3, 1, 0) }])
+    expect(merged).toHaveLength(3)
+  })
+})
+
+describe("applyDwellFloor", () => {
+  const minutes = (fromMinute: number, toMinute: number, ...bucketIds: ReadonlyArray<string>) => ({
+    bucketIds,
+    endMs: at(2026, 7, 1, 9, 0) + toMinute * 60_000,
+    startMs: at(2026, 7, 1, 9, 0) + fromMinute * 60_000
+  })
+
+  const attributedOnly = (bucketId: string) => bucketId.startsWith("attributed")
+  const floor = (slices: ReadonlyArray<ReturnType<typeof minutes>>, dwellSeconds = 900) =>
+    applyDwellFloor(slices, { attributed: attributedOnly, dwellSeconds })
+
+  const owners = (runs: ReadonlyArray<{ bucketIds: ReadonlyArray<string>; startMs: number; endMs: number }>) =>
+    runs.map((run) => [run.bucketIds.join("+"), (run.endMs - run.startMs) / 60_000])
+
+  /** Time may move between buckets, but the total must not change. */
+  const heldMinutes = (runs: ReadonlyArray<{ startMs: number; endMs: number }>) =>
+    runs.reduce((total, run) => total + (run.endMs - run.startMs), 0) / 60_000
+
+  it("gives a short interruption back to the ticket that was already holding the time", () => {
+    const slices = [
+      minutes(0, 20, "attributed\u0000PROJ-1"),
+      minutes(20, 22, "attributed\u0000PROJ-2"),
+      minutes(22, 40, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([["attributed\u0000PROJ-1", 40]])
+    expect(heldMinutes(floor(slices))).toBe(heldMinutes(slices))
+  })
+
+  it("leaves an alternation alone once each stretch clears the floor", () => {
+    const slices = [
+      minutes(0, 20, "attributed\u0000PROJ-1"),
+      minutes(20, 40, "attributed\u0000PROJ-2"),
+      minutes(40, 60, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 20],
+      ["attributed\u0000PROJ-2", 20],
+      ["attributed\u0000PROJ-1", 20]
+    ])
+  })
+
+  it("keeps a short stretch that touches nothing — there is no incumbent to give it to", () => {
+    const slices = [minutes(0, 4, "attributed\u0000PROJ-1"), minutes(120, 124, "attributed\u0000PROJ-2")]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 4],
+      ["attributed\u0000PROJ-2", 4]
+    ])
+  })
+
+  it("does not reassign settled work when later evidence appears beyond an idle gap", () => {
+    const beforeLaterEvidence = floor([
+      minutes(0, 30, "attributed\u0000PROJ-2"),
+      minutes(60, 65, "attributed\u0000PROJ-1")
+    ])
+    const afterLaterEvidence = floor([
+      minutes(0, 30, "attributed\u0000PROJ-2"),
+      minutes(60, 65, "attributed\u0000PROJ-1"),
+      minutes(120, 150, "attributed\u0000PROJ-2")
+    ])
+    expect(owners(beforeLaterEvidence)).toEqual([
+      ["attributed\u0000PROJ-2", 30],
+      ["attributed\u0000PROJ-1", 5]
+    ])
+    expect(owners(afterLaterEvidence).slice(0, 2)).toEqual(owners(beforeLaterEvidence))
+  })
+
+  it("does not promote an earlier minor overlap with work in a later source cluster", () => {
+    const beforeLaterEvidence = floor([
+      minutes(0, 10, "attributed\u0000PROJ-1"),
+      minutes(10, 15, "attributed\u0000PROJ-1", "attributed\u0000PROJ-2"),
+      minutes(15, 60, "attributed\u0000PROJ-1")
+    ])
+    const afterLaterEvidence = floor([
+      minutes(0, 10, "attributed\u0000PROJ-1"),
+      minutes(10, 15, "attributed\u0000PROJ-1", "attributed\u0000PROJ-2"),
+      minutes(15, 60, "attributed\u0000PROJ-1"),
+      minutes(120, 150, "attributed\u0000PROJ-2")
+    ])
+    expect(owners(beforeLaterEvidence)).toEqual([["attributed\u0000PROJ-1", 60]])
+    expect(owners(afterLaterEvidence).slice(0, 1)).toEqual(owners(beforeLaterEvidence))
+    expect(heldMinutes(afterLaterEvidence)).toBe(90)
+  })
+
+  // The asymmetry. Demoting a sliver of a ticket into unplaced hours writes nothing and is safe;
+  // promoting unplaced hours into a ticket would bill work no transcript placed there.
+  it("never turns unplaced hours into credited time", () => {
+    const slices = [
+      minutes(0, 30, "attributed\u0000PROJ-1"),
+      minutes(30, 33, "unattributed\u0000"),
+      minutes(33, 60, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 30],
+      ["unattributed\u0000", 3],
+      ["attributed\u0000PROJ-1", 27]
+    ])
+  })
+
+  // The other half of the asymmetry: a sliver of a ticket surrounded by unplaced hours keeps its own
+  // time. Handing it to them would discard billable work, which is worse than a short block.
+  it("never turns credited time into unplaced hours", () => {
+    const slices = [
+      minutes(0, 30, "unattributed\u0000"),
+      minutes(30, 33, "attributed\u0000PROJ-1"),
+      minutes(33, 60, "unattributed\u0000")
+    ]
+    expect(owners(floor(slices))).toEqual([
+      ["unattributed\u0000", 30],
+      ["attributed\u0000PROJ-1", 3],
+      ["unattributed\u0000", 27]
+    ])
+  })
+
+  // A short piece of work with nothing after it is work, not an interruption.
+  it("keeps a short stretch that the earlier ticket never resumes after", () => {
+    const slices = [minutes(0, 30, "attributed\u0000PROJ-1"), minutes(30, 38, "attributed\u0000PROJ-2")]
+    expect(owners(floor(slices))).toEqual([
+      ["attributed\u0000PROJ-1", 30],
+      ["attributed\u0000PROJ-2", 8]
+    ])
+  })
+
+  it("absorbs a shared sliver too — the rule is about how often ownership changes", () => {
+    const slices = [
+      minutes(0, 30, "attributed\u0000PROJ-1"),
+      minutes(30, 32, "attributed\u0000PROJ-1", "attributed\u0000PROJ-2"),
+      minutes(32, 60, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices))).toEqual([["attributed\u0000PROJ-1", 60]])
+  })
+
+  it("never welds two stretches across a local midnight", () => {
+    const before = {
+      bucketIds: ["attributed\u0000PROJ-1"],
+      endMs: at(2026, 7, 2, 0, 0),
+      startMs: at(2026, 7, 1, 23, 58)
+    }
+    const after = {
+      bucketIds: ["attributed\u0000PROJ-1"],
+      endMs: at(2026, 7, 2, 0, 3),
+      startMs: at(2026, 7, 2, 0, 0)
+    }
+    // Runs are bucketed by the day they start in, so one run over midnight would report the small
+    // hours on the wrong day and leave the next day empty.
+    expect(applyDwellFloor([before, after], { attributed: attributedOnly, dwellSeconds: 900 })).toHaveLength(2)
+  })
+
+  it("reports the raw interleaving when the floor is off", () => {
+    const slices = [
+      minutes(0, 20, "attributed\u0000PROJ-1"),
+      minutes(20, 22, "attributed\u0000PROJ-2"),
+      minutes(22, 40, "attributed\u0000PROJ-1")
+    ]
+    expect(owners(floor(slices, 0))).toHaveLength(3)
+  })
+})
+
+describe("splitCredits under the Dwell Floor", () => {
+  it("credits an interrupting minute to the stretch around it", () => {
+    const events = [
+      ...Array.from({ length: 21 }, (_, index) => ({ atMs: at(2026, 7, 1, 9, 0) + index * 60_000, sessionId: "s1" })),
+      { atMs: at(2026, 7, 1, 9, 10), sessionId: "s2" }
+    ]
+    const attributions: ReadonlyArray<SessionAttribution> = [
+      { belowConfidenceFloor: false, confidence: null, sessionId: "s1", signal: "branch", ticketKey: "PROJ-1" },
+      { belowConfidenceFloor: false, confidence: null, sessionId: "s2", signal: "branch", ticketKey: "PROJ-2" }
+    ]
+    const windows = activeWindows(events, { idleCapSeconds: 300, observedAtMs: at(2027, 1, 1, 0, 0) })
+    const withFloor = splitCredits(windows, attributions, { dwellSeconds: 900 })
+    const withoutFloor = splitCredits(windows, attributions, { dwellSeconds: 0 })
+
+    // Read literally, the transcripts say the work changed ticket twice in a minute. It did not.
+    expect(withFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1"])
+    expect(withoutFloor.attributed.map((row) => row.ticketKey)).toEqual(["PROJ-1", "PROJ-2"])
+    // Time moved rather than vanished: the day still holds what it held.
+    const total = (rows: ReadonlyArray<{ seconds: number }>) => rows.reduce((sum, row) => sum + row.seconds, 0)
+    expect(total(withFloor.attributed)).toBe(total(withoutFloor.attributed))
+    // And one block instead of two, which is the difference on a calendar.
+    expect(withFloor.attributed[0]!.blocks).toHaveLength(1)
+  })
+})
+
+describe("buildSessionProposals", () => {
+  const credit = (seconds: number): ReadonlyArray<TicketDayCredit> => [{
+    ticketKey: "PROJ-1",
+    day: "2026-07-01",
+    seconds,
+    activeSeconds: seconds,
+    sessionIds: ["s1"],
+    signal: "branch",
+    confidence: null,
+    sourceStartMs: at(2026, 7, 1, 10, 0),
+    settlementEndMs: at(2026, 7, 1, 10, 0) + seconds * 1000,
+    blocks: [{ startMs: at(2026, 7, 1, 10, 0), endMs: at(2026, 7, 1, 10, 0) + seconds * 1000, seconds }]
+  }]
+
+  it("proposes the whole amount when neither side holds anything", () => {
+    const proposals = buildSessionProposals(credit(3600), [], { minimumSeconds: 60, excludedDays: [] })
+    expect(proposals).toHaveLength(1)
+    expect(proposals[0]).toMatchObject({ clockifyDelta: 3600, jiraDelta: 3600 })
+  })
+
+  it("keeps an overlapping ordinary unlinked entry ambiguous instead of consuming its seconds", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const proposals = buildSessionProposals(credit(3600), [], {
+      excludedDays: [],
+      minimumSeconds: 60,
+      consumptionRows: [{
+        day: "2026-07-01",
+        intervals: [{
+          entry: {
+            source: "clockify",
+            id: "synthetic-unlinked",
+            startMs,
+            endMs: startMs + 3600_000,
+            description: "ordinary entry"
+          }
+        }]
+      }]
+    })
+    expect(proposals[0]?.clockifyDelta).toBe(3600)
+    expect(proposals[0]?.jiraDelta).toBe(3600)
+    expect(proposals[0]?.blocks[0]).toMatchObject({ clockifyRefusal: "unlinked-overlap" })
+    expect(proposals[0]?.blocks[0]?.clockifyConsumedSeconds).toBeUndefined()
+  })
+
+  it("holds only intersecting blocks, not adjacent time or a verified source binding", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const base = credit(7200)[0]!
+    const credits = [{
+      ...base,
+      blocks: [
+        { startMs, endMs: startMs + 3600_000, seconds: 3600 },
+        { startMs: startMs + 3600_000, endMs: startMs + 7200_000, seconds: 3600 }
+      ]
+    }]
+    const proposalWith = (entryStartMs: number, entryEndMs: number, bound = false) => {
+      const source: "clockify" = "clockify"
+      const entry = {
+        source,
+        id: "synthetic-unlinked",
+        startMs: entryStartMs,
+        endMs: entryEndMs,
+        description: "ordinary entry"
+      }
+      return buildSessionProposals(credits, [], {
+        excludedDays: [],
+        minimumSeconds: 60,
+        consumptionRows: [{ day: "2026-07-01", intervals: [{ entry }] }],
+        ...(bound && {
+          sourceEntries: [{
+            source,
+            id: entry.id,
+            rowId: "2026-07-01:PROJ-1",
+            sourceStartMs: startMs,
+            startMs: entryStartMs,
+            endMs: entryEndMs
+          }]
+        })
+      })[0]
+    }
+    expect(proposalWith(startMs + 1800_000, startMs + 5400_000)?.blocks.map((block) => block.clockifyRefusal))
+      .toEqual(["unlinked-overlap", "unlinked-overlap"])
+    expect(proposalWith(startMs, startMs + 3600_000)?.blocks.map((block) => block.clockifyRefusal))
+      .toEqual(["unlinked-overlap", undefined])
+    expect(proposalWith(startMs + 7200_000, startMs + 9000_000)?.blocks.map((block) => block.clockifyRefusal))
+      .toEqual([undefined, undefined])
+    expect(proposalWith(startMs, startMs + 3600_000, true)?.blocks[0]?.clockifyRefusal).toBeUndefined()
+  })
+
+  // Each side is sized to its own gap, so an hour already in Jira does not shrink the Clockify row.
+  it("sizes each side to its own gap", () => {
+    const proposals = buildSessionProposals(
+      credit(3600),
+      [{ ticketKey: "PROJ-1", day: "2026-07-01", clockifySeconds: 0, jiraSeconds: 3000 }],
+      { minimumSeconds: 60, excludedDays: [] }
+    )
+    expect(proposals[0]).toMatchObject({ clockifyDelta: 3600, jiraDelta: 600 })
+  })
+
+  it("proposes nothing when both sides already hold the time", () => {
+    const proposals = buildSessionProposals(
+      credit(3600),
+      [{ ticketKey: "PROJ-1", day: "2026-07-01", clockifySeconds: 3600, jiraSeconds: 3600 }],
+      { minimumSeconds: 60, excludedDays: [] }
+    )
+    expect(proposals).toEqual([])
+  })
+
+  it("subtracts corrected-ticket source markers and reopens only removed time", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const sources: ReadonlyArray<"clockify" | "jira"> = ["clockify", "jira"]
+    const recorded = (seconds: number, marked: boolean) => [{
+      ticketKey: "PROJ-2",
+      day: "2026-07-01",
+      clockifySeconds: seconds,
+      jiraSeconds: seconds,
+      intervals: sources.map((source) => ({
+        entry: {
+          source,
+          id: `${source}-corrected`,
+          startMs,
+          endMs: startMs + seconds * 1000,
+          description: marked ? marker("2026-07-01:PROJ-1", startMs) : "ordinary corrected-ticket entry"
+        }
+      }))
+    }]
+    expect(buildSessionProposals(credit(3600), recorded(3600, true), {
+      minimumSeconds: 60,
+      excludedDays: []
+    })).toEqual([])
+    expect(
+      buildSessionProposals(credit(3600), recorded(1800, true), {
+        minimumSeconds: 60,
+        excludedDays: []
+      })[0]
+    ).toMatchObject({ clockifyDelta: 1800, jiraDelta: 1800 })
+    expect(
+      buildSessionProposals(credit(3600), recorded(3600, false), {
+        minimumSeconds: 60,
+        excludedDays: []
+      })[0]
+    ).toMatchObject({ clockifyDelta: 3600, jiraDelta: 3600 })
+    expect(
+      buildSessionProposals(credit(3600), [{ ...recorded(1800, true)[0]!, ticketKey: "PROJ-1" }], {
+        minimumSeconds: 60,
+        excludedDays: []
+      })[0]
+    ).toMatchObject({ clockifyDelta: 1800, jiraDelta: 1800 })
+  })
+
+  it("does not accept editable source markers as authority when the private ledger is present", () => {
+    const startMs = at(2026, 7, 1, 10, 0)
+    const recorded: Parameters<typeof buildSessionProposals>[1] = [{
+      ticketKey: "PROJ-2",
+      day: "2026-07-01",
+      clockifySeconds: 3600,
+      jiraSeconds: 0,
+      intervals: [{
+        entry: {
+          source: "clockify",
+          id: "unbound-entry",
+          startMs,
+          endMs: startMs + 3_600_000,
+          description: marker("2026-07-01:PROJ-1", startMs)
+        }
+      }]
+    }]
+    expect(
+      buildSessionProposals(credit(3600), recorded, {
+        minimumSeconds: 60,
+        excludedDays: [],
+        sourceEntries: []
+      })[0]
+    ).toMatchObject({ clockifyDelta: 3600 })
+  })
+
+  it("keeps a clipped watch marker consumed when a later read widens its source block", () => {
+    const blockStartMs = at(2026, 7, 1, 9, 0)
+    const markerStartMs = at(2026, 7, 1, 9, 30)
+    const sources: ReadonlyArray<"clockify" | "jira"> = ["clockify", "jira"]
+    const widened: ReadonlyArray<TicketDayCredit> = [{
+      ...credit(3600)[0]!,
+      sourceStartMs: blockStartMs,
+      settlementEndMs: at(2026, 7, 1, 10, 0),
+      blocks: [{ startMs: blockStartMs, endMs: at(2026, 7, 1, 10, 0), seconds: 3600, sourceStartMs: blockStartMs }]
+    }]
+    const corrected = [{
+      ticketKey: "PROJ-2",
+      day: "2026-07-01",
+      clockifySeconds: 1800,
+      jiraSeconds: 1800,
+      intervals: sources.map((source) => ({
+        entry: {
+          source,
+          id: `${source}-clipped`,
+          startMs: markerStartMs,
+          endMs: at(2026, 7, 1, 10, 0),
+          description: marker("2026-07-01:PROJ-1", markerStartMs)
+        }
+      }))
+    }]
+
+    expect(buildSessionProposals(widened, corrected, { minimumSeconds: 60, excludedDays: [] })[0])
+      .toMatchObject({ clockifyDelta: 1800, jiraDelta: 1800 })
+  })
+
+  it("assigns a clipped marker to one source stretch", () => {
+    const morningStartMs = at(2026, 7, 1, 9, 0)
+    const markerStartMs = at(2026, 7, 1, 9, 30)
+    const afternoonStartMs = at(2026, 7, 1, 14, 0)
+    const source: "clockify" | "jira" = "clockify"
+    const split: ReadonlyArray<TicketDayCredit> = [{
+      ...credit(7200)[0]!,
+      sourceStartMs: morningStartMs,
+      settlementEndMs: at(2026, 7, 1, 15, 0),
+      blocks: [
+        { startMs: morningStartMs, endMs: at(2026, 7, 1, 10, 0), seconds: 3600, sourceStartMs: morningStartMs },
+        { startMs: afternoonStartMs, endMs: at(2026, 7, 1, 15, 0), seconds: 3600, sourceStartMs: afternoonStartMs }
+      ]
+    }]
+    const corrected = [{
+      ticketKey: "PROJ-2",
+      day: "2026-07-01",
+      clockifySeconds: 1800,
+      jiraSeconds: 1800,
+      intervals: [{
+        entry: {
+          source,
+          id: "clockify-clipped",
+          startMs: markerStartMs,
+          endMs: at(2026, 7, 1, 10, 0),
+          description: marker("2026-07-01:PROJ-1", markerStartMs)
+        }
+      }]
+    }]
+
+    const proposal = buildSessionProposals(split, corrected, { minimumSeconds: 60, excludedDays: [] })[0]
+    expect(proposal).toMatchObject({ clockifyDelta: 5400, jiraDelta: 7200 })
+    expect(proposal?.blocks).toMatchObject([
+      { clockifyConsumedSeconds: 1800 },
+      { startMs: afternoonStartMs }
+    ])
+    expect(proposal?.blocks[1]).not.toHaveProperty("clockifyConsumedSeconds")
+  })
+
+  it("never proposes a negative amount when a side holds more than the session accounts for", () => {
+    const proposals = buildSessionProposals(
+      credit(600),
+      [{ ticketKey: "PROJ-1", day: "2026-07-01", clockifySeconds: 7200, jiraSeconds: 7200 }],
+      { minimumSeconds: 60, excludedDays: [] }
+    )
+    expect(proposals).toEqual([])
+  })
+
+  it("offers exact sub-minute Clockify credit without offering an unwritable Jira gap", () => {
+    const options = { minimumSeconds: 60, excludedDays: [] }
+    expect(buildSessionProposals(credit(0), [], options)).toEqual([])
+    expect(buildSessionProposals(credit(45), [], options)[0]).toMatchObject({
+      sessionSeconds: 45,
+      clockifyDelta: 45,
+      jiraDelta: 0
+    })
+    expect(buildSessionProposals(credit(45), [], { ...options, sides: { clockify: true, jira: false } })[0])
+      .toMatchObject({ clockifyDelta: 45, jiraDelta: 0 })
+    expect(buildSessionProposals(credit(45), [], { ...options, sides: { clockify: false, jira: true } }))
+      .toEqual([])
+    expect(buildSessionProposals(credit(60), [], options)[0]).toMatchObject({
+      clockifyDelta: 60,
+      jiraDelta: 60
+    })
+  })
+
+  it("withholds an excluded day entirely", () => {
+    const proposals = buildSessionProposals(credit(3600), [], {
+      minimumSeconds: 60,
+      excludedDays: ["2026-07-01"]
+    })
+    expect(proposals).toEqual([])
+  })
+
+  // Someone who tracks in one system only. The side that is out was never read, so the only
+  // defensible statement about its gap is none at all — certainly not the whole day.
+  it("proposes nothing for a side that is out of scope", () => {
+    const proposals = buildSessionProposals(credit(3600), [], {
+      excludedDays: [],
+      minimumSeconds: 60,
+      sides: { clockify: false, jira: true }
+    })
+    expect(proposals[0]).toMatchObject({ clockifyDelta: 0, jiraDelta: 3600 })
+  })
+
+  it("drops a row whose only short side is out of scope", () => {
+    const proposals = buildSessionProposals(
+      credit(3600),
+      [{ ticketKey: "PROJ-1", day: "2026-07-01", clockifySeconds: 0, jiraSeconds: 3600 }],
+      { excludedDays: [], minimumSeconds: 60, sides: { clockify: false, jira: true } }
+    )
+    expect(proposals).toEqual([])
+  })
+})
+
+describe("buildSessionDigest", () => {
+  it("joins prompts in order and drops blanks", () => {
+    expect(buildSessionDigest(["first", "  ", "second"])).toBe("first\nsecond")
+  })
+
+  it("stops at the character budget so one long transcript cannot dominate", () => {
+    const digest = buildSessionDigest(["a".repeat(50), "b".repeat(50)], { maxChars: 60 })
+    expect(digest.length).toBeLessThanOrEqual(61)
+    expect(digest.startsWith("a".repeat(50))).toBe(true)
+  })
+
+  it("returns an empty digest for a session with no text", () => {
+    expect(buildSessionDigest([])).toBe("")
+  })
+})

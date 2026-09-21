@@ -1,0 +1,66 @@
+{
+  "name": "@knpkv/jcf-web",
+  "version": "0.1.0",
+  "description": "Week view over Jira and Clockify that fills the gaps a Coding Agent's sessions evidence",
+  "license": "MIT",
+  "author": "knpkv",
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "jcf-web": "dist/main.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./*.js": "./src/*.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./*.js": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "start": "node dist/main.js",
+    "dev": "JCF_WEB_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts & vite --clearScreen false",
+    "build": "tsc -b && vite build",
+    "prepack": "tsc -b && vite build",
+    "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
+    "test": "vitest",
+    "test:pack": "tsx scripts/test-packed-package.ts",
+    "lint": "eslint \"{scripts,src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
+    "test:browser": "pnpm --filter '@knpkv/jcf-web^...' --sort run build && vite build && playwright test"
+  },
+  "dependencies": {
+    "@effect/atom-react": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0-rc.109",
+    "@knpkv/browser-pairing": "workspace:^",
+    "@knpkv/jira-clockify": "workspace:^",
+    "@knpkv/rly": "workspace:^",
+    "effect": "4.0.0-rc.109",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0-rc.109",
+    "@playwright/test": "1.62.1",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "@vitejs/plugin-react": "^6.0.5",
+    "tsx": "^4.23.12",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vite": "^8.2.1",
+    "vitest": "catalog:"
+  }
+}

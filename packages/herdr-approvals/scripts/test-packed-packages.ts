@@ -1,19 +1,13 @@
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Console from "effect/Console"
-import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import * as Stream from "effect/Stream"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
-
-class HerdrPackContractError extends Data.TaggedError("HerdrPackContractError")<{
-  readonly cause?: unknown
-  readonly reason: string
-}> {}
+import { ChildProcessSpawner } from "effect/unstable/process"
+import { HerdrPackContractError, runPackContractCommand as run } from "./pack-contract-command.js"
 
 const PackageSideEffects = Schema.Array(Schema.String)
 const HerdrPackFailure = Schema.TaggedStruct("HerdrPackContractError", {
@@ -45,31 +39,6 @@ const reactSurfacePeers = new Map<string, ReadonlyArray<string>>([
   ["@knpkv/herdr-work", ["react"]],
   ["@knpkv/herdr-approvals", ["react", "react-dom"]]
 ])
-
-const commandError = (command: string, args: ReadonlyArray<string>, cause?: unknown) =>
-  new HerdrPackContractError({ cause, reason: `${command} ${args.join(" ")} failed` })
-
-const run = Effect.fn("HerdrPackContract.run")(function*(
-  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-  command: string,
-  args: ReadonlyArray<string>,
-  cwd: string
-) {
-  const handle = yield* spawner.spawn(
-    ChildProcess.make(command, args, { cwd, stderr: "pipe", stdout: "pipe" })
-  ).pipe(Effect.mapError((cause) => commandError(command, args, cause)))
-  const [stdout, stderr, exitCode] = yield* Effect.all([
-    Stream.decodeText(handle.stdout).pipe(Stream.mkString),
-    Stream.decodeText(handle.stderr).pipe(Stream.mkString),
-    handle.exitCode
-  ], { concurrency: "unbounded" })
-  if (exitCode !== ChildProcessSpawner.ExitCode(0)) {
-    return yield* new HerdrPackContractError({
-      reason: `${command} ${args.join(" ")} exited with code ${exitCode}: ${stderr.trim()}`
-    })
-  }
-  return stdout
-})
 
 const sameBytes = (left: Uint8Array, right: Uint8Array): boolean =>
   left.byteLength === right.byteLength && left.every((byte, index) => byte === right[index])
@@ -166,7 +135,13 @@ const program = Effect.scoped(
     const second = yield* fileSystem.makeTempDirectoryScoped({ prefix: "herdr-pack-second-" })
     const archives = new Map<string, string>()
 
-    const stagedPnpmVersion = (yield* run(spawner, "corepack", ["pnpm@11.21.0", "--version"], first)).trim()
+    const stagedPnpmVersion = (yield* run(
+      spawner,
+      "resolve staged pnpm version",
+      "corepack",
+      ["pnpm@11.21.0", "--version"],
+      first
+    )).trim()
     if (stagedPnpmVersion !== "11.21.0") {
       return yield* new HerdrPackContractError({
         reason: `Staging did not resolve pnpm@11.21.0: ${stagedPnpmVersion}`
@@ -200,11 +175,18 @@ const program = Effect.scoped(
     const cleanArchive = path.join(first, "test-sample-1.0.0.tgz")
     yield* run(
       spawner,
+      "pack clean staging fixture",
       "node",
       [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), cleanPackage, first],
       cleanWorkspace
     )
-    const cleanListing = (yield* run(spawner, "tar", ["-tzf", cleanArchive], cleanWorkspace))
+    const cleanListing = (yield* run(
+      spawner,
+      "list clean staging archive",
+      "tar",
+      ["-tzf", cleanArchive],
+      cleanWorkspace
+    ))
       .split("\n")
       .filter((entry) => entry !== "")
       .sort()
@@ -215,7 +197,13 @@ const program = Effect.scoped(
       })
     }
     const cleanManifest = yield* Schema.decodeUnknownEffect(PackageManifest)(
-      yield* run(spawner, "tar", ["-xOf", cleanArchive, "package/package.json"], cleanWorkspace)
+      yield* run(
+        spawner,
+        "read clean staging manifest",
+        "tar",
+        ["-xOf", cleanArchive, "package/package.json"],
+        cleanWorkspace
+      )
     ).pipe(
       Effect.mapError((cause) =>
         new HerdrPackContractError({ cause, reason: "Could not decode clean packed manifest" })
@@ -230,6 +218,7 @@ const program = Effect.scoped(
     }
     const cleanPrepackMarker = yield* run(
       spawner,
+      "read clean staging prepack marker",
       "tar",
       ["-xOf", cleanArchive, "package/prepack-marker"],
       cleanWorkspace
@@ -266,6 +255,7 @@ const program = Effect.scoped(
     yield* fileSystem.writeFileString(path.join(invalidPackage, "README.md"), "fixture\n")
     const missingWorkspace = yield* Effect.result(run(
       spawner,
+      "reject missing workspace dependency",
       "node",
       [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), invalidPackage],
       workspaceRoot
@@ -303,6 +293,7 @@ const program = Effect.scoped(
     yield* fileSystem.symlink("package.json", path.join(brokenPackage, "package.json"))
     const manifestProbe = yield* Effect.result(run(
       spawner,
+      "reject invalid manifest probe",
       "node",
       [path.join(workspaceRoot, "scripts", "pack-herdr.mjs"), probePackage],
       probeWorkspace
@@ -332,12 +323,14 @@ const program = Effect.scoped(
       yield* assertReactSurfaceManifest(sourceManifest.name, sourceManifest, true)
       yield* run(
         spawner,
+        `pack ${sourceManifest.name} first archive`,
         "pnpm",
         ["--filter", sourceManifest.name, "run", "pack:deterministic", "--", first],
         workspaceRoot
       )
       yield* run(
         spawner,
+        `pack ${sourceManifest.name} second archive`,
         "pnpm",
         ["--filter", sourceManifest.name, "run", "pack:deterministic", "--", second],
         workspaceRoot
@@ -355,7 +348,13 @@ const program = Effect.scoped(
       if (!sameBytes(firstBytes, secondBytes)) {
         return yield* new HerdrPackContractError({ reason: `${sourceManifest.name} packs are not byte-identical` })
       }
-      const listing = (yield* run(spawner, "tar", ["-tzf", firstArchive], workspaceRoot))
+      const listing = (yield* run(
+        spawner,
+        `list ${sourceManifest.name} first archive`,
+        "tar",
+        ["-tzf", firstArchive],
+        workspaceRoot
+      ))
         .split("\n")
         .filter((entry) => entry !== "")
         .sort()
@@ -367,6 +366,7 @@ const program = Effect.scoped(
       }
       const packedManifestText = yield* run(
         spawner,
+        `read ${sourceManifest.name} packed manifest`,
         "tar",
         ["-xOf", firstArchive, "package/package.json"],
         workspaceRoot
@@ -398,8 +398,20 @@ const program = Effect.scoped(
       return yield* new HerdrPackContractError({ reason: "Fleet archive was not packed" })
     }
     const fleetDelegateEntries = yield* Effect.all([
-      run(spawner, "tar", ["-xOf", fleetArchive, "package/dist/model.js"], workspaceRoot),
-      run(spawner, "tar", ["-xOf", fleetArchive, "package/dist/model.d.ts"], workspaceRoot)
+      run(
+        spawner,
+        "read packed fleet runtime",
+        "tar",
+        ["-xOf", fleetArchive, "package/dist/model.js"],
+        workspaceRoot
+      ),
+      run(
+        spawner,
+        "read packed fleet declarations",
+        "tar",
+        ["-xOf", fleetArchive, "package/dist/model.d.ts"],
+        workspaceRoot
+      )
     ])
     if (fleetDelegateEntries.some((entry) => entry.includes("transition_summary") === false)) {
       return yield* new HerdrPackContractError({
@@ -416,12 +428,14 @@ const program = Effect.scoped(
     yield* fileSystem.makeDirectory(installed, { recursive: true })
     yield* run(
       spawner,
+      "extract packed approvals consumer",
       "tar",
       ["-xzf", approvalsArchive, "--strip-components=1", "-C", installed],
       workspaceRoot
     )
     const resolution = yield* run(
       spawner,
+      "resolve packed approvals exports",
       "node",
       [
         "--input-type=module",

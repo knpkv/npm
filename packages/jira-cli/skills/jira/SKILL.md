@@ -84,8 +84,8 @@ jira version get 10042 --json
 Open a new unreleased version:
 
 ```bash
-jira version create --project PROJ --name "OOB 100"
-jira version create --project PROJ --name "OOB 100" --description "Q3 release" --start-date 2026-01-05 --release-date 2026-01-19 --json
+jira version create --project PROJ --name "REL 100"
+jira version create --project PROJ --name "REL 100" --description "Q3 release" --start-date 2026-01-05 --release-date 2026-01-19 --json
 ```
 
 Update a version description:
@@ -105,8 +105,8 @@ jira version related-work sync 10042 --link "Release notes=https://example.atlas
 Set an issue's fix versions and labels:
 
 ```bash
-jira issue edit PROJ-123 --add-fix-version "OOB 100" --add-label release-notes
-jira issue edit PROJ-123 --remove-fix-version "OOB 99" --json
+jira issue edit PROJ-123 --add-fix-version "REL 100" --add-label release-notes
+jira issue edit PROJ-123 --remove-fix-version "REL 99" --json
 ```
 
 ## Agent Workflow

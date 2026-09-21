@@ -17,6 +17,16 @@ rule:
     - pattern: import { $$$IMPORTS } from "process"
     - pattern: require("node:process")
     - pattern: require("process")
+    - pattern: import $NAME from "node:child_process"
+    - pattern: import $NAME from "child_process"
+    - pattern: import * as $NAME from "node:child_process"
+    - pattern: import * as $NAME from "child_process"
+    - pattern: import { $$$IMPORTS } from "node:child_process"
+    - pattern: import { $$$IMPORTS } from "child_process"
+    - pattern: require("node:child_process")
+    - pattern: require("child_process")
+    - pattern: import("node:child_process")
+    - pattern: import("child_process")
 
 files:
   - "scripts/**/*.mjs"
@@ -26,5 +36,6 @@ ignores:
   - "scratchpad/**"
 
 note: |
-  JavaScript scripts should use Effect Stdio for argv and NodeRuntime for exit
-  handling instead of reading process directly.
+  JavaScript scripts should use Effect Stdio for argv, NodeRuntime for exit
+  handling, and ChildProcessSpawner for child processes instead of raw Node
+  process access.

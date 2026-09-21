@@ -123,8 +123,8 @@ The command uploads the file, replaces exactly one matching placeholder with the
 Edit an issue's list-valued fields (fix versions and labels).
 
 ```bash
-jira issue edit PROJ-123 --add-fix-version "OOB 100" --add-label release-notes
-jira issue edit PROJ-123 --remove-fix-version "OOB 99" --json
+jira issue edit PROJ-123 --add-fix-version "REL 100" --add-label release-notes
+jira issue edit PROJ-123 --remove-fix-version "REL 99" --json
 ```
 
 | Option                 | Description                                                    | Default |
@@ -195,8 +195,8 @@ The version id is the **numeric** id (e.g. `10042`); use `version list` to find 
 ### Create a version
 
 ```bash
-jira version create --project PROJ --name "OOB 100"
-jira version create --project PROJ --name "OOB 100" \
+jira version create --project PROJ --name "REL 100"
+jira version create --project PROJ --name "REL 100" \
   --description "Q3 release" \
   --start-date 2026-01-05 \
   --release-date 2026-01-19 \
@@ -206,7 +206,7 @@ jira version create --project PROJ --name "OOB 100" \
 | Option           | Alias | Description                           | Default |
 | ---------------- | ----- | ------------------------------------- | ------- |
 | `--project`      | `-p`  | Jira project key (e.g. `PROJ`)        | -       |
-| `--name`         |       | Version name (e.g. `"OOB 100"`)       | -       |
+| `--name`         |       | Version name (e.g. `"REL 100"`)       | -       |
 | `--description`  | `-d`  | Version description                   | -       |
 | `--start-date`   |       | Start date, ISO 8601 (`yyyy-mm-dd`)   | -       |
 | `--release-date` |       | Release date, ISO 8601 (`yyyy-mm-dd`) | -       |

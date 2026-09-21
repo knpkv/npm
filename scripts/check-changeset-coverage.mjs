@@ -696,10 +696,10 @@ const resolveNamespaceQualifiedTypeDeclaration = (analysis, filePath, typeName, 
   if (!TypeScript.isIdentifier(root)) return undefined
   const imported = analysis.modules.get(filePath)?.imports.get(root.text)
   if (imported?.importedName !== "*") return undefined
+  if (!imported.sourceSpecifier.startsWith(".")) return undefined
   if (!TypeScript.isIdentifier(typeName.left) || !TypeScript.isIdentifier(typeName.right)) {
     failCanonicalType(filePath, typeNode, "unsupported nested namespace-qualified type")
   }
-  if (!imported.sourceSpecifier.startsWith(".")) return undefined
   const target = resolveLocalModule(filePath, imported.sourceSpecifier, analysis.sources)
   if (target === undefined) failCanonicalType(filePath, typeNode, "unresolved namespace-qualified type")
   const declaration = resolveExportedType(analysis, target, typeName.right.text, seen)
@@ -2454,26 +2454,8 @@ const canonicalKeySetForNode = (
             ) {
               continue
             }
-            const descriptor = parameterPropertyDescriptor(parameter, analysis, filePath, substitutions, seen, {
-              depth: 0,
-              genericScope,
-              substitutionPath,
-              recursiveDeclarations,
-              typeMembersMemo: memo
-            })
-            const existing = result.members.get(parameter.name.text)
-            result.members.set(
-              parameter.name.text,
-              existing === undefined ? descriptor : `overloads(${existing}|${descriptor})`
-            )
-            const canonicalName = canonicalPropertyKeyText(parameter.name)
-            if (canonicalName !== undefined) {
-              const existingCanonical = result.canonicalMembers.get(canonicalName)
-              result.canonicalMembers.set(
-                canonicalName,
-                existingCanonical === undefined ? descriptor : mergeMemberContract(existingCanonical, descriptor)
-              )
-            }
+            const key = canonicalPropertyKeyText(parameter.name)
+            if (key !== undefined) keys.add(key)
           }
           continue
         }
@@ -3954,7 +3936,8 @@ const callableParameterTypesInSources = (
   sources,
   filePath,
   analysis = analyzeSources(sources),
-  recursiveDeclarations = new Set()
+  recursiveDeclarations = new Set(),
+  selectedName
 ) => {
   const module = analysis.modules.get(filePath)
   if (module === undefined) return new Map()
@@ -3977,6 +3960,8 @@ const callableParameterTypesInSources = (
     contextualTypeParameters,
     callableNode
   ) => {
+    // Public reachability supplies the declaration name, including non-exported declarations re-exported by a barrel.
+    if (selectedName !== undefined && name !== selectedName) return
     const publicTypeParameters = contextualTypeParameters ?? initializerTypeParameters
     const callableGeneric = genericDescriptor(publicTypeParameters, analysis, filePath, new Map(), {
       depth: 0,
@@ -4145,6 +4130,10 @@ const publicCallableAdditions = (previousSource, currentSource, filePath, reacha
 const isExcludedSourcePath = (filePath) =>
   filePath.split("/").some((segment) => segment === "generated" || segment === "vendor" || segment === "node_modules")
 
+// Generated and vendor declarations can shape a handwritten public API without being report targets themselves.
+const isAnalysisSourcePath = (filePath) =>
+  /\.(?:ts|tsx)$/u.test(filePath) && !filePath.split("/").includes("node_modules")
+
 const resolveLocalModule = (fromPath, specifier, sourceFiles) => {
   if (!specifier.startsWith(".")) return undefined
   const fromSegments = fromPath.split("/")
@@ -4275,11 +4264,13 @@ const publicCallableChanges = (
         [entryPointDescriptor],
         analysis
       )) {
+        if (isExcludedSourcePath(target.filePath)) continue
         const signature = callableParameterTypesInSources(
           sources,
           target.filePath,
           analysis,
-          recursiveDeclarations
+          recursiveDeclarations,
+          target.name
         ).get(target.name)
         if (signature === undefined) continue
         const identity = `${entryPoint}\u0000${exportedName}`
@@ -4882,6 +4873,102 @@ const runSelfTest = () => {
   )
   assert.equal(isExcludedSourcePath("packages/public/src/generated/public.ts"), true)
   assert.equal(isExcludedSourcePath("packages/public/src/vendor/public.ts"), true)
+  assert.equal(isAnalysisSourcePath("packages/public/src/generated/public.ts"), true)
+  assert.equal(isAnalysisSourcePath("packages/public/src/vendor/public.ts"), true)
+  assert.equal(isAnalysisSourcePath("packages/public/src/node_modules/dependency/index.ts"), false)
+  assert.equal(isAnalysisSourcePath("packages/public/src/schema.json"), false)
+  const privateRecursivePrevious = new Map([
+    ["packages/public/src/index.ts", 'export { Public as View } from "./view.js"'],
+    [
+      "packages/public/src/view.ts",
+      'interface AdfNode { readonly content?: ReadonlyArray<AdfNode> }\nconst internal = (node: AdfNode): string => "text"\nexport function Public(): string { return "before" }'
+    ]
+  ])
+  const privateRecursiveCurrent = new Map([
+    ["packages/public/src/index.ts", 'export { Public as View } from "./view.js"'],
+    [
+      "packages/public/src/view.ts",
+      'interface AdfNode { readonly content?: ReadonlyArray<AdfNode> }\nconst internal = (node: AdfNode): string => "text"\nexport function Public(): number { return 1 }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(privateRecursivePrevious, privateRecursiveCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.ts", name: "Public", properties: [] }]
+  )
+  const publicRecursive = new Map([
+    ["packages/public/src/index.ts", 'export { internal } from "./view.js"'],
+    [
+      "packages/public/src/view.ts",
+      'interface AdfNode { readonly content?: ReadonlyArray<AdfNode> }\nexport const internal = (node: AdfNode): string => "text"'
+    ]
+  ])
+  assert.throws(
+    () => publicCallableChanges(publicRecursive, publicRecursive, ["packages/public/src/index.ts"]),
+    /recursive type declaration/u
+  )
+  const externalNamespacePrevious = new Map([
+    [
+      "packages/public/src/index.ts",
+      'import * as FileSystem from "effect/FileSystem"\nexport function info(): FileSystem.File.Info { throw new Error("fixture") }'
+    ]
+  ])
+  const externalNamespaceCurrent = new Map([
+    [
+      "packages/public/src/index.ts",
+      'import * as FileSystem from "effect/FileSystem"\nexport function info(): FileSystem.File.Info | undefined { throw new Error("fixture") }'
+    ]
+  ])
+  assert.deepEqual(
+    publicCallableChanges(externalNamespacePrevious, externalNamespaceCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/index.ts", name: "info", properties: [] }]
+  )
+  const nestedLocalNamespace = new Map([
+    [
+      "packages/public/src/index.ts",
+      'import * as Local from "./local.js"\nexport function info(): Local.Nested.Value { throw new Error("fixture") }'
+    ],
+    ["packages/public/src/local.ts", "export namespace Nested { export interface Value { readonly name: string } }"]
+  ])
+  assert.throws(
+    () => publicCallableChanges(nestedLocalNamespace, nestedLocalNamespace, ["packages/public/src/index.ts"]),
+    /unsupported nested namespace-qualified type/u
+  )
+  const generatedNamespacePrevious = new Map(
+    [
+      [
+        "packages/public/src/index.ts",
+        'export { Public } from "./view.js"\nexport { GeneratedPublic } from "./generated/JiraApi.js"'
+      ],
+      [
+        "packages/public/src/generated/JiraApi.ts",
+        'export interface JiraApi { readonly issue: string }\nexport function GeneratedPublic(): JiraApi { throw new Error("fixture") }'
+      ],
+      [
+        "packages/public/src/view.ts",
+        'import type * as Generated from "./generated/JiraApi.js"\nexport function Public(): Generated.JiraApi { throw new Error("fixture") }'
+      ]
+    ].filter(([filePath]) => isAnalysisSourcePath(filePath))
+  )
+  const generatedNamespaceCurrent = new Map(
+    [
+      [
+        "packages/public/src/index.ts",
+        'export { Public } from "./view.js"\nexport { GeneratedPublic } from "./generated/JiraApi.js"'
+      ],
+      [
+        "packages/public/src/generated/JiraApi.ts",
+        'export interface JiraApi { readonly issue: number }\nexport function GeneratedPublic(): JiraApi { throw new Error("fixture") }'
+      ],
+      [
+        "packages/public/src/view.ts",
+        'import type * as Generated from "./generated/JiraApi.js"\nexport function Public(): Generated.JiraApi { throw new Error("fixture") }'
+      ]
+    ].filter(([filePath]) => isAnalysisSourcePath(filePath))
+  )
+  assert.deepEqual(
+    publicCallableChanges(generatedNamespacePrevious, generatedNamespaceCurrent, ["packages/public/src/index.ts"]),
+    [{ kind: "return-type-change", filePath: "packages/public/src/view.ts", name: "Public", properties: [] }]
+  )
   const manifestSources = [
     "packages/public/src/index.ts",
     "packages/public/src/feature/view.ts",
@@ -7991,6 +8078,13 @@ const runSelfTest = () => {
     ]),
     []
   )
+  const parameterPropertyKeys = (name) => constraintSources(`class Model { constructor(public ${name}: string) {} }`)
+  assert.deepEqual(
+    publicCallableChanges(parameterPropertyKeys("before"), parameterPropertyKeys("after"), [
+      "packages/public/src/index.ts"
+    ]),
+    [{ kind: "type-change", filePath: "packages/public/src/view.tsx", name: "Public", properties: [] }]
+  )
   assert.deepEqual(
     publicCallableChanges(constraintSources("type Model = object"), constraintSources("type Model = unknown"), [
       "packages/public/src/index.ts"
@@ -9778,7 +9872,7 @@ const collectSourceFiles = Effect.fn("ChangesetCoverage.collectSourceFiles")(
       if (stats.type === "Directory") {
         const nestedFiles = yield* collectSourceFiles(fileSystem, path, absolute, relative)
         for (const nestedFile of nestedFiles) files.push(nestedFile)
-      } else if (/\.(?:ts|tsx)$/u.test(entry) && !isExcludedSourcePath(relative)) {
+      } else if (isAnalysisSourcePath(relative)) {
         files.push(relative)
       }
     }
@@ -9794,8 +9888,8 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
     const changes = []
     for (const record of records) {
       if (!record.publishable) continue
-      const changedSourceFiles = sourcePaths(paths).filter((changedPath) =>
-        changedPath.startsWith(`${record.directory}/`)
+      const changedSourceFiles = [...paths].filter(
+        (changedPath) => changedPath.startsWith(`${record.directory}/src/`) && isAnalysisSourcePath(changedPath)
       )
       const packageConfigPath = `${record.directory}/tsconfig.json`
       const packageConfigAbsolutePath = path.join(repositoryRoot, packageConfigPath)
@@ -9817,7 +9911,9 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
                 (cause) =>
                   new ChangesetCoverageError({
                     cause,
-                    reason: `${mergeBase}:${configPath.slice(repositoryRoot.length + 1)}: compiler configuration is unavailable`
+                    reason: `${mergeBase}:${configPath.slice(
+                      repositoryRoot.length + 1
+                    )}: compiler configuration is unavailable`
                   })
               )
             )
@@ -9838,9 +9934,7 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
         currentSources.set(relativePath, yield* fileSystem.readFileString(path.join(repositoryRoot, relativePath)))
       }
       const previousOutput = yield* git(["ls-tree", "-r", "--name-only", mergeBase, "--", `${record.directory}/src`])
-      const previousRelativeSourceFiles = splitLines(previousOutput).filter(
-        (filePath) => /\.(?:ts|tsx)$/u.test(filePath) && !isExcludedSourcePath(filePath)
-      )
+      const previousRelativeSourceFiles = splitLines(previousOutput).filter(isAnalysisSourcePath)
       const previousSources = new Map()
       for (const relativePath of previousRelativeSourceFiles) {
         const source = yield* gitOption(git, ["show", `${mergeBase}:${relativePath}`])
@@ -10076,6 +10170,134 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   )
 })
 
+// The real admission path must run for a generated declaration that changes a handwritten export.
+const runGeneratedAdmissionSelfTest = Effect.fn("ChangesetCoverage.runGeneratedAdmissionSelfTest")(function* () {
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "changeset-generated-admission-" })
+  const git = yield* makeGit(root, {
+    PATH: yield* Config.string("PATH"),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1"
+  })
+  const write = Effect.fn("ChangesetCoverage.generatedFixtureWrite")(function* (name, content) {
+    const target = path.join(root, name)
+    yield* fileSystem.makeDirectory(path.dirname(target), { recursive: true })
+    yield* fileSystem.writeFileString(target, content)
+  })
+  const equal = (actual, expected) =>
+    Effect.try({
+      try: () => assert.deepEqual(actual, expected),
+      catch: (cause) => new ChangesetCoverageError({ cause, reason: "Generated admission regression failed" })
+    })
+  const generatedPath = "packages/public/src/generated/JiraApi.ts"
+  const vendorPath = "packages/public/src/vendor/VendorApi.ts"
+  const dependencyPath = "packages/public/src/node_modules/dependency/index.ts"
+  const privatePath = "packages/private/src/index.ts"
+  const previous =
+    'export interface JiraApi { readonly issue: string }\nexport function GeneratedPublic(): JiraApi { throw new Error("fixture") }\n'
+  const changed =
+    'export interface JiraApi { readonly issue: number }\nexport function GeneratedPublic(): JiraApi { throw new Error("fixture") }\n'
+  const previousVendor = "export interface VendorApi { readonly issue: string }\n"
+  yield* git(["init", "--initial-branch=main"])
+  yield* git(["config", "user.name", "Fixture"])
+  yield* git(["config", "user.email", "fixture@example.test"])
+  yield* write(
+    "packages/public/package.json",
+    JSON.stringify({
+      name: "@fixture/public",
+      version: "1.0.0",
+      type: "module",
+      main: "src/index.ts"
+    })
+  )
+  yield* write(
+    "packages/public/tsconfig.json",
+    JSON.stringify({ compilerOptions: { module: "NodeNext", moduleResolution: "NodeNext" } })
+  )
+  yield* write(
+    "packages/public/src/index.ts",
+    'export { Public, VendorPublic } from "./view.js"\nexport { GeneratedPublic } from "./generated/JiraApi.js"\n'
+  )
+  yield* write(
+    "packages/public/src/view.ts",
+    'import type * as Generated from "./generated/JiraApi.js"\nimport type * as Vendor from "./vendor/VendorApi.js"\nexport function Public(): Generated.JiraApi { throw new Error("fixture") }\nexport function VendorPublic(): Vendor.VendorApi { throw new Error("fixture") }\n'
+  )
+  yield* write(generatedPath, previous)
+  yield* write(vendorPath, previousVendor)
+  yield* write(dependencyPath, "export interface Dependency { readonly issue: string }\n")
+  yield* write(
+    "packages/private/package.json",
+    JSON.stringify({ name: "@fixture/private", version: "1.0.0", private: true, main: "src/index.ts" })
+  )
+  yield* write(privatePath, "export function Hidden(): string { return 'before' }\n")
+  yield* git(["add", "."])
+  yield* git(["add", "-f", dependencyPath])
+  yield* git(["commit", "-m", "baseline"])
+  const base = yield* git(["rev-parse", "HEAD"])
+  yield* write(generatedPath, changed)
+  const paths = yield* changedPaths(git, base)
+  yield* equal(paths, new Set([generatedPath]))
+  const records = yield* loadPackageRecords(git, fileSystem, path, root, path.join(root, "packages"), base, paths)
+  const changes = yield* changedPublicCallableChanges(git, fileSystem, path, root, base, paths, records)
+  yield* equal(changes, [
+    {
+      kind: "return-type-change",
+      filePath: "packages/public/src/view.ts",
+      name: "Public",
+      properties: [],
+      packageName: "@fixture/public"
+    }
+  ])
+  yield* equal(
+    validatePublicCallableReleaseTypes({ changes, releaseTypes: new Map([["@fixture/public", "patch"]]) }).length,
+    1
+  )
+  yield* write(generatedPath, `${previous}// unchanged public shape\n`)
+  yield* equal(
+    yield* changedPublicCallableChanges(git, fileSystem, path, root, base, yield* changedPaths(git, base), records),
+    []
+  )
+  yield* write(generatedPath, `${previous}export interface Unused { readonly issue: number }\n`)
+  yield* equal(
+    yield* changedPublicCallableChanges(git, fileSystem, path, root, base, yield* changedPaths(git, base), records),
+    []
+  )
+  yield* write(generatedPath, previous.replace("GeneratedPublic(): JiraApi", "GeneratedPublic(): number"))
+  yield* equal(
+    yield* changedPublicCallableChanges(git, fileSystem, path, root, base, yield* changedPaths(git, base), records),
+    []
+  )
+  yield* write(generatedPath, previous)
+  yield* write(vendorPath, "export interface VendorApi { readonly issue: number }\n")
+  yield* equal(
+    yield* changedPublicCallableChanges(git, fileSystem, path, root, base, yield* changedPaths(git, base), records),
+    [
+      {
+        kind: "return-type-change",
+        filePath: "packages/public/src/view.ts",
+        name: "VendorPublic",
+        properties: [],
+        packageName: "@fixture/public"
+      }
+    ]
+  )
+  yield* write(vendorPath, previousVendor)
+  yield* write(privatePath, "export function Hidden(): number { return 1 }\n")
+  yield* equal(
+    yield* changedPublicCallableChanges(git, fileSystem, path, root, base, yield* changedPaths(git, base), records),
+    []
+  )
+  yield* write(privatePath, "export function Hidden(): string { return 'before' }\n")
+  yield* write(dependencyPath, "export interface Dependency { readonly issue: number }\n")
+  yield* equal(yield* changedPaths(git, base), new Set([dependencyPath]))
+  yield* equal(
+    yield* changedPublicCallableChanges(git, fileSystem, path, root, base, yield* changedPaths(git, base), records),
+    []
+  )
+  yield* Console.log("Generated admission regression passed")
+})
+
 const program = Effect.gen(function* () {
   const stdio = yield* Stdio.Stdio
   const args = yield* stdio.args
@@ -10090,6 +10312,7 @@ const program = Effect.gen(function* () {
   })
   yield* runMergeBaseSelfTest()
   yield* runPendingMergeSelfTest()
+  yield* runGeneratedAdmissionSelfTest()
   if (args.includes("--self-test")) return
 
   const path = yield* Path.Path

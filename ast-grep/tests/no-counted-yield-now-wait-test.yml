@@ -1,0 +1,15 @@
+id: no-counted-yield-now-wait
+valid:
+  - |
+    yield* Effect.yieldNow
+  - |
+    for (let index = 0; index < 3; index++) {
+      values.push(index)
+    }
+  - |
+    yield* Deferred.await(entered)
+invalid:
+  - |
+    for (let index = 0; index < 200; index++) {
+      yield* Effect.yieldNow
+    }
