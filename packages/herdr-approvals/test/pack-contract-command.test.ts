@@ -92,6 +92,38 @@ const runUncRootWith = (result: FakeCommandResult) =>
     "\\\\RootServer\\RootShare\\"
   )
 
+const runExtendedDriveWith = (result: FakeCommandResult) =>
+  runPackContractCommand(
+    ChildProcessSpawner.make(() => Effect.succeed(fakeHandle(result))),
+    "pack @test/windows extended drive first",
+    "pnpm",
+    [
+      "--output",
+      "\\\\?\\D:\\Sensitive.Path\\[output]\\",
+      "--root",
+      "\\\\?\\E:\\",
+      "--device",
+      "\\\\.\\pipe\\fixture",
+      "--unsupported",
+      "\\\\?\\Volume{fixture}\\private"
+    ],
+    "\\\\?\\C:\\Users\\[fixture]\\Work\\"
+  )
+
+const runExtendedUncWith = (result: FakeCommandResult) =>
+  runPackContractCommand(
+    ChildProcessSpawner.make(() => Effect.succeed(fakeHandle(result))),
+    "pack @test/windows extended unc first",
+    "pnpm",
+    [
+      "--output",
+      "\\\\?\\UNC\\ArgumentServer\\ArgumentShare\\",
+      "--malformed",
+      "\\\\?\\UNC\\server"
+    ],
+    "\\\\?\\UNC\\RootServer\\RootShare\\"
+  )
+
 const privatePath = "/private/workspace/customer-fixture"
 const privateCredential = "fixture-user:fixture-password"
 const longPrivateSentinel = `fixture-private-${"z".repeat(2_000)}`
@@ -287,7 +319,7 @@ describe("pack contract command diagnostics", () => {
       expect(rendered).toContain("sibling //servername/sharename/private.path[fixture]-old/kept.txt")
       expect(rendered).toContain("extension //servername/sharename/private.path[fixture].bak/kept.txt")
       expect(rendered).toContain("embedded prefix//servername/sharename/private.path[fixture]/kept.txt")
-      expect(rendered).toContain("extended \\\\?\\C:\\fixture")
+      expect(rendered).toContain("extended <path>")
       expect(rendered).toContain("device \\\\.\\pipe\\fixture")
       expect(rendered).toContain("unrelated argument //archivehost/other/[output]/kept.tgz")
       expect(rendered).not.toContain("//servername/sharename/private.path[FIXTURE]")
@@ -317,6 +349,81 @@ describe("pack contract command diagnostics", () => {
       expect(rendered).toContain("different server //other/rootshare/fixture/file.ts")
       expect(rendered).not.toContain("//rootserver/rootshare")
       expect(rendered).not.toContain("\\\\ARGUMENTSERVER\\ARGUMENTSHARE")
+    }))
+
+  it.effect("sanitizes extended-length drive paths without admitting device namespaces", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(runExtendedDriveWith({
+        exitCode: 31,
+        stderr: [
+          "exact \\\\?\\C:\\Users\\[fixture]\\Work",
+          "argument \\\\?\\d:\\sensitive.path\\[OUTPUT]\\archive.tgz",
+          "root \\\\?\\e:\\nested\\file.ts"
+        ].join("\n"),
+        stdout: [
+          "quoted \"//?/c:/USERS/[FIXTURE]/WORK\", refused",
+          "cwd \\\\?\\c:\\users\\[fixture]\\work\\diagnostics.txt",
+          "argument //?/D:/SENSITIVE.PATH/[output]/archive.tgz",
+          "sibling //?/c:/users/[fixture]/work-old/kept.txt",
+          "extension //?/c:/users/[fixture]/work.bak/kept.txt",
+          "embedded prefix//?/c:/users/[fixture]/work/kept.txt",
+          "other drive //?/f:/users/[fixture]/work/kept.txt",
+          "device \\\\.\\pipe\\fixture",
+          "unsupported \\\\?\\Volume{fixture}\\private"
+        ].join("\n")
+      }))
+      const rendered = Cause.pretty(Cause.fail(error))
+
+      expect(rendered).toContain("quoted \"<path>\", refused")
+      expect(rendered).toContain("cwd <path>\\diagnostics.txt")
+      expect(rendered).toContain("argument <path>/archive.tgz")
+      expect(rendered).toContain("root <path>\\nested\\file.ts")
+      expect(rendered).toContain("exact <path>")
+      expect(rendered).toContain("sibling //?/c:/users/[fixture]/work-old/kept.txt")
+      expect(rendered).toContain("extension //?/c:/users/[fixture]/work.bak/kept.txt")
+      expect(rendered).toContain("embedded prefix//?/c:/users/[fixture]/work/kept.txt")
+      expect(rendered).toContain("other drive //?/f:/users/[fixture]/work/kept.txt")
+      expect(rendered).toContain("device \\\\.\\pipe\\fixture")
+      expect(rendered).toContain("unsupported \\\\?\\Volume{fixture}\\private")
+      expect(rendered).not.toContain("//?/c:/USERS/[FIXTURE]/WORK")
+      expect(rendered).not.toContain("\\\\?\\d:\\sensitive.path\\[OUTPUT]")
+      expect(rendered).not.toContain("\\\\?\\e:\\nested")
+    }))
+
+  it.effect("sanitizes extended-length UNC share roots without widening namespace support", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(runExtendedUncWith({
+        exitCode: 37,
+        stderr: [
+          "exact \\\\?\\UNC\\RootServer\\RootShare",
+          "argument \\\\?\\unc\\ARGUMENTSERVER\\ARGUMENTSHARE\\archive.tgz"
+        ].join("\n"),
+        stdout: [
+          "quoted \"//?/UNC/ROOTSERVER/ROOTSHARE\", refused",
+          "cwd //?/unc/rootserver/rootshare/private/file.ts",
+          "argument //?/UNC/argumentserver/argumentshare/archive.tgz",
+          "different server //?/UNC/other/rootshare/private/file.ts",
+          "different share //?/UNC/rootserver/other/private/file.ts",
+          "sibling //?/UNC/rootserver/rootshare-old/private/file.ts",
+          "extension //?/UNC/rootserver/rootshare.bak/private/file.ts",
+          "embedded prefix//?/UNC/rootserver/rootshare/private/file.ts",
+          "malformed \\\\?\\UNC\\server"
+        ].join("\n")
+      }))
+      const rendered = Cause.pretty(Cause.fail(error))
+
+      expect(rendered).toContain("quoted \"<path>\", refused")
+      expect(rendered).toContain("cwd <path>/private/file.ts")
+      expect(rendered).toContain("argument <path>/archive.tgz")
+      expect(rendered).toContain("exact <path>")
+      expect(rendered).toContain("different server //?/UNC/other/rootshare/private/file.ts")
+      expect(rendered).toContain("different share //?/UNC/rootserver/other/private/file.ts")
+      expect(rendered).toContain("sibling //?/UNC/rootserver/rootshare-old/private/file.ts")
+      expect(rendered).toContain("extension //?/UNC/rootserver/rootshare.bak/private/file.ts")
+      expect(rendered).toContain("embedded prefix//?/UNC/rootserver/rootshare/private/file.ts")
+      expect(rendered).toContain("malformed \\\\?\\UNC\\server")
+      expect(rendered).not.toContain("//?/UNC/ROOTSERVER/ROOTSHARE")
+      expect(rendered).not.toContain("\\\\?\\unc\\ARGUMENTSERVER\\ARGUMENTSHARE")
     }))
 
   it.effect("returns successful stdout unchanged", () =>

@@ -17,10 +17,17 @@ const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, 
 const credentialUrl = /(https?:\/\/)[^/\s:@]+:[^@\s/]+@/gi
 const windowsDrivePath = /^[A-Za-z]:[\\/]/
 const windowsUncPath = /^[\\/]{2}(?![?.](?:[\\/]|$))[^\\/]+[\\/]+[^\\/]+(?:[\\/]|$)/
+const windowsExtendedDrivePath = /^\\\\\?\\[A-Za-z]:\\/
+const windowsExtendedUncPath = /^\\\\\?\\UNC\\[^\\]+\\[^\\]+(?:\\|$)/i
 const windowsDiagnosticTerminator = String.raw`(?:\s|["':,;!?)}\]])`
 
+/** Admit only documented drive and UNC filesystem forms, excluding device and other namespace paths. */
 const absolutePathArgument = (value: string): boolean =>
-  value.startsWith("/") || windowsDrivePath.test(value) || windowsUncPath.test(value)
+  value.startsWith("/") ||
+  windowsDrivePath.test(value) ||
+  windowsUncPath.test(value) ||
+  windowsExtendedDrivePath.test(value) ||
+  windowsExtendedUncPath.test(value)
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -28,12 +35,30 @@ const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\
 const redactPrivateValue = (output: string, privateValue: string): string => {
   const isDrivePath = windowsDrivePath.test(privateValue)
   const isUncPath = windowsUncPath.test(privateValue)
-  if (!isDrivePath && !isUncPath) return output.replaceAll(privateValue, "<path>")
+  const isExtendedDrivePath = windowsExtendedDrivePath.test(privateValue)
+  const isExtendedUncPath = windowsExtendedUncPath.test(privateValue)
+  if (!isDrivePath && !isUncPath && !isExtendedDrivePath && !isExtendedUncPath) {
+    return output.replaceAll(privateValue, "<path>")
+  }
   const normalizedPath = privateValue.replace(/[\\/]+$/, "")
-  const components = (isUncPath ? normalizedPath.slice(2) : normalizedPath)
+  const pathWithoutPrefix = isExtendedUncPath
+    ? normalizedPath.slice(8)
+    : isExtendedDrivePath
+    ? normalizedPath.slice(4)
+    : isUncPath
+    ? normalizedPath.slice(2)
+    : normalizedPath
+  const components = pathWithoutPrefix
     .split(/[\\/]+/)
     .map(escapeRegExp)
-  const pattern = `${isUncPath ? "[\\\\/]{2}" : ""}${components.join("[\\\\/]+")}`
+  const prefixPattern = isExtendedUncPath
+    ? "[\\\\/]{2}\\?[\\\\/]UNC[\\\\/]+"
+    : isExtendedDrivePath
+    ? "[\\\\/]{2}\\?[\\\\/]"
+    : isUncPath
+    ? "[\\\\/]{2}"
+    : ""
+  const pattern = `${prefixPattern}${components.join("[\\\\/]+")}`
   const rightBoundary = `(?=$|[\\\\/]|${windowsDiagnosticTerminator})`
   return output.replace(new RegExp(`(^|[^A-Za-z0-9._-])${pattern}${rightBoundary}`, "gi"), "$1<path>")
 }
