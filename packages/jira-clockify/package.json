@@ -17,10 +17,20 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/src/index.js",
+    "types": "dist/src/index.d.ts",
     "exports": {
-      ".": "./dist/src/index.js",
-      "./testing.js": "./dist/src/testing/fakeHeadless.js",
-      "./*.js": "./dist/src/*.js"
+      ".": {
+        "types": "./dist/src/index.d.ts",
+        "default": "./dist/src/index.js"
+      },
+      "./testing.js": {
+        "types": "./dist/src/testing/fakeHeadless.d.ts",
+        "default": "./dist/src/testing/fakeHeadless.js"
+      },
+      "./*.js": {
+        "types": "./dist/src/*.d.ts",
+        "default": "./dist/src/*.js"
+      }
     }
   },
   "files": [

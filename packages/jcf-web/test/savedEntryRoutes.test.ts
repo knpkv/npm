@@ -2,7 +2,8 @@ import { NodeCrypto, NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import { ReconcileService, SavedEntries, SessionAttributor, SourceConsumption } from "@knpkv/jira-clockify"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
-import { Deferred, Effect, Layer, Redacted, Schema } from "effect"
+import { Clock, Deferred, Effect, Layer, Redacted, Schema } from "effect"
+import { TestClock } from "effect/testing"
 import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
 import { readWeekStream } from "../src/client/api.js"
 import { application } from "../src/server/HttpApplication.js"
@@ -43,8 +44,17 @@ const makeApplication = async (options: {
   readonly afterRefresh?: () => Effect.Effect<void>
   readonly afterScan?: () => Effect.Effect<void>
   readonly legacy?: boolean
+  readonly nowMs?: number
 } = {}) => {
-  const secrets = await Effect.runPromise(makeOwnerSessionSecrets(origin).pipe(Effect.provide(NodeCrypto.layer)))
+  const nowMs = options.nowMs
+  const clock = nowMs === undefined ? undefined : await Effect.runPromise(Effect.scoped(TestClock.make()))
+  if (clock !== undefined && nowMs !== undefined) await Effect.runPromise(clock.setTime(nowMs))
+  const clockLayer = clock === undefined ? Layer.empty : Layer.succeed(Clock.Clock, clock)
+  const secrets = await Effect.runPromise(
+    makeOwnerSessionSecrets(origin).pipe(
+      Effect.provide([NodeCrypto.layer, clockLayer])
+    )
+  )
   const fake = makeFakeHeadless({
     config: { sessionRoots: [`${FAKE_HOME}/dev/work`], sessionOwnership: "any" },
     clockifyEntries: [
@@ -133,7 +143,8 @@ const makeApplication = async (options: {
     Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, secrets)),
     Layer.provide(Etag.layer),
     Layer.provideMerge(NodeServices.layer),
-    Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer)))
+    Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
+    Layer.provide(clockLayer)
   )
   const web = HttpRouter.toWebHandler(app, { disableLogger: true })
   const get = (path: string) =>
@@ -413,6 +424,74 @@ it("validates ranges/descriptions and preserves the plan when the provider refus
     await app.web.dispose()
   }
 })
+
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "refuses future interval edits for %s without touching the provider or retained week",
+  async (source) => {
+    const app = await makeApplication({ nowMs: Date.parse(at(10)) + 30 * 60_000 })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      const retained = await app.retained()
+      const invalid: ReadonlyArray<readonly [number, number]> = [
+        [Date.parse(at(12)), Date.parse(at(13))],
+        [Date.parse(at(9)), Date.parse(at(11))]
+      ]
+      for (const [startMs, endMs] of invalid) {
+        const response = await app.post("/api/entries/update", { ...edit(plan, entry), startMs, endMs })
+        expect(response.status).toBe(422)
+      }
+      expect(app.calls.updates).toHaveLength(0)
+      expect(app.fake.world.updatedJiraWorklogs).toHaveLength(0)
+      expect(app.fake.world.updatedClockifyEntries).toHaveLength(0)
+      expect(await app.retained()).toEqual(retained)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
+
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "allows a completed %s edit ending exactly now",
+  async (source) => {
+    const nowMs = Date.parse(at(10)) + 30 * 60_000
+    const app = await makeApplication({ nowMs })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      const response = await app.post("/api/entries/update", {
+        ...edit(plan, entry),
+        startMs: Date.parse(at(9)),
+        endMs: nowMs
+      })
+      expect(response.status).toBe(200)
+      expect(app.calls.updates).toHaveLength(1)
+      expect(app.fake.world.updatedJiraWorklogs).toHaveLength(source === "jira" ? 1 : 0)
+      expect(app.fake.world.updatedClockifyEntries).toHaveLength(source === "clockify" ? 1 : 0)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
+
+it.each<SavedEntry["source"]>(["jira", "clockify"])(
+  "keeps a %s description-only edit of a legacy entry whose interval already ends after now",
+  async (source) => {
+    const app = await makeApplication({ nowMs: Date.parse(at(10)) + 30 * 60_000 })
+    try {
+      const plan = await app.read()
+      const entry = entryFor(plan, source)
+      expect(entry.description ?? "").not.toContain("[jcf-source:")
+      const response = await app.post("/api/entries/update", edit(plan, entry, "Reviewed earlier entry"))
+      expect(response.status).toBe(200)
+      expect(app.calls.updates).toHaveLength(1)
+      expect(app.fake.world.updatedJiraWorklogs).toHaveLength(source === "jira" ? 1 : 0)
+      expect(app.fake.world.updatedClockifyEntries).toHaveLength(source === "clockify" ? 1 : 0)
+    } finally {
+      await app.web.dispose()
+    }
+  }
+)
 
 it("projects midnight slices and description-driven ticket changes without refreshing providers", async () => {
   const start = new Date(2026, 8, 7, 23).toISOString()

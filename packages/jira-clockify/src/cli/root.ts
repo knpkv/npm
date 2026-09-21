@@ -3,7 +3,7 @@ import { Effect } from "effect"
 import * as Console from "effect/Console"
 import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
-import { auth } from "./auth.js"
+import * as AuthCommand from "./auth.js"
 import { config } from "./config.js"
 import { issue } from "./list.js"
 import { sync } from "./reconcile.js"
@@ -29,6 +29,25 @@ const skills = Command.make("skills", {}, () => Console.log("Usage: jcf skills i
   Command.withSubcommands([skillsInstall])
 )
 
-export const root = Command.make("jcf", {}, () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))).pipe(
-  Command.withSubcommands([tui, auth, timer, issue, sync, watch, config, skills])
+type RootSubcommand =
+  | typeof AuthCommand.auth
+  | typeof timer
+  | typeof issue
+  | typeof sync
+  | typeof watch
+  | typeof config
+  | ReturnType<typeof makeInstallCommand>
+
+export const root: Command.Command<
+  "jcf",
+  {},
+  {},
+  Effect.Error<ReturnType<typeof launchTuiOrSetup>> | Command.Error<RootSubcommand>,
+  Effect.Services<ReturnType<typeof launchTuiOrSetup>> | Stdio.Stdio | Command.Services<RootSubcommand>
+> = Command.make(
+  "jcf",
+  {},
+  () => processArgv.pipe(Effect.flatMap(launchTuiOrSetup))
+).pipe(
+  Command.withSubcommands([tui, AuthCommand.auth, timer, issue, sync, watch, config, skills])
 )

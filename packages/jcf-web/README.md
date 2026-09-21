@@ -15,6 +15,10 @@ pnpm --filter @knpkv/jcf-web build   # the client is a static bundle the server 
 pnpm --filter @knpkv/jcf-web start   # prints the URL that gets you in
 ```
 
+When installed from the published package, run `jcf-web` from the package's bin directory
+(`pnpm exec jcf-web` in a pnpm project). The archive includes the built server and client;
+it does not need the workspace source tree or `tsx` to start.
+
 The printed URL carries a one-time code in its fragment. Opening it exchanges the code for a session
 cookie and strips it from the address bar; reloading afterwards works because the cookie is what
 authenticates. The code expires a minute after the server binds, so restart to get a fresh one.
@@ -248,6 +252,9 @@ calendar and below the mobile calendar, without adding a banner above the week.
 Click a solid Jira or Clockify entry to open its details in the right panel. Edit the
 start, end or multiline description, then Save changes. Save updates only the clicked
 provider entry; it never creates another entry. Midnight slices open the entire entry.
+Changed intervals must have ended by the time Save runs. A description-only edit keeps
+the original interval, even for an older entry already dated in the future; it cannot
+move that entry or create new future time.
 The calendar previews the edit immediately with Effect Atom and rolls back on failure,
 keeping the draft available to retry. Hiding the entry's provider layer disables Save.
 Successful edits remain visible if the following

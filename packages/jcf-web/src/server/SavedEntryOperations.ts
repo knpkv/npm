@@ -1,7 +1,7 @@
 /** Saved provider entries resolve only through retained weeks; generation consumes retained digests. */
 import type { SavedEntries, SessionAttributor } from "@knpkv/jira-clockify"
 import { AgentSessions, ReconcileService, SourceConsumption, Time } from "@knpkv/jira-clockify"
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import {
   ApiError,
   type DescribeSavedEntryRequest,
@@ -141,6 +141,12 @@ export const validateSavedUpdate = Effect.fn("SavedEntryOperations.validate")(fu
   request: UpdateSavedEntryRequest
 ) {
   const changed = expected.startMs !== request.startMs || expected.endMs !== request.endMs
+  if (changed) {
+    const nowMs = yield* Clock.currentTimeMillis
+    if (request.startMs > nowMs || request.endMs > nowMs) {
+      return yield* new ProposalRejectedError({ message: "Choose an interval that has already ended." })
+    }
+  }
   const period = Time.isoWeekPeriod(new Date(`${plan.plan.monday}T00:00:00`))
   if (changed && expected.source === "jira" && request.startMs < period.from.getTime()) {
     return yield* new ProposalRejectedError({

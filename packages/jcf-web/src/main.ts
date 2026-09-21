@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 /**
  * `jcf-web` — start the week view and print the URL that gets you in.
  *

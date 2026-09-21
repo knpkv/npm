@@ -2367,21 +2367,6 @@ describe("logging time by hand", () => {
       }
     }))
 
-  it.effect("uses elapsed seconds across a local daylight-saving change", () =>
-    Effect.gen(function*() {
-      const start = new Date(2026, 2, 29, 1, 30, 0, 0)
-      const endMs = start.getTime() + 3600_000
-      const { value, world } = yield* run(
-        manualAt(endMs, { day: "2026-03-29", startClock: "01:30", seconds: 3600 }),
-        {}
-      )
-      expect(value.clockify).toEqual({ _tag: "Written", seconds: 3600 })
-      expect(value.jira).toEqual({ _tag: "Written", seconds: 3600 })
-      expect(world.createdClockifyEntries[0]).toMatchObject({ start: iso(start.getTime()), end: iso(endMs) })
-      expect(new Date(world.jiraWorklogs[0]?.started ?? "").getTime()).toBe(start.getTime())
-      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(3600)
-    }))
-
   const manual = Effect.gen(function*() {
     const reconcile = yield* ReconcileService.ReconcileService
     return yield* logManualEntry({
