@@ -16,6 +16,7 @@
  * @module
  */
 import { AgentWrite, ReconcileService, SourceConsumption, Time } from "@knpkv/jira-clockify"
+import type { PlannedWrite } from "@knpkv/jira-clockify/agent/writePlanning.js"
 import { Clock, Effect } from "effect"
 import { MINIMUM_WRITE_SECONDS, prepareProposal } from "../shared/writePlanning.js"
 import { ProposalRejectedError, type WriteResultResponse } from "./Api.js"
@@ -109,21 +110,27 @@ export const confirmProposal = (options: {
     const expectedScopes = currentScopes === undefined
       ? undefined
       : {
-        clockify: retainedScopes.clockify ?? currentScopes.clockify,
-        jira: retainedScopes.jira ?? currentScopes.jira
+        clockify: currentScopes.clockify === null
+          ? null
+          : retainedScopes.clockify ?? currentScopes.clockify,
+        jira: currentScopes.jira === null ? null : retainedScopes.jira ?? currentScopes.jira
       }
     if (
       expectedScopes === undefined || currentScopes === undefined ||
       (prepared.targets.clockify &&
-        (expectedScopes.clockify === null || expectedScopes.clockify !== currentScopes.clockify)) ||
-      (prepared.targets.jira && (expectedScopes.jira === null || expectedScopes.jira !== currentScopes.jira))
+        expectedScopes.clockify !== null && expectedScopes.clockify !== currentScopes.clockify) ||
+      (prepared.targets.jira && expectedScopes.jira !== null && expectedScopes.jira !== currentScopes.jira)
     ) {
       return yield* new ReconcileService.ReconcileError({
         message: "The provider account changed or could not be verified; reload the week before confirming"
       })
     }
-    if (prepared.targets.clockify) options.plan.boundScopes.clockify = expectedScopes.clockify
-    if (prepared.targets.jira) options.plan.boundScopes.jira = expectedScopes.jira
+    if (prepared.targets.clockify && expectedScopes.clockify !== null) {
+      options.plan.boundScopes.clockify = expectedScopes.clockify
+    }
+    if (prepared.targets.jira && expectedScopes.jira !== null) {
+      options.plan.boundScopes.jira = expectedScopes.jira
+    }
     consumption = reconcileConsumption(refreshed, consumption)
     options.plan.consumption.clear()
     for (const [key, value] of consumption) options.plan.consumption.set(key, value)
@@ -153,7 +160,9 @@ export const confirmProposal = (options: {
       consumed: (block, source) => consumption.get(evidenceBlockKey(evidence.rowId, block))?.[source] ?? 0
     })
     if (freshPrepared._tag !== "Prepared") return freshPrepared
-    const write = freshPrepared.plan(refreshed.recorded)
+    const write = freshPrepared.plan(
+      ReconcileService.recordedForExecution(refreshed.recorded, refreshed.jiraAvailability)
+    )
     if (write._tag === "PastEvidence" || write._tag === "BelowMinimum") return write
 
     const retainedTitle = options.plan.ownership.facts.get(prepared.ticketKey)?.title ?? null
@@ -164,42 +173,55 @@ export const confirmProposal = (options: {
       provenance: freshPrepared.provenance,
       summary
     })
-    if (write._tag === "NothingOwed") {
-      return { _tag: "NothingOwed", result: nothingOwed(description, freshPrepared.targets) } satisfies ConfirmOutcome
-    }
-
     // The suffix helps import legacy writes. The private provider-ID binding remains authoritative
     // when a saved entry is relabeled or its description is edited outside jcf.
-    const providerWrite = {
-      ...write,
-      clockify: {
-        ...write.clockify,
-        segments: write.clockify.segments.map((segment) => ({
-          ...segment,
-          description: `${description}\n${evidenceMarker(evidence.rowId, segment.block)}`
-        }))
-      },
-      jira: {
-        ...write.jira,
-        segments: write.jira.segments.map((segment) => ({
-          ...segment,
-          description: `${description}\n${evidenceMarker(evidence.rowId, segment.block)}`
-        }))
+    const providerWrite: PlannedWrite = write._tag === "NothingOwed"
+      ? {
+        _tag: "Write",
+        ticketKey: freshPrepared.ticketKey,
+        day: freshPrepared.day,
+        targets: freshPrepared.targets,
+        clockify: { seconds: 0, segments: [], startedAt: undefined },
+        jira: { seconds: 0, segments: [], startedAt: undefined }
       }
-    }
+      : {
+        ...write,
+        clockify: {
+          ...write.clockify,
+          segments: write.clockify.segments.map((segment) => ({
+            ...segment,
+            description: `${description}\n${evidenceMarker(evidence.rowId, segment.block)}`
+          }))
+        },
+        jira: {
+          ...write.jira,
+          segments: write.jira.segments.map((segment) => ({
+            ...segment,
+            description: `${description}\n${evidenceMarker(evidence.rowId, segment.block)}`
+          }))
+        }
+      }
     const outcome = yield* AgentWrite.applyPlannedWrite(
       options.service,
       providerWrite,
       description,
       evidence.rowId,
-      expectedScopes
+      expectedScopes,
+      refreshed.jiraAvailability
     )
+    if (
+      write._tag === "NothingOwed" &&
+      outcome.clockify._tag === (freshPrepared.targets.clockify ? "NothingOwed" : "Skipped") &&
+      outcome.jira._tag === (freshPrepared.targets.jira ? "NothingOwed" : "Skipped")
+    ) {
+      return { _tag: "NothingOwed", result: nothingOwed(description, freshPrepared.targets) } satisfies ConfirmOutcome
+    }
     for (const source of ["clockify", "jira"] satisfies ReadonlyArray<keyof AgentWrite.WriteOutcome>) {
       const side = outcome[source]
       if (side._tag !== "Written" && side._tag !== "PartiallyWritten") continue
       if (source === "jira") options.plan.jiraReceiptIssueKeys.add(prepared.ticketKey)
       let remaining = side.seconds
-      for (const segment of write[source].segments) {
+      for (const segment of providerWrite[source].segments) {
         if (remaining <= 0) break
         const block = segment.block
         const key = evidenceBlockKey(evidence.rowId, block)
@@ -294,6 +316,8 @@ export const logManualEntry = (options: {
       ? { _tag: "Written", seconds: request.seconds }
       : posted._tag === "NotLoggedIn"
       ? { _tag: "NotLoggedIn" }
+      : posted._tag === "VerificationUnavailable"
+      ? { _tag: "Refused", message: "the Jira account could not be verified; refresh before writing" }
       : { _tag: "Refused", message: posted.message }
     return { clockify, description, jira, lines: AgentWrite.writeOutcomeLines({ clockify, jira }) }
   })

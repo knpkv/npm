@@ -1258,15 +1258,295 @@ it.effect("allows a Clockify key rotation only while the verified account and en
   }).pipe(Effect.provide(fake.layer))
 })
 
+it.effect("refuses Jira-only confirmation when compatibility totals cover an unverified account", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readJiraOnlyPlan
+    fake.world.setJiraWorklogs({
+      [TICKET]: [{
+        id: "synthetic-compatibility-worklog",
+        author: { accountId: FAKE_ACCOUNT_ID },
+        started: iso(at(10, 0)),
+        timeSpentSeconds: 3900
+      }]
+    })
+    fake.world.jiraCurrentUserReadFailuresRemaining = 1
+    const beforeLedger = fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+
+    const result = yield* confirm(plan)
+
+    expect(result._tag).toBe("Written")
+    if (result._tag === "Written") {
+      expect(result.result.clockify).toEqual({ _tag: "Skipped" })
+      expect(result.result.jira).toMatchObject({ _tag: "Refused" })
+    }
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
+    expect(fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]).toBe(beforeLedger)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("refuses unavailable Jira when both selected providers already display complete", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readPlan
+    fake.world.setClockifyEntries([{
+      id: "synthetic-complete-clockify",
+      description: `[${TICKET}] already recorded`,
+      start: iso(at(10, 0)),
+      end: iso(at(11, 5))
+    }])
+    fake.world.setJiraWorklogs({
+      [TICKET]: [{
+        id: "synthetic-complete-jira",
+        author: { accountId: FAKE_ACCOUNT_ID },
+        started: iso(at(10, 0)),
+        timeSpentSeconds: 3900
+      }]
+    })
+    fake.world.jiraCurrentUserReadFailuresRemaining = 1
+
+    const result = yield* confirm(plan)
+
+    expect(result._tag).toBe("Written")
+    if (result._tag === "Written") {
+      expect(result.result.clockify).toEqual({ _tag: "NothingOwed" })
+      expect(result.result.jira).toMatchObject({ _tag: "Refused" })
+    }
+    expect(fake.world.createdClockifyEntries).toEqual([])
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("keeps an unverified compatibility Jira tally read-only until a fresh verified tally", () => {
+  const profileA = {
+    accessToken: "synthetic-token-a",
+    accountId: FAKE_ACCOUNT_ID,
+    cloudId: "synthetic-cloud-a",
+    siteUrl: "https://a.example.invalid"
+  }
+  const profileB = {
+    accessToken: "synthetic-token-b",
+    accountId: "synthetic-account-b",
+    cloudId: "synthetic-cloud-b",
+    siteUrl: "https://b.example.invalid"
+  }
+  let authResolutions = 0
+  const fake = makeFakeHeadless(baseOptions({
+    jiraAccessToken: profileA.accessToken,
+    jiraAccountId: profileA.accountId,
+    jiraCloudId: profileA.cloudId,
+    jiraWorklogsByCloudId: {
+      [profileA.cloudId]: {
+        [TICKET]: [{
+          id: "synthetic-existing-a",
+          author: { accountId: profileA.accountId },
+          started: iso(at(10, 0)),
+          timeSpentSeconds: 3900
+        }]
+      },
+      [profileB.cloudId]: {}
+    },
+    beforeJiraAuthResolution: (world) => {
+      authResolutions++
+      if (authResolutions > 1) Object.assign(world.jiraAuth, profileB)
+    }
+  }))
+  fake.world.jiraCurrentUserReadFailuresRemaining = 1
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    const beforeRead = fake.world.writtenFiles[ledgerPath]
+    const plan = yield* readPlan
+
+    expect(authResolutions).toBeGreaterThan(1)
+    expect(plan.report.sourceScopes?.jira).toBeNull()
+    expect(plan.report.jiraAvailability).toBe("unverified")
+    expect(plan.report.proposals[0]?.jiraDelta).toBe(3900)
+    expect(plan.plan.rows.find((row) => row.ticketKey === TICKET)?.proposal?.blocks[0]?.consumed.jira).toBe(0)
+    expect(fake.world.writtenFiles[ledgerPath]).toBe(beforeRead)
+
+    Object.assign(fake.world.jiraAuth, profileA)
+    const result = yield* confirm(plan)
+    expect(result._tag).toBe("Written")
+    if (result._tag === "Written") {
+      expect(result.result.clockify).toMatchObject({ _tag: "Written", seconds: 3900 })
+      expect(result.result.jira).toEqual({ _tag: "NothingOwed" })
+    }
+    expect(fake.world.createdClockifyEntries).toHaveLength(1)
+    expect(fake.world.jiraWorklogs).toEqual([])
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("reports logout when retained Jira consumption already covers the repeated write", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readJiraOnlyPlan
+    expect((yield* confirm(plan, { ticketKey: OTHER_TICKET }))._tag).toBe("Written")
+    const beforeConsumption = [...plan.consumption.entries()]
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    const beforeLedger = fake.world.writtenFiles[ledgerPath]
+    const beforePosts = fake.world.jiraRequests.filter((request) => request.method === "POST").length
+    fake.world.jiraLoggedIn = false
+
+    const repeated = yield* confirm(plan)
+
+    expect(repeated._tag).toBe("Written")
+    if (repeated._tag === "Written") {
+      expect(repeated.result.clockify).toEqual({ _tag: "Skipped" })
+      expect(repeated.result.jira).toEqual({ _tag: "NotLoggedIn" })
+      expect(repeated.result.lines.join(" ")).toContain("jcf auth jira login")
+    }
+    expect([...plan.consumption.entries()]).toEqual(beforeConsumption)
+    expect(fake.world.writtenFiles[ledgerPath]).toBe(beforeLedger)
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toHaveLength(beforePosts)
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("reports verification failure when retained Jira consumption covers a full repeat", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readJiraOnlyPlan
+    expect((yield* confirm(plan, { ticketKey: OTHER_TICKET }))._tag).toBe("Written")
+    const beforeConsumption = [...plan.consumption.entries()]
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    const beforeLedger = fake.world.writtenFiles[ledgerPath]
+    const beforePosts = fake.world.jiraRequests.filter((request) => request.method === "POST").length
+    fake.world.jiraCurrentUserReadFailuresRemaining = 1
+
+    const repeated = yield* confirm(plan)
+
+    expect(repeated._tag).toBe("Written")
+    if (repeated._tag === "Written") {
+      expect(repeated.result.clockify).toEqual({ _tag: "Skipped" })
+      expect(repeated.result.jira).toEqual({
+        _tag: "Refused",
+        message: "the provider account for this session was not verified; refresh before writing"
+      })
+      expect(repeated.result.lines.join(" ")).toContain("refresh before writing")
+      expect(repeated.result.lines.join(" ")).not.toContain("jcf auth jira login")
+    }
+    expect([...plan.consumption.entries()]).toEqual(beforeConsumption)
+    expect(fake.world.writtenFiles[ledgerPath]).toBe(beforeLedger)
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toHaveLength(beforePosts)
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("reports verification failure when retained Jira consumption covers a partial repeat", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readJiraOnlyPlan
+    expect((yield* confirm(plan, { seconds: 1800, ticketKey: OTHER_TICKET }))._tag).toBe("Written")
+    const beforeConsumption = [...plan.consumption.entries()]
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    const beforeLedger = fake.world.writtenFiles[ledgerPath]
+    const beforePosts = fake.world.jiraRequests.filter((request) => request.method === "POST").length
+    fake.world.jiraCurrentUserReadFailuresRemaining = 1
+
+    const repeated = yield* confirm(plan, { seconds: 1800 })
+
+    expect(repeated._tag).toBe("Written")
+    if (repeated._tag === "Written") {
+      expect(repeated.result.clockify).toEqual({ _tag: "Skipped" })
+      expect(repeated.result.jira).toEqual({
+        _tag: "Refused",
+        message: "the provider account for this session was not verified; refresh before writing"
+      })
+    }
+    expect([...plan.consumption.entries()]).toEqual(beforeConsumption)
+    expect([...plan.consumption.values()][0]?.jira).toBe(1800)
+    expect(fake.world.writtenFiles[ledgerPath]).toBe(beforeLedger)
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toHaveLength(beforePosts)
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("retains corrected Jira consumption through an unverified Confirm refresh", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readPlan
+    expect((yield* confirm(plan, { seconds: 1800, ticketKey: OTHER_TICKET }))._tag).toBe("Written")
+    const before = [...plan.consumption.values()][0]?.jira
+    const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+    const beforeLedger = yield* Schema.decodeUnknownEffect(StoredConsumption)(fake.world.writtenFiles[ledgerPath])
+    const jiraPosts = fake.world.jiraRequests.filter((request) => request.method === "POST").length
+
+    fake.world.jiraCurrentUserReadFailuresRemaining = 1
+    const held = yield* confirm(plan)
+
+    expect(before).toBe(1800)
+    expect(held._tag).toBe("Written")
+    if (held._tag === "Written") {
+      expect(held.result.clockify).toMatchObject({ _tag: "Written", seconds: 2100 })
+      expect(held.result.jira).toMatchObject({ _tag: "Refused" })
+    }
+    expect([...plan.consumption.values()][0]?.jira).toBe(1800)
+    expect(fake.world.jiraRequests.filter((request) => request.method === "POST")).toHaveLength(jiraPosts)
+    const afterLedger = yield* Schema.decodeUnknownEffect(StoredConsumption)(fake.world.writtenFiles[ledgerPath])
+    expect(afterLedger.bindings.filter((binding) => binding.provider === "jira"))
+      .toEqual(beforeLedger.bindings.filter((binding) => binding.provider === "jira"))
+    expect(afterLedger.pending).toEqual(beforeLedger.pending)
+
+    const resumed = yield* confirm(plan)
+    expect(resumed._tag).toBe("Written")
+    if (resumed._tag === "Written") {
+      expect(resumed.result.clockify).toEqual({ _tag: "NothingOwed" })
+      expect(resumed.result.jira).toMatchObject({ _tag: "Written", seconds: 2100 })
+    }
+    expect((yield* confirm(plan))._tag).toBe("NothingOwed")
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("retains corrected Jira consumption through an unverified WeekRead replacement", () => {
+  const fake = makeFakeHeadless(baseOptions())
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plans = yield* WeekPlans
+    const reconcile = yield* ReconcileService.ReconcileService
+    const initial = yield* plans.keep(yield* readPlan, yield* plans.readGeneration)
+    expect(
+      (yield* plans.withConfirmationPermit(
+        confirm(initial, { seconds: 1800, ticketKey: OTHER_TICKET })
+      ))._tag
+    ).toBe("Written")
+    const before = [...initial.consumption.values()][0]
+    fake.world.jiraCurrentUserReadFailuresRemaining = 1
+
+    yield* refreshWeekPlan({
+      planId: initial.planId,
+      plans,
+      reconcile,
+      report: () => Effect.void
+    })
+    const retained = yield* plans.find(initial.planId)
+
+    expect(before?.jira).toBe(1800)
+    expect([...retained!.consumption.values()][0]?.jira).toBe(1800)
+    expect(retained?.report.jiraAvailability).toBe("unverified")
+    expect(retained?.plan.rows.find((row) => row.ticketKey === TICKET)?.proposal?.blocks[0]?.consumed.jira).toBe(1800)
+  }).pipe(Effect.provide(weekPlansLayer.pipe(Layer.provideMerge(fake.layer), Layer.provideMerge(NodeCrypto.layer))))
+})
+
 it.effect("does not post a Jira worklog under a profile switched during private reservation", () => {
   let accountId = FAKE_ACCOUNT_ID
+  let accountReads = 0
   return Effect.gen(function*() {
     const reserved = yield* Deferred.make<void>()
     const resume = yield* Deferred.make<void>()
     let stopped = false
+    let accountReadsAtReservation = 0
     const fake = makeFakeHeadless({
       ...baseOptions(),
       get jiraAccountId() {
+        accountReads++
         return accountId
       },
       afterFileWrite: (path) =>
@@ -1277,6 +1557,7 @@ it.effect("does not post a Jira worklog under a profile switched during private 
             saved.includes("\"pending\":[{")
           ) {
             stopped = true
+            accountReadsAtReservation = accountReads
             yield* Deferred.succeed(reserved, undefined)
             yield* Deferred.await(resume)
           }
@@ -1291,6 +1572,7 @@ it.effect("does not post a Jira worklog under a profile switched during private 
       yield* Deferred.succeed(resume, undefined)
       const result = yield* Fiber.join(writer)
       expect(stopped).toBe(true)
+      expect(accountReads).toBeGreaterThan(accountReadsAtReservation)
       if (result._tag === "Written") expect(result.result.jira._tag).not.toBe("Written")
       expect(fake.world.jiraWorklogs).toEqual([])
       expect(fake.world.createdClockifyEntries).toEqual([])
@@ -1305,10 +1587,13 @@ it.effect("does not post a Jira worklog under a profile switched during private 
 
 it.effect("keeps the verified Jira account on a same-identity token rotation", () => {
   let token = "synthetic-token-a"
+  let tokenReads = 0
   let rotated = false
+  let tokenReadsAtReservation = 0
   const fake = makeFakeHeadless({
     ...baseOptions(),
     get jiraAccessToken() {
+      tokenReads++
       return token
     },
     afterFileWrite: (path) =>
@@ -1317,6 +1602,7 @@ it.effect("keeps the verified Jira account on a same-identity token rotation", (
         if (
           !rotated && path.includes("source-consumption") && saved !== undefined && saved.includes("\"pending\":[{")
         ) {
+          tokenReadsAtReservation = tokenReads
           token = "synthetic-token-b"
           rotated = true
         }
@@ -1326,6 +1612,7 @@ it.effect("keeps the verified Jira account on a same-identity token rotation", (
     yield* TestClock.setTime(HISTORICAL_NOW)
     const result = yield* confirm(yield* readJiraOnlyPlan)
     expect(rotated).toBe(true)
+    expect(tokenReads).toBeGreaterThan(tokenReadsAtReservation)
     expect(result._tag).toBe("Written")
     expect(fake.world.jiraWorklogs).toHaveLength(1)
     const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
@@ -2185,6 +2472,49 @@ it.effect("does not reuse an injected Jira ID after replacing the fake world", (
     )
     expect(stored.pending).toEqual([])
     expect(stored.bindings.find((binding) => binding.provider === "jira")?.entryId).toBe("wl-created-1")
+  }).pipe(Effect.provide(fake.layer))
+})
+
+it.effect("does not reuse a per-cloud Jira ID seeded outside the confirmation window", () => {
+  const priorStart = at(9, 0) - 7 * 24 * 60 * 60 * 1000
+  const fake = makeFakeHeadless(baseOptions({
+    jiraWorklogsByCloudId: {
+      "cloud-fake": {
+        [OTHER_TICKET]: [{
+          id: "wl-created-0",
+          author: { accountId: FAKE_ACCOUNT_ID },
+          started: iso(priorStart),
+          timeSpentSeconds: 600
+        }]
+      }
+    }
+  }))
+  return Effect.gen(function*() {
+    yield* TestClock.setTime(HISTORICAL_NOW)
+    const plan = yield* readJiraOnlyPlan
+    const result = yield* confirm(plan)
+    expect(result._tag).toBe("Written")
+    if (result._tag === "Written") {
+      expect(result.result.jira).toMatchObject({ _tag: "Written", seconds: 3900 })
+    }
+    const stored = yield* Schema.decodeUnknownEffect(StoredConsumption)(
+      fake.world.writtenFiles[`${FAKE_HOME}/.jcf/source-consumption.v1.json`]
+    )
+    expect(stored.pending).toEqual([])
+    expect(stored.bindings.find((binding) => binding.provider === "jira")).toMatchObject({
+      entryId: "wl-created-1",
+      seconds: 3900
+    })
+
+    const reconcile = yield* ReconcileService.ReconcileService
+    const rows = yield* reconcile.compare({
+      from: new Date(priorStart - 60_000),
+      to: new Date(at(12, 0) + 60_000)
+    }, { sides: { clockify: false, jira: true } })
+    expect(rows.find((row) => row.ticketKey === OTHER_TICKET)?.jiraSeconds).toBe(600)
+    expect(rows.find((row) => row.ticketKey === TICKET)?.jiraSeconds).toBe(3900)
+    expect((yield* confirm(plan))._tag).toBe("NothingOwed")
+    expect(fake.world.jiraWorklogs).toHaveLength(1)
   }).pipe(Effect.provide(fake.layer))
 })
 

@@ -706,7 +706,9 @@ const runAgentMode = (options: {
               refreshed.sourceScopes ?? {
                 clockify: null,
                 jira: null
-              }
+              },
+              undefined,
+              refreshed.jiraAvailability
             )
             yield* Effect.forEach(writeOutcomeLines(written), (line) => say(`    ${line}`))
             if (!keepGoing(written)) return
@@ -910,6 +912,9 @@ export const reconcile = Command.make(
                 } else if (outcome._tag === "NotLoggedIn") {
                   yield* Console.log(`    ✗ ${NOT_LOGGED_IN_HINT}`)
                   return // no point continuing — every Jira write will fail
+                } else if (outcome._tag === "VerificationUnavailable") {
+                  yield* Console.log(`    ✗ the Jira account could not be verified; refresh before writing`)
+                  return
                 } else {
                   yield* Console.log(`    ✗ ${outcome.message}`)
                 }

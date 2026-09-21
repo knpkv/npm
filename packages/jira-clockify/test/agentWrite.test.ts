@@ -14,7 +14,8 @@ import {
   keepGoing,
   provenanceText,
   type WriteOutcome,
-  writeOutcomeLines
+  writeOutcomeLines,
+  writeStopReason
 } from "../src/cli/agentWrite.js"
 import type { SourceSegment } from "../src/services/ReconcileService.js"
 import type { JiraWorklogOutcome } from "../src/services/TimerService.js"
@@ -89,6 +90,15 @@ describe("keepGoing", () => {
       keepGoing(outcome({ _tag: "Refused", message: "rate limited" }, { _tag: "Refused", message: "no such issue" }))
     )
       .toBe(true)
+  })
+
+  it("stops after a Jira account could not be verified", () => {
+    const refused = outcome(
+      { _tag: "Written", seconds: 60 },
+      { _tag: "Refused", message: "the provider account for this session was not verified; refresh before writing" }
+    )
+    expect(keepGoing(refused)).toBe(false)
+    expect(writeStopReason(refused)).toContain("was not verified")
   })
 })
 
@@ -282,6 +292,39 @@ describe("applyProposal targets", () => {
       expect(jiraMissing.calls).toEqual(["clockify PROJ-1 3600"])
       expect(second.clockify).toMatchObject({ _tag: "Written", seconds: 3600 })
       expect(second.jira).toMatchObject({ _tag: "Refused" })
+    }))
+
+  it.effect("reports unavailable Jira instead of settling a compatibility-covered side", () =>
+    Effect.gen(function*() {
+      const covered: SessionProposal = {
+        ...proposal,
+        jiraDelta: 0,
+        jiraSeconds: 3600,
+        recordedIntervals: [{ source: "jira", startMs: 0, endMs: 3600000 }]
+      }
+      const loggedOut = fakeService()
+      const login = yield* applyProposal(
+        loggedOut.service,
+        covered,
+        "note",
+        { clockify: sourceScopes.clockify, jira: null },
+        { clockify: false, jira: true },
+        "not-logged-in"
+      )
+      expect(loggedOut.calls).toEqual([])
+      expect(login.jira).toEqual({ _tag: "NotLoggedIn" })
+
+      const unverified = fakeService()
+      const refresh = yield* applyProposal(
+        unverified.service,
+        covered,
+        "note",
+        { clockify: sourceScopes.clockify, jira: null },
+        { clockify: false, jira: true },
+        "unverified"
+      )
+      expect(unverified.calls).toEqual([])
+      expect(refresh.jira).toMatchObject({ _tag: "Refused" })
     }))
 
   it.effect("leaves a side alone when it is not asked for, and says so", () =>

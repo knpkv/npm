@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { scheduleRuns } from "../src/agent/schedule.js"
 import { type SessionAttribution, splitCredits } from "../src/agent/sessions.js"
 
 const start = new Date(2026, 8, 7, 10).getTime()
@@ -76,6 +77,56 @@ describe("proposed schedule", () => {
 
     expect(rows.reduce((sum, row) => sum + row.seconds, 0)).toBe(36 * 60)
     expect(rows.every((row) => row.seconds <= row.activeSeconds)).toBe(true)
+  })
+
+  it("keeps overlapping owner allocations jointly feasible inside their source runs", () => {
+    const runs = [
+      { startMs: start, endMs: start + 5 * 60_000, bucketIds: ["A", "B"] },
+      { startMs: start + 5 * 60_000, endMs: start + 20 * 60_000, bucketIds: ["A", "C"] },
+      { startMs: start + 20 * 60_000, endMs: start + 25 * 60_000, bucketIds: ["A", "B", "unplaced"] },
+      { startMs: start + 25 * 60_000, endMs: start + 30 * 60_000, bucketIds: ["B", "unplaced"] }
+    ]
+    const scheduled = scheduleRuns(runs, 15 * 60, (id) => id !== "unplaced")
+    const permuted = scheduleRuns(
+      runs.map((run) => ({ ...run, bucketIds: [...run.bucketIds].reverse() })),
+      15 * 60,
+      (id) => id !== "unplaced"
+    )
+    expect(permuted).toEqual(scheduled)
+    expect(scheduled.reduce((sum, run) => sum + run.endMs - run.startMs, 0)).toBe(30 * 60_000)
+    for (const allocation of scheduled) {
+      if (allocation.bucketIds[0] === "unplaced") continue
+      expect(runs.some((run) =>
+        run.startMs <= allocation.startMs && run.endMs >= allocation.endMs &&
+        run.bucketIds.includes(allocation.bucketIds[0] ?? "")
+      )).toBe(true)
+    }
+
+    const split = splitCredits(
+      [
+        { sessionId: "A", spans: [{ startMs: start, endMs: start + 25 * 60_000 }] },
+        {
+          sessionId: "B",
+          spans: [
+            { startMs: start, endMs: start + 5 * 60_000 },
+            { startMs: start + 20 * 60_000, endMs: start + 30 * 60_000 }
+          ]
+        },
+        { sessionId: "C", spans: [{ startMs: start + 5 * 60_000, endMs: start + 20 * 60_000 }] },
+        { sessionId: "unplaced", spans: [{ startMs: start + 20 * 60_000, endMs: start + 30 * 60_000 }] }
+      ],
+      [
+        { sessionId: "A", ticketKey: "PROJ-A", signal: "branch", confidence: null, belowConfidenceFloor: false },
+        { sessionId: "B", ticketKey: "PROJ-B", signal: "branch", confidence: null, belowConfidenceFloor: false },
+        { sessionId: "C", ticketKey: "PROJ-C", signal: "branch", confidence: null, belowConfidenceFloor: false },
+        { sessionId: "unplaced", ticketKey: null, signal: "none", confidence: null, belowConfidenceFloor: false }
+      ],
+      { dwellSeconds: 15 * 60 }
+    )
+    expect([
+      ...split.attributed.map((row) => row.seconds),
+      ...split.unattributed.map((row) => row.seconds)
+    ].reduce((sum, seconds) => sum + seconds, 0)).toBe(30 * 60)
   })
 
   it("uses whole seconds for allocations so drawn and written durations agree on uneven shares", () => {

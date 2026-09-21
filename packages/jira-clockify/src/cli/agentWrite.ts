@@ -19,7 +19,12 @@ import * as Effect from "effect/Effect"
 import type { SessionProposal } from "../agent/sessions.js"
 import * as SourceConsumption from "../agent/sourceConsumption.js"
 import { MINIMUM_WRITE_SECONDS, type PlannedWrite, prepareProposal, type WriteTargets } from "../agent/writePlanning.js"
-import type { ProviderScopes, ReconcileServiceContract, SourceSegment } from "../services/ReconcileService.js"
+import type {
+  JiraAvailability,
+  ProviderScopes,
+  ReconcileServiceContract,
+  SourceSegment
+} from "../services/ReconcileService.js"
 import { NOT_LOGGED_IN_HINT } from "../utils/hints.js"
 import { formatDuration } from "../utils/time.js"
 
@@ -172,6 +177,27 @@ export interface WriteOutcome {
   readonly jira: SideOutcome
 }
 
+const missingSourceScope = "the provider account for this session was not verified; refresh before writing"
+
+/** Why later rows would repeat the same Jira failure, or `null` when the next row remains useful. */
+export const writeStopReason = (outcome: WriteOutcome): string | null => {
+  const jira = outcome.jira
+  if (
+    jira._tag === "NotLoggedIn" ||
+    (jira._tag === "PartiallyWritten" && jira.failure._tag === "NotLoggedIn")
+  ) {
+    return NOT_LOGGED_IN_HINT
+  }
+  if (jira._tag === "Refused" && jira.message === missingSourceScope) return jira.message
+  if (
+    jira._tag === "PartiallyWritten" && jira.failure._tag === "Refused" &&
+    jira.failure.message === missingSourceScope
+  ) {
+    return jira.failure.message
+  }
+  return null
+}
+
 const sideSeconds = (outcome: SideOutcome): number =>
   outcome._tag === "Written" || outcome._tag === "PartiallyWritten" ? outcome.seconds : 0
 
@@ -184,13 +210,11 @@ export const jiraWritten = (outcome: WriteOutcome): number => sideSeconds(outcom
 /**
  * Whether a run should go on to the next row.
  *
- * False only for an expired Jira session: every remaining Jira write would fail the same way, and
- * twenty rows that all fail is worse than stopping at the first. A Clockify refusal, or a Jira
- * refusal about *this* row, says nothing about the next one.
+ * False for an expired Jira session or an unverified Jira account: every remaining Jira write
+ * would fail the same way, and twenty rows that all fail is worse than stopping at the first. A
+ * Clockify refusal, or a Jira refusal about *this* row, says nothing about the next one.
  */
-export const keepGoing = (outcome: WriteOutcome): boolean =>
-  outcome.jira._tag !== "NotLoggedIn" &&
-  !(outcome.jira._tag === "PartiallyWritten" && outcome.jira.failure._tag === "NotLoggedIn")
+export const keepGoing = (outcome: WriteOutcome): boolean => writeStopReason(outcome) === null
 
 /**
  * One line per side saying what happened, in the words every surface should use.
@@ -232,8 +256,6 @@ export const writeOutcomeLines = (outcome: WriteOutcome): ReadonlyArray<string> 
 const nothingOwed: SideOutcome = { _tag: "NothingOwed" }
 const skipped: SideOutcome = { _tag: "Skipped" }
 const unlinkedOverlap = "an unlinked Clockify entry overlaps this session block; review it before logging time"
-const missingSourceScope = "the provider account for this session was not verified; refresh before writing"
-
 /**
  * Execute concrete per-side amounts and starts without reinterpreting their evidence.
  *
@@ -246,7 +268,8 @@ export const applyPlannedWrite = (
   plan: PlannedWrite,
   description: string,
   sourceRowId?: string,
-  expectedScopes?: ProviderScopes
+  expectedScopes?: ProviderScopes,
+  jiraAvailability: JiraAvailability = "verified"
 ): Effect.Effect<WriteOutcome, never, never> =>
   Effect.gen(function*() {
     const sourceOf = (
@@ -318,21 +341,24 @@ export const applyPlannedWrite = (
       : { _tag: "Refused", message: clockifyFailure ?? "the entry was not created" }
 
     if (!targets.jira) return { clockify, jira: skipped }
+    const unavailableJira: SideOutcome | null = sourceRowId !== undefined && expectedScopes?.jira == null
+      ? jiraAvailability === "not-logged-in"
+        ? { _tag: "NotLoggedIn" }
+        : { _tag: "Refused", message: missingSourceScope }
+      : null
     const withheldJiraSeconds = plan.jira.withheldSeconds ?? 0
     if (plan.jira.seconds <= 0) {
       return {
         clockify,
-        jira: withheldJiraSeconds > 0
+        jira: unavailableJira ?? (withheldJiraSeconds > 0
           ? { _tag: "Refused", message: "the remaining Jira gaps are below its one-minute minimum" }
-          : nothingOwed
+          : nothingOwed)
       }
     }
 
     let jiraWrittenSeconds = 0
     const jiraSegments: Array<WrittenSegment> = []
-    let jiraFailure: SideOutcome | null = sourceRowId !== undefined && expectedScopes?.jira == null
-      ? { _tag: "Refused", message: missingSourceScope }
-      : null
+    let jiraFailure: SideOutcome | null = unavailableJira
     for (const segment of jiraFailure === null ? plan.jira.segments : []) {
       const posted = yield* service.applyToJira(
         plan.ticketKey,
@@ -345,6 +371,8 @@ export const applyPlannedWrite = (
       if (posted._tag !== "Posted") {
         jiraFailure = posted._tag === "NotLoggedIn"
           ? { _tag: "NotLoggedIn" }
+          : posted._tag === "VerificationUnavailable"
+          ? { _tag: "Refused", message: missingSourceScope }
           : { _tag: "Refused", message: posted.message }
         break
       }
@@ -371,7 +399,8 @@ export const applyProposal = (
   proposal: SessionProposal,
   description: string,
   sourceScopes: ProviderScopes,
-  targets: WriteTargets = bothTargets
+  targets: WriteTargets = bothTargets,
+  jiraAvailability: JiraAvailability = "verified"
 ): Effect.Effect<WriteOutcome> => {
   const prepared = prepareProposal({
     evidence: {
@@ -407,7 +436,8 @@ export const applyProposal = (
       },
       description,
       `${proposal.day}:${proposal.ticketKey}`,
-      sourceScopes
+      sourceScopes,
+      jiraAvailability
     )
   }
   const planned = prepared.plan([{
@@ -460,7 +490,8 @@ export const applyProposal = (
       },
       description,
       `${proposal.day}:${proposal.ticketKey}`,
-      sourceScopes
+      sourceScopes,
+      jiraAvailability
     )
   }
   const belowMinimum = planned._tag === "BelowMinimum"
@@ -481,6 +512,7 @@ export const applyProposal = (
     },
     description,
     `${proposal.day}:${proposal.ticketKey}`,
-    sourceScopes
+    sourceScopes,
+    jiraAvailability
   )
 }

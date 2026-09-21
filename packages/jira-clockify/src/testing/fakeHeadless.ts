@@ -39,7 +39,12 @@
 import { NodePath } from "@effect/platform-node"
 import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
-import { JiraApiClient, JiraApiConfig } from "@knpkv/jira-api-client"
+import {
+  JiraApiClient,
+  JiraApiConfig,
+  type JiraApiConfigContract,
+  type JiraApiCredential
+} from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import type * as Cause from "effect/Cause"
 import * as Console from "effect/Console"
@@ -184,6 +189,10 @@ export interface FakeWorld {
   readonly writtenFiles: Record<string, string>
   /** Mutable synthetic auth file, independent of the startup client. */
   clockifyAuth: { baseUrl: string; workspaceId: string; userId: string; apiKey: string }
+  /** Mutable synthetic Jira profile used by the live per-request credential resolver. */
+  jiraAuth: { accessToken: string; accountId: string; cloudId: string; siteUrl: string }
+  /** Jira requests after credential resolution, retained without authorization headers. */
+  readonly jiraRequests: Array<{ readonly method: string; readonly url: string }>
   clockifyVerifiedUserId: string
   clockifyUserReadFailuresRemaining: number
   /** Whether Jira accepts worklogs. Flip it mid-test to model logging back in between two runs. */
@@ -191,6 +200,8 @@ export interface FakeWorld {
   /** Running Clockify timer. Flip it mid-test to model one starting after a retained read. */
   runningTimer: ExistingClockifyEntry | null
   /** Provider reads to fail before returning to normal; tests set this at synchronization hooks. */
+  jiraLoginStateReadFailuresRemaining: number
+  jiraCurrentUserReadFailuresRemaining: number
   jiraWorklogReadFailuresRemaining: number
   jiraSearchFailuresRemaining: number
   /** Issues omitted from JQL search while direct worklog reads remain authoritative. */
@@ -242,6 +253,10 @@ export interface FakeHeadlessOptions {
   readonly transcripts?: Readonly<Record<string, string>> | undefined
   readonly clockifyEntries?: ReadonlyArray<ExistingClockifyEntry> | undefined
   readonly jiraWorklogs?: Readonly<Record<string, ReadonlyArray<ExistingJiraWorklog>>> | undefined
+  /** Separate provider data by synthetic Jira cloud so profile-switch races are observable. */
+  readonly jiraWorklogsByCloudId?:
+    | Readonly<Record<string, Readonly<Record<string, ReadonlyArray<ExistingJiraWorklog>>>>>
+    | undefined
   /** The Coding Agent's answer, or a failure to model one being unavailable. */
   readonly attributor?:
     | ((request: { readonly candidateKeys: ReadonlyArray<string> }) => AttributionChoice | "fail")
@@ -275,6 +290,8 @@ export interface FakeHeadlessOptions {
   readonly jiraCloudId?: string | undefined
   /** Synthetic OAuth credential, readable through a getter to switch it at a reservation boundary. */
   readonly jiraAccessToken?: string | undefined
+  /** Test synchronization immediately before the generated client resolves a live Jira credential. */
+  readonly beforeJiraAuthResolution?: ((world: FakeWorld) => void) | undefined
   /** Omit the account cached in Jira auth while provider reads remain available. */
   readonly jiraCachedUserMissing?: boolean | undefined
   /** Make Jira's current-user endpoint fail while the stored auth session remains present. */
@@ -652,6 +669,10 @@ const captureConsoleLayer = (world: FakeWorld, afterLog?: (line: string, world: 
  * assertions read.
  */
 export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
+  let jiraAccessTokenOverride: string | undefined
+  let jiraAccountIdOverride: string | undefined
+  let jiraCloudIdOverride: string | undefined
+  let jiraSiteUrl = "https://fake.atlassian.net"
   const world: FakeWorld = {
     createdClockifyEntries: [],
     clockifyRequests: [],
@@ -662,6 +683,33 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
       apiKey: "key",
       ...options.clockifyAuth
     },
+    jiraAuth: {
+      get accessToken() {
+        return jiraAccessTokenOverride ?? options.jiraAccessToken ?? "jira-token"
+      },
+      set accessToken(value: string) {
+        jiraAccessTokenOverride = value
+      },
+      get accountId() {
+        return jiraAccountIdOverride ?? options.jiraAccountId ?? FAKE_ACCOUNT_ID
+      },
+      set accountId(value: string) {
+        jiraAccountIdOverride = value
+      },
+      get cloudId() {
+        return jiraCloudIdOverride ?? options.jiraCloudId ?? "cloud-fake"
+      },
+      set cloudId(value: string) {
+        jiraCloudIdOverride = value
+      },
+      get siteUrl() {
+        return jiraSiteUrl
+      },
+      set siteUrl(value: string) {
+        jiraSiteUrl = value
+      }
+    },
+    jiraRequests: [],
     clockifyVerifiedUserId: options.clockifyVerifiedUserId ?? FAKE_USER_ID,
     clockifyUserReadFailuresRemaining: 0,
     jiraWorklogs: [],
@@ -710,6 +758,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
       { ...options.writtenFiles },
     jiraLoggedIn: options.jiraLoggedIn ?? true,
     runningTimer: options.runningTimer ?? null,
+    jiraLoginStateReadFailuresRemaining: 0,
+    jiraCurrentUserReadFailuresRemaining: 0,
     jiraWorklogReadFailuresRemaining: 0,
     jiraSearchFailuresRemaining: 0,
     jiraSearchHiddenIssues: new Set(),
@@ -739,8 +789,20 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   const jiraLedger = new Map<string, Array<ExistingJiraWorklog>>(
     Object.entries(options.jiraWorklogs ?? {}).map(([key, worklogs]) => [key, [...worklogs]])
   )
+  const jiraLedgersByCloudId = new Map(
+    Object.entries(options.jiraWorklogsByCloudId ?? {}).map(([cloudId, issues]) => [
+      cloudId,
+      new Map(Object.entries(issues).map(([key, worklogs]) => [key, [...worklogs]]))
+    ])
+  )
+  const jiraLedgerForUrl = (url: string): Map<string, Array<ExistingJiraWorklog>> => {
+    const cloudId = url.match(/\/ex\/jira\/([^/]+)\//u)?.[1]
+    return cloudId === undefined ? jiraLedger : jiraLedgersByCloudId.get(decodeURIComponent(cloudId)) ?? jiraLedger
+  }
   const issuedJiraIds = new Set(
-    [...jiraLedger.values()].flatMap((entries) => entries.flatMap((entry) => entry.id === undefined ? [] : [entry.id]))
+    [jiraLedger, ...jiraLedgersByCloudId.values()].flatMap((ledger) =>
+      [...ledger.values()].flatMap((entries) => entries.flatMap((entry) => entry.id === undefined ? [] : [entry.id]))
+    )
   )
   const runningEntry = () => world.runningTimer === null ? null : makeTimeEntry(world.runningTimer, "running-1")
 
@@ -878,6 +940,10 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     HttpClient.HttpClient,
     HttpClient.make((request) =>
       Effect.sync(() => {
+        const requestJiraLedger = jiraLedgerForUrl(request.url)
+        if (request.url.includes("atlassian")) {
+          world.jiraRequests.push({ method: request.method, url: request.url })
+        }
         if (request.url.includes("/v1/user") && request.method === "GET") {
           world.clockifyRequests.push({ method: request.method, url: request.url })
           if (options.clockifyUserReadFails === true) {
@@ -942,7 +1008,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
         if (exactWorklog !== null) {
           const issueKey = exactWorklog[1] ?? ""
           const id = exactWorklog[2] ?? ""
-          const entries = jiraLedger.get(issueKey) ?? []
+          const entries = requestJiraLedger.get(issueKey) ?? []
           const index = entries.findIndex((entry, index) => (entry.id ?? `wl-${index}`) === id)
           const entry = entries[index]
           if (entry === undefined) return jsonResponse(request, 404, { errorMessages: ["Worklog not found"] })
@@ -978,7 +1044,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const started = payload.started ?? ""
           const timeSpentSeconds = payload.timeSpentSeconds ?? 0
           world.jiraWorklogs.push({ issueKey, started, timeSpentSeconds, comment: commentText(payload.comment) })
-          jiraLedger.set(issueKey, [...(jiraLedger.get(issueKey) ?? []), {
+          requestJiraLedger.set(issueKey, [...(requestJiraLedger.get(issueKey) ?? []), {
             id: entryId,
             started,
             timeSpentSeconds,
@@ -1004,7 +1070,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const startedAfter = numberParam("startedAfter")
           const startedBefore = numberParam("startedBefore")
           const startAt = numberParam("startAt") ?? 0
-          const entries = (jiraLedger.get(worklogMatch[1] ?? "") ?? []).filter((worklog) => {
+          const entries = (requestJiraLedger.get(worklogMatch[1] ?? "") ?? []).filter((worklog) => {
             const startedMs = new Date(worklog.started).getTime()
             return (startedAfter === undefined || startedMs >= startedAfter) &&
               (startedBefore === undefined || startedMs < startedBefore)
@@ -1062,11 +1128,12 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           })
         }
         if (request.url.includes("/myself")) {
-          if (options.jiraCurrentUserFails === true) {
+          if (options.jiraCurrentUserFails === true || world.jiraCurrentUserReadFailuresRemaining > 0) {
+            if (world.jiraCurrentUserReadFailuresRemaining > 0) world.jiraCurrentUserReadFailuresRemaining--
             return jsonResponse(request, 500, { errorMessages: ["Current user unavailable"] })
           }
           return jsonResponse(request, 200, {
-            accountId: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
+            accountId: world.jiraAuth.accountId,
             displayName: "Fake User"
           })
         }
@@ -1105,7 +1172,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           }
           return jsonResponse(request, 200, {
             ...(options.jiraSearchClaimsMoreWithoutToken === true && { isLast: false }),
-            issues: [...jiraLedger.keys()]
+            issues: [...requestJiraLedger.keys()]
               .filter((key) => !world.jiraSearchHiddenIssues.has(key))
               .map((key, index) => ({ id: String(index), key }))
           })
@@ -1212,13 +1279,13 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     isConfigured: () => Effect.succeed(loggedIn()),
     login: () => Effect.void,
     logout: () => Effect.void,
-    getAccessToken: () => Effect.succeed(Redacted.make(loggedIn() ? options.jiraAccessToken ?? "jira-token" : "")),
-    getCloudId: () => Effect.succeed(options.jiraCloudId ?? "cloud-fake"),
-    getSiteUrl: () => Effect.succeed("https://fake.atlassian.net"),
+    getAccessToken: () => Effect.succeed(Redacted.make(loggedIn() ? world.jiraAuth.accessToken : "")),
+    getCloudId: () => Effect.succeed(world.jiraAuth.cloudId),
+    getSiteUrl: () => Effect.succeed(world.jiraAuth.siteUrl),
     getCurrentUser: () =>
       Effect.succeed(
-        options.jiraCachedUserMissing === true ? null : {
-          account_id: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
+        !loggedIn() || options.jiraCachedUserMissing === true ? null : {
+          account_id: world.jiraAuth.accountId,
           name: "Fake User",
           email: "fake@example.com"
         }
@@ -1230,14 +1297,14 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             id: "synthetic-profile",
             name: "Synthetic",
             token: {
-              access_token: options.jiraAccessToken ?? "jira-token",
+              access_token: world.jiraAuth.accessToken,
               refresh_token: "synthetic-refresh",
               expires_at: 4_102_444_800_000,
               scope: "write:jira-work",
-              cloud_id: options.jiraCloudId ?? "cloud-fake",
-              site_url: "https://fake.atlassian.net",
+              cloud_id: world.jiraAuth.cloudId,
+              site_url: world.jiraAuth.siteUrl,
               user: {
-                account_id: options.jiraAccountId ?? FAKE_ACCOUNT_ID,
+                account_id: world.jiraAuth.accountId,
                 name: "Fake User",
                 email: "fake@example.com"
               }
@@ -1250,7 +1317,19 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     listProfiles: () => Effect.succeed([]),
     switchProfile: () => Effect.succeed(null),
     removeProfile: () => Effect.succeed(null),
-    isLoggedIn: () => Effect.succeed(loggedIn())
+    isLoggedIn: () => {
+      if (world.jiraLoginStateReadFailuresRemaining === 0) return Effect.succeed(loggedIn())
+      world.jiraLoginStateReadFailuresRemaining--
+      return Effect.fail(
+        systemError({
+          _tag: "PermissionDenied",
+          module: "FileSystem",
+          method: "readFileString",
+          description: "synthetic Jira login state read failure",
+          pathOrDescriptor: `${FAKE_HOME}/.jira/config.json`
+        })
+      )
+    }
   })
   const StateWriterLayer = Layer.succeed(StateWriter, {
     write: () => Effect.void,
@@ -1268,10 +1347,25 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
   })
 
   const ClockifyLayer = Layer.succeed(ClockifyApiClient, clockify)
-  const JiraConfigLayer = Layer.succeed(JiraApiConfig, {
-    baseUrl: "https://fake.atlassian.net",
-    auth: { type: "basic", email: "fake@example.com", apiToken: Redacted.make("token") }
+  const resolvedJiraCredential = (): JiraApiCredential => ({
+    type: "oauth2",
+    accessToken: Redacted.make(world.jiraAuth.accessToken),
+    cloudId: world.jiraAuth.cloudId
   })
+  const jiraConfig: JiraApiConfigContract = options.beforeJiraAuthResolution === undefined
+    ? {
+      baseUrl: "https://fake.atlassian.net",
+      auth: { type: "basic", email: "fake@example.com", apiToken: Redacted.make("token") }
+    }
+    : {
+      baseUrl: "",
+      auth: resolvedJiraCredential(),
+      resolveAuth: Effect.sync(() => {
+        options.beforeJiraAuthResolution?.(world)
+        return resolvedJiraCredential()
+      })
+    }
+  const JiraConfigLayer = Layer.succeed(JiraApiConfig, jiraConfig)
   const FileSystemLayer = fakeFileSystemLayer(
     world.transcripts,
     world.transcriptReads,

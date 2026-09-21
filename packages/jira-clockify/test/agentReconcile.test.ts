@@ -1492,6 +1492,65 @@ describe("jcf sync reconcile --agent: proposals", () => {
       expect(world.jiraWorklogs).toEqual([])
       expect(output(world.stdout)).toContain("jcf auth jira login")
     }))
+
+  it.effect("stops with a refresh remedy when Jira is logged in but cannot be verified", () =>
+    Effect.gen(function*() {
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            ...branchSession(),
+            "work-other/s2.jsonl": transcript({
+              sessionId: "s2",
+              cwd: `${WORK_ROOT}/other`,
+              gitBranch: "feat/PROJ-9-x",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 14, 0), 20)
+            })
+          },
+          jiraCurrentUserFails: true,
+          keep: [true, true]
+        })
+      )
+      const printed = output(world.stdout)
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toEqual([])
+      expect(printed).toContain("provider account for this session was not verified")
+      expect(printed).not.toContain("jcf auth jira login")
+    }))
+
+  it.effect("stops later rows when Jira verification fails after the first Clockify write", () =>
+    Effect.gen(function*() {
+      let armed = false
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            ...branchSession(),
+            "work-other/s2.jsonl": transcript({
+              sessionId: "s2",
+              cwd: `${WORK_ROOT}/other`,
+              gitBranch: "feat/PROJ-9-x",
+              events: steady(at(DAY.year, DAY.month, DAY.day, 14, 0), 20)
+            })
+          },
+          keep: [true, true],
+          afterConsoleLog: (line, current) => {
+            if (armed || !line.includes("PROJ-5662") || current.describeRequests.length === 0) return
+            armed = true
+            current.jiraCurrentUserReadFailuresRemaining = 1
+          }
+        })
+      )
+
+      const printed = output(world.stdout)
+      expect(armed).toBe(true)
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.createdClockifyEntries[0]?.description).toContain("PROJ-5662")
+      expect(world.jiraWorklogs).toEqual([])
+      expect(world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
+      expect(printed).toContain("provider account for this session was not verified")
+      expect(printed).not.toContain("jcf auth jira login")
+    }))
 })
 
 // ---------------------------------------------------------------------------

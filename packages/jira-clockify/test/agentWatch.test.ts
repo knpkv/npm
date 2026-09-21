@@ -412,6 +412,83 @@ describe("jcf watch claude", () => {
       expect(world.jiraWorklogs).toHaveLength(1)
     }))
 
+  it.effect("pins every Jira tally page to one verified profile across an A-B-A switch", () =>
+    Effect.gen(function*() {
+      const profileA = {
+        accessToken: "jira-token-a",
+        accountId: FAKE_ACCOUNT_ID,
+        cloudId: "cloud-a",
+        siteUrl: "https://a.example.invalid"
+      }
+      const profileB = {
+        accessToken: "jira-token-b",
+        accountId: "acct-b",
+        cloudId: "cloud-b",
+        siteUrl: "https://b.example.invalid"
+      }
+      const restoreA = (current: ReturnType<typeof makeFakeHeadless>["world"]) => {
+        Object.assign(current.jiraAuth, { ...profileA, accessToken: "jira-token-a-rotated" })
+      }
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: branchWork({
+          jiraAccessToken: profileA.accessToken,
+          jiraAccountId: profileA.accountId,
+          jiraCloudId: profileA.cloudId,
+          clockifyEntries: [{
+            description: "[PROJ-1] already recorded",
+            start: iso(at(10, 1)),
+            end: iso(at(10, 16))
+          }],
+          jiraWorklogsByCloudId: {
+            [profileA.cloudId]: {
+              "PROJ-1": [
+                { id: "wl-a-1", started: iso(at(10, 1)), timeSpentSeconds: 450 },
+                { id: "wl-a-2", started: iso(at(10, 8) + 30_000), timeSpentSeconds: 450 }
+              ]
+            },
+            [profileB.cloudId]: {}
+          },
+          jiraWorklogPageSize: 1,
+          beforeJiraAuthResolution: (current) => {
+            Object.assign(current.jiraAuth, profileB)
+          },
+          beforeDescribe: restoreA,
+          afterConsoleLog: (line, current) => {
+            if (line.includes("PROJ-1")) restoreA(current)
+          }
+        })
+      })
+      yield* advance(Duration.minutes(30))
+      yield* Fiber.interrupt(fiber)
+
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+      const searches = world.jiraRequests.filter((request) => request.url.includes("/search/jql"))
+      const worklogPages = world.jiraRequests.filter((request) => request.url.includes("/worklog"))
+      expect(searches.every((request) => request.url.includes("/cloud-a/"))).toBe(true)
+      expect(worklogPages.length).toBeGreaterThanOrEqual(4)
+      expect(worklogPages.length % 2).toBe(0)
+      expect(worklogPages.every((request) => request.url.includes("/cloud-a/"))).toBe(true)
+    }))
+
+  it.effect("keeps the same Jira account valid across a token rotation", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: branchWork({
+          beforeDescribe: (current) => {
+            current.jiraAuth.accessToken = "jira-token-rotated"
+          }
+        })
+      })
+      yield* advance(Duration.minutes(30))
+      yield* Fiber.interrupt(fiber)
+
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toHaveLength(1)
+    }))
+
   for (
     const policy of [
       { label: "assigned ownership", config: { sessionOwnership: "assigned" }, writes: false },
@@ -597,13 +674,80 @@ describe("jcf watch claude", () => {
       expect(world.jiraWorklogs).toEqual([])
       const printed = output(world.stdout)
       expect(printed).toContain("Stopped:")
-      // The real command is nested under `auth jira`; the watch used to print one that does not exist.
       expect(printed).toContain("jcf auth jira login")
       // The Clockify half landed and the Jira half did not, and the summary has to say exactly
       // that. For a command whose whole purpose is making sure hours are not lost, overstating what
       // was written is the wrong direction to be wrong in.
       expect(world.createdClockifyEntries).toHaveLength(1)
       expect(printed).toContain("Wrote 1 block(s): Clockify 15m 0s, Jira 0s")
+    }))
+
+  it.effect("stops with a refresh remedy when Jira verification is unavailable", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: branchWork({ jiraCurrentUserFails: true })
+      })
+      yield* advance(Duration.minutes(30))
+      const exit = yield* Fiber.join(fiber)
+
+      expect(exit._tag).toBe("Success")
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.jiraWorklogs).toEqual([])
+      const printed = output(world.stdout)
+      expect(printed).toContain("Stopped:")
+      expect(printed).toContain("provider account for this session was not verified")
+      expect(printed).not.toContain("jcf auth jira login")
+    }))
+
+  it.effect("stops later rows when the late Jira login-state read fails", () =>
+    Effect.gen(function*() {
+      let armed = false
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: branchWork({
+          transcripts: {
+            "work/session-a.jsonl": transcript({
+              sessionId: "session-a",
+              cwd: `${WORK_ROOT}/repo-a`,
+              gitBranch: "feature/PROJ-1",
+              from: at(10, 1),
+              minutes: 10,
+              text: "Finish the first synthetic change"
+            }),
+            "work/session-b.jsonl": transcript({
+              sessionId: "session-b",
+              cwd: `${WORK_ROOT}/repo-b`,
+              gitBranch: "feature/PROJ-2",
+              from: at(10, 1),
+              minutes: 10,
+              text: "Finish the second synthetic change"
+            })
+          },
+          issueSummaries: {
+            "PROJ-1": "First synthetic change",
+            "PROJ-2": "Second synthetic change"
+          },
+          afterConsoleLog: (line, current) => {
+            if (armed || !line.includes("PROJ-1") || current.describeRequests.length === 0) return
+            armed = true
+            current.jiraLoginStateReadFailuresRemaining = 1
+          }
+        })
+      })
+      yield* advance(Duration.minutes(30))
+      const completed = fiber.pollUnsafe()
+      yield* Fiber.interrupt(fiber)
+
+      const printed = output(world.stdout)
+      expect(completed?._tag).toBe("Success")
+      expect(armed).toBe(true)
+      expect(world.createdClockifyEntries).toHaveLength(1)
+      expect(world.createdClockifyEntries[0]?.description).toContain("PROJ-1")
+      expect(world.jiraWorklogs).toEqual([])
+      expect(world.jiraRequests.filter((request) => request.method === "POST")).toEqual([])
+      expect(printed).toContain("provider account for this session was not verified")
+      expect(printed).not.toContain("jcf auth jira login")
     }))
 
   // The Jira half landed and the Clockify half did not. Both numbers have to say so independently:

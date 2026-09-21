@@ -82,6 +82,12 @@ export interface ProviderScopes {
   readonly jira: string | null
 }
 
+/** Server-private reason Jira cannot currently authorize source-backed writes. */
+export type JiraAvailability = "verified" | "not-logged-in" | "unverified"
+
+/** A durable source write can be refused before Jira is called when its account cannot be verified. */
+export type JiraWriteOutcome = JiraWorklogOutcome | { readonly _tag: "VerificationUnavailable" }
+
 // ---------------------------------------------------------------------------
 // Domain
 // ---------------------------------------------------------------------------
@@ -291,6 +297,8 @@ export interface SessionProposalReport {
   readonly sourceEntries?: ReadonlyArray<SourceConsumption.ResolvedEntry> | undefined
   /** Provider identities used by this read, held only on the server. */
   readonly sourceScopes?: ProviderScopes | undefined
+  /** Jira write authority for this read. Compatibility totals never upgrade this value. */
+  readonly jiraAvailability?: JiraAvailability | undefined
   /** Which systems this run read. A side that is out reports zero because it was never asked. */
   readonly sides: ReconcileSides
   /** Attributed below the confidence floor — reported, never offered. */
@@ -318,6 +326,24 @@ export interface SessionProposalReport {
    */
   readonly digests: ReadonlyMap<string, string>
 }
+
+/**
+ * Provider totals that may size a write. Compatibility Jira rows remain visible, but cannot settle
+ * an executable gap until the same credential and account have been verified.
+ *
+ * @internal
+ */
+export const recordedForExecution = (
+  recorded: ReadonlyArray<ReconcileRow>,
+  jiraAvailability: JiraAvailability | undefined
+): ReadonlyArray<ReconcileRow> =>
+  jiraAvailability === undefined || jiraAvailability === "verified"
+    ? recorded
+    : recorded.map((row) => ({
+      ...row,
+      jiraSeconds: 0,
+      intervals: row.intervals.filter((interval) => interval.source !== "jira" && interval.entry?.source !== "jira")
+    }))
 
 export interface RefreshRecordedOptions {
   /** Jira issues that must be read directly even when its eventually consistent JQL omits them. */
@@ -356,7 +382,7 @@ export interface ReconcileServiceContract {
     comment?: string,
     startedAt?: Date,
     source?: SourceSegment
-  ) => Effect.Effect<JiraWorklogOutcome>
+  ) => Effect.Effect<JiraWriteOutcome>
   /**
    * Create a closed Clockify entry of `seconds` for `(ticketKey, day)`. Resolves true on success.
    *
@@ -643,6 +669,19 @@ export const layer = Layer.effect(
       readonly legacyScope: string
     }
 
+    interface JiraWriteSnapshot {
+      readonly client: ReturnType<typeof makeJiraApi>
+      readonly ledgerScope: string
+      readonly heldScope: string
+      readonly accountId: string
+      readonly cloudId: string
+      readonly siteUrl: string
+    }
+
+    type JiraWriteState =
+      | { readonly availability: "verified"; readonly snapshot: JiraWriteSnapshot }
+      | { readonly availability: "not-logged-in" | "unverified"; readonly snapshot: null }
+
     /** One decoded credential and endpoint back every Clockify read and write in this operation. */
     const clockifyWriteSnapshot: Effect.Effect<ClockifyWriteSnapshot, ReconcileError> = Effect.gen(function*() {
       const auth = yield* getAuth
@@ -672,28 +711,44 @@ export const layer = Layer.effect(
     })
 
     /** Bind verification and worklog POST to one OAuth credential and selected site. */
-    const jiraWriteSnapshot = Effect.gen(function*() {
-      const token = yield* jiraAuth.getAccessToken().pipe(Effect.orElseSucceed(() => null))
-      const profile = yield* jiraAuth.getActiveProfile().pipe(Effect.orElseSucceed(() => null))
+    const jiraWriteState: Effect.Effect<JiraWriteState> = Effect.gen(function*() {
+      const login = yield* Effect.result(jiraAuth.isLoggedIn())
+      if (login._tag === "Failure") return { availability: "unverified", snapshot: null }
+      if (!login.success) return { availability: "not-logged-in", snapshot: null }
+      const tokenResult = yield* Effect.result(jiraAuth.getAccessToken())
+      const profileResult = yield* Effect.result(jiraAuth.getActiveProfile())
+      if (tokenResult._tag === "Failure" || profileResult._tag === "Failure") {
+        return { availability: "unverified", snapshot: null }
+      }
+      const token = tokenResult.success
+      const profile = profileResult.success
       if (
-        token === null || profile === null || profile.token.cloud_id === "" || profile.token.site_url === "" ||
+        profile === null || profile.token.cloud_id === "" || profile.token.site_url === "" ||
         profile.token.access_token !== Redacted.value(token)
-      ) return null
+      ) return { availability: "unverified", snapshot: null }
       const client = makeJiraApi(httpClient, {
         baseUrl: "",
         auth: { type: "oauth2", accessToken: token, cloudId: profile.token.cloud_id }
       })
       const live = yield* client.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
-      if (live?.accountId === undefined || live.accountId === "") return null
+      if (live?.accountId === undefined || live.accountId === "") {
+        return { availability: "unverified", snapshot: null }
+      }
       return {
-        client,
-        ledgerScope: JSON.stringify([profile.token.cloud_id, live.accountId]),
-        heldScope: JSON.stringify([profile.token.cloud_id, profile.token.site_url, live.accountId]),
-        accountId: live.accountId,
-        cloudId: profile.token.cloud_id,
-        siteUrl: profile.token.site_url
+        availability: "verified",
+        snapshot: {
+          client,
+          ledgerScope: JSON.stringify([profile.token.cloud_id, live.accountId]),
+          heldScope: JSON.stringify([profile.token.cloud_id, profile.token.site_url, live.accountId]),
+          accountId: live.accountId,
+          cloudId: profile.token.cloud_id,
+          siteUrl: profile.token.site_url
+        }
       }
     })
+    const jiraWriteSnapshot: Effect.Effect<JiraWriteSnapshot | null> = jiraWriteState.pipe(
+      Effect.map((state) => state.snapshot)
+    )
 
     /**
      * How many entries to ask Clockify for at a time, and how many pages to accept.
@@ -795,6 +850,7 @@ export const layer = Layer.effect(
 
     /** Read every Jira page before treating an absent provider ID as deletion evidence. */
     const readJiraWorklogs = Effect.fn("ReconcileService.readJiraWorklogs")(function*(
+      client: ReturnType<typeof makeJiraApi>,
       issueKey: string,
       startedAfter: number,
       startedBefore: number
@@ -804,7 +860,7 @@ export const layer = Layer.effect(
       let nextStartAt = 0
       let expectedTotal: number | undefined
       for (;;) {
-        const page = yield* jira.getIssueWorklog(issueKey, {
+        const page = yield* client.getIssueWorklog(issueKey, {
           params: { startAt: nextStartAt, startedAfter, startedBefore }
         }).pipe(
           Effect.mapError((cause) =>
@@ -847,12 +903,26 @@ export const layer = Layer.effect(
     })
 
     // Tally the current user's Jira worklogs in the period by (ticket, day).
-    const jiraTally = (period: ReconcilePeriod, requiredIssueKeys: ReadonlyArray<string> = []) =>
+    const jiraTally = (
+      period: ReconcilePeriod,
+      requiredIssueKeys: ReadonlyArray<string> = [],
+      pinned: JiraWriteSnapshot | null | undefined = undefined
+    ) =>
       Effect.gen(function*() {
-        const user = yield* jiraAuth.getCurrentUser().pipe(
+        // A verified snapshot pins the account, site and credential-backed client for every page.
+        // Falling back is only for a side without a usable write credential; that side cannot be
+        // written because its source scope remains null, but independent providers may still proceed.
+        const snapshot = pinned === undefined ? yield* jiraWriteSnapshot : pinned
+        const client = snapshot?.client ?? jira
+        const cachedAccountId = (yield* jiraAuth.getCurrentUser().pipe(
           Effect.mapError((cause) => new ReconcileError({ message: "Could not read the Jira account", cause }))
-        )
-        const accountId = user?.account_id
+        ))?.account_id
+        if (snapshot !== null && snapshot !== undefined && cachedAccountId !== snapshot.accountId) {
+          return yield* new ReconcileError({
+            message: "The cached Jira account does not match the verified credential"
+          })
+        }
+        const accountId = snapshot?.accountId ?? cachedAccountId
         if (accountId === undefined || accountId === "") {
           return yield* new ReconcileError({
             message: "Jira account identity is unavailable; recorded time cannot be tallied"
@@ -877,7 +947,7 @@ export const layer = Layer.effect(
         // already holds. A window of more than a hundred distinct issues is an ordinary week.
         const jql = `worklogAuthor = currentUser() AND worklogDate >= "${fromDay}" AND worklogDate <= "${toDay}"`
         const searchPage = (pageToken: string | undefined) =>
-          jira.searchIssuesUsingJql({
+          client.searchIssuesUsingJql({
             params: {
               jql,
               maxResults: 100,
@@ -946,7 +1016,7 @@ export const layer = Layer.effect(
         }> = []
 
         for (const issueKey of issueKeys) {
-          const worklogs = yield* readJiraWorklogs(issueKey, lookupFromMs - 1, toMs)
+          const worklogs = yield* readJiraWorklogs(client, issueKey, lookupFromMs - 1, toMs)
 
           for (const wl of worklogs) {
             // Only this user's worklogs (the JQL narrows issues, not individual worklog authors).
@@ -994,6 +1064,9 @@ export const layer = Layer.effect(
         readonly sides?: ReconcileSides | undefined
         readonly jiraIssueKeys?: ReadonlyArray<string> | undefined
         readonly clockifySnapshot?: ClockifyWriteSnapshot | undefined
+        readonly jiraSnapshot?: JiraWriteSnapshot | null | undefined
+        /** Keep an unavailable Jira side read-only while independently verified providers proceed. */
+        readonly tolerateUnavailableJira?: boolean | undefined
       }
     ) =>
       Effect.gen(function*() {
@@ -1001,12 +1074,17 @@ export const layer = Layer.effect(
         // A side that is out is not called at all. That is the point of the option for someone who
         // tracks in one system: no Clockify workspace to configure, no Jira login to keep alive, and
         // no request whose failure could stop a run that never needed it.
+        const jiraSideRead = sides.jira
+          ? jiraTally(period, options?.jiraIssueKeys, options?.jiraSnapshot)
+          : Effect.succeed([])
         const [clockifySide, jiraSide] = yield* Effect.all(
           [
             sides.clockify
               ? clockifyTally(period, options?.clockifySnapshot)
               : Effect.succeed({ tally: [], unlinked: [] }),
-            sides.jira ? jiraTally(period, options?.jiraIssueKeys) : Effect.succeed([])
+            options?.tolerateUnavailableJira === true
+              ? jiraSideRead.pipe(Effect.catch(() => Effect.succeed([])))
+              : jiraSideRead
           ],
           { concurrency: 2 }
         )
@@ -1036,9 +1114,10 @@ export const layer = Layer.effect(
       comment?: string,
       startedAt?: Date,
       source?: SourceSegment
-    ): Effect.Effect<JiraWorklogOutcome> =>
+    ): Effect.Effect<JiraWriteOutcome> =>
       Effect.gen(function*() {
-        const snapshot = source === undefined ? null : yield* jiraWriteSnapshot
+        const state = source === undefined ? undefined : yield* jiraWriteState
+        const snapshot = state?.snapshot ?? null
         const identity: SourceIdentity | undefined = source === undefined || snapshot === null ? undefined : {
           rowId: source.rowId,
           sourceStartMs: source.sourceStartMs,
@@ -1050,10 +1129,9 @@ export const layer = Layer.effect(
           scope: snapshot.ledgerScope
         }
         if (source !== undefined && identity === undefined) {
-          const loggedIn = yield* jiraAuth.isLoggedIn().pipe(Effect.orElseSucceed(() => false))
-          return loggedIn
-            ? { _tag: "Failed", message: "Could not identify the Jira account for a durable source write" }
-            : { _tag: "NotLoggedIn" }
+          return state?.availability === "not-logged-in"
+            ? { _tag: "NotLoggedIn" }
+            : { _tag: "VerificationUnavailable" }
         }
         if (source?.expectedScope !== undefined && snapshot?.heldScope !== source.expectedScope) {
           return { _tag: "Failed", message: "The Jira account changed since this plan was read" }
@@ -1426,41 +1504,22 @@ export const layer = Layer.effect(
         )
       }
       const clockifyScope = clockifySnapshot?.scope ?? null
-      const jiraSnapshot = sides.jira ? yield* jiraWriteSnapshot : null
-      // A missing write credential does not erase a readable Jira side: an independent Clockify
-      // write may still succeed. Jira posting itself requires the verified snapshot above.
-      const readableJira = sides.jira && jiraSnapshot === null
-        ? yield* Effect.gen(function*() {
-          const account = yield* jiraAuth.getCurrentUser().pipe(Effect.orElseSucceed(() => null))
-          const live = yield* jira.getCurrentUser({}).pipe(Effect.orElseSucceed(() => null))
-          const cloud = yield* jiraAuth.getCloudId().pipe(Effect.orElseSucceed(() => ""))
-          const site = yield* jiraAuth.getSiteUrl().pipe(Effect.orElseSucceed(() => ""))
-          if (
-            account === null || account.account_id === "" || live?.accountId !== account.account_id ||
-            cloud === "" || site === ""
-          ) return null
-          return {
-            ledgerScope: JSON.stringify([cloud, account.account_id]),
-            heldScope: JSON.stringify([cloud, site, account.account_id])
-          }
-        })
-        : null
-      const jiraScope = jiraSnapshot?.ledgerScope ?? readableJira?.ledgerScope ?? null
-      const jiraHeldScope = jiraSnapshot?.heldScope ?? readableJira?.heldScope ?? null
+      const jiraState = sides.jira ? yield* jiraWriteState : undefined
+      const jiraSnapshot = jiraState?.snapshot ?? null
+      // Compatibility reads may still render Jira totals, but only one verified snapshot may grant
+      // durable source authority. Independent Clockify work remains executable while Jira is held.
+      const jiraScope = jiraSnapshot?.ledgerScope ?? null
+      const jiraHeldScope = jiraSnapshot?.heldScope ?? null
       const sourceScopes: ProviderScopes = { clockify: clockifyScope, jira: jiraHeldScope }
       if (
         previous.sourceScopes !== undefined &&
         ((sides.clockify && previous.sourceScopes.clockify !== null &&
+          clockifyScope !== null &&
           previous.sourceScopes.clockify !== clockifyScope) ||
-          (sides.jira && previous.sourceScopes.jira !== null && previous.sourceScopes.jira !== jiraHeldScope))
+          (sides.jira && previous.sourceScopes.jira !== null && jiraHeldScope !== null &&
+            previous.sourceScopes.jira !== jiraHeldScope))
       ) {
         return yield* new ReconcileError({ message: "The provider account changed since this plan was read" })
-      }
-      if (
-        previous.attributed.length > 0 && sides.jira && jiraScope === null &&
-        stored.bindings.some((binding) => binding.provider === "jira")
-      ) {
-        return yield* new ReconcileError({ message: "Cannot verify the Jira account for private source consumption" })
       }
       const scoped = stored.bindings.filter((binding) =>
         binding.provider === "clockify" ? binding.scope === clockifyScope : binding.scope === jiraScope
@@ -1481,7 +1540,13 @@ export const layer = Layer.effect(
         ])
       ]
       const [{ recorded, unlinkedClockify }, excludedDays] = yield* Effect.all([
-        readRecorded(period, { sides, jiraIssueKeys, clockifySnapshot: clockifySnapshot ?? undefined }),
+        readRecorded(period, {
+          sides,
+          jiraIssueKeys,
+          clockifySnapshot: clockifySnapshot ?? undefined,
+          jiraSnapshot,
+          tolerateUnavailableJira: jiraState?.availability !== "verified"
+        }),
         clockifySnapshot === null ? Effect.succeed([]) : runningTimerExclusions(period, clockifySnapshot)
       ], { concurrency: 2 })
       if (
@@ -1575,13 +1640,14 @@ export const layer = Layer.effect(
       )
       if (
         previous.attributed.length > 0 &&
-        entries.some((entry) =>
-          entry.description !== null && SourceConsumption.markers(entry.description).length > 0 &&
-          !verifiedLedger.bindings.some((binding) =>
-            binding.provider === entry.source && binding.entryId === entry.id &&
-            binding.scope === (entry.source === "clockify" ? clockifyScope : jiraScope)
-          )
-        )
+        entries.some((entry) => {
+          const scope = entry.source === "clockify" ? clockifyScope : jiraScope
+          return scope !== null && entry.description !== null &&
+            SourceConsumption.markers(entry.description).length > 0 &&
+            !verifiedLedger.bindings.some((binding) =>
+              binding.provider === entry.source && binding.entryId === entry.id && binding.scope === scope
+            )
+        })
       ) {
         return yield* new ReconcileError({
           message: "An unlinked source marker needs private manual review before session writes"
@@ -1602,9 +1668,10 @@ export const layer = Layer.effect(
           endMs: entry.endMs
         }]
       })
+      const executableRecorded = recordedForExecution(recorded, jiraState?.availability)
       return {
         ...previous,
-        proposals: buildSessionProposals(previous.attributed, recorded, {
+        proposals: buildSessionProposals(previous.attributed, executableRecorded, {
           minimumSeconds: MINIMUM_PROPOSAL_SECONDS,
           excludedDays: excludedDays.map((excluded) => excluded.day),
           sides,
@@ -1618,6 +1685,7 @@ export const layer = Layer.effect(
         unlinkedClockify,
         sourceEntries,
         sourceScopes,
+        jiraAvailability: jiraState?.availability,
         excludedDays
       }
     })

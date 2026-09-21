@@ -100,7 +100,11 @@ export const scheduleRuns = (
     const placementOrder = rankedOwners.map(([id]) => id).sort((a, b) =>
       (lastActiveMs.get(a) ?? 0) - (lastActiveMs.get(b) ?? 0)
     )
-    const gaps: Array<{ readonly startMs: number; readonly endMs: number }> = []
+    const gaps: Array<{
+      readonly startMs: number
+      readonly endMs: number
+      readonly bucketIds: ReadonlyArray<string>
+    }> = []
     for (const run of cluster) {
       const runMs = run.endMs - run.startMs
       for (const id of run.bucketIds) futureActiveMs.set(id, (futureActiveMs.get(id) ?? 0) - runMs)
@@ -123,10 +127,9 @@ export const scheduleRuns = (
         remainingMs.set(id, (remainingMs.get(id) ?? 0) - placedMs)
         cursor += placedMs
       }
-      if (cursor < run.endMs) gaps.push({ startMs: cursor, endMs: run.endMs })
-    }
-    if ([...remainingMs.values()].some((milliseconds) => milliseconds > 0)) {
-      throw new ScheduleAllocationError({ message: "Attribution cannot fit inside its source activity" })
+      if (cursor < run.endMs) {
+        gaps.push({ startMs: cursor, endMs: run.endMs, bucketIds: run.bucketIds })
+      }
     }
     let gapIndex = 0
     let gapCursor = gaps[0]?.startMs ?? last.endMs
@@ -155,6 +158,27 @@ export const scheduleRuns = (
       }
       offset += seconds
     }
+    let residualMs = [...remainingMs.values()].reduce((sum, milliseconds) => sum + milliseconds, 0)
+    for (let index = gapIndex; index < gaps.length && residualMs > 0; index++) {
+      const gap = gaps[index]
+      if (gap === undefined) continue
+      if (residualMs <= 0) break
+      const recipient = rankedOwners.find(([id]) => gap.bucketIds.includes(id))?.[0]
+      if (recipient === undefined) continue
+      const startMs = index === gapIndex ? gapCursor : gap.startMs
+      const placedMs = Math.min(residualMs, gap.endMs - startMs)
+      result.push({
+        bucketIds: [recipient],
+        startMs,
+        endMs: startMs + placedMs,
+        sourceStartMs: first.startMs,
+        settlementEndMs
+      })
+      residualMs -= placedMs
+    }
+    if (residualMs > 0) {
+      throw new ScheduleAllocationError({ message: "Attribution cannot fit inside its source activity" })
+    }
     cluster = []
   }
   for (const run of runs) {
@@ -174,5 +198,5 @@ export const scheduleRuns = (
     } else cluster.push(run)
   }
   flush()
-  return result
+  return result.sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
 }

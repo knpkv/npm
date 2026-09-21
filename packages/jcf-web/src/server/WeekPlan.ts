@@ -110,11 +110,12 @@ export const reconcileConsumption = (
         "clockify"
       )
       const ordinaryJira = SourceConsumption.recordedSecondsInBlock(block, recorded?.intervals ?? [], "jira")
+      const jiraVerified = report.jiraAvailability === undefined || report.jiraAvailability === "verified"
       const value = {
         clockify: report.sides.clockify
           ? Math.min(block.seconds, marked.clockify + ordinaryClockify)
           : old.clockify,
-        jira: report.sides.jira
+        jira: report.sides.jira && jiraVerified
           ? Math.min(block.seconds, marked.jira + ordinaryJira)
           : old.jira
       }

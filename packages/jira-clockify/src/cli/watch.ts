@@ -20,9 +20,9 @@
  *
  * - The interval is how often it *looks*, not how quickly a block is written. A block is written on
  *   the first tick after it settles, so the lag is up to one interval past the settle deadline.
- * - Jira refusing the login stops the watch rather than retrying. Every later write would fail the
- *   same way, and a watch that logs to Clockify alone for six hours quietly recreates the
- *   discrepancy the tool exists to close.
+ * - Jira refusing the login or lacking a verified provider account stops the watch rather than
+ *   retrying. Every later write would fail the same way, and a watch that logs to Clockify alone
+ *   for six hours quietly recreates the discrepancy the tool exists to close.
  *
  * @module
  */
@@ -43,7 +43,8 @@ import {
   jiraWritten,
   keepGoing,
   proposalTargets,
-  writeOutcomeLines
+  writeOutcomeLines,
+  writeStopReason
 } from "./agentWrite.js"
 import { fetchTicketByKey } from "./fetchTicket.js"
 import * as WatchLease from "./watchLease.js"
@@ -437,7 +438,9 @@ export const runWatch = (options: {
             refreshed.sourceScopes ?? {
               clockify: null,
               jira: null
-            }
+            },
+            undefined,
+            refreshed.jiraAvailability
           )
           yield* Effect.forEach(writeOutcomeLines(written), (line) => Console.log(`    ${line}`))
           const clockifySeconds = clockifyWritten(written)
@@ -455,7 +458,7 @@ export const runWatch = (options: {
             commitCursor(unwrittenStarts())
             return {
               _tag: "Stop",
-              reason: "Jira rejected the login. Run `jcf auth jira login`, then start the watch again."
+              reason: writeStopReason(written) ?? "Jira refused every remaining write."
             }
           }
         }

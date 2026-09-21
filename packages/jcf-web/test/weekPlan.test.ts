@@ -198,6 +198,47 @@ describe("evidenceBlockKey", () => {
     const consumption = reconcileConsumption(report({ attributed: [credit], recorded: [corrected] }))
     expect(consumption.get(evidenceBlockKey(sourceRow, block))).toEqual({ clockify: 1800, jira: 1800 })
   })
+
+  it("retains held Jira consumption while its compatibility tally is unverified", () => {
+    const sourceRow = rowId("PROJ-1", "2025-06-16")
+    const block = { startMs: at(16, 10), endMs: at(16, 11) + 300_000, seconds: 3900 }
+    const credit: AgentSessions.TicketDayCredit = {
+      activeSeconds: 3900,
+      blocks: [block],
+      confidence: null,
+      day: "2025-06-16",
+      seconds: 3900,
+      sessionIds: ["s1"],
+      settlementEndMs: block.endMs,
+      signal: "branch",
+      sourceStartMs: block.startMs,
+      ticketKey: "PROJ-1"
+    }
+    const key = evidenceBlockKey(sourceRow, block)
+    const previous = new Map([[key, { clockify: 900, jira: 1800 }]])
+    const compatibility = recorded({
+      clockifySeconds: 1200,
+      day: "2025-06-16",
+      intervals: [
+        { source: "clockify", startMs: block.startMs, endMs: block.startMs + 1200_000 },
+        { source: "jira", startMs: block.startMs, endMs: block.endMs }
+      ],
+      jiraSeconds: 3900,
+      ticketKey: "PROJ-1"
+    })
+
+    const consumption = reconcileConsumption(
+      report({
+        attributed: [credit],
+        jiraAvailability: "unverified",
+        recorded: [compatibility],
+        sourceScopes: { clockify: "clockify-scope", jira: null }
+      }),
+      previous
+    )
+
+    expect(consumption.get(key)).toEqual({ clockify: 1200, jira: 1800 })
+  })
 })
 
 describe("buildWeekPlan", () => {
