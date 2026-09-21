@@ -67,6 +67,31 @@ const runWindowsTrailingWith = (result: FakeCommandResult) =>
     "C:/"
   )
 
+const runUncWith = (result: FakeCommandResult) =>
+  runPackContractCommand(
+    ChildProcessSpawner.make(() => Effect.succeed(fakeHandle(result))),
+    "pack @test/windows unc first",
+    "pnpm",
+    [
+      "--output",
+      "\\\\ArchiveHost\\Artifacts\\[output]\\",
+      "--extended",
+      "\\\\?\\C:\\fixture",
+      "--device",
+      "\\\\.\\pipe\\fixture"
+    ],
+    "\\\\ServerName\\ShareName\\Private.Path[fixture]\\"
+  )
+
+const runUncRootWith = (result: FakeCommandResult) =>
+  runPackContractCommand(
+    ChildProcessSpawner.make(() => Effect.succeed(fakeHandle(result))),
+    "pack @test/windows unc root first",
+    "pnpm",
+    ["--output", "\\\\ArgumentServer\\ArgumentShare\\"],
+    "\\\\RootServer\\RootShare\\"
+  )
+
 const privatePath = "/private/workspace/customer-fixture"
 const privateCredential = "fixture-user:fixture-password"
 const longPrivateSentinel = `fixture-private-${"z".repeat(2_000)}`
@@ -224,6 +249,74 @@ describe("pack contract command diagnostics", () => {
       expect(rendered).toContain("root <path>/Users/[fixture]/Work/file.ts")
       expect(rendered).not.toContain("c:/Users/[fixture]")
       expect(rendered).not.toContain("d:\\sensitive.path\\[OUTPUT]")
+    }))
+
+  it.effect("sanitizes conventional UNC private paths across case and separator variants", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(runUncWith({
+        exitCode: 23,
+        stderr: [
+          "cwd //servername/sharename/private.path[FIXTURE]/diagnostics.txt",
+          "argument \\\\ARCHIVEHOST\\ARTIFACTS\\[OUTPUT]\\archive.tgz",
+          "exact \\\\ServerName\\ShareName\\Private.Path[fixture]"
+        ].join("\n"),
+        stdout: [
+          "quoted \"//SERVERNAME/SHARENAME/PRIVATE.PATH[fixture]\", refused",
+          "whitespace \\\\servername\\sharename\\private.path[FIXTURE] refused",
+          "argument //archivehost/artifacts/[OUTPUT]/stdout.tgz",
+          "different server //other/sharename/private.path[fixture]/kept.txt",
+          "different share //servername/other/private.path[fixture]/kept.txt",
+          "sibling //servername/sharename/private.path[fixture]-old/kept.txt",
+          "extension //servername/sharename/private.path[fixture].bak/kept.txt",
+          "embedded prefix//servername/sharename/private.path[fixture]/kept.txt",
+          "extended \\\\?\\C:\\fixture",
+          "device \\\\.\\pipe\\fixture",
+          "unrelated argument //archivehost/other/[output]/kept.tgz"
+        ].join("\n")
+      }))
+      const rendered = Cause.pretty(Cause.fail(error))
+
+      expect(rendered).toContain("quoted \"<path>\", refused")
+      expect(rendered).toContain("whitespace <path> refused")
+      expect(rendered).toContain("cwd <path>/diagnostics.txt")
+      expect(rendered).toContain("argument <path>\\archive.tgz")
+      expect(rendered).toContain("argument <path>/stdout.tgz")
+      expect(rendered).toContain("exact <path>")
+      expect(rendered).toContain("different server //other/sharename/private.path[fixture]/kept.txt")
+      expect(rendered).toContain("different share //servername/other/private.path[fixture]/kept.txt")
+      expect(rendered).toContain("sibling //servername/sharename/private.path[fixture]-old/kept.txt")
+      expect(rendered).toContain("extension //servername/sharename/private.path[fixture].bak/kept.txt")
+      expect(rendered).toContain("embedded prefix//servername/sharename/private.path[fixture]/kept.txt")
+      expect(rendered).toContain("extended \\\\?\\C:\\fixture")
+      expect(rendered).toContain("device \\\\.\\pipe\\fixture")
+      expect(rendered).toContain("unrelated argument //archivehost/other/[output]/kept.tgz")
+      expect(rendered).not.toContain("//servername/sharename/private.path[FIXTURE]")
+      expect(rendered).not.toContain("\\\\ARCHIVEHOST\\ARTIFACTS\\[OUTPUT]")
+    }))
+
+  it.effect("preserves UNC share-root meaning when configured paths have trailing separators", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(runUncRootWith({
+        exitCode: 29,
+        stderr: [
+          "argument \\\\ARGUMENTSERVER\\ARGUMENTSHARE\\archive.tgz",
+          "other share //argumentserver/other/archive.tgz"
+        ].join("\n"),
+        stdout: [
+          "cwd //rootserver/rootshare/fixture/file.ts",
+          "root \\\\ROOTSERVER\\ROOTSHARE",
+          "different server //other/rootshare/fixture/file.ts"
+        ].join("\n")
+      }))
+      const rendered = Cause.pretty(Cause.fail(error))
+
+      expect(rendered).toContain("cwd <path>/fixture/file.ts")
+      expect(rendered).toContain("root <path>")
+      expect(rendered).toContain("argument <path>\\archive.tgz")
+      expect(rendered).toContain("other share //argumentserver/other/archive.tgz")
+      expect(rendered).toContain("different server //other/rootshare/fixture/file.ts")
+      expect(rendered).not.toContain("//rootserver/rootshare")
+      expect(rendered).not.toContain("\\\\ARGUMENTSERVER\\ARGUMENTSHARE")
     }))
 
   it.effect("returns successful stdout unchanged", () =>

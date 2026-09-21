@@ -16,17 +16,24 @@ const diagnosticLimit = 1_024
 const ansiEscape = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g")
 const credentialUrl = /(https?:\/\/)[^/\s:@]+:[^@\s/]+@/gi
 const windowsDrivePath = /^[A-Za-z]:[\\/]/
+const windowsUncPath = /^[\\/]{2}(?![?.](?:[\\/]|$))[^\\/]+[\\/]+[^\\/]+(?:[\\/]|$)/
 const windowsDiagnosticTerminator = String.raw`(?:\s|["':,;!?)}\]])`
 
-const absolutePathArgument = (value: string): boolean => value.startsWith("/") || windowsDrivePath.test(value)
+const absolutePathArgument = (value: string): boolean =>
+  value.startsWith("/") || windowsDrivePath.test(value) || windowsUncPath.test(value)
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
-/** Redact only the known drive path, accepting Windows-equivalent case and separators at component boundaries. */
+/** Redact only the known Windows path, accepting equivalent case and separators at component boundaries. */
 const redactPrivateValue = (output: string, privateValue: string): string => {
-  if (!windowsDrivePath.test(privateValue)) return output.replaceAll(privateValue, "<path>")
+  const isDrivePath = windowsDrivePath.test(privateValue)
+  const isUncPath = windowsUncPath.test(privateValue)
+  if (!isDrivePath && !isUncPath) return output.replaceAll(privateValue, "<path>")
   const normalizedPath = privateValue.replace(/[\\/]+$/, "")
-  const pattern = normalizedPath.split(/[\\/]+/).map(escapeRegExp).join("[\\\\/]+")
+  const components = (isUncPath ? normalizedPath.slice(2) : normalizedPath)
+    .split(/[\\/]+/)
+    .map(escapeRegExp)
+  const pattern = `${isUncPath ? "[\\\\/]{2}" : ""}${components.join("[\\\\/]+")}`
   const rightBoundary = `(?=$|[\\\\/]|${windowsDiagnosticTerminator})`
   return output.replace(new RegExp(`(^|[^A-Za-z0-9._-])${pattern}${rightBoundary}`, "gi"), "$1<path>")
 }
