@@ -24,6 +24,7 @@ import {
   confirmProposal,
   type ConfirmRequest,
   logManualEntry,
+  type ManualRequest,
   type WriteCapableService
 } from "../src/server/Confirm.js"
 import { buildWeekPlan, type HeldPlan, rowId } from "../src/server/WeekPlan.js"
@@ -2299,6 +2300,88 @@ describe("overruling a row", () => {
 })
 
 describe("logging time by hand", () => {
+  const manualAt = (nowMs: number, changes: Partial<ManualRequest> = {}) =>
+    Effect.gen(function*() {
+      yield* TestClock.setTime(nowMs)
+      const reconcile = yield* ReconcileService.ReconcileService
+      return yield* logManualEntry({
+        request: {
+          day: DAY,
+          note: undefined,
+          seconds: 1800,
+          startClock: "10:00",
+          targets: { clockify: true, jira: true },
+          ticketKey: OTHER_TICKET,
+          ...changes
+        },
+        service: reconcile,
+        summaryOf: noSummary
+      })
+    })
+
+  it.effect("refuses a manual interval whose end has not happened", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(Effect.flip(manualAt(at(10, 15))), {})
+      expect(value.message).toContain("future")
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  it.effect("refuses a future day and a later clock time before either provider write", () =>
+    Effect.gen(function*() {
+      const cases: ReadonlyArray<readonly [number, Partial<ManualRequest>]> = [
+        [HISTORICAL_NOW, { day: "2026-07-09" }],
+        [at(9, 0), {}]
+      ]
+      for (const [nowMs, changes] of cases) {
+        const { value, world } = yield* run(Effect.flip(manualAt(nowMs, changes)), {})
+        expect(value.message).toContain("future")
+        expect(world.createdClockifyEntries).toEqual([])
+        expect(world.jiraWorklogs).toEqual([])
+      }
+    }))
+
+  it.effect("refuses the implicit local-noon start before noon", () =>
+    Effect.gen(function*() {
+      const { value, world } = yield* run(
+        Effect.flip(manualAt(at(11, 59), { seconds: 60, startClock: undefined })),
+        {}
+      )
+      expect(value.message).toContain("future")
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.jiraWorklogs).toEqual([])
+    }))
+
+  it.effect("allows an interval ending exactly now and a completed earlier interval", () =>
+    Effect.gen(function*() {
+      for (const nowMs of [at(10, 30), at(11, 0)]) {
+        const { value, world } = yield* run(manualAt(nowMs), {})
+        expect(value.clockify).toEqual({ _tag: "Written", seconds: 1800 })
+        expect(value.jira).toEqual({ _tag: "Written", seconds: 1800 })
+        expect(world.createdClockifyEntries[0]).toMatchObject({
+          start: iso(at(10, 0)),
+          end: iso(at(10, 30))
+        })
+        expect(new Date(world.jiraWorklogs[0]?.started ?? "").getTime()).toBe(at(10, 0))
+        expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(1800)
+      }
+    }))
+
+  it.effect("uses elapsed seconds across a local daylight-saving change", () =>
+    Effect.gen(function*() {
+      const start = new Date(2026, 2, 29, 1, 30, 0, 0)
+      const endMs = start.getTime() + 3600_000
+      const { value, world } = yield* run(
+        manualAt(endMs, { day: "2026-03-29", startClock: "01:30", seconds: 3600 }),
+        {}
+      )
+      expect(value.clockify).toEqual({ _tag: "Written", seconds: 3600 })
+      expect(value.jira).toEqual({ _tag: "Written", seconds: 3600 })
+      expect(world.createdClockifyEntries[0]).toMatchObject({ start: iso(start.getTime()), end: iso(endMs) })
+      expect(new Date(world.jiraWorklogs[0]?.started ?? "").getTime()).toBe(start.getTime())
+      expect(world.jiraWorklogs[0]?.timeSpentSeconds).toBe(3600)
+    }))
+
   const manual = Effect.gen(function*() {
     const reconcile = yield* ReconcileService.ReconcileService
     return yield* logManualEntry({

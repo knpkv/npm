@@ -8,6 +8,13 @@ export default defineConfig({
   forbidOnly: true,
   use: {
     baseURL: "http://127.0.0.1:4179",
+    storageState: {
+      cookies: [],
+      origins: [{
+        origin: "http://127.0.0.1:4179",
+        localStorage: [{ name: "jcf_web_week", value: "2026-09-07" }]
+      }]
+    },
     viewport: { width: 1440, height: 1000 },
     reducedMotion: "reduce",
     screenshot: "only-on-failure"

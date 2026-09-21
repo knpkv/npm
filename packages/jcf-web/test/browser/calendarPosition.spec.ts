@@ -26,6 +26,7 @@ for (const viewport of [{ width: 1440, height: 1000 }, { width: 1440, height: 16
     const response = await page.request.post("/__test/reset")
     const setup = Schema.decodeUnknownSync(Schema.Struct({ url: Schema.String }))(await response.json())
     await page.goto(setup.url)
+    await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Refresh totals", exact: true })).toBeEnabled()
     const confirmation = hold()
     const refresh = hold()

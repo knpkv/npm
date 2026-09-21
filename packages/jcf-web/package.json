@@ -13,9 +13,16 @@
   "publishConfig": {
     "access": "public",
     "main": "dist/index.js",
+    "types": "dist/index.d.ts",
     "exports": {
-      ".": "./dist/index.js",
-      "./*.js": "./dist/*.js"
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./*.js": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      }
     }
   },
   "files": [
@@ -28,7 +35,8 @@
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
+    "test:pack": "tsx scripts/test-packed-package.ts",
+    "lint": "eslint \"{scripts,src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
     "test:browser": "pnpm --filter '@knpkv/jcf-web^...' --sort run build && vite build && playwright test"
   },
   "dependencies": {

@@ -647,6 +647,15 @@ test("Jira, Clockify and suggestions are separate layers with provider totals", 
   expect(reads).toBe(0)
 })
 
+// A person's saved week wins over the test fixture's default without changing navigation.
+test("a saved week overrides the browser fixture's initial week", async ({ page }) => {
+  await page.context().addInitScript(() => window.localStorage.setItem("jcf_web_week", "2026-09-14"))
+  await bootstrap(page)
+  await expect(page.getByRole("heading", { name: "14–20 September 2026" })).toBeVisible()
+  await page.getByRole("button", { name: "Previous week", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "7–13 September 2026" })).toBeVisible()
+})
+
 // A browser reload must restore the held evidence, never enter the expensive session route.
 test("reload restores the selected week and refreshes totals without scanning sessions", async ({ page }) => {
   await open(page)

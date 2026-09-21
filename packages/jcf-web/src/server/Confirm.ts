@@ -16,9 +16,9 @@
  * @module
  */
 import { AgentWrite, ReconcileService, SourceConsumption, Time } from "@knpkv/jira-clockify"
-import { Effect } from "effect"
+import { Clock, Effect } from "effect"
 import { MINIMUM_WRITE_SECONDS, prepareProposal } from "../shared/writePlanning.js"
-import type { WriteResultResponse } from "./Api.js"
+import { ProposalRejectedError, type WriteResultResponse } from "./Api.js"
 import { evidenceBlockKey, evidenceMarker, type HeldPlan, reconcileConsumption } from "./WeekPlan.js"
 import { planSides } from "./WeekPlan.js"
 
@@ -243,17 +243,29 @@ export const logManualEntry = (options: {
   readonly service: Pick<WriteCapableService, "applyToClockify" | "applyToJira">
   readonly request: ManualRequest
   readonly summaryOf: (ticketKey: string) => Effect.Effect<string | null>
-}): Effect.Effect<WriteResultResponse> =>
+}): Effect.Effect<WriteResultResponse, ProposalRejectedError> =>
   Effect.gen(function*() {
     const { request } = options
+    const startedAt = new Date(`${request.day}T${request.startClock ?? "12:00"}:00`)
+    const startMs = startedAt.getTime()
+    if (
+      !Number.isFinite(startMs) || Time.localDay(startedAt) !== request.day ||
+      (request.startClock !== undefined && Time.formatClock(startedAt) !== request.startClock)
+    ) {
+      return yield* new ProposalRejectedError({ message: "That local start time does not exist on the chosen day" })
+    }
+    const nowMs = yield* Clock.currentTimeMillis
+    if (startMs > nowMs) {
+      return yield* new ProposalRejectedError({ message: "Start time is in the future" })
+    }
+    if (startMs + request.seconds * 1000 > nowMs) {
+      return yield* new ProposalRejectedError({ message: "End time is in the future" })
+    }
     const description = AgentWrite.entryDescription({
       note: request.note ?? null,
       provenance: AgentWrite.byHand,
       summary: request.targets.jira ? yield* options.summaryOf(request.ticketKey) : null
     })
-    const startedAt = request.startClock === undefined
-      ? undefined
-      : new Date(`${request.day}T${request.startClock}:00`)
 
     const clockify: AgentWrite.SideOutcome = !request.targets.clockify
       ? { _tag: "Skipped" }
