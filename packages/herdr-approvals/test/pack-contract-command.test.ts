@@ -49,6 +49,24 @@ const runWith = (result: FakeCommandResult) =>
     "/private/workspace"
   )
 
+const runWindowsWith = (result: FakeCommandResult) =>
+  runPackContractCommand(
+    ChildProcessSpawner.make(() => Effect.succeed(fakeHandle(result))),
+    "pack @test/windows first",
+    "pnpm",
+    ["--output", "D:/Sensitive.Path/[output]"],
+    "C:\\Users\\[fixture]\\Work"
+  )
+
+const runWindowsTrailingWith = (result: FakeCommandResult) =>
+  runPackContractCommand(
+    ChildProcessSpawner.make(() => Effect.succeed(fakeHandle(result))),
+    "pack @test/windows trailing first",
+    "pnpm",
+    ["--output", "D:/Sensitive.Path/[output]/"],
+    "C:/"
+  )
+
 const privatePath = "/private/workspace/customer-fixture"
 const privateCredential = "fixture-user:fixture-password"
 const longPrivateSentinel = `fixture-private-${"z".repeat(2_000)}`
@@ -151,6 +169,61 @@ describe("pack contract command diagnostics", () => {
       expect(error.reason).toContain("<truncated ")
       expect(error.reason).not.toContain(privateCredential)
       expect(error.reason).not.toContain(escape)
+    }))
+
+  it.effect("sanitizes drive-qualified private paths across case and separator variants", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(runWindowsWith({
+        exitCode: 17,
+        stdout: [
+          "quoted \"c:/users/[FIXTURE]/work\", retry refused",
+          "whitespace C:\\USERS\\[fixture]\\WORK retry refused",
+          "punctuation C:/Users/[fixture]/Work: access denied"
+        ].join("\n"),
+        stderr: [
+          "cwd c:/users/[FIXTURE]/work\\diagnostics.txt",
+          "output d:\\sensitive.path\\[OUTPUT]/archive.tgz",
+          "newline C:/Users/[fixture]/Work",
+          "retry refused",
+          "sibling C:\\Users\\[fixture]\\Work-old\\kept.txt",
+          "extension C:\\Users\\[fixture]\\Work.bak\\kept.txt",
+          "embedded prefixC:\\Users\\[fixture]\\Work\\kept.txt",
+          "other E:\\Users\\[fixture]\\Work\\kept.txt",
+          "posix /PRIVATE/workspace/kept.txt",
+          "exact C:/Users/[fixture]/Work"
+        ].join("\n")
+      }))
+      const rendered = Cause.pretty(Cause.fail(error))
+
+      expect(rendered).toContain("quoted \"<path>\", retry refused")
+      expect(rendered).toContain("whitespace <path> retry refused")
+      expect(rendered).toContain("punctuation <path>: access denied")
+      expect(rendered).toContain("cwd <path>\\diagnostics.txt")
+      expect(rendered).toContain("output <path>/archive.tgz")
+      expect(rendered).toContain("newline <path>\nretry refused")
+      expect(rendered).toContain("sibling C:\\Users\\[fixture]\\Work-old\\kept.txt")
+      expect(rendered).toContain("extension C:\\Users\\[fixture]\\Work.bak\\kept.txt")
+      expect(rendered).toContain("embedded prefixC:\\Users\\[fixture]\\Work\\kept.txt")
+      expect(rendered).toContain("other E:\\Users\\[fixture]\\Work\\kept.txt")
+      expect(rendered).toContain("posix /PRIVATE/workspace/kept.txt")
+      expect(rendered).toContain("exact <path>")
+      expect(rendered).not.toContain("c:/users/[FIXTURE]/work")
+      expect(rendered).not.toContain("d:\\sensitive.path\\[OUTPUT]")
+    }))
+
+  it.effect("sanitizes descendants of drive roots and directories configured with trailing separators", () =>
+    Effect.gen(function*() {
+      const error = yield* Effect.flip(runWindowsTrailingWith({
+        exitCode: 19,
+        stderr: "root c:/Users/[fixture]/Work/file.ts",
+        stdout: "directory d:\\sensitive.path\\[OUTPUT]\\archive.tgz"
+      }))
+      const rendered = Cause.pretty(Cause.fail(error))
+
+      expect(rendered).toContain("directory <path>\\archive.tgz")
+      expect(rendered).toContain("root <path>/Users/[fixture]/Work/file.ts")
+      expect(rendered).not.toContain("c:/Users/[fixture]")
+      expect(rendered).not.toContain("d:\\sensitive.path\\[OUTPUT]")
     }))
 
   it.effect("returns successful stdout unchanged", () =>

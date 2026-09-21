@@ -14,7 +14,7 @@
     "build": "tsc -b tsconfig.build.json && pnpm --recursive --sort --filter \"./packages/**/*\" run build",
     "audit": "pnpm audit --prod && pnpm audit --dev",
     "test": "vitest --configLoader native && pnpm test:pack",
-    "test:pack": "pnpm --recursive --filter \"./packages/**/*\" --if-present run test:pack",
+    "test:pack": "pnpm --workspace-concurrency=1 --recursive --filter \"./packages/**/*\" --if-present run test:pack",
     "test:browser": "pnpm --workspace-concurrency=1 --recursive --filter \"./packages/**/*\" --if-present run test:browser",
     "coverage": "vitest --configLoader native --coverage",
     "check": "tsc -p tsconfig.json --noEmit && pnpm build && pnpm --recursive --filter \"./packages/**/*\" run check",
