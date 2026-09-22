@@ -1214,12 +1214,12 @@
         "additionalProperties": false,
         "properties": {
           "expand": {
-            "description": "Use [expand](#expansion) to include additional information about issues in the response. Note that, unlike the majority of instances where `expand` is specified, `expand` is defined as a list of values. The expand options are:\n\n *  `renderedFields` Returns field values rendered in HTML format.\n *  `names` Returns the display name of each field.\n *  `schema` Returns the schema describing a field type.\n *  `transitions` Returns all possible transitions for the issue.\n *  `operations` Returns all possible operations for the issue.\n *  `editmeta` Returns information about how each field can be edited.\n *  `changelog` Returns a list of recent updates to an issue, sorted by date, starting from the most recent. This returns a maximum of 40 changelogs. If you require more, please refer to [Bulk fetch changelogs](#api-rest-api-3-changelog-bulkfetch-post).\n *  `versionedRepresentations` Instead of `fields`, returns `versionedRepresentations` a JSON array containing each version of a field's value, with the highest numbered item representing the most recent version.",
+            "description": "Use [expand](#expansion) to include additional information about issues in the response. Note that, unlike the majority of instances where `expand` is specified, `expand` is defined as a list of values. The expand options are:\n\n *  `renderedFields` Returns field values rendered in HTML format.\n *  `names` Returns the display name of each field.\n *  `schema` Returns the schema describing a field type.\n *  `transitions` Returns all possible transitions for the issue.\n *  `operations` Returns all possible operations for the issue.\n *  `editmeta` Returns information about how each field can be edited.\n *  `changelog` Returns a list of recent updates to an issue, sorted by date, starting from the most recent. This returns a maximum of 40 changelogs. If you require more, please refer to [Bulk fetch changelogs](#api-rest-api-3-changelog-bulkfetch-post).\n *  `versionedRepresentations` Instead of `fields`, returns `versionedRepresentations` a JSON array containing each version of a field's value, with the highest numbered item representing the most recent version.\n\nTo request up to 1000 issues in a single call, do not include `changelog`, `editmeta`, `operations`, `renderedFields`, `transitions`, or `versionedRepresentations` in `expand`. Requests that include any of these can include at most 100 issues; larger requests are rejected with a 400 error.",
             "items": { "type": "string" },
             "type": "array"
           },
           "fields": {
-            "description": "A list of fields to return for each issue, use it to retrieve a subset of fields. This parameter accepts a comma-separated list. Expand options include:\n\n *  `*all` Returns all fields.\n *  `*navigable` Returns navigable fields.\n *  Any issue field, prefixed with a minus to exclude.\n\nThe default is `*navigable`.\n\nExamples:\n\n *  `summary,comment` Returns the summary and comments fields only.\n *  `-description` Returns all navigable (default) fields except description.\n *  `*all,-comment` Returns all fields except comments.\n\nMultiple `fields` parameters can be included in a request.\n\nNote: All navigable fields are returned by default. This differs from [GET issue](#api-rest-api-3-issue-issueIdOrKey-get) where the default is all fields.",
+            "description": "A list of fields to return for each issue, use it to retrieve a subset of fields. This parameter accepts a comma-separated list. Expand options include:\n\n *  `*all` Returns all fields.\n *  `*navigable` Returns navigable fields.\n *  Any issue field, prefixed with a minus to exclude.\n\nThe default is `*navigable`.\n\nExamples:\n\n *  `summary,comment` Returns the summary and comments fields only.\n *  `-description` Returns all navigable (default) fields except description.\n *  `*all,-comment` Returns all fields except comments.\n\nMultiple `fields` parameters can be included in a request.\n\nNote: All navigable fields are returned by default. This differs from [GET issue](#api-rest-api-3-issue-issueIdOrKey-get) where the default is all fields.\n\nTo request up to 1000 issues in a single call, explicitly list the fields you need: at least one field must be a positive include (a request containing only exclusions is not eligible), the `*all` and `*navigable` wildcards and the default navigable field set are not eligible for the higher limit, no more than 100 fields may be listed, and none of the included fields returns multiple values (for example `comment`, `worklog`, or `attachment`). Requests that do not meet these conditions can include at most 100 issues; larger requests are rejected with a 400 error.",
             "items": { "type": "string" },
             "type": "array"
           },
@@ -1228,7 +1228,7 @@
             "type": "boolean"
           },
           "issueIdsOrKeys": {
-            "description": "An array of issue IDs or issue keys to fetch. You can mix issue IDs and keys in the same query.",
+            "description": "An array of issue IDs or issue keys to fetch. You can mix issue IDs and keys in the same query. You can request up to 100 issues per call. Requests can include up to 1000 issues per call when they meet all of the conditions described for the `fields` and `expand` parameters. Requests that exceed the applicable limit are rejected with a 400 error.",
             "items": { "type": "string" },
             "type": "array"
           },
@@ -2784,7 +2784,7 @@
           },
           "projectTypeKey": {
             "description": "The [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes), which defines the application-specific feature set. If you don't specify the project template you have to specify the project type.",
-            "enum": ["software", "service_desk", "business"],
+            "enum": ["software", "service_desk", "business", "customer_service"],
             "type": "string"
           },
           "url": {
@@ -5330,6 +5330,57 @@
         "required": ["moduleId", "projectList"],
         "type": "object"
       },
+      "ForgePanelProjectPinStatus": {
+        "additionalProperties": false,
+        "description": "The pin status of an issue panel (added by a Forge app) for a single project.",
+        "properties": {
+          "error": {
+            "description": "The reason the pin status could not be read for the project. Null if the pin status was read successfully.",
+            "type": "string"
+          },
+          "pinned": { "description": "Whether the issue panel is currently pinned to the project.", "type": "boolean" },
+          "pinnedAt": {
+            "description": "The time the issue panel was pinned to the project, in epoch milliseconds.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "projectIdOrKey": { "description": "The project ID or key supplied in the request.", "type": "string" }
+        },
+        "type": "object"
+      },
+      "ForgePanelProjectPinStatusRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "moduleId": {
+            "description": "The moduleId of the Forge panel in the format `ari:cloud:ecosystem::extension/{app-id}/{environment-id}/static/{module-key}`",
+            "type": "string"
+          },
+          "projectList": {
+            "description": "The IDs or keys of the projects to check the issue panel pin status for.",
+            "items": {
+              "description": "The IDs or keys of the projects to check the issue panel pin status for.",
+              "type": "string"
+            },
+            "maxItems": 1000,
+            "minItems": 0,
+            "type": "array"
+          }
+        },
+        "required": ["moduleId", "projectList"],
+        "type": "object"
+      },
+      "ForgePanelProjectPinStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "moduleId": { "description": "The moduleId of the Forge panel that was requested.", "type": "string" },
+          "statuses": {
+            "description": "The pin status of the issue panel, with one entry per requested project.",
+            "items": { "$ref": "#/components/schemas/ForgePanelProjectPinStatus" },
+            "type": "array"
+          }
+        },
+        "type": "object"
+      },
       "FoundGroup": {
         "additionalProperties": false,
         "description": "A group found in a search.",
@@ -6585,6 +6636,14 @@
       "IssueLimitReportResponseBean": {
         "additionalProperties": false,
         "properties": {
+          "entitiesBreachingLimit": {
+            "additionalProperties": {
+              "additionalProperties": { "items": { "format": "int64", "type": "integer" }, "type": "array" },
+              "type": "object"
+            },
+            "description": "For each field, the ids of the individual entities breaching the limit, grouped by the id or key of the issue they belong to. Fields that hold a single value, such as description and environment, map to an empty list because the issue itself identifies the breaching content",
+            "type": "object"
+          },
           "issuesApproachingLimit": {
             "additionalProperties": {
               "additionalProperties": { "format": "int64", "type": "integer" },
@@ -7535,14 +7594,14 @@
         "description": "List of issues and JQL queries.",
         "properties": {
           "issueIds": {
-            "description": "A list of issue IDs.",
-            "items": { "description": "A list of issue IDs.", "format": "int64", "type": "integer" },
+            "description": "A list of up to 50 issue IDs.",
+            "items": { "description": "A list of up to 50 issue IDs.", "format": "int64", "type": "integer" },
             "type": "array",
             "uniqueItems": true
           },
           "jqls": {
-            "description": "A list of JQL queries.",
-            "items": { "description": "A list of JQL queries.", "type": "string" },
+            "description": "A list of up to 10 JQL queries.",
+            "items": { "description": "A list of up to 10 JQL queries.", "type": "string" },
             "type": "array"
           }
         },
@@ -9020,6 +9079,19 @@
           }
         },
         "required": ["id", "plan"],
+        "type": "object"
+      },
+      "LimitExceededResponseBean": {
+        "additionalProperties": false,
+        "properties": {
+          "current_count": { "format": "int32", "type": "integer" },
+          "entity_type": { "type": "string" },
+          "error_code": { "type": "string" },
+          "limit_type": { "type": "string" },
+          "max_allowed_limit": { "format": "int32", "type": "integer" },
+          "message": { "type": "string" },
+          "scope_id": { "type": "string" }
+        },
         "type": "object"
       },
       "LinkGroup": {
@@ -13011,13 +13083,13 @@
           },
           "projectTypeKey": {
             "description": "The [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes) of the project.",
-            "enum": ["software", "service_desk", "business"],
+            "enum": ["software", "service_desk", "business", "product_discovery"],
             "readOnly": true,
             "type": "string"
           },
           "properties": {
             "additionalProperties": { "readOnly": true },
-            "description": "Map of project properties",
+            "description": "Map of project properties. Only the properties named in the request's properties query parameter are returned, so this is an empty object when that parameter is omitted.",
             "readOnly": true,
             "type": "object"
           },
@@ -13277,7 +13349,7 @@
           },
           "projectTypeKey": {
             "description": "The [project type](https://confluence.atlassian.com/x/GwiiLQ#Jiraapplicationsoverview-Productfeaturesandprojecttypes) of the project.",
-            "enum": ["software", "service_desk", "business"],
+            "enum": ["software", "service_desk", "business", "product_discovery"],
             "readOnly": true,
             "type": "string"
           },
@@ -14656,6 +14728,10 @@
             "description": "Reference fields by their key (rather than ID). The default is `false`.",
             "type": "boolean"
           },
+          "includeArchivedProjects": {
+            "description": "Whether to also return issues that belong to archived projects. Archived projects are excluded by default. Requires *Browse projects* permission on the archived project. The default is `false`.",
+            "type": "boolean"
+          },
           "jql": {
             "description": "A [JQL](https://confluence.atlassian.com/x/egORLQ) expression. For performance reasons, this parameter requires a bounded query. A bounded query is a query with a search restriction.\n\n *  Example of an unbounded query: `order by key desc`.\n *  Example of a bounded query: `assignee = currentUser() order by key`.\n\nAdditionally, `orderBy` clause can contain a maximum of 7 fields.",
             "type": "string"
@@ -15700,6 +15776,11 @@
             "type": "string"
           },
           "pcri": { "$ref": "#/components/schemas/ProjectCreateResourceIdentifier" },
+          "scope": {
+            "description": "The scope of the status. Set to GLOBAL to make the status shared across projects. Leave null for the default (project-scoped) behaviour.",
+            "enum": ["GLOBAL"],
+            "type": "string"
+          },
           "statusCategory": {
             "description": "The status category of the status. The value is case-sensitive.",
             "enum": ["TODO", "IN_PROGRESS", "DONE"],
@@ -16563,12 +16644,20 @@
             "type": "string"
           },
           "requestTypeId": {
-            "description": "The request type ID of the context. Only required for Jira Service Management request create portal view (`JSMRequestCreate`).",
+            "description": "The request type ID of the context. Required for Jira Service Management request create portal view (`JSMRequestCreate`). Optional for Agent view types (`GICAgentView`, `IssueViewAgentView`, `IssueTransitionAgentView`): when set on an agent view context, the UI modification applies only to issues with that request type. Omitting `requestTypeId` does not create a wildcard — it means the context is not scoped to any specific request type.",
             "type": "string"
           },
           "viewType": {
-            "description": "The view type of the context.  \nSupported values:\n\n *  `GIC` \\- Jira global issue create\n *  `IssueView` \\- Jira issue view\n *  `IssueTransition` \\- Jira issue transition\n *  `JSMRequestCreate` \\- Jira Service Management request create portal view\n\nFor Jira view types (`GIC`, `IssueView`, `IssueTransition`), null is treated as a wildcard, meaning the UI modification will be applied to all view types. Each Jira context can have a maximum of one wildcard.  \n  \nWildcards are not applicable for JSM contexts.",
-            "enum": ["GIC", "IssueView", "IssueTransition", "JSMRequestCreate"],
+            "description": "The view type of the context.  \nSupported values:\n\n *  `GIC` \\- Jira global issue create\n *  `IssueView` \\- Jira issue view\n *  `IssueTransition` \\- Jira issue transition\n *  `JSMRequestCreate` \\- Jira Service Management request create portal view\n *  `GICAgentView` \\- Agent view variant of Jira global issue create\n *  `IssueViewAgentView` \\- Agent view variant of Jira issue view\n *  `IssueTransitionAgentView` \\- Agent view variant of Jira issue transition\n\nFor Jira and Agent view types (`GIC`, `IssueView`, `IssueTransition`, `GICAgentView`, `IssueViewAgentView`, `IssueTransitionAgentView`), null is treated as a wildcard, meaning the UI modification will be applied to all view types. Each Jira or Agent context can have a maximum of one wildcard.  \n  \nAgent view contexts use `projectId` and `issueTypeId` like Jira contexts, and may optionally also set `requestTypeId`. Agent view contexts must not set `portalId`.  \n  \nWildcards are not applicable for JSM contexts.",
+            "enum": [
+              "GIC",
+              "IssueView",
+              "IssueTransition",
+              "JSMRequestCreate",
+              "GICAgentView",
+              "IssueViewAgentView",
+              "IssueTransitionAgentView"
+            ],
             "type": "string"
           }
         },
@@ -18188,6 +18277,32 @@
           { "$ref": "#/components/schemas/WorkflowSimpleCondition" },
           { "$ref": "#/components/schemas/WorkflowCompoundCondition" }
         ],
+        "type": "object"
+      },
+      "WorkflowCopyRequest": {
+        "additionalProperties": false,
+        "description": "The copy workflow payload.",
+        "properties": {
+          "description": {
+            "description": "The description of the new workflow to create. Defaults to an empty description.",
+            "maxLength": 2048,
+            "minLength": 0,
+            "type": "string"
+          },
+          "workflowId": {
+            "description": "The ID of the workflow to copy.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          },
+          "workflowName": {
+            "description": "The name of the new workflow to create.",
+            "maxLength": 255,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": ["workflowId", "workflowName"],
         "type": "object"
       },
       "WorkflowCreate": {
@@ -20083,7 +20198,7 @@
     "license": { "name": "Apache 2.0", "url": "http://www.apache.org/licenses/LICENSE-2.0.html" },
     "termsOfService": "https://developer.atlassian.com/platform/marketplace/atlassian-developer-terms/",
     "title": "The Jira Cloud platform REST API",
-    "version": "1001.0.0-SNAPSHOT-532ed230ff9aa83f9c3039b776559e831302b5dd"
+    "version": "1001.0.0-SNAPSHOT-44cdd07c042959317ed5591bf79dbcd9369f3610"
   },
   "openapi": "3.0.1",
   "paths": {
@@ -22157,6 +22272,12 @@
           },
           "404": {
             "description": "Returned if the project is not found or the user does not have permission to browse the project containing the component."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }, {}],
@@ -22452,7 +22573,7 @@
       },
       "post": {
         "deprecated": false,
-        "description": "Endpoint for creating a new field association scheme.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Endpoint for creating a new field association scheme.\n\nA new scheme is **not** copied from, or based on, any existing field association scheme. Instead, it is initialised with a minimal default set of critical fields sourced from the instance's own *system* and *product* fields (the fields returned by the product's field API), rather than from a scheme you specify.\n\nTo create a scheme that is based on an existing one, use the *Clone field scheme* endpoint instead.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "createFieldAssociationScheme",
         "parameters": [],
         "requestBody": {
@@ -25872,6 +25993,9 @@
             },
             "description": "Returned if the request is successful."
           },
+          "400": {
+            "description": "Returned if one or more of the field's contexts have different default values per issue type, which this endpoint cannot represent. Use `GET /rest/api/3/field/{fieldId}/context/defaultvalues` instead."
+          },
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
           "403": {
             "content": {
@@ -25987,7 +26111,7 @@
     "/rest/api/3/field/{fieldId}/context/defaultValues": {
       "get": {
         "deprecated": false,
-        "description": "Returns a paginated list of default values grouped by custom field context.\n\nEach returned \\{@code ContextDefaultValuesBean\\} has a \\{@code contextId\\} and a \\{@code defaultValues\\} list of \\{@code IssueTypeDefaultValueBean\\} entries \\\\u2014 one per issue-type-scoped default value configured for the context. An entry with \\{@code \"isAnyIssueType\": true\\} represents the catch-all default that applies to every issue type covered by the context that is not covered by a more specific entry; a non-null \\{@code issueTypeId\\} represents a default that only applies to that issue type.\n\nFor contexts that have not been converted to the multiple-contexts data model, exactly one entry is returned per context with \\{@code isAnyIssueType=true\\}. For converted contexts, one entry is returned per configured per-issue-type default.\n\nThe value object on each entry is the same polymorphic \\{@code CustomFieldContextDefaultValueBean\\} exposed by the deprecated \\{@code GET /defaultValue\\} endpoint \\\\u2014 its concrete subtype depends on the custom field's type (see the list of supported types on that endpoint).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Returns a paginated list of default values grouped by custom field context.\n\nEach returned `ContextDefaultValuesBean` has a `contextId` and a `defaultValues` list of `IssueTypeDefaultValueBean` entries - one per issue-type-scoped default value configured for the context. An entry with `\"isAnyIssueType\": true` represents the catch-all default that applies to every issue type covered by the context that is not covered by a more specific entry; a non-null `issueTypeId` represents a default that only applies to that issue type.\n\nFor contexts that have not been converted to the multiple-contexts data model, exactly one entry is returned per context with `isAnyIssueType=true`. For converted contexts, one entry is returned per configured per-issue-type default.\n\nThe value object on each entry is the same polymorphic `CustomFieldContextDefaultValueBean` exposed by the deprecated `GET /defaultValue` endpoint - its concrete subtype depends on the custom field's type (see the list of supported types on that endpoint).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "getContextDefaultValues",
         "parameters": [
           {
@@ -26004,7 +26128,7 @@
             "schema": { "items": { "format": "int64", "type": "integer" }, "type": "array", "uniqueItems": true }
           },
           {
-            "description": "The IDs of the issue types to restrict the returned per-issue-type default values to. If omitted, default values for every issue type are returned. This filter never removes the catch-all \\{@code isAnyIssueType\\} entry of a context.",
+            "description": "The IDs of the issue types to restrict the returned per-issue-type default values to. If omitted, default values for every issue type are returned. This filter never removes the catch-all `isAnyIssueType` entry of a context.",
             "in": "query",
             "name": "issueTypeId",
             "schema": { "items": { "default": "", "type": "string" }, "type": "array", "uniqueItems": true }
@@ -26213,7 +26337,7 @@
     "/rest/api/3/field/{fieldId}/context/projectmapping": {
       "get": {
         "deprecated": false,
-        "description": "Returns a [paginated](#pagination) list of context to project mappings for a custom field. The result can be filtered by `contextId`. Otherwise, all mappings are returned. Invalid IDs are ignored.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Returns a [paginated](#pagination) list of context to project mappings for a custom field. The result can be filtered by `contextId`. Otherwise, all mappings are returned. Invalid IDs are ignored.\n\n**Note:** Jira is adding support for multiple field contexts per project. On sites where this is enabled, a custom field can have more than one context associated with the same project, so this operation can return several mappings that share the same `projectId`, each with a different `contextId`. Do not assume that a project appears at most once in the response. See [CHANGE-3082](https://developer.atlassian.com/cloud/jira/platform/changelog/#CHANGE-3082) for more details.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "getProjectContextMapping",
         "parameters": [
           {
@@ -29820,6 +29944,46 @@
         "x-atlassian-connect-scope": "INACCESSIBLE"
       }
     },
+    "/rest/api/3/forge/panel/action/bulk/status": {
+      "post": {
+        "deprecated": false,
+        "description": "Get the pin status of an issue panel (added by a Forge app) for multiple projects.\n\nThe operation is read-only and runs synchronously. Projects that do not exist, or that you do not have permission to access, are returned in the response with the panel reported as not pinned and the reason in the `error` field; the request itself still succeeds.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "operationId": "getBulkPinStatus",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": { "schema": { "$ref": "#/components/schemas/ForgePanelProjectPinStatusRequest" } }
+          },
+          "description": "Forge module ID and the list of projects to check.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/ForgePanelProjectPinStatusResponse" } }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorCollection" } } },
+            "description": "Returned if the request body is invalid."
+          },
+          "403": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorCollection" } } },
+            "description": "Returned if the user does not have permission to administer Jira."
+          },
+          "500": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/ErrorCollection" } } },
+            "description": "Returned if the pin status could not be read (server error)."
+          }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }],
+        "summary": "Get issue panel pin status for projects",
+        "tags": ["Issue panels"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
     "/rest/api/3/group": {
       "delete": {
         "deprecated": false,
@@ -30882,7 +31046,7 @@
     "/rest/api/3/issue/bulkfetch": {
       "post": {
         "deprecated": false,
-        "description": "Returns the details for a set of requested issues. You can request up to 100 issues.\n\nEach issue is identified by its ID or key, however, if the identifier doesn't match an issue, a case-insensitive search and check for moved issues is performed. If a matching issue is found its details are returned, a 302 or other redirect is **not** returned.\n\nIssues will be returned in ascending `id` order. If there are errors, Jira will return a list of issues which couldn't be fetched along with error messages.\n\nThis operation can be accessed anonymously.\n\n**[Permissions](#permissions) required:** Issues are included in the response where the user has:\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "description": "Returns the details for a set of requested issues.\n\nBy default you can request up to 100 issues in a single call. You can request up to 1000 issues in a single call when the request is shaped so that it can be served efficiently, that is, when *all* of the following are true:\n\n *  the `fields` parameter explicitly names at least one field to include — a request that contains only exclusions is **not** eligible, and neither are the `*all` and `*navigable` wildcards or the default navigable field set, because the number of resolved fields depends on the site's configuration;\n *  no more than 100 fields are explicitly included;\n *  none of the included fields returns multiple values (for example `comment`, `worklog`, or `attachment`); and\n *  the `expand` parameter does not include `changelog`, `editmeta`, `operations`, `renderedFields`, `transitions`, or `versionedRepresentations`.\n\nRequests that do not meet all of these conditions can include at most 100 issues; larger requests are rejected with a 400 error.\n\nEach issue is identified by its ID or key, however, if the identifier doesn't match an issue, a case-insensitive search and check for moved issues is performed. If a matching issue is found its details are returned, a 302 or other redirect is **not** returned.\n\nIssues will be returned in ascending `id` order. If there are errors, Jira will return a list of issues which couldn't be fetched along with error messages.\n\nThis operation can be accessed anonymously.\n\n**[Permissions](#permissions) required:** Issues are included in the response where the user has:\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
         "operationId": "bulkFetchIssues",
         "parameters": [],
         "requestBody": {
@@ -30912,7 +31076,7 @@
             "description": "Returned if the request is successful. A response may contain both successful issues and issue errors."
           },
           "400": {
-            "description": "Returned if no issue IDs/keys were present, or more than 100 issue IDs/keys were requested."
+            "description": "Returned if no issue IDs/keys were present, more than the maximum number of issue IDs/keys were requested (100, or up to 1000 for eligible requests), or more than 5 issue property keys were requested."
           },
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." }
         },
@@ -31139,6 +31303,53 @@
             "state": "Beta"
           }
         ],
+        "x-atlassian-connect-scope": "READ"
+      }
+    },
+    "/rest/api/3/issue/limit/adf/report": {
+      "get": {
+        "deprecated": false,
+        "description": "Returns all issues whose ADF (rich text) field data breaches the universal ADF size limit.\n\nUnlike the issue limit report, which reports issues breaching per-issue entity *count* limits, this endpoint reports issues whose ADF field *byte size* exceeds that limit. The reported ADF field types are `comment_adf`, `worklog_adf`, `customfield_adf`, `description_adf` and `environment_adf`. The reported value for each issue is the number of breaching entities for that field (always 1 for the single-value description and environment fields).\n\n**[Permissions](#permissions) required:**\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) is required for the project the issues are in. Results may be incomplete otherwise\n *  *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "operationId": "getIssueAdfLimitReport",
+        "parameters": [
+          {
+            "description": "Return issue keys instead of issue ids in the response.\n\nUsage: Add `?isReturningKeys=true` to the end of the path to request issue keys.",
+            "in": "query",
+            "name": "isReturningKeys",
+            "schema": { "default": false, "type": "boolean" },
+            "x-showInExample": "true"
+          },
+          {
+            "description": "Restrict the report to the given ADF field types. Defaults to every ADF field type.\n\nFor sites with a high issue volume, consider requesting field types individually to avoid timeouts.\n\nUsage: Add `?fieldType=comment_adf&fieldType=worklog_adf` to the end of the path to report on comments and worklogs only.",
+            "in": "query",
+            "name": "fieldType",
+            "schema": { "items": { "type": "string" }, "type": "array" },
+            "x-showInExample": "true"
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"entitiesBreachingLimit\":{\"comment_adf\":{\"10059\":[30401]},\"customfield_adf\":{\"10051\":[20301,20302]},\"description_adf\":{\"10058\":[],\"10059\":[]},\"environment_adf\":{\"10058\":[]},\"worklog_adf\":{\"10056\":[40501],\"10058\":[40502,40503]}},\"issuesBreachingLimit\":{\"comment_adf\":{\"10059\":1},\"customfield_adf\":{\"10051\":2},\"description_adf\":{\"10058\":1,\"10059\":1},\"environment_adf\":{\"10058\":1},\"worklog_adf\":{\"10056\":1,\"10058\":2}},\"limits\":{\"comment_adf\":1048576,\"customfield_adf\":1048576,\"description_adf\":1048576,\"environment_adf\":1048576,\"worklog_adf\":1048576}}",
+                "schema": { "$ref": "#/components/schemas/IssueLimitReportResponseBean" }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": { "description": "Returned if a requested field type is not a valid ADF field type." },
+          "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
+          "403": { "description": "Returned if the user does not have permission to complete this request." }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["read:jira-work"] }],
+        "summary": "Get issue adf limit report",
+        "tags": ["Issues"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "OAuth2", "scopes": ["read:jira-work"], "state": "Current" },
+          { "scheme": "OAuth2", "scopes": ["read:project:jira", "read:issue:jira"], "state": "Beta" }
+        ],
+        "x-experimental": true,
         "x-atlassian-connect-scope": "READ"
       }
     },
@@ -35461,6 +35672,12 @@
               }
             },
             "description": "Returned if the security scheme isn't found."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
@@ -37907,7 +38124,7 @@
     "/rest/api/3/jql/match": {
       "post": {
         "deprecated": false,
-        "description": "Checks whether one or more issues would be returned by one or more JQL queries.\n\n**[Permissions](#permissions) required:** None, however, issues are only matched against JQL queries where the user has:\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
+        "description": "Checks whether one or more issues would be returned by one or more JQL queries. Up to 10 JQL queries can be specified and up to 50 issue IDs included in the request.\n\n**[Permissions](#permissions) required:** None, however, issues are only matched against JQL queries where the user has:\n\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for the project that the issue is in.\n *  If [issue-level security](https://confluence.atlassian.com/x/J4lKLg) is configured, issue-level security permission to view the issue.",
         "operationId": "matchIssues",
         "parameters": [],
         "requestBody": {
@@ -37933,7 +38150,7 @@
             "description": "Returned if the request is successful."
           },
           "400": {
-            "description": "Returned if `jqls` exceeds the maximum number of JQL queries or `issueIds` exceeds the maximum number of issue IDs."
+            "description": "Returned if `jqls` contains more than 10 JQL queries or `issueIds` contains more than 50 issue IDs."
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["read:jira-work"] }],
@@ -39472,7 +39689,13 @@
           "403": {
             "description": "Returned if:\n\n *  the user does not have the necessary permission to update permission schemes.\n *  the Jira instance is Jira Core Free or Jira Software Free. Permission schemes cannot be updated on free plans."
           },
-          "404": { "description": "Returned if the permission scheme is not found." }
+          "404": { "description": "Returned if the permission scheme is not found." },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
+          }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
         "summary": "Update permission scheme",
@@ -39607,7 +39830,13 @@
             "description": "Returned if the value for expand is invalid or the same permission grant is present."
           },
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
-          "403": { "description": "Returned if the user does not have the necessary permission." }
+          "403": { "description": "Returned if the user does not have the necessary permission." },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
+          }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
         "summary": "Create permission grant",
@@ -41228,7 +41457,13 @@
           },
           "401": { "description": "Returned if the authentication credentials are incorrect." },
           "403": { "description": "Returned if the user doesn't have the necessary permissions." },
-          "409": { "description": "Returned if an action with this priority scheme is still in progress." }
+          "409": { "description": "Returned if an action with this priority scheme is still in progress." },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
+          }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
         "summary": "Create priority scheme",
@@ -41429,7 +41664,13 @@
           },
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
           "403": { "description": "Returned if the user doesn't have the necessary permissions." },
-          "409": { "description": "Returned if an action with this priority scheme is still in progress." }
+          "409": { "description": "Returned if an action with this priority scheme is still in progress." },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
+          }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
         "summary": "Update priority scheme",
@@ -41630,7 +41871,7 @@
       },
       "post": {
         "deprecated": false,
-        "description": "Creates a project based on a project type template, as shown in the following table:\n\n| Project Type Key | Project Template Key |  \n|--|--|  \n| `business` | `com.atlassian.jira-core-project-templates:jira-core-simplified-content-management`, `com.atlassian.jira-core-project-templates:jira-core-simplified-document-approval`, `com.atlassian.jira-core-project-templates:jira-core-simplified-lead-tracking`, `com.atlassian.jira-core-project-templates:jira-core-simplified-process-control`, `com.atlassian.jira-core-project-templates:jira-core-simplified-procurement`, `com.atlassian.jira-core-project-templates:jira-core-simplified-project-management`, `com.atlassian.jira-core-project-templates:jira-core-simplified-recruitment`, `com.atlassian.jira-core-project-templates:jira-core-simplified-task-tracking` |  \n| `service_desk` | `com.atlassian.servicedesk:simplified-it-service-management`, `com.atlassian.servicedesk:simplified-external-service-desk`, `com.atlassian.servicedesk:simplified-hr-service-desk`, `com.atlassian.servicedesk:simplified-facilities-service-desk`, `com.atlassian.servicedesk:simplified-legal-service-desk`, `com.atlassian.servicedesk:simplified-analytics-service-desk`, `com.atlassian.servicedesk:simplified-marketing-service-desk`, `com.atlassian.servicedesk:simplified-design-service-desk`, `com.atlassian.servicedesk:simplified-sales-service-desk`, `com.atlassian.servicedesk:simplified-finance-service-desk`, `com.atlassian.servicedesk:company-managed-blank-service-project`, `com.atlassian.servicedesk:company-managed-general-service-project`, `com.atlassian.servicedesk:team-managed-general-service-project`, `com.atlassian.servicedesk:next-gen-it-service-desk`, `com.atlassian.servicedesk:next-gen-hr-service-desk`, `com.atlassian.servicedesk:next-gen-legal-service-desk`, `com.atlassian.servicedesk:next-gen-marketing-service-desk`, `com.atlassian.servicedesk:next-gen-facilities-service-desk`, `com.atlassian.servicedesk:next-gen-analytics-service-desk`, `com.atlassian.servicedesk:next-gen-finance-service-desk`, `com.atlassian.servicedesk:next-gen-design-service-desk`, `com.atlassian.servicedesk:next-gen-sales-service-desk` |  \n| `software` | `com.pyxis.greenhopper.jira:gh-simplified-agility-kanban`, `com.pyxis.greenhopper.jira:gh-simplified-agility-scrum`, `com.pyxis.greenhopper.jira:gh-simplified-basic`, `com.pyxis.greenhopper.jira:gh-simplified-kanban-classic`, `com.pyxis.greenhopper.jira:gh-simplified-scrum-classic` |  \n| `customer_service` | `com.atlassian.jcs:customer-service-management` |  \nThe project types are available according to the installed Jira features as follows:\n\n *  Jira Core, the default, enables `business` projects.\n *  Jira Service Management enables `service_desk` projects.\n *  Jira Software enables `software` projects.\n\nTo determine which features are installed, go to **Jira settings** > **Apps** > **Manage apps** and review the System Apps list. To add Jira Software or Jira Service Management into a JIRA instance, use **Jira settings** > **Apps** > **Finding new apps**. For more information, see [ Managing add-ons](https://confluence.atlassian.com/x/S31NLg).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
+        "description": "Creates a project based on a project type template, as shown in the following table:\n\n| Project Type Key | Project Template Key |  \n|--|--|  \n| `business` | `com.atlassian.jira-core-project-templates:jira-core-simplified-content-management`, `com.atlassian.jira-core-project-templates:jira-core-simplified-document-approval`, `com.atlassian.jira-core-project-templates:jira-core-simplified-lead-tracking`, `com.atlassian.jira-core-project-templates:jira-core-simplified-process-control`, `com.atlassian.jira-core-project-templates:jira-core-simplified-procurement`, `com.atlassian.jira-core-project-templates:jira-core-simplified-project-management`, `com.atlassian.jira-core-project-templates:jira-core-simplified-recruitment`, `com.atlassian.jira-core-project-templates:jira-core-simplified-task-tracking` |  \n| `service_desk` | `com.atlassian.servicedesk:simplified-it-service-management`, `com.atlassian.servicedesk:simplified-external-service-desk`, `com.atlassian.servicedesk:simplified-hr-service-desk`, `com.atlassian.servicedesk:simplified-facilities-service-desk`, `com.atlassian.servicedesk:simplified-legal-service-desk`, `com.atlassian.servicedesk:simplified-analytics-service-desk`, `com.atlassian.servicedesk:simplified-marketing-service-desk`, `com.atlassian.servicedesk:simplified-design-service-desk`, `com.atlassian.servicedesk:simplified-sales-service-desk`, `com.atlassian.servicedesk:simplified-finance-service-desk`, `com.atlassian.servicedesk:company-managed-blank-service-project`, `com.atlassian.servicedesk:company-managed-general-service-project`, `com.atlassian.servicedesk:team-managed-general-service-project`, `com.atlassian.servicedesk:next-gen-it-service-desk`, `com.atlassian.servicedesk:next-gen-hr-service-desk`, `com.atlassian.servicedesk:next-gen-legal-service-desk`, `com.atlassian.servicedesk:next-gen-marketing-service-desk`, `com.atlassian.servicedesk:next-gen-facilities-service-desk`, `com.atlassian.servicedesk:next-gen-analytics-service-desk`, `com.atlassian.servicedesk:next-gen-finance-service-desk`, `com.atlassian.servicedesk:next-gen-design-service-desk`, `com.atlassian.servicedesk:next-gen-sales-service-desk` |  \n| `software` | `com.pyxis.greenhopper.jira:gh-simplified-agility-kanban`, `com.pyxis.greenhopper.jira:gh-simplified-agility-scrum`, `com.pyxis.greenhopper.jira:gh-simplified-basic`, `com.pyxis.greenhopper.jira:gh-simplified-kanban-classic`, `com.pyxis.greenhopper.jira:gh-simplified-scrum-classic` |  \n| `customer_service` | `com.atlassian.jcs:customer-service-management` |  \nThe project types are available according to the installed Jira features as follows:\n\n *  Jira Core, the default, enables `business` projects.\n *  Jira Service Management enables `service_desk` projects.\n *  Jira Software enables `software` projects.\n *  Jira Customer Service enables `customer_service` projects.\n\nTo determine which features are installed, go to **Jira settings** > **Apps** > **Manage apps** and review the System Apps list. To add Jira Software or Jira Service Management into a JIRA instance, use **Jira settings** > **Apps** > **Finding new apps**. For more information, see [ Managing add-ons](https://confluence.atlassian.com/x/S31NLg).\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg).",
         "operationId": "createProject",
         "parameters": [],
         "requestBody": {
@@ -41690,7 +41931,347 @@
         "parameters": [],
         "requestBody": {
           "content": {
-            "application/json": { "schema": { "$ref": "#/components/schemas/ProjectCustomTemplateCreateRequestDTO" } }
+            "application/json": {
+              "example": {
+                "details": {
+                  "additionalProperties": {},
+                  "assigneeType": "PROJECT_LEAD",
+                  "avatarId": 1,
+                  "categoryId": 1,
+                  "currencyCode": "USD",
+                  "description": "description",
+                  "enableComponents": false,
+                  "key": "key",
+                  "language": "EN-US",
+                  "leadAccountId": "leadAccountId",
+                  "name": "name",
+                  "projectTypeKey": "software",
+                  "url": "url",
+                  "useSystemDefaultPermissionSchemeAndRole": false
+                },
+                "template": {
+                  "boardFeatures": {
+                    "boardFeatures": { "pcri:board:ref:board1": [{ "featureKey": "SPRINTS", "state": true }] }
+                  },
+                  "boards": {
+                    "boards": [
+                      {
+                        "boardFilterJQL": "project = 'My Project'",
+                        "cardLayout": { "showDaysInColumn": true },
+                        "columns": [{ "name": "TODO", "statusIds": ["pcri:status:ref:todo"] }],
+                        "name": "My Board",
+                        "pcri": "pcri:board:ref:board1",
+                        "quickFilters": [
+                          {
+                            "description": "This is a quick filter for my project",
+                            "jqlQuery": "project = 'My Project'",
+                            "name": "My Quick Filter"
+                          }
+                        ],
+                        "setupFutureSprint": true,
+                        "supportsSprint": true,
+                        "swimlanes": {
+                          "customSwimlanes": [
+                            {
+                              "description": "This is a swimlane for my project",
+                              "jqlQuery": "project = 'My Project'",
+                              "name": "My Swimlane"
+                            }
+                          ],
+                          "defaultCustomSwimlaneName": "My Swimlane",
+                          "swimlaneStrategy": "none"
+                        }
+                      }
+                    ]
+                  },
+                  "field": {
+                    "customFieldDefinitions": [
+                      {
+                        "cfType": "com.atlassian.jira.plugin.system.customfieldtypes:textfield",
+                        "description": "This is a custom field",
+                        "name": "Custom Field 1",
+                        "onConflict": "FAIL",
+                        "pcri": "pcri:field:ref:customField1",
+                        "searcherKey": "com.atlassian.jira.plugin.system.customfieldtypes:textsearcher"
+                      }
+                    ],
+                    "fieldContexts": [],
+                    "fieldLayoutScheme": {
+                      "defaultFieldLayout": "pcri:fieldLayout:ref:fieldLayout1",
+                      "description": "This is a field layout scheme",
+                      "explicitMappings": { "pcri:issueType:ref:default": "pcri:fieldLayout:ref:fieldLayout2" },
+                      "name": "Field Layout Scheme 1",
+                      "pcri": "pcri:fieldLayoutScheme:ref:fls1"
+                    },
+                    "fieldLayouts": [
+                      {
+                        "configuration": [{ "pcri": "pcri:field:id:summary", "required": false, "show": true }],
+                        "description": "This is a field layout",
+                        "name": "Field Layout 1",
+                        "pcri": "pcri:fieldLayout:ref:fieldLayout1"
+                      }
+                    ],
+                    "fieldScheme": {
+                      "description": "This is a field scheme",
+                      "items": [],
+                      "name": "Field Scheme 1",
+                      "onConflict": "USE",
+                      "pcri": "pcri:fieldScheme:id:fieldScheme1"
+                    },
+                    "issueLayouts": [
+                      {
+                        "containerId": "pcri:issueType:ref:epic",
+                        "issueLayoutType": "ISSUE_VIEW",
+                        "items": [
+                          {
+                            "itemKey": "pcri:field:id:summary",
+                            "properties": {
+                              "jsd.field.displayName": "sd.premade.project.servicedesk.common.requesttype.email.field.summary"
+                            },
+                            "sectionType": "content",
+                            "type": "FIELD"
+                          }
+                        ],
+                        "pcri": "pcri:issueLayout:ref:issueLayout1"
+                      }
+                    ],
+                    "issueTypeScreenScheme": {
+                      "defaultScreenScheme": "pcri:screenScheme:ref:defaultScreenScheme",
+                      "description": "This is an issue type screen scheme",
+                      "explicitMappings": { "pcri:issueType:ref:issueType1": "pcri:screenScheme:ref:screenScheme1" },
+                      "name": "Issue Type Screen Scheme 1",
+                      "pcri": "pcri:issuetypeScreenScheme:ref:issuetypeScreenSchemeRef1"
+                    },
+                    "projectTemplateSource": "LIVE",
+                    "screenScheme": [
+                      {
+                        "defaultScreen": "pcri:screen:ref:default",
+                        "description": "This is a screen scheme",
+                        "explicitMappings": {
+                          "create": "pcri:screen:ref:createScreen",
+                          "edit": "pcri:screen:ref:editScreen",
+                          "view": "pcri:screen:ref:viewScreen"
+                        },
+                        "name": "Screen Scheme 1",
+                        "pcri": "pcri:screenScheme:ref:screenScheme1"
+                      }
+                    ],
+                    "screens": [
+                      {
+                        "description": "This is a screen",
+                        "name": "Screen 1",
+                        "pcri": "pcri:screen:ref:screen1",
+                        "tabs": [{ "fields": ["pcri:field:ref:field1", "pcri:field:ref:field2"], "name": "Tab 1" }]
+                      }
+                    ]
+                  },
+                  "issueType": {
+                    "issueTypeHierarchy": [
+                      {
+                        "hierarchyLevel": 0,
+                        "name": "Task issue type hierachy",
+                        "onConflict": "USE",
+                        "pcri": "pcri:issueTypeHierachy:ref:issueTypeHierachy1"
+                      }
+                    ],
+                    "issueTypeScheme": {
+                      "defaultIssueTypeId": "pcri:issueType:ref:default",
+                      "description": "Test Issue Type Scheme description",
+                      "issueTypeIds": ["pcri:issueType:ref:default", "pcri:issueType:id:10000"],
+                      "name": "Test Issue Type Scheme",
+                      "pcri": "pcri:issueTypeScheme:ref:its"
+                    },
+                    "issueTypes": [
+                      {
+                        "avatarId": 10,
+                        "description": "Test issue type description",
+                        "hierarchyLevel": 0,
+                        "name": "Test issue type",
+                        "onConflict": "USE",
+                        "pcri": "pcri:issueType:ref:default",
+                        "permitedOperations": { "deletable": false, "editable": true }
+                      }
+                    ]
+                  },
+                  "notification": {
+                    "description": "Description",
+                    "name": "Simplified Notification Scheme",
+                    "notificationSchemeEvents": [
+                      { "event": { "id": "1" }, "notifications": [{ "notificationType": "CurrentAssignee" }] }
+                    ],
+                    "onConflict": "USE",
+                    "pcri": "pcri:notificationScheme:ref:notification1"
+                  },
+                  "permissionScheme": {
+                    "addAddonRole": true,
+                    "description": "This is an example permission scheme",
+                    "grants": [
+                      {
+                        "applicationAccess": [],
+                        "groupCustomFields": [],
+                        "groups": [],
+                        "permissionKeys": ["ADMINISTER_PROJECTS", "BROWSE_PROJECTS"],
+                        "projectRoles": ["pcri:role:ref:admin"],
+                        "specialGrants": [],
+                        "userCustomFields": [],
+                        "users": []
+                      }
+                    ],
+                    "name": "Example Permission Scheme",
+                    "onConflict": "USE",
+                    "pcri": "pcri:permissionScheme:ref:scheme"
+                  },
+                  "project": {
+                    "fieldLayoutSchemeId": "pcri:fieldLayoutScheme:id:10001",
+                    "issueSecuritySchemeId": "pcri:issueSecurityScheme:id:10001",
+                    "issueTypeSchemeId": "pcri:issueTypeScheme:id:10001",
+                    "issueTypeScreenSchemeId": "pcri:issueTypeScreenScheme:id:10001",
+                    "notificationSchemeId": "pcri:notificationScheme:id:10001",
+                    "pcri": "pcri:project:ref:newProject1",
+                    "permissionSchemeId": "pcri:permissionScheme:id:10001",
+                    "projectTypeKey": "software",
+                    "workflowSchemeId": "pcri:workflowScheme:id:10001"
+                  },
+                  "role": {
+                    "roleToProjectActors": {
+                      "pcri:role:ref:role1": ["pcri:user:id:1"],
+                      "pcri:role:ref:role2": ["pcri:user:id:2"]
+                    },
+                    "roles": [
+                      {
+                        "defaultActors": ["pcri:user:id:1", "pcri:user:id:2"],
+                        "description": "Administrator role with all permissions",
+                        "name": "Admin Role",
+                        "onConflict": "FAIL",
+                        "pcri": "pcri:role:ref:role1",
+                        "type": "EDITABLE"
+                      },
+                      {
+                        "description": "Regular user role with limited permissions",
+                        "name": "User Role",
+                        "onConflict": "FAIL",
+                        "pcri": "pcri:role:ref:role2",
+                        "type": "VIEWABLE"
+                      }
+                    ]
+                  },
+                  "scope": { "type": "GLOBAL" },
+                  "security": {
+                    "description": "Newly created issue security scheme",
+                    "name": "New Security Scheme",
+                    "pcri": "pcri:issueSecurityScheme:ref:newIssueSecurityScheme",
+                    "securityLevels": [
+                      {
+                        "description": "Newly created issue security level",
+                        "isDefault": true,
+                        "name": "New Security Level",
+                        "pcri": "pcri:issueSecurityLevel:ref:new-security-level",
+                        "securityLevelMembers": [{ "parameter": "administrators", "type": "group" }]
+                      }
+                    ]
+                  },
+                  "workflow": {
+                    "statuses": [
+                      {
+                        "description": "To Do Status",
+                        "name": "To Do",
+                        "onConflict": "USE",
+                        "pcri": "pcri:status:ref:todo",
+                        "statusCategory": "TODO"
+                      },
+                      {
+                        "description": "In Progress Status",
+                        "name": "In Progress",
+                        "onConflict": "USE",
+                        "pcri": "pcri:status:ref:inprogress",
+                        "statusCategory": "IN_PROGRESS"
+                      },
+                      {
+                        "description": "Done Status",
+                        "name": "Done",
+                        "onConflict": "USE",
+                        "pcri": "pcri:status:ref:done",
+                        "statusCategory": "DONE"
+                      }
+                    ],
+                    "workflowScheme": {
+                      "defaultWorkflow": "pcri:workflow:ref:workflow1",
+                      "description": "Description",
+                      "name": "New Workflow scheme for Project Custom Template",
+                      "pcri": "pcri:workflowScheme:ref:workflowSchemeRef1"
+                    },
+                    "workflows": [
+                      {
+                        "description": "a software workflow",
+                        "loopedTransitionContainerLayout": { "x": 1, "y": 2 },
+                        "name": "Software Simplified Workflow for Project",
+                        "onConflict": "NEW",
+                        "pcri": "pcri:workflow:ref:workflow",
+                        "startPointLayout": { "x": 1, "y": 2 },
+                        "statuses": [
+                          {
+                            "layout": { "x": 1, "y": 2 },
+                            "pcri": "pcri:status:ref:todo",
+                            "properties": { "key": "value" }
+                          }
+                        ],
+                        "transitions": [
+                          {
+                            "actions": [],
+                            "description": "To do transition",
+                            "from": [],
+                            "id": 11,
+                            "name": "To Do",
+                            "properties": { "jira.i18n.title": "gh.workflow.preset.todo" },
+                            "to": { "status": "pcri:status:ref:todo" },
+                            "triggers": [],
+                            "type": "GLOBAL",
+                            "validators": []
+                          },
+                          {
+                            "actions": [],
+                            "description": "In Progress Transition",
+                            "from": [],
+                            "id": 21,
+                            "name": "In Progress",
+                            "properties": { "jira.i18n.title": "gh.workflow.preset.inprogress" },
+                            "to": { "status": "pcri:status:ref:inprogress" },
+                            "triggers": [],
+                            "type": "GLOBAL",
+                            "validators": []
+                          },
+                          {
+                            "actions": [],
+                            "description": "Done Transition",
+                            "from": [],
+                            "id": 31,
+                            "name": "Done",
+                            "properties": { "jira.i18n.title": "gh.workflow.preset.done" },
+                            "to": { "status": "pcri:status:ref:done" },
+                            "triggers": [],
+                            "type": "GLOBAL",
+                            "validators": []
+                          },
+                          {
+                            "actions": [],
+                            "description": "Start transition",
+                            "from": [],
+                            "id": 1,
+                            "name": "Create",
+                            "properties": { "jira.i18n.title": "gh.workflow.preset.todo" },
+                            "to": { "status": "pcri:status:ref:todo" },
+                            "triggers": [],
+                            "type": "INITIAL",
+                            "validators": []
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              "schema": { "$ref": "#/components/schemas/ProjectCustomTemplateCreateRequestDTO" }
+            }
           },
           "description": "The JSON payload containing the project details and capabilities",
           "required": true
@@ -42236,7 +42817,7 @@
             "schema": { "type": "string" }
           },
           {
-            "description": "A list of project properties to return for the project. This parameter accepts a comma-separated list.",
+            "description": "A list of project properties to return for the project. This parameter accepts a comma-separated list. Note that only the properties named here are returned in `properties` in the response; that object is empty when this parameter is omitted.",
             "in": "query",
             "name": "properties",
             "schema": { "items": { "default": "", "type": "string" }, "type": "array" }
@@ -47004,6 +47585,12 @@
             "name": "reconcileIssues",
             "schema": { "items": { "format": "int64", "type": "integer" }, "type": "array" },
             "x-showInExample": "true"
+          },
+          {
+            "description": "Whether to also return issues that belong to [archived projects](https://support.atlassian.com/jira-cloud-administration/docs/archive-a-project/). Issues in archived projects are excluded by default. Setting this to `true` returns them alongside issues from active projects; the *Browse projects* permission is still required on the archived project. The default is `false`.",
+            "in": "query",
+            "name": "includeArchivedProjects",
+            "schema": { "default": false, "type": "boolean" }
           }
         ],
         "responses": {
@@ -47949,7 +48536,7 @@
           "200": {
             "content": {
               "application/json": {
-                "example": "{\"isLast\":true,\"maxResults\":100,\"startAt\":0,\"total\":3,\"values\":[{\"id\":\"d7dbda8a-6239-4b63-8e13-a5ef975c8e61\",\"name\":\"Reveal Story Points\",\"description\":\"Reveals Story Points field when any Sprint is selected.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d7dbda8a-6239-4b63-8e13-a5ef975c8e61\",\"data\":\"{field: 'Story Points', config: {hidden: false}}\",\"contexts\":[{\"id\":\"1533537a-bda3-4ac6-8481-846128cd9ef4\",\"projectId\":\"10000\",\"issueTypeId\":\"10000\",\"viewType\":\"GIC\",\"isAvailable\":true},{\"id\":\"c016fefa-6eb3-40c9-8596-4c4ef273e67c\",\"projectId\":\"10000\",\"issueTypeId\":\"10001\",\"viewType\":\"IssueView\",\"isAvailable\":true},{\"id\":\"1016defa-7ew3-40c5-8696-4c1efg73e67s\",\"projectId\":\"10000\",\"issueTypeId\":\"10002\",\"viewType\":\"IssueTransition\",\"isAvailable\":true}]},{\"id\":\"e4fe8db5-f82f-416b-a3aa-b260b55da577\",\"name\":\"Set Assignee\",\"description\":\"Sets the Assignee field automatically.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/e4fe8db5-f82f-416b-a3aa-b260b55da577\",\"contexts\":[{\"id\":\"8b3740f9-8780-4958-8228-69dcfbda11d9\",\"projectId\":\"10000\",\"issueTypeId\":\"10000\",\"viewType\":\"GIC\",\"isAvailable\":true}]},{\"id\":\"d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff\",\"name\":\"Wildcard example\",\"description\":\"This context is applied to all issue types\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff\",\"contexts\":[{\"id\":\"521f2181-5d5e-46ea-9fc9-871bbf245b8b\",\"projectId\":\"10000\",\"issueTypeId\":null,\"viewType\":\"GIC\",\"isAvailable\":true}]},{\"id\":\"1453f993-79ce-4389-a36d-eb72d5c85dd6\",\"name\":\"JSM Context\",\"description\":\"JSM context doesn't support wildcards.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/1453f993-79ce-4389-a36d-eb72d5c85dd6\",\"contexts\":[{\"id\":\"521f2181-8780-4958-9fc9-871bbf245b8b\",\"projectId\":null,\"portalId\":\"5\",\"issueTypeId\":null,\"requestTypeId\":\"100\",\"viewType\":\"JSMRequestCreate\",\"isAvailable\":true}]}]}",
+                "example": "{\"isLast\":true,\"maxResults\":100,\"startAt\":0,\"total\":5,\"values\":[{\"id\":\"d7dbda8a-6239-4b63-8e13-a5ef975c8e61\",\"name\":\"Reveal Story Points\",\"description\":\"Reveals Story Points field when any Sprint is selected.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d7dbda8a-6239-4b63-8e13-a5ef975c8e61\",\"data\":\"{field: 'Story Points', config: {hidden: false}}\",\"contexts\":[{\"id\":\"1533537a-bda3-4ac6-8481-846128cd9ef4\",\"projectId\":\"10000\",\"issueTypeId\":\"10000\",\"viewType\":\"GIC\",\"isAvailable\":true},{\"id\":\"c016fefa-6eb3-40c9-8596-4c4ef273e67c\",\"projectId\":\"10000\",\"issueTypeId\":\"10001\",\"viewType\":\"IssueView\",\"isAvailable\":true},{\"id\":\"1016defa-7ew3-40c5-8696-4c1efg73e67s\",\"projectId\":\"10000\",\"issueTypeId\":\"10002\",\"viewType\":\"IssueTransition\",\"isAvailable\":true}]},{\"id\":\"e4fe8db5-f82f-416b-a3aa-b260b55da577\",\"name\":\"Set Assignee\",\"description\":\"Sets the Assignee field automatically.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/e4fe8db5-f82f-416b-a3aa-b260b55da577\",\"contexts\":[{\"id\":\"8b3740f9-8780-4958-8228-69dcfbda11d9\",\"projectId\":\"10000\",\"issueTypeId\":\"10000\",\"viewType\":\"GIC\",\"isAvailable\":true}]},{\"id\":\"d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff\",\"name\":\"Wildcard example\",\"description\":\"This context is applied to all issue types\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/d3f4097e-8d8e-451e-9fb6-27c3c8c3bfff\",\"contexts\":[{\"id\":\"521f2181-5d5e-46ea-9fc9-871bbf245b8b\",\"projectId\":\"10000\",\"issueTypeId\":null,\"viewType\":\"GIC\",\"isAvailable\":true}]},{\"id\":\"1453f993-79ce-4389-a36d-eb72d5c85dd6\",\"name\":\"JSM Context\",\"description\":\"JSM context doesn't support wildcards.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/1453f993-79ce-4389-a36d-eb72d5c85dd6\",\"contexts\":[{\"id\":\"521f2181-8780-4958-9fc9-871bbf245b8b\",\"projectId\":null,\"portalId\":\"5\",\"issueTypeId\":null,\"requestTypeId\":\"100\",\"viewType\":\"JSMRequestCreate\",\"isAvailable\":true}]},{\"id\":\"b83f4e12-2c1a-4d9b-a6e5-3f7c8d2e9b44\",\"name\":\"Agent View Context\",\"description\":\"Agent view context with project and issue type scope.\",\"self\":\"https://api.atlassian.com/ex/jira/{cloudid}/rest/api/2/uiModifications/b83f4e12-2c1a-4d9b-a6e5-3f7c8d2e9b44\",\"contexts\":[{\"id\":\"a92c6e34-1b4d-4f7e-8a3c-9d5f0e1c2b78\",\"projectId\":\"10000\",\"issueTypeId\":\"10004\",\"viewType\":\"IssueViewAgentView\",\"isAvailable\":true}]}]}",
                 "schema": { "$ref": "#/components/schemas/PageBeanUiModificationDetails" }
               }
             },
@@ -47971,7 +48558,7 @@
       },
       "post": {
         "deprecated": false,
-        "description": "Creates a UI modification. UI modification can only be created by Forge apps.\n\nEach app can define up to 3000 UI modifications. Each UI modification can define up to 1000 contexts. The same context can be assigned to maximum 100 UI modifications.\n\n**Context types:**\n\n *  **Jira contexts:** For Jira view types, use `projectId` and `issueTypeId`. One field can act as a wildcard. Supported Jira views:\n    \n     *  `GIC` \\- Jira global issue create\n     *  `IssueView` \\- Jira issue view\n     *  `IssueTransition` \\- Jira issue transition\n *  **Jira Service Management contexts:** For Jira Service Management view types, use `portalId` and `requestTypeId`. Wildcards are not supported. Supported JSM views:\n    \n     *  `JSMRequestCreate` \\- Jira Service Management request create portal view\n\n**[Permissions](#permissions) required:**\n\n *  *None* if the UI modification is created without contexts.\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for one or more projects, if the UI modification is created with contexts.\n\nThe new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.",
+        "description": "Creates a UI modification. UI modification can only be created by Forge apps.\n\nEach app can define up to 3000 UI modifications. Each UI modification can define up to 1000 contexts. The same context can be assigned to maximum 100 UI modifications.\n\n**Context types:**\n\n *  **Jira contexts:** For Jira view types, use `projectId` and `issueTypeId`. One field can act as a wildcard. Supported Jira views:\n    \n     *  `GIC` \\- Jira global issue create\n     *  `IssueView` \\- Jira issue view\n     *  `IssueTransition` \\- Jira issue transition\n *  **Jira Service Management contexts:** For Jira Service Management view types, use `portalId` and `requestTypeId`. Wildcards are not supported. Supported JSM views:\n    \n     *  `JSMRequestCreate` \\- Jira Service Management request create portal view\n *  **Agent view contexts:** For Agent view types, use `projectId` and `issueTypeId` like Jira contexts, and optionally set `requestTypeId`. `portalId` must not be set. One of `projectId`, `issueTypeId`, or `viewType` can act as a wildcard. Supported Agent views:\n    \n     *  `GICAgentView` \\- Agent view variant of Jira global issue create\n     *  `IssueViewAgentView` \\- Agent view variant of Jira issue view\n     *  `IssueTransitionAgentView` \\- Agent view variant of Jira issue transition\n\n**[Permissions](#permissions) required:**\n\n *  *None* if the UI modification is created without contexts.\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for one or more projects, if the UI modification is created with contexts.\n\nThe new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.",
         "operationId": "createUiModification",
         "parameters": [],
         "requestBody": {
@@ -47989,7 +48576,9 @@
                     "projectId": null,
                     "requestTypeId": "10",
                     "viewType": "JSMRequestCreate"
-                  }
+                  },
+                  { "issueTypeId": "10004", "projectId": "10000", "viewType": "IssueViewAgentView" },
+                  { "issueTypeId": "10004", "projectId": "10000", "requestTypeId": "20", "viewType": "GICAgentView" }
                 ],
                 "data": "{field: 'Story Points', config: {hidden: false}}",
                 "description": "Reveals Story Points field when any Sprint is selected.",
@@ -48070,7 +48659,7 @@
       },
       "put": {
         "deprecated": false,
-        "description": "Updates a UI modification. UI modification can only be updated by Forge apps.\n\nEach UI modification can define up to 1000 contexts. The same context can be assigned to maximum 100 UI modifications.\n\n**Context types:**\n\n *  **Jira contexts:** For Jira view types, use `projectId` and `issueTypeId`. One field can act as a wildcard. Supported Jira views:\n    \n     *  `GIC` \\- Jira global issue create\n     *  `IssueView` \\- Jira issue view\n     *  `IssueTransition` \\- Jira issue transition\n *  **Jira Service Management contexts:** For Jira Service Management view types, use `portalId` and `requestTypeId`. Wildcards are not supported. Supported JSM views:\n    \n     *  `JSMRequestCreate` \\- Jira Service Management request create portal view\n\n**[Permissions](#permissions) required:**\n\n *  *None* if the UI modification is created without contexts.\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for one or more projects, if the UI modification is created with contexts.\n\nThe new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.",
+        "description": "Updates a UI modification. UI modification can only be updated by Forge apps.\n\nEach UI modification can define up to 1000 contexts. The same context can be assigned to maximum 100 UI modifications.\n\n**Context types:**\n\n *  **Jira contexts:** For Jira view types, use `projectId` and `issueTypeId`. One field can act as a wildcard. Supported Jira views:\n    \n     *  `GIC` \\- Jira global issue create\n     *  `IssueView` \\- Jira issue view\n     *  `IssueTransition` \\- Jira issue transition\n *  **Jira Service Management contexts:** For Jira Service Management view types, use `portalId` and `requestTypeId`. Wildcards are not supported. Supported JSM views:\n    \n     *  `JSMRequestCreate` \\- Jira Service Management request create portal view\n *  **Agent view contexts:** For Agent view types, use `projectId` and `issueTypeId` like Jira contexts, and optionally set `requestTypeId`. `portalId` must not be set. One of `projectId`, `issueTypeId`, or `viewType` can act as a wildcard. Supported Agent views:\n    \n     *  `GICAgentView` \\- Agent view variant of Jira global issue create\n     *  `IssueViewAgentView` \\- Agent view variant of Jira issue view\n     *  `IssueTransitionAgentView` \\- Agent view variant of Jira issue transition\n\n**[Permissions](#permissions) required:**\n\n *  *None* if the UI modification is created without contexts.\n *  *Browse projects* [project permission](https://confluence.atlassian.com/x/yodKLg) for one or more projects, if the UI modification is created with contexts.\n\nThe new `write:app-data:jira` OAuth scope is 100% optional now, and not using it won't break your app. However, we recommend adding it to your app's scope list because we will eventually make it mandatory.",
         "operationId": "updateUiModification",
         "parameters": [
           {
@@ -48095,7 +48684,9 @@
                     "projectId": null,
                     "requestTypeId": "100",
                     "viewType": "JSMRequestCreate"
-                  }
+                  },
+                  { "issueTypeId": "10004", "projectId": "10000", "viewType": "IssueViewAgentView" },
+                  { "issueTypeId": "10004", "projectId": "10000", "requestTypeId": "20", "viewType": "GICAgentView" }
                 ],
                 "data": "{field: 'Story Points', config: {hidden: true}}",
                 "name": "Updated Reveal Story Points"
@@ -48673,7 +49264,7 @@
       },
       "post": {
         "deprecated": false,
-        "description": "Creates a user. This resource is retained for legacy compatibility. As soon as a more suitable alternative is available this resource will be deprecated.\n\n**Note:** This API does not support Forge apps.\n\nIf the user exists and has access to Jira, the operation returns a 201 status. If the user exists but does not have access to Jira, the operation returns a 400 status.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg). The caller has to be an **organization admin**.",
+        "description": "Creates a user. This resource is retained for legacy compatibility. As soon as a more suitable alternative is available this resource will be deprecated.\n\n**Note:** This API does not support Forge apps.\n\nIf the user exists and has access to Jira, the operation returns a 201 status. If the user exists but does not have access to Jira & no new jira-products are requested, the operation returns a 400 status.\n\n**[Permissions](#permissions) required:** *Administer Jira* [global permission](https://confluence.atlassian.com/x/x4dKLg). The caller has to be an **organization admin**.",
         "operationId": "createUser",
         "parameters": [],
         "requestBody": {
@@ -48687,6 +49278,10 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/User" } } },
+            "description": "Returned if the user already exists and already has the requested Jira product access."
+          },
           "201": {
             "content": {
               "application/json": {
@@ -48697,7 +49292,7 @@
             "description": "Returned if the request is successful."
           },
           "400": {
-            "description": "Returned if the request is invalid, the user already exists but does not have access to jira, or the number of licensed users is exceeded."
+            "description": "Returned if the request is invalid, or the number of licensed users is exceeded, or if the user already exists and has no access to jira & no new jira-products are requested"
           },
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
           "403": { "description": "Returned if the user does not have the necessary permission." }
@@ -50137,6 +50732,12 @@
           "401": { "description": "Returned if the authentication credentials are incorrect or missing." },
           "404": {
             "description": "Returned if:\n\n *  the project is not found.\n *  the user does not have the required permissions."
+          },
+          "422": {
+            "content": {
+              "application/json": { "schema": { "$ref": "#/components/schemas/LimitExceededResponseBean" } }
+            },
+            "description": "422 response"
           }
         },
         "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-project"] }, {}],
@@ -51657,7 +52258,7 @@
     "/rest/api/3/workflows/capabilities": {
       "get": {
         "deprecated": false,
-        "description": "Get the list of workflow capabilities for a specific workflow using either the workflow ID, or the project and issue type ID pair. The response includes the scope of the workflow, defined as global/project-based, and a list of project types that the workflow is scoped to. It also includes all rules organised into their broad categories (conditions, validators, actions, triggers, screens) as well as the source location (Atlassian-provided, Connect, Forge).\n\n**[Permissions](#permissions) required:**\n\n *  *Administer Jira* project permission to access all, including global-scoped, workflows\n *  *Administer projects* project permissions to access project-scoped workflows\n\nThe current list of Atlassian-provided rules:\n\n#### Validators ####\n\nA validator rule that checks if a user has the required permissions to execute the transition in the workflow.\n\n##### Permission validator #####\n\nA validator rule that checks if a user has the required permissions to execute the transition in the workflow.\n\n    {\n       \"ruleKey\": \"system:check-permission-validator\",\n       \"parameters\": {\n         \"permissionKey\": \"ADMINISTER_PROJECTS\"\n       }\n     }\n\nParameters:\n\n *  `permissionKey` The permission required to perform the transition. Allowed values: [built-in Jira permissions](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions).\n\n##### Parent or child blocking validator #####\n\nA validator to block the child issue's transition depending on the parent issue's status.\n\n    {\n       \"ruleKey\" : \"system:parent-or-child-blocking-validator\"\n       \"parameters\" : {\n         \"blocker\" : \"PARENT\"\n         \"statusIds\" : \"1,2,3\"\n       }\n     }\n\nParameters:\n\n *  `blocker` currently only supports `PARENT`.\n *  `statusIds` a comma-separated list of status IDs.\n\n##### Previous status validator #####\n\nA validator that checks if an issue has transitioned through specified previous status(es) before allowing the current transition to occur.\n\n    {\n       \"ruleKey\": \"system:previous-status-validator\",\n       \"parameters\": {\n         \"previousStatusIds\": \"10014\",\n         \"mostRecentStatusOnly\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `previousStatusIds` a comma-separated list of status IDs, currently only support one ID.\n *  `mostRecentStatusOnly` when `true` only considers the most recent status for the condition evaluation. Allowed values: `true`, `false`.\n\n##### Validate a field value #####\n\nA validation that ensures a specific field's value meets the defined criteria before allowing an issue to transition in the workflow.\n\nDepending on the rule type, the result will vary:\n\n###### Field required ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldRequired\",\n         \"fieldsRequired\": \"assignee\",\n         \"ignoreContext\": \"true\",\n         \"errorMessage\": \"An assignee must be set!\"\n       }\n     }\n\nParameters:\n\n *  `fieldsRequired` the ID of the field that is required. For a custom field, it would look like `customfield_123`.\n *  `ignoreContext` controls the impact of context settings on field validation. When set to `true`, the validator doesn't check a required field if its context isn't configured for the current issue. When set to `false`, the validator requires a field even if its context is invalid. Allowed values: `true`, `false`.\n *  `errorMessage` is the error message to display if the user does not provide a value during the transition. A default error message will be shown if you don't provide one (Optional).\n\n###### Field changed ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldChanged\",\n         \"groupsExemptFromValidation\": \"6862ac20-8672-4f68-896d-4854f5efb79e\",\n         \"fieldKey\": \"versions\",\n         \"errorMessage\": \"Affect versions must be modified before transition\"\n       }\n     }\n\nParameters:\n\n *  `groupsExemptFromValidation` a comma-separated list of group IDs to be exempt from the validation.\n *  `fieldKey` the ID of the field that has changed. For a custom field, it would look like `customfield_123`.\n *  `errorMessage` the error message to display if the user does not provide a value during the transition. A default error message will be shown if you don't provide one (Optional).\n\n###### Field has a single value ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldHasSingleValue\",\n         \"fieldKey\": \"created\",\n         \"excludeSubtasks\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `fieldKey` the ID of the field to validate. For a custom field, it would look like `customfield_123`.\n *  `excludeSubtasks` Option to exclude values copied from sub-tasks. Allowed values: `true`, `false`.\n\n###### Field matches regular expression ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldMatchesRegularExpression\",\n         \"regexp\": \"[0-9]{4}\",\n         \"fieldKey\": \"description\"\n       }\n     }\n\nParameters:\n\n *  `regexp` the regular expression used to validate the field\\\\u2019s content.\n *  `fieldKey` the ID of the field to validate. For a custom field, it would look like `customfield_123`.\n\n###### Date field comparison ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"dateFieldComparison\",\n         \"date1FieldKey\": \"duedate\",\n         \"date2FieldKey\": \"customfield_10054\",\n         \"includeTime\": \"true\",\n         \"conditionSelected\": \">=\"\n       }\n     }\n\nParameters:\n\n *  `date1FieldKey` the ID of the first field to compare. For a custom field, it would look like `customfield_123`.\n *  `date2FieldKey` the ID of the second field to compare. For a custom field, it would look like `customfield_123`.\n *  `includeTime` if `true`, compares both date and time. Allowed values: `true`, `false`.\n *  `conditionSelected` the condition to compare with. Allowed values: `>`, `>=`, `=`, `<=`, `<`, `!=`.\n\n###### Date range comparison ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"windowDateComparison\",\n         \"date1FieldKey\": \"customfield_10009\",\n         \"date2FieldKey\": \"customfield_10054\",\n         \"numberOfDays\": \"3\"\n       }\n     }\n\nParameters:\n\n *  `date1FieldKey` the ID of the first field to compare. For a custom field, it would look like `customfield_123`.\n *  `date2FieldKey` the ID of the second field to compare. For a custom field, it would look like `customfield_123`.\n *  `numberOfDays` maximum number of days past the reference date (`date2FieldKey`) to pass validation.\n\nThis rule is composed by aggregating the following legacy rules:\n\n *  FieldRequiredValidator\n *  FieldChangedValidator\n *  FieldHasSingleValueValidator\n *  RegexpFieldValidator\n *  DateFieldValidator\n *  WindowsDateValidator\n\n##### Pro forma: Forms attached validator #####\n\nValidates that one or more forms are attached to the issue.\n\n    {\n       \"ruleKey\" : \"system:proforma-forms-attached\"\n       \"parameters\" : {}\n     }\n\n##### Proforma: Forms submitted validator #####\n\nValidates that all forms attached to the issue have been submitted.\n\n    {\n       \"ruleKey\" : \"system:proforma-forms-submitted\"\n       \"parameters\" : {}\n     }\n\n#### Conditions ####\n\nConditions enable workflow rules that govern whether a transition can execute.\n\n##### Check field value #####\n\nA condition rule evaluates as true if a specific field's value meets the defined criteria. This rule ensures that an issue can only transition to the next step in the workflow if the field's value matches the desired condition.\n\n    {\n       \"ruleKey\": \"system:check-field-value\",\n       \"parameters\": {\n         \"fieldId\": \"description\",\n         \"fieldValue\": \"[\\\"Done\\\"]\",\n         \"comparator\": \"=\",\n         \"comparisonType\": \"STRING\"\n       }\n     }\n\nParameters:\n\n *  `fieldId` The ID of the field to check the value of. For non-system fields, it will look like `customfield_123`. Note: `fieldId` is used interchangeably with the idea of `fieldKey` here, they refer to the same field.\n *  `fieldValue` the list of values to check against the field\\\\u2019s value.\n *  `comparator` The comparison logic. Allowed values: `>`, `>=`, `=`, `<=`, `<`, `!=`.\n *  `comparisonType` The type of data being compared. Allowed values: `STRING`, `NUMBER`, `DATE`, `DATE_WITHOUT_TIME`, `OPTIONID`.\n\n##### Restrict issue transition #####\n\nThis rule ensures that issue transitions are restricted based on user accounts, roles, group memberships, and permissions, maintaining control over who can transition an issue. This condition evaluates as `true` if any of the following criteria is met.\n\n    {\n       \"ruleKey\": \"system:restrict-issue-transition\",\n       \"parameters\": {\n         \"accountIds\": \"allow-reporter,5e68ac137d64450d01a77fa0\",\n         \"roleIds\": \"10002,10004\",\n         \"groupIds\": \"703ff44a-7dc8-4f4b-9aa6-a65bf3574fa4\",\n         \"permissionKeys\": \"ADMINISTER_PROJECTS\",\n         \"groupCustomFields\": \"customfield_10028\",\n         \"allowUserCustomFields\": \"customfield_10072,customfield_10144,customfield_10007\",\n         \"denyUserCustomFields\": \"customfield_10107\"\n       }\n     }\n\nParameters:\n\n *  `accountIds` a comma-separated list of the user account IDs. It also allows generic values like: `allow-assignee`, `allow-reporter`, and `accountIds` Note: This is only supported in team-managed projects\n *  `roleIds` a comma-separated list of role IDs.\n *  `groupIds` a comma-separated list of group IDs.\n *  `permissionKeys` a comma-separated list of permission keys. Allowed values: [built-in Jira permissions](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions).\n *  `groupCustomFields` a comma-separated list of group custom field IDs.\n *  `allowUserCustomFields` a comma-separated list of user custom field IDs to allow for issue transition.\n *  `denyUserCustomFields` a comma-separated list of user custom field IDs to deny for issue transition.\n\nThis rule is composed by aggregating the following legacy rules:\n\n *  AllowOnlyAssignee\n *  AllowOnlyReporter\n *  InAnyProjectRoleCondition\n *  InProjectRoleCondition\n *  UserInAnyGroupCondition\n *  UserInGroupCondition\n *  PermissionCondtion\n *  InGroupCFCondition\n *  UserIsInCustomFieldCondition\n\n##### Previous status condition #####\n\nA condition that evaluates based on an issue's previous status(es) and specific criteria.\n\n    {\n       \"ruleKey\" : \"system:previous-status-condition\"\n       \"parameters\" : {\n         \"previousStatusIds\" : \"10004\",\n         \"not\": \"true\",\n         \"mostRecentStatusOnly\" : \"true\",\n         \"includeCurrentStatus\": \"true\",\n         \"ignoreLoopTransitions\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `previousStatusIds` a comma-separated list of status IDs, current only support one ID.\n *  `not` indicates if the condition should be reversed. When `true` it checks that the issue has not been in the selected statuses. Allowed values: `true`, `false`.\n *  `mostRecentStatusOnly` when true only considers the most recent status for the condition evaluation. Allowed values: `true`, `false`.\n *  `includeCurrentStatus` includes the current status when evaluating if the issue has been through the selected statuses. Allowed values: `true`, `false`.\n *  `ignoreLoopTransitions` ignore loop transitions. Allowed values: `true`, `false`.\n\n##### Parent or child blocking condition #####\n\nA condition to block the parent\\\\u2019s issue transition depending on the child\\\\u2019s issue status.\n\n    {\n       \"ruleKey\" : \"system:parent-or-child-blocking-condition\"\n       \"parameters\" : {\n         \"blocker\" : \"CHILD\",\n         \"statusIds\" : \"1,2,3\"\n       }\n     }\n\nParameters:\n\n *  `blocker` currently only supports `CHILD`.\n *  `statusIds` a comma-separated list of status IDs.\n\n##### Separation of duties #####\n\nA condition preventing the user from performing, if the user has already performed a transition on the issue.\n\n    {\n       \"ruleKey\": \"system:separation-of-duties\",\n       \"parameters\": {\n         \"fromStatusId\": \"10161\",\n         \"toStatusId\": \"10160\"\n       }\n     }\n\nParameters:\n\n *  `fromStatusId` represents the status ID from which the issue is transitioning. It ensures that the user performing the current transition has not performed any actions when the issue was in the specified status.\n *  `toStatusId` represents the status ID to which the issue is transitioning. It ensures that the user performing the current transition is not the same user who has previously transitioned the issue.\n\n##### Restrict transitions #####\n\nA condition preventing all users from transitioning the issue can also optionally include APIs as well.\n\n    {\n       \"ruleKey\": \"system:restrict-from-all-users\",\n       \"parameters\": {\n         \"restrictMode\": \"users\"\n       }\n     }\n\nParameters:\n\n *  `restrictMode` restricts the issue transition including/excluding APIs. Allowed values: `\"users\"`, `\"usersAndAPI\"`.\n\n##### Jira Service Management block until approved #####\n\nBlock an issue transition until approval. Note: This is only supported in team-managed projects.\n\n    {\n       \"ruleKey\": \"system:jsd-approvals-block-until-approved\",\n       \"parameters\": {\n         \"approvalConfigurationJson\": \"{\"statusExternalUuid...}\"\n       }\n     }\n\nParameters:\n\n *  `approvalConfigurationJson` a stringified JSON holding the Jira Service Management approval configuration.\n\n##### Jira Service Management block until rejected #####\n\nBlock an issue transition until rejected. Note: This is only supported in team-managed projects.\n\n    {\n       \"ruleKey\": \"system:jsd-approvals-block-until-rejected\",\n       \"parameters\": {\n         \"approvalConfigurationJson\": \"{\"statusExternalUuid...}\"\n       }\n     }\n\nParameters:\n\n *  `approvalConfigurationJson` a stringified JSON holding the Jira Service Management approval configuration.\n\n##### Block in progress approval #####\n\nCondition to block issue transition if there is pending approval. Note: This is only supported in company-managed projects.\n\n    {\n       \"ruleKey\": \"system:block-in-progress-approval\",\n       \"parameters\": {}\n     }\n\n#### Post functions ####\n\nPost functions carry out any additional processing required after a workflow transition is executed.\n\n##### Change assignee #####\n\nA post function rule that changes the assignee of an issue after a transition.\n\n    {\n       \"ruleKey\": \"system:change-assignee\",\n       \"parameters\": {\n         \"type\": \"to-selected-user\",\n         \"accountId\": \"example-account-id\"\n       }\n     }\n\nParameters:\n\n *  `type` the parameter used to determine the new assignee. Allowed values: `to-selected-user`, `to-unassigned`, `to-current-user`, `to-current-user`, `to-default-user`, `to-default-user`\n *  `accountId` the account ID of the user to assign the issue to. This parameter is required only when the type is `\"to-selected-user\"`.\n\n##### Copy field value #####\n\nA post function that automates the process of copying values between fields during a specific transition, ensuring data consistency and reducing manual effort.\n\n    {\n       \"ruleKey\": \"system:copy-value-from-other-field\",\n       \"parameters\": {\n         \"sourceFieldKey\": \"description\",\n         \"targetFieldKey\": \"components\",\n         \"issueSource\": \"SAME\"\n       }\n     }\n\nParameters:\n\n *  `sourceFieldKey` the field key to copy from. For a custom field, it would look like `customfield_123`\n *  `targetFieldKey` the field key to copy to. For a custom field, it would look like `customfield_123`\n *  `issueSource` `SAME` or `PARENT`. Defaults to `SAME` if no value is provided.\n\n##### Update field #####\n\nA post function that updates or appends a specific field with the given value.\n\n    {\n       \"ruleKey\": \"system:update-field\",\n       \"parameters\": {\n         \"field\": \"customfield_10056\",\n         \"value\": \"asdf\",\n         \"mode\": \"append\"\n       }\n     }\n\nParameters:\n\n *  `field` the ID of the field to update. For a custom field, it would look like `customfield_123`\n *  `value` the value to update the field with.\n *  `mode` `append` or `replace`. Determines if a value will be appended to the current value, or if the current value will be replaced.\n\n##### Trigger webhook #####\n\nA post function that automatically triggers a predefined webhook when a transition occurs in the workflow.\n\n    {\n       \"ruleKey\": \"system:trigger-webhook\",\n       \"parameters\": {\n         \"webhookId\": \"1\"\n       }\n     }\n\nParameters:\n\n *  `webhookId` the ID of the webhook.\n\n##### Trigger agent #####\n\nA post function that triggers a Jira AI agent for the issue after the transition runs, using the configured agent and an optional prompt. The agent run is asynchronous: it is scheduled after the transition finishes and does not block the transition.\n\n    {\n       \"ruleKey\": \"system:trigger-agent\",\n       \"parameters\": {\n         \"agentId\": \"712020:3c6d3f05-331a-4488-932e-37c34b704720\",\n         \"promptValue\": \"\"\n       }\n     }\n\nParameters:\n\n *  `agentId` the identifier of the agent to trigger (the Atlassian account ID of the agent).\n *  `promptValue` optional text passed to the agent as a user prompt after the transition runs; use an empty string if no extra prompt is needed.\n\n#### Screen ####\n\n##### Remind people to update fields #####\n\nA screen rule that prompts users to update a specific field when they interact with an issue screen during a transition. This rule is useful for ensuring that users provide or modify necessary information before moving an issue to the next step in the workflow.\n\n    {\n       \"ruleKey\": \"system:remind-people-to-update-fields\",\n       \"params\": {\n         \"remindingFieldIds\": \"assignee,customfield_10025\",\n         \"remindingMessage\": \"The message\",\n         \"remindingAlwaysAsk\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `remindingFieldIds` a comma-separated list of field IDs. Note: `fieldId` is used interchangeably with the idea of `fieldKey` here, they refer to the same field.\n *  `remindingMessage` the message to display when prompting the users to update the fields.\n *  `remindingAlwaysAsk` always remind to update fields. Allowed values: `true`, `false`.\n\n##### Shared transition screen #####\n\nA common screen that is shared between transitions in a workflow.\n\n    {\n       \"ruleKey\": \"system:transition-screen\",\n       \"params\": {\n         \"screenId\": \"3\"\n       }\n     }\n\nParameters:\n\n *  `screenId` the ID of the screen.\n\n#### Connect & Forge ####\n\n##### Connect rules #####\n\nValidator/Condition/Post function for Connect app.\n\n    {\n       \"ruleKey\": \"connect:expression-validator\",\n       \"parameters\": {\n         \"appKey\": \"com.atlassian.app\",\n         \"config\": \"\",\n         \"id\": \"90ce590f-e90c-4cd3-8281-165ce41f2ac3\",\n         \"disabled\": \"false\",\n         \"tag\": \"\"\n       }\n     }\n\nParameters:\n\n *  `ruleKey` Validator: `connect:expression-validator`, Condition: `connect:expression-condition`, and Post function: `connect:remote-workflow-function`\n *  `appKey` the reference to the Connect app\n *  `config` a JSON payload string describing the configuration\n *  `id` the ID of the rule\n *  `disabled` determine if the Connect app is disabled. Allowed values: `true`, `false`.\n *  `tag` additional tags for the Connect app\n\n##### Forge rules #####\n\nValidator/Condition/Post function for Forge app.\n\n    {\n       \"ruleKey\": \"forge:expression-validator\",\n       \"parameters\": {\n         \"key\": \"ari:cloud:ecosystem::extension/{appId}/{environmentId}/static/{moduleKey}\",\n         \"config\": \"{\"searchString\":\"workflow validator\"}\",\n         \"id\": \"a865ddf6-bb3f-4a7b-9540-c2f8b3f9f6c2\",\n         \"disabled\": \"false\",\n         \"tag\": \"\"\n       }\n     }\n\nParameters:\n\n *  `ruleKey` Validator: `forge:expression-validator`, Condition: `forge:expression-condition`, and Post function: `forge:workflow-post-function`\n *  `key` the identifier for the Forge app\n *  `config` the persistent stringified JSON configuration for the Forge rule\n *  `id` the ID of the Forge rule\n *  `disabled` determine if the Forge app is disabled. Allowed values: `true`, `false`.\n *  `tag` additional tags for the Forge app",
+        "description": "Get the list of workflow capabilities for a specific workflow using either the workflow ID, or the project and issue type ID pair. The response includes the scope of the workflow, defined as global/project-based, and a list of project types that the workflow is scoped to. It also includes all rules organised into their broad categories (conditions, validators, actions, triggers, screens) as well as the source location (Atlassian-provided, Connect, Forge).\n\n**[Permissions](#permissions) required:**\n\n *  *Administer Jira* project permission to access all, including global-scoped, workflows\n *  *Administer projects* project permissions to access project-scoped workflows\n\nThe current list of Atlassian-provided rules:\n\n#### Validators ####\n\nA validator rule that checks if a user has the required permissions to execute the transition in the workflow.\n\n##### Permission validator #####\n\nA validator rule that checks if a user has the required permissions to execute the transition in the workflow.\n\n    {\n       \"ruleKey\": \"system:check-permission-validator\",\n       \"parameters\": {\n         \"permissionKey\": \"ADMINISTER_PROJECTS\"\n       }\n     }\n\nParameters:\n\n *  `permissionKey` The permission required to perform the transition. Allowed values: [built-in Jira permissions](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions).\n\n##### Parent or child blocking validator #####\n\nA validator to block the child issue's transition depending on the parent issue's status.\n\n    {\n       \"ruleKey\" : \"system:parent-or-child-blocking-validator\"\n       \"parameters\" : {\n         \"blocker\" : \"PARENT\"\n         \"statusIds\" : \"1,2,3\"\n       }\n     }\n\nParameters:\n\n *  `blocker` currently only supports `PARENT`.\n *  `statusIds` a comma-separated list of status IDs.\n\n##### Previous status validator #####\n\nA validator that checks if an issue has transitioned through specified previous status(es) before allowing the current transition to occur.\n\n    {\n       \"ruleKey\": \"system:previous-status-validator\",\n       \"parameters\": {\n         \"previousStatusIds\": \"10014\",\n         \"mostRecentStatusOnly\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `previousStatusIds` a comma-separated list of status IDs, currently only support one ID.\n *  `mostRecentStatusOnly` when `true` only considers the most recent status for the condition evaluation. Allowed values: `true`, `false`.\n\n##### Validate a field value #####\n\nA validation that ensures a specific field's value meets the defined criteria before allowing an issue to transition in the workflow.\n\nDepending on the rule type, the result will vary:\n\n###### Field required ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldRequired\",\n         \"fieldsRequired\": \"assignee\",\n         \"ignoreContext\": \"true\",\n         \"errorMessage\": \"An assignee must be set!\"\n       }\n     }\n\nParameters:\n\n *  `fieldsRequired` the ID of the field that is required. For a custom field, it would look like `customfield_123`.\n *  `ignoreContext` controls the impact of context settings on field validation. When set to `true`, the validator doesn't check a required field if its context isn't configured for the current issue. When set to `false`, the validator requires a field even if its context is invalid. Allowed values: `true`, `false`.\n *  `errorMessage` is the error message to display if the user does not provide a value during the transition. A default error message will be shown if you don't provide one (Optional).\n\n###### Field changed ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldChanged\",\n         \"groupsExemptFromValidation\": \"6862ac20-8672-4f68-896d-4854f5efb79e\",\n         \"fieldKey\": \"versions\",\n         \"errorMessage\": \"Affect versions must be modified before transition\"\n       }\n     }\n\nParameters:\n\n *  `groupsExemptFromValidation` a comma-separated list of group IDs to be exempt from the validation.\n *  `fieldKey` the ID of the field that has changed. For a custom field, it would look like `customfield_123`.\n *  `errorMessage` the error message to display if the user does not provide a value during the transition. A default error message will be shown if you don't provide one (Optional).\n\n###### Field has a single value ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldHasSingleValue\",\n         \"fieldKey\": \"created\",\n         \"excludeSubtasks\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `fieldKey` the ID of the field to validate. For a custom field, it would look like `customfield_123`.\n *  `excludeSubtasks` Option to exclude values copied from sub-tasks. Allowed values: `true`, `false`.\n\n###### Field matches regular expression ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"fieldMatchesRegularExpression\",\n         \"regexp\": \"[0-9]{4}\",\n         \"fieldKey\": \"description\",\n         \"errorMessage\": \"Description must contain a 4-digit year\"\n       }\n     }\n\nParameters:\n\n *  `regexp` the regular expression used to validate the field's content.\n *  `fieldKey` the ID of the field to validate. For a custom field, it would look like `customfield_123`.\n *  `errorMessage` the error message to display if the field value does not match the regular expression. A default error message will be shown if you don't provide one (Optional).\n\n###### Date field comparison ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"dateFieldComparison\",\n         \"date1FieldKey\": \"duedate\",\n         \"date2FieldKey\": \"customfield_10054\",\n         \"includeTime\": \"true\",\n         \"conditionSelected\": \">=\"\n       }\n     }\n\nParameters:\n\n *  `date1FieldKey` the ID of the first field to compare. For a custom field, it would look like `customfield_123`.\n *  `date2FieldKey` the ID of the second field to compare. For a custom field, it would look like `customfield_123`.\n *  `includeTime` if `true`, compares both date and time. Allowed values: `true`, `false`.\n *  `conditionSelected` the condition to compare with. Allowed values: `>`, `>=`, `=`, `<=`, `<`, `!=`.\n\n###### Date range comparison ######\n\n    {\n       \"ruleKey\": \"system:validate-field-value\",\n       \"parameters\": {\n         \"ruleType\": \"windowDateComparison\",\n         \"date1FieldKey\": \"customfield_10009\",\n         \"date2FieldKey\": \"customfield_10054\",\n         \"numberOfDays\": \"3\"\n       }\n     }\n\nParameters:\n\n *  `date1FieldKey` the ID of the first field to compare. For a custom field, it would look like `customfield_123`.\n *  `date2FieldKey` the ID of the second field to compare. For a custom field, it would look like `customfield_123`.\n *  `numberOfDays` maximum number of days past the reference date (`date2FieldKey`) to pass validation.\n\nThis rule is composed by aggregating the following legacy rules:\n\n *  FieldRequiredValidator\n *  FieldChangedValidator\n *  FieldHasSingleValueValidator\n *  RegexpFieldValidator\n *  DateFieldValidator\n *  WindowsDateValidator\n\n##### Pro forma: Forms attached validator #####\n\nValidates that one or more forms are attached to the issue.\n\n    {\n       \"ruleKey\" : \"system:proforma-forms-attached\"\n       \"parameters\" : {}\n     }\n\n##### Proforma: Forms submitted validator #####\n\nValidates that all forms attached to the issue have been submitted.\n\n    {\n       \"ruleKey\" : \"system:proforma-forms-submitted\"\n       \"parameters\" : {}\n     }\n\n#### Conditions ####\n\nConditions enable workflow rules that govern whether a transition can execute.\n\n##### Check field value #####\n\nA condition rule evaluates as true if a specific field's value meets the defined criteria. This rule ensures that an issue can only transition to the next step in the workflow if the field's value matches the desired condition.\n\n    {\n       \"ruleKey\": \"system:check-field-value\",\n       \"parameters\": {\n         \"fieldId\": \"description\",\n         \"fieldValue\": \"[\\\"Done\\\"]\",\n         \"comparator\": \"=\",\n         \"comparisonType\": \"STRING\"\n       }\n     }\n\nParameters:\n\n *  `fieldId` The ID of the field to check the value of. For non-system fields, it will look like `customfield_123`. Note: `fieldId` is used interchangeably with the idea of `fieldKey` here, they refer to the same field.\n *  `fieldValue` the list of values to check against the field\\\\u2019s value.\n *  `comparator` The comparison logic. Allowed values: `>`, `>=`, `=`, `<=`, `<`, `!=`.\n *  `comparisonType` The type of data being compared. Allowed values: `STRING`, `NUMBER`, `DATE`, `DATE_WITHOUT_TIME`, `OPTIONID`.\n\n##### Restrict issue transition #####\n\nThis rule ensures that issue transitions are restricted based on user accounts, roles, group memberships, and permissions, maintaining control over who can transition an issue. This condition evaluates as `true` if any of the following criteria is met.\n\n    {\n       \"ruleKey\": \"system:restrict-issue-transition\",\n       \"parameters\": {\n         \"accountIds\": \"allow-reporter,5e68ac137d64450d01a77fa0\",\n         \"roleIds\": \"10002,10004\",\n         \"groupIds\": \"703ff44a-7dc8-4f4b-9aa6-a65bf3574fa4\",\n         \"permissionKeys\": \"ADMINISTER_PROJECTS\",\n         \"groupCustomFields\": \"customfield_10028\",\n         \"allowUserCustomFields\": \"customfield_10072,customfield_10144,customfield_10007\",\n         \"denyUserCustomFields\": \"customfield_10107\"\n       }\n     }\n\nParameters:\n\n *  `accountIds` a comma-separated list of the user account IDs. It also allows generic values like: `allow-assignee`, `allow-reporter`, and `accountIds` Note: This is only supported in team-managed projects\n *  `roleIds` a comma-separated list of role IDs.\n *  `groupIds` a comma-separated list of group IDs.\n *  `permissionKeys` a comma-separated list of permission keys. Allowed values: [built-in Jira permissions](https://developer.atlassian.com/cloud/jira/platform/rest/v3/api-group-permission-schemes/#built-in-permissions).\n *  `groupCustomFields` a comma-separated list of group custom field IDs.\n *  `allowUserCustomFields` a comma-separated list of user custom field IDs to allow for issue transition.\n *  `denyUserCustomFields` a comma-separated list of user custom field IDs to deny for issue transition.\n\nThis rule is composed by aggregating the following legacy rules:\n\n *  AllowOnlyAssignee\n *  AllowOnlyReporter\n *  InAnyProjectRoleCondition\n *  InProjectRoleCondition\n *  UserInAnyGroupCondition\n *  UserInGroupCondition\n *  PermissionCondtion\n *  InGroupCFCondition\n *  UserIsInCustomFieldCondition\n\n##### Previous status condition #####\n\nA condition that evaluates based on an issue's previous status(es) and specific criteria.\n\n    {\n       \"ruleKey\" : \"system:previous-status-condition\"\n       \"parameters\" : {\n         \"previousStatusIds\" : \"10004\",\n         \"not\": \"true\",\n         \"mostRecentStatusOnly\" : \"true\",\n         \"includeCurrentStatus\": \"true\",\n         \"ignoreLoopTransitions\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `previousStatusIds` a comma-separated list of status IDs, current only support one ID.\n *  `not` indicates if the condition should be reversed. When `true` it checks that the issue has not been in the selected statuses. Allowed values: `true`, `false`.\n *  `mostRecentStatusOnly` when true only considers the most recent status for the condition evaluation. Allowed values: `true`, `false`.\n *  `includeCurrentStatus` includes the current status when evaluating if the issue has been through the selected statuses. Allowed values: `true`, `false`.\n *  `ignoreLoopTransitions` ignore loop transitions. Allowed values: `true`, `false`.\n\n##### Parent or child blocking condition #####\n\nA condition to block the parent\\\\u2019s issue transition depending on the child\\\\u2019s issue status.\n\n    {\n       \"ruleKey\" : \"system:parent-or-child-blocking-condition\"\n       \"parameters\" : {\n         \"blocker\" : \"CHILD\",\n         \"statusIds\" : \"1,2,3\"\n       }\n     }\n\nParameters:\n\n *  `blocker` currently only supports `CHILD`.\n *  `statusIds` a comma-separated list of status IDs.\n\n##### Separation of duties #####\n\nA condition preventing the user from performing, if the user has already performed a transition on the issue.\n\n    {\n       \"ruleKey\": \"system:separation-of-duties\",\n       \"parameters\": {\n         \"fromStatusId\": \"10161\",\n         \"toStatusId\": \"10160\"\n       }\n     }\n\nParameters:\n\n *  `fromStatusId` represents the status ID from which the issue is transitioning. It ensures that the user performing the current transition has not performed any actions when the issue was in the specified status.\n *  `toStatusId` represents the status ID to which the issue is transitioning. It ensures that the user performing the current transition is not the same user who has previously transitioned the issue.\n\n##### Restrict transitions #####\n\nA condition preventing all users from transitioning the issue can also optionally include APIs as well.\n\n    {\n       \"ruleKey\": \"system:restrict-from-all-users\",\n       \"parameters\": {\n         \"restrictMode\": \"users\"\n       }\n     }\n\nParameters:\n\n *  `restrictMode` restricts the issue transition including/excluding APIs. Allowed values: `\"users\"`, `\"usersAndAPI\"`.\n\n##### Jira Service Management block until approved #####\n\nBlock an issue transition until approval. Note: This is only supported in team-managed projects.\n\n    {\n       \"ruleKey\": \"system:jsd-approvals-block-until-approved\",\n       \"parameters\": {\n         \"approvalConfigurationJson\": \"{\"statusExternalUuid...}\"\n       }\n     }\n\nParameters:\n\n *  `approvalConfigurationJson` a stringified JSON holding the Jira Service Management approval configuration.\n\n##### Jira Service Management block until rejected #####\n\nBlock an issue transition until rejected. Note: This is only supported in team-managed projects.\n\n    {\n       \"ruleKey\": \"system:jsd-approvals-block-until-rejected\",\n       \"parameters\": {\n         \"approvalConfigurationJson\": \"{\"statusExternalUuid...}\"\n       }\n     }\n\nParameters:\n\n *  `approvalConfigurationJson` a stringified JSON holding the Jira Service Management approval configuration.\n\n##### Block in progress approval #####\n\nCondition to block issue transition if there is pending approval. Note: This is only supported in company-managed projects.\n\n    {\n       \"ruleKey\": \"system:block-in-progress-approval\",\n       \"parameters\": {}\n     }\n\n#### Post functions ####\n\nPost functions carry out any additional processing required after a workflow transition is executed.\n\n##### Change assignee #####\n\nA post function rule that changes the assignee of an issue after a transition.\n\n    {\n       \"ruleKey\": \"system:change-assignee\",\n       \"parameters\": {\n         \"type\": \"to-selected-user\",\n         \"accountId\": \"example-account-id\"\n       }\n     }\n\nParameters:\n\n *  `type` the parameter used to determine the new assignee. Allowed values: `to-selected-user`, `to-unassigned`, `to-current-user`, `to-current-user`, `to-default-user`, `to-default-user`\n *  `accountId` the account ID of the user to assign the issue to. This parameter is required only when the type is `\"to-selected-user\"`.\n\n##### Copy field value #####\n\nA post function that automates the process of copying values between fields during a specific transition, ensuring data consistency and reducing manual effort.\n\n    {\n       \"ruleKey\": \"system:copy-value-from-other-field\",\n       \"parameters\": {\n         \"sourceFieldKey\": \"description\",\n         \"targetFieldKey\": \"components\",\n         \"issueSource\": \"SAME\"\n       }\n     }\n\nParameters:\n\n *  `sourceFieldKey` the field key to copy from. For a custom field, it would look like `customfield_123`\n *  `targetFieldKey` the field key to copy to. For a custom field, it would look like `customfield_123`\n *  `issueSource` `SAME` or `PARENT`. Defaults to `SAME` if no value is provided.\n\n##### Update field #####\n\nA post function that updates or appends a specific field with the given value.\n\n    {\n       \"ruleKey\": \"system:update-field\",\n       \"parameters\": {\n         \"field\": \"customfield_10056\",\n         \"value\": \"asdf\",\n         \"mode\": \"append\"\n       }\n     }\n\nParameters:\n\n *  `field` the ID of the field to update. For a custom field, it would look like `customfield_123`\n *  `value` the value to update the field with.\n *  `mode` `append` or `replace`. Determines if a value will be appended to the current value, or if the current value will be replaced.\n\n##### Trigger webhook #####\n\nA post function that automatically triggers a predefined webhook when a transition occurs in the workflow.\n\n    {\n       \"ruleKey\": \"system:trigger-webhook\",\n       \"parameters\": {\n         \"webhookId\": \"1\"\n       }\n     }\n\nParameters:\n\n *  `webhookId` the ID of the webhook.\n\n##### Trigger agent #####\n\nA post function that triggers a Jira AI agent for the issue after the transition runs, using the configured agent and an optional prompt. The agent run is asynchronous: it is scheduled after the transition finishes and does not block the transition.\n\n    {\n       \"ruleKey\": \"system:trigger-agent\",\n       \"parameters\": {\n         \"agentId\": \"712020:3c6d3f05-331a-4488-932e-37c34b704720\",\n         \"promptValue\": \"\"\n       }\n     }\n\nParameters:\n\n *  `agentId` the identifier of the agent to trigger (the Atlassian account ID of the agent).\n *  `promptValue` optional text passed to the agent as a user prompt after the transition runs; use an empty string if no extra prompt is needed.\n\n#### Screen ####\n\n##### Remind people to update fields #####\n\nA screen rule that prompts users to update a specific field when they interact with an issue screen during a transition. This rule is useful for ensuring that users provide or modify necessary information before moving an issue to the next step in the workflow.\n\n    {\n       \"ruleKey\": \"system:remind-people-to-update-fields\",\n       \"params\": {\n         \"remindingFieldIds\": \"assignee,customfield_10025\",\n         \"remindingMessage\": \"The message\",\n         \"remindingAlwaysAsk\": \"true\"\n       }\n     }\n\nParameters:\n\n *  `remindingFieldIds` a comma-separated list of field IDs. Note: `fieldId` is used interchangeably with the idea of `fieldKey` here, they refer to the same field.\n *  `remindingMessage` the message to display when prompting the users to update the fields.\n *  `remindingAlwaysAsk` always remind to update fields. Allowed values: `true`, `false`.\n\n##### Shared transition screen #####\n\nA common screen that is shared between transitions in a workflow.\n\n    {\n       \"ruleKey\": \"system:transition-screen\",\n       \"params\": {\n         \"screenId\": \"3\"\n       }\n     }\n\nParameters:\n\n *  `screenId` the ID of the screen.\n\n#### Connect & Forge ####\n\n##### Connect rules #####\n\nValidator/Condition/Post function for Connect app.\n\n    {\n       \"ruleKey\": \"connect:expression-validator\",\n       \"parameters\": {\n         \"appKey\": \"com.atlassian.app\",\n         \"config\": \"\",\n         \"id\": \"90ce590f-e90c-4cd3-8281-165ce41f2ac3\",\n         \"disabled\": \"false\",\n         \"tag\": \"\"\n       }\n     }\n\nParameters:\n\n *  `ruleKey` Validator: `connect:expression-validator`, Condition: `connect:expression-condition`, and Post function: `connect:remote-workflow-function`\n *  `appKey` the reference to the Connect app\n *  `config` a JSON payload string describing the configuration\n *  `id` the ID of the rule\n *  `disabled` determine if the Connect app is disabled. Allowed values: `true`, `false`.\n *  `tag` additional tags for the Connect app\n\n##### Forge rules #####\n\nValidator/Condition/Post function for Forge app.\n\n    {\n       \"ruleKey\": \"forge:expression-validator\",\n       \"parameters\": {\n         \"key\": \"ari:cloud:ecosystem::extension/{appId}/{environmentId}/static/{moduleKey}\",\n         \"config\": \"{\"searchString\":\"workflow validator\"}\",\n         \"id\": \"a865ddf6-bb3f-4a7b-9540-c2f8b3f9f6c2\",\n         \"disabled\": \"false\",\n         \"tag\": \"\"\n       }\n     }\n\nParameters:\n\n *  `ruleKey` Validator: `forge:expression-validator`, Condition: `forge:expression-condition`, and Post function: `forge:workflow-post-function`\n *  `key` the identifier for the Forge app\n *  `config` the persistent stringified JSON configuration for the Forge rule\n *  `id` the ID of the Forge rule\n *  `disabled` determine if the Forge app is disabled. Allowed values: `true`, `false`.\n *  `tag` additional tags for the Forge app",
         "operationId": "workflowCapabilities",
         "parameters": [
           { "in": "query", "name": "workflowId", "schema": { "type": "string" } },
@@ -51686,6 +52287,53 @@
         "x-atlassian-oauth2-scopes": [
           { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
           { "scheme": "OAuth2", "scopes": ["read:workflow:jira"], "state": "Beta" }
+        ],
+        "x-atlassian-connect-scope": "INACCESSIBLE"
+      }
+    },
+    "/rest/api/3/workflows/copy": {
+      "post": {
+        "deprecated": false,
+        "description": "Copies an existing workflow, and the statuses it uses, into a new workflow with the given name. The copy is created in the same scope as the workflow it is copied from. If no description is provided, the copy is created with an empty description.\n\nCopying a workflow requires permission both to read the workflow being copied and to create the copy, which is created in the same scope as its source.\n\n**[Permissions](#permissions) required:**\n\n *  *Administer Jira* global permission to copy all, including project-scoped, workflows\n *  To copy a project-scoped workflow, either the *Edit workflows* project permission, or both the *View (read-only) workflow* and *Administer projects* project permissions",
+        "operationId": "copyWorkflow",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "example": {
+                "description": "A copy of the software workflow",
+                "workflowId": "b9ff2384-d3b6-4d4e-9509-3ee19f607168",
+                "workflowName": "Copy of Software workflow 1"
+              },
+              "schema": { "$ref": "#/components/schemas/WorkflowCopyRequest" }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": "{\"statuses\":[{\"description\":\"\",\"id\":\"10003\",\"name\":\"Done\",\"scope\":{\"type\":\"GLOBAL\"},\"statusCategory\":\"DONE\",\"statusReference\":\"10003\"},{\"description\":\"\",\"id\":\"10001\",\"name\":\"To Do\",\"scope\":{\"type\":\"GLOBAL\"},\"statusCategory\":\"TODO\",\"statusReference\":\"10001\"},{\"description\":\"\",\"id\":\"10002\",\"name\":\"In Progress\",\"scope\":{\"type\":\"GLOBAL\"},\"statusCategory\":\"IN_PROGRESS\",\"statusReference\":\"10002\"}],\"workflows\":[{\"description\":\"\",\"id\":\"b9ff2384-d3b6-4d4e-9509-3ee19f607168\",\"isEditable\":true,\"name\":\"Software workflow 1\",\"scope\":{\"type\":\"GLOBAL\"},\"startPointLayout\":{\"x\":-100.00030899047852,\"y\":-153.00020599365234},\"statuses\":[{\"deprecated\":false,\"layout\":{\"x\":317.0000915527344,\"y\":-16.0},\"properties\":{},\"statusReference\":\"10002\"},{\"deprecated\":false,\"layout\":{\"x\":508.000244140625,\"y\":-16.0},\"properties\":{},\"statusReference\":\"10003\"},{\"deprecated\":false,\"layout\":{\"x\":114.99993896484375,\"y\":-16.0},\"properties\":{},\"statusReference\":\"10001\"}],\"transitions\":[{\"actions\":[],\"description\":\"\",\"id\":\"11\",\"links\":[],\"name\":\"To Do\",\"properties\":{},\"toStatusReference\":\"10001\",\"triggers\":[],\"type\":\"GLOBAL\",\"validators\":[]},{\"actions\":[],\"description\":\"\",\"id\":\"21\",\"links\":[],\"name\":\"In Progress\",\"properties\":{},\"toStatusReference\":\"10002\",\"triggers\":[],\"type\":\"GLOBAL\",\"validators\":[]},{\"actions\":[],\"description\":\"\",\"id\":\"1\",\"links\":[],\"name\":\"Create\",\"properties\":{},\"toStatusReference\":\"10001\",\"triggers\":[],\"type\":\"INITIAL\",\"validators\":[]},{\"actions\":[],\"description\":\"Move a work item from in progress to done\",\"id\":\"31\",\"links\":[{\"fromPort\":0,\"fromStatusReference\":\"10002\",\"toPort\":1}],\"name\":\"Done\",\"properties\":{},\"toStatusReference\":\"10003\",\"triggers\":[],\"type\":\"DIRECTED\",\"validators\":[]}],\"version\":{\"id\":\"f010ac1b-3dd3-43a3-aa66-0ee8a447f76e\",\"versionNumber\":0}}]}",
+                "schema": { "$ref": "#/components/schemas/WorkflowCreateResponse" }
+              }
+            },
+            "description": "Returned if the request is successful."
+          },
+          "400": { "description": "Returned if the request is not valid." },
+          "401": {
+            "description": "Returned if the authentication credentials are incorrect or missing, or the caller doesn't have permissions to perform the operation."
+          },
+          "404": { "description": "Returned if the workflow to copy is not found." },
+          "409": { "description": "Returned if another workflow configuration update task is ongoing." }
+        },
+        "security": [{ "basicAuth": [] }, { "OAuth2": ["manage:jira-configuration"] }],
+        "summary": "Copy workflow",
+        "tags": ["Workflows"],
+        "x-atlassian-data-security-policy": [{ "app-access-rule-exempt": true }],
+        "x-atlassian-oauth2-scopes": [
+          { "scheme": "OAuth2", "scopes": ["manage:jira-configuration"], "state": "Current" },
+          { "scheme": "OAuth2", "scopes": ["write:workflow:jira"], "state": "Beta" }
         ],
         "x-atlassian-connect-scope": "INACCESSIBLE"
       }
@@ -55217,6 +55865,15 @@
             "name": "jiraIssueFieldsKey",
             "required": true,
             "schema": { "type": "string" }
+          },
+          {
+            "description": "Whether to retrigger the migration if it has already completed.",
+            "explode": true,
+            "in": "query",
+            "name": "retriggerCompletedMigration",
+            "required": false,
+            "schema": { "default": false, "type": "boolean" },
+            "style": "form"
           }
         ],
         "responses": {
