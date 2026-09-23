@@ -73,6 +73,73 @@ const parsed = (text: string): Patch => {
   return result.patch
 }
 
+it("keeps every guide fragment inside its own instance when a host already owns content", async () => {
+  const existing = document.createElement("div")
+  existing.id = "content"
+  existing.textContent = "Host content"
+  const host = document.createElement("div")
+  document.body.append(existing, host)
+  const root = createRoot(host)
+  const patch = parsed(
+    "diff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new\n" +
+      "diff --git a/other.ts b/other.ts\n--- a/other.ts\n+++ b/other.ts\n@@ -1 +1 @@\n-old\n+new\n"
+  )
+  const page = (title: string) => (
+    <GuidePage
+      guide={{
+        title,
+        intent: "Inspect the change",
+        sections: [{ title: "Source", overview: "One changed file", diffs: [{ file: "file.ts", summary: "Change" }] }],
+        unplacedFiles: ["other.ts"],
+        review: { gitRef: "head" }
+      }}
+      patch={patch}
+      findings={{
+        checklist: [],
+        issues: [
+          { id: 1, severity: "P1", file: "file.ts", line: 1, summary: "Anchored finding" },
+          { id: 2, severity: "P2", file: "missing.ts", summary: "Outside the diff" }
+        ],
+        preExisting: ["Existing context"],
+        openQuestions: ["Open question"]
+      }}
+    />
+  )
+  try {
+    await act(async () =>
+      root.render(
+        <>
+          {page("First guide")}
+          {page("Second guide")}
+        </>
+      )
+    )
+    const guides = [...host.querySelectorAll<HTMLElement>(".review-guide")]
+    expect(guides).toHaveLength(2)
+    const ids = [...document.querySelectorAll("[id]")].map((element) => element.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const guide of guides) {
+      const links = guide.querySelectorAll<HTMLAnchorElement>(
+        ".review-skip, .review-nav a, .review-roadmap a, .review-issues a, .review-finding a"
+      )
+      expect(links.length).toBeGreaterThan(6)
+      for (const link of links) {
+        const fragment = link.getAttribute("href")
+        if (fragment === null || !fragment.startsWith("#")) throw new TypeError("Missing guide fragment")
+        const target = document.getElementById(decodeURIComponent(fragment.slice(1)))
+        expect(target, fragment).not.toBeNull()
+        expect(guide.contains(target), fragment).toBe(true)
+      }
+      expect(guide.querySelectorAll(".review-file [id]").length).toBeGreaterThan(0)
+    }
+    expect(existing.textContent).toBe("Host content")
+  } finally {
+    await act(async () => root.unmount())
+    host.remove()
+    existing.remove()
+  }
+})
+
 it("renders inline Markdown in review navigation and checklist notes without nesting links", async () => {
   const host = document.createElement("div")
   document.body.append(host)
@@ -110,7 +177,10 @@ it("renders inline Markdown in review navigation and checklist notes without nes
     )
     if (review === undefined) throw new TypeError("Fixture has no Review tab")
     await act(async () => review.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })))
-    const link = host.querySelector('.review-issues a[href="#issue-1"]')
+    const link = host.querySelector(".review-issues a")
+    const target = link?.getAttribute("href")
+    expect(target).toMatch(/^#.+-issue-1$/)
+    expect(target === undefined || target === null ? null : document.getElementById(target.slice(1))).not.toBeNull()
     expect(link?.querySelector("code")?.textContent).toBe("requestedRevision")
     expect(link?.querySelector("strong")?.textContent).toBe("approval")
     expect(link?.querySelector("a")).toBeNull()
@@ -180,7 +250,7 @@ it("retains a rendered diagram when diff mode and wrapping change", async () => 
     if (reviewTab === undefined || guideTab === undefined) throw new TypeError("Fixture has no reading tabs")
     await act(async () => reviewTab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })))
     expect(reviewTab.getAttribute("aria-selected")).toBe("true")
-    expect(host.querySelector("#verdict")?.textContent).toContain("No review source supplied")
+    expect(host.querySelector(".review-verdict")?.textContent).toContain("No review source supplied")
     await act(async () => guideTab.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, button: 0 })))
     expect(guideTab.getAttribute("aria-selected")).toBe("true")
     expect(host.querySelector(".mermaid")?.firstChild).toBe(svg)

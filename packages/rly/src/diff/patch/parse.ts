@@ -110,7 +110,8 @@ const headerPaths = (
   source: string | undefined,
   destination: string | undefined,
   prefixes: PatchPrefixes | undefined,
-  moved: { readonly source: string; readonly destination: string } | undefined
+  moved: { readonly source: string; readonly destination: string } | undefined,
+  unmarkedBinary = false
 ): { readonly _tag: "Paths"; readonly oldPath: string; readonly newPath: string } | PatchInvalid => {
   const candidates: Array<{ readonly oldPath: string; readonly newPath: string }> = []
   for (let index = 0; index < header.length; index++) {
@@ -121,7 +122,8 @@ const headerPaths = (
     if (left.path === "" || right.path === "") continue
     if (source !== undefined && source !== "/dev/null" && source !== left.path) continue
     if (destination !== undefined && destination !== "/dev/null" && destination !== right.path) continue
-    const selected = prefixes ?? (left.path.startsWith("a/") && right.path.startsWith("b/")
+    const defaultPrefixes = prefixes === undefined && left.path.startsWith("a/") && right.path.startsWith("b/")
+    const selected = prefixes ?? (defaultPrefixes
       ? { source: "a/", destination: "b/" }
       : { source: "", destination: "" })
     if (!left.path.startsWith(selected.source) || !right.path.startsWith(selected.destination)) continue
@@ -129,7 +131,10 @@ const headerPaths = (
     const newPath = right.path.slice(selected.destination.length)
     if (oldPath === "" || newPath === "") continue
     if (moved !== undefined && (oldPath !== moved.source || newPath !== moved.destination)) continue
-    if (moved === undefined && source === undefined && destination === undefined && oldPath !== newPath) continue
+    if (
+      moved === undefined && source === undefined && destination === undefined && oldPath !== newPath &&
+      !(unmarkedBinary && (defaultPrefixes || prefixes !== undefined))
+    ) continue
     candidates.push({ oldPath, newPath })
   }
   const paths = candidates[0]
@@ -331,7 +336,7 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
       ? undefined
       : { source: movedSource, destination: movedDestination }
     const paths = binarySummary === undefined
-      ? headerPaths(header, source, destination, prefixes, moved)
+      ? headerPaths(header, source, destination, prefixes, moved, binary)
       : binaryPaths(header, binarySummary, prefixes, moved, status)
     if (paths._tag === "PatchInvalid") return paths
     const path = status === "deleted" ? paths.oldPath : paths.newPath

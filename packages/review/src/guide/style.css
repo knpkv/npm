@@ -138,7 +138,7 @@
 .review-roadmap a {
   font-weight: 500;
 }
-#reading {
+.review-guide .review-reading {
   scroll-margin-top: var(--rly-space-24);
 }
 .review-inline {
@@ -380,7 +380,7 @@
     gap: var(--rly-space-8);
   }
 }
-#reading > [role="tabpanel"][data-state="inactive"] {
+.review-guide .review-reading > [role="tabpanel"][data-state="inactive"] {
   display: none;
 }
 /* A static receipt also prints before hydration and when scripts are disabled. */
@@ -397,10 +397,10 @@
   .review-prose .mermaid[data-diagram-theme="dark"] {
     background: #1f2020;
   }
-  #reading > [role="tabpanel"][data-state="inactive"] {
+  .review-guide .review-reading > [role="tabpanel"][data-state="inactive"] {
     display: block;
   }
-  #reading > [role="tablist"] {
+  .review-guide .review-reading > [role="tablist"] {
     display: none;
   }
   .review-nav,

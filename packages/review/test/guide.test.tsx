@@ -1,4 +1,5 @@
 import * as Schema from "effect/Schema"
+import { Window } from "happy-dom"
 import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it } from "vitest"
 import { type Patch, parsePatch } from "@knpkv/rly/diff/patch"
@@ -47,6 +48,53 @@ const findings: Findings = {
     },
     { id: 2, severity: "P1", file: "a.ts", line: 99, summary: "Outside" }
   ]
+}
+
+/** Select one rendered guide, then find its regions from their visible headings. */
+const guideRoot = (page: Window, html: string) => {
+  page.document.body.innerHTML = html
+  const guides = page.document.querySelectorAll(".review-guide")
+  expect(guides).toHaveLength(1)
+  const guide = guides.item(0)
+  if (guide === null) throw new TypeError("Expected one rendered guide")
+  return guide
+}
+
+const headingSection = (guide: ReturnType<typeof guideRoot>, label: string) => {
+  const headings = [...guide.querySelectorAll("h2")].filter((heading) => heading.textContent?.trim() === label)
+  expect(headings).toHaveLength(1)
+  const heading = headings[0]
+  if (heading === undefined) throw new TypeError(`Missing ${label} heading`)
+  const section = heading.closest("section")
+  if (section === null) throw new TypeError(`Missing ${label} section`)
+  return { heading, section }
+}
+
+const labeledSection = (guide: ReturnType<typeof guideRoot>, label: string) => {
+  const result = headingSection(guide, label)
+  const labelId = result.section.getAttribute("aria-labelledby")
+  if (labelId === null) throw new TypeError(`Unlabelled ${label} section`)
+  const targets = [...guide.querySelectorAll("[id]")].filter((element) => element.id === labelId)
+  expect(targets).toHaveLength(1)
+  expect(targets[0]).toBe(result.heading)
+  return result.section
+}
+
+const issueTarget = (guide: ReturnType<typeof guideRoot>, summary: string) => {
+  const links = [...guide.querySelectorAll(".review-issues a")].filter((link) => link.textContent?.trim() === summary)
+  expect(links).toHaveLength(1)
+  const fragment = links[0]?.getAttribute("href")
+  if (fragment === undefined || fragment === null || !fragment.startsWith("#")) {
+    throw new TypeError(`Missing ${summary} fragment`)
+  }
+  const id = decodeURIComponent(fragment.slice(1))
+  const targets = [...guide.querySelectorAll("[id]")].filter((element) => element.id === id)
+  expect(targets).toHaveLength(1)
+  const target = targets[0]
+  if (target === undefined) throw new TypeError(`Missing ${summary} target`)
+  expect(target.matches(".review-finding")).toBe(true)
+  expect(target.textContent).toContain(summary)
+  return target
 }
 
 describe("guide", () => {
@@ -98,18 +146,39 @@ describe("guide", () => {
       expect(html).toContain(`${displayed} · reported`)
     }
   })
-  it("keeps pre-existing context and open questions in separately labelled groups", () => {
+  it("keeps pre-existing context and open questions in separately labelled groups", async () => {
     const render = (context: Pick<Findings, "preExisting" | "openQuestions">) =>
       renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={{ ...findings, ...context }} />)
-    const html = render({ preExisting: ["Existing constraint"], openQuestions: ["Unresolved question?"] })
-    const existing = html.split('aria-labelledby="pre-existing"')[1]?.split("</section>")[0]
-    const questions = html.split('aria-labelledby="open-questions"')[1]?.split("</section>")[0]
-    expect(existing).toContain("Existing constraint")
-    expect(existing).not.toContain("Unresolved question?")
-    expect(questions).toContain("Unresolved question?")
-    expect(questions).not.toContain("Existing constraint")
-    expect(render({ preExisting: ["Existing constraint"] })).not.toContain('id="open-questions"')
-    expect(render({ openQuestions: ["Unresolved question?"] })).not.toContain('id="pre-existing"')
+    const page = new Window()
+    try {
+      const root = guideRoot(
+        page,
+        render({ preExisting: ["Existing constraint"], openQuestions: ["Unresolved question?"] })
+      )
+      const existing = labeledSection(root, "Pre-existing context")
+      const questions = labeledSection(root, "Open questions")
+      expect(existing.textContent).toContain("Existing constraint")
+      expect(existing.textContent).not.toContain("Unresolved question?")
+      expect(questions.textContent).toContain("Unresolved question?")
+      expect(questions.textContent).not.toContain("Existing constraint")
+
+      const existingOnly = guideRoot(page, render({ preExisting: ["Existing constraint"] }))
+      expect(existingOnly.querySelectorAll("section[aria-labelledby]")).toHaveLength(1)
+      labeledSection(existingOnly, "Pre-existing context")
+      expect(
+        [...existingOnly.querySelectorAll("section[aria-labelledby] h2")].map((heading) => heading.textContent)
+      ).toEqual(["Pre-existing context"])
+      expect(existingOnly.textContent).not.toContain("Unresolved question?")
+      const questionsOnly = guideRoot(page, render({ openQuestions: ["Unresolved question?"] }))
+      expect(questionsOnly.querySelectorAll("section[aria-labelledby]")).toHaveLength(1)
+      labeledSection(questionsOnly, "Open questions")
+      expect(
+        [...questionsOnly.querySelectorAll("section[aria-labelledby] h2")].map((heading) => heading.textContent)
+      ).toEqual(["Open questions"])
+      expect(questionsOnly.textContent).not.toContain("Existing constraint")
+    } finally {
+      await page.happyDOM.close()
+    }
   })
   it("identifies source pull requests with their supplied title or number", () => {
     const render = (source: Guide["source"]) =>
@@ -121,15 +190,36 @@ describe("guide", () => {
     expect(render({ pr: { ...pr, title: "  " } })).toContain(">Source pull request</a>")
     expect(render(undefined)).not.toContain(pr.url)
   })
-  it("places every finding or explains why it cannot anchor", () => {
+  it("places every finding or explains why it cannot anchor", async () => {
     expect(placeAll(patch, findings).map((item) => item.kind)).toEqual(["anchored", "general"])
     const html = renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={findings} />)
     expect(html).toContain("data-rly-root")
     expect(html).toContain("callout-important")
     expect(html).toContain("A signed approval for A must not authorize <strong>B</strong>.")
-    expect(html.indexOf('id="issue-1"')).toBeGreaterThan(html.indexOf('id="f1-new-20"'))
-    expect(html.indexOf('id="issue-2"')).toBeGreaterThan(html.indexOf('id="general"'))
-    expect(html).toContain("line not in the diff")
+    const page = new Window()
+    try {
+      const root = guideRoot(page, html)
+      const anchored = issueTarget(root, "Check signature")
+      const general = issueTarget(root, "Outside")
+      const lines = [...root.querySelectorAll(".review-file code[id]")].filter(
+        (line) => line.textContent?.trim() === "new"
+      )
+      expect(lines).toHaveLength(1)
+      const line = lines[0]
+      if (line === undefined) throw new TypeError("Missing changed source line")
+      expect([...root.querySelectorAll("[id]")].filter((element) => element.id === line.id)).toHaveLength(1)
+      expect(line.compareDocumentPosition(anchored) & page.Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        page.Node.DOCUMENT_POSITION_FOLLOWING
+      )
+      const region = headingSection(root, "Outside the diff")
+      expect(region.section.contains(general)).toBe(true)
+      expect(region.heading.compareDocumentPosition(general) & page.Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        page.Node.DOCUMENT_POSITION_FOLLOWING
+      )
+      expect(region.section.textContent).toContain("line not in the diff")
+    } finally {
+      await page.happyDOM.close()
+    }
   })
   it("rejects incomplete and duplicate coverage", () => {
     expect(coverageProblems({ ...guide, unplacedFiles: ["a.ts"] }, patch, findings)).toHaveLength(1)

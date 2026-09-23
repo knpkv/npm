@@ -3,7 +3,7 @@
 import { findFile, type FileDiff, type Patch, PatchDiffView } from "@knpkv/rly/diff/patch"
 import { ThemeProvider } from "@knpkv/rly/foundations"
 import { Button, StateLabel, Surface, Tabs, Text } from "@knpkv/rly/primitives"
-import { memo, type ReactElement, useEffect, useRef, useState } from "react"
+import { memo, type ReactElement, useEffect, useId, useRef, useState } from "react"
 import { renderInline, renderMarkdown } from "./markdown.js"
 import type { Findings, Guide, Issue, Usage } from "./model.js"
 import { bySeverity, placeAll, type Placed } from "./plan.js"
@@ -26,13 +26,23 @@ const Severity = ({ issue }: { readonly issue: Issue }) => (
   />
 )
 
-const FindingCard = ({ issue, onReview }: { readonly issue: Issue; readonly onReview: () => void }) => (
-  <Surface as="aside" padding="compact" id={`issue-${issue.id}`} className="review-finding">
+const FindingCard = ({
+  issue,
+  issueId,
+  onReview,
+  readingId
+}: {
+  readonly issue: Issue
+  readonly issueId: string
+  readonly readingId: string
+  readonly onReview: () => void
+}) => (
+  <Surface as="aside" padding="compact" id={issueId} className="review-finding">
     <div className="review-inline">
       <Severity issue={issue} />
       <strong>Issue {issue.id}</strong>
       {issue.status === undefined ? null : <span>{issue.status}</span>}
-      <a href="#reading" onClick={onReview}>
+      <a href={`#${readingId}`} onClick={onReview}>
         Review summary
       </a>
     </div>
@@ -154,6 +164,8 @@ export interface GuidePageProps {
 
 /** Chapter-first reading with explicit diff controls and stable links to source lines and findings. */
 export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElement => {
+  const instanceId = useId()
+  const fragmentId = (name: string) => `${instanceId}-${name}`
   const [reading, setReading] = useState("guide")
   const [mode, setMode] = useState<"split" | "stacked">("split")
   const [wrap, setWrap] = useState(true)
@@ -162,7 +174,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
   const general = placed.filter((entry): entry is Extract<Placed, { kind: "general" }> => entry.kind === "general")
   const hasFindings = findings.checklist.length + findings.issues.length > 0
   const renderFile = (file: FileDiff, summary: string) => {
-    const id = `f${patch.files.indexOf(file) + 1}`
+    const id = fragmentId(`f${patch.files.indexOf(file) + 1}`)
     return (
       <article className="review-file" id={id} key={file.path}>
         <header className="review-file-header">
@@ -185,7 +197,13 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
             return issues.length === 0 ? null : (
               <>
                 {issues.map(({ issue }) => (
-                  <FindingCard key={issue.id} issue={issue} onReview={() => setReading("review")} />
+                  <FindingCard
+                    key={issue.id}
+                    issue={issue}
+                    issueId={fragmentId(`issue-${issue.id}`)}
+                    readingId={fragmentId("reading")}
+                    onReview={() => setReading("review")}
+                  />
                 ))}
               </>
             )
@@ -196,7 +214,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
   }
   return (
     <ThemeProvider theme={theme} className="review-guide">
-      <a className="review-skip" href="#content">
+      <a className="review-skip" href={`#${fragmentId("content")}`}>
         Skip to changes
       </a>
       <nav className="review-nav" aria-label="Guide chapters">
@@ -209,14 +227,14 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         <ol>
           {hasFindings ? (
             <li>
-              <a href="#reading" onClick={() => setReading("review")}>
+              <a href={`#${fragmentId("reading")}`} onClick={() => setReading("review")}>
                 Review
               </a>
             </li>
           ) : null}
           {guide.sections.map((section, index) => (
             <li key={index}>
-              <a href={`#s${index + 1}`}>
+              <a href={`#${fragmentId(`s${index + 1}`)}`}>
                 <span>{String(index + 1).padStart(2, "0")}</span>
                 {section.title}
               </a>
@@ -224,12 +242,12 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           ))}
           {guide.unplacedFiles.length > 0 ? (
             <li>
-              <a href="#rest">Other files</a>
+              <a href={`#${fragmentId("rest")}`}>Other files</a>
             </li>
           ) : null}
           {general.length > 0 ? (
             <li>
-              <a href="#general">Outside the diff</a>
+              <a href={`#${fragmentId("general")}`}>Outside the diff</a>
             </li>
           ) : null}
         </ol>
@@ -253,7 +271,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           </div>
         </div>
       </nav>
-      <main className="review-content" id="content">
+      <main className="review-content" id={fragmentId("content")}>
         <header className="review-header">
           <div className="review-inline review-muted">
             <span>{patch.files.length} files</span>
@@ -281,7 +299,8 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           </Text>
           <Tabs
             aria-label="Read the change"
-            id="reading"
+            className="review-reading"
+            id={fragmentId("reading")}
             size="large"
             value={reading}
             onValueChange={setReading}
@@ -299,7 +318,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                     <ol className="review-roadmap">
                       {guide.sections.map((section, index) => (
                         <li key={index}>
-                          <a href={`#s${index + 1}`}>{section.title}</a>
+                          <a href={`#${fragmentId(`s${index + 1}`)}`}>{section.title}</a>
                           {section.diffs.length === 0 ? null : (
                             <span className="review-muted">
                               {" "}
@@ -317,7 +336,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                 label: `Review${findings.issues.length === 0 ? "" : ` · ${findings.issues.length}`}`,
                 forceMount: true,
                 content: (
-                  <Surface as="section" id="verdict" className="review-verdict">
+                  <Surface as="section" id={fragmentId("verdict")} className="review-verdict">
                     <Text as="h2" variant="section-title">
                       Review verdict
                     </Text>
@@ -347,7 +366,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                       {[...findings.issues].sort(bySeverity).map((issue) => (
                         <li key={issue.id}>
                           <Severity issue={issue} />
-                          <a href={`#issue-${issue.id}`}>
+                          <a href={`#${fragmentId(`issue-${issue.id}`)}`}>
                             <Inline text={issue.summary} links={false} />
                           </a>
                           <code className="review-issue-location">
@@ -365,7 +384,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           <GuideUsage usage={guide.usage} />
         </header>
         {guide.sections.map((section, index) => (
-          <section className="review-chapter" id={`s${index + 1}`} key={index}>
+          <section className="review-chapter" id={fragmentId(`s${index + 1}`)} key={index}>
             <header className="review-chapter-header">
               <span>{String(index + 1).padStart(2, "0")}</span>
               <Text as="h2" variant="section-title">
@@ -380,7 +399,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           </section>
         ))}
         {guide.unplacedFiles.length === 0 ? null : (
-          <section className="review-chapter" id="rest">
+          <section className="review-chapter" id={fragmentId("rest")}>
             <Text as="h2" variant="section-title">
               Other files
             </Text>
@@ -391,7 +410,7 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           </section>
         )}
         {general.length === 0 ? null : (
-          <section className="review-chapter" id="general">
+          <section className="review-chapter" id={fragmentId("general")}>
             <Text as="h2" variant="section-title">
               Outside the diff
             </Text>
@@ -409,14 +428,19 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
                       ? "line not in the diff"
                       : "file not in the diff"}
                 </p>
-                <FindingCard issue={issue} onReview={() => setReading("review")} />
+                <FindingCard
+                  issue={issue}
+                  issueId={fragmentId(`issue-${issue.id}`)}
+                  readingId={fragmentId("reading")}
+                  onReview={() => setReading("review")}
+                />
               </div>
             ))}
           </section>
         )}
         {(findings.preExisting?.length ?? 0) === 0 ? null : (
-          <section className="review-chapter" aria-labelledby="pre-existing">
-            <Text as="h2" id="pre-existing" variant="section-title">
+          <section className="review-chapter" aria-labelledby={fragmentId("pre-existing")}>
+            <Text as="h2" id={fragmentId("pre-existing")} variant="section-title">
               Pre-existing context
             </Text>
             {findings.preExisting?.map((text, index) => (
@@ -425,8 +449,8 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
           </section>
         )}
         {(findings.openQuestions?.length ?? 0) === 0 ? null : (
-          <section className="review-chapter" aria-labelledby="open-questions">
-            <Text as="h2" id="open-questions" variant="section-title">
+          <section className="review-chapter" aria-labelledby={fragmentId("open-questions")}>
+            <Text as="h2" id={fragmentId("open-questions")} variant="section-title">
               Open questions
             </Text>
             {findings.openQuestions?.map((text, index) => (

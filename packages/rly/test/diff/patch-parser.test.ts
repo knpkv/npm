@@ -1,4 +1,8 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { expect, test } from "vitest"
 import { findFile, parsePatch, type Patch } from "../../src/diff/patch/parse.js"
 import binarySummaries from "./git-binary-summaries.json" with { type: "json" }
@@ -28,6 +32,65 @@ index 1111111..2222222 100644
  }
 \\ No newline at end of file
 `
+
+test("accepts Git's marker-free default-prefix binary no-index comparison", () => {
+  const directory = mkdtempSync(join(tmpdir(), "rly-no-index-binary-"))
+  try {
+    const bytes = Array.from({ length: 256 }, (_, index) => index)
+    writeFileSync(join(directory, "old.bin"), Uint8Array.from(bytes))
+    writeFileSync(join(directory, "new.bin"), Uint8Array.from(bytes.slice().reverse()))
+    const git = spawnSync("git", ["diff", "--no-index", "--binary", "old.bin", "new.bin"], {
+      cwd: directory,
+      encoding: "utf8"
+    })
+    assert.equal(git.status, 1, git.stderr)
+    assert.match(git.stdout, /^diff --git a\/old\.bin b\/new\.bin\n/)
+    assert.match(git.stdout, /\nGIT binary patch\n/)
+    assert.doesNotMatch(git.stdout, /\n--- |\n\+\+\+ |\n(?:rename|copy) (?:from|to) /)
+    const result = parsePatch(git.stdout)
+    assert.equal(result._tag, "Patch", result._tag === "PatchInvalid" ? result.reason : "")
+    if (result._tag === "Patch") {
+      assert.deepEqual(
+        result.patch.files.map(({ binary, newPath, oldPath, path }) => ({
+          oldPath,
+          newPath,
+          path,
+          binary
+        })),
+        [{ oldPath: "old.bin", newPath: "new.bin", path: "new.bin", binary: true }]
+      )
+    }
+    assert.equal(
+      parsePatch(git.stdout.replace("a/old.bin b/new.bin", "left/old.bin right/new.bin"))._tag,
+      "PatchInvalid"
+    )
+    assert.equal(parsePatch(git.stdout.replace("a/old.bin b/new.bin", "old.bin new.bin"))._tag, "PatchInvalid")
+    const producers: ReadonlyArray<{
+      readonly flags: ReadonlyArray<string>
+      readonly source: string
+      readonly destination: string
+    }> = [
+      { flags: ["--src-prefix=left/", "--dst-prefix=right/"], source: "left/", destination: "right/" },
+      { flags: ["--no-prefix"], source: "", destination: "" }
+    ]
+    for (const { destination, flags, source } of producers) {
+      const alternate = spawnSync("git", ["diff", "--no-index", "--binary", ...flags, "old.bin", "new.bin"], {
+        cwd: directory,
+        encoding: "utf8"
+      })
+      assert.equal(alternate.status, 1, alternate.stderr)
+      assert.equal(parsePatch(alternate.stdout)._tag, "PatchInvalid")
+      const explicit = parsePatch(alternate.stdout, { source, destination })
+      assert.equal(explicit._tag, "Patch", explicit._tag === "PatchInvalid" ? explicit.reason : "")
+      if (explicit._tag === "Patch") {
+        assert.equal(explicit.patch.files[0]?.oldPath, "old.bin")
+        assert.equal(explicit.patch.files[0]?.newPath, "new.bin")
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
 
 test("rejects non-UTF-8 path identities while preserving valid octal UTF-8", () => {
   const file = (name: string) =>
