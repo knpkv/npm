@@ -37,6 +37,7 @@ load the opt-in diff renderer or its worker graph.
 | `@knpkv/rly/patterns`                 | Releases, relationships, collaborators, and governed agents |
 | `@knpkv/rly/diff`                     | Opt-in complete diff workbench and bounded worker provider  |
 | `@knpkv/rly/diff/bounded`             | Strict-budget line diffs without syntax packs or WASM       |
+| `@knpkv/rly/diff/patch`               | Git unified-diff parsing and source-line-anchored rendering |
 | `@knpkv/rly/diff/workbench`           | Lightweight diff inventory and workbench composition        |
 | `@knpkv/rly/tokens`                   | Browser-safe semantic token names                           |
 | `@knpkv/rly/styles.css`               | Generated fonts, tokens, reset, and component styles        |
@@ -159,4 +160,20 @@ import { BoundedDiffCodeView, type RlyDiffCodeItem } from "@knpkv/rly/diff/bound
 export const ReviewDiff = ({ items }: { readonly items: ReadonlyArray<RlyDiffCodeItem> }) => (
   <BoundedDiffCodeView initialItems={items} mode="split" />
 )
+```
+
+Use the patch entry when the input is a `git diff` and findings have to anchor
+to real source lines. `parsePatch` returns the reason a patch could not be
+trusted instead of throwing, so a malformed diff cannot silently produce
+invented line numbers:
+
+```tsx
+import { findFile, parsePatch, PatchDiffView } from "@knpkv/rly/diff/patch"
+
+export const PatchView = ({ diff, path }: { readonly diff: string; readonly path: string }) => {
+  const result = parsePatch(diff)
+  if (result._tag === "PatchInvalid") return <p>{result.reason}</p>
+  const file = findFile(result.patch, path)
+  return file === undefined ? null : <PatchDiffView file={file} id={path} mode="split" />
+}
 ```

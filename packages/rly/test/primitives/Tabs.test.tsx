@@ -33,6 +33,16 @@ afterEach(() => {
 })
 
 describe("Tabs", () => {
+  it("retains inactive content only when the item opts in", () => {
+    const ordinary = renderToStaticMarkup(<Tabs aria-label="Details" items={items} />)
+    expect(ordinary).not.toContain("Recorded evidence")
+    const retained = renderToStaticMarkup(
+      <Tabs aria-label="Details" items={[summaryItem, { ...evidenceItem, forceMount: true }]} />
+    )
+    expect(retained).toContain("Decision summary")
+    expect(retained).toContain("Recorded evidence")
+    expect(retained).toContain('data-state="inactive"')
+  })
   it("publishes meaningful size metadata", () => {
     expect(RLY_TABS_DEFAULT_VARIANTS).toEqual({ size: "default" })
     expect(Object.keys(RLY_TABS_VARIANTS.size)).toEqual(["default", "large"])

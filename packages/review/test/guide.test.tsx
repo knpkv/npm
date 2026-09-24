@@ -1,0 +1,391 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { it as effectIt } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Stream from "effect/Stream"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as Schema from "effect/Schema"
+import { Window } from "happy-dom"
+import { renderToStaticMarkup } from "react-dom/server"
+import { describe, expect, it } from "vitest"
+import { type Patch, parsePatch } from "@knpkv/rly/diff/patch"
+import type { Findings, Guide } from "../src/guide/model.js"
+import { Issue, Usage } from "../src/guide/model.js"
+import { coverageProblems, placeAll } from "../src/guide/plan.js"
+import { GuidePage, GuideUsage } from "../src/guide/view.js"
+
+/** Unwrap a patch these tests expect to be well formed. */
+const parsed = (text: string): Patch => {
+  const result = parsePatch(text)
+  if (result._tag === "PatchInvalid") throw new Error(`unexpected invalid patch: ${result.reason}`)
+  return result.patch
+}
+
+const patch = parsed(`diff --git a/a.ts b/a.ts
+--- a/a.ts
++++ b/a.ts
+@@ -10 +20 @@
+-old
++new
+`)
+const guide: Guide = {
+  title: "Guard releases",
+  intent: "Unapproved releases could ship.\n\nRequire signed evidence.",
+  sections: [
+    {
+      title: "Release gate",
+      overview: "> [!IMPORTANT]\n> Check the revision before shipping.",
+      diffs: [{ file: "a.ts", summary: "Require approval." }]
+    }
+  ],
+  unplacedFiles: [],
+  review: { gitRef: "abc" }
+}
+const findings: Findings = {
+  checklist: [],
+  issues: [
+    {
+      id: 1,
+      severity: "P2",
+      file: "a.ts",
+      line: 20,
+      summary: "Check signature",
+      explanation: "A signed approval for A must not authorize **B**."
+    },
+    { id: 2, severity: "P1", file: "a.ts", line: 99, summary: "Outside" }
+  ]
+}
+
+/** Select one rendered guide, then find its regions from their visible headings. */
+const guideRoot = (page: Window, html: string) => {
+  page.document.body.innerHTML = html
+  const guides = page.document.querySelectorAll(".review-guide")
+  expect(guides).toHaveLength(1)
+  const guide = guides.item(0)
+  if (guide === null) throw new TypeError("Expected one rendered guide")
+  return guide
+}
+
+const headingSection = (guide: ReturnType<typeof guideRoot>, label: string) => {
+  const headings = [...guide.querySelectorAll("h2")].filter((heading) => heading.textContent?.trim() === label)
+  expect(headings).toHaveLength(1)
+  const heading = headings[0]
+  if (heading === undefined) throw new TypeError(`Missing ${label} heading`)
+  const section = heading.closest("section")
+  if (section === null) throw new TypeError(`Missing ${label} section`)
+  return { heading, section }
+}
+
+const labeledSection = (guide: ReturnType<typeof guideRoot>, label: string) => {
+  const result = headingSection(guide, label)
+  const labelId = result.section.getAttribute("aria-labelledby")
+  if (labelId === null) throw new TypeError(`Unlabelled ${label} section`)
+  const targets = [...guide.querySelectorAll("[id]")].filter((element) => element.id === labelId)
+  expect(targets).toHaveLength(1)
+  expect(targets[0]).toBe(result.heading)
+  return result.section
+}
+
+const issueTarget = (guide: ReturnType<typeof guideRoot>, summary: string) => {
+  const links = [...guide.querySelectorAll(".review-issues a")].filter((link) => link.textContent?.trim() === summary)
+  expect(links).toHaveLength(1)
+  const fragment = links[0]?.getAttribute("href")
+  if (fragment === undefined || fragment === null || !fragment.startsWith("#")) {
+    throw new TypeError(`Missing ${summary} fragment`)
+  }
+  const id = decodeURIComponent(fragment.slice(1))
+  const targets = [...guide.querySelectorAll("[id]")].filter((element) => element.id === id)
+  expect(targets).toHaveLength(1)
+  const target = targets[0]
+  if (target === undefined) throw new TypeError(`Missing ${summary} target`)
+  expect(target.matches(".review-finding")).toBe(true)
+  expect(target.textContent).toContain(summary)
+  return target
+}
+
+describe("guide", () => {
+  it("shows the supplied comparison base and keeps head-only reviews without a placeholder", () => {
+    const render = (review: Guide["review"]) =>
+      renderToStaticMarkup(<GuidePage guide={{ ...guide, review }} patch={patch} findings={findings} />)
+    const comparison = render({ base: "main", gitRef: "feature" })
+    expect(comparison).toContain("Base: ")
+    expect(comparison).toContain(">main</code>")
+    expect(comparison).toContain("Head: ")
+    expect(comparison).toContain(">feature</code>")
+    const headOnly = render({ gitRef: "feature" })
+    expect(headOnly).toContain(">feature</code>")
+    expect(headOnly).not.toContain("Base: ")
+  })
+  it("retains the source and destination of copies and renames", () => {
+    for (const status of ["copy", "rename"]) {
+      const moved = parsed(
+        `diff --git a/source.txt b/copy.txt\nsimilarity index 100%\n${status} from source.txt\n${status} to copy.txt\n`
+      )
+      const html = renderToStaticMarkup(
+        <GuidePage
+          guide={{ ...guide, sections: [{ title: "Moved", overview: "", diffs: [{ file: "copy.txt", summary: "" }] }] }}
+          patch={moved}
+          findings={{ checklist: [], issues: [] }}
+        />
+      )
+      expect(html).toContain("source.txt → copy.txt</code>")
+    }
+    const html = renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={findings} />)
+    expect(html).toContain(">a.ts</code>")
+    expect(html).not.toContain("a.ts → a.ts")
+  })
+  effectIt.layer(NodeServices.layer)((it) => {
+    it.effect("shows both names for a Git no-index comparison of distinct files", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped()
+        yield* fs.writeFileString(`${directory}/old.txt`, "old\n")
+        yield* fs.writeFileString(`${directory}/new.txt`, "new\n")
+        const diff = (source: string, destination: string) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const git = yield* ChildProcess.make("git", ["diff", "--no-index", "--", source, destination], {
+                cwd: directory,
+                stdin: "ignore",
+                stdout: "pipe",
+                stderr: "pipe"
+              })
+              const [exitCode, stdout, stderr] = yield* Effect.all([
+                git.exitCode,
+                git.stdout.pipe(Stream.decodeText(), Stream.mkString),
+                git.stderr.pipe(Stream.decodeText(), Stream.mkString)
+              ])
+              expect(exitCode).toBe(ChildProcessSpawner.ExitCode(1))
+              expect(stderr).toBe("")
+              return stdout
+            })
+          )
+        const comparison = parsed(yield* diff("old.txt", "new.txt"))
+        expect(comparison.files[0]).toMatchObject({ oldPath: "old.txt", newPath: "new.txt", status: "modified" })
+        const html = renderToStaticMarkup(
+          <GuidePage
+            guide={{
+              ...guide,
+              sections: [{ title: "Comparison", overview: "", diffs: [{ file: "new.txt", summary: "" }] }]
+            }}
+            patch={comparison}
+            findings={{ checklist: [], issues: [] }}
+          />
+        )
+        expect(html).toContain("old.txt → new.txt</code>")
+        for (const [source, destination, status, path] of [
+          ["/dev/null", "new.txt", "added", "new.txt"],
+          ["old.txt", "/dev/null", "deleted", "old.txt"]
+        ] satisfies ReadonlyArray<readonly [string, string, string, string]>) {
+          const single = parsed(yield* diff(source, destination))
+          expect(single.files[0]).toMatchObject({ oldPath: path, newPath: path, status })
+          const rendered = renderToStaticMarkup(
+            <GuidePage
+              guide={{ ...guide, sections: [{ title: "Change", overview: "", diffs: [{ file: path, summary: "" }] }] }}
+              patch={single}
+              findings={{ checklist: [], issues: [] }}
+            />
+          )
+          expect(rendered).toContain(`>${path}</code>`)
+          expect(rendered).not.toContain(`${path} → ${path}`)
+          expect(rendered).not.toContain("/dev/null →")
+        }
+      }).pipe(Effect.scoped)
+    )
+  })
+  it("preserves supplied cost precision without confusing a small charge with zero", () => {
+    for (const [currency, amount, displayed] of [
+      ["USD", 0, "USD 0"],
+      ["USD", 0.001, "USD 0.001"],
+      ["USD", 0.12, "USD 0.12"],
+      ["KWD", 1.234, "KWD 1.234"],
+      ["USD", 1e-25, "USD 1e-25"]
+    ] satisfies Array<[string, number, string]>) {
+      const html = renderToStaticMarkup(
+        <GuideUsage
+          usage={[
+            { label: "Recorded run", scope: "review", source: "receipt", cost: { currency, amount, basis: "reported" } }
+          ]}
+        />
+      )
+      expect(html).toContain(`${displayed} · reported`)
+    }
+  })
+  it("keeps pre-existing context and open questions in separately labelled groups", async () => {
+    const render = (context: Pick<Findings, "preExisting" | "openQuestions">) =>
+      renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={{ ...findings, ...context }} />)
+    const page = new Window()
+    try {
+      const root = guideRoot(
+        page,
+        render({ preExisting: ["Existing constraint"], openQuestions: ["Unresolved question?"] })
+      )
+      const existing = labeledSection(root, "Pre-existing context")
+      const questions = labeledSection(root, "Open questions")
+      expect(existing.textContent).toContain("Existing constraint")
+      expect(existing.textContent).not.toContain("Unresolved question?")
+      expect(questions.textContent).toContain("Unresolved question?")
+      expect(questions.textContent).not.toContain("Existing constraint")
+
+      const existingOnly = guideRoot(page, render({ preExisting: ["Existing constraint"] }))
+      expect(existingOnly.querySelectorAll("section[aria-labelledby]")).toHaveLength(1)
+      labeledSection(existingOnly, "Pre-existing context")
+      expect(
+        [...existingOnly.querySelectorAll("section[aria-labelledby] h2")].map((heading) => heading.textContent)
+      ).toEqual(["Pre-existing context"])
+      expect(existingOnly.textContent).not.toContain("Unresolved question?")
+      const questionsOnly = guideRoot(page, render({ openQuestions: ["Unresolved question?"] }))
+      expect(questionsOnly.querySelectorAll("section[aria-labelledby]")).toHaveLength(1)
+      labeledSection(questionsOnly, "Open questions")
+      expect(
+        [...questionsOnly.querySelectorAll("section[aria-labelledby] h2")].map((heading) => heading.textContent)
+      ).toEqual(["Open questions"])
+      expect(questionsOnly.textContent).not.toContain("Existing constraint")
+    } finally {
+      await page.happyDOM.close()
+    }
+  })
+  it("identifies source pull requests with their supplied title or number", () => {
+    const render = (source: Guide["source"]) =>
+      renderToStaticMarkup(<GuidePage guide={{ ...guide, source }} patch={patch} findings={findings} />)
+    const pr = { url: "https://example.invalid/pull/7", title: "Signed release approval" }
+    expect(render({ pr })).toContain(">Signed release approval</a>")
+    expect(render({ pr: { ...pr, number: 7 } })).toContain("PR 7")
+    expect(render({ pr: { url: pr.url } })).toContain(">Source pull request</a>")
+    expect(render({ pr: { ...pr, title: "  " } })).toContain(">Source pull request</a>")
+    expect(render(undefined)).not.toContain(pr.url)
+  })
+  it("places every finding or explains why it cannot anchor", async () => {
+    expect(placeAll(patch, findings).map((item) => item.kind)).toEqual(["anchored", "general"])
+    const html = renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={findings} />)
+    expect(html).toContain("data-rly-root")
+    expect(html).toContain("callout-important")
+    expect(html).toContain("A signed approval for A must not authorize <strong>B</strong>.")
+    const page = new Window()
+    try {
+      const root = guideRoot(page, html)
+      const anchored = issueTarget(root, "Check signature")
+      const general = issueTarget(root, "Outside")
+      const lines = [...root.querySelectorAll(".review-file code[id]")].filter(
+        (line) => line.textContent?.trim() === "new"
+      )
+      expect(lines).toHaveLength(1)
+      const line = lines[0]
+      if (line === undefined) throw new TypeError("Missing changed source line")
+      expect([...root.querySelectorAll("[id]")].filter((element) => element.id === line.id)).toHaveLength(1)
+      expect(line.compareDocumentPosition(anchored) & page.Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        page.Node.DOCUMENT_POSITION_FOLLOWING
+      )
+      const region = headingSection(root, "Outside the diff")
+      expect(region.section.contains(general)).toBe(true)
+      expect(region.heading.compareDocumentPosition(general) & page.Node.DOCUMENT_POSITION_FOLLOWING).toBe(
+        page.Node.DOCUMENT_POSITION_FOLLOWING
+      )
+      expect(region.section.textContent).toContain("line not in the diff")
+    } finally {
+      await page.happyDOM.close()
+    }
+  })
+  it("rejects incomplete and duplicate coverage", () => {
+    expect(coverageProblems({ ...guide, unplacedFiles: ["a.ts"] }, patch, findings)).toHaveLength(1)
+    expect(coverageProblems({ ...guide, sections: [] }, patch, findings)).toHaveLength(1)
+  })
+  it("distinguishes zero cost from missing data and retains estimation evidence", () => {
+    const html = renderToStaticMarkup(
+      <GuideUsage
+        usage={[
+          {
+            label: "Review run",
+            scope: "review",
+            source: "Provider usage receipt",
+            inputTokens: 1000,
+            cachedInputTokens: 800,
+            durationMs: 125000,
+            cost: { amount: 0, currency: "USD", basis: "reported" }
+          },
+          {
+            label: "Guide run",
+            scope: "guide",
+            source: "Session estimate",
+            cost: { amount: 328.2407, currency: "USD", basis: "estimated" }
+          }
+        ]}
+      />
+    )
+    expect(html).toContain("USD 0 · reported")
+    expect(html).toContain("USD 328.2407 · estimated")
+    expect(html).toContain("2m 5s")
+    expect(html).toContain("Not recorded")
+    expect(html).toContain("Provider usage receipt")
+    expect(renderToStaticMarkup(<GuideUsage usage={undefined} />)).toContain("were not recorded")
+  })
+  it("retains nonzero sub-millisecond duration evidence", () => {
+    for (const [durationMs, displayed] of [
+      [0, "0 ms"],
+      [0.4, "0.4 ms"],
+      [0.000001, "0.000001 ms"],
+      [Number.MIN_VALUE, "5e-324 ms"],
+      [1, "1 ms"],
+      [999, "999 ms"],
+      [2500, "0m 2s"],
+      [125000, "2m 5s"]
+    ] satisfies ReadonlyArray<readonly [number, string]>) {
+      const usage = Schema.decodeUnknownSync(Usage)({ label: "Duration", scope: "review", source: "timer", durationMs })
+      const html = renderToStaticMarkup(<GuideUsage usage={[usage]} />)
+      expect.soft(html).toContain(`>${displayed}<`)
+    }
+  })
+  it("rejects negative, fractional token counters and invalid costs", () => {
+    const base = { label: "Review", scope: "review", source: "receipt" }
+    for (const extra of [
+      { inputTokens: -1 },
+      { outputTokens: 1.5 },
+      { durationMs: -1 },
+      { cost: { amount: -1, currency: "USD", basis: "reported" } }
+    ])
+      expect(Schema.is(Usage)({ ...base, ...extra })).toBe(false)
+  })
+})
+
+it("rejects impossible cached counts while allowing unknown totals", () => {
+  const base = { label: "Review", scope: "review", source: "receipt" }
+  expect(Schema.is(Usage)({ ...base, inputTokens: 1000, cachedInputTokens: 1001 })).toBe(false)
+  expect(Schema.is(Usage)({ ...base, inputTokens: 1000, cachedInputTokens: 800 })).toBe(true)
+  expect(Schema.is(Usage)({ ...base, cachedInputTokens: 1001 })).toBe(true)
+})
+
+it("requires positive integral source coordinates, including lines outside the hunks", () => {
+  const base = { id: 1, severity: "P2", file: "a.ts", summary: "Check signature" }
+  for (const line of [0, -1, 1.5]) expect(Schema.is(Issue)({ ...base, line })).toBe(false)
+  for (const line of [1, 99]) expect(Schema.is(Issue)({ ...base, line })).toBe(true)
+  expect(placeAll(patch, findings)[1]).toMatchObject({ kind: "general", reason: "outside-hunks" })
+})
+
+it("status replaces obsolete fix instructions, while unresolved findings retain them", () => {
+  const issue = {
+    id: 1,
+    severity: "P2",
+    file: "a.ts",
+    summary: "Check signature",
+    recommendation: "Compare both revisions."
+  } satisfies Issue
+  const render = (finding: Issue) =>
+    renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={{ checklist: [], issues: [finding] }} />)
+  expect(render(issue)).toContain("Compare both revisions.")
+  expect(render({ ...issue, status: "Resolved" })).toContain("Resolved")
+  expect(render({ ...issue, status: "Resolved" })).not.toContain("Compare both revisions.")
+  expect(render({ ...issue, status: "Resolved" })).not.toContain(">Fix<")
+})
+
+it("requires positive JSON-safe issue IDs and meaningful optional status", () => {
+  const issue = { id: 1, severity: "P2", file: "a.ts", summary: "Check evidence" }
+  const decode = Schema.decodeUnknownSync(Issue)
+  for (const id of [NaN, Infinity, -Infinity, 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    expect.soft(() => decode({ ...issue, id })).toThrow()
+  }
+  for (const status of ["", " ", "\t\n"]) expect.soft(() => decode({ ...issue, status })).toThrow()
+  expect(decode(issue).id).toBe(1)
+  expect(decode({ ...issue, id: Number.MAX_SAFE_INTEGER }).id).toBe(Number.MAX_SAFE_INTEGER)
+  expect(decode({ ...issue, status: "Resolved" }).status).toBe("Resolved")
+})

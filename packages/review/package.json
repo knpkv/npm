@@ -20,10 +20,28 @@
     "./react": {
       "types": "./dist/view.d.ts",
       "import": "./dist/view.js"
-    }
+    },
+    "./guide": {
+      "types": "./dist/guide/index.d.ts",
+      "import": "./dist/guide/index.js"
+    },
+    "./guide/react": {
+      "types": "./dist/guide/view.d.ts",
+      "import": "./dist/guide/view.js"
+    },
+    "./guide/export": {
+      "types": "./dist/guide/export.d.ts",
+      "import": "./dist/guide/export.js"
+    },
+    "./guide/diagrams": {
+      "types": "./dist/guide/diagrams.d.ts",
+      "import": "./dist/guide/diagrams.js"
+    },
+    "./guide/styles.css": "./dist/guide/style.css"
   },
   "files": [
     "dist",
+    "examples",
     "README.md"
   ],
   "publishConfig": {
@@ -33,27 +51,35 @@
     "node": ">=26"
   },
   "scripts": {
-    "build": "rimraf dist && tsc -b --force",
+    "example:guide": "pnpm build && tsx scripts/example-guide.ts",
+    "build": "rimraf dist && tsc -b --force && tsx scripts/build-guide-assets.ts",
     "check": "tsc -b tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
-    "test": "vitest run"
+    "lint": "eslint \"{src,test,scripts}/**/*.{ts,tsx}\"",
+    "test": "vitest run",
+    "pretest": "pnpm --filter @knpkv/review... build"
   },
   "dependencies": {
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0-rc.109"
   },
   "devDependencies": {
+    "@effect/platform-node": "4.0.0-rc.109",
     "@effect/vitest": "4.0.0-rc.109",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
+    "esbuild": "^0.28.2",
+    "happy-dom": "20.11.2",
+    "mermaid": "^11.12.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "rimraf": "^6.1.3",
+    "tsx": "^4.23.12",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vitest": "catalog:"
   },
   "peerDependencies": {
-    "react": "^19.2.8"
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8"
   }
 }

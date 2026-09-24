@@ -1,0 +1,254 @@
+[
+  {
+    "name": "plain.bin",
+    "kind": "modified",
+    "prefix": "default",
+    "patch": "diff --git a/left/plain.bin b/right/plain.bin\nindex e7be1ea..f9e371f 100644\nBinary files a/left/plain.bin and b/right/plain.bin differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "modified",
+    "prefix": "custom",
+    "patch": "diff --git old/left/plain.bin new/right/plain.bin\nindex e7be1ea..f9e371f 100644\nBinary files old/left/plain.bin and new/right/plain.bin differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "modified",
+    "prefix": "none",
+    "patch": "diff --git left/plain.bin right/plain.bin\nindex e7be1ea..f9e371f 100644\nBinary files left/plain.bin and right/plain.bin differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "added",
+    "prefix": "default",
+    "patch": "diff --git a/right/plain.bin b/right/plain.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and b/right/plain.bin differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "added",
+    "prefix": "custom",
+    "patch": "diff --git old/right/plain.bin new/right/plain.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and new/right/plain.bin differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "added",
+    "prefix": "none",
+    "patch": "diff --git right/plain.bin right/plain.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and right/plain.bin differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "deleted",
+    "prefix": "default",
+    "patch": "diff --git a/left/plain.bin b/left/plain.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files a/left/plain.bin and /dev/null differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "deleted",
+    "prefix": "custom",
+    "patch": "diff --git old/left/plain.bin new/left/plain.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files old/left/plain.bin and /dev/null differ\n"
+  },
+  {
+    "name": "plain.bin",
+    "kind": "deleted",
+    "prefix": "none",
+    "patch": "diff --git left/plain.bin left/plain.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files left/plain.bin and /dev/null differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "modified",
+    "prefix": "default",
+    "patch": "diff --git a/left/space name.bin b/right/space name.bin\nindex e7be1ea..f9e371f 100644\nBinary files a/left/space name.bin and b/right/space name.bin differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "modified",
+    "prefix": "custom",
+    "patch": "diff --git old/left/space name.bin new/right/space name.bin\nindex e7be1ea..f9e371f 100644\nBinary files old/left/space name.bin and new/right/space name.bin differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "modified",
+    "prefix": "none",
+    "patch": "diff --git left/space name.bin right/space name.bin\nindex e7be1ea..f9e371f 100644\nBinary files left/space name.bin and right/space name.bin differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "added",
+    "prefix": "default",
+    "patch": "diff --git a/right/space name.bin b/right/space name.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and b/right/space name.bin differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "added",
+    "prefix": "custom",
+    "patch": "diff --git old/right/space name.bin new/right/space name.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and new/right/space name.bin differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "added",
+    "prefix": "none",
+    "patch": "diff --git right/space name.bin right/space name.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and right/space name.bin differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "deleted",
+    "prefix": "default",
+    "patch": "diff --git a/left/space name.bin b/left/space name.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files a/left/space name.bin and /dev/null differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "deleted",
+    "prefix": "custom",
+    "patch": "diff --git old/left/space name.bin new/left/space name.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files old/left/space name.bin and /dev/null differ\n"
+  },
+  {
+    "name": "space name.bin",
+    "kind": "deleted",
+    "prefix": "none",
+    "patch": "diff --git left/space name.bin left/space name.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files left/space name.bin and /dev/null differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "modified",
+    "prefix": "default",
+    "patch": "diff --git a/left/x and y.bin b/right/x and y.bin\nindex e7be1ea..f9e371f 100644\nBinary files a/left/x and y.bin and b/right/x and y.bin differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "modified",
+    "prefix": "custom",
+    "patch": "diff --git old/left/x and y.bin new/right/x and y.bin\nindex e7be1ea..f9e371f 100644\nBinary files old/left/x and y.bin and new/right/x and y.bin differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "modified",
+    "prefix": "none",
+    "patch": "diff --git left/x and y.bin right/x and y.bin\nindex e7be1ea..f9e371f 100644\nBinary files left/x and y.bin and right/x and y.bin differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "added",
+    "prefix": "default",
+    "patch": "diff --git a/right/x and y.bin b/right/x and y.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and b/right/x and y.bin differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "added",
+    "prefix": "custom",
+    "patch": "diff --git old/right/x and y.bin new/right/x and y.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and new/right/x and y.bin differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "added",
+    "prefix": "none",
+    "patch": "diff --git right/x and y.bin right/x and y.bin\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and right/x and y.bin differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "deleted",
+    "prefix": "default",
+    "patch": "diff --git a/left/x and y.bin b/left/x and y.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files a/left/x and y.bin and /dev/null differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "deleted",
+    "prefix": "custom",
+    "patch": "diff --git old/left/x and y.bin new/left/x and y.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files old/left/x and y.bin and /dev/null differ\n"
+  },
+  {
+    "name": "x and y.bin",
+    "kind": "deleted",
+    "prefix": "none",
+    "patch": "diff --git left/x and y.bin left/x and y.bin\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files left/x and y.bin and /dev/null differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "modified",
+    "prefix": "default",
+    "patch": "diff --git \"a/left/tab\\tquote\\\"\\303\\251.bin\" \"b/right/tab\\tquote\\\"\\303\\251.bin\"\nindex e7be1ea..f9e371f 100644\nBinary files \"a/left/tab\\tquote\\\"\\303\\251.bin\" and \"b/right/tab\\tquote\\\"\\303\\251.bin\" differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "modified",
+    "prefix": "custom",
+    "patch": "diff --git \"old/left/tab\\tquote\\\"\\303\\251.bin\" \"new/right/tab\\tquote\\\"\\303\\251.bin\"\nindex e7be1ea..f9e371f 100644\nBinary files \"old/left/tab\\tquote\\\"\\303\\251.bin\" and \"new/right/tab\\tquote\\\"\\303\\251.bin\" differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "modified",
+    "prefix": "none",
+    "patch": "diff --git \"left/tab\\tquote\\\"\\303\\251.bin\" \"right/tab\\tquote\\\"\\303\\251.bin\"\nindex e7be1ea..f9e371f 100644\nBinary files \"left/tab\\tquote\\\"\\303\\251.bin\" and \"right/tab\\tquote\\\"\\303\\251.bin\" differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "added",
+    "prefix": "default",
+    "patch": "diff --git \"a/right/tab\\tquote\\\"\\303\\251.bin\" \"b/right/tab\\tquote\\\"\\303\\251.bin\"\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and \"b/right/tab\\tquote\\\"\\303\\251.bin\" differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "added",
+    "prefix": "custom",
+    "patch": "diff --git \"old/right/tab\\tquote\\\"\\303\\251.bin\" \"new/right/tab\\tquote\\\"\\303\\251.bin\"\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and \"new/right/tab\\tquote\\\"\\303\\251.bin\" differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "added",
+    "prefix": "none",
+    "patch": "diff --git \"right/tab\\tquote\\\"\\303\\251.bin\" \"right/tab\\tquote\\\"\\303\\251.bin\"\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and \"right/tab\\tquote\\\"\\303\\251.bin\" differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "deleted",
+    "prefix": "default",
+    "patch": "diff --git \"a/left/tab\\tquote\\\"\\303\\251.bin\" \"b/left/tab\\tquote\\\"\\303\\251.bin\"\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files \"a/left/tab\\tquote\\\"\\303\\251.bin\" and /dev/null differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "deleted",
+    "prefix": "custom",
+    "patch": "diff --git \"old/left/tab\\tquote\\\"\\303\\251.bin\" \"new/left/tab\\tquote\\\"\\303\\251.bin\"\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files \"old/left/tab\\tquote\\\"\\303\\251.bin\" and /dev/null differ\n"
+  },
+  {
+    "name": "tab\tquote\"é.bin",
+    "kind": "deleted",
+    "prefix": "none",
+    "patch": "diff --git \"left/tab\\tquote\\\"\\303\\251.bin\" \"left/tab\\tquote\\\"\\303\\251.bin\"\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files \"left/tab\\tquote\\\"\\303\\251.bin\" and /dev/null differ\n"
+  },
+  {
+    "name": "ends and",
+    "kind": "modified",
+    "prefix": "default",
+    "patch": "diff --git a/left/ends and b/right/ends and\nindex e7be1ea..f9e371f 100644\nBinary files a/left/ends and and b/right/ends and differ\n"
+  },
+  {
+    "name": "ends and",
+    "kind": "added",
+    "prefix": "default",
+    "patch": "diff --git a/right/ends and b/right/ends and\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and b/right/ends and differ\n"
+  },
+  {
+    "name": "ends and",
+    "kind": "deleted",
+    "prefix": "default",
+    "patch": "diff --git a/left/ends and b/left/ends and\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files a/left/ends and and /dev/null differ\n"
+  },
+  {
+    "name": "and and",
+    "kind": "modified",
+    "prefix": "default",
+    "patch": "diff --git a/left/and and b/right/and and\nindex e7be1ea..f9e371f 100644\nBinary files a/left/and and and b/right/and and differ\n"
+  },
+  {
+    "name": "and and",
+    "kind": "added",
+    "prefix": "default",
+    "patch": "diff --git a/right/and and b/right/and and\nnew file mode 100644\nindex 0000000..f9e371f\nBinary files /dev/null and b/right/and and differ\n"
+  },
+  {
+    "name": "and and",
+    "kind": "deleted",
+    "prefix": "default",
+    "patch": "diff --git a/left/and and b/left/and and\ndeleted file mode 100644\nindex e7be1ea..0000000\nBinary files a/left/and and and /dev/null differ\n"
+  }
+]
