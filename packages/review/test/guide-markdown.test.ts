@@ -1,5 +1,8 @@
 import { Window } from "happy-dom"
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
+import { readFileSync } from "node:fs"
+import * as TypeScript from "typescript"
 import { test } from "vitest"
 import { renderInline, renderMarkdown } from "../src/guide/markdown.js"
 
@@ -31,6 +34,28 @@ test("inline code closes only with a matching backtick run", () => {
   assert.equal(renderInline("Use `a` now"), "Use <code>a</code> now")
   assert.equal(renderInline("Use ``<a>`&`` now"), "Use <code>&lt;a&gt;`&amp;</code> now")
   assert.equal(renderInline("Use ``a` now"), "Use ``a` now")
+})
+
+test("distinct unmatched backtick runs do not rescan the remaining guide", () => {
+  const raw = Array.from({ length: 240 }, (_, index) => "`".repeat(index + 1)).join("a")
+  const source = readFileSync(
+    process.env.GUIDE_MARKDOWN_COMPLEXITY_SOURCE ?? new URL("../src/guide/markdown.ts", import.meta.url),
+    "utf8"
+  )
+  const indexedRead = /raw\[([^\]]+)\]/g
+  assert.ok([...source.matchAll(indexedRead)].length > 0, "the measured renderer must read source characters")
+  const instrumented = source.replaceAll(indexedRead, (_match, index: string) => `(__reads++, raw[${index}])`)
+  const inputLiteral = JSON.stringify(raw)
+  const program = TypeScript.transpileModule(
+    `let __reads = 0\n${instrumented}\nconst input = ${inputLiteral}\nconst output = renderInline(input)\nprocess.stdout.write(__reads + "\\t" + (output === input))`,
+    { compilerOptions: { module: TypeScript.ModuleKind.ESNext, target: TypeScript.ScriptTarget.ES2022 } }
+  ).outputText
+  const result = spawnSync(process.execPath, ["--input-type=module", "-e", program], { encoding: "utf8" })
+  assert.equal(result.status, 0, result.stderr)
+  const [reads, unchanged] = result.stdout.split("\t")
+  assert.equal(unchanged, "true")
+  assert.ok(Number(reads) <= raw.length * 4, `renderer read ${reads} characters from ${raw.length} bytes`)
+  assert.equal(renderInline(raw), raw)
 })
 
 test("inline navigation keeps code and emphasis but cannot create nested links or executable HTML", () => {

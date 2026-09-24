@@ -77,6 +77,21 @@ const renderMarkup = (escaped: string, links: boolean): string => {
 
 /** Escape source text and render inline markup. Disable links inside an existing navigation link. */
 export const renderInline = (raw: string, { links = true }: { readonly links?: boolean } = {}): string => {
+  const nextByWidth = new Map<number, number>()
+  const closeByStart = new Map<number, number>()
+  for (let index = raw.length - 1; index >= 0;) {
+    if (raw[index] !== "`") {
+      index--
+      continue
+    }
+    const end = index + 1
+    while (raw[index - 1] === "`") index--
+    const width = end - index
+    const next = nextByWidth.get(width)
+    if (next !== undefined) closeByStart.set(index, next)
+    nextByWidth.set(width, index)
+    index--
+  }
   let html = ""
   let offset = 0
   for (let index = 0; index < raw.length;) {
@@ -87,18 +102,8 @@ export const renderInline = (raw: string, { links = true }: { readonly links?: b
     let end = index
     while (raw[end] === "`") end++
     const width = end - index
-    let close = end
-    while (close < raw.length) {
-      if (raw[close] !== "`") {
-        close++
-        continue
-      }
-      let next = close
-      while (raw[next] === "`") next++
-      if (next - close === width) break
-      close = next
-    }
-    if (close === raw.length) {
+    const close = closeByStart.get(index)
+    if (close === undefined) {
       index = end
       continue
     }

@@ -1619,12 +1619,21 @@ module.exports = {
       const isHook = (name) => Predicate.isString(name) && /^use[A-Z]/u.test(name)
       const isReactObject = (identifier) =>
         isNamespaceImportFrom(context, identifier, ["react"]) || isDefaultImportFrom(context, identifier, ["react"])
-      const isReactHookAlias = (identifier) => {
+      const isReactHookAlias = (identifier, seen = new Set()) => {
         const variable = resolvedVariable(context, identifier)
-        if (variable === undefined) return false
+        if (variable === undefined || seen.has(variable)) return false
+        seen.add(variable)
         return variable.defs.some((definition) => {
-          if (definition.type !== "Variable" || definition.node.type !== "VariableDeclarator") return false
+          if (
+            definition.type !== "Variable" ||
+            definition.node.type !== "VariableDeclarator" ||
+            definition.parent.kind !== "const"
+          )
+            return false
           const { id, init } = definition.node
+          if (id.type === "Identifier" && id.name === identifier.name && init?.type === "Identifier") {
+            return isReactHookAlias(init, seen)
+          }
           if (init?.type === "MemberExpression" && init.object.type === "Identifier") {
             return (
               isReactObject(init.object) &&

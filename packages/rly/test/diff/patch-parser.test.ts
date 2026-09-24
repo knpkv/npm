@@ -581,6 +581,38 @@ test("rejects dangling quoted Git escapes without losing literal backslashes", (
   }
 })
 
+test("rejects backslashes before line separators in quoted identities", () => {
+  const diff = (name: string) =>
+    `diff --git "a/${name}" "b/${name}"\n--- "a/${name}"\n+++ "b/${name}"\n@@ -1 +1 @@\n-old\n+new\n`
+  for (const separator of ["\r", "\u2028", "\u2029"]) {
+    expect(parsePatch(diff(`x\\${separator}y\\\\`))._tag, `backslash before ${JSON.stringify(separator)}`)
+      .toBe("PatchInvalid")
+  }
+})
+
+test("rejects raw interior quotes while retaining Git-escaped quotes", () => {
+  const name = "foo\"bar"
+  const malformed = `diff --git "a/${name}" "b/${name}"\n--- "a/${name}"\n+++ "b/${name}"\n@@ -1 +1 @@\n-old\n+new\n`
+  expect(parsePatch(malformed)._tag).toBe("PatchInvalid")
+
+  const directory = mkdtempSync(join(tmpdir(), "rly-quoted-path-"))
+  try {
+    mkdirSync(join(directory, "old"))
+    mkdirSync(join(directory, "new"))
+    writeFileSync(join(directory, "old", "quote\"here"), "old\n")
+    writeFileSync(join(directory, "new", "quote\"here"), "new\n")
+    const git = spawnSync("git", ["diff", "--no-index", "--", "old/quote\"here", "new/quote\"here"], {
+      cwd: directory,
+      encoding: "utf8"
+    })
+    assert.equal(git.status, 1, git.stderr)
+    assert.match(git.stdout, /quote\\"here/)
+    expect(parsePatch(git.stdout)._tag).toBe("Patch")
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test("rejects backward hunk ranges on either side, including empty anchors", () => {
   const header = "diff --git a/a b/a\n--- a/a\n+++ b/a\n"
   for (

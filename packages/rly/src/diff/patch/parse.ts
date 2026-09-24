@@ -85,16 +85,20 @@ const unquote = (path: string): UnquotedPath => {
     ["\\", 92]
   ])
   let offset = 0
-  for (const match of source.matchAll(/\\([0-7]{3}|.)/g)) {
-    for (const byte of encoder.encode(source.slice(offset, match.index))) bytes.push(byte)
+  for (const match of source.matchAll(/\\([0-7]{3}|.)/gs)) {
+    const literal = source.slice(offset, match.index)
+    if (literal.includes("\"")) return invalid("Unescaped quote in quoted path")
+    for (const byte of encoder.encode(literal)) bytes.push(byte)
     const code = match[1] ?? ""
     const byte = /^[0-7]{3}$/.test(code) ? parseInt(code, 8) : escapes.get(code)
     if (byte === undefined || byte === 0 || byte > 255) return invalid("Invalid quoted path escape")
     bytes.push(byte)
     offset = match.index + match[0].length
   }
-  if (source.slice(offset).includes("\\")) return invalid("Dangling quoted path escape")
-  for (const byte of encoder.encode(source.slice(offset))) bytes.push(byte)
+  const trailing = source.slice(offset)
+  if (trailing.includes("\\")) return invalid("Dangling quoted path escape")
+  if (trailing.includes("\"")) return invalid("Unescaped quote in quoted path")
+  for (const byte of encoder.encode(trailing)) bytes.push(byte)
   try {
     return {
       _tag: "Path",

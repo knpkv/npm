@@ -4214,6 +4214,7 @@ for (const code of [
   'import * as React from "react"; const { useState: state = fallback } = React; export const View = () => state(0)',
   'import { default as ReactView } from "react"; const { useState } = ReactView; export const View = () => useState(0)',
   'import React from "react"; const state = React.useState; export const View = () => state(0)',
+  'import React from "react"; const state = React.useState; const indirect = state; export const View = () => indirect(0)',
   'import React from "react"; const state = React["useState"]; export const View = () => state(0)',
   'import * as React from "react"; export const View = () => React.useState(0)',
   'import React from "react"; export const View = () => React["useState"](0)',
@@ -4239,6 +4240,9 @@ for (const code of [
   'import * as React from "react"; const { useState } = React; export const View = (useState = () => 0) => useState(0)',
   'import * as React from "react"; const property = "useState"; const state = React[property]; export const View = () => state(0)',
   'import * as React from "react"; const property = "useState"; const { [property]: state } = React; export const View = () => state(0)',
+  'import React from "react"; const local = () => 0; const indirect = local; export const View = () => indirect(0)',
+  'import React from "react"; let state = React.useState; state = () => 0; const indirect = state; export const View = () => indirect(0)',
+  'import React from "react"; const first = second; const second = first; export const View = () => first(0)',
   'import type * as React from "react"; export type Hook = typeof React.useState'
 ])
   await assertRuleDiagnostics({

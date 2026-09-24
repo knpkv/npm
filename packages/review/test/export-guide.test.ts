@@ -60,6 +60,19 @@ it.effect("rejects malformed JavaScript prefix options before parsing or seriali
     }
   }))
 
+it.effect("rejects non-string JavaScript patches through the typed input error", () =>
+  Effect.gen(function*() {
+    for (const invalidPatch of [null, 42]) {
+      // @ts-expect-error Exercise the untyped JavaScript caller boundary.
+      const error = yield* Effect.flip(exportGuide({ guide, patch: invalidPatch }))
+      expect(error._tag).toBe("GuideExportError")
+      expect(error.stage).toBe("input")
+    }
+    expect((yield* exportGuide({ guide, patch })).files).toBe(1)
+    const malformed = yield* Effect.flip(exportGuide({ guide, patch: patch.slice(0, -1) }))
+    expect(malformed.stage).toBe("patch")
+  }))
+
 it.effect("retains explicit no-prefix mode in exported paths and hydration input", () =>
   Effect.gen(function*() {
     const prefixes = { source: "", destination: "" }
