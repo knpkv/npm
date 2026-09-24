@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawnSync } from "node:child_process"
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { expect, test } from "vitest"
@@ -525,6 +525,59 @@ test("accepts installed Git binary summaries with quoting, separator text, prefi
       status: fixture.kind,
       path: `${fixture.kind === "deleted" ? "left" : "right"}/${fixture.name}`
     })
+  }
+})
+
+test("rejects split identities on marker-free binary additions and deletions", () => {
+  const kinds: ReadonlyArray<"added" | "deleted"> = ["added", "deleted"]
+  for (const kind of kinds) {
+    const fixture = binarySummaries.find((entry) => entry.kind === kind && entry.prefix === "default")
+    if (fixture === undefined) assert.fail(`Missing Git-generated ${kind} binary fixture`)
+    expect(parsePatch(fixture.patch)._tag).toBe("Patch")
+    const split = fixture.patch.replace(
+      /^diff --git a\/([^ ]+) b\/\1/m,
+      (_header, name: string) =>
+        kind === "added"
+          ? `diff --git a/other/${name} b/${name}`
+          : `diff --git a/${name} b/other/${name}`
+    )
+    assert.notEqual(split, fixture.patch)
+    expect(parsePatch(split)._tag, kind).toBe("PatchInvalid")
+  }
+})
+
+test("rejects dangling quoted Git escapes without losing literal backslashes", () => {
+  const valid = String.raw`"a/trailing\\" "b/trailing\\"`
+  const invalid = String.raw`"a/trailing\" "b/trailing\"`
+  const body = "--- " + String.raw`"a/trailing\\"` + "\n+++ " + String.raw`"b/trailing\\"` +
+    "\n@@ -1 +1 @@\n-old\n+new\n"
+  expect(parsePatch(`diff --git ${valid}\n${body}`)._tag).toBe("Patch")
+  const headerError = parsePatch(`diff --git ${invalid}\n${body}`)
+  expect(headerError._tag).toBe("PatchInvalid")
+  const malformedBody = body.replaceAll("trailing\\\\", "trailing\\")
+  expect(parsePatch(`diff --git ${valid}\n${malformedBody}`)._tag)
+    .toBe("PatchInvalid")
+  const literal = "trailing\\"
+  expect(
+    parsePatch(`diff --git a/${literal} b/${literal}\n--- a/${literal}\n+++ b/${literal}\n@@ -1 +1 @@\n-old\n+new\n`)
+      ._tag
+  )
+    .toBe("Patch")
+  const directory = mkdtempSync(join(tmpdir(), "rly-quoted-backslash-"))
+  try {
+    mkdirSync(join(directory, "old"))
+    mkdirSync(join(directory, "new"))
+    writeFileSync(join(directory, "old", literal), "old\n")
+    writeFileSync(join(directory, "new", literal), "new\n")
+    const git = spawnSync("git", ["diff", "--no-index", "--", `old/${literal}`, `new/${literal}`], {
+      cwd: directory,
+      encoding: "utf8"
+    })
+    assert.equal(git.status, 1, git.stderr)
+    assert.match(git.stdout, /trailing\\\\"/)
+    expect(parsePatch(git.stdout)._tag).toBe("Patch")
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
   }
 })
 

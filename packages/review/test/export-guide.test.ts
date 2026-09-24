@@ -50,6 +50,16 @@ it.effect("reports malformed input, coverage, and patch failures through the typ
     }
   }))
 
+it.effect("rejects malformed JavaScript prefix options before parsing or serializing", () =>
+  Effect.gen(function*() {
+    for (const prefixes of [null, { source: "a/" }]) {
+      // @ts-expect-error Exercise the untyped JavaScript caller boundary.
+      const error = yield* Effect.flip(exportGuide({ guide, patch, prefixes }))
+      expect(error._tag).toBe("GuideExportError")
+      expect(error.stage).toBe("input")
+    }
+  }))
+
 it.effect("retains explicit no-prefix mode in exported paths and hydration input", () =>
   Effect.gen(function*() {
     const prefixes = { source: "", destination: "" }

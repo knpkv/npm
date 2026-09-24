@@ -26,6 +26,13 @@ test("inline: code wins over other markup, html is escaped, only safe links", ()
   assert.equal(renderInline("snake_case_name stays"), "snake_case_name stays")
 })
 
+test("inline code closes only with a matching backtick run", () => {
+  assert.equal(renderInline("Use ``a ` b`` now"), "Use <code>a ` b</code> now")
+  assert.equal(renderInline("Use `a` now"), "Use <code>a</code> now")
+  assert.equal(renderInline("Use ``<a>`&`` now"), "Use <code>&lt;a&gt;`&amp;</code> now")
+  assert.equal(renderInline("Use ``a` now"), "Use ``a` now")
+})
+
 test("inline navigation keeps code and emphasis but cannot create nested links or executable HTML", () => {
   assert.equal(
     renderInline("Check `requestedRevision` and **[approval](#policy)** <img src=x onerror=alert(1)>", {

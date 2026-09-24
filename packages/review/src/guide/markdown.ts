@@ -77,13 +77,37 @@ const renderMarkup = (escaped: string, links: boolean): string => {
 
 /** Escape source text and render inline markup. Disable links inside an existing navigation link. */
 export const renderInline = (raw: string, { links = true }: { readonly links?: boolean } = {}): string => {
-  // Code spans first: nothing inside them is markup.
-  const parts = raw.split(/(`[^`]*`)/)
-  return parts
-    .map((part, index) =>
-      index % 2 === 1 ? `<code>${escapeHtml(part.slice(1, -1))}</code>` : renderMarkup(escapeHtml(part), links)
-    )
-    .join("")
+  let html = ""
+  let offset = 0
+  for (let index = 0; index < raw.length;) {
+    if (raw[index] !== "`") {
+      index++
+      continue
+    }
+    let end = index
+    while (raw[end] === "`") end++
+    const width = end - index
+    let close = end
+    while (close < raw.length) {
+      if (raw[close] !== "`") {
+        close++
+        continue
+      }
+      let next = close
+      while (raw[next] === "`") next++
+      if (next - close === width) break
+      close = next
+    }
+    if (close === raw.length) {
+      index = end
+      continue
+    }
+    html += renderMarkup(escapeHtml(raw.slice(offset, index)), links)
+    html += `<code>${escapeHtml(raw.slice(end, close))}</code>`
+    offset = close + width
+    index = offset
+  }
+  return html + renderMarkup(escapeHtml(raw.slice(offset)), links)
 }
 
 const CALLOUT = /^\[!(NOTE|IMPORTANT|WARNING)\]\s*$/

@@ -1617,6 +1617,35 @@ module.exports = {
         if (statement.directive === "use client") return {}
       }
       const isHook = (name) => Predicate.isString(name) && /^use[A-Z]/u.test(name)
+      const isReactObject = (identifier) =>
+        isNamespaceImportFrom(context, identifier, ["react"]) || isDefaultImportFrom(context, identifier, ["react"])
+      const isReactHookAlias = (identifier) => {
+        const variable = resolvedVariable(context, identifier)
+        if (variable === undefined) return false
+        return variable.defs.some((definition) => {
+          if (definition.type !== "Variable" || definition.node.type !== "VariableDeclarator") return false
+          const { id, init } = definition.node
+          if (init?.type === "MemberExpression" && init.object.type === "Identifier") {
+            return (
+              isReactObject(init.object) &&
+              !(init.computed && init.property.type === "Identifier") &&
+              isHook(staticPropertyName(init.property)) &&
+              id.type === "Identifier" &&
+              id.name === identifier.name
+            )
+          }
+          if (init?.type !== "Identifier" || id.type !== "ObjectPattern" || !isReactObject(init)) return false
+          return id.properties.some((property) => {
+            if (property.type !== "Property" || (property.computed && property.key.type === "Identifier")) return false
+            const binding = property.value.type === "AssignmentPattern" ? property.value.left : property.value
+            return (
+              isHook(staticPropertyName(property.key)) &&
+              binding.type === "Identifier" &&
+              binding.name === identifier.name
+            )
+          })
+        })
+      }
       return {
         ImportDeclaration(node) {
           if (node.source.value !== "react" || node.importKind === "type") return
@@ -1631,13 +1660,13 @@ module.exports = {
         },
         CallExpression(node) {
           const callee = node.callee
+          if (callee.type === "Identifier") {
+            if (isReactHookAlias(callee)) context.report({ node, messageId: "clientBoundary" })
+            return
+          }
           if (callee.type !== "MemberExpression" || callee.object.type !== "Identifier") return
           if (callee.computed && callee.property.type === "Identifier") return
-          if (
-            isHook(staticPropertyName(callee.property)) &&
-            (isNamespaceImportFrom(context, callee.object, ["react"]) ||
-              isDefaultImportFrom(context, callee.object, ["react"]))
-          )
+          if (isHook(staticPropertyName(callee.property)) && isReactObject(callee.object))
             context.report({ node, messageId: "clientBoundary" })
         }
       }

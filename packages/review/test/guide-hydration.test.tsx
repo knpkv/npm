@@ -168,3 +168,22 @@ it("hydrates the actual exported guide with the actual bundled client", async ()
     await server.happyDOM.close()
   }
 })
+
+it("hydrates omitted, empty and custom producer prefixes from exported data", async () => {
+  const cases = [
+    { patch },
+    {
+      patch: patch.replaceAll("a/release.ts", "release.ts").replaceAll("b/release.ts", "release.ts"),
+      prefixes: { source: "", destination: "" }
+    },
+    {
+      patch: patch.replaceAll("a/release.ts", "old/release.ts").replaceAll("b/release.ts", "new/release.ts"),
+      prefixes: { source: "old/", destination: "new/" }
+    }
+  ]
+  for (const input of cases) {
+    const exported = await Effect.runPromise(exportGuide({ guide, findings, ...input }))
+    const hydrated = await hydrateExport(exported.html, "production")
+    expect(hydrated.links.length).toBeGreaterThan(0)
+  }
+})

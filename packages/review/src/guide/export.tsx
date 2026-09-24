@@ -4,8 +4,7 @@ import * as Schema from "effect/Schema"
 import { renderToString } from "react-dom/server"
 import { client, css, diagrams } from "./assets.js"
 import { escapeHtml } from "./markdown.js"
-import type { PatchPrefixes } from "./model.js"
-import { emptyFindings, Findings, Guide } from "./model.js"
+import { emptyFindings, Findings, Guide, PatchPrefixes } from "./model.js"
 import { coverageProblems, placeAll } from "./plan.js"
 import { GuideRoot } from "./root.js"
 
@@ -30,7 +29,13 @@ export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: Gui
   const findings = yield* Schema.decodeUnknownEffect(Findings)(
     input.findings === undefined ? emptyFindings : input.findings
   ).pipe(Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) })))
-  const parsed = parsePatch(input.patch, input.prefixes)
+  const prefixes =
+    input.prefixes === undefined
+      ? undefined
+      : yield* Schema.decodeUnknownEffect(PatchPrefixes)(input.prefixes).pipe(
+          Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) }))
+        )
+  const parsed = parsePatch(input.patch, prefixes)
   if (parsed._tag === "PatchInvalid") {
     return yield* new GuideExportError({ stage: "patch", detail: parsed.reason })
   }
@@ -42,10 +47,7 @@ export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: Gui
   const html = yield* Effect.try({
     try: () => {
       const content = renderToString(<GuideRoot guide={guide} patch={patch} findings={findings} />)
-      const payload = JSON.stringify({ guide, findings, patch: input.patch, prefixes: input.prefixes }).replaceAll(
-        "<",
-        "\\u003c"
-      )
+      const payload = JSON.stringify({ guide, findings, patch: input.patch, prefixes }).replaceAll("<", "\\u003c")
       const inlineScript = (text: string) => text.replaceAll(/<\/script/gi, "<\\/script")
       return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(guide.title)}</title><style>body{margin:0}${css}</style></head><body><div id="review-root">${content}</div><script id="review-data" type="application/json">${payload}</script><script>${inlineScript(client)}</script>${content.includes('class="mermaid"') ? `<script>${inlineScript(diagrams)}</script>` : ""}</body></html>`
     },

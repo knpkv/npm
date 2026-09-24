@@ -4210,6 +4210,11 @@ await assertRuleDiagnostics({
 // Published UI hook imports need their own RSC boundary; foreign and type-only imports remain valid.
 for (const code of [
   'import { useState as state } from "react"; export const View = () => state(0)',
+  'import * as React from "react"; const { useState: state } = React; export const View = () => state(0)',
+  'import * as React from "react"; const { useState: state = fallback } = React; export const View = () => state(0)',
+  'import { default as ReactView } from "react"; const { useState } = ReactView; export const View = () => useState(0)',
+  'import React from "react"; const state = React.useState; export const View = () => state(0)',
+  'import React from "react"; const state = React["useState"]; export const View = () => state(0)',
   'import * as React from "react"; export const View = () => React.useState(0)',
   'import React from "react"; export const View = () => React["useState"](0)',
   'import { default as React } from "react"; export const View = () => React.useState(0)',
@@ -4224,11 +4229,17 @@ for (const code of [
 for (const code of [
   '"use client"; import { useState } from "react"; export const View = () => useState(0)',
   '"use client"; import { default as React } from "react"; export const View = () => React.useState(0)',
+  '"use client"; import * as React from "react"; const { useState } = React; export const View = () => useState(0)',
   'import { default as React } from "other"; export const View = () => React.useState(0)',
   'import type { useState } from "react"; export type Hook = typeof useState',
   'import { use } from "react"; export const View = () => use(resource)',
   'import { useState } from "other"; export const View = () => useState(0)',
-  'import * as React from "react"; const other = { useState: () => 0 }; export const View = (React = other) => React.useState()'
+  'import * as React from "react"; const other = { useState: () => 0 }; export const View = (React = other) => React.useState()',
+  'import * as React from "react"; const other = { useState: () => 0 }; const { useState } = other; export const View = () => useState(0)',
+  'import * as React from "react"; const { useState } = React; export const View = (useState = () => 0) => useState(0)',
+  'import * as React from "react"; const property = "useState"; const state = React[property]; export const View = () => state(0)',
+  'import * as React from "react"; const property = "useState"; const { [property]: state } = React; export const View = () => state(0)',
+  'import type * as React from "react"; export type Hook = typeof React.useState'
 ])
   await assertRuleDiagnostics({
     code,
@@ -4236,3 +4247,10 @@ for (const code of [
     filePath: "packages/review/src/guide/view.tsx",
     ruleId: "local-rules/require-react-hook-client-boundary"
   })
+
+await assertRuleDiagnostics({
+  code: 'import * as React from "react"; const { useState } = React; export const View = () => useState(0)',
+  expected: 1,
+  filePath: "packages/review/src/view.tsx",
+  ruleId: "local-rules/require-react-hook-client-boundary"
+})

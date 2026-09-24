@@ -93,6 +93,7 @@ const unquote = (path: string): UnquotedPath => {
     bytes.push(byte)
     offset = match.index + match[0].length
   }
+  if (source.slice(offset).includes("\\")) return invalid("Dangling quoted path escape")
   for (const byte of encoder.encode(source.slice(offset))) bytes.push(byte)
   try {
     return {
@@ -339,6 +340,11 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
       ? headerPaths(header, source, destination, prefixes, moved, binary)
       : binaryPaths(header, binarySummary, prefixes, moved, status)
     if (paths._tag === "PatchInvalid") return paths
+    if (
+      binary && source === undefined && moved === undefined && status !== "modified" && paths.oldPath !== paths.newPath
+    ) {
+      return invalid("Binary addition or deletion has conflicting header paths")
+    }
     const path = status === "deleted" ? paths.oldPath : paths.newPath
     if (currentPaths.has(path)) return invalid("Duplicate canonical current file path")
     currentPaths.add(path)
