@@ -180,7 +180,9 @@ export const GuidePage = ({ findings, guide, patch }: GuidePageProps): ReactElem
         <header className="review-file-header">
           <StateLabel label={file.status} size="compact" tone="neutral" />
           <code>
-            {file.status === "renamed" || file.status === "copied" ? `${file.oldPath} → ${file.newPath}` : file.path}
+            {file.status === "renamed" || file.status === "copied" || file.oldPath !== file.newPath
+              ? `${file.oldPath} → ${file.newPath}`
+              : file.path}
           </code>
         </header>
         {summary === "" ? null : <Prose text={summary} />}

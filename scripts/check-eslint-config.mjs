@@ -4215,6 +4215,9 @@ for (const code of [
   'import { default as ReactView } from "react"; const { useState } = ReactView; export const View = () => useState(0)',
   'import React from "react"; const state = React.useState; export const View = () => state(0)',
   'import React from "react"; const state = React.useState; const indirect = state; export const View = () => indirect(0)',
+  'import React from "react"; const R = React; export const View = () => R.useState(0)',
+  'import * as React from "react"; const R = React; const state = R.useState; export const View = () => state(0)',
+  'import React from "react"; const R = React; const Next = R; const { useState: state } = Next; export const View = () => state(0)',
   'import React from "react"; const state = React["useState"]; export const View = () => state(0)',
   'import * as React from "react"; export const View = () => React.useState(0)',
   'import React from "react"; export const View = () => React["useState"](0)',
@@ -4231,7 +4234,13 @@ for (const code of [
   '"use client"; import { useState } from "react"; export const View = () => useState(0)',
   '"use client"; import { default as React } from "react"; export const View = () => React.useState(0)',
   '"use client"; import * as React from "react"; const { useState } = React; export const View = () => useState(0)',
+  '"use client"; import React from "react"; const R = React; export const View = () => R.useState(0)',
   'import { default as React } from "other"; export const View = () => React.useState(0)',
+  'import React from "react"; const R = foreign; export const View = () => R.useState(0)',
+  'import React from "react"; let R = React; R = foreign; export const View = () => R.useState(0)',
+  'import React from "react"; const R = React; export const View = (R = foreign) => R.useState(0)',
+  'import React from "react"; const R = React; const property = "useState"; export const View = () => R[property](0)',
+  'import React from "react"; const R = Next; const Next = R; export const View = () => R.useState(0)',
   'import type { useState } from "react"; export type Hook = typeof useState',
   'import { use } from "react"; export const View = () => use(resource)',
   'import { useState } from "other"; export const View = () => useState(0)',
@@ -4242,6 +4251,7 @@ for (const code of [
   'import * as React from "react"; const property = "useState"; const { [property]: state } = React; export const View = () => state(0)',
   'import React from "react"; const local = () => 0; const indirect = local; export const View = () => indirect(0)',
   'import React from "react"; let state = React.useState; state = () => 0; const indirect = state; export const View = () => indirect(0)',
+  'import React from "react"; const R = React; let mutable = R; mutable = foreign; export const View = () => mutable.useState(0)',
   'import React from "react"; const first = second; const second = first; export const View = () => first(0)',
   'import type * as React from "react"; export type Hook = typeof React.useState'
 ])
@@ -4254,6 +4264,12 @@ for (const code of [
 
 await assertRuleDiagnostics({
   code: 'import * as React from "react"; const { useState } = React; export const View = () => useState(0)',
+  expected: 1,
+  filePath: "packages/review/src/view.tsx",
+  ruleId: "local-rules/require-react-hook-client-boundary"
+})
+await assertRuleDiagnostics({
+  code: 'import React from "react"; const R = React; export const View = () => R.useState(0)',
   expected: 1,
   filePath: "packages/review/src/view.tsx",
   ruleId: "local-rules/require-react-hook-client-boundary"

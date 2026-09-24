@@ -1617,8 +1617,31 @@ module.exports = {
         if (statement.directive === "use client") return {}
       }
       const isHook = (name) => Predicate.isString(name) && /^use[A-Z]/u.test(name)
-      const isReactObject = (identifier) =>
-        isNamespaceImportFrom(context, identifier, ["react"]) || isDefaultImportFrom(context, identifier, ["react"])
+      const isReactObject = (identifier, seen = new Set()) => {
+        if (
+          isNamespaceImportFrom(context, identifier, ["react"]) ||
+          isDefaultImportFrom(context, identifier, ["react"])
+        )
+          return true
+        const variable = resolvedVariable(context, identifier)
+        if (variable === undefined || seen.has(variable)) return false
+        seen.add(variable)
+        return variable.defs.some((definition) => {
+          if (
+            definition.type !== "Variable" ||
+            definition.node.type !== "VariableDeclarator" ||
+            definition.parent.kind !== "const"
+          )
+            return false
+          const { id, init } = definition.node
+          return (
+            id.type === "Identifier" &&
+            id.name === identifier.name &&
+            init?.type === "Identifier" &&
+            isReactObject(init, seen)
+          )
+        })
+      }
       const isReactHookAlias = (identifier, seen = new Set()) => {
         const variable = resolvedVariable(context, identifier)
         if (variable === undefined || seen.has(variable)) return false

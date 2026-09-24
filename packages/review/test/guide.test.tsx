@@ -1,3 +1,10 @@
+import * as NodeServices from "@effect/platform-node/NodeServices"
+import { it as effectIt } from "@effect/vitest"
+import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
+import * as Stream from "effect/Stream"
+import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
 import { Window } from "happy-dom"
 import { renderToStaticMarkup } from "react-dom/server"
@@ -127,6 +134,65 @@ describe("guide", () => {
     const html = renderToStaticMarkup(<GuidePage guide={guide} patch={patch} findings={findings} />)
     expect(html).toContain(">a.ts</code>")
     expect(html).not.toContain("a.ts → a.ts")
+  })
+  effectIt.layer(NodeServices.layer)((it) => {
+    it.effect("shows both names for a Git no-index comparison of distinct files", () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem
+        const directory = yield* fs.makeTempDirectoryScoped()
+        yield* fs.writeFileString(`${directory}/old.txt`, "old\n")
+        yield* fs.writeFileString(`${directory}/new.txt`, "new\n")
+        const diff = (source: string, destination: string) =>
+          Effect.scoped(
+            Effect.gen(function* () {
+              const git = yield* ChildProcess.make("git", ["diff", "--no-index", "--", source, destination], {
+                cwd: directory,
+                stdin: "ignore",
+                stdout: "pipe",
+                stderr: "pipe"
+              })
+              const [exitCode, stdout, stderr] = yield* Effect.all([
+                git.exitCode,
+                git.stdout.pipe(Stream.decodeText(), Stream.mkString),
+                git.stderr.pipe(Stream.decodeText(), Stream.mkString)
+              ])
+              expect(exitCode).toBe(ChildProcessSpawner.ExitCode(1))
+              expect(stderr).toBe("")
+              return stdout
+            })
+          )
+        const comparison = parsed(yield* diff("old.txt", "new.txt"))
+        expect(comparison.files[0]).toMatchObject({ oldPath: "old.txt", newPath: "new.txt", status: "modified" })
+        const html = renderToStaticMarkup(
+          <GuidePage
+            guide={{
+              ...guide,
+              sections: [{ title: "Comparison", overview: "", diffs: [{ file: "new.txt", summary: "" }] }]
+            }}
+            patch={comparison}
+            findings={{ checklist: [], issues: [] }}
+          />
+        )
+        expect(html).toContain("old.txt → new.txt</code>")
+        for (const [source, destination, status, path] of [
+          ["/dev/null", "new.txt", "added", "new.txt"],
+          ["old.txt", "/dev/null", "deleted", "old.txt"]
+        ] satisfies ReadonlyArray<readonly [string, string, string, string]>) {
+          const single = parsed(yield* diff(source, destination))
+          expect(single.files[0]).toMatchObject({ oldPath: path, newPath: path, status })
+          const rendered = renderToStaticMarkup(
+            <GuidePage
+              guide={{ ...guide, sections: [{ title: "Change", overview: "", diffs: [{ file: path, summary: "" }] }] }}
+              patch={single}
+              findings={{ checklist: [], issues: [] }}
+            />
+          )
+          expect(rendered).toContain(`>${path}</code>`)
+          expect(rendered).not.toContain(`${path} → ${path}`)
+          expect(rendered).not.toContain("/dev/null →")
+        }
+      }).pipe(Effect.scoped)
+    )
   })
   it("preserves supplied cost precision without confusing a small charge with zero", () => {
     for (const [currency, amount, displayed] of [
