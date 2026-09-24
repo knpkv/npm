@@ -279,6 +279,9 @@ export const parsePatch = (text: string, prefixes?: PatchPrefixes): ParseResult 
         if (source === undefined || destination === undefined) return invalid("Text hunks require paired file markers")
         const parsed = readHunk(lines, index)
         if (parsed._tag === "PatchInvalid") return parsed
+        if (!parsed.hunk.lines.some((record) => record.kind === "add" || record.kind === "del")) {
+          return invalid("Text hunk has no change evidence")
+        }
         if (parsed.oldOffset < oldEnd || parsed.newOffset < newEnd) return invalid("Hunk ranges move backwards")
         oldEnd = parsed.oldEnd
         newEnd = parsed.newEnd

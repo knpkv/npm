@@ -70,24 +70,19 @@ Binary files a/icon.png and b/icon.png differ
 })
 
 it("shows newline absence on the affected sides without inventing source coordinates", () => {
-  for (const body of [
-    "-same\n\\ No newline at end of file\n+same\n",
-    "-same\n+same\n\\ No newline at end of file\n",
-    "-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n",
-    " same\n\\ No newline at end of file\n"
+  for (const { after, before, body } of [
+    { body: "-same\n\\ No newline at end of file\n+same\n", before: true, after: false },
+    { body: "-same\n+same\n\\ No newline at end of file\n", before: false, after: true },
+    { body: "-old\n\\ No newline at end of file\n+new\n\\ No newline at end of file\n", before: true, after: true },
+    { body: "-old\n+new\n", before: false, after: false }
   ]) {
     const file = parsed(`diff --git a/a b/a\n--- a/a\n+++ b/a\n@@ -1 +1 @@\n${body}`).files[0]
     if (file === undefined) throw new TypeError("Missing fixture")
     for (const mode of ["split", "stacked"] satisfies ReadonlyArray<"split" | "stacked">) {
       const html = renderToStaticMarkup(<PatchDiffView file={file} id="eof" mode={mode} />)
-      expect(html).toContain("No newline at end of file")
+      expect(html.includes("No newline at end of file")).toBe(before || after)
       expect(html).not.toContain('id="eof-old-2"')
       expect(html).not.toContain('id="eof-new-2"')
-      const before = body.startsWith(" same") || body.includes("-same\n\\") || body.includes("-old\n\\")
-      const after =
-        body.startsWith(" same") ||
-        body.endsWith("+same\n\\ No newline at end of file\n") ||
-        body.endsWith("+new\n\\ No newline at end of file\n")
       expect(html.includes("Before: no newline")).toBe(before)
       expect(html.includes("After: no newline")).toBe(after)
     }

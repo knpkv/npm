@@ -347,6 +347,20 @@ test("text hunks require both file markers while metadata-only records remain va
   assert.equal(parsed("diff --git a/a.txt b/a.txt\nBinary files a/a.txt and b/a.txt differ\n").files[0]?.binary, true)
 })
 
+test("rejects context-only hunks, including beside a real change", () => {
+  const header = "diff --git a/a.txt b/a.txt\n--- a/a.txt\n+++ b/a.txt\n"
+  const firstContext = "@@ -1 +1 @@\n unchanged\n"
+  const laterContext = "@@ -2 +2 @@\n unchanged\n"
+  const firstChange = "@@ -1 +1 @@\n-old\n+new\n"
+  const laterChange = "@@ -2 +2 @@\n-old\n+new\n"
+  for (const hunks of [firstContext, firstContext + laterChange, firstChange + laterContext]) {
+    assert.equal(parsePatch(header + hunks)._tag, "PatchInvalid", hunks)
+  }
+  assert.equal(parsePatch(header + "@@ -1,2 +1,2 @@\n unchanged\n-old\n+new\n")._tag, "Patch")
+  assert.equal(parsePatch(header + "@@ -1,0 +2 @@\n+added\n")._tag, "Patch")
+  assert.equal(parsePatch(header + "@@ -2 +1,0 @@\n-deleted\n")._tag, "Patch")
+})
+
 test.each([
   ["late markers", "@@ -1 +1 @@\n-old\n+new\n--- a/a.txt\n+++ b/a.txt\n"],
   ["missing source", "+++ b/a.txt\n@@ -1 +1 @@\n-old\n+new\n"],

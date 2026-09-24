@@ -21,21 +21,31 @@ export interface GuideExportInput {
   readonly findings?: unknown
 }
 
+const GuideExportBoundary = Schema.Struct({
+  guide: Schema.Unknown,
+  patch: Schema.Unknown,
+  prefixes: Schema.optionalKey(Schema.Unknown),
+  findings: Schema.optionalKey(Schema.Unknown)
+})
+
 /** Export one offline document. All guide fields become client-visible; adapters must omit private locators and credentials. */
 export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: GuideExportInput) {
-  const guide = yield* Schema.decodeUnknownEffect(Guide)(input.guide).pipe(
+  const request = yield* Schema.decodeUnknownEffect(GuideExportBoundary)(input).pipe(
+    Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) }))
+  )
+  const guide = yield* Schema.decodeUnknownEffect(Guide)(request.guide).pipe(
     Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) }))
   )
   const findings = yield* Schema.decodeUnknownEffect(Findings)(
-    input.findings === undefined ? emptyFindings : input.findings
+    request.findings === undefined ? emptyFindings : request.findings
   ).pipe(Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) })))
   const prefixes =
-    input.prefixes === undefined
+    request.prefixes === undefined
       ? undefined
-      : yield* Schema.decodeUnknownEffect(PatchPrefixes)(input.prefixes).pipe(
+      : yield* Schema.decodeUnknownEffect(PatchPrefixes)(request.prefixes).pipe(
           Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) }))
         )
-  const patchText = yield* Schema.decodeUnknownEffect(Schema.String)(input.patch).pipe(
+  const patchText = yield* Schema.decodeUnknownEffect(Schema.String)(request.patch).pipe(
     Effect.mapError((error) => new GuideExportError({ stage: "input", detail: String(error) }))
   )
   const parsed = parsePatch(patchText, prefixes)

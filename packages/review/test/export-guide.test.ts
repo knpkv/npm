@@ -50,6 +50,17 @@ it.effect("reports malformed input, coverage, and patch failures through the typ
     }
   }))
 
+it.effect("rejects invalid outer JavaScript input through the typed input error", () =>
+  Effect.gen(function*() {
+    for (const input of [null, undefined, 42, "invalid"]) {
+      // @ts-expect-error Exercise the untyped JavaScript caller boundary.
+      const error = yield* Effect.flip(exportGuide(input))
+      expect(error._tag).toBe("GuideExportError")
+      expect(error.stage).toBe("input")
+    }
+    expect((yield* exportGuide({ guide, patch })).files).toBe(1)
+  }))
+
 it.effect("rejects malformed JavaScript prefix options before parsing or serializing", () =>
   Effect.gen(function*() {
     for (const prefixes of [null, { source: "a/" }]) {
