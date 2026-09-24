@@ -7,7 +7,7 @@ import { escapeHtml } from "./markdown.js"
 import type { PatchPrefixes } from "./model.js"
 import { emptyFindings, Findings, Guide } from "./model.js"
 import { coverageProblems, placeAll } from "./plan.js"
-import { GuidePage } from "./view.js"
+import { GuideRoot } from "./root.js"
 
 export class GuideExportError extends Schema.TaggedError<GuideExportError>()("GuideExportError", {
   stage: Schema.Literals(["input", "patch", "coverage", "render"]),
@@ -41,7 +41,7 @@ export const exportGuide = Effect.fn("Review.exportGuide")(function* (input: Gui
   const general = placed.filter((entry) => entry.kind === "general")
   const html = yield* Effect.try({
     try: () => {
-      const content = renderToString(<GuidePage guide={guide} patch={patch} findings={findings} />)
+      const content = renderToString(<GuideRoot guide={guide} patch={patch} findings={findings} />)
       const payload = JSON.stringify({ guide, findings, patch: input.patch, prefixes: input.prefixes }).replaceAll(
         "<",
         "\\u003c"
