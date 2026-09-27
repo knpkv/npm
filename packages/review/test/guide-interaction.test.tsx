@@ -2,8 +2,8 @@
 import { type Patch, parsePatch } from "@knpkv/rly/diff/patch"
 import { Window } from "happy-dom"
 import { act } from "react"
-import { renderToStaticMarkup } from "react-dom/server"
-import { createRoot } from "react-dom/client"
+import { renderToStaticMarkup, renderToString } from "react-dom/server"
+import { createRoot, hydrateRoot } from "react-dom/client"
 import { expect, it } from "vitest"
 import { GuidePage, GuideUsage } from "../src/guide/view.js"
 import { observeGuideDiagrams } from "../src/guide/diagram-mount.js"
@@ -137,6 +137,94 @@ it("keeps every guide fragment inside its own instance when a host already owns 
     await act(async () => root.unmount())
     host.remove()
     existing.remove()
+  }
+})
+
+it("keeps separately server-rendered and hydrated guide roots distinct", async () => {
+  const first = document.createElement("div")
+  const second = document.createElement("div")
+  const existing = document.createElement("div")
+  existing.id = "content"
+  existing.textContent = "Host content"
+  document.body.append(existing, first, second)
+  const roots: Array<ReturnType<typeof hydrateRoot>> = []
+  const hydrationErrors: Array<string> = []
+  const originalHash = window.location.hash
+  const page = (
+    <GuidePage
+      guide={{
+        title: "Independent guide",
+        intent: "Inspect the change",
+        sections: [
+          { title: "Source", overview: "Inspect the old line", diffs: [{ file: "file.ts", summary: "Change" }] }
+        ],
+        unplacedFiles: [],
+        review: { gitRef: "head" }
+      }}
+      patch={parsed("diff --git a/file.ts b/file.ts\n--- a/file.ts\n+++ b/file.ts\n@@ -1 +1 @@\n-old\n+new\n")}
+      findings={{
+        checklist: [],
+        issues: [{ id: 1, severity: "P1", file: "file.ts", line: 1, summary: "Anchored finding" }]
+      }}
+    />
+  )
+  const checkReferences = () => {
+    const ids = [...document.querySelectorAll("[id]")].map((element) => element.id)
+    expect(new Set(ids).size).toBe(ids.length)
+    for (const host of [first, second]) {
+      const guide = host.querySelector(".review-guide")
+      expect(guide).not.toBeNull()
+      const links = host.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')
+      expect(links.length).toBeGreaterThan(0)
+      for (const link of links) {
+        const target = document.getElementById(decodeURIComponent(link.hash.slice(1)))
+        expect(guide?.contains(target), link.href).toBe(true)
+      }
+      for (const labelled of host.querySelectorAll("[aria-labelledby]")) {
+        for (const id of labelled.getAttribute("aria-labelledby")?.split(/\s+/) ?? []) {
+          expect(host.querySelectorAll(`[id="${id}"]`), id).toHaveLength(1)
+        }
+      }
+    }
+  }
+  try {
+    first.innerHTML = renderToString(page, { identifierPrefix: "first-guide-" })
+    second.innerHTML = renderToString(page, { identifierPrefix: "second-guide-" })
+    expect(first.textContent).toContain("Independent guide")
+    expect(second.textContent).toContain("Independent guide")
+    checkReferences()
+    await act(async () => {
+      roots.push(
+        hydrateRoot(second, page, {
+          identifierPrefix: "second-guide-",
+          onRecoverableError: (error) => hydrationErrors.push(String(error))
+        })
+      )
+      roots.push(
+        hydrateRoot(first, page, {
+          identifierPrefix: "first-guide-",
+          onRecoverableError: (error) => hydrationErrors.push(String(error))
+        })
+      )
+    })
+    expect(hydrationErrors).toEqual([])
+    checkReferences()
+    for (const host of [second, first]) {
+      const skip = host.querySelector<HTMLAnchorElement>(".review-skip")
+      if (skip === null) throw new TypeError("Guide skip link missing")
+      skip.click()
+      expect(window.location.hash).toBe(skip.hash)
+      expect(host.contains(document.getElementById(decodeURIComponent(skip.hash.slice(1))))).toBe(true)
+    }
+    expect(existing.textContent).toBe("Host content")
+  } finally {
+    await act(async () => {
+      for (const root of roots) root.unmount()
+    })
+    first.remove()
+    second.remove()
+    existing.remove()
+    window.location.hash = originalHash
   }
 })
 

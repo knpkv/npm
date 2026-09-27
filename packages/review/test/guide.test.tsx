@@ -163,6 +163,20 @@ describe("guide", () => {
           )
         const comparison = parsed(yield* diff("old.txt", "new.txt"))
         expect(comparison.files[0]).toMatchObject({ oldPath: "old.txt", newPath: "new.txt", status: "modified" })
+        const oldSide: Issue = { id: 1, severity: "P1", file: "old.txt", side: "old", line: 1, summary: "Old line" }
+        expect(placeAll(comparison, { checklist: [], issues: [oldSide] })).toMatchObject([
+          { kind: "anchored", side: "old", line: 1, file: { path: "new.txt" } }
+        ])
+        expect(
+          coverageProblems(
+            {
+              ...guide,
+              sections: [{ title: "Comparison", overview: "", diffs: [{ file: "old.txt", summary: "" }] }]
+            },
+            comparison,
+            { checklist: [], issues: [oldSide] }
+          )
+        ).toEqual([])
         const html = renderToStaticMarkup(
           <GuidePage
             guide={{

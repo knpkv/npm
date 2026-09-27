@@ -486,9 +486,11 @@ const readHunk = (
   }
 }
 
-/** Every path a guide may use for this file: the new one first, the old one for renames. */
+/** Changed-file paths: the current name first, then the source of a rename or modified comparison. */
 export const pathsOf = (file: FileDiff): ReadonlyArray<string> =>
-  file.status === "renamed" ? [file.newPath, file.oldPath] : [file.path]
+  file.status === "renamed" || (file.status === "modified" && file.oldPath !== file.newPath)
+    ? [file.newPath, file.oldPath]
+    : [file.path]
 
 export const findFile = (patch: Patch, path: string): FileDiff | undefined =>
   patch.files.find((file) => file.path === path) ?? patch.files.find((file) => pathsOf(file).includes(path))

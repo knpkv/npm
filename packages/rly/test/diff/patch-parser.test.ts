@@ -295,6 +295,25 @@ test("normalizes CRLF patch records and still rejects incomplete hunks", () => {
   assert.equal(parsePatch("diff --git a/a b/a\r\n--- a/a\r\n+++ b/a\r\n@@ -1 +1 @@\r\n-old\r\n")._tag, "PatchInvalid")
 })
 
+test("resolves both names of a modified comparison without shadowing a current path", () => {
+  const comparison = `diff --git a/old.txt b/new.txt\n--- a/old.txt\n+++ b/new.txt\n@@ -1 +1 @@\n-old\n+new\n`
+  const compared = parsed(comparison)
+  assert.equal(compared.files[0]?.status, "modified")
+  assert.equal(findFile(compared, "old.txt"), compared.files[0])
+  assert.equal(findFile(compared, "new.txt"), compared.files[0])
+
+  const replacement = `diff --git a/old.txt b/old.txt
+new file mode 100644
+--- /dev/null
++++ b/old.txt
+@@ -0,0 +1 @@
++replacement
+`
+  const withReplacement = parsed(comparison + replacement)
+  assert.equal(findFile(withReplacement, "old.txt"), withReplacement.files[1])
+  assert.equal(findFile(withReplacement, "new.txt"), withReplacement.files[0])
+})
+
 test("copies retain their source identity without treating it as a changed alias", () => {
   const copy = `diff --git a/source.txt b/copy.txt
 similarity index 100%

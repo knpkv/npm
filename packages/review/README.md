@@ -40,6 +40,15 @@ The initializer handles newly mounted content, theme changes and print lifecycle
 ordinary fenced code does not start a Mermaid render. Without JavaScript, Mermaid
 remains source text. Standalone exports initialize diagrams automatically.
 
+When embedding guides as separate React roots in one document, the host must choose
+a distinct, stable React `identifierPrefix` for each root. Pass the same prefix
+to the server renderer and `hydrateRoot`; sibling guides in one root already share
+React's ID coordination. For example, the host can render one slot with
+`renderToString(<GuidePage {...props} />, { identifierPrefix: "review-left-" })`
+and hydrate that markup with
+`hydrateRoot(slot, <GuidePage {...props} />, { identifierPrefix: "review-left-" })`.
+Give a second independent slot a different prefix. See [React's `useId` guidance](https://react.dev/reference/react/useId#using-the-same-id-prefix-on-the-client-and-the-server).
+
 `@knpkv/review/guide/export` exports `exportGuide`, an Effect returning the HTML
 and placement counts or a typed `GuideExportError`. It validates inputs and
 requires each changed file to appear exactly once. Default Git prefixes work
