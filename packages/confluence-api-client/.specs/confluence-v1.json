@@ -3974,7 +3974,7 @@
       "put": {
         "tags": ["Settings"],
         "summary": "Select look and feel settings",
-        "description": "Sets the look and feel settings to the default (global) settings, the\ncustom settings, or the current theme's settings for a space.\nThe custom and theme settings can only be selected if there is already\na theme set for a space. Note, the default space settings are inherited\nfrom the current global settings.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Admin' permission for the space.",
+        "description": "Sets the look and feel settings to the default (global) settings, the\ncustom settings, or the current theme's settings for a space.\nThe custom and theme settings can only be selected if there is already\na theme set for a space. Note, the default space settings are inherited\nfrom the current global settings.\n\n**[Permissions](https://support.atlassian.com/confluence-cloud/docs/what-are-confluences-roles/) required**:\n[`manage/look-and-feel`](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) permission for the space.\n\n**Note:** To find the display name for each permission ID, call the [Get available space permissions](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) API.",
         "operationId": "updateLookAndFeel",
         "requestBody": {
           "description": "The look and feel type to be set.",
@@ -4018,7 +4018,7 @@
       "post": {
         "tags": ["Settings"],
         "summary": "Update look and feel settings",
-        "description": "Updates the look and feel settings for the site or for a single space.\nIf custom settings exist, they are updated. If no custom settings exist,\nthen a set of custom settings is created.\n\nNote, if a theme is selected for a space, the space look and feel settings\nare provided by the theme and cannot be overridden.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Admin' permission for the space.",
+        "description": "Updates the look and feel settings for the site or for a single space.\nIf custom settings exist, they are updated. If no custom settings exist,\nthen a set of custom settings is created.\n\nNote, if a theme is selected for a space, the space look and feel settings\nare provided by the theme and cannot be overridden.\n\n**[Permissions](https://support.atlassian.com/confluence-cloud/docs/what-are-confluences-roles/) required**:\n\n- If `spaceKey` is specified, [`manage/look-and-feel`](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) permission for the space.\n- If `spaceKey` is omitted, 'Confluence Administrator' global permission.\n\n**Note:** To find the display name for each permission ID, call the [Get available space permissions](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) API.",
         "operationId": "updateLookAndFeelSettings",
         "parameters": [
           {
@@ -4069,7 +4069,7 @@
       "delete": {
         "tags": ["Settings"],
         "summary": "Reset look and feel settings",
-        "description": "Resets the custom look and feel settings for the site or a single space.\nThis changes the values of the custom settings to be the same as the\ndefault settings. It does not change which settings (default or custom)\nare selected. Note, the default space settings are inherited from the\ncurrent global settings.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Admin' permission for the space.",
+        "description": "Resets the custom look and feel settings for the site or a single space.\nThis changes the values of the custom settings to be the same as the\ndefault settings. It does not change which settings (default or custom)\nare selected. Note, the default space settings are inherited from the\ncurrent global settings.\n\n**[Permissions](https://support.atlassian.com/confluence-cloud/docs/what-are-confluences-roles/) required**:\n\n- If `spaceKey` is specified, [`manage/look-and-feel`](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) permission for the space.\n- If `spaceKey` is omitted, 'Confluence Administrator' global permission.\n\n**Note:** To find the display name for each permission ID, call the [Get available space permissions](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) API.",
         "operationId": "resetLookAndFeelSettings",
         "parameters": [
           {
@@ -4583,7 +4583,7 @@
       "put": {
         "tags": ["Space settings"],
         "summary": "Update space settings",
-        "description": "Updates the settings for a space.\n\n**[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:\n'Admin' permission for the space.",
+        "description": "Updates the settings for a space.\n\n**[Permissions](https://support.atlassian.com/confluence-cloud/docs/what-are-confluences-roles/) required**:\n[`manage/space`](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) permission for the space.\n\n**Note:** To find the display name for each permission ID, call the [Get available space permissions](https://developer.atlassian.com/cloud/confluence/rest/v2/api-group-space-permissions/#api-space-permissions-get) API.",
         "operationId": "updateSpaceSettings",
         "parameters": [
           {
