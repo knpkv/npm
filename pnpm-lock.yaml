@@ -28,7 +28,7 @@ overrides:
   yaml: 2.9.0
   linkify-it@<=5.0.1: 5.0.2
   diff@>=6.0.0 <8.0.3: 8.0.3
-  devalue@<5.9.3: 5.9.4
+  devalue@>=5.0.0 <5.9.3: 5.9.4
 
 patchedDependencies:
   '@pierre/diffs@1.3.5': ce17810cfea58efa02eb4e70947801afb36c9f8a08a8bb4c810297c24c2e7a25
