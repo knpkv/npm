@@ -10,7 +10,7 @@ const raw = {
   goalId: "goal-ser8-control-surface",
   from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
   to: { id: "agent-claude-coord", name: "Claude coordinator" },
-  toAgent: null,
+  toAgent: { _tag: "keep" },
   reason: "Codex identities retired",
   expectedGoalEventId: "goal-event-7",
   expectedGoalUpdatedAt: 500
@@ -50,7 +50,8 @@ describe("work.reassign executor", () => {
                     updatedAt: 1_000
                   }
                 },
-                lane: null
+                lane: null,
+                binding: null
               }
               return result
             })
@@ -73,7 +74,8 @@ describe("work.reassign executor", () => {
         eventId: "job-reassign",
         owner: raw.to,
         laneId: null,
-        laneRevision: null
+        laneRevision: null,
+        bindingDispatchRequestId: null
       })
     }))
 

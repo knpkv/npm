@@ -215,11 +215,14 @@ describe("dashboard approval capability", () => {
         from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
         to: { id: "agent-claude-coord", name: "Claude coordinator" },
         toAgent: {
-          host: "SER8",
-          agentId: "agent-claude-coord",
-          name: "coord",
-          paneId: "w1J:p9",
-          relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+          _tag: "set",
+          agent: {
+            host: "SER8",
+            agentId: "agent-claude-coord",
+            name: "coord",
+            paneId: "w1J:p9",
+            relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+          }
         },
         reason: "Codex identities retired",
         expectedGoalEventId: "goal-event-7",

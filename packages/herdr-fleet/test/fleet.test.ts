@@ -1536,11 +1536,14 @@ describe("fleet local authority", () => {
     from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
     to: { id: "agent-claude-coord", name: "Claude coordinator" },
     toAgent: {
-      host: "SER8",
-      agentId: "agent-claude-coord",
-      name: "coord",
-      paneId: "w1J:p9",
-      relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      _tag: "set",
+      agent: {
+        host: "SER8",
+        agentId: "agent-claude-coord",
+        name: "coord",
+        paneId: "w1J:p9",
+        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      }
     },
     reason: "Codex identities retired",
     expectedGoalEventId: "goal-event-7",
@@ -1593,12 +1596,30 @@ describe("fleet local authority", () => {
         Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, to: reassignBaseline.from })._tag
       ).toBe("Failure")
       expect(Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, reason: "" })._tag).toBe("Failure")
+      expect(Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, toAgent: null })._tag).toBe("Failure")
+    }))
+
+  it.effect("bounds the recorded activity summary before a reassignment can be approved", () =>
+    Effect.sync(() => {
+      type Owner = { readonly id: string; readonly name: string }
+      const decode = (
+        change: { readonly reason?: string; readonly from?: Owner; readonly to?: Owner }
+      ) => Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, ...change })._tag
+      expect(decode({ reason: "r".repeat(1_024) })).toBe("Success")
+      expect(decode({ reason: "line\nbreak" })).toBe("Failure")
+      const longName = "n".repeat(1_900)
+      expect(decode({ from: { id: "owner-a", name: longName }, to: { id: "owner-b", name: longName } })).toBe(
+        "Failure"
+      )
+      expect(decode({ from: { id: "owner-a", name: "a" }, to: { id: "owner-b", name: longName } })).toBe("Success")
+      expect(decode({ from: { id: "owner-a", name: "bad\u0007name" } })).toBe("Failure")
     }))
 
   it.effect("binds every reassignment field and owner identity into approval", () =>
     Effect.gen(function*() {
       const baseline = Schema.decodeUnknownSync(JobPayload)(reassignBaseline)
-      if (baseline.kind !== "work.reassign" || baseline.toAgent === null) return
+      if (baseline.kind !== "work.reassign" || baseline.toAgent._tag !== "set") return
+      const agent = baseline.toAgent.agent
       const original = yield* jobHash("SER8", "coord", baseline)
       const changes = [
         { goalId: "other-goal" },
@@ -1606,21 +1627,27 @@ describe("fleet local authority", () => {
         { from: { ...baseline.from, name: "Changed" } },
         { to: { ...baseline.to, id: "other-target" } },
         { to: { ...baseline.to, name: "Changed" } },
-        { toAgent: null },
-        { toAgent: { ...baseline.toAgent, host: "OTHER" } },
-        { toAgent: { ...baseline.toAgent, agentId: "agent-other" } },
-        { toAgent: { ...baseline.toAgent, name: "Changed" } },
-        { toAgent: { ...baseline.toAgent, paneId: "w2:p2" } },
+        { toAgent: { _tag: "clear" } },
+        { toAgent: { _tag: "keep" } },
+        { toAgent: { _tag: "set", agent: { ...agent, host: "OTHER" } } },
+        { toAgent: { _tag: "set", agent: { ...agent, agentId: "agent-other" } } },
+        { toAgent: { _tag: "set", agent: { ...agent, name: "Changed" } } },
+        { toAgent: { _tag: "set", agent: { ...agent, paneId: "w2:p2" } } },
         {
           toAgent: {
-            host: baseline.toAgent.host,
-            agentId: baseline.toAgent.agentId,
-            name: baseline.toAgent.name,
-            paneId: baseline.toAgent.paneId
+            _tag: "set",
+            agent: { host: agent.host, agentId: agent.agentId, name: agent.name, paneId: agent.paneId }
           }
         },
-        { toAgent: { ...baseline.toAgent, relationship: { parentAgentId: "agent-other", relation: "delegated" } } },
-        { toAgent: { ...baseline.toAgent, relationship: { parentAgentId: "agent-lead", relation: "pair" } } },
+        {
+          toAgent: {
+            _tag: "set",
+            agent: { ...agent, relationship: { parentAgentId: "agent-other", relation: "delegated" } }
+          }
+        },
+        {
+          toAgent: { _tag: "set", agent: { ...agent, relationship: { parentAgentId: "agent-lead", relation: "pair" } } }
+        },
         { reason: "Another reason" },
         { expectedGoalEventId: "other-event" },
         { expectedGoalUpdatedAt: 501 }
@@ -1636,11 +1663,14 @@ describe("fleet local authority", () => {
         expectedGoalEventId: baseline.expectedGoalEventId,
         reason: baseline.reason,
         toAgent: {
-          relationship: { relation: "delegated", parentAgentId: "agent-lead" },
-          paneId: baseline.toAgent.paneId,
-          name: baseline.toAgent.name,
-          agentId: baseline.toAgent.agentId,
-          host: baseline.toAgent.host
+          agent: {
+            relationship: { relation: "delegated", parentAgentId: "agent-lead" },
+            paneId: agent.paneId,
+            name: agent.name,
+            agentId: agent.agentId,
+            host: agent.host
+          },
+          _tag: "set"
         },
         to: { name: baseline.to.name, id: baseline.to.id },
         from: { name: baseline.from.name, id: baseline.from.id },

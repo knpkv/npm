@@ -247,20 +247,66 @@ export const WorkRecover = Schema.Struct({
 export type WorkRecover = typeof WorkRecover.Type
 
 /**
+ * The agent target a reassigned goal ends with: `set` points it at a new
+ * worker, `clear` removes it, and `keep` is accepted only when the goal has no
+ * target, so a reassignment never leaves the previous owner's agent in place.
+ */
+export const WorkReassignAgent = Schema.TaggedUnion({
+  set: { agent: AgentWorkerIdentity },
+  clear: {},
+  keep: {}
+})
+export type WorkReassignAgent = typeof WorkReassignAgent.Type
+
+const workReassignOwnerIdMaxLength = 256
+const workReassignActivityMaxLength = 4_096
+const workReassignActivityText = /^[^\p{Cc}\p{Cs}]+$/u
+
+/** Activity text the Work store records for an approved reassignment. */
+export const workReassignActivitySummary = (
+  payload: {
+    readonly from: { readonly id: string; readonly name: string }
+    readonly to: { readonly id: string; readonly name: string }
+    readonly reason: string
+  },
+  approvalJobId: string,
+  approvalHash: string
+): string =>
+  `Reassigned from ${payload.from.name} (${payload.from.id}) to ${payload.to.name} (${payload.to.id}): ` +
+  `${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+
+/**
+ * Accepts a reassignment only when its target owner and its longest possible
+ * activity summary fit Work's durable limits, so nothing approved can fail to
+ * record for size or control characters.
+ */
+export const workReassignIsRecordable = (
+  payload: Parameters<typeof workReassignActivitySummary>[0]
+): boolean => {
+  const summary = workReassignActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  return payload.from.id !== payload.to.id &&
+    payload.to.id.length <= workReassignOwnerIdMaxLength &&
+    summary.length <= workReassignActivityMaxLength &&
+    workReassignActivityText.test(summary)
+}
+
+/**
  * Approval-bound transfer of one Work goal, and its active lane, from the exact
- * current owner to a new owner. `toAgent: null` keeps the goal's agent target.
+ * current owner to a new owner.
  */
 export const WorkReassign = Schema.Struct({
   kind: Schema.Literal("work.reassign"),
   goalId: WorkAdmit.fields.goalId,
   from: WorkAdmit.fields.owner,
   to: WorkAdmit.fields.owner,
-  toAgent: Schema.NullOr(AgentWorkerIdentity),
+  toAgent: WorkReassignAgent,
   reason: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
   expectedGoalEventId: WorkRecover.fields.expectedGoalEventId,
   expectedGoalUpdatedAt: WorkRecover.fields.expectedGoalUpdatedAt
 }).check(
-  Schema.makeFilter(({ from, to }) => from.id !== to.id, { expected: "a different target owner" })
+  Schema.makeFilter(workReassignIsRecordable, {
+    expected: "a different, recordable target owner and a bounded single-line activity summary"
+  })
 )
 export type WorkReassign = typeof WorkReassign.Type
 

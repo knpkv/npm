@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { renderToStaticMarkup } from "react-dom/server"
 import { JobPayload } from "@knpkv/herdr-fleet/model"
-import type { JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
+import type { JobPayload as JobPayloadType, JobRecord, WorkReassignAgent } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
@@ -1132,11 +1132,14 @@ describe("sanitized approval requests", () => {
       from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
       to: { id: "agent-claude-coord", name: "Claude coordinator" },
       toAgent: {
-        host: "SER8",
-        agentId: "agent-claude-coord",
-        name: "coord",
-        paneId: "w1J:p9",
-        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+        _tag: "set",
+        agent: {
+          host: "SER8",
+          agentId: "agent-claude-coord",
+          name: "coord",
+          paneId: "w1J:p9",
+          relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+        }
       },
       reason: "Codex identities retired",
       expectedGoalEventId: "goal-event-7",
@@ -1156,10 +1159,14 @@ describe("sanitized approval requests", () => {
     expect(values.get("expectedGoalUpdatedAt")).toBe("500")
     expect(values.get("goalId")).toBe("goal-ser8-control-surface")
     expect(sanitizeJobPayload(payload)).toEqual(payload)
-    const unbound = approvalRequestFor(Schema.decodeUnknownSync(JobPayload)({ ...payload, toAgent: null }))
-    expect(new Map(unbound.fields.map(({ key, value }) => [key, value])).get("toAgent")).toBe(
-      "unchanged (no agent target)"
-    )
+    const agentField = (toAgent: WorkReassignAgent) =>
+      new Map(
+        approvalRequestFor(Schema.decodeUnknownSync(JobPayload)({ ...payload, toAgent })).fields.map(
+          ({ key, value }) => [key, value]
+        )
+      ).get("toAgent")
+    expect(agentField({ _tag: "clear" })).toBe("clear the agent target")
+    expect(agentField({ _tag: "keep" })).toBe("keep (only when the goal has no agent target)")
   })
 
   it.each(approvalDashboardStatuses)(

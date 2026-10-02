@@ -39,6 +39,7 @@ export const runWorkReassign = Effect.fn("HostOperations.workReassign")(function
     eventId: result.checkpoint.eventId,
     owner: result.checkpoint.goal.owner,
     laneId: result.lane?.laneId ?? null,
-    laneRevision: result.lane?.revision ?? null
+    laneRevision: result.lane?.revision ?? null,
+    bindingDispatchRequestId: result.binding?.request.dispatchRequestId ?? null
   })
 })

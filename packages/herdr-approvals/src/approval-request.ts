@@ -6,7 +6,12 @@ import {
   JobPayload,
   JobStatus
 } from "@knpkv/herdr-fleet/model"
-import type { AgentDelegate, JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
+import type {
+  AgentDelegate,
+  JobPayload as JobPayloadType,
+  JobRecord,
+  WorkReassignAgent
+} from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const requestTextMaxLength = 16 * 1_024
@@ -428,6 +433,28 @@ const field = (key: string, label: string, value: string, redacted = false): App
   value
 })
 
+const reassignAgentFields = (toAgent: WorkReassignAgent): ReadonlyArray<ApprovalRequestField> => {
+  switch (toAgent._tag) {
+    case "clear":
+      return [field("toAgent", "New agent target", "clear the agent target")]
+    case "keep":
+      return [field("toAgent", "New agent target", "keep (only when the goal has no agent target)")]
+    case "set":
+      return [
+        field("toAgent", "New agent target", toAgent.agent.agentId),
+        field("toAgentHost", "New agent host", toAgent.agent.host),
+        field("toAgentPane", "New agent pane", toAgent.agent.paneId),
+        field(
+          "toAgentLineage",
+          "New agent lineage",
+          toAgent.agent.relationship === undefined
+            ? "root"
+            : `${toAgent.agent.relationship.relation}:${toAgent.agent.relationship.parentAgentId}`
+        )
+      ]
+  }
+}
+
 export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => {
   switch (payload.kind) {
     case "browser.mcp.recover":
@@ -550,20 +577,7 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("goalId", "Work goal", payload.goalId),
           field("from", "Current Work owner", `${payload.from.name} (${payload.from.id})`),
           field("to", "New Work owner", `${payload.to.name} (${payload.to.id})`),
-          ...(payload.toAgent === null
-            ? [field("toAgent", "New agent target", "unchanged (no agent target)")]
-            : [
-              field("toAgent", "New agent target", payload.toAgent.agentId),
-              field("toAgentHost", "New agent host", payload.toAgent.host),
-              field("toAgentPane", "New agent pane", payload.toAgent.paneId),
-              field(
-                "toAgentLineage",
-                "New agent lineage",
-                payload.toAgent.relationship === undefined
-                  ? "root"
-                  : `${payload.toAgent.relationship.relation}:${payload.toAgent.relationship.parentAgentId}`
-              )
-            ]),
+          ...reassignAgentFields(payload.toAgent),
           field("reason", "Reason", payload.reason),
           field("expectedGoalEventId", "Expected goal event", payload.expectedGoalEventId),
           field("expectedGoalUpdatedAt", "Expected goal update", String(payload.expectedGoalUpdatedAt))

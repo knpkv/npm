@@ -9,6 +9,8 @@ import type {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalAgentTargetConflictError,
+  WorkGoalBindingRequiresAgentError,
   WorkGoalOwnerMismatchError,
   WorkGoalReassignmentConflictError,
   WorkGoalRevisionConflictError,
@@ -59,6 +61,8 @@ export interface WorkService {
     request: WorkGoalReassignment
   ) => Effect.Effect<
     WorkGoalReassigned,
+    | WorkGoalAgentTargetConflictError
+    | WorkGoalBindingRequiresAgentError
     | WorkGoalOwnerMismatchError
     | WorkGoalReassignmentConflictError
     | WorkGoalRevisionConflictError

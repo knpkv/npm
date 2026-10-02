@@ -118,20 +118,23 @@ const canonicalPayload = (payload: JobPayload): string => {
         goalId: payload.goalId,
         from: { id: payload.from.id, name: payload.from.name },
         to: { id: payload.to.id, name: payload.to.name },
-        toAgent: payload.toAgent === null
-          ? null
-          : {
-            host: payload.toAgent.host,
-            agentId: payload.toAgent.agentId,
-            name: payload.toAgent.name,
-            paneId: payload.toAgent.paneId,
-            relationship: payload.toAgent.relationship === undefined
-              ? null
-              : {
-                parentAgentId: payload.toAgent.relationship.parentAgentId,
-                relation: payload.toAgent.relationship.relation
-              }
-          },
+        toAgent: payload.toAgent._tag === "set"
+          ? {
+            _tag: payload.toAgent._tag,
+            agent: {
+              host: payload.toAgent.agent.host,
+              agentId: payload.toAgent.agent.agentId,
+              name: payload.toAgent.agent.name,
+              paneId: payload.toAgent.agent.paneId,
+              relationship: payload.toAgent.agent.relationship === undefined
+                ? null
+                : {
+                  parentAgentId: payload.toAgent.agent.relationship.parentAgentId,
+                  relation: payload.toAgent.agent.relationship.relation
+                }
+            }
+          }
+          : { _tag: payload.toAgent._tag },
         reason: payload.reason,
         expectedGoalEventId: payload.expectedGoalEventId,
         expectedGoalUpdatedAt: payload.expectedGoalUpdatedAt

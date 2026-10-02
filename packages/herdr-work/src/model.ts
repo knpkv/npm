@@ -1,4 +1,11 @@
-import { AgentConnectTarget, AgentWorkerIdentity, WorkAdmit, WorkReassign, WorkRecover } from "@knpkv/herdr-fleet/model"
+import {
+  AgentConnectTarget,
+  AgentWorkerIdentity,
+  WorkAdmit,
+  WorkReassign,
+  workReassignIsRecordable,
+  WorkRecover
+} from "@knpkv/herdr-fleet/model"
 import { Equal, Schema } from "effect"
 
 const Identifier = Schema.String.check(
@@ -424,11 +431,23 @@ export const WorkAgentBindingRequest = Schema.Struct({
       approvalApprovedAt: Timestamp,
       approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
     })
+  ),
+  /** Set when an approved `work.reassign` job moved the lane's binding to a new worker. */
+  ownerReassignment: Schema.optionalKey(
+    Schema.Struct({
+      previousDispatchRequestId: WorkDispatchRequestId,
+      approvalJobId: Identifier,
+      approvalActor: Identifier,
+      approvalApprovedBy: Identifier,
+      approvalApprovedAt: Timestamp,
+      approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+    })
   )
 }).check(
   Schema.makeFilter(
-    ({ existingGoalRecovery, prospectiveAdmission }) =>
-      prospectiveAdmission === undefined || existingGoalRecovery === undefined,
+    ({ existingGoalRecovery, ownerReassignment, prospectiveAdmission }) =>
+      [existingGoalRecovery, ownerReassignment, prospectiveAdmission].filter((kind) => kind !== undefined).length <=
+        1,
     { expected: "one truthful owner-linkage provenance kind" }
   )
 )
@@ -599,22 +618,26 @@ export const WorkGoalReassignment = Schema.Struct({
   approvalApprovedAt: Timestamp,
   approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
 }).check(
-  Schema.makeFilter(({ from, to }) => from.id !== to.id, { expected: "a different target owner" })
+  Schema.makeFilter(workReassignIsRecordable, {
+    expected: "a different, recordable target owner and a bounded single-line activity summary"
+  })
 )
 export type WorkGoalReassignment = typeof WorkGoalReassignment.Type
 
 /**
- * Durable result of one reassignment. The checkpoint and any rewritten lane are
- * both identified by the approval job id; `lane` is null when the goal had no
- * active lane.
+ * Durable result of one reassignment. The checkpoint, any rewritten lane, and
+ * any rebound worker binding are all identified by the approval job id. `lane`
+ * is null when the goal had no active lane (a shipped lane keeps its previous
+ * owner); `binding` is null when that lane had no started-worker binding.
  */
 export const WorkGoalReassigned = Schema.Struct({
   reassignment: WorkGoalReassignment,
   checkpoint: WorkGoalCheckpoint,
-  lane: Schema.NullOr(WorkLaneClaimed)
+  lane: Schema.NullOr(WorkLaneClaimed),
+  binding: Schema.NullOr(WorkAgentBinding)
 }).check(
   Schema.makeFilter(
-    ({ checkpoint, lane, reassignment }) =>
+    ({ binding, checkpoint, lane, reassignment }) =>
       checkpoint.eventId === reassignment.approvalJobId &&
       checkpoint.goal.id === reassignment.goalId &&
       Equal.equals(checkpoint.goal.owner, reassignment.to) &&
@@ -622,8 +645,14 @@ export const WorkGoalReassigned = Schema.Struct({
         lane.goalId === reassignment.goalId &&
         lane.operationId === reassignment.approvalJobId &&
         Equal.equals(lane.owner, reassignment.to)
+      )) &&
+      (binding === null || (
+        lane !== null &&
+        Equal.equals(binding.lane, lane) &&
+        Equal.equals(binding.checkpoint, checkpoint) &&
+        binding.request.ownerReassignment?.approvalJobId === reassignment.approvalJobId
       )),
-    { expected: "a checkpoint and lane owned by the approved target owner" }
+    { expected: "a checkpoint, lane, and binding owned by the approved target owner" }
   )
 )
 export interface WorkGoalReassigned extends Schema.Schema.Type<typeof WorkGoalReassigned> {}

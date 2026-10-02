@@ -159,3 +159,15 @@ export class WorkGoalReassignmentConflictError extends Schema.TaggedError<WorkGo
     reason: Schema.Literals(["payload_mismatch", "identifier_in_use"])
   }
 ) {}
+
+/** The goal's active lane has a started-worker binding, so a reassignment must name the agent that takes it over. */
+export class WorkGoalBindingRequiresAgentError extends Schema.TaggedError<WorkGoalBindingRequiresAgentError>()(
+  "WorkGoalBindingRequiresAgentError",
+  { goalId: Schema.String, laneId: Schema.String, dispatchRequestId: Schema.String }
+) {}
+
+/** `keep` would leave the previous owner's agent target on the reassigned goal. */
+export class WorkGoalAgentTargetConflictError extends Schema.TaggedError<WorkGoalAgentTargetConflictError>()(
+  "WorkGoalAgentTargetConflictError",
+  { goalId: Schema.String, currentAgentId: Schema.String }
+) {}

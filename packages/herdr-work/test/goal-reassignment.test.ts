@@ -1,12 +1,20 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { agentConnectTarget } from "@knpkv/herdr-fleet/model"
+import { Effect, Option } from "effect"
 import { TestClock } from "effect/testing"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { makeWorkService, WorkStore } from "../src/index.js"
-import type { WorkGoalCheckpoint, WorkGoalReassignment, WorkLaneClaim } from "../src/model.js"
+import { DatabaseSync } from "node:sqlite"
+import { makeWorkService, type WorkService, WorkStore } from "../src/index.js"
+import type {
+  WorkExistingGoalRecovery,
+  WorkGoalCheckpoint,
+  WorkGoalReassignment,
+  WorkLaneClaim,
+  WorkRecoveryTarget
+} from "../src/model.js"
 
 const from = { id: "agent-codex-owner", name: "Codex owner" }
 const to = { id: "agent-claude-coord", name: "Claude coordinator" }
@@ -56,7 +64,7 @@ const request = {
   goalId: original.goal.id,
   from,
   to,
-  toAgent,
+  toAgent: { _tag: "set", agent: toAgent },
   reason: "Codex identities retired; Claude coordinator takes over",
   expectedGoalEventId: original.eventId,
   expectedGoalUpdatedAt: original.goal.updatedAt,
@@ -79,7 +87,7 @@ const fixture = Effect.fn("fixture")(
     const work = yield* makeWorkService(store)
     yield* work.record(original)
     if (options.lane) yield* work.claim(laneClaim)
-    return { store, work }
+    return { path: join(root, "work.sqlite"), store, work }
   },
   // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.provide(NodeServices.layer)
@@ -110,16 +118,112 @@ describe("approved goal reassignment", () => {
       })
       expect(yield* store.currentClaim(laneClaim.laneId)).toMatchObject({ value: result.lane })
       expect((yield* store.list()).map(({ eventId }) => eventId)).toEqual([original.eventId, request.approvalJobId])
+      expect(result.binding).toBeNull()
     })))
 
-  it.effect("reassigns a goal without a lane and keeps its agent target when toAgent is null", () =>
+  it.effect("records the rewritten lane in the operation ledger at the new revision", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, work } = yield* fixture({ lane: true })
+      const result = yield* work.reassign(request)
+      const sql = new DatabaseSync(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => sql.close()))
+      const row = sql.prepare("SELECT revision, record FROM work_lane_operations WHERE operation_id = ?")
+        .get(request.approvalJobId)
+      expect(row?.revision).toBe(2)
+      expect(JSON.parse(String(row?.record))).toEqual(result.lane)
+    })))
+
+  it.effect("orders the new checkpoint after a head written ahead of the local clock", () =>
     Effect.scoped(Effect.gen(function*() {
       const { work } = yield* fixture({ lane: false })
-      const result = yield* work.reassign({ ...request, toAgent: null })
+      const ahead = {
+        ...original,
+        eventId: "goal-ahead",
+        occurredAt: 5_000,
+        goal: { ...original.goal, updatedAt: 5_000 }
+      }
+      yield* work.record(ahead)
+      const result = yield* work.reassign({
+        ...request,
+        toAgent: { _tag: "keep" },
+        expectedGoalEventId: ahead.eventId,
+        expectedGoalUpdatedAt: 5_000
+      })
+      expect(result.checkpoint.occurredAt).toBe(5_001)
+      expect(yield* work.recoveryContext(original.goal.id)).toMatchObject({
+        expectedGoalEventId: request.approvalJobId
+      })
+    })))
+
+  it.effect("reassigns a goal without a lane or agent target when asked to keep the absent target", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      const result = yield* work.reassign({ ...request, toAgent: { _tag: "keep" } })
       expect(result.lane).toBeNull()
       expect(result.checkpoint.goal.owner).toEqual(to)
       expect(result.checkpoint.goal.connectTarget).toBeNull()
       expect(result.checkpoint.goal.agentHierarchy).toBeUndefined()
+    })))
+
+  const targeted = Effect.fn("targeted")(function*(work: WorkService) {
+    const oldAgent = { host: "SER8", agentId: "agent-codex-owner", name: "codex", paneId: "w1:p2" }
+    const head = {
+      ...original,
+      eventId: "goal-targeted",
+      occurredAt: 600,
+      goal: {
+        ...original.goal,
+        agentHierarchy: { agent: oldAgent },
+        connectTarget: agentConnectTarget(oldAgent),
+        updatedAt: 600
+      }
+    } satisfies WorkGoalCheckpoint
+    yield* work.record(head)
+    return { ...request, expectedGoalEventId: head.eventId, expectedGoalUpdatedAt: 600 } satisfies WorkGoalReassignment
+  })
+
+  it.effect("refuses to keep an existing agent target that belongs to the previous owner", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture({ lane: false })
+      const expected = yield* targeted(work)
+      expect(yield* Effect.flip(work.reassign({ ...expected, toAgent: { _tag: "keep" } }))).toMatchObject({
+        _tag: "WorkGoalAgentTargetConflictError",
+        goalId: original.goal.id,
+        currentAgentId: "agent-codex-owner"
+      })
+      expect(yield* store.list()).toHaveLength(2)
+    })))
+
+  it.effect("clears an existing agent target on request", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      const expected = yield* targeted(work)
+      const result = yield* work.reassign({ ...expected, toAgent: { _tag: "clear" } })
+      expect(result.checkpoint.goal.agentHierarchy).toBeNull()
+      expect(result.checkpoint.goal.connectTarget).toBeNull()
+    })))
+
+  it.effect("reassigns a deployed goal and leaves its shipped lane with the previous owner", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture({ lane: true })
+      yield* work.claim({ ...laneClaim, operationId: "lane-shipped", phase: "shipped", expectedRevision: 1 })
+      const deployed = {
+        ...original,
+        eventId: "goal-deployed",
+        occurredAt: 700,
+        goal: { ...original.goal, state: "deployed", delivery: "deployed", updatedAt: 700 }
+      } satisfies WorkGoalCheckpoint
+      yield* work.record(deployed)
+      const result = yield* work.reassign({
+        ...request,
+        expectedGoalEventId: deployed.eventId,
+        expectedGoalUpdatedAt: 700
+      })
+      expect(result.checkpoint.goal).toMatchObject({ state: "deployed", owner: to })
+      expect(result.lane).toBeNull()
+      expect(yield* store.currentClaim(laneClaim.laneId)).toMatchObject({
+        value: { owner: from, phase: "shipped", revision: 2 }
+      })
     })))
 
   it.effect("rejects a goal whose owner is not the approved source owner", () =>
@@ -205,4 +309,103 @@ describe("approved goal reassignment", () => {
         reason: "identifier_in_use"
       })
     })))
+
+  const recoveryTarget = {
+    repository: "example/npm",
+    pullRequest: 433,
+    reviewUrl: "https://github.com/example/npm/pull/433",
+    goalId: "npm-pr433-release",
+    laneId: "npm-pr433-lane",
+    head: "a".repeat(40),
+    baseHead: "b".repeat(40),
+    owner: from,
+    sessionId: "01a0ae54-197e-72b2-914f-8d5d22abe522",
+    expectedWork: "work:pr433",
+    worker: { host: "SER8", agentId: "agent-codex-pr433", name: "codex pr433", paneId: "w1:p4" },
+    worktree: "/tmp/pr433",
+    branch: "feat/pr433",
+    expectedGoalEventId: "pr433-created",
+    expectedGoalUpdatedAt: 500
+  } satisfies WorkRecoveryTarget
+
+  const bound = Effect.fn("bound")(function*(work: WorkService) {
+    yield* work.record({
+      version: "herdr.work.event.v1",
+      eventId: recoveryTarget.expectedGoalEventId,
+      occurredAt: 500,
+      goal: {
+        ...original.goal,
+        id: recoveryTarget.goalId,
+        state: "review",
+        delivery: "pull_request",
+        repository: { repository: recoveryTarget.repository, branch: recoveryTarget.branch },
+        goalFamily: { canonicalGoalId: recoveryTarget.goalId, role: "canonical" },
+        review: null
+      }
+    })
+    const preflight = yield* work.recoveryPreflight(recoveryTarget)
+    if (preflight._tag !== "recoverable") return yield* Effect.die(preflight)
+    const recovery: WorkExistingGoalRecovery = {
+      ...recoveryTarget,
+      kind: "work.recover",
+      operationId: "pr433-recovery",
+      expectedHistoryToken: preflight.historyToken,
+      approvalJobId: "job-recover-433",
+      approvalActor: "coord",
+      approvalApprovedBy: "andrey",
+      approvalApprovedAt: 800,
+      approvalHash: "d".repeat(64)
+    }
+    const link = yield* work.recoverExistingGoal(recovery)
+    return {
+      ...request,
+      goalId: recoveryTarget.goalId,
+      expectedGoalEventId: link.goalEventId,
+      expectedGoalUpdatedAt: link.goal.updatedAt
+    } satisfies WorkGoalReassignment
+  })
+
+  it.effect("rebinds a bound lane to the new worker so PR inspection succeeds for it", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture({ lane: false })
+      const expected = yield* bound(work)
+      const result = yield* work.reassign(expected)
+      expect(result.binding?.request).toMatchObject({
+        dispatchRequestId: request.approvalJobId,
+        worker: toAgent,
+        ownerReassignment: {
+          previousDispatchRequestId: "pr433-recovery",
+          approvalJobId: request.approvalJobId,
+          approvalHash: request.approvalHash
+        }
+      })
+      const link = yield* work.inspectPullRequest({
+        repository: recoveryTarget.repository,
+        pullRequest: recoveryTarget.pullRequest,
+        goalId: recoveryTarget.goalId,
+        laneId: recoveryTarget.laneId
+      })
+      expect(link.binding.request.worker).toEqual(toAgent)
+      expect(link.lane.owner).toEqual(to)
+      expect(link.goal.owner).toEqual(to)
+      expect(yield* store.agentBinding(request.approvalJobId)).toEqual(Option.some(result.binding))
+      expect(yield* work.reassign(expected)).toEqual(result)
+    })))
+
+  const unboundChoices: ReadonlyArray<WorkGoalReassignment["toAgent"]> = [{ _tag: "clear" }, { _tag: "keep" }]
+  for (const toAgentChoice of unboundChoices) {
+    it.effect(`refuses to ${toAgentChoice._tag} the agent of a bound lane`, () =>
+      Effect.scoped(Effect.gen(function*() {
+        const { store, work } = yield* fixture({ lane: false })
+        const expected = yield* bound(work)
+        const before = yield* store.list()
+        expect(yield* Effect.flip(work.reassign({ ...expected, toAgent: toAgentChoice }))).toMatchObject({
+          _tag: "WorkGoalBindingRequiresAgentError",
+          goalId: recoveryTarget.goalId,
+          laneId: recoveryTarget.laneId,
+          dispatchRequestId: "pr433-recovery"
+        })
+        expect(yield* store.list()).toEqual(before)
+      })))
+  }
 })
