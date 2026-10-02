@@ -140,10 +140,12 @@ const normalisePrefix = (input: string): { readonly path: string } | { readonly 
   const trimmed = /^[A-Za-z]:[\\/]+$/.test(raw) ? raw.slice(0, 3) : raw.replace(/[\\/]+$/, "")
   if (trimmed.length === 0) return { error: "Provide a directory." }
   if (
-    !trimmed.startsWith("/") && !trimmed.startsWith("~") && !/^[A-Za-z]:[\\/]/.test(trimmed) &&
+    // Only `~` and `~/…` (or `~\…`) expand to the home directory; `~work` would never match a cwd.
+    !trimmed.startsWith("/") && trimmed !== "~" && !/^~[\\/]/.test(trimmed) &&
+    !/^[A-Za-z]:[\\/]/.test(trimmed) &&
     !/^[\\/]{2}[^\\/]+[\\/][^\\/]+/.test(trimmed)
   ) {
-    return { error: `Use an absolute path or one starting with ~ (got "${input}").` }
+    return { error: `Use an absolute path or one starting with ~/ (got "${input}").` }
   }
   return { path: trimmed }
 }

@@ -245,7 +245,10 @@ export const runWatch = (options: {
           yield* Console.log(`  ${excluded.day}  skipped — ${excluded.reason}`)
         }
         for (const entry of report.unattributed) {
-          const key = `unattributed\u0000${entry.day}`
+          // Keyed by how many sessions are unplaced, not by seconds: one session's credit grows on
+          // every tick until it settles, which must stay quiet, but a later unplaced session on the
+          // same day adds time the operator still has to reconcile and is said again.
+          const key = `unattributed\u0000${entry.day}\u0000${entry.sessionCount}`
           if (announced.has(key)) continue
           announced.add(key)
           yield* Console.log(

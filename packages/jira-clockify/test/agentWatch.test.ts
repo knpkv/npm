@@ -616,6 +616,46 @@ describe("jcf watch claude", () => {
       expect(said[0]).toContain("jcf sync reconcile --agent claude")
     }))
 
+  // Once per amount, not once per day: a later unplaced session on the same day changes the total
+  // the operator has to reconcile, and a day-only key used to hide it for the rest of the watch.
+  it.effect("names unplaced time again when the day's total grows", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: baseOptions({
+          transcripts: {
+            "work/session-b.jsonl": transcript({
+              sessionId: "session-b",
+              cwd: `${WORK_ROOT}/scratch`,
+              gitBranch: "main",
+              from: at(10, 1),
+              minutes: 10,
+              text: "Look at PROJ-9 and PROJ-8 and decide"
+            }),
+            "work/session-c.jsonl": transcript({
+              sessionId: "session-c",
+              cwd: `${WORK_ROOT}/scratch`,
+              gitBranch: "main",
+              from: at(11, 0),
+              minutes: 30,
+              text: "Compare PROJ-9 with PROJ-8 again"
+            })
+          }
+        })
+      })
+      yield* advance(Duration.minutes(30))
+      const first = world.stdout.filter((line) => line.includes("no branch, path, or standing rule places"))
+      yield* advance(Duration.minutes(60))
+      yield* advance(Duration.minutes(30))
+      yield* Fiber.interrupt(fiber)
+
+      const said = world.stdout.filter((line) => line.includes("no branch, path, or standing rule places"))
+      expect(first).toHaveLength(1)
+      expect(said.length).toBeGreaterThan(1)
+      expect(said.at(-1)).not.toBe(said[0])
+      expect(world.createdClockifyEntries).toEqual([])
+    }))
+
   // A running Timer has no end time, so its hours are invisible to the tally. Writing over that day
   // would log them a second time the moment the Timer stops.
   it.effect("writes nothing on a day a Clockify timer is still running", () =>

@@ -36,6 +36,21 @@ describe("jcf config reset", () => {
       expect(drive.stored.sessionRoots).toEqual(["C:\\"])
     }))
 
+  // Only `~` and `~/…` expand to the home directory. `~work` or `~other/x` would be stored as
+  // configured and then never match an absolute transcript cwd, silently opting nothing in.
+  it.effect("rejects tilde prefixes that do not expand to the home directory", () =>
+    Effect.gen(function*() {
+      for (const prefix of ["~work", "~other/repo"]) {
+        const { stored, world } = yield* run(["config", "set", "session-root", prefix], {})
+        expect(stored.sessionRoots).toEqual([])
+        expect(world.stdout.join("\n")).toContain("Use an absolute path")
+      }
+      const home = yield* run(["config", "set", "session-root", "~"], {})
+      expect(home.stored.sessionRoots).toEqual(["~"])
+      const nested = yield* run(["config", "set", "session-root", "~/dev/work"], {})
+      expect(nested.stored.sessionRoots).toEqual(["~/dev/work"])
+    }))
+
   // `jcf config show` lists the session settings, so leaving them behind was invisible: a user
   // chasing a bad idle cap or a stale Standing Attribution would reset, see them still there, and
   // have nothing to go on. Reset means reset.
