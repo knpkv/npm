@@ -28,7 +28,8 @@ import {
   makeFleetService,
   requiresApproval,
   summarizeHostOperationTerminalDetail,
-  type WorkerStarted
+  type WorkerStarted,
+  WorkJobKind
 } from "../src/index.js"
 
 // Each test effect is an application boundary; @effect/vitest scopes its Node services.
@@ -1190,7 +1191,7 @@ describe("fleet local authority", () => {
             id: Effect.succeed("job-reconcile"),
             nonce: Effect.succeed("nonce-reconcile"),
             now: Effect.succeed(1_000),
-            operations,
+            operations: { ...operations, workJobKinds: new Set(["work.reconcile"]) },
             store
           })
           const payload = Schema.decodeUnknownSync(JobPayload)({
@@ -1235,6 +1236,113 @@ describe("fleet local authority", () => {
         })
     ).pipe(provideNodeServices)
   })
+
+  const workJobPayloads = [
+    {
+      kind: "work.reconcile",
+      repository: "knpkv/npm",
+      pullRequest: 433,
+      goalId: "goal-433",
+      laneId: "lane-433",
+      operationId: "operation-433",
+      expectedRevision: 2,
+      expectedHead: "0123456789abcdef0123456789abcdef01234567",
+      newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      expectedOwner: { id: "owner-1", name: "Owner" },
+      expectedGoalEventId: "event-433",
+      bindingDispatchRequestId: "dispatch-433",
+      sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+      expectedWork: "feat/guided-review-rly",
+      worker: { host: "SER8", agentId: "agent-433", name: "Owner", paneId: "w1:p3" },
+      worktree: "/worktrees/npm/feat/guided-review-rly",
+      branch: "feat/guided-review-rly"
+    },
+    {
+      kind: "work.admit",
+      repository: "knpkv/npm",
+      pullRequest: 433,
+      reviewUrl: "https://github.com/knpkv/npm/pull/433",
+      goalId: "goal-433",
+      laneId: "lane-433",
+      operationId: "admit-433",
+      expectedAbsenceToken: "a".repeat(64),
+      head: "b".repeat(40),
+      baseHead: "c".repeat(40),
+      owner: { id: "owner-1", name: "Owner" },
+      sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+      expectedWork: "feat/guided-review-rly",
+      worker: { host: "SER8", agentId: "agent-433", name: "Owner", paneId: "w1:p3" },
+      worktree: "/worktrees/npm/feat/guided-review-rly",
+      branch: "feat/guided-review-rly",
+      title: "Review PR 433",
+      summary: "Guided review",
+      detail: "Admit the running owner"
+    },
+    {
+      kind: "work.recover",
+      repository: "knpkv/npm",
+      pullRequest: 376,
+      reviewUrl: "https://github.com/knpkv/npm/pull/376",
+      goalId: "jcf-ai-review-85170486",
+      laneId: "jcf-release-lane",
+      operationId: "approved-jcf-recovery",
+      expectedGoalEventId: "original-event",
+      expectedGoalUpdatedAt: 500,
+      expectedHistoryToken: "a".repeat(64),
+      head: "b".repeat(40),
+      baseHead: "c".repeat(40),
+      owner: { id: "original-owner", name: "Original" },
+      sessionId: "01a0ae54-197e-72b2-914f-8d5d22abe522",
+      expectedWork: "work:85170486-375a-4dab-91c4-b5f39c974156",
+      worker: { host: "SER8", agentId: "agent-jcf", name: "Original", paneId: "w1K:p1" },
+      worktree: "/worktrees/jcf",
+      branch: "feat/jcf"
+    }
+  ]
+
+  for (const raw of workJobPayloads) {
+    it.effect(`rejects ${raw.kind} at submission unless a Work adapter is composed`, () => {
+      const root = mkdtempSync(join(tmpdir(), "herdr-work-adapter-test-"))
+      return Effect.acquireUseRelease(
+        JobStore.open(join(root, "jobs.sqlite")),
+        (store) =>
+          Effect.gen(function*() {
+            const payload = Schema.decodeUnknownSync(JobPayload)(raw)
+            const make = (hostOperations: HostOperations, id: string) =>
+              makeFleetService({
+                approvalEnabled: true,
+                host: "SER8",
+                id: Effect.succeed(id),
+                nonce: Effect.succeed("nonce-work"),
+                now: Effect.succeed(1_000),
+                operations: hostOperations,
+                store
+              })
+            const bare = yield* make(operations, "job-without-adapter")
+            expect(yield* Effect.flip(bare.submit({ payload }, "coord"))).toMatchObject({
+              _tag: "FleetOperationUnavailableError",
+              kind: raw.kind
+            })
+            expect(yield* store.get("job-without-adapter")).toBeUndefined()
+            const kind = Schema.decodeUnknownSync(WorkJobKind)(raw.kind)
+            const otherKind = yield* make(
+              { ...operations, workJobKinds: new Set([kind === "work.reconcile" ? "work.admit" : "work.reconcile"]) },
+              "job-other"
+            )
+            expect((yield* Effect.flip(otherKind.submit({ payload }, "coord")))._tag).toBe(
+              "FleetOperationUnavailableError"
+            )
+            const composed = yield* make({ ...operations, workJobKinds: new Set([kind]) }, "job-with-adapter")
+            expect((yield* composed.submit({ payload }, "coord")).status).toBe("pending_approval")
+          }),
+        (store) =>
+          Effect.sync(() => {
+            store.close()
+            rmSync(root, { force: true, recursive: true })
+          })
+      ).pipe(provideNodeServices)
+    })
+  }
 
   it.effect("binds every reconciliation identity field into the approval hash", () =>
     Effect.gen(function*() {

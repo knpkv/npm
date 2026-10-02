@@ -502,11 +502,27 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("pullRequest", "Pull request", String(payload.pullRequest)),
           field("goalId", "Existing Work goal", payload.goalId),
           field("laneId", "Existing lane", payload.laneId),
+          field("operationId", "Reconciliation operation", payload.operationId),
+          field("expectedRevision", "Expected lane revision", String(payload.expectedRevision)),
           field("expectedHead", "Expected old head", payload.expectedHead),
           field("newHead", "New head", payload.newHead),
+          field("expectedOwner", "Expected Work owner", `${payload.expectedOwner.name} (${payload.expectedOwner.id})`),
+          field("expectedGoalEventId", "Expected goal event", payload.expectedGoalEventId),
+          field("bindingDispatchRequestId", "Existing binding dispatch", payload.bindingDispatchRequestId),
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
-          field("worker", "Existing stable agent", payload.worker.agentId)
+          field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerHost", "Existing worker host", payload.worker.host),
+          field("workerPane", "Existing worker pane", payload.worker.paneId),
+          field(
+            "workerLineage",
+            "Existing worker lineage",
+            payload.worker.relationship === undefined
+              ? "root"
+              : `${payload.worker.relationship.relation}:${payload.worker.relationship.parentAgentId}`
+          ),
+          field("worktree", "Existing worktree", payload.worktree),
+          field("branch", "Existing branch", payload.branch)
         ],
         kind: payload.kind,
         title: "Reconcile one existing PR owner"

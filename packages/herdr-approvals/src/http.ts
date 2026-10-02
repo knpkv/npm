@@ -25,6 +25,7 @@ import type { ChatHistoryError } from "@knpkv/herdr-coordinator"
 import { ChatRequest, ChatStore, makeCoordinatorChat } from "@knpkv/herdr-coordinator"
 import type {
   FleetJobConflictError,
+  FleetOperationUnavailableError,
   FleetService,
   FleetStoreError,
   FleetTransitionConflictError,
@@ -238,6 +239,7 @@ type ApiError =
   | FleetJobConflictError
   | FleetJobNotFoundError
   | FleetOperationError
+  | FleetOperationUnavailableError
   | FleetStoreError
   | FleetTransitionConflictError
   | FleetValidationError
@@ -342,6 +344,8 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 409, body: { error: error._tag, jobId: error.jobId } }
     case "FleetValidationError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
+    case "FleetOperationUnavailableError":
+      return { status: 422, body: { error: error._tag, kind: error.kind, detail: error.detail } }
     case "LanWorkPairingMalformedError":
       return { status: 400, body: { error: error._tag, detail: error.detail } }
     case "LanWorkSelectionMalformedError":

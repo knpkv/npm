@@ -3,6 +3,7 @@ import {
   FleetApprovalError,
   FleetJobNotFoundError,
   FleetOperationError,
+  FleetOperationUnavailableError,
   FleetStoreError,
   FleetTransitionConflictError,
   FleetValidationError
@@ -19,6 +20,7 @@ import {
   type CoreJobPayload,
   type HostDetails,
   HostOperationReceipt,
+  isWorkJobKind,
   JobActor,
   type JobHash,
   type JobPayload,
@@ -27,7 +29,8 @@ import {
   type LocalJobPayload,
   type PendingApprovalCursor,
   requiresApproval,
-  workerObservationMaxLength
+  workerObservationMaxLength,
+  type WorkJobKind
 } from "./model.js"
 import type { JobStore } from "./store.js"
 
@@ -126,6 +129,12 @@ export type HostOperations = {
   ) => Effect.Effect<string, FleetOperationError>
   /** Explicit crash recovery for operations backed by another durable store. */
   readonly recovery?: HostOperationRecovery
+  /**
+   * Work job kinds this host's composed Work adapter executes. Submission
+   * refuses every other Work kind before an approval request exists; absent
+   * means the host executes none.
+   */
+  readonly workJobKinds?: ReadonlySet<WorkJobKind>
 }
 
 /** Persisted Fleet approval, distinct from the job's submitting actor. */
@@ -248,6 +257,13 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     actor: string
   ) {
     const validatedActor = yield* decodeActor(actor)
+    const kind = request.payload.kind
+    if (isWorkJobKind(kind) && options.operations.workJobKinds?.has(kind) !== true) {
+      return yield* new FleetOperationUnavailableError({
+        kind,
+        detail: `this host has no composed Work adapter for ${kind}`
+      })
+    }
     const timestamp = yield* now
     const approval = requiresApproval(request.payload)
     if (approval && options.approvalEnabled === false) {
