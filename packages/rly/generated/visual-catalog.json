@@ -488,6 +488,21 @@
       ]
     },
     {
+      "name": "PatchDiffView",
+      "paths": {
+        "source": "packages/rly/src/diff/patch/PatchDiffView.tsx",
+        "story": "packages/rly/stories/diff/PatchDiffView.stories.tsx",
+        "styles": [],
+        "tests": [
+          "packages/rly/test/diff/PatchDiffView.test.tsx"
+        ]
+      },
+      "storyId": "diff-patchdiffview--split",
+      "storyIds": [
+        "diff-patchdiffview--split"
+      ]
+    },
+    {
       "name": "PeopleStrip",
       "paths": {
         "source": "packages/rly/src/patterns/PeopleStrip.tsx",
