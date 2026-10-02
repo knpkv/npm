@@ -92,6 +92,13 @@
   background: var(--rly-color-success-tint);
 }
 
+.deletion .lineNumber,
+.addition .lineNumber,
+.deletion .marker,
+.addition .marker {
+  color: var(--rly-color-text-2);
+}
+
 .context > td {
   background: var(--rly-color-surface-1);
 }

@@ -69,7 +69,7 @@ test("default lint retains every original check and both CI partitions", () => {
   assert.equal(staticCommands.includes("node scripts/check-changeset-coverage.mjs"), false)
   assert.equal(
     staticCommands[0],
-    'pnpm --recursive --sort --filter "@knpkv/herdr-approvals^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" run build'
+    'pnpm --recursive --sort --filter "@knpkv/herdr-approvals^..." --filter "@knpkv/relay-product" --filter "@knpkv/browser-pairing" --filter "@knpkv/review" run build'
   )
   for (const required of [
     "check-eslint-config.mjs",

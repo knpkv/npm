@@ -28,6 +28,8 @@ export type RlyTabsDirection = "ltr" | "rtl"
 export interface RlyTabItem {
   readonly content: ReactNode
   readonly disabled?: boolean
+  /** Retain this panel while inactive. Defaults to unmounting; the caller must style inactive panel visibility. */
+  readonly forceMount?: true
   readonly label: string
   readonly value: string
 }
@@ -121,7 +123,12 @@ export const Tabs = ({
         ))}
       </RadixTabs.List>
       {items.map((item) => (
-        <RadixTabs.Content className={style("panel")} key={item.value} value={item.value}>
+        <RadixTabs.Content
+          className={style("panel")}
+          {...(item.forceMount === undefined ? {} : { forceMount: item.forceMount })}
+          key={item.value}
+          value={item.value}
+        >
           {item.content}
         </RadixTabs.Content>
       ))}
