@@ -1374,7 +1374,6 @@ type AdmissionRejection = {
   readonly error: WorkAdmissionConflictError
 }
 
-/** Reads every durable identity row, including entries omitted by time-window projections. */
 /**
  * Splits bindings into each lane's authoritative row (highest lane revision)
  * and the lanes where that revision is shared by more than one row. Earlier
@@ -1395,6 +1394,7 @@ const authoritativeBindings = (bindings: ReadonlyArray<WorkAgentBindingType>) =>
   return { latest, ambiguousLanes }
 }
 
+/** Reads every durable identity row, including entries omitted by time-window projections. */
 const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType): AdmissionInspection => {
   const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
     database.prepare(
@@ -1465,7 +1465,10 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
       (claim.worktree === target.worktree && claim.laneId !== target.laneId)
     ) ||
     authority.latest.some(({ request }) =>
-      (request.worker.agentId === target.worker.agentId && request.laneId !== target.laneId) ||
+      request.worker.agentId === target.worker.agentId && request.laneId !== target.laneId
+    ) ||
+    // A session id stays claimed by its lane even after a reassignment supersedes that binding.
+    bindings.some(({ request }) =>
       (request.prospectiveAdmission?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
       (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
     ) || authority.ambiguousLanes.has(target.laneId)
@@ -1514,8 +1517,8 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     ) || lanes.entries.some(({ claim }) =>
       claim.laneId === target.laneId || claim.goalId === target.goalId ||
       claim.worktree === target.worktree
-    ) || authority.latest.some(({ request }) =>
-      request.worker.agentId === target.worker.agentId ||
+    ) || authority.latest.some(({ request }) => request.worker.agentId === target.worker.agentId) ||
+    bindings.some(({ request }) =>
       request.prospectiveAdmission?.sessionId === target.sessionId ||
       request.existingGoalRecovery?.sessionId === target.sessionId
     )

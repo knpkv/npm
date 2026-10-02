@@ -484,4 +484,26 @@ describe("approved goal reassignment", () => {
       expect(yield* store.list()).toEqual([original])
       expect(yield* store.currentClaim(laneClaim.laneId)).toMatchObject({ value: { owner: from, revision: 1 } })
     })))
+
+  it.effect("keeps a superseded binding's session id in the new-admission conflict scan", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      yield* work.reassign(yield* bound(work))
+      const preflight = yield* work.admissionPreflight({
+        repository: recoveryTarget.repository,
+        pullRequest: 500,
+        reviewUrl: "https://github.com/example/npm/pull/500",
+        goalId: "npm-pr500-release",
+        laneId: "npm-pr500-lane",
+        head: "c".repeat(40),
+        baseHead: recoveryTarget.baseHead,
+        owner: { id: "agent-other-owner", name: "Other owner" },
+        sessionId: recoveryTarget.sessionId,
+        expectedWork: "work:pr500",
+        worker: { host: "SER8", agentId: "agent-pr500", name: "pr500", paneId: "w1:p6" },
+        worktree: "/tmp/pr500",
+        branch: "feat/pr500"
+      })
+      expect(preflight._tag).toBe("conflict")
+    })))
 })
