@@ -1,0 +1,54 @@
+{
+  "source": "Illustrative review of the accompanying example patch",
+  "checklist": [
+    {
+      "item": "Code quality & design",
+      "verdict": "Yes",
+      "note": "`release(...)` owns the decision; `postRelease(...)` owns the HTTP mapping."
+    },
+    {
+      "item": "Security & privacy",
+      "verdict": "No",
+      "note": "`verified.revision` is never compared with `requestedRevision`. See Issue 1."
+    },
+    {
+      "item": "Architecture",
+      "verdict": "Yes",
+      "note": "`verifyApproval(...)` precedes `ship(...)` in one domain function."
+    },
+    {
+      "item": "Documentation",
+      "verdict": "N/A",
+      "note": "This illustrative patch contains no public API documentation."
+    },
+    {
+      "item": "Tests",
+      "verdict": "No",
+      "note": "The tests miss valid-A/request-B and `Rejected → HTTP status`. See Issues 1 and 2."
+    }
+  ],
+  "issues": [
+    {
+      "id": 1,
+      "severity": "P1",
+      "file": "src/release.ts",
+      "line": 8,
+      "summary": "`ship(requestedRevision)` can ship a revision the signature did not approve.",
+      "recommendation": "1. Compare `requestedRevision` with `verified.revision` before shipping. Return a named rejection when they differ.\n2. Pass the verified revision to `ship(...)` after the comparison.\n3. Add a valid-A/request-B test. Assert `Rejected` and `expect(ship).not.toHaveBeenCalled()`.",
+      "explanation": "**Trigger**\n\nSubmit a valid approval for `revision-a` with `requestedRevision = \"revision-b\"`.\n\n**Code path**\n\n```text\nverifyApproval(approval) → Valid { revision: \"revision-a\" }\nrequestedRevision        → \"revision-b\"\nship(requestedRevision)   → ship(\"revision-b\")\n```\n\n**Consequence**\n\nVerification succeeds, but it does not constrain the value passed to `ship`. The caller can substitute a different revision without invalidating the signature.\n\nThe happy-path test cannot expose this: its signed revision and requested revision are both `revision-a`."
+    },
+    {
+      "id": 2,
+      "severity": "P2",
+      "file": "src/release-route.ts",
+      "line": 14,
+      "summary": "`Rejected` is serialized as `HTTP 200`, so callers can report false success.",
+      "recommendation": "1. Map `Rejected` to the API's documented non-success status. Keep `Released` on the success path.\n2. Add a route test asserting both status and body for invalid approval.\n3. Assert that `ship` was not called, so the route test also protects the side-effect boundary.",
+      "explanation": "**Trigger**\n\nSend an invalid signed approval through `postRelease(...)`.\n\n**Code path**\n\n```text\nrelease(...)          → { _tag: \"Rejected\", ... }\nResponse.json(result) → status 200\nresponse.ok           → true\n```\n\n**Consequence**\n\nA deployment client that uses `response.ok` as its completion signal reports a release that never shipped. The body says rejection; the HTTP status says success."
+    }
+  ],
+  "preExisting": [],
+  "openQuestions": [
+    "Should invalid approval map to `403` or a domain-conflict response? The excerpt does not establish that contract. Confirm it before fixing Issue 2."
+  ]
+}
