@@ -40,7 +40,7 @@ describe("jcf config reset", () => {
   // configured and then never match an absolute transcript cwd, silently opting nothing in.
   it.effect("rejects tilde prefixes that do not expand to the home directory", () =>
     Effect.gen(function*() {
-      for (const prefix of ["~work", "~other/repo"]) {
+      for (const prefix of ["~work", "~work/repo", "~other/repo"]) {
         const { stored, world } = yield* run(["config", "set", "session-root", prefix], {})
         expect(stored.sessionRoots).toEqual([])
         expect(world.stdout.join("\n")).toContain("Use an absolute path")

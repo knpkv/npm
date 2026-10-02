@@ -49,13 +49,7 @@ type GuardRequirements = ConfigService | FileSystem.FileSystem | Path.Path
 
 const verifyStanding = (scope: WriterScopeState): Effect.Effect<void, WriterGuardError, FileSystem.FileSystem> =>
   Effect.gen(function*() {
-    const standing = yield* WatchLease.refresh({
-      path: scope.lease.path,
-      owner: scope.lease.owner,
-      heldSinceMs: 0,
-      intervalSeconds: 0,
-      unresolvedFromMs: 0
-    })
+    const standing = yield* WatchLease.refresh({ path: scope.lease.path, owner: scope.lease.owner })
     if (standing._tag !== "Mine") return yield* standingError(standing.reason)
   })
 

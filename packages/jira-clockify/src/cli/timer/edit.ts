@@ -4,11 +4,18 @@
  * @module
  */
 import { ClockifyApiClient, type Project, type Tag } from "@knpkv/clockify-api-client"
-import { Console, Effect, SubscriptionRef } from "effect"
+import { Console, Data, Effect, Runtime, SubscriptionRef } from "effect"
 import { Command, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { TimerService } from "../../services/TimerService.js"
 import * as WriterGuard from "../writerGuard.js"
+
+/** A guarded edit was refused after its reason was printed; fails so a script sees non-zero. */
+export class TimerEditFailedError extends Data.TaggedError("TimerEditFailedError")<{
+  readonly message: string
+}> {
+  override readonly [Runtime.errorReported] = false
+}
 
 type EditableField = "project" | "billable" | "tags"
 type TagEditAction = "add" | "remove"
@@ -77,7 +84,7 @@ export const edit = Command.make(
         })
         const startedAt = current.startedAt
         if (startedAt === null) return
-        const updated = yield* WriterGuard.mutate(Effect.gen(function*() {
+        yield* WriterGuard.mutate(Effect.gen(function*() {
           const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
           yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
             start: startedAt.toISOString(),
@@ -86,10 +93,12 @@ export const edit = Command.make(
             ...((entry?.billable !== undefined) && { billable: entry.billable })
           })
         })).pipe(
-          Effect.as(true),
-          Effect.catch((error) => Console.log(`Error: ${error.message}`).pipe(Effect.as(false)))
+          Effect.catch((error) =>
+            Console.log(`Error: ${error.message}`).pipe(
+              Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+            )
+          )
         )
-        if (!updated) return
 
         const name = projects.find((p) => p.id === selected)?.name ?? null
         yield* Console.log(`Project updated: ${name ?? "(none)"}`)
@@ -105,7 +114,7 @@ export const edit = Command.make(
         })
         const startedAt = current.startedAt
         if (startedAt === null) return
-        const updated = yield* WriterGuard.mutate(Effect.gen(function*() {
+        yield* WriterGuard.mutate(Effect.gen(function*() {
           const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
           yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
             start: startedAt.toISOString(),
@@ -114,10 +123,12 @@ export const edit = Command.make(
             ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] })
           })
         })).pipe(
-          Effect.as(true),
-          Effect.catch((error) => Console.log(`Error: ${error.message}`).pipe(Effect.as(false)))
+          Effect.catch((error) =>
+            Console.log(`Error: ${error.message}`).pipe(
+              Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+            )
+          )
         )
-        if (!updated) return
 
         yield* Console.log(`Billable updated: ${val ? "yes" : "no"}`)
       }
@@ -156,7 +167,7 @@ export const edit = Command.make(
           })
           const startedAt = current.startedAt
           if (startedAt === null) return
-          const updated = yield* WriterGuard.mutate(Effect.gen(function*() {
+          yield* WriterGuard.mutate(Effect.gen(function*() {
             const latest = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
             const newTagIds = [...new Set([...(latest?.tagIds ?? []), tagId])]
             yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
@@ -166,10 +177,12 @@ export const edit = Command.make(
               ...((latest?.billable !== undefined) && { billable: latest.billable })
             })
           })).pipe(
-            Effect.as(true),
-            Effect.catch((error) => Console.log(`Error: ${error.message}`).pipe(Effect.as(false)))
+            Effect.catch((error) =>
+              Console.log(`Error: ${error.message}`).pipe(
+                Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+              )
+            )
           )
-          if (!updated) return
           yield* Console.log(`Tag added: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
 
@@ -185,7 +198,7 @@ export const edit = Command.make(
           })
           const startedAt = current.startedAt
           if (startedAt === null) return
-          const updated = yield* WriterGuard.mutate(Effect.gen(function*() {
+          yield* WriterGuard.mutate(Effect.gen(function*() {
             const latest = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
             const newTagIds = (latest?.tagIds ?? []).filter((id) => id !== tagId)
             yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
@@ -195,10 +208,12 @@ export const edit = Command.make(
               ...((latest?.billable !== undefined) && { billable: latest.billable })
             })
           })).pipe(
-            Effect.as(true),
-            Effect.catch((error) => Console.log(`Error: ${error.message}`).pipe(Effect.as(false)))
+            Effect.catch((error) =>
+              Console.log(`Error: ${error.message}`).pipe(
+                Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+              )
+            )
           )
-          if (!updated) return
           yield* Console.log(`Tag removed: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
       }

@@ -228,17 +228,8 @@ const readStanding = (file: string, owner: string) =>
  * The cursor is persisted only on orderly release. Rewriting the lock while held would reintroduce
  * a write race and buys no exclusion: ownership is the unchanged token on disk.
  */
-export const refresh = (options: {
-  readonly path: string
-  readonly owner: string
-  readonly heldSinceMs: number
-  readonly intervalSeconds: number
-  readonly unresolvedFromMs: number
-}) =>
-  Effect.gen(function*() {
-    const standing = yield* readStanding(options.path, options.owner)
-    return standing
-  })
+export const refresh = (options: { readonly path: string; readonly owner: string }) =>
+  readStanding(options.path, options.owner)
 
 /**
  * Stop holding the lease, keeping the cursor in a separate file.

@@ -50,7 +50,7 @@ const runEdit = (action: "add" | "remove", failFinalRead: boolean) => {
     Effect.andThen(Command.runWith(root, { version: "0.0.0-test" })(["timer", "edit"])),
     Effect.exit,
     Effect.provide(fake.layer),
-    Effect.as(fake.world)
+    Effect.map((exit) => Object.assign(fake.world, { exitTag: exit._tag }))
   )
 }
 
@@ -86,7 +86,7 @@ const runFieldEdit = (field: "project" | "billable", failFinalRead: boolean) => 
     Effect.andThen(Command.runWith(root, { version: "0.0.0-test" })(["timer", "edit"])),
     Effect.exit,
     Effect.provide(fake.layer),
-    Effect.as(fake.world)
+    Effect.map((exit) => Object.assign(fake.world, { exitTag: exit._tag }))
   )
 }
 
@@ -97,6 +97,8 @@ describe("timer edit", () => {
         Effect.map((world) => {
           expect(world.updatedClockifyEntries).toEqual([])
           expect(world.stdout.join("\n")).toContain("Error:")
+          // A refused edit is a failed command, so a script sees a non-zero exit.
+          expect(world.exitTag).toBe("Failure")
         })
       ))
   }
@@ -104,6 +106,7 @@ describe("timer edit", () => {
   it.effect("adds a tag from the fresh entry while preserving unrelated fields", () =>
     runEdit("add", false).pipe(
       Effect.map((world) => {
+        expect(world.exitTag).toBe("Success")
         expect(world.updatedClockifyEntries).toHaveLength(1)
         expect(world.updatedClockifyEntries[0]?.payload).toMatchObject({
           projectId: "project-1",
@@ -116,6 +119,7 @@ describe("timer edit", () => {
   it.effect("removes one tag from the fresh entry while preserving unrelated fields", () =>
     runEdit("remove", false).pipe(
       Effect.map((world) => {
+        expect(world.exitTag).toBe("Success")
         expect(world.updatedClockifyEntries).toHaveLength(1)
         expect(world.updatedClockifyEntries[0]?.payload).toMatchObject({
           projectId: "project-1",
@@ -131,6 +135,8 @@ describe("timer edit", () => {
         Effect.map((world) => {
           expect(world.updatedClockifyEntries).toEqual([])
           expect(world.stdout.join("\n")).toContain("Error:")
+          // A refused edit is a failed command, so a script sees a non-zero exit.
+          expect(world.exitTag).toBe("Failure")
         })
       ))
   }
@@ -138,6 +144,7 @@ describe("timer edit", () => {
   it.effect("changes the project without dropping billable or tags", () =>
     runFieldEdit("project", false).pipe(
       Effect.map((world) => {
+        expect(world.exitTag).toBe("Success")
         expect(world.updatedClockifyEntries[0]?.payload).toMatchObject({
           projectId: "project-2",
           billable: false,
@@ -149,6 +156,7 @@ describe("timer edit", () => {
   it.effect("changes billable without dropping the project or tags", () =>
     runFieldEdit("billable", false).pipe(
       Effect.map((world) => {
+        expect(world.exitTag).toBe("Success")
         expect(world.updatedClockifyEntries[0]?.payload).toMatchObject({
           projectId: "project-1",
           billable: true,

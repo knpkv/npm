@@ -656,6 +656,35 @@ describe("jcf watch claude", () => {
       expect(world.createdClockifyEntries).toEqual([])
     }))
 
+  // One long unplaced session grows the day's total without adding a session. It is said again
+  // each time the total crosses another half hour, not on every tick in between.
+  it.effect("names one long unplaced session again as its total grows", () =>
+    Effect.gen(function*() {
+      const { fiber, world } = yield* startWatch({
+        startMs: at(10, 0),
+        fake: baseOptions({
+          transcripts: {
+            "work/session-long.jsonl": transcript({
+              sessionId: "session-long",
+              cwd: `${WORK_ROOT}/scratch`,
+              gitBranch: "main",
+              from: at(10, 1),
+              minutes: 75,
+              text: "Look at PROJ-9 and PROJ-8 and decide"
+            })
+          }
+        })
+      })
+      yield* advance(Duration.minutes(100))
+      yield* Fiber.interrupt(fiber)
+
+      const said = world.stdout.filter((line) => line.includes("no branch, path, or standing rule places"))
+      expect(said.length).toBeGreaterThanOrEqual(2)
+      expect(said.length).toBeLessThanOrEqual(4)
+      expect(new Set(said).size).toBe(said.length)
+      expect(world.createdClockifyEntries).toEqual([])
+    }))
+
   // A running Timer has no end time, so its hours are invisible to the tally. Writing over that day
   // would log them a second time the moment the Timer stops.
   it.effect("writes nothing on a day a Clockify timer is still running", () =>

@@ -87,6 +87,9 @@ interface WatchTotals {
  * `formatDuration` always spells the seconds out because it reports *worked* time, where the odd
  * seconds are the point. An interval is a round number nobody wants read back to them.
  */
+/** How much a day's unplaced time must grow before the watch names it again. */
+const UNPLACED_ANNOUNCE_STEP_SECONDS = 30 * 60
+
 const cadence = (seconds: number): string => formatDuration(seconds).replace(/ 0s$/, "")
 
 /** How a held row reads on screen — one line, saying what would unblock it. */
@@ -211,13 +214,7 @@ export const runWatch = (options: {
        * or malformed before a provider write.
        */
       const stillMine = Effect.gen(function*() {
-        const standing = yield* WatchLease.refresh({
-          path: leasePath,
-          owner: leaseOwner,
-          heldSinceMs: startedAtMs,
-          intervalSeconds: options.intervalSeconds,
-          unresolvedFromMs
-        })
+        const standing = yield* WatchLease.refresh({ path: leasePath, owner: leaseOwner })
         return standing._tag === "Mine"
           ? null
           : ({ _tag: "Stop", reason: `${standing.reason}, so this one is standing down.` } satisfies TickOutcome)
@@ -245,10 +242,11 @@ export const runWatch = (options: {
           yield* Console.log(`  ${excluded.day}  skipped — ${excluded.reason}`)
         }
         for (const entry of report.unattributed) {
-          // Keyed by how many sessions are unplaced, not by seconds: one session's credit grows on
-          // every tick until it settles, which must stay quiet, but a later unplaced session on the
-          // same day adds time the operator still has to reconcile and is said again.
-          const key = `unattributed\u0000${entry.day}\u0000${entry.sessionCount}`
+          // Said again when the day's unplaced time grows materially: a later session on the same
+          // day, or the total crossing another half hour. Raw seconds would repeat on every tick
+          // while one session's credit is still growing.
+          const growth = Math.floor(entry.seconds / UNPLACED_ANNOUNCE_STEP_SECONDS)
+          const key = `unattributed\u0000${entry.day}\u0000${entry.sessionCount}\u0000${growth}`
           if (announced.has(key)) continue
           announced.add(key)
           yield* Console.log(
