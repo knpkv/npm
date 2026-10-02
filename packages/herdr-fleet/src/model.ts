@@ -164,16 +164,103 @@ export const AgentMessage = Schema.Struct({
   message: JobText
 })
 
+/** Approval-bound, exact existing-owner Work reconciliation. */
+export const WorkReconcile = Schema.Struct({
+  kind: Schema.Literal("work.reconcile"),
+  repository: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)),
+  pullRequest: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+  goalId: Schema.String.check(Schema.isNonEmpty()),
+  laneId: Schema.String.check(Schema.isNonEmpty()),
+  operationId: Schema.String.check(Schema.isNonEmpty()),
+  expectedRevision: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(1)),
+  expectedHead: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  newHead: Schema.String.check(Schema.isPattern(/^[0-9a-f]{40}$/)),
+  expectedOwner: Schema.Struct({
+    id: Schema.String.check(Schema.isNonEmpty()),
+    name: Schema.String.check(Schema.isNonEmpty())
+  }),
+  expectedGoalEventId: Schema.String.check(Schema.isNonEmpty()),
+  bindingDispatchRequestId: Schema.String.check(Schema.isNonEmpty()),
+  sessionId: Schema.String.check(Schema.isPattern(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)),
+  expectedWork: Schema.String.check(Schema.isNonEmpty()),
+  worker: AgentWorkerIdentity,
+  worktree: JobPath,
+  branch: Schema.String.check(Schema.isNonEmpty())
+})
+export type WorkReconcile = typeof WorkReconcile.Type
+
+/** A new, prospective Work admission for an already-running settled owner. */
+export const WorkAdmit = Schema.Struct({
+  kind: Schema.Literal("work.admit"),
+  repository: WorkReconcile.fields.repository,
+  pullRequest: WorkReconcile.fields.pullRequest,
+  reviewUrl: Schema.String.check(
+    Schema.isPattern(/^https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/pull\/[1-9][0-9]*$/)
+  ),
+  goalId: WorkReconcile.fields.goalId,
+  laneId: WorkReconcile.fields.laneId,
+  operationId: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(180)),
+  expectedAbsenceToken: JobHash,
+  head: WorkReconcile.fields.newHead,
+  baseHead: WorkReconcile.fields.newHead,
+  owner: WorkReconcile.fields.expectedOwner,
+  sessionId: WorkReconcile.fields.sessionId,
+  expectedWork: WorkReconcile.fields.expectedWork,
+  worker: AgentWorkerIdentity,
+  worktree: WorkReconcile.fields.worktree,
+  branch: WorkReconcile.fields.branch,
+  title: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)),
+  summary: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096)),
+  detail: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(4_096))
+}).check(Schema.makeFilter(
+  ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+  { expected: "exact PR URL" }
+))
+export type WorkAdmit = typeof WorkAdmit.Type
+
+/** Approval-bound linkage of one existing canonical goal to its settled owner. */
+export const WorkRecover = Schema.Struct({
+  kind: Schema.Literal("work.recover"),
+  repository: WorkAdmit.fields.repository,
+  pullRequest: WorkAdmit.fields.pullRequest,
+  reviewUrl: WorkAdmit.fields.reviewUrl,
+  goalId: WorkAdmit.fields.goalId,
+  laneId: WorkAdmit.fields.laneId,
+  operationId: WorkAdmit.fields.operationId,
+  expectedGoalEventId: Schema.String.check(Schema.isNonEmpty()),
+  expectedGoalUpdatedAt: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+  expectedHistoryToken: JobHash,
+  head: WorkAdmit.fields.head,
+  baseHead: WorkAdmit.fields.baseHead,
+  owner: WorkAdmit.fields.owner,
+  sessionId: WorkAdmit.fields.sessionId,
+  expectedWork: WorkAdmit.fields.expectedWork,
+  worker: AgentWorkerIdentity,
+  worktree: WorkAdmit.fields.worktree,
+  branch: WorkAdmit.fields.branch
+}).check(
+  Schema.makeFilter(
+    ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+    { expected: "exact PR URL" }
+  )
+)
+export type WorkRecover = typeof WorkRecover.Type
+
+/** Fleet job kinds that change Work authority; only a composed Work adapter executes them. */
+export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover"])
+export type WorkJobKind = typeof WorkJobKind.Type
+export const isWorkJobKind = Schema.is(WorkJobKind)
+
 export const BrowserMcpRecover = Schema.Struct({
   kind: Schema.Literal("browser.mcp.recover")
 })
 export type BrowserMcpRecover = typeof BrowserMcpRecover.Type
 
 export const CoreJobPayload = Schema.Union([
-  NixCheck,
-  NixApply,
-  AgentDelegate,
-  AgentMessage
+  Schema.Union([NixCheck, NixApply, AgentDelegate, AgentMessage]),
+  WorkReconcile,
+  WorkAdmit,
+  WorkRecover
 ])
 export type CoreJobPayload = typeof CoreJobPayload.Type
 
@@ -323,10 +410,12 @@ const WorkBindAddress = Schema.String.check(
     (address) => {
       const octets = address.split(".")
       const values = octets.map(Number)
-      return values.some((octet) => octet !== 0) &&
+      return (
+        values.some((octet) => octet !== 0) &&
         values.every(
           (octet, index) => String(octet) === octets[index] && octet >= 0 && octet <= 255
         )
+      )
     },
     { expected: "a specific IPv4 Work listener address, not a wildcard" }
   )
@@ -410,7 +499,8 @@ export const HostConfiguration = Schema.Struct({
         ![configuration.localPort, configuration.port, configuration.approvalPort].includes(
           configuration.lanWork.port
         )
-      return new Set(applyHosts).size === applyHosts.length &&
+      return (
+        new Set(applyHosts).size === applyHosts.length &&
         applyHosts.every((host) => configuredHosts.has(host)) &&
         localConfigured &&
         approvalHubUrl !== null &&
@@ -424,6 +514,7 @@ export const HostConfiguration = Schema.Struct({
           )
         ) &&
         lanPortAvailable
+      )
     },
     {
       expected:
@@ -482,4 +573,7 @@ export const requiresApproval = (payload: JobPayload): boolean =>
   payload.kind === "nix.apply" ||
   payload.kind === "browser.mcp.recover" ||
   payload.kind === "agent.message" ||
+  payload.kind === "work.reconcile" ||
+  payload.kind === "work.admit" ||
+  payload.kind === "work.recover" ||
   (payload.kind === "agent.delegate" && payload.mode === "work")

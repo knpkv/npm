@@ -30,10 +30,12 @@ import {
   type WorkApprovalTarget as WorkApprovalTargetType,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkRecoveryContext,
   WorkSnapshots,
   WorkStore
 } from "@knpkv/herdr-work"
 import { Deferred, Effect, Fiber, Result, Schema, Stream } from "effect"
+import { spawn } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { createServer, request as httpRequest } from "node:http"
 import { request as httpsRequest } from "node:https"
@@ -171,6 +173,64 @@ const secureRequestBody = (
     )
     request.once("error", reject)
     request.end()
+  })
+
+const reserveLoopbackPort = (): Promise<number> =>
+  new Promise((resolve, reject) => {
+    const reservation = createServer()
+    reservation.once("error", reject)
+    reservation.listen(0, "127.0.0.1", () => {
+      let port: number
+      try {
+        port = Schema.decodeUnknownSync(Schema.Struct({ port: Schema.Number }))(reservation.address()).port
+      } catch (error) {
+        reservation.close()
+        reject(error)
+        return
+      }
+      reservation.close((error) => error === undefined ? resolve(port) : reject(error))
+    })
+  })
+
+const workPreflightFromFleetctl = (
+  operation: "admission-preflight" | "recovery-preflight" | "recovery-context",
+  configPath: string,
+  targetJson: string | undefined,
+  host = "SER8"
+): Promise<{ readonly code: number; readonly stdout: string; readonly stderr: string }> =>
+  new Promise((resolve, reject) => {
+    const bundledEntry = process.env.FLEETCTL_TEST_ENTRY
+    const entryArgs = bundledEntry === undefined
+      ? [
+        "--import",
+        join(import.meta.dirname, "../../../node_modules/tsx/dist/loader.mjs"),
+        join(import.meta.dirname, "../src/fleetctl.ts")
+      ]
+      : [bundledEntry]
+    const child = spawn(process.execPath, [
+      ...entryArgs,
+      "work",
+      operation,
+      host,
+      ...(targetJson === undefined ? [] : [targetJson])
+    ], {
+      env: {
+        ...process.env,
+        FLEET_CONFIG_PATH: configPath,
+        // Synthetic TLS certificate only; the real listener still authorizes every request.
+        NODE_TLS_REJECT_UNAUTHORIZED: host === "SER8" ? "0" : process.env.NODE_TLS_REJECT_UNAUTHORIZED
+      }
+    })
+    let stdout = ""
+    let stderr = ""
+    child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
+      stdout += chunk
+    })
+    child.stderr.setEncoding("utf8").on("data", (chunk: string) => {
+      stderr += chunk
+    })
+    child.once("error", reject)
+    child.once("close", (code) => resolve({ code: code ?? -1, stdout, stderr }))
   })
 
 const workCheckpoint: WorkGoalCheckpointType = {
@@ -357,7 +417,9 @@ esac
             (running) => Effect.promise(running.close)
           )
           const approvalUrl = server.approvalUrl
-          if (approvalUrl === null) return yield* Effect.die("approval listener missing")
+          if (approvalUrl === null) {
+            return yield* Effect.die("approval listener missing")
+          }
           const headers = {
             "tailscale-user-login": "andrey@example.com"
           }
@@ -870,11 +932,12 @@ esac
                   return Deferred.succeed(overlapPendingPageStarted, undefined)
                 })
               ),
-            approve: (jobId, approval, actor) => (signalConcurrentDecision
-              ? Deferred.succeed(concurrentDecisionStarted, undefined).pipe(
-                Effect.andThen(fleet.approve(jobId, approval, actor))
-              )
-              : fleet.approve(jobId, approval, actor)),
+            approve: (jobId, approval, actor) =>
+              signalConcurrentDecision
+                ? Deferred.succeed(concurrentDecisionStarted, undefined).pipe(
+                  Effect.andThen(fleet.approve(jobId, approval, actor))
+                )
+                : fleet.approve(jobId, approval, actor),
             status: () =>
               delayStatus
                 ? Deferred.succeed(delayedStatusStarted, undefined).pipe(
@@ -1057,7 +1120,9 @@ esac
             const response = yield* Effect.promise(
               () => fetch(`${approvalUrl}/v1/dashboard`, { headers })
             )
-            if (attempt === 0) firstCookie = response.headers.get("set-cookie")?.split(";", 1)[0]
+            if (attempt === 0) {
+              firstCookie = response.headers.get("set-cookie")?.split(";", 1)[0]
+            }
             if (response.status === 503) {
               capacityResponse = response
               break
@@ -1626,6 +1691,380 @@ esac
     }).pipe(Effect.scoped, provideNodeServices)
   })
 
+  it.effect("inspects an authenticated PR owner binding without changing Work", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-pr-link-"))
+    const identityMode = join(root, "identity-mode")
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(identityMode, "allowed")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois)
+    if [ "$(cat '${identityMode}')" = allowed ]; then
+      printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"andrey@example.com"}}'
+    else
+      printf '%s\n' '{"Node":{"StableID":"node-phone"},"UserProfile":{"LoginName":"mallory@example.com"}}'
+    fi ;;
+  status) printf '%s\n' '{"Peer":{},"Self":{"HostName":"SER8","ID":"node-ser8","Online":true,"TailscaleIPs":["127.0.0.1"]}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig: HostConfiguration = {
+      ...config(root),
+      approvalHub: { host: "SER8", nodeId: "node-ser8", url: "https://ser8.example.test:0/" },
+      approvalPort: 0,
+      approvalTls: directTls,
+      applyMachines: ["SER8"],
+      crossHost: true,
+      host: "SER8",
+      machines: [{ host: "SER8", nodeId: "node-ser8" }],
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.scoped(
+      Effect.gen(function*() {
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+        const approvalPort = yield* Effect.promise(reserveLoopbackPort)
+        const localPort = yield* Effect.promise(reserveLoopbackPort)
+        const workPort = yield* Effect.promise(reserveLoopbackPort)
+        const listenerConfig = {
+          ...hostConfig,
+          localPort,
+          port: workPort,
+          approvalPort,
+          machines: [...hostConfig.machines, { host: "ALPHA", nodeId: "node-alpha" }],
+          approvalHub: { ...hostConfig.approvalHub, url: `https://127.0.0.1:${approvalPort}/` }
+        }
+        const workStore = yield* WorkStore.open(join(root, "approval-app.sqlite"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => workStore.close()))
+        const work = yield* makeWorkService(workStore)
+        const goal: WorkGoalCheckpointType = {
+          ...workCheckpoint,
+          occurredAt: 0,
+          goal: {
+            ...workCheckpoint.goal,
+            createdAt: 0,
+            updatedAt: 0,
+            goalFamily: { canonicalGoalId: "goal-work", role: "canonical" },
+            review: {
+              state: "requested",
+              summary: null,
+              updatedAt: 0,
+              url: "https://github.com/knpkv/npm/pull/433"
+            }
+          }
+        }
+        yield* work.record(goal)
+        const lane = yield* work.claim({
+          operationId: "claim-pr-433",
+          goalId: "goal-work",
+          laneId: "lane-pr-433",
+          worktree: root,
+          branch: "feat/pr-433",
+          head: "0123456789abcdef0123456789abcdef01234567",
+          owner: workCheckpoint.goal.owner,
+          parent: null,
+          phase: "review",
+          expectedRevision: 0
+        })
+        const worker = { host: "SER8", agentId: "agent-pr-433", name: "Owner", paneId: "w1:p3" }
+        const binding = yield* work.bindAgent({
+          version: "herdr.work.agent-binding-request.v1",
+          dispatchRequestId: "dispatch-pr-433",
+          expectedRevision: lane.revision,
+          laneId: lane.laneId,
+          worker
+        })
+        const unlinked: WorkGoalCheckpointType = {
+          ...workCheckpoint,
+          eventId: "original-jcf-event",
+          occurredAt: 1_001,
+          goal: {
+            ...workCheckpoint.goal,
+            id: "jcf-ai-review",
+            state: "blocked",
+            blocker: { summary: "Supported linkage pending", since: 1_001 },
+            createdAt: 1_001,
+            updatedAt: 1_001,
+            delivery: "pull_request",
+            repository: { repository: "knpkv/npm", branch: "feat/jcf" },
+            goalFamily: {
+              canonicalGoalId: "jcf-ai-review",
+              role: "canonical"
+            }
+          }
+        }
+        yield* work.record(unlinked)
+        const before = yield* work.snapshots()
+        const jobStore = yield* JobStore.open(join(root, "jobs.sqlite"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => jobStore.close()))
+        const fleet = yield* makeFleetService({ approvalEnabled: true, host: "SER8", operations, store: jobStore })
+        const server = yield* Effect.acquireRelease(
+          Effect.promise(() => startHttpServer(listenerConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+          (running) => Effect.promise(running.close)
+        )
+        if (server.serveUrl === null) {
+          return yield* Effect.die("serve URL missing")
+        }
+        const path =
+          "/v1/work/pull-request-link?repository=knpkv%2Fnpm&pullRequest=433&goalId=goal-work&laneId=lane-pr-433"
+        const headers = { host: `127.0.0.1:${approvalPort}` }
+        const accepted = yield* Effect.promise(() => secureRequestBody(`${server.serveUrl}${path}`, headers))
+        expect(accepted.status).toBe(200)
+        expect(JSON.parse(accepted.body)).toMatchObject({
+          goalId: "goal-work",
+          goalEventId: binding.checkpoint.eventId,
+          lane: { revision: binding.lane.revision, head: binding.lane.head },
+          binding: { dispatchRequestId: "dispatch-pr-433", worker }
+        })
+        const admissionTarget = {
+          repository: "knpkv/npm",
+          pullRequest: 434,
+          reviewUrl: "https://github.com/knpkv/npm/pull/434",
+          goalId: "release-pr-434",
+          laneId: "lane-pr-434",
+          head: "a".repeat(40),
+          baseHead: "b".repeat(40),
+          owner: workCheckpoint.goal.owner,
+          sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+          expectedWork: "feat/pr-434",
+          worker: { host: "SER8", agentId: "agent-pr-434", name: "Owner", paneId: "w1:p4" },
+          worktree: `${root}/pr-434`,
+          branch: "feat/pr-434"
+        }
+        const admissionPath = `/v1/work/admission-preflight?target=${
+          encodeURIComponent(
+            JSON.stringify(admissionTarget)
+          )
+        }`
+        const admission = yield* Effect.promise(() => secureRequestBody(`${server.serveUrl}${admissionPath}`, headers))
+        expect(admission.status).toBe(200)
+        expect(JSON.parse(admission.body)).toMatchObject({ _tag: "prospective", target: admissionTarget })
+        const recoveryTarget = {
+          ...admissionTarget,
+          pullRequest: 376,
+          reviewUrl: "https://github.com/knpkv/npm/pull/376",
+          goalId: unlinked.goal.id,
+          laneId: "jcf-release-lane",
+          owner: unlinked.goal.owner,
+          worker: {
+            host: "SER8",
+            agentId: "agent-jcf",
+            name: "JCF owner",
+            paneId: "w1:p5"
+          },
+          worktree: `${root}/jcf`,
+          branch: "feat/jcf",
+          expectedGoalEventId: unlinked.eventId,
+          expectedGoalUpdatedAt: unlinked.goal.updatedAt
+        }
+        const recoveryPath = `/v1/work/recovery-preflight?target=${encodeURIComponent(JSON.stringify(recoveryTarget))}`
+        const recovery = yield* Effect.promise(() => secureRequestBody(`${server.serveUrl}${recoveryPath}`, headers))
+        expect(recovery.status).toBe(200)
+        expect(JSON.parse(recovery.body)).toMatchObject({
+          _tag: "recoverable",
+          target: recoveryTarget
+        })
+        const cliConfigPath = join(root, "fleet.json")
+        writeFileSync(cliConfigPath, JSON.stringify(listenerConfig))
+        const contextPath = `/v1/work/recovery-context?goalId=${encodeURIComponent(unlinked.goal.id)}`
+        const contextResponse = yield* Effect.promise(() =>
+          secureRequestBody(`${server.serveUrl}${contextPath}`, headers)
+        )
+        expect(contextResponse.status).toBe(200)
+        const expectedContext = {
+          goalId: unlinked.goal.id,
+          expectedGoalEventId: unlinked.eventId,
+          expectedGoalUpdatedAt: unlinked.goal.updatedAt
+        }
+        expect(JSON.parse(contextResponse.body)).toEqual(expectedContext)
+        const cliContext = yield* Effect.promise(() =>
+          workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id)
+        )
+        expect(cliContext.code, cliContext.stderr).toBe(0)
+        expect(JSON.parse(cliContext.stdout)).toEqual(expectedContext)
+        const contextFacts = yield* Schema.decodeEffect(Schema.fromJsonString(WorkRecoveryContext), {
+          onExcessProperty: "error"
+        })(cliContext.stdout)
+        for (const invalidId of ["", "missing-goal"]) {
+          const invalidContext = yield* Effect.promise(() =>
+            secureRequestBody(
+              `${server.serveUrl}/v1/work/recovery-context?goalId=${encodeURIComponent(invalidId)}`,
+              headers
+            )
+          )
+          expect(invalidContext.status).toBe(invalidId === "" ? 400 : 404)
+        }
+        const missingContext = yield* Effect.promise(() =>
+          secureRequestBody(`${server.serveUrl}/v1/work/recovery-context`, headers)
+        )
+        expect(missingContext.status).toBe(400)
+        const cliRecovery = yield* Effect.promise(() =>
+          workPreflightFromFleetctl(
+            "recovery-preflight",
+            cliConfigPath,
+            JSON.stringify({ ...recoveryTarget, ...contextFacts })
+          )
+        )
+        expect(cliRecovery.code, cliRecovery.stderr).toBe(0)
+        expect(JSON.parse(cliRecovery.stdout)).toMatchObject({ _tag: "recoverable", target: recoveryTarget })
+        const cliAdmission = yield* Effect.promise(() =>
+          workPreflightFromFleetctl("admission-preflight", cliConfigPath, JSON.stringify(admissionTarget))
+        )
+        expect(cliAdmission.code, cliAdmission.stderr).toBe(0)
+        expect(JSON.parse(cliAdmission.stdout)).toMatchObject({ _tag: "prospective", target: admissionTarget })
+        const preflightOperations: ReadonlyArray<"admission-preflight" | "recovery-preflight"> = [
+          "admission-preflight",
+          "recovery-preflight"
+        ]
+        for (const operation of preflightOperations) {
+          const target = operation === "admission-preflight" ? admissionTarget : recoveryTarget
+          const invalid = yield* Effect.promise(() =>
+            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify({ ...target, head: "bad" }))
+          )
+          expect(invalid.code).not.toBe(0)
+          expect(invalid.stderr).toContain("invalid")
+          const missing = yield* Effect.promise(() => workPreflightFromFleetctl(operation, cliConfigPath, undefined))
+          expect(missing.code).not.toBe(0)
+          const malformed = yield* Effect.promise(() => workPreflightFromFleetctl(operation, cliConfigPath, "{"))
+          expect(malformed.code).not.toBe(0)
+          expect(malformed.stderr).toContain("invalid")
+          const noncanonical = yield* Effect.promise(() =>
+            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target), "ALPHA")
+          )
+          expect(noncanonical.code).not.toBe(0)
+          expect(noncanonical.stderr).toContain("canonical approval hub")
+          const foreign = yield* Effect.promise(() =>
+            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target), "FOREIGN")
+          )
+          expect(foreign.code).not.toBe(0)
+          expect(foreign.stderr).toContain("unknown host")
+        }
+        expect(yield* work.snapshots()).toEqual(before)
+        writeFileSync(identityMode, "denied")
+        const deniedContext = yield* Effect.promise(() =>
+          secureRequestBody(`${server.serveUrl}${contextPath}`, headers)
+        )
+        expect(deniedContext.status).toBe(403)
+        const deniedContextCli = yield* Effect.promise(() =>
+          workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id)
+        )
+        expect(deniedContextCli.code).not.toBe(0)
+        expect(deniedContextCli.stderr).toContain("HTTP 403")
+        const denied = yield* Effect.promise(() => secureRequestBody(`${server.serveUrl}${path}`, headers))
+        expect(denied.status).toBe(403)
+        const deniedAdmission = yield* Effect.promise(() =>
+          secureRequestBody(`${server.serveUrl}${admissionPath}`, headers)
+        )
+        expect(deniedAdmission.status).toBe(403)
+        const deniedRecovery = yield* Effect.promise(() =>
+          secureRequestBody(`${server.serveUrl}${recoveryPath}`, headers)
+        )
+        expect(deniedRecovery.status).toBe(403)
+        for (const operation of preflightOperations) {
+          const target = operation === "admission-preflight" ? admissionTarget : recoveryTarget
+          const deniedCli = yield* Effect.promise(() =>
+            workPreflightFromFleetctl(operation, cliConfigPath, JSON.stringify(target))
+          )
+          expect(deniedCli.code).not.toBe(0)
+          expect(deniedCli.stderr).toContain("HTTP 403")
+        }
+        expect(yield* work.snapshots()).toEqual(before)
+      }).pipe(provideNodeServices)
+    )
+  }, 30_000)
+
+  it.effect("routes local admission and recovery preflights through the authenticated local listener", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-local-preflight-"))
+    return Effect.gen(function*() {
+      yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(root, { force: true, recursive: true })))
+      const localPort = yield* Effect.promise(reserveLoopbackPort)
+      const workPort = yield* Effect.promise(reserveLoopbackPort)
+      const hostConfig = { ...config(root), localPort, port: workPort }
+      const workStore = yield* WorkStore.open(join(root, "approval-app.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => workStore.close()))
+      const work = yield* makeWorkService(workStore)
+      const unlinked: WorkGoalCheckpointType = {
+        ...workCheckpoint,
+        goal: {
+          ...workCheckpoint.goal,
+          id: "jcf-local-goal",
+          delivery: "pull_request",
+          repository: { repository: "knpkv/npm", branch: "feat/pr-434" },
+          goalFamily: { canonicalGoalId: "jcf-local-goal", role: "canonical" },
+          state: "blocked",
+          blocker: { since: 1_000, summary: "Linkage pending" }
+        }
+      }
+      yield* work.record(unlinked)
+      const before = yield* work.snapshots()
+      const store = yield* JobStore.open(join(root, "jobs.sqlite"))
+      yield* Effect.addFinalizer(() => Effect.sync(() => store.close()))
+      const fleet = yield* makeFleetService({ approvalEnabled: false, host: "ALPHA", operations, store })
+      const server = yield* Effect.acquireRelease(
+        Effect.promise(() => startHttpServer(hostConfig, fleet, assets, { terminalConnector: unusedTerminal })),
+        (running) => Effect.promise(running.close)
+      )
+      expect(server.url).toBe(`http://127.0.0.1:${localPort}`)
+      const admissionTarget = {
+        repository: "knpkv/npm",
+        pullRequest: 434,
+        reviewUrl: "https://github.com/knpkv/npm/pull/434",
+        goalId: "release-pr-434",
+        laneId: "lane-pr-434",
+        head: "a".repeat(40),
+        baseHead: "b".repeat(40),
+        owner: workCheckpoint.goal.owner,
+        sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+        expectedWork: "feat/pr-434",
+        worker: { host: "ALPHA", agentId: "agent-pr-434", name: "Owner", paneId: "w1:p4" },
+        worktree: `${root}/pr-434`,
+        branch: "feat/pr-434"
+      }
+      const recoveryTarget = {
+        ...admissionTarget,
+        goalId: unlinked.goal.id,
+        expectedGoalEventId: unlinked.eventId,
+        expectedGoalUpdatedAt: unlinked.goal.updatedAt
+      }
+      const cliConfigPath = join(root, "fleet.json")
+      writeFileSync(cliConfigPath, JSON.stringify(hostConfig))
+      const context = yield* Effect.promise(() =>
+        workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id, "ALPHA")
+      )
+      expect(context.code, context.stderr).toBe(0)
+      expect(JSON.parse(context.stdout)).toEqual({
+        goalId: unlinked.goal.id,
+        expectedGoalEventId: unlinked.eventId,
+        expectedGoalUpdatedAt: unlinked.goal.updatedAt
+      })
+      const nonlocalContext = yield* Effect.promise(() =>
+        workPreflightFromFleetctl("recovery-context", cliConfigPath, unlinked.goal.id)
+      )
+      expect(nonlocalContext.code).not.toBe(0)
+      expect(nonlocalContext.stderr).toContain("local host")
+      const admission = yield* Effect.promise(() =>
+        workPreflightFromFleetctl("admission-preflight", cliConfigPath, JSON.stringify(admissionTarget), "ALPHA")
+      )
+      expect(admission.code, admission.stderr).toBe(0)
+      expect(JSON.parse(admission.stdout)).toMatchObject({ _tag: "prospective", target: admissionTarget })
+      const recovery = yield* Effect.promise(() =>
+        workPreflightFromFleetctl("recovery-preflight", cliConfigPath, JSON.stringify(recoveryTarget), "ALPHA")
+      )
+      expect(recovery.code, recovery.stderr).toBe(0)
+      expect(JSON.parse(recovery.stdout)).toMatchObject({ _tag: "recoverable", target: recoveryTarget })
+      const nonlocal = yield* Effect.promise(() =>
+        workPreflightFromFleetctl("recovery-preflight", cliConfigPath, JSON.stringify(recoveryTarget))
+      )
+      expect(nonlocal.code).not.toBe(0)
+      expect(nonlocal.stderr).toContain("local host")
+      expect(yield* work.snapshots()).toEqual(before)
+    }).pipe(Effect.scoped, provideNodeServices)
+  }, 15_000)
+
   it.effect("replays approval checkpoints when the authoritative page is unavailable", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-work-replay-"))
     return Effect.gen(function*() {
@@ -1855,7 +2294,9 @@ esac
         (running) => Effect.promise(running.close)
       )
 
-      if (server.workUrl === null) return yield* Effect.die("Work listener missing")
+      if (server.workUrl === null) {
+        return yield* Effect.die("Work listener missing")
+      }
       const workListenerUrl = new URL(server.workUrl)
       expect(workListenerUrl.hostname).toBe("127.0.0.2")
 
@@ -2027,10 +2468,12 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          if (server.tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+          if (server.tailnetUrl === null) {
+            return yield* Effect.die("tailnet listener missing")
+          }
 
           const ids: Array<string> = []
-          let cursor: typeof PendingApprovalSummary.Type["nextCursor"] = null
+          let cursor: (typeof PendingApprovalSummary.Type)["nextCursor"] = null
           do {
             const pageUrl = new URL("/v1/pending-approvals", server.tailnetUrl)
             if (cursor !== null) {
@@ -2268,7 +2711,9 @@ esac
                   JSON.parse(pageResponse.body)
                 )
                 for (const { id } of page.local) localIds.push(id)
-                for (const { approval } of page.remote) remoteIds.push(approval.id)
+                for (const { approval } of page.remote) {
+                  remoteIds.push(approval.id)
+                }
                 for (const next of page.nextCursors) continuations.push(next)
               }
               expect(localIds).toHaveLength(pendingApprovalPageMaxRecords + 1)
@@ -2338,7 +2783,7 @@ esac
               Effect.promise(
                 () =>
                   new Promise<void>((resolve, reject) => {
-                    peerServer.close((error) => error === undefined ? resolve() : reject(error))
+                    peerServer.close((error) => (error === undefined ? resolve() : reject(error)))
                   })
               )
             )
@@ -2473,7 +2918,7 @@ esac
             (running) => Effect.promise(running.close)
           )
           const ids: Array<string> = []
-          let cursor: typeof JobHistoryPage.Type["nextCursor"] = null
+          let cursor: (typeof JobHistoryPage.Type)["nextCursor"] = null
           do {
             const pageUrl = new URL("/v1/history?limit=8", server.url)
             if (cursor !== null) {
@@ -2760,6 +3205,23 @@ esac
           expect(
             Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now.goals
           ).toHaveLength(acceptedWorkCheckpoints)
+          const missingLink = yield* Effect.promise(() =>
+            secureRequestBody(
+              `${server.serveUrl}/v1/work/pull-request-link?repository=knpkv%2Fnpm&pullRequest=433&goalId=missing-goal&laneId=missing-lane`,
+              requestHeaders
+            )
+          )
+          expect(missingLink.status).toBe(409)
+          expect(JSON.parse(missingLink.body)).toEqual({
+            error: "WorkPullRequestLinkError",
+            reason: "missing_provenance"
+          })
+          const afterInspection = yield* Effect.promise(() =>
+            secureRequestBody(`${server.serveUrl}/v1/work`, requestHeaders)
+          )
+          expect(
+            Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(afterInspection.body)).now.goals
+          ).toEqual(Schema.decodeUnknownSync(WorkSnapshots)(JSON.parse(workResponse.body)).now.goals)
           const chatResponse = yield* Effect.promise(() =>
             secureRequestBody(`${server.serveUrl}/v1/chat`, requestHeaders)
           )
@@ -2771,12 +3233,14 @@ esac
             Schema.decodeUnknownSync(ChatHistory)(JSON.parse(chatResponse.body)).entries
           ).toHaveLength(chatHistoryMaxEntries)
           const agentIds: Array<string> = []
-          let agentCursor: typeof FleetConnectAgentPage.Type["nextCursor"] = null
+          let agentCursor: (typeof FleetConnectAgentPage.Type)["nextCursor"] = null
           do {
             const path = agentCursor === null
               ? "/v1/connect/agents"
               : `/v1/connect/agents?cursorHost=${encodeURIComponent(agentCursor.host)}&cursorId=${
-                encodeURIComponent(agentCursor.id)
+                encodeURIComponent(
+                  agentCursor.id
+                )
               }`
             const pageResponse = yield* Effect.promise(() =>
               secureRequestBody(`${server.serveUrl}${path}`, requestHeaders)
@@ -3335,9 +3799,7 @@ esac
               ? Stream.empty
               : attempt === 4
               ? Stream.make({
-                bytes: Buffer.alloc(
-                  terminalFrameMaxEncodedBytes / 4 * 3
-                ).toString("base64"),
+                bytes: Buffer.alloc((terminalFrameMaxEncodedBytes / 4) * 3).toString("base64"),
                 encoding: "ansi",
                 full: true,
                 height: 30,
@@ -3412,7 +3874,9 @@ esac
               ),
               (running) => Effect.promise(running.close)
             )
-            if (server.tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+            if (server.tailnetUrl === null) {
+              return yield* Effect.die("tailnet listener missing")
+            }
             const url = new URL("/v1/connect/terminal", server.tailnetUrl)
             url.protocol = "ws:"
             url.searchParams.set("agent", "agent-1")
@@ -3483,9 +3947,7 @@ esac
                 })
             )
             expect(maximumFrameClose).toBe(1_000)
-            expect(maximumFrameBytes).toBe(
-              terminalFrameMaxEncodedBytes / 4 * 3
-            )
+            expect(maximumFrameBytes).toBe((terminalFrameMaxEncodedBytes / 4) * 3)
 
             const held = yield* Effect.promise(
               () =>
@@ -3594,7 +4056,9 @@ esac
             ),
             (running) => Effect.promise(running.close)
           )
-          if (server.tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+          if (server.tailnetUrl === null) {
+            return yield* Effect.die("tailnet listener missing")
+          }
           const url = new URL("/v1/connect/terminal", server.tailnetUrl)
           url.protocol = "ws:"
           url.searchParams.set("agent", "agent-1")

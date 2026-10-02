@@ -1,9 +1,13 @@
 import { FleetValidationError, type HostConfiguration } from "@knpkv/herdr-fleet"
-import { WorkGoalCheckpoint, WorkSnapshots } from "@knpkv/herdr-work/model"
+import { WorkGoalCheckpoint, WorkGoalId, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Effect, Schema } from "effect"
 
 export const workSnapshotPath = "/v1/work"
 export const workCheckpointPath = "/v1/work/checkpoints"
+export const workAdmissionPreflightPath = "/v1/work/admission-preflight"
+export const workRecoveryPreflightPath = "/v1/work/recovery-preflight"
+
+export const workRecoveryContextPath = "/v1/work/recovery-context"
 
 export const workCheckpointFromJson = Effect.fn("Fleetctl.workCheckpointFromJson")(function*(text: string) {
   const input = yield* Effect.try({
@@ -90,4 +94,39 @@ export const workSnapshotUrl = Effect.fn("Fleetctl.workSnapshotUrl")(function*(
   target: string
 ) {
   return new URL(workSnapshotPath, yield* workLocalBaseUrl(config, target)).href
+})
+
+const workPreflightBaseUrl = Effect.fn("Fleetctl.workPreflightBaseUrl")(function*(
+  config: HostConfiguration,
+  target: string
+) {
+  const workBase = yield* workLocalBaseUrl(config, target)
+  return config.crossHost ? workBase : `http://127.0.0.1:${config.localPort}`
+})
+
+export const workRecoveryContextUrl = Effect.fn("Fleetctl.workRecoveryContextUrl")(function*(
+  config: HostConfiguration,
+  target: string,
+  goalId: string
+) {
+  const id = yield* Schema.decodeUnknownEffect(WorkGoalId)(goalId).pipe(
+    Effect.mapError(() => new FleetValidationError({ detail: "invalid Work goal ID" }))
+  )
+  const url = new URL(workRecoveryContextPath, yield* workPreflightBaseUrl(config, target))
+  url.searchParams.set("goalId", id)
+  return url.href
+})
+
+export const workAdmissionPreflightUrl = Effect.fn("Fleetctl.workAdmissionPreflightUrl")(function*(
+  config: HostConfiguration,
+  target: string
+) {
+  return new URL(workAdmissionPreflightPath, yield* workPreflightBaseUrl(config, target)).href
+})
+
+export const workRecoveryPreflightUrl = Effect.fn("Fleetctl.workRecoveryPreflightUrl")(function*(
+  config: HostConfiguration,
+  target: string
+) {
+  return new URL(workRecoveryPreflightPath, yield* workPreflightBaseUrl(config, target)).href
 })

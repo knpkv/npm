@@ -39,6 +39,12 @@ export class FleetApprovalError extends Schema.TaggedError<FleetApprovalError>()
   { jobId: Schema.String, detail: Schema.String }
 ) {}
 
+/** The host cannot execute this job kind, so it is refused before any approval request exists. */
+export class FleetOperationUnavailableError extends Schema.TaggedError<FleetOperationUnavailableError>()(
+  "FleetOperationUnavailableError",
+  { kind: Schema.String, detail: Schema.String }
+) {}
+
 export class FleetOperationError extends Schema.TaggedError<FleetOperationError>()(
   "FleetOperationError",
   {

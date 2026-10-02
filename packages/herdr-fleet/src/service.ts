@@ -3,6 +3,7 @@ import {
   FleetApprovalError,
   FleetJobNotFoundError,
   FleetOperationError,
+  FleetOperationUnavailableError,
   FleetStoreError,
   FleetTransitionConflictError,
   FleetValidationError
@@ -19,6 +20,7 @@ import {
   type CoreJobPayload,
   type HostDetails,
   HostOperationReceipt,
+  isWorkJobKind,
   JobActor,
   type JobHash,
   type JobPayload,
@@ -27,7 +29,8 @@ import {
   type LocalJobPayload,
   type PendingApprovalCursor,
   requiresApproval,
-  workerObservationMaxLength
+  workerObservationMaxLength,
+  type WorkJobKind
 } from "./model.js"
 import type { JobStore } from "./store.js"
 
@@ -111,7 +114,8 @@ export type HostOperations = {
     workerStarted: WorkerStarted,
     jobId: string,
     actor: JobActor,
-    lifecycle: HostOperationLifecycle
+    lifecycle: HostOperationLifecycle,
+    approval?: ApprovedJobIdentity | null
   ) => Effect.Effect<string, FleetOperationError>
   readonly runLocal: (
     payload: LocalJobPayload
@@ -125,6 +129,19 @@ export type HostOperations = {
   ) => Effect.Effect<string, FleetOperationError>
   /** Explicit crash recovery for operations backed by another durable store. */
   readonly recovery?: HostOperationRecovery
+  /**
+   * Work job kinds this host's composed Work adapter executes. Submission
+   * refuses every other Work kind before an approval request exists; absent
+   * means the host executes none.
+   */
+  readonly workJobKinds?: ReadonlySet<WorkJobKind>
+}
+
+/** Persisted Fleet approval, distinct from the job's submitting actor. */
+export type ApprovedJobIdentity = {
+  readonly approvedBy: string
+  readonly approvedAt: number
+  readonly hash: JobHash
 }
 
 export type Approval = {
@@ -240,6 +257,13 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     actor: string
   ) {
     const validatedActor = yield* decodeActor(actor)
+    const kind = request.payload.kind
+    if (isWorkJobKind(kind) && options.operations.workJobKinds?.has(kind) !== true) {
+      return yield* new FleetOperationUnavailableError({
+        kind,
+        detail: `this host has no composed Work adapter for ${kind}`
+      })
+    }
     const timestamp = yield* now
     const approval = requiresApproval(request.payload)
     if (approval && options.approvalEnabled === false) {
@@ -527,7 +551,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       payload: JobPayload,
       workerStarted: WorkerStarted,
       actor: JobActor,
-      lifecycle: HostOperationLifecycle
+      lifecycle: HostOperationLifecycle,
+      approval: ApprovedJobIdentity | null
     ) => Effect.Effect<
       string,
       FleetOperationError | FleetValidationError
@@ -538,6 +563,20 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       return yield* new FleetApprovalError({
         jobId,
         detail: `job is ${record.status}, not queued`
+      })
+    }
+    if (
+      record.payload.kind === "work.recover" &&
+      (record.approvedBy === null ||
+        record.approvedAt === null || record.approvedAt === undefined ||
+        record.hash !==
+          (yield* jobHash(options.host, record.actor, record.payload).pipe(
+            Effect.provideService(Crypto.Crypto, cryptoService)
+          )))
+    ) {
+      return yield* new FleetApprovalError({
+        jobId,
+        detail: "approved recovery payload or actor changed"
       })
     }
     const corePayload = record.payload.kind === "browser.mcp.recover" ? null : record.payload
@@ -559,7 +598,15 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       false
     )
     const result = yield* Effect.result(
-      execute(running.payload, workerStarted, running.actor, lifecycle)
+      execute(
+        running.payload,
+        workerStarted,
+        running.actor,
+        lifecycle,
+        running.approvedBy === null || running.approvedAt === null || running.approvedAt === undefined
+          ? null
+          : { approvedBy: running.approvedBy, approvedAt: running.approvedAt, hash: running.hash }
+      )
     )
     return yield* transitions.withPermit(Effect.gen(function*() {
       const latest = yield* Ref.get(current)
@@ -616,10 +663,10 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
   })
 
   const run = Effect.fn("FleetService.run")((jobId: string) =>
-    runWith(jobId, (payload, workerStarted, actor, lifecycle) =>
+    runWith(jobId, (payload, workerStarted, actor, lifecycle, approval) =>
       payload.kind === "browser.mcp.recover"
         ? options.operations.runLocal(payload)
-        : options.operations.run(payload, workerStarted, jobId, actor, lifecycle))
+        : options.operations.run(payload, workerStarted, jobId, actor, lifecycle, approval))
   )
 
   const runCoordinatorChat = Effect.fn("FleetService.runCoordinatorChat")(

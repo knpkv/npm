@@ -159,6 +159,52 @@ const renderMixedAgentStates = (): string => {
 }
 
 describe("dashboard approval capability", () => {
+  it("shows the existing-owner reconciliation title and summary", () => {
+    const base = snapshot(true)
+    const pending: DashboardSnapshot["records"][number] = {
+      ...base.records[0],
+      payload: {
+        kind: "work.reconcile",
+        repository: "knpkv/npm",
+        pullRequest: 433,
+        goalId: "goal-433",
+        laneId: "lane-433",
+        operationId: "operation-433",
+        expectedRevision: 2,
+        expectedHead: "0123456789abcdef0123456789abcdef01234567",
+        newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        expectedOwner: { id: "owner-1", name: "Owner" },
+        expectedGoalEventId: "event-433",
+        bindingDispatchRequestId: "dispatch-433",
+        sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+        expectedWork: "feat/guided-review-rly",
+        worker: { agentId: "agent-433", host: "SER8", name: "Owner", paneId: "w1:p3" },
+        worktree: "/worktrees/npm/feat/guided-review-rly",
+        branch: "feat/guided-review-rly"
+      }
+    }
+    const html = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={() => undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={{
+          ...base,
+          pendingApprovals: { ...base.pendingApprovals, local: [pending] },
+          records: [pending]
+        }}
+      />
+    )
+    expect(html).toContain("Reconcile existing Work owner")
+    expect(html).toContain("knpkv/npm#433 · existing owner")
+  })
+
   it("hides decisions on a non-approval listener", () => {
     expect(render(false)).not.toContain("/v1/jobs/job-1/approve")
     expect(render(false)).not.toContain("/v1/jobs/job-1/reject")

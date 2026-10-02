@@ -89,6 +89,11 @@ const makePullRequestEvidenceProvider = Effect.gen(function*() {
       if (new Set(observation.reviews.map(({ id }) => id)).size !== observation.reviews.length) {
         return yield* new EvidenceModel.PullRequestEvidenceInvalid({ detail: "review evidence is duplicated" })
       }
+      if (new Set(observation.botReviews.map(({ id }) => id)).size !== observation.botReviews.length) {
+        return yield* new EvidenceModel.PullRequestEvidenceInvalid({
+          detail: "bot issue-comment evidence is duplicated"
+        })
+      }
       if (observation.requiredChecks.length === 0 || observation.requiredChecks.some((name) => !checkNames.has(name))) {
         return yield* new EvidenceModel.PullRequestEvidenceInvalid({ detail: "required check evidence is incomplete" })
       }
@@ -98,9 +103,21 @@ const makePullRequestEvidenceProvider = Effect.gen(function*() {
         })
       }
       if (
+        observation.botReviews.some(({ createdAt, updatedAt }) =>
+          createdAt > updatedAt || updatedAt > observation.observedAt
+        )
+      ) {
+        return yield* new EvidenceModel.PullRequestEvidenceInvalid({
+          detail: "bot issue-comment evidence is newer than its observation"
+        })
+      }
+      if (
         observation.checks.some(({ head }) => head !== request.expectedHead) ||
         observation.threads.some(({ head }) => head !== request.expectedHead) ||
-        observation.reviews.some(({ head }) => head !== request.expectedHead)
+        observation.reviews.some(({ head }) => head !== request.expectedHead) ||
+        observation.botReviews.some(({ head, pullRequest, repository }) =>
+          repository !== request.repository || pullRequest !== request.pullRequest || head !== request.expectedHead
+        )
       ) {
         return yield* new EvidenceModel.PullRequestEvidenceInvalid({
           detail: "source-sensitive evidence is not bound to the expected head"
@@ -125,6 +142,8 @@ const makePullRequestEvidenceProvider = Effect.gen(function*() {
         checks: observation.checks,
         threads: observation.threads,
         reviews: observation.reviews,
+        botReviews: observation.botReviews,
+        formalReview: observation.formalReview,
         owner: observation.owner,
         work: observation.work
       }).pipe(

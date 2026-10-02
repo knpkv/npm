@@ -62,6 +62,41 @@ const failedMessage: JobRecord = {
 }
 
 describe("activity history", () => {
+  it("keeps approved existing-owner reconciliation in Work and approval activity", () => {
+    const reconciled: JobRecord = {
+      ...delegated,
+      connectTarget: undefined,
+      id: "job-reconcile",
+      payload: {
+        kind: "work.reconcile",
+        repository: "knpkv/npm",
+        pullRequest: 433,
+        goalId: "goal-433",
+        laneId: "lane-433",
+        operationId: "operation-433",
+        expectedRevision: 2,
+        expectedHead: "0123456789abcdef0123456789abcdef01234567",
+        newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        expectedOwner: { id: "owner-1", name: "Owner" },
+        expectedGoalEventId: "event-433",
+        bindingDispatchRequestId: "dispatch-433",
+        sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+        expectedWork: "feat/guided-review-rly",
+        worker: { agentId: "agent-433", host: "SER8", name: "Owner", paneId: "w1:p3" },
+        worktree: "/worktrees/npm/feat/guided-review-rly",
+        branch: "feat/guided-review-rly"
+      },
+      worker: undefined
+    }
+    const items = activityItemsFor([reconciled])
+    expect(items[0]).toMatchObject({
+      title: "Reconcile existing Work owner",
+      summary: "Reconciled the existing owner for knpkv/npm#433."
+    })
+    expect(filterActivityItems(items, "work", "")).toHaveLength(1)
+    expect(filterActivityItems(items, "approvals", "")).toHaveLength(1)
+  })
+
   it("projects one sanitized row per job", () => {
     const items = activityItemsFor([delegated, failedMessage])
     const projection = JSON.stringify(items)

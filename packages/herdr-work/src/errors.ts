@@ -1,5 +1,13 @@
 import { Schema } from "effect"
 
+export class WorkRecoveryContextError extends Schema.TaggedError<WorkRecoveryContextError>()(
+  "WorkRecoveryContextError",
+  {
+    goalId: Schema.String,
+    reason: Schema.Literals(["invalid_goal_id", "missing_goal"])
+  }
+) {}
+
 export class WorkProjectionError extends Schema.TaggedError<WorkProjectionError>()(
   "WorkProjectionError",
   {
@@ -91,4 +99,31 @@ export class WorkAgentBindingAuthorityError extends Schema.TaggedError<WorkAgent
     actualRevision: Schema.Number,
     reason: Schema.Literals(["missing_lane", "stale_revision", "shipped_lane", "missing_goal", "terminal_goal"])
   }
+) {}
+
+export class WorkPullRequestLinkError extends Schema.TaggedError<WorkPullRequestLinkError>()(
+  "WorkPullRequestLinkError",
+  {
+    goalId: Schema.String,
+    laneId: Schema.String,
+    reason: Schema.Literals([
+      "missing_provenance",
+      "missing_goal",
+      "missing_lane",
+      "missing_binding",
+      "stale_revision",
+      "head_mismatch",
+      "owner_mismatch",
+      "session_mismatch",
+      "identity_mismatch",
+      "terminal_goal",
+      "operation_conflict",
+      "ambiguous_binding"
+    ])
+  }
+) {}
+
+export class WorkAdmissionConflictError extends Schema.TaggedError<WorkAdmissionConflictError>()(
+  "WorkAdmissionConflictError",
+  { goalId: Schema.String, laneId: Schema.String, reason: Schema.String }
 ) {}

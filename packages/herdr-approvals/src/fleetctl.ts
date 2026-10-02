@@ -15,8 +15,13 @@ import {
 } from "@knpkv/herdr-fleet"
 import { make as makeTailscale, nodeIpv4, resolveFleetNode, type TailscaleClient } from "@knpkv/herdr-tailscale"
 import {
+  WorkAdmissionPreflight,
+  WorkAdmissionTarget,
   WorkGoalCheckpoint,
   type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkRecoveryContext,
+  WorkRecoveryPreflight,
+  WorkRecoveryTarget,
   WorkSnapshots
 } from "@knpkv/herdr-work/model"
 import { Console, Effect, Layer, Schema, Stdio } from "effect"
@@ -28,8 +33,11 @@ import { fleetConfigPath } from "./internal/config-path.js"
 import { followJob } from "./internal/fleet-follow.js"
 import { withFleetRequestTimeout } from "./internal/fleet-request.js"
 import {
+  workAdmissionPreflightUrl,
   workCheckpointFromJson,
   workCheckpointUrl,
+  workRecoveryContextUrl,
+  workRecoveryPreflightUrl,
   workSnapshotFromJson,
   workSnapshotTarget,
   workSnapshotUrl
@@ -44,8 +52,12 @@ const endpoint = Effect.fn("Fleetctl.endpoint")(function*(
   target: string
 ) {
   const known = config.machines.find(({ host }) => host.toLowerCase() === target.toLowerCase())
-  if (known === undefined) return yield* new FleetValidationError({ detail: `unknown host: ${target}` })
-  if (known.host.toLowerCase() === config.host.toLowerCase()) return `http://127.0.0.1:${config.localPort}`
+  if (known === undefined) {
+    return yield* new FleetValidationError({ detail: `unknown host: ${target}` })
+  }
+  if (known.host.toLowerCase() === config.host.toLowerCase()) {
+    return `http://127.0.0.1:${config.localPort}`
+  }
   if (!config.crossHost) {
     return yield* new FleetValidationError({
       detail: "cross-host fleet control is disabled on this machine"
@@ -139,7 +151,7 @@ const history = Effect.fn("Fleetctl.history")(function*(
     })
   }
   const records: Array<typeof JobRecord.Type> = []
-  let cursor: typeof JobHistoryPage.Type["nextCursor"] = null
+  let cursor: (typeof JobHistoryPage.Type)["nextCursor"] = null
   do {
     const parameters = new URLSearchParams({
       limit: String(limit - records.length)
@@ -190,7 +202,9 @@ export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: Rea
   const kind = args[0]
   switch (kind) {
     case "nix.check": {
-      if (args.length !== 1) return yield* new FleetValidationError({ detail: "nix.check takes no arguments" })
+      if (args.length !== 1) {
+        return yield* new FleetValidationError({ detail: "nix.check takes no arguments" })
+      }
       return { kind } satisfies JobPayloadType
     }
     case "nix.apply": {
@@ -242,6 +256,61 @@ export const payloadFrom = Effect.fn("Fleetctl.payloadFrom")(function*(args: Rea
         )
       )
     }
+    case "work.reconcile": {
+      const body = args[1]
+      if (args.length !== 2 || body === undefined) {
+        return yield* new FleetValidationError({ detail: "work.reconcile requires one JSON payload" })
+      }
+      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
+        onExcessProperty: "error"
+      })(body).pipe(
+        Effect.mapError(() => new FleetValidationError({ detail: "work.reconcile payload is invalid" })),
+        Effect.filterOrFail(
+          (payload) => payload.kind === "work.reconcile",
+          () => new FleetValidationError({ detail: "work.reconcile payload kind does not match the command" })
+        )
+      )
+    }
+    case "work.admit": {
+      const body = args[1]
+      if (args.length !== 2 || body === undefined) {
+        return yield* new FleetValidationError({ detail: "work.admit requires one JSON payload" })
+      }
+      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
+        onExcessProperty: "error"
+      })(body).pipe(
+        Effect.mapError(() => new FleetValidationError({ detail: "work.admit payload is invalid" })),
+        Effect.filterOrFail(
+          (payload) => payload.kind === "work.admit",
+          () => new FleetValidationError({ detail: "work.admit payload kind does not match the command" })
+        )
+      )
+    }
+    case "work.recover": {
+      const body = args[1]
+      if (args.length !== 2 || body === undefined) {
+        return yield* new FleetValidationError({
+          detail: "work.recover requires one JSON payload"
+        })
+      }
+      return yield* Schema.decodeEffect(Schema.fromJsonString(JobPayload), {
+        onExcessProperty: "error"
+      })(body).pipe(
+        Effect.mapError(
+          () =>
+            new FleetValidationError({
+              detail: "work.recover payload is invalid"
+            })
+        ),
+        Effect.filterOrFail(
+          (payload) => payload.kind === "work.recover",
+          () =>
+            new FleetValidationError({
+              detail: "work.recover payload kind does not match the command"
+            })
+        )
+      )
+    }
     default:
       return yield* new FleetValidationError({ detail: `unknown job kind: ${kind ?? ""}` })
   }
@@ -260,8 +329,14 @@ const usage = `fleetctl commands:
   submit HOST nix.apply REF
   submit HOST agent.delegate (consult|transition_summary|review|work) REPOSITORY PROMPT...
   submit HOST agent.message SESSION MESSAGE...
+  submit HOST work.reconcile PAYLOAD_JSON
+  submit HOST work.admit PAYLOAD_JSON
+  submit HOST work.recover PAYLOAD_JSON
   work record HOST CHECKPOINT_JSON
   work snapshot [HOST]
+  work admission-preflight HOST TARGET_JSON
+  work recovery-preflight HOST TARGET_JSON
+  work recovery-context HOST GOAL_ID
   apply-everywhere REF`
 
 const main = Effect.gen(function*() {
@@ -318,14 +393,18 @@ const main = Effect.gen(function*() {
     case "follow": {
       const host = rest[0]
       const id = rest[1]
-      if (host === undefined || id === undefined) return yield* new FleetValidationError({ detail: usage })
+      if (host === undefined || id === undefined) {
+        return yield* new FleetValidationError({ detail: usage })
+      }
       const record = yield* follow(config, tailscale, host, id)
       yield* Console.log(JSON.stringify(record, null, 2))
       return
     }
     case "submit": {
       const host = rest[0]
-      if (host === undefined) return yield* new FleetValidationError({ detail: usage })
+      if (host === undefined) {
+        return yield* new FleetValidationError({ detail: usage })
+      }
       const payload = yield* payloadFrom(rest.slice(1))
       const record = yield* submit(config, tailscale, host, payload)
       if (record.status !== "pending_approval") {
@@ -339,6 +418,51 @@ const main = Effect.gen(function*() {
     }
     case "work": {
       const operation = rest[0]
+      if (operation === "recovery-context") {
+        const host = rest[1]
+        const goalId = rest[2]
+        if (host === undefined || goalId === undefined || rest.length !== 3) {
+          return yield* new FleetValidationError({ detail: usage })
+        }
+        const url = yield* workRecoveryContextUrl(config, host, goalId)
+        const context = yield* requestAt(url, WorkRecoveryContext)
+        yield* Console.log(JSON.stringify(context, null, 2))
+        return
+      }
+      if (operation === "recovery-preflight") {
+        const host = rest[1]
+        const json = rest[2]
+        if (host === undefined || json === undefined || rest.length !== 3) {
+          return yield* new FleetValidationError({ detail: usage })
+        }
+        const target = yield* Schema.decodeEffect(Schema.fromJsonString(WorkRecoveryTarget), {
+          onExcessProperty: "error"
+        })(json).pipe(Effect.mapError(() => new FleetValidationError({ detail: "invalid recovery target" })))
+        const url = yield* workRecoveryPreflightUrl(config, host)
+        const preflight = yield* requestAt(
+          `${url}?target=${encodeURIComponent(JSON.stringify(target))}`,
+          WorkRecoveryPreflight
+        )
+        yield* Console.log(JSON.stringify(preflight, null, 2))
+        return
+      }
+      if (operation === "admission-preflight") {
+        const host = rest[1]
+        const json = rest[2]
+        if (host === undefined || json === undefined || rest.length !== 3) {
+          return yield* new FleetValidationError({ detail: usage })
+        }
+        const target = yield* Schema.decodeEffect(Schema.fromJsonString(WorkAdmissionTarget), {
+          onExcessProperty: "error"
+        })(json).pipe(Effect.mapError(() => new FleetValidationError({ detail: "invalid admission target" })))
+        const url = yield* workAdmissionPreflightUrl(config, host)
+        const preflight = yield* requestAt(
+          `${url}?target=${encodeURIComponent(JSON.stringify(target))}`,
+          WorkAdmissionPreflight
+        )
+        yield* Console.log(JSON.stringify(preflight, null, 2))
+        return
+      }
       if (operation === "record") {
         const host = rest[1]
         const json = rest[2]
@@ -359,7 +483,9 @@ const main = Effect.gen(function*() {
     }
     case "apply-everywhere": {
       const ref = rest[0]
-      if (ref === undefined) return yield* new FleetValidationError({ detail: usage })
+      if (ref === undefined) {
+        return yield* new FleetValidationError({ detail: usage })
+      }
       if (!config.crossHost) {
         return yield* new FleetValidationError({ detail: "cross-host fleet control is disabled on this machine" })
       }

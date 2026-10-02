@@ -422,6 +422,16 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
           "--timeout",
           "900000"
         ])
+      case "work.reconcile":
+      case "work.admit":
+      case "work.recover":
+        return Effect.fail(
+          new FleetOperationError({
+            cause: payload.kind,
+            detail: "Work authority requires the host's approved WorkService adapter",
+            operation: payload.kind
+          })
+        )
     }
   }
 

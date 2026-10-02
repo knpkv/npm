@@ -1069,6 +1069,114 @@ describe("sanitized approval requests", () => {
     expect(regions).toEqual(controls)
   })
 
+  it("shows every hash-bound existing-owner reconciliation field", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "work.reconcile",
+      repository: "knpkv/npm",
+      pullRequest: 433,
+      goalId: "goal-433",
+      laneId: "lane-433",
+      operationId: "operation-433",
+      expectedRevision: 2,
+      expectedHead: "0123456789abcdef0123456789abcdef01234567",
+      newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      expectedOwner: { id: "owner-1", name: "Owner" },
+      expectedGoalEventId: "event-433",
+      bindingDispatchRequestId: "dispatch-433",
+      sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+      expectedWork: "feat/guided-review-rly",
+      worker: {
+        host: "SER8",
+        agentId: "agent-433",
+        name: "Owner",
+        paneId: "w1:p3",
+        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      },
+      worktree: "/worktrees/npm/feat/guided-review-rly",
+      branch: "feat/guided-review-rly"
+    })
+    const values = new Map(approvalRequestFor(payload).fields.map(({ key, value }) => [key, value]))
+    expect(values.get("operationId")).toBe("operation-433")
+    expect(values.get("expectedRevision")).toBe("2")
+    expect(values.get("expectedOwner")).toBe("Owner (owner-1)")
+    expect(values.get("expectedGoalEventId")).toBe("event-433")
+    expect(values.get("bindingDispatchRequestId")).toBe("dispatch-433")
+    expect(values.get("workerHost")).toBe("SER8")
+    expect(values.get("workerPane")).toBe("w1:p3")
+    expect(values.get("workerLineage")).toBe("delegated:agent-lead")
+    expect(values.get("worktree")).toBe("/worktrees/npm/feat/guided-review-rly")
+    expect(values.get("branch")).toBe("feat/guided-review-rly")
+    for (const key of [
+      "repository",
+      "pullRequest",
+      "goalId",
+      "laneId",
+      "expectedHead",
+      "newHead",
+      "sessionId",
+      "expectedWork",
+      "worker"
+    ]) {
+      expect(values.has(key), key).toBe(true)
+    }
+  })
+
+  it("shows every authority-bearing existing-goal recovery field without inventing admission", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "work.recover",
+      repository: "knpkv/npm",
+      pullRequest: 376,
+      reviewUrl: "https://github.com/knpkv/npm/pull/376",
+      goalId: "jcf-ai-review",
+      laneId: "jcf-release",
+      operationId: "recover-jcf",
+      expectedGoalEventId: "original-event",
+      expectedGoalUpdatedAt: 500,
+      expectedHistoryToken: "a".repeat(64),
+      head: "b".repeat(40),
+      baseHead: "c".repeat(40),
+      owner: { id: "original-owner", name: "Original" },
+      sessionId: "01a0ae54-197e-72b2-914f-8d5d22abe522",
+      expectedWork: "work:jcf",
+      worker: {
+        host: "SER8",
+        agentId: "agent-jcf",
+        name: "Original",
+        paneId: "w1:p5",
+        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      },
+      worktree: "/worktrees/jcf",
+      branch: "feat/jcf"
+    })
+    const request = approvalRequestFor(payload)
+    const values = new Map(request.fields.map(({ key, value }) => [key, value]))
+    expect(request.title).toContain("existing unlinked Work goal")
+    expect(values.get("expectedHistoryToken")).toBe("a".repeat(64))
+    expect(values.get("workerLineage")).toBe("delegated:agent-lead")
+    for (const key of [
+      "repository",
+      "pullRequest",
+      "reviewUrl",
+      "goalId",
+      "laneId",
+      "operationId",
+      "expectedGoalEventId",
+      "expectedGoalUpdatedAt",
+      "head",
+      "baseHead",
+      "owner",
+      "sessionId",
+      "expectedWork",
+      "worker",
+      "workerHost",
+      "workerPane",
+      "worktree",
+      "branch"
+    ]) {
+      expect(values.has(key), key).toBe(true)
+    }
+  })
+
   it.each(approvalDashboardStatuses)(
     "keeps the complete redacted request in the approval dashboard for %s",
     (status) => {
