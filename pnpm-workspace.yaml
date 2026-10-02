@@ -48,6 +48,8 @@ overrides:
   diff@>=6.0.0 <8.0.3: 8.0.3
   # GHSA-j22f-vq7h-c4qm, GHSA-mcm9-63f2-9j32, GHSA-x5rw-q4pp-hg5g, GHSA-hx4r-w6wj-j8fg, GHSA-4q55-j62x-fr9h, GHSA-wf3x-273g-mvxv: devalue <=5.9.2 via astro; keep 5.x
   devalue@<5.9.3: 5.9.4
+  # GHSA-p98j-92pf-mc4p: dompurify 3.4.13–3.4.15 via packages/review > mermaid; keep 3.x
+  dompurify@>=3.4.13 <3.4.16: 3.4.16
 
 # Security releases for the pinned overrides above; permit fixes before the age window expires.
 minimumReleaseAgeExclude:
