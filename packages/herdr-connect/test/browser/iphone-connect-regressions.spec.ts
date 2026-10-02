@@ -14,6 +14,15 @@ const terminalViewportSource = transpileModule(readFileSync(resolve(packageRoot,
     target: ScriptTarget.ES2022
   }
 }).outputText
+const terminalDimensionsSource = transpileModule(
+  readFileSync(resolve(packageRoot, "src/terminal-dimensions.ts"), "utf8"),
+  {
+    compilerOptions: {
+      module: ModuleKind.ESNext,
+      target: ScriptTarget.ES2022
+    }
+  }
+).outputText
 const workspaceFocusSource = transpileModule(readFileSync(resolve(packageRoot, "src/workspace-focus.ts"), "utf8"), {
   compilerOptions: {
     module: ModuleKind.ESNext,
@@ -43,6 +52,10 @@ declare global {
       acquireLock: () => () => void
     ) => { readonly releaseLock: () => void; readonly transition: { readonly _tag: string } }
     bindTerminalDocumentLock?: (host: Window) => () => void
+    clampTerminalDimensions?: (dimensions: { readonly cols: number; readonly rows: number }) => {
+      readonly cols: number
+      readonly rows: number
+    }
     returnToDirectoryWorkspace?: (
       elements: {
         readonly directory: HTMLElement
@@ -129,6 +142,36 @@ const setKeyboardTerminal = async (page: Page): Promise<void> => {
     window.releaseTerminalViewport = bind(terminal, window, boundary)
   })
 }
+
+test("keyboard-height terminal never fits below the server terminal bounds", async ({ page }) => {
+  await setKeyboardTerminal(page)
+  await page.addScriptTag({
+    content: `${terminalDimensionsSource}\nwindow.clampTerminalDimensions = clampTerminalDimensions`,
+    type: "module"
+  })
+  await page.setViewportSize({ height: 300, width: 393 })
+  await expect
+    .poll(() => page.locator(".ghostty-terminal").evaluate((terminal) => terminal.clientHeight))
+    .toBeLessThan(80)
+
+  const fitted = await page.evaluate(() => {
+    const terminal = document.querySelector<HTMLElement>(".ghostty-terminal")
+    const clampDimensions = window.clampTerminalDimensions
+    if (terminal === null || clampDimensions === undefined) throw new Error("terminal dimensions fixture missing")
+    // Mirrors ghostty-web 0.4.0 FitAddon.proposeDimensions for 13px Geist Mono cells.
+    const raw = {
+      cols: Math.max(2, Math.floor((terminal.clientWidth - 15) / 8)),
+      rows: Math.max(1, Math.floor(terminal.clientHeight / 16))
+    }
+    return { clamped: clampDimensions(raw), raw }
+  })
+
+  expect(fitted.raw.rows).toBeLessThan(5)
+  expect(fitted.clamped.rows).toBeGreaterThanOrEqual(5)
+  expect(fitted.clamped.rows).toBeLessThanOrEqual(200)
+  expect(fitted.clamped.cols).toBeGreaterThanOrEqual(20)
+  expect(fitted.clamped.cols).toBeLessThanOrEqual(400)
+})
 
 test("393x500 terminal blocks iPhone focus scrolling and restores the document", async ({ page }) => {
   await setKeyboardTerminal(page)
