@@ -23,6 +23,7 @@
  */
 import {
   type AuthenticatedClockifyApi,
+  ClockifyApi,
   type ClockifyApiConfigContract,
   make as makeClockifyApi
 } from "@knpkv/clockify-api-client"
@@ -32,11 +33,15 @@ import * as Clock from "effect/Clock"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import {
   activeWindows,
   type AgentChoice,
@@ -52,15 +57,17 @@ import {
   type UnattributedDayCredit
 } from "../agent/sessions.js"
 import * as SourceConsumption from "../agent/sourceConsumption.js"
+import * as WriterGuard from "../cli/writerGuard.js"
 import { localDay, nextLocalMidnight, splitIntervalByLocalDay } from "../utils/time.js"
 import { AgentSessionReader } from "./AgentSessionReader.js"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 import { postJiraWorklog } from "./internal/JiraWorklogPost.js"
+import { readJiraDeletionEvidence } from "./ProviderDeletion.js"
 import { jiraWorklogDescription, type RecordedEntry } from "./SavedEntries.js"
 import { type AttributionChoice, SessionAttributor, type SessionDescribeAnswer } from "./SessionAttributor.js"
-import { type SourceIdentity, SourceLedger } from "./SourceLedger.js"
+import { type SourceBinding, type SourceIdentity, SourceLedger } from "./SourceLedger.js"
 import { type JiraWorklogOutcome, TimerService } from "./TimerService.js"
 
 export type { RecordedEntry } from "./SavedEntries.js"
@@ -74,6 +81,11 @@ export interface SourceSegment {
   readonly seconds: number
   /** Server-held identity expected by a retained confirmation, never a browser field. */
   readonly expectedScope?: string | undefined
+  /** Provider identity that supplied this source evidence, checked again before the target write. */
+  readonly expectedSource?: {
+    readonly provider: "clockify" | "jira"
+    readonly scope: string
+  } | undefined
 }
 
 /** Private provider/account identity for a retained read. Never serialize it to the week DTO. */
@@ -135,6 +147,62 @@ export interface ReconcileRow {
    * Used as the Jira worklog comment when filling clockify→jira. null when nothing meaningful.
    */
   readonly clockifyDescription: string | null
+}
+
+/** Private write provenance for one direction row. Never serialized to an HTTP client. */
+export type DirectionSourceDecision =
+  | { readonly _tag: "Ordinary" }
+  | { readonly _tag: "Bound"; readonly source: SourceSegment; readonly startedAt: Date }
+  | { readonly _tag: "Refused"; readonly message: string }
+
+/** One complete direction read whose private provider evidence remains attached to its resolver. */
+export interface DirectionComparison {
+  readonly rows: ReadonlyArray<ReconcileRow>
+  readonly resolveSource: (
+    row: ReconcileRow,
+    direction: ReconcileDirection,
+    seconds: number
+  ) => Effect.Effect<DirectionSourceDecision, ReconcileError>
+}
+
+interface VerifiedInterval {
+  readonly startMs: number
+  readonly endMs: number
+}
+
+const mergeIntervals = (intervals: ReadonlyArray<VerifiedInterval>): ReadonlyArray<VerifiedInterval> => {
+  const sorted = [...intervals].sort((left, right) => left.startMs - right.startMs || left.endMs - right.endMs)
+  const merged: Array<VerifiedInterval> = []
+  for (const interval of sorted) {
+    const previous = merged.at(-1)
+    if (previous === undefined || interval.startMs > previous.endMs) {
+      merged.push(interval)
+    } else if (interval.endMs > previous.endMs) {
+      merged[merged.length - 1] = { startMs: previous.startMs, endMs: interval.endMs }
+    }
+  }
+  return merged
+}
+
+const subtractIntervals = (
+  source: VerifiedInterval,
+  consumed: ReadonlyArray<VerifiedInterval>
+): ReadonlyArray<VerifiedInterval> => {
+  let remaining: ReadonlyArray<VerifiedInterval> = [source]
+  for (const interval of mergeIntervals(consumed)) {
+    remaining = remaining.flatMap((candidate) => {
+      if (interval.endMs <= candidate.startMs || interval.startMs >= candidate.endMs) return [candidate]
+      return [
+        ...(interval.startMs > candidate.startMs
+          ? [{ startMs: candidate.startMs, endMs: Math.min(interval.startMs, candidate.endMs) }]
+          : []),
+        ...(interval.endMs < candidate.endMs
+          ? [{ startMs: Math.max(interval.endMs, candidate.startMs), endMs: candidate.endMs }]
+          : [])
+      ]
+    })
+  }
+  return remaining.filter((interval) => interval.endMs > interval.startMs)
 }
 
 export class ReconcileError extends Data.TaggedError("ReconcileError")<{
@@ -368,6 +436,8 @@ export interface ReconcileServiceContract {
     period: ReconcilePeriod,
     options?: { readonly sides?: ReconcileSides | undefined }
   ) => Effect.Effect<ReadonlyArray<ReconcileRow>, ReconcileError>
+  /** Read direction rows and retain their private provider evidence for provenance resolution. */
+  readonly compareDirection: (period: ReconcilePeriod) => Effect.Effect<DirectionComparison, ReconcileError>
   /**
    * Post `seconds` of work to Jira for `(ticketKey, day)`, with an optional worklog comment.
    *
@@ -652,11 +722,20 @@ export const layer = Layer.effect(
     const jiraAuth = yield* JiraAuth
     const httpClient = yield* HttpClient.HttpClient
     const config = yield* ConfigService
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
     const home = (yield* HomeDirectory).path
     const timer = yield* TimerService
     const sessionReader = yield* AgentSessionReader
     const attributor = yield* SessionAttributor
     const sourceLedger = yield* SourceLedger
+
+    const provideGuard = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provideService(ConfigService, config),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path)
+      )
 
     const getAuth = clockifyAuth.getConfig.pipe(
       Effect.mapError((e) => new ReconcileError({ message: e.message }))
@@ -1094,6 +1173,314 @@ export const layer = Layer.effect(
     const compare = (period: ReconcilePeriod, options?: { readonly sides?: ReconcileSides | undefined }) =>
       readRecorded(period, options).pipe(Effect.map((result) => result.recorded))
 
+    type BindingEvidence = { readonly _tag: "Present"; readonly entry: RecordedEntry }
+
+    /**
+     * Read one bound Clockify entry without the generated client's lossy unexpected-status fallback.
+     *
+     * Clockify's pinned OpenAPI contract declares no typed not-found response for this operation.
+     * A non-2xx response therefore remains uncertain even when its numeric status is 404.
+     */
+    const readClockifyBinding = (
+      binding: SourceBinding,
+      snapshot: ClockifyWriteSnapshot
+    ): Effect.Effect<typeof ClockifyApi.GetTimeEntry200.Type, ReconcileError> =>
+      snapshot.client.httpClient.execute(
+        HttpClientRequest.get(`/v1/workspaces/${snapshot.auth.workspaceId}/time-entries/${binding.entryId}`).pipe(
+          HttpClientRequest.setUrlParam("hydrated", "false")
+        )
+      ).pipe(
+        Effect.flatMap((response) =>
+          response.status >= 200 && response.status < 300
+            ? HttpClientResponse.schemaBodyJson(ClockifyApi.GetTimeEntry200)(response).pipe(
+              Effect.mapError((cause) =>
+                new ReconcileError({ message: "Clockify returned incomplete bound-entry evidence", cause })
+              )
+            )
+            : Effect.fail(
+              new ReconcileError({ message: "Clockify did not provide a verifiable bound-entry response" })
+            )
+        ),
+        Effect.mapError((cause) =>
+          Predicate.isTagged(cause, "ReconcileError")
+            ? cause
+            : new ReconcileError({ message: "Could not verify the current Clockify bound entry", cause })
+        )
+      )
+
+    /** A targeted read can verify presence; ambiguous misses keep the bound credit held. */
+    const readBindingEvidence = (
+      binding: SourceBinding,
+      currentEntries: ReadonlyArray<RecordedEntry>,
+      clockifySnapshot: ClockifyWriteSnapshot,
+      jiraSnapshot: JiraWriteSnapshot
+    ): Effect.Effect<BindingEvidence, ReconcileError> => {
+      const current = currentEntries.find((entry) => entry.source === binding.provider && entry.id === binding.entryId)
+      if (current !== undefined) return Effect.succeed({ _tag: "Present", entry: current })
+      const read = binding.provider === "clockify"
+        ? readClockifyBinding(binding, clockifySnapshot).pipe(
+          Effect.flatMap((entry) => {
+            const start = entry.timeInterval.start
+            const end = entry.timeInterval.end
+            const startMs = new Date(start ?? "").getTime()
+            const endMs = new Date(end ?? "").getTime()
+            if (
+              entry.id !== binding.entryId || entry.userId !== clockifySnapshot.auth.userId ||
+              entry.workspaceId !== clockifySnapshot.auth.workspaceId || end === undefined ||
+              !Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs
+            ) {
+              return Effect.fail(
+                new ReconcileError({
+                  message: "Clockify returned incomplete bound-entry evidence"
+                })
+              )
+            }
+            return Effect.succeed<BindingEvidence>({
+              _tag: "Present",
+              entry: {
+                id: entry.id,
+                source: "clockify",
+                ticketKey: parseTicketKey(entry.description),
+                startMs,
+                endMs,
+                description: entry.description
+              }
+            })
+          })
+        )
+        : jiraSnapshot.client.getWorklog(binding.ticketKey, binding.entryId, undefined).pipe(
+          Effect.flatMap((value) => {
+            const worklog = toRawWorklog(value)
+            if (
+              worklog === null || !isReadableWorklog(worklog) || worklog.id !== binding.entryId ||
+              worklog.author.accountId !== jiraSnapshot.accountId
+            ) {
+              return Effect.fail(new ReconcileError({ message: "Jira returned incomplete bound-worklog evidence" }))
+            }
+            const startMs = new Date(worklog.started).getTime()
+            const endMs = startMs + worklog.timeSpentSeconds * 1000
+            if (!Number.isFinite(startMs) || endMs <= startMs) {
+              return Effect.fail(new ReconcileError({ message: "Jira returned incomplete bound-worklog evidence" }))
+            }
+            return Effect.succeed<BindingEvidence>({
+              _tag: "Present",
+              entry: {
+                id: worklog.id,
+                source: "jira",
+                ticketKey: binding.ticketKey,
+                startMs,
+                endMs,
+                description: null
+              }
+            })
+          }),
+          Effect.catchTag("GetWorklog404", () =>
+            Effect.gen(function*() {
+              if (binding.jiraCreatedAtMs === undefined) {
+                return yield* new ReconcileError({
+                  message: "Jira bound entry has no provider-created checkpoint; deletion remains unproved"
+                })
+              }
+              const evidence = yield* readJiraDeletionEvidence(
+                jiraSnapshot.client,
+                binding.entryId,
+                binding.jiraCreatedAtMs
+              ).pipe(
+                Effect.mapError((cause) => new ReconcileError({ message: cause.message }))
+              )
+              if (evidence._tag === "Unproved") {
+                return yield* new ReconcileError({ message: "Jira bound entry has no verified deletion event" })
+              }
+              const current = yield* jiraWriteState
+              if (current.snapshot === null || current.snapshot.heldScope !== jiraSnapshot.heldScope) {
+                return yield* new ReconcileError({ message: "Jira account changed during deletion verification" })
+              }
+              // A deletion event is historical. Jira's targeted 404 also covers lost visibility,
+              // so neither fact proves the entry is still absent after an out-of-band restore.
+              return yield* new ReconcileError({
+                message: "Jira deleted-worklog event is verified, but current absence is not"
+              })
+            }))
+        )
+      return read.pipe(
+        Effect.mapError((cause) =>
+          new ReconcileError({ message: `Could not verify the current ${binding.provider} bound entry`, cause })
+        )
+      )
+    }
+
+    const directionSource = (
+      recorded: ReadonlyArray<ReconcileRow>,
+      unlinkedClockify: ReadonlyArray<UnlinkedClockifyEntry>,
+      clockifySnapshot: ClockifyWriteSnapshot,
+      jiraSnapshot: JiraWriteSnapshot | null
+    ) =>
+    (
+      row: ReconcileRow,
+      direction: ReconcileDirection,
+      seconds: number
+    ): Effect.Effect<DirectionSourceDecision, ReconcileError> =>
+      Effect.gen(function*() {
+        const sourceProvider = direction === "clockify-to-jira" ? "clockify" : "jira"
+        const targetProvider = sourceProvider === "clockify" ? "jira" : "clockify"
+        const sourceEntries = row.intervals
+          .flatMap(({ entry }) => entry?.source === sourceProvider ? [entry] : [])
+          .filter((entry, index, entries) => entries.findIndex((candidate) => candidate.id === entry.id) === index)
+        const stored = yield* sourceLedger.read.pipe(
+          Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
+        )
+        const hasMarker = sourceEntries.some((entry) =>
+          entry.description !== null && SourceConsumption.markers(entry.description).length > 0
+        )
+        const mayBeBound = sourceEntries.some((entry) =>
+          stored.bindings.some((binding) => binding.provider === sourceProvider && binding.entryId === entry.id)
+        )
+        if (!hasMarker && !mayBeBound) return { _tag: "Ordinary" }
+
+        if (jiraSnapshot === null) {
+          return {
+            _tag: "Refused",
+            message: "Direction provenance could not be verified for the current provider accounts"
+          }
+        }
+        const sourceScope = sourceProvider === "clockify" ? clockifySnapshot.scope : jiraSnapshot.ledgerScope
+        const targetScope = targetProvider === "clockify" ? clockifySnapshot.scope : jiraSnapshot.ledgerScope
+        const expectedTargetScope = targetProvider === "clockify" ? clockifySnapshot.scope : jiraSnapshot.heldScope
+        const expectedSourceScope = sourceProvider === "clockify" ? clockifySnapshot.scope : jiraSnapshot.heldScope
+        const sourceIds = new Set(sourceEntries.map((entry) => entry.id))
+        const verifiedSource = stored.bindings.filter((binding) =>
+          binding.provider === sourceProvider && binding.scope === sourceScope && sourceIds.has(binding.entryId)
+        )
+        if (
+          verifiedSource.length === 0 ||
+          sourceEntries.some((entry) =>
+            entry.description !== null && SourceConsumption.markers(entry.description).length > 0 &&
+            !verifiedSource.some((binding) => binding.entryId === entry.id)
+          )
+        ) {
+          return { _tag: "Refused", message: "Direction source marker is not verified by the private ledger" }
+        }
+        const sourceKeys = new Map(
+          verifiedSource.map((binding) => [
+            SourceConsumption.blockKey(binding.rowId, binding.sourceStartMs),
+            { rowId: binding.rowId, sourceStartMs: binding.sourceStartMs }
+          ])
+        )
+        if (sourceKeys.size !== 1) {
+          return {
+            _tag: "Refused",
+            message: "Direction row combines more than one verified source block; split it manually before writing"
+          }
+        }
+        const sourceKey = sourceKeys.values().next().value
+        if (sourceKey === undefined) {
+          return { _tag: "Refused", message: "Direction source binding is unavailable" }
+        }
+        const currentEntries = [
+          ...recorded.flatMap((candidate) =>
+            candidate.intervals.flatMap(({ entry }) => entry === undefined ? [] : [entry])
+          ),
+          ...unlinkedClockify.flatMap(({ entry }) => entry === undefined ? [] : [entry])
+        ].filter((entry, index, entries) =>
+          entries.findIndex((candidate) => candidate.source === entry.source && candidate.id === entry.id) === index
+        )
+        const sourceEvidence = yield* Effect.forEach(
+          verifiedSource,
+          (binding) => readBindingEvidence(binding, currentEntries, clockifySnapshot, jiraSnapshot),
+          { concurrency: 2 }
+        )
+        const sourceIntervals = verifiedSource.flatMap((binding, index) => {
+          const evidence = sourceEvidence[index]
+          if (evidence?._tag !== "Present") return []
+          const startMs = Math.max(binding.startMs, evidence.entry.startMs)
+          const endMs = Math.min(binding.endMs, evidence.entry.endMs)
+          return endMs > startMs ? [{ startMs, endMs }] : []
+        })
+        const sourceAuthority = mergeIntervals(sourceIntervals)
+        if (sourceAuthority.length !== 1 || sourceIntervals.length !== verifiedSource.length) {
+          return {
+            _tag: "Refused",
+            message: "Direction source intervals are no longer one contiguous verified block"
+          }
+        }
+        const sourceInterval = sourceAuthority[0]
+        if (sourceInterval === undefined) {
+          return { _tag: "Refused", message: "Direction source interval is unavailable" }
+        }
+        const targetBindings = stored.bindings.filter((binding) =>
+          binding.provider === targetProvider && binding.scope === targetScope &&
+          binding.rowId === sourceKey.rowId && binding.sourceStartMs === sourceKey.sourceStartMs
+        )
+        const targetEvidence = yield* Effect.forEach(
+          targetBindings,
+          (binding) => readBindingEvidence(binding, currentEntries, clockifySnapshot, jiraSnapshot),
+          { concurrency: 2 }
+        )
+        const consumedIntervals = targetBindings.flatMap((_binding, index) => {
+          const evidence = targetEvidence[index]
+          return evidence?._tag === "Present"
+            ? [{ startMs: evidence.entry.startMs, endMs: evidence.entry.endMs }]
+            : []
+        })
+        if (
+          consumedIntervals.some((interval) =>
+            interval.startMs < sourceInterval.startMs || interval.endMs > sourceInterval.endMs
+          )
+        ) {
+          return {
+            _tag: "Refused",
+            message: "A bound target moved outside its verified source interval"
+          }
+        }
+        const remaining = subtractIntervals(sourceInterval, consumedIntervals)
+        if (remaining.length === 0 || seconds <= 0) {
+          return { _tag: "Refused", message: "Direction delta exceeds the remaining verified source time" }
+        }
+        if (remaining.length !== 1) {
+          return {
+            _tag: "Refused",
+            message: "Verified target time leaves disconnected source intervals; split it manually before writing"
+          }
+        }
+        const remainingInterval = remaining[0]
+        if (remainingInterval === undefined) {
+          return { _tag: "Refused", message: "Direction source interval is unavailable" }
+        }
+        const remainingSeconds = (remainingInterval.endMs - remainingInterval.startMs) / 1000
+        const writableSeconds = Math.min(seconds, remainingSeconds)
+        if (!Number.isSafeInteger(writableSeconds) || writableSeconds <= 0) {
+          return { _tag: "Refused", message: "Direction remainder is not representable as whole seconds" }
+        }
+        if (targetProvider === "jira" && writableSeconds < MINIMUM_PROPOSAL_SECONDS) {
+          return { _tag: "Refused", message: "Direction remainder is less than Jira's one-minute minimum" }
+        }
+        const startedAtMs = remainingInterval.startMs
+        return {
+          _tag: "Bound",
+          startedAt: new Date(startedAtMs),
+          source: {
+            rowId: sourceKey.rowId,
+            sourceStartMs: sourceKey.sourceStartMs,
+            startMs: startedAtMs,
+            endMs: startedAtMs + writableSeconds * 1000,
+            seconds: writableSeconds,
+            expectedScope: expectedTargetScope,
+            expectedSource: { provider: sourceProvider, scope: expectedSourceScope }
+          }
+        }
+      })
+
+    const compareDirection = (period: ReconcilePeriod): Effect.Effect<DirectionComparison, ReconcileError> =>
+      Effect.gen(function*() {
+        const clockifySnapshot = yield* clockifyWriteSnapshot
+        const jiraSnapshot = (yield* jiraWriteState).snapshot
+        const result = yield* readRecorded(period, { clockifySnapshot, jiraSnapshot })
+        return {
+          rows: result.recorded,
+          resolveSource: directionSource(result.recorded, result.unlinkedClockify, clockifySnapshot, jiraSnapshot)
+        }
+      })
+
     // Noon-local on the bucket's day — the fallback when a caller knows only the day. It keeps the
     // worklog or entry firmly on the right calendar day whatever the reader's timezone.
     const dayStart = (day: string): Date => new Date(`${day}T12:00:00`)
@@ -1107,7 +1494,19 @@ export const layer = Layer.effect(
     const startOf = (day: string, startedAt: Date | undefined): Date =>
       startedAt !== undefined && localDay(startedAt) === day ? startedAt : dayStart(day)
 
-    const applyToJira = (
+    const sourceScopeIsCurrent = (source: SourceSegment | undefined): Effect.Effect<boolean> => {
+      if (source?.expectedSource === undefined) return Effect.succeed(true)
+      if (source.expectedSource.provider === "clockify") {
+        return Effect.result(clockifyWriteSnapshot).pipe(
+          Effect.map((result) => result._tag === "Success" && result.success.scope === source.expectedSource?.scope)
+        )
+      }
+      return jiraWriteState.pipe(
+        Effect.map((state) => state.snapshot?.heldScope === source.expectedSource?.scope)
+      )
+    }
+
+    const applyToJiraUnGuarded = (
       ticketKey: string,
       day: string,
       seconds: number,
@@ -1116,6 +1515,15 @@ export const layer = Layer.effect(
       source?: SourceSegment
     ): Effect.Effect<JiraWriteOutcome> =>
       Effect.gen(function*() {
+        if (
+          source !== undefined &&
+          (seconds !== source.seconds || startedAt?.getTime() !== source.startMs)
+        ) {
+          return { _tag: "Failed", message: "The approved Jira interval changed before confirmation" }
+        }
+        if (!(yield* sourceScopeIsCurrent(source))) {
+          return { _tag: "Failed", message: "The source provider account changed since this direction was read" }
+        }
         const state = source === undefined ? undefined : yield* jiraWriteState
         const snapshot = state?.snapshot ?? null
         const identity: SourceIdentity | undefined = source === undefined || snapshot === null ? undefined : {
@@ -1140,20 +1548,30 @@ export const layer = Layer.effect(
           const reserved = yield* Effect.result(sourceLedger.reserve(identity))
           if (reserved._tag === "Failure") return { _tag: "Failed", message: reserved.failure.message }
         }
-        if (snapshot !== null && identity !== undefined) {
-          const active = yield* jiraAuth.getActiveProfile().pipe(Effect.orElseSucceed(() => null))
+        let writeSnapshot = snapshot
+        if (identity !== undefined) {
+          const sourceIsCurrent = yield* sourceScopeIsCurrent(source)
+          const currentState = yield* jiraWriteState
+          const current = currentState.snapshot
           if (
-            active?.token.cloud_id !== snapshot.cloudId || active.token.site_url !== snapshot.siteUrl ||
-            active.token.user?.account_id !== snapshot.accountId
+            !sourceIsCurrent || current === null || current.ledgerScope !== identity.scope ||
+            source?.expectedScope !== undefined && current.heldScope !== source.expectedScope
           ) {
             const released = yield* Effect.result(sourceLedger.release(identity))
-            return {
-              _tag: "Failed",
-              message: released._tag === "Failure"
-                ? "The Jira account changed and the private write intent needs manual review"
-                : "The Jira account changed before the worklog write"
+            if (released._tag === "Failure") {
+              return {
+                _tag: "Failed",
+                message: "Provider identity changed and the private write intent needs manual review"
+              }
             }
+            if (!sourceIsCurrent) {
+              return { _tag: "Failed", message: "The source provider account changed before the Jira worklog write" }
+            }
+            if (currentState.availability === "not-logged-in") return { _tag: "NotLoggedIn" }
+            if (currentState.availability === "unverified") return { _tag: "VerificationUnavailable" }
+            return { _tag: "Failed", message: "The Jira account changed before the worklog write" }
           }
+          writeSnapshot = current
         }
         const params = {
           ticketKey,
@@ -1161,9 +1579,9 @@ export const layer = Layer.effect(
           durationSeconds: seconds,
           comment: comment !== undefined && comment.trim() !== "" ? comment.trim() : "Reconciled from Clockify"
         }
-        const posted = snapshot === null
+        const posted = writeSnapshot === null
           ? yield* timer.logWorklog(params)
-          : yield* postJiraWorklog(snapshot.client, params)
+          : yield* postJiraWorklog(writeSnapshot.client, params)
         if (identity === undefined) return posted
         if (posted._tag === "NotLoggedIn") {
           const released = yield* Effect.result(sourceLedger.release(identity))
@@ -1178,13 +1596,47 @@ export const layer = Layer.effect(
             message: "Jira may have written time without returning an entry ID; manual recovery required"
           }
         }
-        const bound = yield* Effect.result(sourceLedger.bind(identity, posted.entryId))
+        // An exact provider read may add a Jira-clock checkpoint; its failure cannot undo a confirmed POST.
+        const createdAtMs = writeSnapshot === null
+          ? undefined
+          : yield* writeSnapshot.client.getWorklog(ticketKey, posted.entryId, undefined).pipe(
+            Effect.flatMap((worklog) => {
+              const value = worklog.created === undefined ? NaN : new Date(worklog.created).getTime()
+              const valid = worklog.id === posted.entryId &&
+                worklog.author?.accountId === writeSnapshot.accountId &&
+                Number.isSafeInteger(value) && value >= 0
+              return valid
+                ? Effect.succeed(value)
+                : Effect.logWarning("Jira creation checkpoint is incomplete; deletion reconciliation stays held")
+                  .pipe(Effect.as(undefined))
+            }),
+            Effect.catch(() =>
+              Effect.logWarning("Jira creation checkpoint is unavailable; deletion reconciliation stays held")
+                .pipe(Effect.as(undefined))
+            )
+          )
+        const bound = yield* Effect.result(sourceLedger.bind(identity, posted.entryId, createdAtMs))
         return bound._tag === "Failure"
           ? { _tag: "Failed", message: "Jira wrote time but its private binding failed; manual recovery required" }
           : posted
       })
 
-    const applyToClockify = (
+    const applyToJira = (
+      ticketKey: string,
+      day: string,
+      seconds: number,
+      comment?: string,
+      startedAt?: Date,
+      source?: SourceSegment
+    ): Effect.Effect<JiraWriteOutcome> =>
+      provideGuard(WriterGuard.mutate(
+        applyToJiraUnGuarded(ticketKey, day, seconds, comment, startedAt, source)
+      )).pipe(
+        Effect.catchTag("WriterGuardError", (error) =>
+          Effect.succeed<JiraWriteOutcome>({ _tag: "Failed", message: error.message }))
+      )
+
+    const applyToClockifyUnGuarded = (
       ticketKey: string,
       day: string,
       seconds: number,
@@ -1193,8 +1645,18 @@ export const layer = Layer.effect(
       source?: SourceSegment
     ) =>
       Effect.gen(function*() {
+        if (
+          source !== undefined &&
+          (seconds !== source.seconds || startedAt?.getTime() !== source.startMs)
+        ) {
+          return yield* new ReconcileError({ message: "The approved Clockify interval changed before confirmation" })
+        }
+        if (!(yield* sourceScopeIsCurrent(source))) {
+          return yield* new ReconcileError({
+            message: "The source provider account changed since this direction was read"
+          })
+        }
         const snapshot = yield* clockifyWriteSnapshot
-        const { auth } = snapshot
         const cfg = yield* config.get
         const start = startOf(day, startedAt)
         const end = new Date(start.getTime() + seconds * 1000)
@@ -1216,8 +1678,9 @@ export const layer = Layer.effect(
             Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
           )
         }
+        const sourceIsCurrent = yield* sourceScopeIsCurrent(source)
         const verified = yield* Effect.result(clockifyWriteSnapshot)
-        if (verified._tag === "Failure") {
+        if (!sourceIsCurrent || verified._tag === "Failure") {
           if (identity !== undefined) {
             const released = yield* Effect.result(sourceLedger.release(identity))
             if (released._tag === "Failure") {
@@ -1227,10 +1690,15 @@ export const layer = Layer.effect(
               })
             }
           }
-          return yield* verified.failure
+          return yield* verified._tag === "Failure"
+            ? verified.failure
+            : new ReconcileError({ message: "The source provider account changed before the Clockify write" })
         }
         const current = verified.success
-        if (current.scope !== snapshot.scope) {
+        if (
+          current.scope !== snapshot.scope ||
+          (source?.expectedScope !== undefined && current.scope !== source.expectedScope)
+        ) {
           if (identity !== undefined) {
             yield* sourceLedger.release(identity).pipe(
               Effect.mapError((cause) => new ReconcileError({ message: cause.message, cause }))
@@ -1238,7 +1706,7 @@ export const layer = Layer.effect(
           }
           return yield* new ReconcileError({ message: "The Clockify account changed before the write" })
         }
-        const created = yield* snapshot.client.createTimeEntry(auth.workspaceId, {
+        const created = yield* current.client.createTimeEntry(current.auth.workspaceId, {
           payload: {
             description: `[${ticketKey}] ${
               note !== undefined && note.trim() !== "" ? note.trim() : "Reconciled from Jira"
@@ -1266,6 +1734,24 @@ export const layer = Layer.effect(
         }
         return true
       })
+
+    const applyToClockify = (
+      ticketKey: string,
+      day: string,
+      seconds: number,
+      note?: string,
+      startedAt?: Date,
+      source?: SourceSegment
+    ) =>
+      provideGuard(WriterGuard.mutate(
+        applyToClockifyUnGuarded(ticketKey, day, seconds, note, startedAt, source)
+      )).pipe(
+        Effect.mapError((error) =>
+          error._tag === "WriterGuardError"
+            ? new ReconcileError({ message: error.message, cause: error })
+            : error
+        )
+      )
 
     /**
      * Days that must not be proposed because a Timer is still running across them.
@@ -1585,7 +2071,8 @@ export const layer = Layer.effect(
           (entry): ReadonlyArray<SourceIdentity & { readonly entryId: string }> => {
             const references = entry.description === null ? [] : SourceConsumption.sourceReferences(entry.description)
             if (references.length !== 1 || entry.ticketKey === null) return []
-            const reference = references[0]!
+            const reference = references[0]
+            if (reference === undefined) return []
             const sourceCredit = previous.attributed.find((credit) =>
               `${credit.day}:${credit.ticketKey}` === reference.rowId
             )
@@ -1752,6 +2239,14 @@ export const layer = Layer.effect(
         })
       })
 
-    return { compare, applyToJira, applyToClockify, describeProposals, proposeFromSessions, refreshRecordedTime }
+    return {
+      compare,
+      compareDirection,
+      applyToJira,
+      applyToClockify,
+      describeProposals,
+      proposeFromSessions,
+      refreshRecordedTime
+    }
   })
 )

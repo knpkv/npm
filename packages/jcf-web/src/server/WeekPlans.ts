@@ -1,5 +1,5 @@
 /** Server-held evidence for six recent week/scope pairs. Restoring it never reads sessions. */
-import { ConfigService, ReconcileService, SavedEntries, SessionAttributor, WatchLease } from "@knpkv/jira-clockify"
+import { ConfigService, ReconcileService, SavedEntries, SessionAttributor, WriterGuard } from "@knpkv/jira-clockify"
 import { Cache, Context, Crypto, Effect, FileSystem, Layer, Path, Ref, Semaphore } from "effect"
 import type { PlatformError } from "effect"
 import { ApiError, PlanExpiredError, ProposalRejectedError } from "../shared/contracts.js"
@@ -62,6 +62,19 @@ interface RetainedPlan {
 
 export class WeekPlans extends Context.Service<WeekPlans, WeekPlansContract>()("@knpkv/jcf-web/WeekPlans") {}
 
+/** Tells the browser user what to do when the machine writer guard refuses a write. */
+const browserGuardMessage = (error: WriterGuard.WriterGuardError): string => {
+  switch (error.reason) {
+    case "taken":
+      return "jcf watch is writing time. Stop it before changing provider entries in the browser."
+    case "unavailable":
+      return `Could not take the machine writer guard: ${error.message}.`
+    case "lost":
+    case "missing":
+      return error.message
+  }
+}
+
 export const layer = Layer.effect(
   WeekPlans,
   Effect.gen(function*() {
@@ -88,19 +101,12 @@ export const layer = Layer.effect(
       effect: Effect.Effect<A, E, R>
     ): Effect.Effect<A, E | ProposalRejectedError, R> =>
       mutations.withPermits(1)(
-        Effect.acquireUseRelease(
-          provideGuard(WatchLease.acquire({ intervalSeconds: 300 })),
-          (lease): Effect.Effect<A, E | ProposalRejectedError, R> =>
-            lease._tag === "Held"
-              ? effect
-              : Effect.fail(
-                new ProposalRejectedError({
-                  message: lease._tag === "Taken"
-                    ? "jcf watch is writing time. Stop it before changing provider entries in the browser."
-                    : `Could not take the machine writer guard: ${lease.reason}.`
-                })
-              ),
-          (lease) => lease._tag === "Held" ? provideGuard(WatchLease.releaseGuard(lease)) : Effect.void
+        provideGuard(WriterGuard.withWriterGuard(effect)).pipe(
+          Effect.mapError((error) =>
+            WriterGuard.isWriterGuardError(error)
+              ? new ProposalRejectedError({ message: browserGuardMessage(error) })
+              : error
+          )
         )
       )
     return WeekPlans.of({

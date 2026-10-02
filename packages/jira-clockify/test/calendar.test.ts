@@ -165,6 +165,25 @@ describe("daylight saving", () => {
     expect(hours.some((line) => line.includes("02h") && line.includes("#"))).toBe(false)
   })
 
+  it("draws only the elapsed minutes across the spring-forward gap", () => {
+    const lines = renderDayCalendar({
+      day: "2026-03-08",
+      rows: [{
+        ticketKey: "PROJ-1",
+        spans: [{
+          startMs: Date.parse("2026-03-08T01:50:00-05:00"),
+          endMs: Date.parse("2026-03-08T03:10:00-04:00")
+        }]
+      }]
+    })
+    const rows = gridLines(lines)
+    const worked = rows.flatMap((line) => Array.from(line.slice(8))).filter((cell) => cell === "#")
+    expect(worked).toHaveLength(20)
+    expect(rows.some((line) => line.includes("02h"))).toBe(false)
+    expect(rows.find((line) => line.includes("01h"))?.slice(8, 8 + 50)).toBe(".".repeat(50))
+    expect(rows.find((line) => line.includes("03h"))?.slice(8, 8 + 10)).toBe("#".repeat(10))
+  })
+
   // After a fall-back every later block shifted by an hour, and the last of them ran off the end of
   // the fixed 1,440-cell grid and vanished.
   it("keeps a late block on a fall-back day inside the grid", () => {
@@ -187,7 +206,7 @@ describe("daylight saving", () => {
         }]
       }]
     })
-    const cells = gridLines(lines).flatMap((line) => [...line.slice(8)]).filter((cell) => cell === "#")
+    const cells = gridLines(lines).flatMap((line) => Array.from(line.slice(8))).filter((cell) => cell === "#")
     expect(cells).toHaveLength(20)
   })
 

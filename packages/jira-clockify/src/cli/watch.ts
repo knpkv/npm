@@ -48,6 +48,7 @@ import {
 } from "./agentWrite.js"
 import { fetchTicketByKey } from "./fetchTicket.js"
 import * as WatchLease from "./watchLease.js"
+import * as WriterGuard from "./writerGuard.js"
 
 /** Coding Agents whose sessions jcf can watch. Matches `reconcile --agent`. */
 const SUPPORTED_AGENTS: ReadonlyArray<string> = ["claude"]
@@ -168,7 +169,7 @@ export const runWatch = (options: {
     const watchFromMs = lease.resumeFromMs ?? startedAtMs
     unresolvedFromMs = watchFromMs
 
-    return yield* Effect.gen(function*() {
+    const guarded = Effect.gen(function*() {
       /**
        * Where this run starts looking.
        *
@@ -489,6 +490,7 @@ export const runWatch = (options: {
         )
       )
     })
+    return yield* WriterGuard.withExistingWriterGuard(lease, guarded)
   }))
 
 export const watch = Command.make(

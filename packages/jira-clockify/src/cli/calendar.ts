@@ -25,7 +25,6 @@ export interface CalendarRow {
   readonly spans: ReadonlyArray<{ readonly startMs: number; readonly endMs: number }>
 }
 
-const MINUTES_PER_DAY = 24 * 60
 const MINUTES_PER_HOUR = 60
 const IDLE = "."
 const SKIPPED = "~"
@@ -49,20 +48,43 @@ const OVERFLOW = "?"
 
 const LABEL_WIDTH = 8
 
-const DAY_MS = 24 * 60 * 60 * 1000
+interface TimelineRow {
+  readonly hour: number
+  readonly minutes: ReadonlyArray<number | null>
+}
 
 /**
- * Which grid cell an instant belongs in, by the local clock the reader is looking at.
+ * The actual elapsed minutes of one local day, projected into local-clock rows.
  *
- * `up` rounds to the end of the minute, for a span's exclusive end. A `00:00` end rounds to the
- * full day rather than to zero: it is the close of this day, not the start of it.
+ * A backward transition starts a new occurrence, so a repeated hour gets a second row even when
+ * only half of it repeats. A forward transition simply skips the missing local columns or hour.
  */
-const localMinuteOfDay = (atMs: number, rounding: "down" | "up" = "down"): number => {
-  const at = new Date(atMs)
-  const exact = at.getHours() * 60 + at.getMinutes()
-  if (rounding === "down") return exact
-  const rounded = at.getSeconds() > 0 || at.getMilliseconds() > 0 ? exact + 1 : exact
-  return rounded === 0 ? MINUTES_PER_DAY : rounded
+const localTimeline = (dayStartMs: number, dayEndMs: number): ReadonlyArray<TimelineRow> => {
+  const rows: Array<{ hour: number; minutes: Array<number | null> }> = []
+  let occurrence = 0
+  let previousLocalMinute: number | null = null
+  let previousKey: string | null = null
+  let currentRow: { hour: number; minutes: Array<number | null> } | null = null
+  const elapsedMinutes = Math.round((dayEndMs - dayStartMs) / 60_000)
+
+  for (let elapsedMinute = 0; elapsedMinute < elapsedMinutes; elapsedMinute++) {
+    const local = new Date(dayStartMs + elapsedMinute * 60_000)
+    const localMinute = local.getHours() * MINUTES_PER_HOUR + local.getMinutes()
+    if (previousLocalMinute !== null && localMinute < previousLocalMinute) occurrence++
+    const key = `${String(occurrence)}:${String(local.getHours())}`
+    if (key !== previousKey) {
+      currentRow = {
+        hour: local.getHours(),
+        minutes: Array.from({ length: MINUTES_PER_HOUR }, (): number | null => null)
+      }
+      rows.push(currentRow)
+      previousKey = key
+    }
+    if (currentRow !== null) currentRow.minutes[local.getMinutes()] = elapsedMinute
+    previousLocalMinute = localMinute
+  }
+
+  return rows
 }
 
 /**
@@ -97,16 +119,13 @@ export const renderDayCalendar = (options: {
   ).getTime()
   const dayEndMs = nextLocalMidnight(dayStartMs)
   const dayDurationMs = dayEndMs - dayStartMs
-  // A fall-back day contains 25 elapsed hours. Give its repeated local hour a second row so every
-  // instant keeps chronological order and the final local hour remains visible. Ordinary and
-  // spring-forward days retain the familiar 24-row wall-clock grid.
-  const elapsedTimeline = dayDurationMs > DAY_MS
-  const gridMinutes = elapsedTimeline ? Math.round(dayDurationMs / 60_000) : MINUTES_PER_DAY
-  const minutes = new Array<string>(gridMinutes).fill(IDLE)
+  const timeline = localTimeline(dayStartMs, dayEndMs)
+  const gridMinutes = Math.round(dayDurationMs / 60_000)
+  const minutes = Array.from({ length: gridMinutes }, () => IDLE)
   // Who owns each minute, tracked by Issue Key rather than by glyph. There are only so many glyphs,
   // and a day with more Issue Keys than glyphs would otherwise have two of them compare equal — so a
   // minute genuinely split between them would read as exclusively one ticket's.
-  const owners = new Array<string | null>(gridMinutes).fill(null)
+  const owners = Array.from({ length: gridMinutes }, (): string | null => null)
   const glyphs = new Map<string, string>()
   let anyShared = false
 
@@ -117,17 +136,10 @@ export const renderDayCalendar = (options: {
       // Spans never cross a local midnight, but a caller may pass a whole period's worth of rows,
       // so anything outside this day is skipped rather than wrapped onto it.
       if (localDay(new Date(span.startMs)) !== options.day) continue
-      // Read ordinary and spring-forward days off the local clock: after a spring-forward, work at
-      // 03:00 sits only 2 elapsed hours from midnight. Fall-back days instead use the 25-hour
-      // timeline above, because two different instants share each minute of the repeated hour.
-      const from = elapsedTimeline
-        ? Math.floor((span.startMs - dayStartMs) / 60_000)
-        : localMinuteOfDay(span.startMs)
+      const from = Math.floor((span.startMs - dayStartMs) / 60_000)
       const to = span.endMs - span.startMs >= dayDurationMs
         ? gridMinutes
-        : elapsedTimeline
-        ? Math.ceil((span.endMs - dayStartMs) / 60_000)
-        : localMinuteOfDay(span.endMs, "up")
+        : Math.ceil((span.endMs - dayStartMs) / 60_000)
       for (let minute = Math.max(0, from); minute < Math.min(gridMinutes, to); minute++) {
         const owner = owners[minute]
         if (owner === null || owner === undefined) {
@@ -145,9 +157,11 @@ export const renderDayCalendar = (options: {
     }
   })
 
-  const activeHours = [...new Array(Math.ceil(gridMinutes / MINUTES_PER_HOUR)).keys()].filter((hour) =>
-    minutes.slice(hour * MINUTES_PER_HOUR, (hour + 1) * MINUTES_PER_HOUR).some((cell) => cell !== IDLE)
-  )
+  const cellsFor = (row: TimelineRow): ReadonlyArray<string> =>
+    row.minutes.map((elapsedMinute) => elapsedMinute === null ? IDLE : (minutes[elapsedMinute] ?? IDLE))
+  const activeHours = timeline
+    .map((row, index) => ({ cells: cellsFor(row), index, row }))
+    .filter(({ cells }) => cells.some((cell) => cell !== IDLE))
   if (activeHours.length === 0) return []
 
   const legend = [
@@ -157,16 +171,13 @@ export const renderDayCalendar = (options: {
 
   const lines: Array<string> = [`  ${options.day}   ${legend}`, ruler()]
   let previous: number | null = null
-  for (const hour of activeHours) {
-    if (previous !== null && hour > previous + 1) {
-      lines.push(`${" ".repeat(LABEL_WIDTH)}${SKIPPED.repeat(3)} ${hour - previous - 1}h with nothing credited`)
+  for (const { cells, index, row } of activeHours) {
+    if (previous !== null && index > previous + 1) {
+      lines.push(`${" ".repeat(LABEL_WIDTH)}${SKIPPED.repeat(3)} ${index - previous - 1}h with nothing credited`)
     }
-    const localHour = elapsedTimeline
-      ? new Date(dayStartMs + hour * MINUTES_PER_HOUR * 60_000).getHours()
-      : hour
-    const label = `  ${String(localHour).padStart(2, "0")}h  `.padEnd(LABEL_WIDTH)
-    lines.push(label + minutes.slice(hour * MINUTES_PER_HOUR, (hour + 1) * MINUTES_PER_HOUR).join(""))
-    previous = hour
+    const label = `  ${String(row.hour).padStart(2, "0")}h  `.padEnd(LABEL_WIDTH)
+    lines.push(label + cells.join(""))
+    previous = index
   }
   return lines
 }

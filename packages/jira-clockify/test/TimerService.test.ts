@@ -1,3 +1,4 @@
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { ClockifyApiClientContract, TimeEntry } from "@knpkv/clockify-api-client"
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
@@ -257,7 +258,8 @@ const TestLayer = timerLayer.pipe(
   Layer.provide(MockConfigLayer),
   Layer.provide(MockStateWriterLayer),
   Layer.provide(MockJiraAuthLayer),
-  Layer.provide(MockHttpClientLayer)
+  Layer.provide(MockHttpClientLayer),
+  Layer.provide(NodeServices.layer)
 )
 
 // Build a TimerService layer with overridden Clockify / HttpClient / JiraAuth mocks.
@@ -272,7 +274,8 @@ const makeTestLayer = (
     Layer.provide(MockConfigLayer),
     Layer.provide(MockStateWriterLayer),
     Layer.provide(jiraAuthLayer),
-    Layer.provide(httpLayer)
+    Layer.provide(httpLayer),
+    Layer.provide(NodeServices.layer)
   )
 
 // ---------------------------------------------------------------------------

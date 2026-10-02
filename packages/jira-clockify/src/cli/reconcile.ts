@@ -28,6 +28,7 @@ import { applyProposal, clip, entryDescription, keepGoing, proposalTargets, writ
 import { type CalendarRow, earliestStart, formatSpanBounds, formatSpanRanges, renderDayCalendar } from "./calendar.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "./fetchTicket.js"
 import * as WatchLease from "./watchLease.js"
+import * as WriterGuard from "./writerGuard.js"
 
 // Differences under a minute are noise (Jira floors worklogs to 60s), so don't flag them.
 const TOLERANCE_SECONDS = 60
@@ -651,7 +652,7 @@ const runAgentMode = (options: {
               : `  Nothing written: ${lease.reason}.`
           )
         }
-        return Effect.gen(function*() {
+        const guarded = Effect.gen(function*() {
           // Review and description generation are unbounded. Take the writer guard, then re-tally
           // inside it so no watch, browser tab or second reconcile can authorize the same gap.
           const refreshed = yield* svc.refreshRecordedTime(options.period, report)
@@ -714,6 +715,7 @@ const runAgentMode = (options: {
             if (!keepGoing(written)) return
           }
         })
+        return WriterGuard.withExistingWriterGuard(lease, guarded)
       },
       (lease) => lease._tag === "Held" ? WatchLease.releaseGuard(lease) : Effect.void
     )
@@ -878,21 +880,25 @@ export const reconcile = Command.make(
                 : `  Nothing written: ${lease.reason}.`
             )
           }
-          return Effect.gen(function*() {
+          const guarded = Effect.gen(function*() {
             // Confirmation can take arbitrarily long. Admit the whole approved batch first, then
             // re-read under the guard so another writer cannot fill a gap between tally and write.
-            const refreshed = yield* svc.compare(period).pipe(
+            const comparison = yield* svc.compareDirection(period).pipe(
               Effect.catch((e) => Console.log(`Reconcile failed: ${e.message}`).pipe(Effect.as(null)))
             )
-            if (refreshed === null) return
+            if (comparison === null) return
 
             for (const selection of approved) {
-              const row = refreshed.find((candidate) =>
+              const row = comparison.rows.find((candidate) =>
                 candidate.ticketKey === selection.row.ticketKey && candidate.day === selection.row.day
               )
-              const remaining = row === undefined
-                ? 0
-                : Math.min(selection.delta, deltaToApply(row, directionTag))
+              if (row === undefined) {
+                yield* Console.log(
+                  `    ${selection.row.ticketKey} ${selection.row.day}: already logged — nothing written`
+                )
+                continue
+              }
+              const remaining = Math.min(selection.delta, deltaToApply(row, directionTag))
               if (remaining === 0) {
                 yield* Console.log(
                   `    ${selection.row.ticketKey} ${selection.row.day}: already logged — nothing written`
@@ -900,12 +906,26 @@ export const reconcile = Command.make(
                 continue
               }
 
+              const directionSource = yield* comparison.resolveSource(row, directionTag, remaining).pipe(
+                Effect.catch((error) => Console.log(`    ✗ ${error.message}`).pipe(Effect.as(null)))
+              )
+              if (directionSource === null) continue
+              if (directionSource._tag === "Refused") {
+                yield* Console.log(`    ✗ ${directionSource.message}`)
+                continue
+              }
+              const startedAt = directionSource._tag === "Bound" ? directionSource.startedAt : undefined
+              const source = directionSource._tag === "Bound" ? directionSource.source : undefined
+              const writableSeconds = source?.seconds ?? remaining
+
               if (directionTag === "clockify-to-jira") {
                 const outcome = yield* svc.applyToJira(
                   selection.row.ticketKey,
                   selection.row.day,
-                  remaining,
-                  row?.clockifyDescription ?? selection.row.clockifyDescription ?? undefined
+                  writableSeconds,
+                  row.clockifyDescription ?? selection.row.clockifyDescription ?? undefined,
+                  startedAt,
+                  source
                 )
                 if (outcome._tag === "Posted") {
                   yield* Console.log(`    ✓ posted to Jira`)
@@ -919,13 +939,21 @@ export const reconcile = Command.make(
                   yield* Console.log(`    ✗ ${outcome.message}`)
                 }
               } else {
-                const ok = yield* svc.applyToClockify(selection.row.ticketKey, selection.row.day, remaining).pipe(
+                const ok = yield* svc.applyToClockify(
+                  selection.row.ticketKey,
+                  selection.row.day,
+                  writableSeconds,
+                  undefined,
+                  startedAt,
+                  source
+                ).pipe(
                   Effect.catch((e) => Console.log(`    ✗ ${e.message}`).pipe(Effect.as(false)))
                 )
                 if (ok) yield* Console.log(`    ✓ created Clockify entry`)
               }
             }
           })
+          return WriterGuard.withExistingWriterGuard(lease, guarded)
         },
         (lease) => lease._tag === "Held" ? WatchLease.releaseGuard(lease) : Effect.void
       )

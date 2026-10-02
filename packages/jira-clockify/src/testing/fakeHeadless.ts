@@ -195,6 +195,8 @@ export interface FakeWorld {
   readonly jiraRequests: Array<{ readonly method: string; readonly url: string }>
   clockifyVerifiedUserId: string
   clockifyUserReadFailuresRemaining: number
+  clockifyEntryReadFailuresRemaining: number
+  clockifyEntriesReadFailuresRemaining: number
   /** Whether Jira accepts worklogs. Flip it mid-test to model logging back in between two runs. */
   jiraLoggedIn: boolean
   /** Running Clockify timer. Flip it mid-test to model one starting after a retained read. */
@@ -230,6 +232,7 @@ export interface ExistingClockifyEntry {
 export interface ExistingJiraWorklog {
   readonly id?: string
   readonly author?: { readonly accountId: string }
+  readonly created?: string
   readonly comment?: Schema.Json
   readonly visibility?: { readonly type: "group" | "role"; readonly value: string }
   readonly started: string
@@ -252,7 +255,29 @@ export interface FakeHeadlessOptions {
    */
   readonly transcripts?: Readonly<Record<string, string>> | undefined
   readonly clockifyEntries?: ReadonlyArray<ExistingClockifyEntry> | undefined
+  /** Keep exact Clockify entries readable while omitting them from period-list responses. */
+  readonly clockifyListHiddenIds?: ReadonlyArray<string> | undefined
+  readonly clockifyProjects?:
+    | ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly workspaceId: string
+      readonly archived: boolean
+      readonly billable: boolean
+      readonly color: string
+    }>
+    | undefined
+  readonly clockifyTags?:
+    | ReadonlyArray<{
+      readonly id: string
+      readonly name: string
+      readonly workspaceId: string
+      readonly archived: boolean
+    }>
+    | undefined
   readonly jiraWorklogs?: Readonly<Record<string, ReadonlyArray<ExistingJiraWorklog>>> | undefined
+  /** Keep exact Jira worklogs readable while omitting their issues from search-driven period reads. */
+  readonly jiraSearchHiddenIssues?: ReadonlyArray<string> | undefined
   /** Separate provider data by synthetic Jira cloud so profile-switch races are observable. */
   readonly jiraWorklogsByCloudId?:
     | Readonly<Record<string, Readonly<Record<string, ReadonlyArray<ExistingJiraWorklog>>>>>
@@ -272,6 +297,8 @@ export interface FakeHeadlessOptions {
   readonly beforeDescribe?: ((world: FakeWorld) => void) | undefined
   /** Test synchronization hook after a prompt is shown but before its scripted input is read. */
   readonly beforePromptInput?: ((world: FakeWorld) => void) | undefined
+  /** Per-prompt key scripts for command tests with several interactive steps. */
+  readonly promptInputs?: ReadonlyArray<ReadonlyArray<"up" | "down" | "space" | "enter">> | undefined
   /** Test synchronization after a command prints its final pre-write summary. */
   readonly afterConsoleLog?: ((line: string, world: FakeWorld) => void) | undefined
   /**
@@ -285,13 +312,45 @@ export interface FakeHeadlessOptions {
   readonly jiraLoggedIn?: boolean | undefined
   /** A successful create response without its optional provider ID. */
   readonly jiraPostOmitsId?: boolean | undefined
+  /** Exact synthetic Jira POST/readback identity; omitted to retain the legacy fake ID sequence. */
+  readonly jiraPostedWorklog?: {
+    readonly id: string
+    readonly accountId: string
+    readonly created?: string | undefined
+  } | undefined
   /** Existing worklogs whose provider read omits its optional identity field. */
   readonly jiraReadOmitsId?: boolean | undefined
+  /** Override an exact Jira worklog response identity without changing the requested fixture. */
+  readonly jiraExactWorklogReturnedId?: string | undefined
+  /** Production-shaped failures at the exact Jira worklog read boundary. */
+  readonly jiraExactWorklogReadFault?:
+    | "malformed-404"
+    | "body-failure-404"
+    | "permission-404"
+    | "disabled-404"
+    | "null-404"
+    | "empty-404"
+    | "401"
+    | "403"
+    | "500"
+    | undefined
+  /** Production-shaped failures at the exact Clockify time-entry read boundary. */
+  readonly clockifyExactEntryReadFault?:
+    | "malformed-404"
+    | "body-failure-404"
+    | "401"
+    | "403"
+    | "500"
+    | undefined
   readonly jiraCloudId?: string | undefined
   /** Synthetic OAuth credential, readable through a getter to switch it at a reservation boundary. */
   readonly jiraAccessToken?: string | undefined
   /** Test synchronization immediately before the generated client resolves a live Jira credential. */
   readonly beforeJiraAuthResolution?: ((world: FakeWorld) => void) | undefined
+  /** Test synchronization after one complete Clockify entry page has been captured. */
+  readonly afterClockifyEntriesRead?: ((page: number, world: FakeWorld) => void) | undefined
+  /** Test synchronization after one complete Jira worklog page has been captured. */
+  readonly afterJiraWorklogsRead?: ((issueKey: string, startAt: number, world: FakeWorld) => void) | undefined
   /** Omit the account cached in Jira auth while provider reads remain available. */
   readonly jiraCachedUserMissing?: boolean | undefined
   /** Make Jira's current-user endpoint fail while the stored auth session remains present. */
@@ -318,6 +377,8 @@ export interface FakeHeadlessOptions {
     | undefined
   /** Make every Clockify entry creation fail, to model the write half refusing. */
   readonly clockifyWritesFail?: boolean | undefined
+  /** Deterministic test gate immediately before a Clockify create reaches the fake provider. */
+  readonly beforeClockifyWrite?: ((world: FakeWorld) => Effect.Effect<void>) | undefined
   /** Test-only boundary after a remote Clockify create but before its caller records the receipt. */
   readonly afterClockifyWrite?: ((world: FakeWorld) => void) | undefined
   /** Make the running-timer safety read fail before a timer command can proceed. */
@@ -606,12 +667,14 @@ const DEFAULT_COLUMNS = 80
 const fakeTerminalLayer = (
   options: {
     readonly keep: ReadonlyArray<boolean> | undefined
+    readonly promptInputs: ReadonlyArray<ReadonlyArray<"up" | "down" | "space" | "enter">> | undefined
     readonly columns: number
     readonly beforePromptInput: ((world: FakeWorld) => void) | undefined
   },
   world: FakeWorld
-) =>
-  Layer.succeed(
+) => {
+  let prompt = 0
+  return Layer.succeed(
     Terminal.Terminal,
     Terminal.make({
       columns: Effect.succeed(options.columns),
@@ -621,8 +684,12 @@ const fakeTerminalLayer = (
       readInput: Effect.gen(function*() {
         yield* Effect.sync(() => options.beforePromptInput?.(world))
         const queue = yield* Queue.unbounded<Terminal.UserInput, Cause.Done>()
+        const promptInput = options.promptInputs?.[prompt++]
+        if (promptInput !== undefined) yield* Queue.offerAll(queue, promptInput.map(keypress))
         // No script at all means no input, so the prompt ends unanswered.
-        if (options.keep !== undefined) yield* Queue.offerAll(queue, pickerKeys(options.keep))
+        if (promptInput === undefined && options.keep !== undefined) {
+          yield* Queue.offerAll(queue, pickerKeys(options.keep))
+        }
         yield* Queue.end(queue)
         return queue
       }),
@@ -633,6 +700,7 @@ const fakeTerminalLayer = (
         })
     })
   )
+}
 
 /** A console that keeps stdout and stderr apart, which is what the JSON Output Contract needs. */
 const captureConsoleLayer = (world: FakeWorld, afterLog?: (line: string, world: FakeWorld) => void) =>
@@ -712,6 +780,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     jiraRequests: [],
     clockifyVerifiedUserId: options.clockifyVerifiedUserId ?? FAKE_USER_ID,
     clockifyUserReadFailuresRemaining: 0,
+    clockifyEntryReadFailuresRemaining: 0,
+    clockifyEntriesReadFailuresRemaining: 0,
     jiraWorklogs: [],
     updatedClockifyEntries: [],
     updatedJiraWorklogs: [],
@@ -762,7 +832,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     jiraCurrentUserReadFailuresRemaining: 0,
     jiraWorklogReadFailuresRemaining: 0,
     jiraSearchFailuresRemaining: 0,
-    jiraSearchHiddenIssues: new Set(),
+    jiraSearchHiddenIssues: new Set(options.jiraSearchHiddenIssues),
     setClockifyEntries: (entries) => {
       clockifyLedger.splice(
         0,
@@ -818,11 +888,22 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
         status: "ACTIVE"
       }),
     getWorkspaces: () => Effect.succeed([{ id: FAKE_WORKSPACE_ID, name: "WS", imageUrl: "" }]),
-    getProjects: () => Effect.succeed([]),
+    getProjects: () => Effect.succeed(options.clockifyProjects ?? []),
     getProjectByName: () => Effect.succeed(null),
     // Paged when a test asks for it, so "reads only the first page" is observable rather than
     // assumed. `getRunningTimer` has its own path, so the running entry rides along on page one.
     getTimeEntries: (_ws, _user, params) => {
+      if (world.clockifyEntriesReadFailuresRemaining > 0) {
+        world.clockifyEntriesReadFailuresRemaining--
+        return Effect.fail(
+          new HttpClientError.HttpClientError({
+            reason: new HttpClientError.TransportError({
+              request: HttpClientRequest.get("https://fake.clockify/time-entries"),
+              description: "Clockify entries are unavailable"
+            })
+          })
+        )
+      }
       const running = runningEntry()
       const all = running === null ? [...clockifyLedger] : [...clockifyLedger, running]
       const page = params?.page ?? 1
@@ -848,6 +929,17 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
         : Effect.sync(runningEntry),
     getTimeEntry: (_ws, id) =>
       Effect.suspend(() => {
+        if (world.clockifyEntryReadFailuresRemaining > 0) {
+          world.clockifyEntryReadFailuresRemaining--
+          return Effect.fail(
+            new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request: HttpClientRequest.get(`https://fake.clockify/entries/${id}`),
+                description: "Clockify entry read is unavailable"
+              })
+            })
+          )
+        }
         const entry = clockifyLedger.find((entry) => entry.id === id)
         if (entry !== undefined) return Effect.succeed(entry)
         const request = HttpClientRequest.get(`https://fake.clockify/entries/${id}`)
@@ -860,22 +952,23 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           })
         )
       }),
-    getTags: () => Effect.succeed([]),
+    getTags: () => Effect.succeed(options.clockifyTags ?? []),
     createTag: (_ws, name) =>
       Effect.succeed({ id: `tag-${name}`, name, workspaceId: FAKE_WORKSPACE_ID, archived: false }),
     findOrCreateTag: (_ws, name) =>
       Effect.succeed({ id: `tag-${name}`, name, workspaceId: FAKE_WORKSPACE_ID, archived: false }),
     createTimeEntry: (_ws, params) =>
-      options.clockifyWritesFail === true
-        ? Effect.fail(
-          new HttpClientError.HttpClientError({
+      Effect.gen(function*() {
+        if (options.beforeClockifyWrite !== undefined) yield* options.beforeClockifyWrite(world)
+        if (options.clockifyWritesFail === true) {
+          return yield* new HttpClientError.HttpClientError({
             reason: new HttpClientError.TransportError({
               request: HttpClientRequest.post("https://api.clockify.me/time-entries"),
               description: "Clockify refused the entry"
             })
           })
-        )
-        : Effect.sync(() => {
+        }
+        return yield* Effect.sync(() => {
           world.createdClockifyEntries.push({
             description: params.description,
             start: params.start,
@@ -889,7 +982,8 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           clockifyLedger.push(entry)
           options.afterClockifyWrite?.(world)
           return entry
-        }),
+        })
+      }),
     updateTimeEntry: (_ws, id, params) =>
       Effect.sync(() => {
         const index = clockifyLedger.findIndex((entry) => entry.id === id)
@@ -921,6 +1015,15 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     HttpClientResponse.fromWeb(
       request,
       new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
+    )
+
+  const bodyFailureResponse = (request: HttpClientRequest.HttpClientRequest, status: number) =>
+    HttpClientResponse.fromWeb(
+      request,
+      new Response(new ReadableStream({ start: (controller) => controller.error("synthetic body read failure") }), {
+        status,
+        headers: { "content-type": "application/json" }
+      })
     )
 
   const requestPayload = (body: { readonly _tag: string }): WorklogPayload => {
@@ -964,6 +1067,10 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
         const clockifyEntries = request.url.match(/\/v1\/workspaces\/([^/]+)\/user\/([^/]+)\/time-entries/)
         if (clockifyEntries !== null && request.method === "GET") {
           world.clockifyRequests.push({ method: request.method, url: request.url })
+          if (world.clockifyEntriesReadFailuresRemaining > 0) {
+            world.clockifyEntriesReadFailuresRemaining--
+            return jsonResponse(request, 503, { message: "synthetic entry read failure" })
+          }
           if (
             options.clockifyRunningTimerReadFails === true &&
             request.urlParams.params.some(([name]) => name === "in-progress")
@@ -977,12 +1084,36 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
             cap ?? 200
           )
           const running = runningEntry()
+          const hiddenIds = new Set(options.clockifyListHiddenIds)
+          const visibleLedger = clockifyLedger.filter((entry) => entry.id === undefined || !hiddenIds.has(entry.id))
           const all = request.urlParams.params.some(([name]) => name === "in-progress")
             ? running === null ? [] : [running]
             : running === null
-            ? clockifyLedger
-            : [...clockifyLedger, running]
-          return jsonResponse(request, 200, all.slice((page - 1) * size, page * size))
+            ? visibleLedger
+            : [...visibleLedger, running]
+          const entries = all.slice((page - 1) * size, page * size)
+          options.afterClockifyEntriesRead?.(page, world)
+          return jsonResponse(request, 200, entries)
+        }
+        const exactClockifyEntry = request.url.match(/\/v1\/workspaces\/([^/]+)\/time-entries\/([^/?]+)/)
+        if (exactClockifyEntry !== null && request.method === "GET") {
+          world.clockifyRequests.push({ method: request.method, url: request.url })
+          const fault = options.clockifyExactEntryReadFault
+          if (fault === "malformed-404") {
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response("{", {
+                status: 404,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
+          if (fault === "body-failure-404") return bodyFailureResponse(request, 404)
+          if (fault !== undefined) return jsonResponse(request, Number(fault), { message: "synthetic read failure" })
+          const entry = clockifyLedger.find((candidate) => candidate.id === exactClockifyEntry[2])
+          return entry === undefined
+            ? jsonResponse(request, 404, { message: "synthetic time entry not found" })
+            : jsonResponse(request, 200, entry)
         }
         if (request.url.match(/\/v1\/workspaces\/[^/]+\/time-entries$/) !== null && request.method === "POST") {
           world.clockifyRequests.push({ method: request.method, url: request.url })
@@ -1011,6 +1142,26 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const entries = requestJiraLedger.get(issueKey) ?? []
           const index = entries.findIndex((entry, index) => (entry.id ?? `wl-${index}`) === id)
           const entry = entries[index]
+          const fault = options.jiraExactWorklogReadFault
+          if (fault === "malformed-404") {
+            return HttpClientResponse.fromWeb(
+              request,
+              new Response("{", {
+                status: 404,
+                headers: { "content-type": "application/json" }
+              })
+            )
+          }
+          if (fault === "body-failure-404") return bodyFailureResponse(request, 404)
+          if (fault === "permission-404") {
+            return jsonResponse(request, 404, { errorMessages: ["synthetic visibility denied"] })
+          }
+          if (fault === "disabled-404") {
+            return jsonResponse(request, 404, { errorMessages: ["synthetic time tracking unavailable"] })
+          }
+          if (fault === "null-404") return jsonResponse(request, 404, null)
+          if (fault === "empty-404") return jsonResponse(request, 404, {})
+          if (fault !== undefined) return jsonResponse(request, Number(fault), { errorMessages: ["synthetic failure"] })
           if (entry === undefined) return jsonResponse(request, 404, { errorMessages: ["Worklog not found"] })
           if (request.method === "PUT") {
             const payload = requestPayload(request.body)
@@ -1030,7 +1181,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           return jsonResponse(request, 200, {
             author: { accountId: options.jiraAccountId ?? FAKE_ACCOUNT_ID },
             ...entries[index],
-            id
+            id: options.jiraReadOmitsId === true ? undefined : options.jiraExactWorklogReturnedId ?? id
           })
         }
         const worklogMatch = request.url.match(/issue\/([^/]+)\/worklog/)
@@ -1039,13 +1190,20 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           const issueKey = worklogMatch[1] ?? "unknown"
           let nextId = 0
           while (issuedJiraIds.has(`wl-created-${nextId}`)) nextId++
-          const entryId = `wl-created-${nextId}`
+          const entryId = options.jiraPostedWorklog?.id ?? `wl-created-${nextId}`
+          if (issuedJiraIds.has(entryId)) {
+            return jsonResponse(request, 409, { errorMessages: ["Synthetic worklog ID already exists"] })
+          }
           issuedJiraIds.add(entryId)
           const started = payload.started ?? ""
           const timeSpentSeconds = payload.timeSpentSeconds ?? 0
           world.jiraWorklogs.push({ issueKey, started, timeSpentSeconds, comment: commentText(payload.comment) })
           requestJiraLedger.set(issueKey, [...(requestJiraLedger.get(issueKey) ?? []), {
             id: entryId,
+            ...(options.jiraPostedWorklog !== undefined && {
+              author: { accountId: options.jiraPostedWorklog.accountId },
+              ...(options.jiraPostedWorklog.created !== undefined && { created: options.jiraPostedWorklog.created })
+            }),
             started,
             timeSpentSeconds,
             ...(payload.comment !== undefined && { comment: payload.comment })
@@ -1080,7 +1238,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
           if (startAt > 0 && options.jiraWorklogPageFault === "missing") {
             return jsonResponse(request, 200, { startAt, maxResults: pageSize, total: entries.length })
           }
-          return jsonResponse(request, 200, {
+          const response = {
             startAt: startAt > 0 && options.jiraWorklogPageFault === "stalled" ? 0 : startAt,
             maxResults: pageSize,
             total: entries.length + (startAt > 0 && options.jiraWorklogPageFault === "inconsistent" ? 1 : 0),
@@ -1103,7 +1261,9 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
                 ...(options.jiraReadOmitsId === true && { id: undefined })
               }
             })
-          })
+          }
+          options.afterJiraWorklogsRead?.(worklogMatch[1] ?? "", startAt, world)
+          return jsonResponse(request, 200, response)
         }
         const issueMatch = request.url.match(/issue\/([^/?]+)(?:\?|$)/)
         if (request.method === "GET" && issueMatch !== null) {
@@ -1392,6 +1552,7 @@ export const makeFakeHeadless = (options: FakeHeadlessOptions = {}) => {
     attributorLayer,
     fakeTerminalLayer({
       keep: options.keep,
+      promptInputs: options.promptInputs,
       columns: options.columns ?? DEFAULT_COLUMNS,
       beforePromptInput: options.beforePromptInput
     }, world),

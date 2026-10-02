@@ -31,7 +31,15 @@ const Identity = Schema.Struct({
 
 export interface SourceIdentity extends Schema.Schema.Type<typeof Identity> {}
 
-const Binding = Identity.pipe(Schema.fieldsAssign({ entryId: Schema.NonEmptyString }))
+const LegacyBinding = Identity.pipe(Schema.fieldsAssign({ entryId: Schema.NonEmptyString }))
+/** Jira provider time, not the machine clock; old bindings have no ordering checkpoint. */
+const jiraCreatedAtMs = Schema.Number.check(Schema.makeFilter(
+  (value) => Number.isSafeInteger(value) && value >= 0,
+  { expected: "safe Jira worklog creation timestamp" }
+))
+const Binding = LegacyBinding.pipe(Schema.fieldsAssign({
+  jiraCreatedAtMs: Schema.optionalKey(jiraCreatedAtMs)
+}))
 export interface SourceBinding extends Schema.Schema.Type<typeof Binding> {}
 
 const ReviewedWindow = Schema.Struct({
@@ -53,19 +61,27 @@ const LegacyLedgerFile = Schema.Struct({
   version: Schema.Literal(1),
   reviewedWindows: Schema.Array(ReviewedWindow),
   pending: Schema.Array(Identity),
-  bindings: Schema.Array(Binding)
+  bindings: Schema.Array(LegacyBinding)
 })
 
 const V2LedgerFile = Schema.Struct({
   version: Schema.Literal(2),
   reviewedWindows: Schema.Array(ReviewedWindow),
   pending: Schema.Array(Identity),
-  bindings: Schema.Array(Binding),
+  bindings: Schema.Array(LegacyBinding),
+  observedUnbound: Schema.Array(ObservedUnbound)
+})
+
+const V3LedgerFile = Schema.Struct({
+  version: Schema.Literal(3),
+  reviewedWindows: Schema.Array(ReviewedWindow),
+  pending: Schema.Array(Identity),
+  bindings: Schema.Array(LegacyBinding),
   observedUnbound: Schema.Array(ObservedUnbound)
 })
 
 const LedgerFile = Schema.Struct({
-  version: Schema.Literal(3),
+  version: Schema.Literal(4),
   reviewedWindows: Schema.Array(ReviewedWindow),
   pending: Schema.Array(Identity),
   bindings: Schema.Array(Binding),
@@ -85,24 +101,26 @@ const LedgerFile = Schema.Struct({
         window.fromMs <= entry.startMs && entry.startMs < window.toMs
       )
     ) &&
-    value.pending.every(validDuration) && value.bindings.every(validDuration)
+    value.pending.every(validDuration) && value.bindings.every((binding) =>
+      validDuration(binding) && (binding.jiraCreatedAtMs === undefined || binding.provider === "jira")
+    )
 }, { expected: "valid reviewed observations, unique provider entries and source durations" }))
 
 export type LedgerFile = typeof LedgerFile.Type
 
-const empty: LedgerFile = { version: 3, reviewedWindows: [], pending: [], bindings: [], observedUnbound: [] }
+const empty: LedgerFile = { version: 4, reviewedWindows: [], pending: [], bindings: [], observedUnbound: [] }
 const decodeStored = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, V2LedgerFile, LedgerFile])),
+  Schema.fromJsonString(Schema.Union([LegacyLedgerFile, V2LedgerFile, V3LedgerFile, LedgerFile])),
   { onExcessProperty: "error" }
 )
 const decode = (content: string) =>
   decodeStored(content).pipe(
     Effect.flatMap((stored) =>
-      stored.version === 3
+      stored.version === 4
         ? Effect.succeed(stored)
         : Schema.decodeEffect(LedgerFile)({
           ...stored,
-          version: 3,
+          version: 4,
           observedUnbound: stored.version === 1 ? [] : stored.observedUnbound
         })
     )
@@ -128,7 +146,11 @@ export interface SourceLedgerContract {
   readonly read: Effect.Effect<LedgerFile, SourceLedgerError>
   readonly assertNoLegacyClockify: (legacyScope: string) => Effect.Effect<void, SourceLedgerError>
   readonly reserve: (identity: SourceIdentity, legacyScope?: string) => Effect.Effect<void, SourceLedgerError>
-  readonly bind: (identity: SourceIdentity, entryId: string) => Effect.Effect<void, SourceLedgerError>
+  readonly bind: (
+    identity: SourceIdentity,
+    entryId: string,
+    jiraCreatedAtMs?: number
+  ) => Effect.Effect<void, SourceLedgerError>
   readonly release: (identity: SourceIdentity) => Effect.Effect<void, SourceLedgerError>
   readonly ensureWindow: (
     window: SourceWindow,
@@ -326,11 +348,15 @@ export const layer = Layer.effect(
         })
       )
 
-    const bind = (identity: SourceIdentity, entryId: string) =>
+    const bind = (identity: SourceIdentity, entryId: string, createdAtMs?: number) =>
       update((current) =>
         Effect.gen(function*() {
           const pending = current.pending.find((value) => sameIdentity(value, identity))
-          if (pending === undefined || entryId.trim() === "") {
+          if (
+            pending === undefined || entryId.trim() === "" ||
+            createdAtMs !== undefined &&
+              (identity.provider !== "jira" || !Number.isSafeInteger(createdAtMs) || createdAtMs < 0)
+          ) {
             return yield* new SourceLedgerError({
               message: "Successful write has no unique pending identity or provider ID"
             })
@@ -343,10 +369,13 @@ export const layer = Layer.effect(
           ) {
             return yield* new SourceLedgerError({ message: "Provider entry is already bound" })
           }
+          const binding: SourceBinding = createdAtMs === undefined
+            ? { ...pending, entryId }
+            : { ...pending, entryId, jiraCreatedAtMs: createdAtMs }
           return {
             ...current,
             pending: current.pending.filter((value) => !sameIdentity(value, identity)),
-            bindings: [...current.bindings, { ...pending, entryId }]
+            bindings: [...current.bindings, binding]
           }
         })
       )

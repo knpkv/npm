@@ -45,6 +45,120 @@ it.effect("persists a pending write and its provider binding across service rest
   })
 })
 
+it.effect("keeps a Jira provider-created checkpoint with the exact binding across restart", () => {
+  const jiraIdentity: SourceIdentity = {
+    ...identity,
+    provider: "jira",
+    scope: JSON.stringify(["cloud-synthetic", "account-synthetic"])
+  }
+  const first = makeFakeHeadless({ writtenFiles: {} })
+  return Effect.gen(function*() {
+    yield* withLedger(first, (ledger) =>
+      Effect.gen(function*() {
+        const window: SourceWindow = {
+          provider: "jira",
+          scope: jiraIdentity.scope,
+          fromMs: 0,
+          toMs: 2_000_000
+        }
+        yield* ledger.ensureWindow(window, [], [])
+        yield* ledger.reserve(jiraIdentity)
+        yield* ledger.bind(jiraIdentity, "12345", 1_780_000_000_000)
+      }))
+    const restarted = makeFakeHeadless({ writtenFiles: first.world.writtenFiles })
+    yield* withLedger(restarted, (ledger) =>
+      Effect.gen(function*() {
+        const stored = yield* ledger.read
+        expect(stored.version).toBe(4)
+        expect(stored.pending).toEqual([])
+        expect(stored.bindings).toEqual([{
+          ...jiraIdentity,
+          entryId: "12345",
+          jiraCreatedAtMs: 1_780_000_000_000
+        }])
+      }))
+  })
+})
+
+it.effect("migrates old bindings without inventing a Jira checkpoint or releasing pending writes", () => {
+  const oldBinding = { ...identity, provider: "jira", entryId: "12345" }
+  const pending = { ...identity, provider: "jira", rowId: "pending-synthetic" }
+  const original = JSON.stringify({
+    version: 3,
+    reviewedWindows: [],
+    pending: [pending],
+    bindings: [oldBinding],
+    observedUnbound: []
+  })
+  const fake = makeFakeHeadless({ writtenFiles: { [file]: original } })
+  return withLedger(fake, (ledger) =>
+    Effect.gen(function*() {
+      const loaded = yield* ledger.read
+      expect(loaded.version).toBe(4)
+      expect(loaded.bindings).toEqual([oldBinding])
+      expect(loaded.pending).toEqual([pending])
+      expect(fake.world.writtenFiles[file]).toBe(original)
+    }))
+})
+
+it.effect("rejects fabricated or cross-provider checkpoints without clearing the pending write", () => {
+  const fake = makeFakeHeadless({ writtenFiles: {} })
+  return withLedger(fake, (ledger) =>
+    Effect.gen(function*() {
+      const window: SourceWindow = {
+        provider: "clockify",
+        scope: identity.scope,
+        fromMs: 0,
+        toMs: 2_000_000
+      }
+      yield* ledger.ensureWindow(window, [], [])
+      yield* ledger.reserve(identity)
+      const before = fake.world.writtenFiles[file]
+      for (const timestamp of [1_780_000_000_000, Number.MAX_SAFE_INTEGER + 1]) {
+        expect((yield* Effect.result(ledger.bind(identity, "synthetic-entry", timestamp)))._tag).toBe("Failure")
+        expect(fake.world.writtenFiles[file]).toBe(before)
+      }
+      expect((yield* ledger.read).pending).toEqual([identity])
+    }))
+})
+
+it.effect("a failed checkpointed bind leaves the confirmed remote write pending for manual recovery", () => {
+  const jiraIdentity: SourceIdentity = {
+    ...identity,
+    provider: "jira",
+    scope: JSON.stringify(["cloud-synthetic", "account-synthetic"])
+  }
+  const first = makeFakeHeadless({ writtenFiles: {} })
+  return Effect.gen(function*() {
+    yield* withLedger(first, (ledger) =>
+      Effect.gen(function*() {
+        yield* ledger.ensureWindow(
+          {
+            provider: "jira",
+            scope: jiraIdentity.scope,
+            fromMs: 0,
+            toMs: 2_000_000
+          },
+          [],
+          []
+        )
+        yield* ledger.reserve(jiraIdentity)
+      }))
+    const before = first.world.writtenFiles[file]
+    const failed = makeFakeHeadless({
+      writtenFiles: first.world.writtenFiles,
+      unwritablePaths: [`${file}.tmp`]
+    })
+    yield* withLedger(failed, (ledger) =>
+      Effect.gen(function*() {
+        expect((yield* Effect.result(ledger.bind(jiraIdentity, "12345", 1_780_000_000_000)))._tag)
+          .toBe("Failure")
+        expect(failed.world.writtenFiles[file]).toBe(before)
+        expect((yield* ledger.read).pending).toEqual([jiraIdentity])
+      }))
+  })
+})
+
 it.effect("holds legacy Clockify evidence without discarding unrelated Jira or new-scope state", () => {
   const oldScope = JSON.stringify([FAKE_WORKSPACE_ID, FAKE_USER_ID])
   const legacy = JSON.stringify({
@@ -79,7 +193,7 @@ it.effect("preserves all four legacy Clockify evidence classes through a strict 
   return withLedger(fake, (ledger) =>
     Effect.gen(function*() {
       const loaded = yield* ledger.read
-      expect(loaded.version).toBe(3)
+      expect(loaded.version).toBe(4)
       expect(loaded.reviewedWindows).toEqual([window])
       expect(loaded.observedUnbound).toHaveLength(1)
       expect(loaded.pending).toEqual([oldIdentity])
@@ -267,7 +381,7 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
   return withLedger(fake, (ledger) =>
     Effect.gen(function*() {
       const loaded = yield* ledger.read
-      expect(loaded.version).toBe(3)
+      expect(loaded.version).toBe(4)
       expect(loaded.observedUnbound).toEqual([])
       expect(fake.world.writtenFiles[file]).toBe(v1)
       expect(
@@ -282,7 +396,7 @@ it.effect("migrates strict v1 state on a successful write without inventing earl
         { entryId: "ordinary-tail", startMs: 3_000_000 }
       ], [marker])
       const migrated = yield* ledger.read
-      expect(migrated.version).toBe(3)
+      expect(migrated.version).toBe(4)
       expect(migrated.pending).toEqual([identity])
       expect(migrated.bindings).toEqual([marker])
       expect(migrated.observedUnbound).toEqual([{

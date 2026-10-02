@@ -6,14 +6,23 @@
  * what order services were consulted.
  */
 import { describe, expect, it } from "@effect/vitest"
+import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
 import { Command } from "effect/unstable/cli"
+import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as SourceConsumption from "../src/agent/sourceConsumption.js"
 import { root } from "../src/cli/root.js"
-import type { ReconcileDirection } from "../src/services/ReconcileService.js"
+import {
+  layer as reconcileServiceLayer,
+  type ReconcileDirection,
+  ReconcileService
+} from "../src/services/ReconcileService.js"
+import type { SourceBinding } from "../src/services/SourceLedger.js"
 import {
   FAKE_ACCOUNT_ID,
   FAKE_HOME,
@@ -2407,6 +2416,1908 @@ describe("jcf sync reconcile --agent: attribution", () => {
 
 describe("jcf sync reconcile <direction>", () => {
   const directions: ReadonlyArray<ReconcileDirection> = ["clockify-to-jira", "jira-to-clockify"]
+  const ledgerPath = `${FAKE_HOME}/.jcf/source-consumption.v1.json`
+  const clockifyScope = JSON.stringify([
+    "clockify-v3",
+    "https://api.clockify.me/api",
+    FAKE_WORKSPACE_ID,
+    FAKE_USER_ID
+  ])
+  const jiraScope = JSON.stringify(["cloud-fake", FAKE_ACCOUNT_ID])
+  const ledgerWith = (bindings: ReadonlyArray<SourceBinding>, version: 3 | 4 = 3) => ({
+    [ledgerPath]: JSON.stringify({
+      version,
+      reviewedWindows: [
+        { provider: "clockify", scope: clockifyScope, fromMs: 0, toMs: 4_102_444_800_000 },
+        { provider: "jira", scope: jiraScope, fromMs: 0, toMs: 4_102_444_800_000 }
+      ],
+      pending: [],
+      bindings,
+      observedUnbound: []
+    })
+  })
+  const LedgerIdentityEvidence = Schema.Struct({
+    provider: Schema.Literals(["clockify", "jira"]),
+    scope: Schema.String,
+    rowId: Schema.String,
+    sourceStartMs: Schema.Number,
+    startMs: Schema.Number,
+    endMs: Schema.Number,
+    seconds: Schema.Number,
+    ticketKey: Schema.String
+  })
+  const LedgerBindingEvidence = LedgerIdentityEvidence.pipe(Schema.fieldsAssign({
+    entryId: Schema.String,
+    jiraCreatedAtMs: Schema.optionalKey(Schema.Number)
+  }))
+  const decodeLedgerEvidence = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+    version: Schema.Literal(4),
+    reviewedWindows: Schema.Array(Schema.Unknown),
+    pending: Schema.Array(LedgerIdentityEvidence),
+    bindings: Schema.Array(LedgerBindingEvidence),
+    observedUnbound: Schema.Array(Schema.Unknown)
+  })))
+
+  it.effect("checkpoints an exact Jira POST readback and retains it across a fresh CLI process", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = "2026-07-01:POST-CHECKPOINT"
+      const sourceId = "clockify-post-checkpoint-source"
+      const marker = SourceConsumption.marker(rowId, startMs)
+      const source = {
+        id: sourceId,
+        description: `[PROJ-9] source\n${marker}`,
+        start: iso(startMs),
+        end: iso(startMs + 3_600_000)
+      }
+      const stored = ledgerWith([{
+        provider: "clockify",
+        scope: clockifyScope,
+        entryId: sourceId,
+        rowId,
+        sourceStartMs: startMs,
+        startMs,
+        endMs: startMs + 3_600_000,
+        seconds: 3600,
+        ticketKey: "PROJ-9"
+      }])
+      const fake = makeFakeHeadless(baseOptions({
+        clockifyEntries: [source],
+        jiraWorklogs: {},
+        jiraPostedWorklog: { id: "12345", created: iso(startMs + 1_000), accountId: FAKE_ACCOUNT_ID },
+        keep: [true],
+        writtenFiles: stored
+      }))
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const command = Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "clockify-to-jira",
+        ...SINCE
+      ]).pipe(Effect.exit)
+      yield* command.pipe(Effect.provide(fake.layer))
+
+      expect(fake.world.jiraWorklogs).toHaveLength(1)
+      const persisted = fake.world.writtenFiles[ledgerPath] ?? ""
+      const ledger = decodeLedgerEvidence(persisted)
+      const sourceBinding: SourceBinding = {
+        provider: "clockify",
+        scope: clockifyScope,
+        entryId: sourceId,
+        rowId,
+        sourceStartMs: startMs,
+        startMs,
+        endMs: startMs + 3_600_000,
+        seconds: 3600,
+        ticketKey: "PROJ-9"
+      }
+      const targetBinding: SourceBinding = {
+        ...sourceBinding,
+        provider: "jira",
+        scope: jiraScope,
+        entryId: "12345",
+        jiraCreatedAtMs: startMs + 1_000
+      }
+      expect(ledger.pending).toEqual([])
+      expect(ledger.bindings).toEqual([sourceBinding, targetBinding])
+      const wrongScopePersisted = JSON.stringify({
+        ...ledger,
+        bindings: ledger.bindings.map((binding) =>
+          binding.provider === "jira"
+            ? { ...binding, scope: JSON.stringify(["cloud-other", FAKE_ACCOUNT_ID]) }
+            : binding
+        )
+      })
+      const wrongScopeLedger = decodeLedgerEvidence(wrongScopePersisted)
+      expect(() => expect(wrongScopeLedger.bindings).toEqual([sourceBinding, targetBinding])).toThrow()
+
+      const restarted = makeFakeHeadless(baseOptions({
+        clockifyEntries: [source],
+        jiraWorklogs: {
+          "PROJ-9": [{
+            id: "12345",
+            author: { accountId: FAKE_ACCOUNT_ID },
+            created: iso(startMs + 1_000),
+            started: iso(startMs),
+            timeSpentSeconds: 3600
+          }]
+        },
+        keep: [true],
+        writtenFiles: fake.world.writtenFiles
+      }))
+      yield* command.pipe(Effect.provide(restarted.layer))
+      expect(restarted.world.jiraWorklogs).toEqual([])
+      expect(restarted.world.writtenFiles[ledgerPath]).toBe(fake.world.writtenFiles[ledgerPath])
+      const afterRestart = decodeLedgerEvidence(restarted.world.writtenFiles[ledgerPath] ?? "")
+      expect(afterRestart.pending).toEqual([])
+      expect(afterRestart.bindings).toEqual([sourceBinding, targetBinding])
+    }))
+
+  const readbackCases: ReadonlyArray<readonly [string, FakeHeadlessOptions]> = [
+    ["unavailable exact read", { jiraExactWorklogReadFault: "permission-404" }],
+    ["wrong exact ID", { jiraExactWorklogReturnedId: "54321" }],
+    ["wrong account", {
+      jiraPostedWorklog: { id: "12345", accountId: "acct-other", created: iso(at(2026, 7, 1, 12, 0) + 1_000) }
+    }],
+    ["missing creation time", { jiraPostedWorklog: { id: "12345", accountId: FAKE_ACCOUNT_ID } }],
+    ["invalid creation time", { jiraPostedWorklog: { id: "12345", accountId: FAKE_ACCOUNT_ID, created: "not-a-date" } }]
+  ]
+  for (const [label, readback] of readbackCases) {
+    it.effect(`keeps a confirmed Jira binding without a checkpoint after ${label}`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:POST-READBACK-HOLD"
+        const sourceId = "clockify-readback-hold-source"
+        const source = {
+          id: sourceId,
+          description: `[PROJ-9] source\n${SourceConsumption.marker(rowId, startMs)}`,
+          start: iso(startMs),
+          end: iso(startMs + 3_600_000)
+        }
+        const posted = readback.jiraPostedWorklog ?? {
+          id: "12345",
+          accountId: FAKE_ACCOUNT_ID,
+          created: iso(startMs + 1_000)
+        }
+        const fake = makeFakeHeadless(baseOptions({
+          clockifyEntries: [source],
+          jiraWorklogs: {},
+          jiraPostedWorklog: posted,
+          ...readback,
+          keep: [true],
+          writtenFiles: ledgerWith([{
+            provider: "clockify",
+            scope: clockifyScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }])
+        }))
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        const command = Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          "clockify-to-jira",
+          ...SINCE
+        ]).pipe(Effect.exit)
+        yield* command.pipe(Effect.provide(fake.layer))
+        expect(fake.world.jiraWorklogs).toHaveLength(1)
+        const persisted = fake.world.writtenFiles[ledgerPath] ?? ""
+        const ledger = decodeLedgerEvidence(persisted)
+        const sourceBinding: SourceBinding = {
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        }
+        const targetBinding: SourceBinding = {
+          ...sourceBinding,
+          provider: "jira",
+          scope: jiraScope,
+          entryId: "12345"
+        }
+        expect(ledger.pending).toEqual([])
+        expect(ledger.bindings).toEqual([sourceBinding, targetBinding])
+
+        const restarted = makeFakeHeadless(baseOptions({
+          clockifyEntries: [source],
+          jiraWorklogs: {
+            "PROJ-9": [{
+              id: "12345",
+              author: { accountId: posted.accountId },
+              ...(posted.created !== undefined && { created: posted.created }),
+              started: iso(startMs),
+              timeSpentSeconds: 3600
+            }]
+          },
+          keep: [true],
+          writtenFiles: fake.world.writtenFiles
+        }))
+        yield* command.pipe(Effect.provide(restarted.layer))
+        expect(restarted.world.jiraWorklogs).toEqual([])
+        const afterRestart = decodeLedgerEvidence(restarted.world.writtenFiles[ledgerPath] ?? "")
+        expect(afterRestart.pending).toEqual([])
+        expect(afterRestart.bindings).toEqual([sourceBinding, targetBinding])
+      }))
+  }
+
+  it.effect("retains the exact pending intent when Jira POST succeeds but binding persistence fails", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = "2026-07-01:POST-BIND-FAILURE"
+      const sourceId = "clockify-bind-failure-source"
+      const source = {
+        id: sourceId,
+        description: `[PROJ-9] source\n${SourceConsumption.marker(rowId, startMs)}`,
+        start: iso(startMs),
+        end: iso(startMs + 3_600_000)
+      }
+      const unwritable: Array<string> = []
+      const fake = makeFakeHeadless(baseOptions({
+        clockifyEntries: [source],
+        jiraWorklogs: {},
+        jiraPostedWorklog: { id: "12345", accountId: FAKE_ACCOUNT_ID, created: iso(startMs + 1_000) },
+        keep: [true],
+        unwritablePaths: unwritable,
+        afterFileWrite: (filePath) =>
+          Effect.sync(() => {
+            if (filePath === `${ledgerPath}.tmp` && fake.world.jiraWorklogs.length > 0) {
+              unwritable.push(ledgerPath)
+            }
+          }),
+        writtenFiles: ledgerWith([{
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        }])
+      }))
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const command = Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "clockify-to-jira",
+        ...SINCE
+      ]).pipe(Effect.exit)
+      yield* command.pipe(Effect.provide(fake.layer))
+      expect(fake.world.jiraWorklogs).toHaveLength(1)
+      const ledger = decodeLedgerEvidence(fake.world.writtenFiles[ledgerPath] ?? "")
+      const pending = {
+        provider: "jira",
+        scope: jiraScope,
+        rowId,
+        sourceStartMs: startMs,
+        startMs,
+        endMs: startMs + 3_600_000,
+        seconds: 3600,
+        ticketKey: "PROJ-9"
+      }
+      const sourceBinding: SourceBinding = {
+        ...pending,
+        provider: "clockify",
+        scope: clockifyScope,
+        entryId: sourceId
+      }
+      expect(ledger.pending).toEqual([pending])
+      expect(ledger.bindings).toEqual([sourceBinding])
+
+      const restarted = makeFakeHeadless(baseOptions({
+        clockifyEntries: [source],
+        jiraWorklogs: {
+          "PROJ-9": [{
+            id: "12345",
+            author: { accountId: FAKE_ACCOUNT_ID },
+            created: iso(startMs + 1_000),
+            started: iso(startMs),
+            timeSpentSeconds: 3600
+          }]
+        },
+        keep: [true],
+        writtenFiles: fake.world.writtenFiles
+      }))
+      yield* command.pipe(Effect.provide(restarted.layer))
+      expect(restarted.world.jiraWorklogs).toEqual([])
+      expect(restarted.world.writtenFiles[ledgerPath]).toBe(fake.world.writtenFiles[ledgerPath])
+      const afterRestart = decodeLedgerEvidence(restarted.world.writtenFiles[ledgerPath] ?? "")
+      expect(afterRestart.pending).toEqual([pending])
+      expect(afterRestart.bindings).toEqual([sourceBinding])
+    }))
+
+  for (const direction of directions) {
+    if (direction === "clockify-to-jira") {
+      it.effect("probes a checkpointed Jira deletion without treating its 404 as release", () =>
+        Effect.gen(function*() {
+          const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+          const rowId = "2026-07-01:CHECKPOINTED"
+          const sourceId = "clockify-source-checkpointed"
+          const marker = SourceConsumption.marker(rowId, startMs)
+          const stored = ledgerWith([
+            {
+              provider: "clockify",
+              scope: clockifyScope,
+              entryId: sourceId,
+              rowId,
+              sourceStartMs: startMs,
+              startMs,
+              endMs: startMs + 3_600_000,
+              seconds: 3600,
+              ticketKey: "PROJ-9"
+            },
+            {
+              provider: "jira",
+              scope: jiraScope,
+              entryId: "12345",
+              rowId,
+              sourceStartMs: startMs,
+              startMs,
+              endMs: startMs + 3_600_000,
+              seconds: 3600,
+              ticketKey: "PROJ-9",
+              jiraCreatedAtMs: startMs
+            }
+          ], 4)
+          const fake = makeFakeHeadless(baseOptions({
+            clockifyEntries: [{
+              id: sourceId,
+              description: `[PROJ-9] source\n${marker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }],
+            jiraWorklogs: {},
+            keep: [true],
+            writtenFiles: stored
+          }))
+          yield* TestClock.setTime(HISTORICAL_NOW)
+          let feedReads = 0
+          yield* Effect.scoped(Effect.gen(function*() {
+            const context = yield* Layer.build(fake.layer)
+            const underlying = Context.get(context, HttpClient.HttpClient)
+            const client = HttpClient.make((request) => {
+              if (!request.url.includes("/worklog/deleted")) return underlying.execute(request)
+              feedReads++
+              return Effect.succeed(HttpClientResponse.fromWeb(
+                request,
+                new Response(
+                  JSON.stringify({
+                    since: startMs,
+                    until: startMs + 10_000,
+                    lastPage: true,
+                    values: [{ worklogId: 12345, updatedTime: startMs + 10_000 }]
+                  }),
+                  { status: 200, headers: { "content-type": "application/json" } }
+                )
+              ))
+            })
+            const withClient = Context.add(context, HttpClient.HttpClient, client)
+            const rebuilt = yield* Layer.build(
+              reconcileServiceLayer.pipe(Layer.provide(Layer.succeedContext(withClient)))
+            )
+            const services = Context.add(withClient, ReconcileService, Context.get(rebuilt, ReconcileService))
+            yield* Command.runWith(root, { version: "0.0.0-test" })([
+              "sync",
+              "reconcile",
+              direction,
+              ...SINCE
+            ]).pipe(Effect.exit, Effect.provide(Layer.succeedContext(services)))
+          }))
+          expect(feedReads).toBeGreaterThan(0)
+          expect(fake.world.jiraWorklogs).toEqual([])
+          expect(fake.world.createdClockifyEntries).toEqual([])
+          expect(fake.world.writtenFiles[ledgerPath]).toBe(stored[ledgerPath])
+          expect(output(fake.world.stdout)).toContain("Could not verify the current jira bound entry")
+        }))
+    }
+    it.effect(`uses one ledger-verified source binding once in ${direction}`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:PROJ-ORIGINAL"
+        const sourceProvider = direction === "clockify-to-jira" ? "clockify" : "jira"
+        const sourceEntryId = `${sourceProvider}-source-entry`
+        const sourceMarker = SourceConsumption.marker(rowId, startMs)
+        const fake = makeFakeHeadless(baseOptions({
+          clockifyEntries: sourceProvider === "clockify"
+            ? [{
+              id: sourceEntryId,
+              description: `[PROJ-9] corrected\n${sourceMarker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }]
+            : [],
+          jiraWorklogs: sourceProvider === "jira"
+            ? {
+              "PROJ-9": [{
+                id: sourceEntryId,
+                comment: `corrected\n${sourceMarker}`,
+                started: iso(startMs),
+                timeSpentSeconds: 3600
+              }]
+            }
+            : {},
+          keep: [true, true],
+          writtenFiles: ledgerWith([{
+            provider: sourceProvider,
+            scope: sourceProvider === "clockify" ? clockifyScope : jiraScope,
+            entryId: sourceEntryId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }])
+        }))
+        const runDirection = Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          direction,
+          ...SINCE
+        ]).pipe(Effect.exit)
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        yield* runDirection.pipe(Effect.provide(fake.layer))
+        yield* runDirection.pipe(Effect.provide(fake.layer))
+
+        expect(fake.world.createdClockifyEntries).toHaveLength(sourceProvider === "jira" ? 1 : 0)
+        expect(fake.world.jiraWorklogs).toHaveLength(sourceProvider === "clockify" ? 1 : 0)
+        expect(fake.world.writtenFiles[ledgerPath]?.match(new RegExp(`"rowId":"${rowId}"`, "gu"))).toHaveLength(2)
+      }))
+
+    it.effect(`keeps consumed target time after the source is retargeted in ${direction}`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:PROJ-ORIGINAL"
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const targetProvider = sourceIsClockify ? "jira" : "clockify"
+        const sourceId = `${sourceProvider}-retargeted-source`
+        const targetId = `${targetProvider}-original-target`
+        const sourceMarker = SourceConsumption.marker(rowId, startMs)
+        const ledger = ledgerWith([
+          {
+            provider: sourceProvider,
+            scope: sourceIsClockify ? clockifyScope : jiraScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          },
+          {
+            provider: targetProvider,
+            scope: sourceIsClockify ? jiraScope : clockifyScope,
+            entryId: targetId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-8"
+          }
+        ])
+        const { world } = yield* run(
+          ["sync", "reconcile", direction, ...SINCE],
+          baseOptions({
+            clockifyEntries: sourceIsClockify
+              ? [{
+                id: sourceId,
+                description: `[PROJ-9] retargeted\n${sourceMarker}`,
+                start: iso(startMs),
+                end: iso(startMs + 3_600_000)
+              }]
+              : [{
+                id: targetId,
+                description: "[PROJ-8] original target",
+                start: iso(startMs),
+                end: iso(startMs + 3_600_000)
+              }],
+            jiraWorklogs: sourceIsClockify
+              ? {
+                "PROJ-8": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 3600 }]
+              }
+              : {
+                "PROJ-9": [{
+                  id: sourceId,
+                  comment: `retargeted\n${sourceMarker}`,
+                  started: iso(startMs),
+                  timeSpentSeconds: 3600
+                }]
+              },
+            keep: [true],
+            writtenFiles: ledger
+          })
+        )
+
+        expect(world.createdClockifyEntries).toEqual([])
+        expect(world.jiraWorklogs).toEqual([])
+        expect(world.writtenFiles[ledgerPath]).toBe(ledger[ledgerPath])
+      }))
+
+    for (
+      const fault of ["permission-404", "disabled-404", "null-404", "empty-404"] satisfies ReadonlyArray<
+        NonNullable<FakeHeadlessOptions["jiraExactWorklogReadFault"]>
+      >
+    ) {
+      if (direction !== "clockify-to-jira") continue
+      it.effect(`holds bound Jira time after an ambiguous ${fault} exact read`, () =>
+        Effect.gen(function*() {
+          const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+          const rowId = "2026-07-01:PERMISSION-404"
+          const sourceId = "clockify-visible-source"
+          const targetId = "jira-hidden-target"
+          const marker = SourceConsumption.marker(rowId, startMs)
+          const ledger = ledgerWith([
+            {
+              provider: "clockify",
+              scope: clockifyScope,
+              entryId: sourceId,
+              rowId,
+              sourceStartMs: startMs,
+              startMs,
+              endMs: startMs + 3_600_000,
+              seconds: 3600,
+              ticketKey: "PROJ-9"
+            },
+            {
+              provider: "jira",
+              scope: jiraScope,
+              entryId: targetId,
+              rowId,
+              sourceStartMs: startMs,
+              startMs,
+              endMs: startMs + 3_600_000,
+              seconds: 3600,
+              ticketKey: "PROJ-8"
+            }
+          ])
+          const fake = makeFakeHeadless(baseOptions({
+            clockifyEntries: [{
+              id: sourceId,
+              description: `[PROJ-9] retargeted\n${marker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }],
+            jiraWorklogs: {
+              "PROJ-8": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 3600 }]
+            },
+            jiraSearchHiddenIssues: ["PROJ-8"],
+            jiraExactWorklogReadFault: fault,
+            keep: [true],
+            writtenFiles: ledger
+          }))
+
+          yield* TestClock.setTime(HISTORICAL_NOW)
+          yield* Command.runWith(root, { version: "0.0.0-test" })([
+            "sync",
+            "reconcile",
+            direction,
+            ...SINCE
+          ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+          expect(fake.world.createdClockifyEntries).toEqual([])
+          expect(fake.world.jiraWorklogs).toEqual([])
+          expect(fake.world.writtenFiles[ledgerPath]).toBe(ledger[ledgerPath])
+          expect(output(fake.world.stdout)).toContain("Could not verify the current jira bound entry")
+        }))
+    }
+
+    it.effect(`writes only the verified remainder after a partial retarget in ${direction}`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:PARTIAL-SOURCE"
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const targetProvider = sourceIsClockify ? "jira" : "clockify"
+        const sourceId = `${sourceProvider}-partial-source`
+        const targetId = `${targetProvider}-partial-target`
+        const marker = SourceConsumption.marker(rowId, startMs)
+        const { world } = yield* run(
+          ["sync", "reconcile", direction, ...SINCE],
+          baseOptions({
+            clockifyEntries: sourceIsClockify
+              ? [{
+                id: sourceId,
+                description: `[PROJ-9] retargeted\n${marker}`,
+                start: iso(startMs),
+                end: iso(startMs + 3_600_000)
+              }]
+              : [{
+                id: targetId,
+                description: "[PROJ-8] partial target",
+                start: iso(startMs),
+                end: iso(startMs + 1_800_000)
+              }],
+            jiraWorklogs: sourceIsClockify
+              ? { "PROJ-8": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 1800 }] }
+              : {
+                "PROJ-9": [{
+                  id: sourceId,
+                  comment: `retargeted\n${marker}`,
+                  started: iso(startMs),
+                  timeSpentSeconds: 3600
+                }]
+              },
+            keep: [true],
+            writtenFiles: ledgerWith([
+              {
+                provider: sourceProvider,
+                scope: sourceIsClockify ? clockifyScope : jiraScope,
+                entryId: sourceId,
+                rowId,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              },
+              {
+                provider: targetProvider,
+                scope: sourceIsClockify ? jiraScope : clockifyScope,
+                entryId: targetId,
+                rowId,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 1_800_000,
+                seconds: 1800,
+                ticketKey: "PROJ-8"
+              }
+            ])
+          })
+        )
+
+        if (sourceIsClockify) {
+          expect(world.jiraWorklogs).toMatchObject([{ timeSpentSeconds: 1800 }])
+        } else {
+          expect(world.createdClockifyEntries).toHaveLength(1)
+          expect(
+            new Date(world.createdClockifyEntries[0]!.end ?? 0).getTime() -
+              new Date(world.createdClockifyEntries[0]!.start).getTime()
+          ).toBe(1_800_000)
+        }
+      }))
+
+    it.effect(`uses the live target duration after a bound ${direction} entry is shortened`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:SHORTENED-TARGET"
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const targetProvider = sourceIsClockify ? "jira" : "clockify"
+        const sourceId = `${sourceProvider}-shortened-source`
+        const targetId = `${targetProvider}-shortened-target`
+        const marker = SourceConsumption.marker(rowId, startMs)
+        const { world } = yield* run(
+          ["sync", "reconcile", direction, ...SINCE],
+          baseOptions({
+            clockifyEntries: sourceIsClockify
+              ? [{
+                id: sourceId,
+                description: `[PROJ-9] source\n${marker}`,
+                start: iso(startMs),
+                end: iso(startMs + 3_600_000)
+              }]
+              : [{
+                id: targetId,
+                description: "[PROJ-9] shortened target",
+                start: iso(startMs),
+                end: iso(startMs + 1_800_000)
+              }],
+            jiraWorklogs: sourceIsClockify
+              ? { "PROJ-9": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 1800 }] }
+              : {
+                "PROJ-9": [{
+                  id: sourceId,
+                  comment: `source\n${marker}`,
+                  started: iso(startMs),
+                  timeSpentSeconds: 3600
+                }]
+              },
+            keep: [true],
+            writtenFiles: ledgerWith([
+              {
+                provider: sourceProvider,
+                scope: sourceIsClockify ? clockifyScope : jiraScope,
+                entryId: sourceId,
+                rowId,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              },
+              {
+                provider: targetProvider,
+                scope: sourceIsClockify ? jiraScope : clockifyScope,
+                entryId: targetId,
+                rowId,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              }
+            ])
+          })
+        )
+
+        if (sourceIsClockify) {
+          expect(world.jiraWorklogs).toMatchObject([{ timeSpentSeconds: 1800 }])
+        } else {
+          expect(world.createdClockifyEntries).toHaveLength(1)
+          expect(
+            new Date(world.createdClockifyEntries[0]!.end ?? 0).getTime() -
+              new Date(world.createdClockifyEntries[0]!.start).getTime()
+          ).toBe(1_800_000)
+        }
+      }))
+
+    it.effect(`does not regrow a shortened bound ${direction} source`, () => {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = `2026-07-01:SHORTENED-SOURCE-${direction}`
+      const sourceIsClockify = direction === "clockify-to-jira"
+      const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+      const targetProvider = sourceIsClockify ? "jira" : "clockify"
+      const sourceId = `${sourceProvider}-shortened-live-source`
+      const targetId = `${targetProvider}-consumed-source-half`
+      const marker = SourceConsumption.marker(rowId, startMs)
+      const fake = makeFakeHeadless(baseOptions({
+        clockifyEntries: sourceIsClockify
+          ? [{
+            id: sourceId,
+            description: `[PROJ-9] source\n${marker}`,
+            start: iso(startMs),
+            end: iso(startMs + 1_800_000)
+          }]
+          : [{
+            id: targetId,
+            description: "[PROJ-9] consumed source half",
+            start: iso(startMs),
+            end: iso(startMs + 1_800_000)
+          }],
+        jiraWorklogs: sourceIsClockify
+          ? { "PROJ-9": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 1800 }] }
+          : {
+            "PROJ-9": [{
+              id: sourceId,
+              comment: `source\n${marker}`,
+              started: iso(startMs),
+              timeSpentSeconds: 1800
+            }]
+          },
+        writtenFiles: ledgerWith([
+          {
+            provider: sourceProvider,
+            scope: sourceIsClockify ? clockifyScope : jiraScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          },
+          {
+            provider: targetProvider,
+            scope: sourceIsClockify ? jiraScope : clockifyScope,
+            entryId: targetId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 1_800_000,
+            seconds: 1800,
+            ticketKey: "PROJ-9"
+          }
+        ])
+      }))
+      return Effect.gen(function*() {
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        const service = yield* ReconcileService
+        const comparison = yield* service.compareDirection({
+          from: new Date(DAY.year, DAY.month - 1, DAY.day),
+          to: new Date(DAY.year, DAY.month - 1, DAY.day + 1)
+        })
+        const row = comparison.rows.find((candidate) => candidate.ticketKey === "PROJ-9")
+        expect(row).toBeDefined()
+        if (row === undefined) return
+        const decision = yield* comparison.resolveSource(row, direction, 1800)
+        expect(decision).toEqual({
+          _tag: "Refused",
+          message: "Direction delta exceeds the remaining verified source time"
+        })
+        expect(fake.world.createdClockifyEntries).toEqual([])
+        expect(fake.world.jiraWorklogs).toEqual([])
+      }).pipe(Effect.provide(fake.layer))
+    })
+
+    it.effect(
+      `holds a verified ${direction} source when its bound target is absent from current reads`,
+      () =>
+        Effect.gen(function*() {
+          const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+          const rowId = "2026-07-01:DELETED-TARGET"
+          const sourceIsClockify = direction === "clockify-to-jira"
+          const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+          const targetProvider = sourceIsClockify ? "jira" : "clockify"
+          const sourceId = `${sourceProvider}-source-with-deleted-target`
+          const marker = SourceConsumption.marker(rowId, startMs)
+          const { world } = yield* run(
+            ["sync", "reconcile", direction, ...SINCE],
+            baseOptions({
+              clockifyEntries: sourceIsClockify
+                ? [{
+                  id: sourceId,
+                  description: `[PROJ-9] source\n${marker}`,
+                  start: iso(startMs),
+                  end: iso(startMs + 3_600_000)
+                }]
+                : [],
+              jiraWorklogs: sourceIsClockify
+                ? {}
+                : {
+                  "PROJ-9": [{
+                    id: sourceId,
+                    comment: `source\n${marker}`,
+                    started: iso(startMs),
+                    timeSpentSeconds: 3600
+                  }]
+                },
+              keep: [true],
+              writtenFiles: ledgerWith([
+                {
+                  provider: sourceProvider,
+                  scope: sourceIsClockify ? clockifyScope : jiraScope,
+                  entryId: sourceId,
+                  rowId,
+                  sourceStartMs: startMs,
+                  startMs,
+                  endMs: startMs + 3_600_000,
+                  seconds: 3600,
+                  ticketKey: "PROJ-9"
+                },
+                {
+                  provider: targetProvider,
+                  scope: sourceIsClockify ? jiraScope : clockifyScope,
+                  entryId: `${targetProvider}-deleted-target`,
+                  rowId,
+                  sourceStartMs: startMs,
+                  startMs,
+                  endMs: startMs + 3_600_000,
+                  seconds: 3600,
+                  ticketKey: "PROJ-9"
+                }
+              ])
+            })
+          )
+
+          expect(world.createdClockifyEntries).toHaveLength(0)
+          expect(world.jiraWorklogs).toHaveLength(0)
+          expect(output(world.stdout)).toContain(`Could not verify the current ${targetProvider} bound entry`)
+        })
+    )
+
+    it.effect(`holds ${direction} when targeted provider evidence is not a complete decoded absence`, () =>
+      Effect.forEach(
+        ["malformed-404", "body-failure-404", "401", "403", "500"] satisfies ReadonlyArray<
+          NonNullable<FakeHeadlessOptions["jiraExactWorklogReadFault"]>
+        >,
+        (fault) =>
+          Effect.gen(function*() {
+            const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+            const rowId = `2026-07-01:UNCERTAIN-TARGET-${direction}-${fault}`
+            const sourceIsClockify = direction === "clockify-to-jira"
+            const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+            const targetProvider = sourceIsClockify ? "jira" : "clockify"
+            const sourceId = `${sourceProvider}-uncertain-source-${fault}`
+            const targetId = `${targetProvider}-uncertain-target-${fault}`
+            const marker = SourceConsumption.marker(rowId, startMs)
+            const ledger = ledgerWith([
+              {
+                provider: sourceProvider,
+                scope: sourceIsClockify ? clockifyScope : jiraScope,
+                entryId: sourceId,
+                rowId,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              },
+              {
+                provider: targetProvider,
+                scope: sourceIsClockify ? jiraScope : clockifyScope,
+                entryId: targetId,
+                rowId,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              }
+            ])
+            const fake = makeFakeHeadless(baseOptions({
+              clockifyEntries: sourceIsClockify
+                ? [{
+                  id: sourceId,
+                  description: `[PROJ-9] source\n${marker}`,
+                  start: iso(startMs),
+                  end: iso(startMs + 3_600_000)
+                }]
+                : [],
+              jiraWorklogs: sourceIsClockify
+                ? {}
+                : {
+                  "PROJ-9": [{
+                    id: sourceId,
+                    comment: `source\n${marker}`,
+                    started: iso(startMs),
+                    timeSpentSeconds: 3600
+                  }]
+                },
+              ...(sourceIsClockify
+                ? { jiraExactWorklogReadFault: fault }
+                : { clockifyExactEntryReadFault: fault }),
+              keep: [true],
+              writtenFiles: ledger
+            }))
+
+            yield* TestClock.setTime(HISTORICAL_NOW)
+            yield* Command.runWith(root, { version: "0.0.0-test" })([
+              "sync",
+              "reconcile",
+              direction,
+              ...SINCE
+            ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+            expect(fake.world.createdClockifyEntries).toEqual([])
+            expect(fake.world.jiraWorklogs).toEqual([])
+            expect(fake.world.writtenFiles[ledgerPath]).toBe(ledger[ledgerPath])
+            expect(output(fake.world.stdout)).toContain(`Could not verify the current ${targetProvider} bound entry`)
+          }),
+        { discard: true }
+      ))
+
+    it.effect(`does not infer ${direction} target deletion from a failed final read`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:INCOMPLETE-TARGET"
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const sourceId = `${sourceProvider}-source-with-unread-target`
+        const marker = SourceConsumption.marker(rowId, startMs)
+        const fake = makeFakeHeadless(baseOptions({
+          clockifyEntries: sourceIsClockify
+            ? [{
+              id: sourceId,
+              description: `[PROJ-9] source\n${marker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }]
+            : [],
+          jiraWorklogs: sourceIsClockify
+            ? {}
+            : {
+              "PROJ-9": [{
+                id: sourceId,
+                comment: `source\n${marker}`,
+                started: iso(startMs),
+                timeSpentSeconds: 3600
+              }]
+            },
+          keep: [true],
+          beforePromptInput: (world) => {
+            if (sourceIsClockify) world.jiraSearchFailuresRemaining = 1
+            else world.clockifyEntriesReadFailuresRemaining = 1
+          },
+          writtenFiles: ledgerWith([{
+            provider: sourceProvider,
+            scope: sourceIsClockify ? clockifyScope : jiraScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }])
+        }))
+
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        yield* Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          direction,
+          ...SINCE
+        ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+        expect(fake.world.createdClockifyEntries).toEqual([])
+        expect(fake.world.jiraWorklogs).toEqual([])
+        expect(output(fake.world.stdout)).toContain("Reconcile failed")
+      }))
+  }
+
+  for (
+    const response of [
+      { name: "different ID", id: "jira-different-target", valid: false },
+      { name: "blank ID", id: "", valid: false },
+      { name: "missing ID", id: undefined, valid: false },
+      { name: "matching ID", id: "jira-requested-target", valid: true }
+    ]
+  ) {
+    it.effect(`checks targeted Jira evidence with a ${response.name}`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = "2026-07-01:MISMATCHED-JIRA-ID"
+        const sourceId = "clockify-mismatched-jira-source"
+        const targetId = "jira-requested-target"
+        const marker = SourceConsumption.marker(rowId, startMs)
+        const ledger = ledgerWith([
+          {
+            provider: "clockify",
+            scope: clockifyScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          },
+          {
+            provider: "jira",
+            scope: jiraScope,
+            entryId: targetId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }
+        ])
+        const options = baseOptions({
+          clockifyEntries: [{
+            id: sourceId,
+            description: `[PROJ-9] source\n${marker}`,
+            start: iso(startMs),
+            end: iso(startMs + 3_600_000)
+          }],
+          jiraWorklogs: {
+            "PROJ-9": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 1800 }]
+          },
+          jiraSearchHiddenIssues: ["PROJ-9"],
+          keep: [true],
+          writtenFiles: ledger
+        })
+        const fake = makeFakeHeadless(
+          response.valid
+            ? options
+            : response.id === undefined
+            ? { ...options, jiraReadOmitsId: true }
+            : { ...options, jiraExactWorklogReturnedId: response.id }
+        )
+
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        yield* Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          "clockify-to-jira",
+          ...SINCE
+        ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+        if (response.valid) {
+          expect(fake.world.jiraWorklogs).toHaveLength(1)
+          expect(fake.world.jiraWorklogs[0]).toMatchObject({ issueKey: "PROJ-9", timeSpentSeconds: 1800 })
+        } else {
+          expect(fake.world.jiraWorklogs).toEqual([])
+        }
+        expect(fake.world.createdClockifyEntries).toEqual([])
+        if (response.valid) {
+          expect(fake.world.writtenFiles[ledgerPath]).not.toBe(ledger[ledgerPath])
+          const settled = fake.world.writtenFiles[ledgerPath]
+          yield* Command.runWith(root, { version: "0.0.0-test" })([
+            "sync",
+            "reconcile",
+            "clockify-to-jira",
+            ...SINCE
+          ]).pipe(Effect.exit, Effect.provide(fake.layer))
+          expect(fake.world.jiraWorklogs).toHaveLength(1)
+          expect(fake.world.writtenFiles[ledgerPath]).toBe(settled)
+        } else {
+          expect(fake.world.writtenFiles[ledgerPath]).toBe(ledger[ledgerPath])
+          expect(output(fake.world.stdout)).toContain("Could not verify the current jira bound entry")
+        }
+      }))
+  }
+
+  it.effect("retains a bound Clockify target after its ticket text is removed", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = "2026-07-01:UNLINKED-TARGET"
+      const sourceId = "jira-unlinked-source"
+      const targetId = "clockify-unlinked-target"
+      const marker = SourceConsumption.marker(rowId, startMs)
+      const ledger = ledgerWith([
+        {
+          provider: "jira",
+          scope: jiraScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        },
+        {
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: targetId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        }
+      ])
+      const { world } = yield* run(
+        ["sync", "reconcile", "jira-to-clockify", ...SINCE],
+        baseOptions({
+          clockifyEntries: [{
+            id: targetId,
+            description: "Synthetic manual entry",
+            start: iso(startMs),
+            end: iso(startMs + 3_600_000)
+          }],
+          jiraWorklogs: {
+            "PROJ-9": [{
+              id: sourceId,
+              comment: `source\n${marker}`,
+              started: iso(startMs),
+              timeSpentSeconds: 3600
+            }]
+          },
+          keep: [true],
+          writtenFiles: ledger
+        })
+      )
+
+      expect(world.createdClockifyEntries).toEqual([])
+      expect(world.writtenFiles[ledgerPath]).toBe(ledger[ledgerPath])
+    }))
+
+  it.effect("refuses a bound Jira remainder below one minute after the guarded re-read", () => {
+    const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+    const rowId = "2026-07-01:JIRA-REMAINDER"
+    const sourceId = "clockify-jira-remainder-source"
+    const targetId = "jira-remainder-target"
+    const marker = SourceConsumption.marker(rowId, startMs)
+    const fake = makeFakeHeadless(baseOptions({
+      clockifyEntries: [{
+        id: sourceId,
+        description: `[PROJ-9] source\n${marker}`,
+        start: iso(startMs),
+        end: iso(startMs + 3_600_000)
+      }],
+      jiraWorklogs: {
+        "PROJ-9": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 3570 }]
+      },
+      writtenFiles: ledgerWith([
+        {
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        },
+        {
+          provider: "jira",
+          scope: jiraScope,
+          entryId: targetId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_570_000,
+          seconds: 3570,
+          ticketKey: "PROJ-9"
+        }
+      ])
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const service = yield* ReconcileService
+      const comparison = yield* service.compareDirection({
+        from: new Date(DAY.year, DAY.month - 1, DAY.day),
+        to: new Date(DAY.year, DAY.month - 1, DAY.day + 1)
+      })
+      const row = comparison.rows.find((candidate) => candidate.ticketKey === "PROJ-9")
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      const decision = yield* comparison.resolveSource(row, "clockify-to-jira", 3600)
+      expect(decision).toEqual({
+        _tag: "Refused",
+        message: "Direction remainder is less than Jira's one-minute minimum"
+      })
+      expect(fake.world.jiraWorklogs).toEqual([])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("reserves, posts, and binds the exact one-minute Jira remainder", () => {
+    const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+    const rowId = "2026-07-01:JIRA-EXACT-MINIMUM"
+    const sourceId = "clockify-exact-minute-source"
+    const targetId = "jira-exact-minute-target"
+    const marker = SourceConsumption.marker(rowId, startMs)
+    const fake = makeFakeHeadless(baseOptions({
+      clockifyEntries: [{
+        id: sourceId,
+        description: `[PROJ-9] source\n${marker}`,
+        start: iso(startMs),
+        end: iso(startMs + 3_600_000)
+      }],
+      jiraWorklogs: {
+        "PROJ-9": [{ id: targetId, started: iso(startMs), timeSpentSeconds: 3540 }]
+      },
+      writtenFiles: ledgerWith([
+        {
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        },
+        {
+          provider: "jira",
+          scope: jiraScope,
+          entryId: targetId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_540_000,
+          seconds: 3540,
+          ticketKey: "PROJ-9"
+        }
+      ])
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const service = yield* ReconcileService
+      const comparison = yield* service.compareDirection({
+        from: new Date(DAY.year, DAY.month - 1, DAY.day),
+        to: new Date(DAY.year, DAY.month - 1, DAY.day + 1)
+      })
+      const row = comparison.rows.find((candidate) => candidate.ticketKey === "PROJ-9")
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      const decision = yield* comparison.resolveSource(row, "clockify-to-jira", 3600)
+      expect(decision._tag).toBe("Bound")
+      if (decision._tag !== "Bound") return
+      const outcome = yield* service.applyToJira(
+        row.ticketKey,
+        row.day,
+        decision.source.seconds,
+        undefined,
+        decision.startedAt,
+        decision.source
+      )
+      expect(outcome._tag).toBe("Posted")
+      expect(fake.world.jiraWorklogs).toMatchObject([{ timeSpentSeconds: 60 }])
+      const stored = fake.world.writtenFiles[ledgerPath] ?? ""
+      expect(stored).toContain("\"seconds\":60")
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("refuses a moved bound target that leaves disconnected source time", () => {
+    const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+    const rowId = "2026-07-01:DISCONNECTED-TARGET"
+    const sourceId = "clockify-disconnected-source"
+    const targetId = "jira-disconnected-target"
+    const marker = SourceConsumption.marker(rowId, startMs)
+    const fake = makeFakeHeadless(baseOptions({
+      clockifyEntries: [{
+        id: sourceId,
+        description: `[PROJ-9] source\n${marker}`,
+        start: iso(startMs),
+        end: iso(startMs + 3_600_000)
+      }],
+      jiraWorklogs: {
+        "PROJ-9": [{ id: targetId, started: iso(startMs + 900_000), timeSpentSeconds: 900 }]
+      },
+      writtenFiles: ledgerWith([
+        {
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        },
+        {
+          provider: "jira",
+          scope: jiraScope,
+          entryId: targetId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 900_000,
+          seconds: 900,
+          ticketKey: "PROJ-9"
+        }
+      ])
+    }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      const service = yield* ReconcileService
+      const comparison = yield* service.compareDirection({
+        from: new Date(DAY.year, DAY.month - 1, DAY.day),
+        to: new Date(DAY.year, DAY.month - 1, DAY.day + 1)
+      })
+      const row = comparison.rows.find((candidate) => candidate.ticketKey === "PROJ-9")
+      expect(row).toBeDefined()
+      if (row === undefined) return
+      const decision = yield* comparison.resolveSource(row, "clockify-to-jira", 3600)
+      expect(decision).toEqual({
+        _tag: "Refused",
+        message: "Verified target time leaves disconnected source intervals; split it manually before writing"
+      })
+      expect(fake.world.jiraWorklogs).toEqual([])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  for (const direction of directions) {
+    it.effect(`reverifies the ${direction} source after reserving the target write`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = `2026-07-01:FINAL-${direction}`
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const sourceId = `${sourceProvider}-final-source`
+        const marker = SourceConsumption.marker(rowId, startMs)
+        let switched = false
+        const fake = makeFakeHeadless(baseOptions({
+          clockifyEntries: sourceIsClockify
+            ? [{
+              id: sourceId,
+              description: `[PROJ-9] source\n${marker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }]
+            : [],
+          jiraWorklogs: sourceIsClockify
+            ? {}
+            : {
+              "PROJ-9": [{
+                id: sourceId,
+                comment: `source\n${marker}`,
+                started: iso(startMs),
+                timeSpentSeconds: 3600
+              }]
+            },
+          keep: [true],
+          afterFileWrite: (path) =>
+            Effect.sync(() => {
+              if (switched || path !== `${ledgerPath}.tmp`) return
+              switched = true
+              if (sourceIsClockify) {
+                fake.world.clockifyAuth.workspaceId = "ws-after-reserve"
+                fake.world.clockifyAuth.userId = "user-after-reserve"
+                fake.world.clockifyVerifiedUserId = "user-after-reserve"
+              } else {
+                fake.world.jiraAuth.cloudId = "cloud-after-reserve"
+                fake.world.jiraAuth.siteUrl = "https://after-reserve.invalid"
+                fake.world.jiraAuth.accountId = "account-after-reserve"
+                fake.world.jiraAuth.accessToken = "token-after-reserve"
+              }
+            }),
+          writtenFiles: ledgerWith([{
+            provider: sourceProvider,
+            scope: sourceIsClockify ? clockifyScope : jiraScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }])
+        }))
+
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        yield* Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          direction,
+          ...SINCE
+        ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+        expect(switched).toBe(true)
+        expect(fake.world.createdClockifyEntries).toEqual([])
+        expect(fake.world.jiraWorklogs).toEqual([])
+        const ledger = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+          pending: Schema.Array(Schema.Unknown),
+          bindings: Schema.Array(Schema.Unknown)
+        })))(fake.world.writtenFiles[ledgerPath] ?? "")
+        expect(ledger.pending).toEqual([])
+        expect(ledger.bindings).toHaveLength(1)
+      }))
+
+    it.effect(`keeps the ${direction} intent for manual review when pre-write cleanup fails`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = `2026-07-01:CLEANUP-${direction}`
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const sourceId = `${sourceProvider}-cleanup-source`
+        const marker = SourceConsumption.marker(rowId, startMs)
+        const unwritable: Array<string> = []
+        let switched = false
+        const fake = makeFakeHeadless(baseOptions({
+          clockifyEntries: sourceIsClockify
+            ? [{
+              id: sourceId,
+              description: `[PROJ-9] source\n${marker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }]
+            : [],
+          jiraWorklogs: sourceIsClockify
+            ? {}
+            : {
+              "PROJ-9": [{
+                id: sourceId,
+                comment: `source\n${marker}`,
+                started: iso(startMs),
+                timeSpentSeconds: 3600
+              }]
+            },
+          keep: [true],
+          unwritablePaths: unwritable,
+          afterFileWrite: (path) =>
+            Effect.sync(() => {
+              if (switched || path !== `${ledgerPath}.tmp`) return
+              switched = true
+              unwritable.push(`${ledgerPath}.tmp`)
+              if (sourceIsClockify) {
+                fake.world.clockifyAuth.workspaceId = "ws-cleanup-failure"
+                fake.world.clockifyAuth.userId = "user-cleanup-failure"
+                fake.world.clockifyVerifiedUserId = "user-cleanup-failure"
+              } else {
+                fake.world.jiraAuth.cloudId = "cloud-cleanup-failure"
+                fake.world.jiraAuth.siteUrl = "https://cleanup-failure.invalid"
+                fake.world.jiraAuth.accountId = "account-cleanup-failure"
+                fake.world.jiraAuth.accessToken = "token-cleanup-failure"
+              }
+            }),
+          writtenFiles: ledgerWith([{
+            provider: sourceProvider,
+            scope: sourceIsClockify ? clockifyScope : jiraScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }])
+        }))
+
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        yield* Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          direction,
+          ...SINCE
+        ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+        expect(fake.world.createdClockifyEntries).toEqual([])
+        expect(fake.world.jiraWorklogs).toEqual([])
+        const ledger = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+          pending: Schema.Array(Schema.Unknown)
+        })))(fake.world.writtenFiles[ledgerPath] ?? "")
+        expect(ledger.pending).toHaveLength(1)
+        expect(output(fake.world.stdout)).toContain("manual")
+      }))
+
+    it.effect(`keeps the ${direction} intent after a dispatched write has no durable receipt`, () =>
+      Effect.gen(function*() {
+        const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+        const rowId = `2026-07-01:UNCERTAIN-${direction}`
+        const sourceIsClockify = direction === "clockify-to-jira"
+        const sourceProvider = sourceIsClockify ? "clockify" : "jira"
+        const sourceId = `${sourceProvider}-uncertain-source`
+        const marker = SourceConsumption.marker(rowId, startMs)
+        const fake = makeFakeHeadless(baseOptions({
+          clockifyEntries: sourceIsClockify
+            ? [{
+              id: sourceId,
+              description: `[PROJ-9] source\n${marker}`,
+              start: iso(startMs),
+              end: iso(startMs + 3_600_000)
+            }]
+            : [],
+          jiraWorklogs: sourceIsClockify
+            ? {}
+            : {
+              "PROJ-9": [{
+                id: sourceId,
+                comment: `source\n${marker}`,
+                started: iso(startMs),
+                timeSpentSeconds: 3600
+              }]
+            },
+          keep: [true],
+          jiraPostOmitsId: sourceIsClockify,
+          clockifyWritesFail: !sourceIsClockify,
+          writtenFiles: ledgerWith([{
+            provider: sourceProvider,
+            scope: sourceIsClockify ? clockifyScope : jiraScope,
+            entryId: sourceId,
+            rowId,
+            sourceStartMs: startMs,
+            startMs,
+            endMs: startMs + 3_600_000,
+            seconds: 3600,
+            ticketKey: "PROJ-9"
+          }])
+        }))
+
+        yield* TestClock.setTime(HISTORICAL_NOW)
+        yield* Command.runWith(root, { version: "0.0.0-test" })([
+          "sync",
+          "reconcile",
+          direction,
+          ...SINCE
+        ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+        expect(fake.world.jiraWorklogs).toHaveLength(sourceIsClockify ? 1 : 0)
+        expect(fake.world.createdClockifyEntries).toEqual([])
+        const ledger = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+          pending: Schema.Array(Schema.Unknown)
+        })))(fake.world.writtenFiles[ledgerPath] ?? "")
+        expect(ledger.pending).toHaveLength(1)
+      }))
+  }
+
+  it.effect("refuses a Clockify source when its verified account changes after the final read", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const sourceId = "clockify-colliding-source"
+      const rowA = "2026-07-01:SOURCE-A"
+      const rowB = "2026-07-01:SOURCE-B"
+      const scopeB = JSON.stringify(["clockify-v3", "https://api.clockify.me/api", "ws-b", "user-b"])
+      let pages = 0
+      const fake = makeFakeHeadless(baseOptions({
+        clockifyEntries: [{
+          id: sourceId,
+          description: `[PROJ-9] source A\n${SourceConsumption.marker(rowA, startMs)}`,
+          start: iso(startMs),
+          end: iso(startMs + 3_600_000)
+        }],
+        keep: [true],
+        afterClockifyEntriesRead: (_page, world) => {
+          pages++
+          if (pages !== 4) return
+          world.clockifyAuth.workspaceId = "ws-b"
+          world.clockifyAuth.userId = "user-b"
+          world.clockifyVerifiedUserId = "user-b"
+        },
+        writtenFiles: {
+          [ledgerPath]: JSON.stringify({
+            version: 3,
+            reviewedWindows: [
+              { provider: "clockify", scope: clockifyScope, fromMs: 0, toMs: 4_102_444_800_000 },
+              { provider: "clockify", scope: scopeB, fromMs: 0, toMs: 4_102_444_800_000 },
+              { provider: "jira", scope: jiraScope, fromMs: 0, toMs: 4_102_444_800_000 }
+            ],
+            pending: [],
+            bindings: [
+              {
+                provider: "clockify",
+                scope: clockifyScope,
+                entryId: sourceId,
+                rowId: rowA,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              },
+              {
+                provider: "clockify",
+                scope: scopeB,
+                entryId: sourceId,
+                rowId: rowB,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              }
+            ],
+            observedUnbound: []
+          })
+        }
+      }))
+      const ledgerBefore = fake.world.writtenFiles[ledgerPath]
+
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      yield* Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "clockify-to-jira",
+        ...SINCE
+      ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+      expect(fake.world.jiraWorklogs).toEqual([])
+      expect(fake.world.writtenFiles[ledgerPath]).toBe(ledgerBefore)
+      expect(output(fake.world.stdout)).toContain("source provider account changed")
+    }))
+
+  it.effect("refuses a Jira source when its verified site changes after the final read", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const sourceId = "jira-colliding-source"
+      const rowA = "2026-07-01:JIRA-A"
+      const rowB = "2026-07-01:JIRA-B"
+      const scopeA = JSON.stringify(["cloud-a", "acct-a"])
+      const scopeB = JSON.stringify(["cloud-b", "acct-b"])
+      let pages = 0
+      const fake = makeFakeHeadless(baseOptions({
+        jiraCloudId: "cloud-a",
+        jiraAccountId: "acct-a",
+        jiraWorklogsByCloudId: {
+          "cloud-a": {
+            "PROJ-9": [{
+              id: sourceId,
+              comment: `source A\n${SourceConsumption.marker(rowA, startMs)}`,
+              started: iso(startMs),
+              timeSpentSeconds: 3600,
+              author: { accountId: "acct-a" }
+            }]
+          },
+          "cloud-b": {
+            "PROJ-9": [{
+              id: sourceId,
+              comment: `source B\n${SourceConsumption.marker(rowB, startMs)}`,
+              started: iso(startMs),
+              timeSpentSeconds: 3600,
+              author: { accountId: "acct-b" }
+            }]
+          }
+        },
+        keep: [true],
+        afterJiraWorklogsRead: (_issueKey, _startAt, world) => {
+          pages++
+          if (pages !== 2) return
+          world.jiraAuth.cloudId = "cloud-b"
+          world.jiraAuth.siteUrl = "https://b.invalid"
+          world.jiraAuth.accountId = "acct-b"
+          world.jiraAuth.accessToken = "token-b"
+        },
+        writtenFiles: {
+          [ledgerPath]: JSON.stringify({
+            version: 3,
+            reviewedWindows: [
+              { provider: "clockify", scope: clockifyScope, fromMs: 0, toMs: 4_102_444_800_000 },
+              { provider: "jira", scope: scopeA, fromMs: 0, toMs: 4_102_444_800_000 },
+              { provider: "jira", scope: scopeB, fromMs: 0, toMs: 4_102_444_800_000 }
+            ],
+            pending: [],
+            bindings: [
+              {
+                provider: "jira",
+                scope: scopeA,
+                entryId: sourceId,
+                rowId: rowA,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              },
+              {
+                provider: "jira",
+                scope: scopeB,
+                entryId: sourceId,
+                rowId: rowB,
+                sourceStartMs: startMs,
+                startMs,
+                endMs: startMs + 3_600_000,
+                seconds: 3600,
+                ticketKey: "PROJ-9"
+              }
+            ],
+            observedUnbound: []
+          })
+        }
+      }))
+      const ledgerBefore = fake.world.writtenFiles[ledgerPath]
+
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      yield* Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "jira-to-clockify",
+        ...SINCE
+      ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+      expect(fake.world.createdClockifyEntries).toEqual([])
+      expect(fake.world.writtenFiles[ledgerPath]).toBe(ledgerBefore)
+      expect(output(fake.world.stdout)).toContain("source provider account changed")
+    }))
+
+  it.effect("accepts Clockify credential rotation when the verified source identity stays the same", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = "2026-07-01:CLOCKIFY-ROTATION"
+      const sourceId = "clockify-rotation-source"
+      let pages = 0
+      const fake = makeFakeHeadless(baseOptions({
+        clockifyEntries: [{
+          id: sourceId,
+          description: `[PROJ-9] source\n${SourceConsumption.marker(rowId, startMs)}`,
+          start: iso(startMs),
+          end: iso(startMs + 3_600_000)
+        }],
+        keep: [true],
+        afterClockifyEntriesRead: (_page, world) => {
+          pages++
+          if (pages === 4) world.clockifyAuth.apiKey = "rotated-key"
+        },
+        writtenFiles: ledgerWith([{
+          provider: "clockify",
+          scope: clockifyScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        }])
+      }))
+
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      yield* Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "clockify-to-jira",
+        ...SINCE
+      ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+      expect(fake.world.jiraWorklogs).toMatchObject([{ timeSpentSeconds: 3600 }])
+    }))
+
+  it.effect("accepts Jira token rotation when the verified source identity stays the same", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const rowId = "2026-07-01:JIRA-ROTATION"
+      const sourceId = "jira-rotation-source"
+      let pages = 0
+      const fake = makeFakeHeadless(baseOptions({
+        jiraWorklogs: {
+          "PROJ-9": [{
+            id: sourceId,
+            comment: `source\n${SourceConsumption.marker(rowId, startMs)}`,
+            started: iso(startMs),
+            timeSpentSeconds: 3600
+          }]
+        },
+        keep: [true],
+        afterJiraWorklogsRead: (_issueKey, _startAt, world) => {
+          pages++
+          if (pages === 2) world.jiraAuth.accessToken = "rotated-token"
+        },
+        writtenFiles: ledgerWith([{
+          provider: "jira",
+          scope: jiraScope,
+          entryId: sourceId,
+          rowId,
+          sourceStartMs: startMs,
+          startMs,
+          endMs: startMs + 3_600_000,
+          seconds: 3600,
+          ticketKey: "PROJ-9"
+        }])
+      }))
+
+      yield* TestClock.setTime(HISTORICAL_NOW)
+      yield* Command.runWith(root, { version: "0.0.0-test" })([
+        "sync",
+        "reconcile",
+        "jira-to-clockify",
+        ...SINCE
+      ]).pipe(Effect.exit, Effect.provide(fake.layer))
+
+      expect(fake.world.createdClockifyEntries).toHaveLength(1)
+    }))
+
+  it.effect("refuses multiple verified source blocks before a direction write", () =>
+    Effect.gen(function*() {
+      const first = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const second = first + 1_800_000
+      const entries = [first, second].map((startMs, index) => ({
+        id: `source-${String(index + 1)}`,
+        description: `[PROJ-9] part\n${SourceConsumption.marker(`2026-07-01:SOURCE-${String(index + 1)}`, startMs)}`,
+        start: iso(startMs),
+        end: iso(startMs + 1_800_000)
+      }))
+      const independent = {
+        id: "independent-source",
+        description: "[PROJ-10] independent work",
+        start: iso(second + 1_800_000),
+        end: iso(second + 3_600_000)
+      }
+      const { world } = yield* run(
+        ["sync", "reconcile", "clockify-to-jira", ...SINCE],
+        baseOptions({
+          clockifyEntries: [...entries, independent],
+          keep: [true, true],
+          writtenFiles: ledgerWith(entries.map((entry, index) => ({
+            provider: "clockify",
+            scope: clockifyScope,
+            entryId: entry.id,
+            rowId: `2026-07-01:SOURCE-${String(index + 1)}`,
+            sourceStartMs: index === 0 ? first : second,
+            startMs: index === 0 ? first : second,
+            endMs: (index === 0 ? first : second) + 1_800_000,
+            seconds: 1800,
+            ticketKey: "PROJ-9"
+          })))
+        })
+      )
+
+      expect(world.jiraWorklogs).toHaveLength(1)
+      expect(world.jiraWorklogs[0]?.issueKey).toBe("PROJ-10")
+      expect(output(world.stdout)).toContain("more than one verified source block")
+    }))
+
+  it.effect("refuses an editable direction marker with no private binding", () =>
+    Effect.gen(function*() {
+      const startMs = at(DAY.year, DAY.month, DAY.day, 12, 0)
+      const { world } = yield* run(
+        ["sync", "reconcile", "clockify-to-jira", ...SINCE],
+        baseOptions({
+          clockifyEntries: [{
+            id: "unbound-marker",
+            description: `[PROJ-9] note\n${SourceConsumption.marker("2026-07-01:SOURCE-X", startMs)}`,
+            start: iso(startMs),
+            end: iso(startMs + 3_600_000)
+          }],
+          keep: [true],
+          writtenFiles: ledgerWith([])
+        })
+      )
+
+      expect(world.jiraWorklogs).toEqual([])
+      expect(output(world.stdout)).toContain("not verified by the private ledger")
+    }))
+
   for (const direction of directions) {
     it.effect(`does not duplicate matching overnight records in ${direction}`, () =>
       Effect.gen(function*() {

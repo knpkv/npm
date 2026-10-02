@@ -1025,7 +1025,7 @@ it.effect("holds legacy Clockify windows before source planning and leaves priva
     expect((yield* confirm(yield* readJiraOnlyPlan))._tag).toBe("Written")
     expect(fake.world.jiraWorklogs).toHaveLength(1)
     const migrated = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Struct({
-      version: Schema.Literal(3),
+      version: Schema.Literal(4),
       reviewedWindows: Schema.Array(Schema.Struct({ provider: Schema.String, scope: Schema.String }))
     })))(fake.world.writtenFiles[ledgerPath])
     expect(

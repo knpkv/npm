@@ -27,12 +27,15 @@ import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as Path from "effect/Path"
 import * as Ref from "effect/Ref"
 import * as Semaphore from "effect/Semaphore"
 import * as SubscriptionRef from "effect/SubscriptionRef"
 import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as WriterGuard from "../cli/writerGuard.js"
 import { ClockifyAuth } from "./ClockifyAuth.js"
 import { ConfigService } from "./ConfigService.js"
 import { postJiraWorklog as postWithClient } from "./internal/JiraWorklogPost.js"
@@ -176,6 +179,8 @@ export const layer = Layer.effect(
     const httpClient = yield* HttpClient.HttpClient
     const clockifyAuth = yield* ClockifyAuth
     const config = yield* ConfigService
+    const fileSystem = yield* FileSystem.FileSystem
+    const path = yield* Path.Path
     const stateWriter = yield* StateWriter
     const ref = yield* SubscriptionRef.make<TimerState>(emptyState)
     const stateRevision = yield* Ref.make(0)
@@ -288,7 +293,23 @@ export const layer = Layer.effect(
         return yield* postWithClient(jira, { ticketKey, startedAt, durationSeconds, comment })
       })
 
-    const start = (ticket: JiraTicket, options?: StartOptions) =>
+    const provideGuard = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+      effect.pipe(
+        Effect.provideService(ConfigService, config),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path)
+      )
+
+    const guardTimerMutation = <A, R>(effect: Effect.Effect<A, TimerError, R>) =>
+      provideGuard(WriterGuard.mutate(effect)).pipe(
+        Effect.mapError((error) =>
+          error._tag === "WriterGuardError"
+            ? new TimerError({ message: error.message, cause: error })
+            : error
+        )
+      )
+
+    const startUnGuarded = (ticket: JiraTicket, options?: StartOptions) =>
       Effect.gen(function*() {
         const auth = yield* getAuth
         const cfg = yield* config.get
@@ -348,6 +369,8 @@ export const layer = Layer.effect(
 
         yield* storeState(newState)
       })
+
+    const start = (ticket: JiraTicket, options?: StartOptions) => guardTimerMutation(startUnGuarded(ticket, options))
 
     // Two ways the end can be moved off "now", with deliberately opposite
     // out-of-bounds behaviour:
@@ -448,12 +471,17 @@ export const layer = Layer.effect(
 
     // Retry a worklog post in isolation (Clockify already saved during the failed stop).
     const logWorklog = (params: WorklogParams) =>
-      postJiraWorklog(params.ticketKey, params.startedAt, params.durationSeconds, params.comment)
+      provideGuard(WriterGuard.mutate(
+        postJiraWorklog(params.ticketKey, params.startedAt, params.durationSeconds, params.comment)
+      )).pipe(
+        Effect.catchTag("WriterGuardError", (error) =>
+          Effect.succeed<JiraWorklogOutcome>({ _tag: "Failed", message: error.message }))
+      )
 
     // Log a completed interval after the fact — for when the timer was never started.
     // Writes a closed Clockify entry (start + end) and posts the matching Jira worklog,
     // without ever touching the running-timer state.
-    const logManual = (ticket: JiraTicket, options: LogManualOptions) =>
+    const logManualUnGuarded = (ticket: JiraTicket, options: LogManualOptions) =>
       Effect.gen(function*() {
         const nowMs = yield* Clock.currentTimeMillis
         // Shared future-time guard for all backdating callers (log + stop-correction).
@@ -506,6 +534,9 @@ export const layer = Layer.effect(
           billable
         } satisfies LogManualResult
       })
+
+    const logManual = (ticket: JiraTicket, options: LogManualOptions) =>
+      guardTimerMutation(logManualUnGuarded(ticket, options))
 
     const detectRunning = Effect.gen(function*() {
       const observedRevision = yield* Ref.get(stateRevision)
@@ -585,7 +616,7 @@ export const layer = Layer.effect(
     })
 
     // Discard: delete the Clockify entry, clear state, no Jira worklog
-    const discard = Effect.gen(function*() {
+    const discardUnGuarded = Effect.gen(function*() {
       const current = yield* SubscriptionRef.get(ref)
       if (!current.active) {
         return yield* new TimerError({ message: "No active timer to discard" })
@@ -602,6 +633,16 @@ export const layer = Layer.effect(
       yield* clearState
     })
 
-    return { state: ref, start, stop: internalStop, logWorklog, logManual, discard, detectRunning }
+    const discard = guardTimerMutation(discardUnGuarded)
+
+    return {
+      state: ref,
+      start,
+      stop: (options) => guardTimerMutation(internalStop(options)),
+      logWorklog,
+      logManual,
+      discard,
+      detectRunning
+    }
   })
 )
