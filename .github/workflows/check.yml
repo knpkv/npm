@@ -67,7 +67,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 10
+    # Builds the workspace, then type-checks every changed public surface. A PR touching several
+    # publishable packages needs ~4 min for the coverage step alone on top of `pnpm check`.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
