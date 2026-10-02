@@ -433,6 +433,10 @@ const field = (key: string, label: string, value: string, redacted = false): App
   value
 })
 
+/** `root`, or `relation:parentAgentId`: the lineage fields bound into the approval hash. */
+const agentLineage = (agent: AgentWorkerIdentity): string =>
+  agent.relationship === undefined ? "root" : `${agent.relationship.relation}:${agent.relationship.parentAgentId}`
+
 const reassignAgentFields = (toAgent: WorkReassignAgent): ReadonlyArray<ApprovalRequestField> => {
   switch (toAgent._tag) {
     case "clear":
@@ -448,9 +452,7 @@ const reassignAgentFields = (toAgent: WorkReassignAgent): ReadonlyArray<Approval
         field(
           "toAgentLineage",
           "New agent lineage",
-          toAgent.agent.relationship === undefined
-            ? "root"
-            : `${toAgent.agent.relationship.relation}:${toAgent.agent.relationship.parentAgentId}`
+          agentLineage(toAgent.agent)
         )
       ]
   }
@@ -513,14 +515,13 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
           field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerName", "Existing worker name", payload.worker.name),
           field("workerHost", "Existing worker host", payload.worker.host),
           field("workerPane", "Existing worker pane", payload.worker.paneId),
           field(
             "workerLineage",
             "Existing worker lineage",
-            payload.worker.relationship === undefined
-              ? "root"
-              : `${payload.worker.relationship.relation}:${payload.worker.relationship.parentAgentId}`
+            agentLineage(payload.worker)
           ),
           field("worktree", "Existing worktree", payload.worktree),
           field("branch", "Existing branch", payload.branch)
@@ -544,8 +545,14 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
           field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerName", "Existing worker name", payload.worker.name),
           field("workerHost", "Existing worker host", payload.worker.host),
           field("workerPane", "Existing worker pane", payload.worker.paneId),
+          field(
+            "workerLineage",
+            "Existing worker lineage",
+            agentLineage(payload.worker)
+          ),
           field("worktree", "Existing worktree", payload.worktree),
           field("branch", "Existing branch", payload.branch),
           field("title", "New goal title", payload.title),
@@ -573,14 +580,13 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
           field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerName", "Existing worker name", payload.worker.name),
           field("workerHost", "Existing worker host", payload.worker.host),
           field("workerPane", "Existing worker pane", payload.worker.paneId),
           field(
             "workerLineage",
             "Existing worker lineage",
-            payload.worker.relationship === undefined
-              ? "root"
-              : `${payload.worker.relationship.relation}:${payload.worker.relationship.parentAgentId}`
+            agentLineage(payload.worker)
           ),
           field("worktree", "Existing worktree", payload.worktree),
           field("branch", "Existing branch", payload.branch)

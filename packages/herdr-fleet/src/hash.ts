@@ -4,7 +4,11 @@ import type { JobPayload } from "./model.js"
 
 const text = (value: string): string => JSON.stringify(value)
 
-const canonicalPayload = (payload: JobPayload): string => {
+/**
+ * The exact payload text bound into a job's approval hash. Approval displays
+ * use it to prove that every hash-bound field is shown to the approver.
+ */
+export const canonicalJobPayload = (payload: JobPayload): string => {
   switch (payload.kind) {
     case "browser.mcp.recover":
       return `{"kind":${text(payload.kind)}}`
@@ -148,7 +152,7 @@ export const jobHash = Effect.fn("Fleet.jobHash")(function*(
   payload: JobPayload
 ) {
   const cryptoService = yield* Crypto.Crypto
-  const canonical = `{"actor":${text(actor)},"host":${text(host)},"payload":${canonicalPayload(payload)}}`
+  const canonical = `{"actor":${text(actor)},"host":${text(host)},"payload":${canonicalJobPayload(payload)}}`
   const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(canonical)).pipe(
     Effect.mapError(
       (cause) =>
