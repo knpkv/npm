@@ -216,7 +216,7 @@ layer(NodeServices.layer)("Control Center live integration workflow", (it) => {
       )
       expect(workflow).toContain("persist-credentials: false")
       expect(workflow).toContain(
-        "aws-actions/configure-aws-credentials@cbe3b392738ccf3f987d68400dafcf4b0624a56c"
+        "aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd"
       )
       expect(workflow).toContain(
         "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a"
