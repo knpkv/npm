@@ -1204,6 +1204,7 @@ describe("sanitized approval requests", () => {
     expect(values.get("to")).toBe("Claude coordinator (agent-claude-coord)")
     expect(values.get("toAgent")).toBe("agent-claude-coord")
     expect(values.get("toAgentHost")).toBe("SER8")
+    expect(values.get("toAgentName")).toBe("coord")
     expect(values.get("toAgentPane")).toBe("w1J:p9")
     expect(values.get("toAgentLineage")).toBe("delegated:agent-lead")
     expect(values.get("reason")).toBe("Codex identities retired")

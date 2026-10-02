@@ -311,7 +311,7 @@ export const WorkReassign = Schema.Struct({
 export type WorkReassign = typeof WorkReassign.Type
 
 /** Fleet job kinds that change Work authority; only a composed Work adapter executes them. */
-export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover"])
+export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover", "work.reassign"])
 export type WorkJobKind = typeof WorkJobKind.Type
 export const isWorkJobKind = Schema.is(WorkJobKind)
 

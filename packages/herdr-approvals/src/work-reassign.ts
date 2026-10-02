@@ -6,7 +6,9 @@ import { Effect } from "effect"
 /**
  * Executes an approved `work.reassign` job against the host's Work store.
  * Compose it into `HostOperations.run` with the approval the Fleet service
- * passes in; a job without persisted approval never reaches the store.
+ * passes in, and declare `"work.reassign"` in `HostOperations.workJobKinds`
+ * so submission accepts the job; a job without persisted approval never
+ * reaches the store.
  */
 export const runWorkReassign = Effect.fn("HostOperations.workReassign")(function*(
   work: Pick<WorkService, "reassign">,

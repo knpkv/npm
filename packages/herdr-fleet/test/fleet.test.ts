@@ -1297,6 +1297,16 @@ describe("fleet local authority", () => {
       worker: { host: "SER8", agentId: "agent-jcf", name: "Original", paneId: "w1K:p1" },
       worktree: "/worktrees/jcf",
       branch: "feat/jcf"
+    },
+    {
+      kind: "work.reassign",
+      goalId: "goal-ser8-control-surface",
+      from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      to: { id: "agent-claude-coord", name: "Claude coordinator" },
+      toAgent: { _tag: "keep" },
+      reason: "Codex identities retired",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
     }
   ]
 
@@ -1673,6 +1683,7 @@ describe("fleet local authority", () => {
             now: Effect.succeed(1_000),
             operations: {
               ...operations,
+              workJobKinds: new Set(["work.reassign"]),
               run: (_payload, _started, _jobId, _actor, _lifecycle, approval) =>
                 Effect.sync(() => {
                   approvals.push(approval)

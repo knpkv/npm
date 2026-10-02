@@ -442,6 +442,7 @@ const reassignAgentFields = (toAgent: WorkReassignAgent): ReadonlyArray<Approval
     case "set":
       return [
         field("toAgent", "New agent target", toAgent.agent.agentId),
+        field("toAgentName", "New agent name", toAgent.agent.name),
         field("toAgentHost", "New agent host", toAgent.agent.host),
         field("toAgentPane", "New agent pane", toAgent.agent.paneId),
         field(
