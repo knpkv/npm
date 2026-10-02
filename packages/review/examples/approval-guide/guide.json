@@ -1,0 +1,76 @@
+{
+  "title": "Bind releases to signed approval",
+  "intent": "A caller could pass any revision to `release(revision)` and ship it without approval.\n\nThis PR adds signed approval to that decision. Follow the revision from the request to `ship(...)`, then see how the HTTP response and tests describe the outcome.",
+  "sections": [
+    {
+      "title": "The approval boundary",
+      "overview": "**Before:** `requestedRevision → ship(requestedRevision)`. The caller chose what shipped.\n\n**After:** `verifyApproval(approval)` runs first. An `Invalid` result returns `Rejected`; a `Valid` result allows execution to continue.\n\nTwo values now meet at this boundary: `requestedRevision` comes from the caller, while `verified.revision` comes from the signed approval. They are not interchangeable.\n\n> [!IMPORTANT]\n> The signature proves which revision was approved. The code must also prove that it is the revision about to ship.\n\n```mermaid\nflowchart LR\nRequest[Caller revision + signed approval] --> Verify{Valid signature?}\nVerify -- No --> Reject[Rejected result]\nVerify -- Yes --> Ship[Ship caller revision]\nVerify -. Signed revision is not compared .-> Gap[Issue 1]\n```\n\n**Review:** Follow the argument passed to `ship(...)`. Does it equal `verified.revision`?",
+      "diffs": [
+        {
+          "file": "src/release.ts",
+          "summary": "Call `verifyApproval(approval)` before `ship(requestedRevision)` and return `Rejected` for an invalid signature."
+        }
+      ]
+    },
+    {
+      "title": "What callers observe",
+      "overview": "**Before:** a completed call returned `{ ok: true }`. **After:** the route sends the domain outcome, either `Released` or `Rejected`, in the response body.\n\nThe responsibilities stay separate. `release(...)` decides whether shipping is allowed; `postRelease(...)` translates that decision into HTTP. Other callers can reuse the domain rule without knowing about HTTP.\n\nAn invalid approval takes this path:\n\n```text\nverifyApproval → Invalid\nrelease       → Rejected\nResponse.json → HTTP 200 + Rejected body\n```\n\nThe last step is the mismatch. A client checking only `response.ok` sees success, even though nothing shipped.\n\n**Review:** Check both the rejection body and the HTTP status. Issue 2 is anchored at the translation point.",
+      "diffs": [
+        {
+          "file": "src/release-route.ts",
+          "summary": "Serialize `Released | Rejected` with `Response.json(result)`; the status still needs an explicit mapping."
+        }
+      ]
+    },
+    {
+      "title": "What the tests prove",
+      "overview": "The new tests cover signature rejection and a successful release. Read each fixture as a claim about the boundary:\n\n- **Invalid signature:** expect `Rejected` and zero calls to `ship`.\n- **Valid approval for A, request for A:** expect `ship(\"revision-a\")`.\n- **Valid approval for A, request for B:** not covered. This is the case that distinguishes signature validity from permission to ship.\n\nThe negative side-effect assertion matters. Checking only `result._tag` would miss a function that ships first and returns `Rejected` afterward.\n\n**Review:** Add the A/B mismatch case and a route-level rejection test. Verify the result, HTTP status, and absence of shipping.",
+      "diffs": [
+        {
+          "file": "test/release.test.ts",
+          "summary": "Assert `Rejected` without shipping, then exercise a matching `revision-a` approval and request."
+        }
+      ]
+    }
+  ],
+  "unplacedFiles": [],
+  "review": {
+    "gitRef": "example/signed-approval",
+    "base": "main"
+  },
+  "generator": {
+    "engine": "illustrative-example",
+    "model": "Hand-authored expected guide"
+  },
+  "usage": [
+    {
+      "label": "Implementation",
+      "scope": "implementation",
+      "source": "Illustrative telemetry fixture, not actual task billing",
+      "model": "example/model",
+      "inputTokens": 24000,
+      "cachedInputTokens": 18000,
+      "outputTokens": 3200,
+      "durationMs": 326000,
+      "cost": {
+        "amount": 0.146,
+        "currency": "USD",
+        "basis": "estimated"
+      }
+    },
+    {
+      "label": "Review",
+      "scope": "review",
+      "source": "Illustrative telemetry fixture",
+      "inputTokens": 8200,
+      "outputTokens": 970,
+      "durationMs": 87000
+    },
+    {
+      "label": "Guide generation",
+      "scope": "guide",
+      "source": "Illustrative telemetry fixture",
+      "durationMs": 18000
+    }
+  ]
+}
