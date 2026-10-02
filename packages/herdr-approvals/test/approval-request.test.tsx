@@ -1125,6 +1125,43 @@ describe("sanitized approval requests", () => {
     }
   })
 
+  it("shows every authority-bearing goal reassignment field", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "work.reassign",
+      goalId: "goal-ser8-control-surface",
+      from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      to: { id: "agent-claude-coord", name: "Claude coordinator" },
+      toAgent: {
+        host: "SER8",
+        agentId: "agent-claude-coord",
+        name: "coord",
+        paneId: "w1J:p9",
+        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      },
+      reason: "Codex identities retired",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
+    })
+    const request = approvalRequestFor(payload)
+    const values = new Map(request.fields.map(({ key, value }) => [key, value]))
+    expect(request.title).toBe("Reassign one Work goal to a new owner")
+    expect(values.get("from")).toBe("Codex host coordinator (owner-host-coordinator)")
+    expect(values.get("to")).toBe("Claude coordinator (agent-claude-coord)")
+    expect(values.get("toAgent")).toBe("agent-claude-coord")
+    expect(values.get("toAgentHost")).toBe("SER8")
+    expect(values.get("toAgentPane")).toBe("w1J:p9")
+    expect(values.get("toAgentLineage")).toBe("delegated:agent-lead")
+    expect(values.get("reason")).toBe("Codex identities retired")
+    expect(values.get("expectedGoalEventId")).toBe("goal-event-7")
+    expect(values.get("expectedGoalUpdatedAt")).toBe("500")
+    expect(values.get("goalId")).toBe("goal-ser8-control-surface")
+    expect(sanitizeJobPayload(payload)).toEqual(payload)
+    const unbound = approvalRequestFor(Schema.decodeUnknownSync(JobPayload)({ ...payload, toAgent: null }))
+    expect(new Map(unbound.fields.map(({ key, value }) => [key, value])).get("toAgent")).toBe(
+      "unchanged (no agent target)"
+    )
+  })
+
   it.each(approvalDashboardStatuses)(
     "keeps the complete redacted request in the approval dashboard for %s",
     (status) => {

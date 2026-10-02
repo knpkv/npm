@@ -1,4 +1,4 @@
-import { AgentConnectTarget, AgentWorkerIdentity, WorkAdmit, WorkRecover } from "@knpkv/herdr-fleet/model"
+import { AgentConnectTarget, AgentWorkerIdentity, WorkAdmit, WorkReassign, WorkRecover } from "@knpkv/herdr-fleet/model"
 import { Equal, Schema } from "effect"
 
 const Identifier = Schema.String.check(
@@ -589,6 +589,44 @@ export const WorkExistingGoalRecovery = Schema.Struct({
   )
 )
 export type WorkExistingGoalRecovery = typeof WorkExistingGoalRecovery.Type
+
+/** The approved Fleet job supplies actor, job identity, and immutable hash. */
+export const WorkGoalReassignment = Schema.Struct({
+  ...WorkReassign.fields,
+  approvalJobId: Identifier,
+  approvalActor: Identifier,
+  approvalApprovedBy: Identifier,
+  approvalApprovedAt: Timestamp,
+  approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+}).check(
+  Schema.makeFilter(({ from, to }) => from.id !== to.id, { expected: "a different target owner" })
+)
+export type WorkGoalReassignment = typeof WorkGoalReassignment.Type
+
+/**
+ * Durable result of one reassignment. The checkpoint and any rewritten lane are
+ * both identified by the approval job id; `lane` is null when the goal had no
+ * active lane.
+ */
+export const WorkGoalReassigned = Schema.Struct({
+  reassignment: WorkGoalReassignment,
+  checkpoint: WorkGoalCheckpoint,
+  lane: Schema.NullOr(WorkLaneClaimed)
+}).check(
+  Schema.makeFilter(
+    ({ checkpoint, lane, reassignment }) =>
+      checkpoint.eventId === reassignment.approvalJobId &&
+      checkpoint.goal.id === reassignment.goalId &&
+      Equal.equals(checkpoint.goal.owner, reassignment.to) &&
+      (lane === null || (
+        lane.goalId === reassignment.goalId &&
+        lane.operationId === reassignment.approvalJobId &&
+        Equal.equals(lane.owner, reassignment.to)
+      )),
+    { expected: "a checkpoint and lane owned by the approved target owner" }
+  )
+)
+export interface WorkGoalReassigned extends Schema.Schema.Type<typeof WorkGoalReassigned> {}
 
 export const WorkCoordinatorBlocker = Schema.Struct({
   id: Identifier,

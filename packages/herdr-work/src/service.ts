@@ -9,6 +9,9 @@ import type {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalOwnerMismatchError,
+  WorkGoalReassignmentConflictError,
+  WorkGoalRevisionConflictError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -26,6 +29,8 @@ import type {
   WorkExistingGoalRecovery,
   WorkExistingOwnerReconciliation,
   WorkGoalCheckpoint,
+  WorkGoalReassigned,
+  WorkGoalReassignment,
   WorkLaneClaim,
   WorkLaneClaimed,
   WorkProspectiveAdmission,
@@ -49,6 +54,17 @@ export interface WorkService {
   readonly recoverExistingGoal: (
     request: WorkExistingGoalRecovery
   ) => Effect.Effect<WorkPullRequestLink, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  /** Approval-bound owner transfer; replaying the same approval job returns the prior result. */
+  readonly reassign: (
+    request: WorkGoalReassignment
+  ) => Effect.Effect<
+    WorkGoalReassigned,
+    | WorkGoalOwnerMismatchError
+    | WorkGoalReassignmentConflictError
+    | WorkGoalRevisionConflictError
+    | WorkProjectionError
+    | WorkStoreError
+  >
   readonly admissionPreflight: (
     target: WorkAdmissionTarget
   ) => Effect.Effect<WorkAdmissionPreflight, WorkProjectionError | WorkStoreError>
@@ -159,6 +175,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
   const recoverExistingGoal = Effect.fn("HerdrWork.recoverExistingGoal")((request: WorkExistingGoalRecovery) =>
     store.recoverExistingGoal(request)
   )
+  const reassign = Effect.fn("HerdrWork.reassign")((request: WorkGoalReassignment) => store.reassign(request))
   const admissionPreflight = Effect.fn("HerdrWork.admissionPreflight")((target: WorkAdmissionTarget) =>
     store.admissionPreflight(target)
   )
@@ -279,6 +296,7 @@ export const makeWorkService = Effect.fn("HerdrWork.makeService")(function(store
       recoveryContext,
       recoveryPreflight,
       recoverExistingGoal,
+      reassign,
       admissionPreflight,
       admitExistingOwner,
       agentBinding,

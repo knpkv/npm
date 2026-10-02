@@ -246,6 +246,24 @@ export const WorkRecover = Schema.Struct({
 )
 export type WorkRecover = typeof WorkRecover.Type
 
+/**
+ * Approval-bound transfer of one Work goal, and its active lane, from the exact
+ * current owner to a new owner. `toAgent: null` keeps the goal's agent target.
+ */
+export const WorkReassign = Schema.Struct({
+  kind: Schema.Literal("work.reassign"),
+  goalId: WorkAdmit.fields.goalId,
+  from: WorkAdmit.fields.owner,
+  to: WorkAdmit.fields.owner,
+  toAgent: Schema.NullOr(AgentWorkerIdentity),
+  reason: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  expectedGoalEventId: WorkRecover.fields.expectedGoalEventId,
+  expectedGoalUpdatedAt: WorkRecover.fields.expectedGoalUpdatedAt
+}).check(
+  Schema.makeFilter(({ from, to }) => from.id !== to.id, { expected: "a different target owner" })
+)
+export type WorkReassign = typeof WorkReassign.Type
+
 export const BrowserMcpRecover = Schema.Struct({
   kind: Schema.Literal("browser.mcp.recover")
 })
@@ -255,7 +273,8 @@ export const CoreJobPayload = Schema.Union([
   Schema.Union([NixCheck, NixApply, AgentDelegate, AgentMessage]),
   WorkReconcile,
   WorkAdmit,
-  WorkRecover
+  WorkRecover,
+  WorkReassign
 ])
 export type CoreJobPayload = typeof CoreJobPayload.Type
 
@@ -571,4 +590,5 @@ export const requiresApproval = (payload: JobPayload): boolean =>
   payload.kind === "work.reconcile" ||
   payload.kind === "work.admit" ||
   payload.kind === "work.recover" ||
+  payload.kind === "work.reassign" ||
   (payload.kind === "agent.delegate" && payload.mode === "work")

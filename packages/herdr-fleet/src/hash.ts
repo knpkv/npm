@@ -112,6 +112,30 @@ const canonicalPayload = (payload: JobPayload): string => {
         worktree: payload.worktree,
         branch: payload.branch
       })
+    case "work.reassign":
+      return JSON.stringify({
+        kind: payload.kind,
+        goalId: payload.goalId,
+        from: { id: payload.from.id, name: payload.from.name },
+        to: { id: payload.to.id, name: payload.to.name },
+        toAgent: payload.toAgent === null
+          ? null
+          : {
+            host: payload.toAgent.host,
+            agentId: payload.toAgent.agentId,
+            name: payload.toAgent.name,
+            paneId: payload.toAgent.paneId,
+            relationship: payload.toAgent.relationship === undefined
+              ? null
+              : {
+                parentAgentId: payload.toAgent.relationship.parentAgentId,
+                relation: payload.toAgent.relationship.relation
+              }
+          },
+        reason: payload.reason,
+        expectedGoalEventId: payload.expectedGoalEventId,
+        expectedGoalUpdatedAt: payload.expectedGoalUpdatedAt
+      })
   }
 }
 

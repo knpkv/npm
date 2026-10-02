@@ -544,6 +544,33 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
         kind: payload.kind,
         title: "Link one existing unlinked Work goal"
       }
+    case "work.reassign":
+      return {
+        fields: [
+          field("goalId", "Work goal", payload.goalId),
+          field("from", "Current Work owner", `${payload.from.name} (${payload.from.id})`),
+          field("to", "New Work owner", `${payload.to.name} (${payload.to.id})`),
+          ...(payload.toAgent === null
+            ? [field("toAgent", "New agent target", "unchanged (no agent target)")]
+            : [
+              field("toAgent", "New agent target", payload.toAgent.agentId),
+              field("toAgentHost", "New agent host", payload.toAgent.host),
+              field("toAgentPane", "New agent pane", payload.toAgent.paneId),
+              field(
+                "toAgentLineage",
+                "New agent lineage",
+                payload.toAgent.relationship === undefined
+                  ? "root"
+                  : `${payload.toAgent.relationship.relation}:${payload.toAgent.relationship.parentAgentId}`
+              )
+            ]),
+          field("reason", "Reason", payload.reason),
+          field("expectedGoalEventId", "Expected goal event", payload.expectedGoalEventId),
+          field("expectedGoalUpdatedAt", "Expected goal update", String(payload.expectedGoalUpdatedAt))
+        ],
+        kind: payload.kind,
+        title: "Reassign one Work goal to a new owner"
+      }
   }
 }
 
@@ -565,6 +592,7 @@ export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
     case "work.reconcile":
     case "work.admit":
     case "work.recover":
+    case "work.reassign":
       return payload
   }
 }

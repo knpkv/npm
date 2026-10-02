@@ -127,3 +127,35 @@ export class WorkAdmissionConflictError extends Schema.TaggedError<WorkAdmission
   "WorkAdmissionConflictError",
   { goalId: Schema.String, laneId: Schema.String, reason: Schema.String }
 ) {}
+
+/** The goal, or its active lane when `laneId` is set, is not owned by the approved source owner. */
+export class WorkGoalOwnerMismatchError extends Schema.TaggedError<WorkGoalOwnerMismatchError>()(
+  "WorkGoalOwnerMismatchError",
+  {
+    goalId: Schema.String,
+    laneId: Schema.NullOr(Schema.String),
+    expectedOwner: Schema.Struct({ id: Schema.String, name: Schema.String }),
+    actualOwner: Schema.Struct({ id: Schema.String, name: Schema.String })
+  }
+) {}
+
+/** The goal's durable head is not the approved expected event; `actual*` is null when the goal is absent. */
+export class WorkGoalRevisionConflictError extends Schema.TaggedError<WorkGoalRevisionConflictError>()(
+  "WorkGoalRevisionConflictError",
+  {
+    goalId: Schema.String,
+    expectedEventId: Schema.String,
+    expectedUpdatedAt: Schema.Number,
+    actualEventId: Schema.NullOr(Schema.String),
+    actualUpdatedAt: Schema.NullOr(Schema.Number)
+  }
+) {}
+
+/** The approval job id already names a different reassignment or another durable record. */
+export class WorkGoalReassignmentConflictError extends Schema.TaggedError<WorkGoalReassignmentConflictError>()(
+  "WorkGoalReassignmentConflictError",
+  {
+    approvalJobId: Schema.String,
+    reason: Schema.Literals(["payload_mismatch", "identifier_in_use"])
+  }
+) {}

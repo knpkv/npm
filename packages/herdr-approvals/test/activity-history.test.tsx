@@ -97,6 +97,38 @@ describe("activity history", () => {
     expect(filterActivityItems(items, "approvals", "")).toHaveLength(1)
   })
 
+  it("keeps approved goal reassignment in Work and approval activity", () => {
+    const reassigned: JobRecord = {
+      ...delegated,
+      connectTarget: undefined,
+      id: "job-reassign",
+      payload: {
+        kind: "work.reassign",
+        goalId: "goal-ser8-control-surface",
+        from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+        to: { id: "agent-claude-coord", name: "Claude coordinator" },
+        toAgent: {
+          host: "SER8",
+          agentId: "agent-claude-coord",
+          name: "coord",
+          paneId: "w1J:p9",
+          relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+        },
+        reason: "Codex identities retired",
+        expectedGoalEventId: "goal-event-7",
+        expectedGoalUpdatedAt: 500
+      },
+      worker: undefined
+    }
+    const items = activityItemsFor([reassigned])
+    expect(items[0]).toMatchObject({
+      title: "Reassign Work goal owner",
+      summary: "Reassigned goal-ser8-control-surface from Codex host coordinator to Claude coordinator."
+    })
+    expect(filterActivityItems(items, "work", "")).toHaveLength(1)
+    expect(filterActivityItems(items, "approvals", "")).toHaveLength(1)
+  })
+
   it("projects one sanitized row per job", () => {
     const items = activityItemsFor([delegated, failedMessage])
     const projection = JSON.stringify(items)

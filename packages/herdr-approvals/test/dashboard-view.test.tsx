@@ -205,6 +205,49 @@ describe("dashboard approval capability", () => {
     expect(html).toContain("knpkv/npm#433 · existing owner")
   })
 
+  it("shows the goal reassignment title and summary", () => {
+    const base = snapshot(true)
+    const pending: DashboardSnapshot["records"][number] = {
+      ...base.records[0],
+      payload: {
+        kind: "work.reassign",
+        goalId: "goal-ser8-control-surface",
+        from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+        to: { id: "agent-claude-coord", name: "Claude coordinator" },
+        toAgent: {
+          host: "SER8",
+          agentId: "agent-claude-coord",
+          name: "coord",
+          paneId: "w1J:p9",
+          relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+        },
+        reason: "Codex identities retired",
+        expectedGoalEventId: "goal-event-7",
+        expectedGoalUpdatedAt: 500
+      }
+    }
+    const html = renderToStaticMarkup(
+      <DashboardView
+        busyJobId={null}
+        chatBusy={false}
+        notificationState="disabled"
+        onChatSubmit={undefined}
+        onDecision={() => undefined}
+        onDisableNotifications={undefined}
+        onEnableNotifications={undefined}
+        onRefresh={undefined}
+        pull={{ distance: 0, ready: false, refreshing: false }}
+        snapshot={{
+          ...base,
+          pendingApprovals: { ...base.pendingApprovals, local: [pending] },
+          records: [pending]
+        }}
+      />
+    )
+    expect(html).toContain("Reassign Work goal owner")
+    expect(html).toContain("goal-ser8-control-surface · Codex host coordinator → Claude coordinator")
+  })
+
   it("hides decisions on a non-approval listener", () => {
     expect(render(false)).not.toContain("/v1/jobs/job-1/approve")
     expect(render(false)).not.toContain("/v1/jobs/job-1/reject")
