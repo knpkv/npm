@@ -1375,6 +1375,26 @@ type AdmissionRejection = {
 }
 
 /** Reads every durable identity row, including entries omitted by time-window projections. */
+/**
+ * Splits bindings into each lane's authoritative row (highest lane revision)
+ * and the lanes where that revision is shared by more than one row. Earlier
+ * rows on a lane were superseded, for example by an approved reassignment.
+ */
+const authoritativeBindings = (bindings: ReadonlyArray<WorkAgentBindingType>) => {
+  const maxRevision = new Map<string, number>()
+  for (const binding of bindings) {
+    const laneId = binding.request.laneId
+    maxRevision.set(laneId, Math.max(maxRevision.get(laneId) ?? 0, binding.lane.revision))
+  }
+  const latest = bindings.filter((binding) => binding.lane.revision === maxRevision.get(binding.request.laneId))
+  const ambiguousLanes = new Set(
+    latest
+      .map(({ request }) => request.laneId)
+      .filter((laneId, index, laneIds) => laneIds.indexOf(laneId) !== index)
+  )
+  return { latest, ambiguousLanes }
+}
+
 const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType): AdmissionInspection => {
   const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
     database.prepare(
@@ -1433,7 +1453,8 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
   for (const event of events) latest.set(event.goal.id, event)
   const goal = [...latest.values()].find(({ goal }) => goal.review?.url === target.reviewUrl)
   const lane = lanes.entries.find(({ claim }) => claim.laneId === target.laneId)?.claim
-  const binding = bindings.find(({ lane: bound }) => bound.laneId === target.laneId)
+  const authority = authoritativeBindings(bindings)
+  const binding = authority.latest.find(({ lane: bound }) => bound.laneId === target.laneId)
   const foreignConflict =
     events.some(({ goal: entry }) =>
       (entry.review?.url === target.reviewUrl && entry.id !== target.goalId) ||
@@ -1443,11 +1464,11 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
       (claim.goalId === target.goalId && claim.laneId !== target.laneId) ||
       (claim.worktree === target.worktree && claim.laneId !== target.laneId)
     ) ||
-    bindings.some(({ request }) =>
+    authority.latest.some(({ request }) =>
       (request.worker.agentId === target.worker.agentId && request.laneId !== target.laneId) ||
       (request.prospectiveAdmission?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
       (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
-    ) || bindings.filter(({ request }) => request.laneId === target.laneId).length > 1
+    ) || authority.ambiguousLanes.has(target.laneId)
   const exact = goal !== undefined && lane !== undefined && binding !== undefined &&
     goal.goal.id === target.goalId && goal.goal.state !== "completed" &&
     goal.goal.state !== "deployed" && goal.goal.goalFamily?.role === "canonical" &&
@@ -1493,7 +1514,7 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     ) || lanes.entries.some(({ claim }) =>
       claim.laneId === target.laneId || claim.goalId === target.goalId ||
       claim.worktree === target.worktree
-    ) || bindings.some(({ request }) =>
+    ) || authority.latest.some(({ request }) =>
       request.worker.agentId === target.worker.agentId ||
       request.prospectiveAdmission?.sessionId === target.sessionId ||
       request.existingGoalRecovery?.sessionId === target.sessionId

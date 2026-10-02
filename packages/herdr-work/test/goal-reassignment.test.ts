@@ -15,6 +15,7 @@ import type {
   WorkLaneClaim,
   WorkRecoveryTarget
 } from "../src/model.js"
+import { __herdrWorkLaneOperationMaxBytesForTest } from "../src/store.js"
 
 const from = { id: "agent-codex-owner", name: "Codex owner" }
 const to = { id: "agent-claude-coord", name: "Claude coordinator" }
@@ -408,4 +409,79 @@ describe("approved goal reassignment", () => {
         expect(yield* store.list()).toEqual(before)
       })))
   }
+
+  it.effect("treats the rebound binding as the lane's authority in admission preflight", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { work } = yield* fixture({ lane: false })
+      const result = yield* work.reassign(yield* bound(work))
+      const preflight = yield* work.admissionPreflight({
+        repository: recoveryTarget.repository,
+        pullRequest: recoveryTarget.pullRequest,
+        reviewUrl: recoveryTarget.reviewUrl,
+        goalId: recoveryTarget.goalId,
+        laneId: recoveryTarget.laneId,
+        head: recoveryTarget.head,
+        baseHead: recoveryTarget.baseHead,
+        owner: to,
+        sessionId: recoveryTarget.sessionId,
+        expectedWork: recoveryTarget.expectedWork,
+        worker: toAgent,
+        worktree: recoveryTarget.worktree,
+        branch: recoveryTarget.branch
+      })
+      expect(preflight._tag).toBe("existing")
+      if (preflight._tag !== "existing") return
+      expect(preflight.link.binding).toEqual(result.binding)
+    })))
+
+  it.effect("rejects an owner whose id matches but whose name differs", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture({ lane: true })
+      const renamed = { ...from, name: "Renamed owner" }
+      expect(yield* Effect.flip(work.reassign({ ...request, from: renamed }))).toMatchObject({
+        _tag: "WorkGoalOwnerMismatchError",
+        laneId: null,
+        expectedOwner: renamed,
+        actualOwner: from
+      })
+      expect(yield* store.list()).toEqual([original])
+    })))
+
+  it.effect("rolls back every earlier write when the final reassignment insert fails", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, store, work } = yield* fixture({ lane: false })
+      const expected = yield* bound(work)
+      const before = yield* store.list()
+      const lane = yield* store.currentClaim(recoveryTarget.laneId)
+      const sql = new DatabaseSync(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => sql.close()))
+      sql.exec(`CREATE TRIGGER fail_reassignment BEFORE INSERT ON work_goal_reassignments
+        BEGIN SELECT RAISE(ABORT, 'synthetic reassignment failure'); END`)
+      expect(yield* Effect.flip(work.reassign(expected))).toMatchObject({
+        _tag: "WorkStoreError",
+        operation: "reassign.transaction"
+      })
+      expect(yield* store.list()).toEqual(before)
+      expect(yield* store.currentClaim(recoveryTarget.laneId)).toEqual(lane)
+      expect(yield* store.agentBinding(request.approvalJobId)).toEqual(Option.none())
+      expect(sql.prepare("SELECT 1 FROM work_lane_operations WHERE operation_id = ?").get(request.approvalJobId))
+        .toBeUndefined()
+      sql.exec("DROP TRIGGER fail_reassignment")
+      expect((yield* work.reassign(expected)).binding?.request.dispatchRequestId).toBe(request.approvalJobId)
+    })))
+
+  it.effect("rejects a lane rewrite once the lane operation ledger is at its byte cap", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, store, work } = yield* fixture({ lane: true })
+      const sql = new DatabaseSync(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => sql.close()))
+      sql.prepare("UPDATE work_lane_operation_totals SET operation_bytes = ? WHERE singleton = 1")
+        .run(__herdrWorkLaneOperationMaxBytesForTest)
+      expect(yield* Effect.flip(work.reassign(request))).toMatchObject({
+        _tag: "WorkProjectionError",
+        reason: "capacity_exceeded"
+      })
+      expect(yield* store.list()).toEqual([original])
+      expect(yield* store.currentClaim(laneClaim.laneId)).toMatchObject({ value: { owner: from, revision: 1 } })
+    })))
 })
