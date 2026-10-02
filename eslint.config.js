@@ -181,6 +181,13 @@ export default tseslint.config(
     }
   },
   {
+    // These public entries ship through tsc. Rly's generated client barrels supply its boundaries.
+    files: ["packages/review/src/view.tsx", "packages/review/src/guide/view.tsx"],
+    rules: {
+      "local-rules/require-react-hook-client-boundary": "error"
+    }
+  },
+  {
     files: ["packages/*/src/**/*.{ts,tsx,mjs}", "packages/*/scripts/**/*.{ts,tsx,mjs}"],
     rules: {
       "local-rules/no-unowned-detached-fiber": "error"
