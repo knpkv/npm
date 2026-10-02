@@ -1,5 +1,6 @@
 import { AgentStableId, AgentWorkerIdentity, AgentWorkerRelationship } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
+import { terminalColumnBounds, terminalRowBounds } from "./terminal-dimensions.js"
 
 const BoundedString = Schema.String.check(
   Schema.isMinLength(1),
@@ -79,11 +80,11 @@ export type FleetConnectAgentPage = typeof FleetConnectAgentPage.Type
 
 const TerminalColumns = Schema.Number.check(
   Schema.isInt(),
-  Schema.isBetween({ minimum: 20, maximum: 400 })
+  Schema.isBetween(terminalColumnBounds)
 )
 const TerminalRows = Schema.Number.check(
   Schema.isInt(),
-  Schema.isBetween({ minimum: 5, maximum: 200 })
+  Schema.isBetween(terminalRowBounds)
 )
 const TerminalScrollLines = Schema.Number.check(
   Schema.isInt(),

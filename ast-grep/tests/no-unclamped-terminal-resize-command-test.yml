@@ -1,0 +1,13 @@
+id: no-unclamped-terminal-resize-command
+valid:
+  - |
+    send(terminalResizeCommand({ cols, rows }))
+  - |
+    Schema.Struct({ type: Schema.Literal("terminal.resize"), cols: TerminalColumns })
+  - |
+    send({ type: "terminal.input", text })
+invalid:
+  - |
+    send({ type: "terminal.resize", cols, rows, cell_width_px: 0, cell_height_px: 0 })
+  - |
+    const command = { "type": 'terminal.resize', cols: 2, rows: 1 }

@@ -1,0 +1,30 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-unclamped-terminal-resize-command
+language: tsx
+severity: error
+message: "Build Connect terminal.resize commands with terminalResizeCommand"
+
+rule:
+  kind: pair
+  all:
+    - has:
+        field: key
+        regex: '^["'']?type["'']?$'
+    - has:
+        field: value
+        regex: '^["''`]terminal\.resize["''`]$'
+
+files:
+  - "packages/herdr-connect/src/**/*.ts"
+  - "packages/herdr-connect/src/**/*.tsx"
+
+ignores:
+  - "packages/herdr-connect/src/terminal-dimensions.ts"
+  - "**/generated/**"
+
+note: |
+  The server closes the terminal socket when a resize falls outside its row or
+  column bounds, and a mobile keyboard can shrink the fitted terminal below the
+  minimum. terminalResizeCommand clamps to those bounds; a hand-built command
+  skips the clamp.

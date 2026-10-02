@@ -11,6 +11,7 @@ import { FitAddon, init, Terminal } from "ghostty-web"
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react"
 import { buildConnectForest } from "./forest.js"
 import { applyTerminalInputIdentity } from "./terminal-input-identity.js"
+import { clampTerminalDimensions, type TerminalDimensions, terminalResizeCommand } from "./terminal-dimensions.js"
 import {
   type ConnectAgent,
   type ConnectAgentCursor,
@@ -239,7 +240,8 @@ export const makeConnectAtoms = () => {
 
 export type ConnectAtoms = ReturnType<typeof makeConnectAtoms>
 
-const socketUrl = (agent: ConnectAgent, cols: number, rows: number): string => {
+const socketUrl = (agent: ConnectAgent, dimensions: TerminalDimensions): string => {
+  const { cols, rows } = clampTerminalDimensions(dimensions)
   const url = new URL("/v1/connect/session", window.location.href)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.searchParams.set("host", agent.host)
@@ -395,13 +397,7 @@ const terminalWorker = (
           pendingResize = { cols, rows }
           return
         }
-        send({
-          type: "terminal.resize",
-          cols,
-          rows,
-          cell_width_px: 0,
-          cell_height_px: 0
-        })
+        send(terminalResizeCommand({ cols, rows }))
       })
       terminal.terminal.attachCustomWheelEventHandler((event) => {
         const command = wheelScrollCommand(event, terminal.terminal.rows)
@@ -458,7 +454,7 @@ const terminalWorker = (
       )
       const connectedSocket = yield* Effect.acquireRelease(
         Effect.callback<WebSocket, ConnectNetworkError>((resume) => {
-          const value = new WebSocket(socketUrl(agent, terminal.terminal.cols, terminal.terminal.rows))
+          const value = new WebSocket(socketUrl(agent, { cols: terminal.terminal.cols, rows: terminal.terminal.rows }))
           value.binaryType = "arraybuffer"
           let settled = false
           value.addEventListener("open", () => {
@@ -518,13 +514,7 @@ const terminalWorker = (
               }
             }
             if (pendingResize !== null) {
-              send({
-                type: "terminal.resize",
-                cols: pendingResize.cols,
-                rows: pendingResize.rows,
-                cell_width_px: 0,
-                cell_height_px: 0
-              })
+              send(terminalResizeCommand(pendingResize))
               pendingResize = null
             }
             update({ _tag: "connected", agent })
