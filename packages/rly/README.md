@@ -6,6 +6,15 @@ The package is intentionally application-independent: it contains no vendor clie
 
 ## Status
 
+`@knpkv/rly/diff/patch` exports `parsePatch` and `PatchDiffView` for sparse git
+unified diffs. Parsing retains source line numbers, renamed/deleted paths, and
+binary markers; a malformed hunk comes back as `PatchInvalid` with a reason
+rather than throwing, so bad input cannot yield invented line numbers. The
+view accepts a parsed `file`, a document-unique `id`, `mode` (`split` or `stacked`), `wrap`,
+and `renderAnnotation(side, line)`. It shares the bounded renderer's styling
+and supports server rendering. A patch contains only its original context;
+use the complete-file diff views when reviewers need context expansion.
+
 The initial public surface is complete. Tokens, foundations, primitives,
 delivery patterns, contextual-agent patterns, and the isolated diff workbench
 are available through explicit, generated exports. The package remains
@@ -104,6 +113,11 @@ change callback. `Field` supplies the exact id and ARIA props to a
 consumer-owned input, textarea, or `Select` through its render callback, so it
 can connect visible labels, descriptions, required state, and announced errors
 without cloning a framework-specific control.
+
+`Tabs` items may set `forceMount: true` to retain inactive content, for example
+when printing both panels. It defaults to unmounting inactive content. Callers
+opting in must hide inactive `[role="tabpanel"][data-state="inactive"]` panels
+on screen and supply their own print visibility rules.
 
 `Dialog` and `Sheet` expose owned compound APIs (`Root`, `Trigger`, `Content`,
 and `Close`; `Sheet` also provides `Body` and `Footer`). Both require an
@@ -494,3 +508,17 @@ pnpm --filter @knpkv/rly visual:classify --base origin/main --head HEAD
 The command emits deterministic JSON. Missing refs, malformed Git output,
 unknown paths, catalog drift, or changes to foundations and shared visual
 configuration fail closed to a full visual run.
+
+`parsePatch(text, prefixes?)` infers default `a/` and `b/` prefixes when present.
+For `--no-prefix`, pass `{ source: "", destination: "" }`, especially when real
+paths begin with `a/` and `b/`; those names are indistinguishable from prefixed
+headers. Other custom producers must supply their exact `{ source, destination }`.
+Copied files retain both paths and `copied` status,
+but only the destination resolves as a changed file. CRLF patch records are accepted.
+Nonempty patch input must end with a complete LF or CRLF record, including a final
+`\ No newline at end of file` marker. That marker describes source-file content,
+not the patch record terminator. Empty input remains an empty patch. Nonempty
+hunk ranges require positive line numbers; zero is allowed only for an empty
+side. These parsing constraints do not prove that Git can apply a patch.
+Quoted path bytes must be valid UTF-8; unsupported byte sequences return
+`PatchInvalid` rather than replacing bytes and collapsing distinct file identities.
