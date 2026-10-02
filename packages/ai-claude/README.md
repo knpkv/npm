@@ -24,7 +24,7 @@ conflicting tuple forms fail as typed schema errors rather than being sent with 
 Set `effort` to `low`, `medium`, `high`, `xhigh` or `max` to pass an explicit
 `--effort` override. Omitting it preserves the CLI-configured default.
 
-The child process does not inherit the full host environment. It receives only `PATH`, home/config locations (`HOME`, `USERPROFILE`, `XDG_CONFIG_HOME`, and `CLAUDE_CONFIG_DIR`), and direct Anthropic authentication/gateway settings (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_BASE_URL`) when those values are present. Other provider credentials and session-scoped variables are not forwarded.
+The child process does not inherit the full host environment. It receives only `PATH`, home, account and config locations (`HOME`, `USER`, `USERPROFILE`, `XDG_CONFIG_HOME`, and `CLAUDE_CONFIG_DIR`), and direct Anthropic authentication/gateway settings (`ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, and `ANTHROPIC_BASE_URL`) when those values are present. Other provider credentials and session-scoped variables are not forwarded.
 
 Pass `onActivity` to `model` to receive live `ClaudeActivity` events during a call,
 including `generateObject`. This enables CLI partial-message output and reports

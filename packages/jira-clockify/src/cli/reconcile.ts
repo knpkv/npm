@@ -575,7 +575,13 @@ const runAgentMode = (options: {
     }
 
     if (proposals.length === 0) {
-      if (notOwned.length === 0) {
+      // Withheld, unattributed and skipped time is not recorded time. Claiming both sides hold
+      // everything while those rows sit just above would tell the operator there is nothing to do.
+      const needsAttention = report.withheld.length > 0 || report.unattributed.length > 0 ||
+        report.excludedDays.length > 0 || !report.attributorAvailable
+      if (needsAttention) {
+        yield* say("  Nothing written — the rows above still need you before they can be recorded.")
+      } else if (notOwned.length === 0) {
         yield* say("  Nothing to propose — both sides already hold everything these sessions account for.")
       }
       return

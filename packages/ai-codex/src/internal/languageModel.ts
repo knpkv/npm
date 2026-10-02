@@ -78,13 +78,16 @@ const executeTurn = Effect.fn("CodexLanguageModel.executeTurn")(function*(
   const prompt = yield* renderPrompt(method, providerOptions.prompt)
   yield* validatePrompt(prompt, options.maxPromptBytes, method)
 
+  // Discovery is its own `codex features list` process bounded by its own copy of the timeout, so it
+  // runs before the turn deadline starts: the option bounds one turn, not discovery plus the turn.
+  const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(
+    options,
+    dependencies.spawner,
+    dependencies.fileSystem,
+    method
+  )
+
   return yield* Effect.scoped(Effect.gen(function*() {
-    const promptOnlyDisabledFeatures = yield* resolvePromptOnlyDisabledFeatures(
-      options,
-      dependencies.spawner,
-      dependencies.fileSystem,
-      method
-    )
     const schemaFile = providerOptions.responseFormat.type === "json"
       ? yield* makeOutputSchemaFile(dependencies.fileSystem, providerOptions.responseFormat.schema)
       : undefined

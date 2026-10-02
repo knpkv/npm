@@ -1,5 +1,6 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import { describe, expect, it } from "@effect/vitest"
+import type { Duration } from "effect"
 import { ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Schema, Sink, Stream } from "effect"
 import * as Predicate from "effect/Predicate"
 import * as TestClock from "effect/testing/TestClock"
@@ -16,6 +17,10 @@ import { inventory as completeFeatureInventory } from "./fixtures/codex-0.154.0.
 // @effect-diagnostics multipleEffectProvide:off
 
 interface FakeProcessOptions {
+  /** How long `codex features list` takes before it exits. */
+  readonly featureDuration?: Duration.Input
+  /** How long the turn process takes before it exits. */
+  readonly turnDuration?: Duration.Input
   readonly exitCode?: number
   readonly featureExitCode?: number
   readonly featureInventory?: string
@@ -42,8 +47,12 @@ const fakeProcessLayer = (
       return (
         ChildProcessSpawner.makeHandle({
           all: Stream.concat(stdout, stderr),
-          exitCode: Effect.succeed(
-            ChildProcessSpawner.ExitCode(isFeatureInventory ? (options.featureExitCode ?? 0) : (options.exitCode ?? 0))
+          exitCode: Effect.sleep((isFeatureInventory ? options.featureDuration : options.turnDuration) ?? 0).pipe(
+            Effect.as(
+              ChildProcessSpawner.ExitCode(
+                isFeatureInventory ? (options.featureExitCode ?? 0) : (options.exitCode ?? 0)
+              )
+            )
           ),
           getInputFd: () => Sink.drain,
           getOutputFd: () => Stream.empty,
@@ -58,6 +67,21 @@ const fakeProcessLayer = (
       )
     }))
   )
+
+/**
+ * Advance the test clock a second at a time until `fiber` finishes, pausing briefly in real time
+ * after each step. Discovery creates a real temporary directory, so under load a process may start
+ * (and register its sleep) only after several steps; stepping until done keeps that race out of the
+ * outcome, while the deadlines under test are still measured on the test clock.
+ */
+const runOnTestClock = <A, E>(fiber: Fiber.Fiber<A, E>) =>
+  Effect.gen(function*() {
+    for (let step = 0; step < 600 && fiber.pollUnsafe() === undefined; step++) {
+      yield* TestClock.adjust("1 second")
+      yield* TestClock.withLive(Effect.sleep("2 millis"))
+    }
+    return yield* Fiber.join(fiber)
+  })
 
 const successTranscript = (text: string): string =>
   [
@@ -162,6 +186,43 @@ describe("model", () => {
       }])
       expect(JSON.stringify(activity)).not.toContain("private-")
       expect(activity.at(-1)).toEqual({ kind: "status", text: "Answer received" })
+    }))
+
+  // The timeout bounds one Codex turn. Feature discovery is a separate process with its own copy of
+  // the limit, so a slow inventory must not eat into the turn's budget.
+  it.effect("starts the turn deadline after prompt-only feature discovery", () =>
+    Effect.gen(function*() {
+      const fiber = yield* LanguageModel.generateText({ prompt: "Status" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true, timeout: "90 seconds" })),
+        Effect.provide(fakeProcessLayer([], {
+          featureDuration: "80 seconds",
+          stdout: successTranscript("completed"),
+          turnDuration: "20 seconds"
+        })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.forkChild
+      )
+      const response = yield* runOnTestClock(fiber)
+      expect(response.text).toBe("completed")
+    }))
+
+  it.effect("still times out a turn that alone exceeds the deadline after discovery", () =>
+    Effect.gen(function*() {
+      const fiber = yield* LanguageModel.generateText({ prompt: "Status" }).pipe(
+        Effect.provide(model({ cwd: "/workspace", promptOnly: true, timeout: "90 seconds" })),
+        Effect.provide(fakeProcessLayer([], {
+          featureDuration: "10 seconds",
+          stdout: successTranscript("completed"),
+          turnDuration: "100 seconds"
+        })),
+        Effect.provide(NodeFileSystem.layer),
+        Effect.forkChild
+      )
+      const error = yield* runOnTestClock(fiber).pipe(Effect.flip)
+      expect(error.reason).toMatchObject({
+        _tag: "InternalProviderError",
+        metadata: { "codex-cli": { phase: "timeout" } }
+      })
     }))
 
   it.effect("interrupts a blocked final response observer at the request deadline", () =>

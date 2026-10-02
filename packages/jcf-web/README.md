@@ -120,7 +120,8 @@ Two things may be overruled, and both are said out loud in what gets written:
 - Browser confirmations, manual entries and saved-entry edits share the machine writer guard with
   `jcf watch`. A browser write is refused while the watch runs; a browser mutation holds the guard
   only until its provider operation finishes and does not publish a watch resume cursor.
-- Nothing is ever modified or deleted in either system. Reconciliation only adds.
+- Reconciliation only adds. Nothing is ever deleted in either system, and the only edits are the
+  ones you save explicitly in the saved-entry editor, which update that Jira worklog or Clockify entry.
 
 ## Responsive review and progress
 

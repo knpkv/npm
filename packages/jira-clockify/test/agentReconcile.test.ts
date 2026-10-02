@@ -2191,6 +2191,34 @@ describe("jcf sync reconcile --agent: attribution", () => {
       expect(world.jiraWorklogs[0]!.issueKey).toBe("PROJ-4242")
     }))
 
+  // Tool results are attribution evidence even though they are never presence: a key that only a
+  // command printed (a branch list, a ticket lookup) must still reach the Coding Agent.
+  it.effect("offers an Issue Key that appears only in a tool result", () =>
+    Effect.gen(function*() {
+      const start = at(DAY.year, DAY.month, DAY.day, 10, 0)
+      const { world } = yield* run(
+        agent(),
+        baseOptions({
+          transcripts: {
+            "work-dev/s-dev.jsonl": transcript({
+              sessionId: "s-dev",
+              cwd: `${WORK_ROOT}/dev`,
+              gitBranch: "develop",
+              events: [
+                ...steady(start, 20, "let's continue"),
+                { atMs: start + 5 * 60_000 + 15_000, kind: "tool", text: "Fetched PROJ-42: tighten the retry budget" }
+              ]
+            })
+          },
+          attributor: (request) => ({ _tag: "Chosen", ticketKey: request.candidateKeys[0]!, confidence: 0.9 }),
+          keep: [true]
+        })
+      )
+      expect(world.attributorRequests).toHaveLength(1)
+      expect(world.attributorRequests[0]!.candidateKeys).toEqual(["PROJ-42"])
+      expect(world.jiraWorklogs[0]!.issueKey).toBe("PROJ-42")
+    }))
+
   /** `count` integration-branch sessions, each mentioning a distinct Issue Key. */
   const integrationSessions = (count: number) =>
     Object.fromEntries(
@@ -2325,6 +2353,7 @@ describe("jcf sync reconcile --agent: attribution", () => {
       expect(progress).toContain("0 placed, 0 declined, 3 unavailable.")
       expect(progress).toContain("unavailable — ")
       expect(output(world.stdout)).toContain("(unattributed)")
+      expect(output(world.stdout)).not.toContain("already hold everything")
     }))
 
   it.effect("reports a below-floor choice without offering it", () =>
@@ -2339,7 +2368,9 @@ describe("jcf sync reconcile --agent: attribution", () => {
       )
       const printed = output(world.stdout)
       expect(printed).toContain("below the floor")
-      expect(printed).toContain("Nothing to propose")
+      // Withheld time is not recorded time: the run must not claim both sides hold everything.
+      expect(printed).not.toContain("already hold everything")
+      expect(printed).toContain("Nothing written — the rows above still need you")
       expect(world.createdClockifyEntries).toEqual([])
     }))
 

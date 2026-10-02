@@ -104,10 +104,22 @@ const TranscriptLine = Schema.Struct({
   message: Schema.optional(Schema.Unknown)
 })
 
-const ContentBlock = Schema.Struct({
+const TextBlock = Schema.Struct({
   type: Schema.optional(Schema.String),
   text: Schema.optional(Schema.String)
 })
+
+/**
+ * A `tool_result` carries its output in `content`. It is decoded on its own, so an output shape we
+ * do not understand loses only that output, never the rest of the message.
+ */
+const ContentBlock = Schema.Struct({
+  type: Schema.optional(Schema.String),
+  text: Schema.optional(Schema.String),
+  content: Schema.optional(Schema.Unknown)
+})
+
+const decodeToolOutput = Schema.decodeUnknownOption(Schema.Union([Schema.String, Schema.Array(TextBlock)]))
 
 /** Message content is either a bare string or a list of blocks, only some of which carry text. */
 const MessageContent = Schema.Struct({
@@ -132,14 +144,42 @@ interface TranscriptLineFields {
   readonly isSidechain?: boolean | null | undefined
 }
 
-/** The readable text of a message, or `""` when it carries none we understand. */
+/**
+ * How much of one tool result is kept as evidence. Command output can be megabytes; an Issue Key a
+ * command printed sits near the top, and the digest only needs a hint of what the output was.
+ */
+const TOOL_RESULT_TEXT_LIMIT = 2_000
+
+/** The textual output of a tool result, bounded; non-text parts such as images are ignored. */
+const toolResultText = <UnparsedInput>(output: UnparsedInput): ReadonlyArray<string> => {
+  const decoded = decodeToolOutput(output)
+  if (Option.isNone(decoded)) return []
+  const content = decoded.value
+  const text = Predicate.isString(content)
+    ? content
+    : content.flatMap((block) => (block.text === undefined ? [] : [block.text])).join("\n")
+  return text.length === 0 ? [] : [text.slice(0, TOOL_RESULT_TEXT_LIMIT)]
+}
+
+/**
+ * The readable text of a message, or `""` when it carries none we understand.
+ *
+ * Includes tool-result output: it is attribution and description evidence, never presence, which
+ * {@link isHumanPrompt} decides separately.
+ */
 const messageText = <UnparsedInput>(message: UnparsedInput): string => {
   const decoded = decodeContent(message)
   if (Option.isNone(decoded)) return ""
   const content = decoded.value.content
   if (content === undefined) return ""
   if (Predicate.isString(content)) return content
-  return content.flatMap((block) => (block.text === undefined ? [] : [block.text])).join("\n")
+  return content.flatMap((block) =>
+    block.type === "tool_result"
+      ? toolResultText(block.content)
+      : block.text === undefined
+      ? []
+      : [block.text]
+  ).join("\n")
 }
 
 /**
