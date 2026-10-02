@@ -1,0 +1,32 @@
+id: no-unclamped-terminal-resize-command
+snapshots:
+  ? |
+    const command = { "type": 'terminal.resize', cols: 2, rows: 1 }
+  : labels:
+      - source: '"type": ''terminal.resize'''
+        style: primary
+        start: 18
+        end: 43
+      - source: '"type"'
+        style: secondary
+        start: 18
+        end: 24
+      - source: "'terminal.resize'"
+        style: secondary
+        start: 26
+        end: 43
+  ? |
+    send({ type: "terminal.resize", cols, rows, cell_width_px: 0, cell_height_px: 0 })
+  : labels:
+      - source: 'type: "terminal.resize"'
+        style: primary
+        start: 7
+        end: 30
+      - source: type
+        style: secondary
+        start: 7
+        end: 11
+      - source: '"terminal.resize"'
+        style: secondary
+        start: 13
+        end: 30

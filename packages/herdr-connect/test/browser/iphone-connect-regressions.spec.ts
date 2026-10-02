@@ -149,6 +149,8 @@ test("keyboard-height terminal never fits below the server terminal bounds", asy
     content: `${terminalDimensionsSource}\nwindow.clampTerminalDimensions = clampTerminalDimensions`,
     type: "module"
   })
+  // Inline module scripts run after addScriptTag resolves.
+  await page.waitForFunction(() => window.clampTerminalDimensions !== undefined)
   await page.setViewportSize({ height: 300, width: 393 })
   await expect
     .poll(() => page.locator(".ghostty-terminal").evaluate((terminal) => terminal.clientHeight))
