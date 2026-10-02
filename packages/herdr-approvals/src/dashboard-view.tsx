@@ -77,6 +77,12 @@ const jobSummary = (record: Pick<SanitizedJobRecord, "payload">): string => {
       return `${record.payload.mode} · [redacted internal prompt]`
     case "agent.message":
       return `${record.payload.session} · [redacted internal message]`
+    case "work.reconcile":
+      return `${record.payload.repository}#${record.payload.pullRequest} · existing owner`
+    case "work.admit":
+      return `${record.payload.repository}#${record.payload.pullRequest} · prospective owner admission`
+    case "work.recover":
+      return `${record.payload.repository}#${record.payload.pullRequest} · existing goal recovery`
   }
 }
 

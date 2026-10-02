@@ -1178,6 +1178,358 @@ describe("fleet local authority", () => {
     ).pipe(provideNodeServices)
   })
 
+  it.effect("keeps existing-owner reconciliation behind an immutable approval", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-reconcile-approval-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-reconcile"),
+            nonce: Effect.succeed("nonce-reconcile"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          const payload = Schema.decodeUnknownSync(JobPayload)({
+            kind: "work.reconcile",
+            repository: "knpkv/npm",
+            pullRequest: 433,
+            goalId: "goal-433",
+            laneId: "lane-433",
+            operationId: "operation-433",
+            expectedRevision: 2,
+            expectedHead: "0123456789abcdef0123456789abcdef01234567",
+            newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+            expectedOwner: { id: "owner-1", name: "Owner" },
+            expectedGoalEventId: "event-433",
+            bindingDispatchRequestId: "dispatch-433",
+            sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+            expectedWork: "feat/guided-review-rly",
+            worker: { host: "SER8", agentId: "agent-433", name: "Owner", paneId: "w1:p3" },
+            worktree: "/worktrees/npm/feat/guided-review-rly",
+            branch: "feat/guided-review-rly"
+          })
+          expect(requiresApproval(payload)).toBe(true)
+          const pending = yield* service.submit({ payload }, "local")
+          expect(pending.status).toBe("pending_approval")
+          expect(
+            (yield* Effect.result(service.approve(pending.id, {
+              hash: "wrong",
+              nonce: "nonce-reconcile"
+            }, "owner")))._tag
+          ).toBe("Failure")
+          expect(
+            yield* service.approve(pending.id, {
+              hash: pending.hash,
+              nonce: "nonce-reconcile"
+            }, "owner")
+          ).toMatchObject({ status: "queued", approvedBy: "owner" })
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("binds every reconciliation identity field into the approval hash", () =>
+    Effect.gen(function*() {
+      const baseline = Schema.decodeUnknownSync(JobPayload)({
+        kind: "work.reconcile",
+        repository: "knpkv/npm",
+        pullRequest: 433,
+        goalId: "goal-433",
+        laneId: "lane-433",
+        operationId: "operation-433",
+        expectedRevision: 2,
+        expectedHead: "0123456789abcdef0123456789abcdef01234567",
+        newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+        expectedOwner: { id: "owner-1", name: "Owner" },
+        expectedGoalEventId: "event-433",
+        bindingDispatchRequestId: "dispatch-433",
+        sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+        expectedWork: "feat/guided-review-rly",
+        worker: { host: "SER8", agentId: "agent-433", name: "Owner", paneId: "w1:p3" },
+        worktree: "/worktrees/npm/feat/guided-review-rly",
+        branch: "feat/guided-review-rly"
+      })
+      if (baseline.kind !== "work.reconcile") return
+      const original = yield* jobHash("SER8", "owner", baseline)
+      const changes = [
+        { repository: "other/npm" },
+        { pullRequest: 434 },
+        { goalId: "other-goal" },
+        { laneId: "other-lane" },
+        { operationId: "other-operation" },
+        { expectedRevision: 3 },
+        { expectedHead: "1123456789abcdef0123456789abcdef01234567" },
+        { newHead: "bbcdefabcdefabcdefabcdefabcdefabcdefabcd" },
+        { expectedOwner: { ...baseline.expectedOwner, id: "owner-2" } },
+        { expectedOwner: { ...baseline.expectedOwner, name: "Other" } },
+        { expectedGoalEventId: "other-event" },
+        { bindingDispatchRequestId: "other-dispatch" },
+        { sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cd" },
+        { expectedWork: "other-work" },
+        { worker: { ...baseline.worker, host: "OTHER" } },
+        { worker: { ...baseline.worker, agentId: "agent-other" } },
+        { worker: { ...baseline.worker, name: "Other" } },
+        { worker: { ...baseline.worker, paneId: "w2:p2" } },
+        { worker: { ...baseline.worker, relationship: { parentAgentId: "agent-parent", relation: "delegated" } } },
+        { worktree: "/other/worktree" },
+        { branch: "other-branch" }
+      ]
+      for (const change of changes) {
+        const changed = Schema.decodeUnknownSync(JobPayload)({ ...baseline, ...change })
+        expect(yield* jobHash("SER8", "owner", changed)).not.toBe(original)
+      }
+      expect(yield* jobHash("SER8", "owner", baseline)).toBe(original)
+      const reordered = Schema.decodeUnknownSync(JobPayload)({
+        ...baseline,
+        worker: {
+          paneId: baseline.worker.paneId,
+          name: baseline.worker.name,
+          agentId: baseline.worker.agentId,
+          host: baseline.worker.host
+        },
+        expectedOwner: { name: baseline.expectedOwner.name, id: baseline.expectedOwner.id }
+      })
+      expect(yield* jobHash("SER8", "owner", reordered)).toBe(original)
+      const withRelationship = Schema.decodeUnknownSync(JobPayload)({
+        ...baseline,
+        worker: { ...baseline.worker, relationship: { parentAgentId: "agent-parent", relation: "delegated" } }
+      })
+      const ordered = Schema.decodeUnknownSync(JobPayload)({
+        ...baseline,
+        worker: {
+          relationship: { relation: "delegated", parentAgentId: "agent-parent" },
+          paneId: baseline.worker.paneId,
+          name: baseline.worker.name,
+          agentId: baseline.worker.agentId,
+          host: baseline.worker.host
+        }
+      })
+      expect(yield* jobHash("SER8", "owner", ordered)).toBe(yield* jobHash("SER8", "owner", withRelationship))
+      for (
+        const relationship of [
+          { parentAgentId: "agent-other", relation: "delegated" },
+          { parentAgentId: "agent-parent", relation: "pair" }
+        ]
+      ) {
+        const changed = Schema.decodeUnknownSync(JobPayload)({
+          ...baseline,
+          worker: { ...baseline.worker, relationship }
+        })
+        expect(yield* jobHash("SER8", "owner", changed)).not.toBe(yield* jobHash("SER8", "owner", withRelationship))
+      }
+      expect(yield* jobHash("OTHER", "owner", baseline)).not.toBe(original)
+      expect(yield* jobHash("SER8", "other-actor", baseline)).not.toBe(original)
+    }).pipe(provideNodeServices))
+
+  it.effect("binds every prospective admission field and nested identity into the approval hash", () =>
+    Effect.gen(function*() {
+      const baseline = Schema.decodeUnknownSync(JobPayload)({
+        kind: "work.admit",
+        repository: "knpkv/npm",
+        pullRequest: 433,
+        reviewUrl: "https://github.com/knpkv/npm/pull/433",
+        goalId: "release-pr433",
+        laneId: "lane-pr433",
+        operationId: "admission-433",
+        expectedAbsenceToken: "a".repeat(64),
+        head: "b".repeat(40),
+        baseHead: "c".repeat(40),
+        owner: { id: "owner-433", name: "Original owner" },
+        sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+        expectedWork: "feat/guided-review-rly",
+        worker: {
+          host: "SER8",
+          agentId: "agent-433",
+          name: "Owner",
+          paneId: "w1:p3",
+          relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+        },
+        worktree: "/worktrees/npm/feat/guided-review-rly",
+        branch: "feat/guided-review-rly",
+        title: "Ship PR433",
+        summary: "Prospective owner admission",
+        detail: "Exact approved release work"
+      })
+      if (baseline.kind !== "work.admit") return
+      expect(requiresApproval(baseline)).toBe(true)
+      const original = yield* jobHash("SER8", "owner", baseline)
+      const changes = [
+        { repository: "other/npm", reviewUrl: "https://github.com/other/npm/pull/433" },
+        { pullRequest: 434, reviewUrl: "https://github.com/knpkv/npm/pull/434" },
+        { goalId: "another-goal" },
+        { laneId: "another-lane" },
+        { operationId: "another-operation" },
+        { expectedAbsenceToken: "d".repeat(64) },
+        { head: "d".repeat(40) },
+        { baseHead: "d".repeat(40) },
+        { owner: { ...baseline.owner, id: "another-owner" } },
+        { owner: { ...baseline.owner, name: "Another" } },
+        { sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cd" },
+        { expectedWork: "another-work" },
+        { worker: { ...baseline.worker, host: "OTHER" } },
+        { worker: { ...baseline.worker, agentId: "agent-other" } },
+        { worker: { ...baseline.worker, name: "Another" } },
+        { worker: { ...baseline.worker, paneId: "w2:p2" } },
+        {
+          worker: {
+            ...baseline.worker,
+            relationship: {
+              parentAgentId: "agent-other",
+              relation: "delegated"
+            }
+          }
+        },
+        {
+          worker: {
+            ...baseline.worker,
+            relationship: {
+              parentAgentId: "agent-lead",
+              relation: "pair"
+            }
+          }
+        },
+        { worktree: "/other/worktree" },
+        { branch: "other-branch" },
+        { title: "Another title" },
+        { summary: "Another summary" },
+        { detail: "Another detail" }
+      ]
+      for (const change of changes) {
+        const changed = Schema.decodeUnknownSync(JobPayload)({ ...baseline, ...change })
+        expect(yield* jobHash("SER8", "owner", changed)).not.toBe(original)
+      }
+      const reordered = Schema.decodeUnknownSync(JobPayload)({
+        ...baseline,
+        owner: { name: baseline.owner.name, id: baseline.owner.id },
+        worker: {
+          relationship: { relation: "delegated", parentAgentId: "agent-lead" },
+          paneId: baseline.worker.paneId,
+          name: baseline.worker.name,
+          agentId: baseline.worker.agentId,
+          host: baseline.worker.host
+        }
+      })
+      expect(yield* jobHash("SER8", "owner", reordered)).toBe(original)
+      expect(yield* jobHash("OTHER", "owner", baseline)).not.toBe(original)
+      expect(yield* jobHash("SER8", "other-actor", baseline)).not.toBe(original)
+    }).pipe(provideNodeServices))
+
+  it.effect("binds every existing-goal recovery precondition and owner identity into approval", () =>
+    Effect.gen(function*() {
+      const baseline = Schema.decodeUnknownSync(JobPayload)({
+        kind: "work.recover",
+        repository: "knpkv/npm",
+        pullRequest: 376,
+        reviewUrl: "https://github.com/knpkv/npm/pull/376",
+        goalId: "jcf-ai-review-85170486",
+        laneId: "jcf-release-lane",
+        operationId: "approved-jcf-recovery",
+        expectedGoalEventId: "original-event",
+        expectedGoalUpdatedAt: 500,
+        expectedHistoryToken: "a".repeat(64),
+        head: "b".repeat(40),
+        baseHead: "c".repeat(40),
+        owner: { id: "original-owner", name: "Original" },
+        sessionId: "01a0ae54-197e-72b2-914f-8d5d22abe522",
+        expectedWork: "work:85170486-375a-4dab-91c4-b5f39c974156",
+        worker: {
+          host: "SER8",
+          agentId: "agent-jcf",
+          name: "Original",
+          paneId: "w1K:p1",
+          relationship: {
+            parentAgentId: "agent-lead",
+            relation: "delegated"
+          }
+        },
+        worktree: "/worktrees/jcf",
+        branch: "feat/jcf"
+      })
+      if (baseline.kind !== "work.recover") return
+      expect(requiresApproval(baseline)).toBe(true)
+      const original = yield* jobHash("SER8", "andrey", baseline)
+      const changes = [
+        {
+          repository: "other/npm",
+          reviewUrl: "https://github.com/other/npm/pull/376"
+        },
+        {
+          pullRequest: 377,
+          reviewUrl: "https://github.com/knpkv/npm/pull/377"
+        },
+        { goalId: "other-goal" },
+        { laneId: "other-lane" },
+        { operationId: "other-operation" },
+        { expectedGoalEventId: "other-event" },
+        { expectedGoalUpdatedAt: 501 },
+        { expectedHistoryToken: "d".repeat(64) },
+        { head: "d".repeat(40) },
+        { baseHead: "d".repeat(40) },
+        { owner: { ...baseline.owner, id: "other-owner" } },
+        { owner: { ...baseline.owner, name: "Changed" } },
+        { sessionId: "00000000-0000-0000-0000-000000000000" },
+        { expectedWork: "other-work" },
+        { worker: { ...baseline.worker, host: "OTHER" } },
+        { worker: { ...baseline.worker, agentId: "agent-other" } },
+        { worker: { ...baseline.worker, name: "Changed" } },
+        { worker: { ...baseline.worker, paneId: "w2:p2" } },
+        {
+          worker: {
+            ...baseline.worker,
+            relationship: {
+              parentAgentId: "agent-other",
+              relation: "delegated"
+            }
+          }
+        },
+        {
+          worker: {
+            ...baseline.worker,
+            relationship: { parentAgentId: "agent-lead", relation: "pair" }
+          }
+        },
+        { worktree: "/other/worktree" },
+        { branch: "other-branch" }
+      ]
+      for (const change of changes) {
+        const changed = Schema.decodeUnknownSync(JobPayload)({
+          ...baseline,
+          ...change
+        })
+        expect(yield* jobHash("SER8", "andrey", changed)).not.toBe(original)
+      }
+      expect(yield* jobHash("OTHER", "andrey", baseline)).not.toBe(original)
+      expect(yield* jobHash("SER8", "other-actor", baseline)).not.toBe(original)
+      expect(
+        yield* jobHash(
+          "SER8",
+          "andrey",
+          Schema.decodeUnknownSync(JobPayload)({
+            ...baseline,
+            owner: { name: baseline.owner.name, id: baseline.owner.id },
+            worker: {
+              relationship: {
+                relation: "delegated",
+                parentAgentId: "agent-lead"
+              },
+              paneId: baseline.worker.paneId,
+              name: baseline.worker.name,
+              agentId: baseline.worker.agentId,
+              host: baseline.worker.host
+            }
+          })
+        )
+      ).toBe(original)
+    }).pipe(provideNodeServices))
+
   it.effect("rejects a generated job ID collision without replacing authority", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-fleet-id-conflict-test-"))
     return Effect.acquireUseRelease(

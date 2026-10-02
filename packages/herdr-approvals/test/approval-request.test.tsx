@@ -1069,6 +1069,62 @@ describe("sanitized approval requests", () => {
     expect(regions).toEqual(controls)
   })
 
+  it("shows every authority-bearing existing-goal recovery field without inventing admission", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "work.recover",
+      repository: "knpkv/npm",
+      pullRequest: 376,
+      reviewUrl: "https://github.com/knpkv/npm/pull/376",
+      goalId: "jcf-ai-review",
+      laneId: "jcf-release",
+      operationId: "recover-jcf",
+      expectedGoalEventId: "original-event",
+      expectedGoalUpdatedAt: 500,
+      expectedHistoryToken: "a".repeat(64),
+      head: "b".repeat(40),
+      baseHead: "c".repeat(40),
+      owner: { id: "original-owner", name: "Original" },
+      sessionId: "01a0ae54-197e-72b2-914f-8d5d22abe522",
+      expectedWork: "work:jcf",
+      worker: {
+        host: "SER8",
+        agentId: "agent-jcf",
+        name: "Original",
+        paneId: "w1:p5",
+        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      },
+      worktree: "/worktrees/jcf",
+      branch: "feat/jcf"
+    })
+    const request = approvalRequestFor(payload)
+    const values = new Map(request.fields.map(({ key, value }) => [key, value]))
+    expect(request.title).toContain("existing unlinked Work goal")
+    expect(values.get("expectedHistoryToken")).toBe("a".repeat(64))
+    expect(values.get("workerLineage")).toBe("delegated:agent-lead")
+    for (const key of [
+      "repository",
+      "pullRequest",
+      "reviewUrl",
+      "goalId",
+      "laneId",
+      "operationId",
+      "expectedGoalEventId",
+      "expectedGoalUpdatedAt",
+      "head",
+      "baseHead",
+      "owner",
+      "sessionId",
+      "expectedWork",
+      "worker",
+      "workerHost",
+      "workerPane",
+      "worktree",
+      "branch"
+    ]) {
+      expect(values.has(key), key).toBe(true)
+    }
+  })
+
   it.each(approvalDashboardStatuses)(
     "keeps the complete redacted request in the approval dashboard for %s",
     (status) => {

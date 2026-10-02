@@ -1,8 +1,9 @@
-import { fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
+import { agentConnectTarget, fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
 import { Clock, Crypto, Effect, Encoding, Equal, FileSystem, Option, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
 import {
+  WorkAdmissionConflictError,
   WorkAgentBindingAuthorityError,
   WorkAgentBindingConflictError,
   WorkCheckpointConflictError,
@@ -14,6 +15,7 @@ import {
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
   WorkProjectionError,
+  WorkPullRequestLinkError,
   WorkStoreError,
   WorkTransactionConflictError
 } from "./errors.js"
@@ -58,24 +60,38 @@ import {
   workDispatchLineageContainedBy,
   workDispatchLineageEquivalent
 } from "./internal/decision-handoff-migration.js"
+import { workHistoryError } from "./internal/history-validation.js"
 import {
+  WorkAdmissionTarget,
   WorkAgentBinding,
   WorkAgentBindingRequest,
   WorkCoordinatorSessionId,
   WorkDecisionHandoff,
   WorkDispatchHandoff,
+  WorkExistingGoalRecovery,
+  WorkGoal,
   WorkGoalCheckpoint,
   WorkGoalId,
   workHistoryMaxEvents,
   WorkLaneClaim,
   WorkLaneClaimed,
+  WorkProspectiveAdmission,
+  WorkPullRequestLink,
+  WorkRecoveryTarget,
   workSnapshotMaxGoals
 } from "./model.js"
 import type {
+  WorkAdmissionPreflight as WorkAdmissionPreflightType,
+  WorkAdmissionTarget as WorkAdmissionTargetType,
   WorkAgentBinding as WorkAgentBindingType,
   WorkAgentBindingRequest as WorkAgentBindingRequestType,
   WorkDecisionHandoff as WorkDecisionHandoffType,
-  WorkGoalCheckpoint as WorkGoalCheckpointType
+  WorkExistingGoalRecovery as WorkExistingGoalRecoveryType,
+  WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkProspectiveAdmission as WorkProspectiveAdmissionType,
+  WorkPullRequestLink as WorkPullRequestLinkType,
+  WorkRecoveryPreflight as WorkRecoveryPreflightType,
+  WorkRecoveryTarget as WorkRecoveryTargetType
 } from "./model.js"
 
 const StoredEventRow = Schema.Struct({ record: Schema.String })
@@ -531,8 +547,10 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
         )
         if (!requiresWorkLink) return metadata.hasWorkLink === 1
         const dispatchIdentity = JSON.stringify([metadata.dispatchRequestId, metadata.handoffId])
-        return metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
+        return (
+          metadata.handoffId === null || metadataCounts.get(metadata.dispatchRequestId) !== 1 ||
           dispatchCounts.get(dispatchIdentity) !== 1 || decisionCounts.get(metadata.handoffId) !== 1
+        )
       })
       if (invalidMetadata !== undefined) {
         throw new WorkStoreError({
@@ -1180,7 +1198,7 @@ type ClaimDecision =
   | { readonly _tag: "conflict"; readonly error: WorkLaneClaimConflictError }
   | { readonly _tag: "goal-conflict"; readonly error: WorkLaneGoalConflictError }
   | { readonly _tag: "operation-conflict"; readonly error: WorkLaneOperationConflictError }
-  | { readonly _tag: "rejected"; readonly error: WorkProjectionError | WorkStoreError }
+  | { readonly _tag: "rejected"; readonly error: WorkProjectionError | WorkStoreError | WorkPullRequestLinkError }
   | { readonly _tag: "claimed"; readonly value: WorkLaneClaimed }
 
 type AgentBindingDecision =
@@ -1241,18 +1259,22 @@ const decodeRow = (row: Readonly<Record<string, SQLOutputValue>>) =>
     )
   )
 
-const claimInputFromClaimed = (claim: WorkLaneClaimed): WorkLaneClaim => ({
-  branch: claim.branch,
-  expectedRevision: claim.expectedRevision,
-  goalId: claim.goalId,
-  head: claim.head,
-  laneId: claim.laneId,
-  operationId: claim.operationId,
-  owner: claim.owner,
-  parent: claim.parent,
-  phase: claim.phase,
-  worktree: claim.worktree
-})
+const claimInputFromClaimed = (claim: WorkLaneClaimed): WorkLaneClaim => {
+  const input = {
+    branch: claim.branch,
+    expectedRevision: claim.expectedRevision,
+    goalId: claim.goalId,
+    head: claim.head,
+    laneId: claim.laneId,
+    operationId: claim.operationId,
+    owner: claim.owner,
+    parent: claim.parent,
+    phase: claim.phase
+  }
+  return claim.reconciliation === undefined
+    ? { ...input, worktree: claim.worktree }
+    : { ...input, reconciliation: claim.reconciliation, worktree: claim.worktree }
+}
 
 type ValidatedLaneEntry = {
   readonly claim: WorkLaneClaimed
@@ -1303,7 +1325,403 @@ const readValidatedLaneLedger = (
   }
 }
 
+const admissionConflict = (target: WorkAdmissionTargetType, reason: string) =>
+  new WorkAdmissionConflictError({ goalId: target.goalId, laneId: target.laneId, reason })
+
+type AdmissionInspection =
+  | Exclude<WorkAdmissionPreflightType, { readonly _tag: "prospective" }>
+  | { readonly _tag: "prospective"; readonly target: WorkAdmissionTargetType; readonly snapshot: string }
+
+type AdmissionRejection = {
+  readonly _tag: "rejected"
+  readonly error: WorkAdmissionConflictError
+}
+
+/** Reads every durable identity row, including entries omitted by time-window projections. */
+const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType): AdmissionInspection => {
+  const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
+    database.prepare(
+      `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+       FROM work_goal_events ORDER BY occurred_at ASC, event_id ASC LIMIT ?`
+    ).all(workHistoryMaxEvents + 1)
+  )
+  const lanes = readValidatedLaneLedger(database, "admission.inspect")
+  if (lanes._tag === "invalid") throw lanes.error
+  const bindingRows = Schema.decodeUnknownSync(AgentBindingRows)(
+    database.prepare(
+      `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+       expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+       FROM work_agent_bindings ORDER BY dispatch_request_id ASC LIMIT ?`
+    ).all(workLaneOperationMaxRecords + 1)
+  )
+  const operationRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingLaneOperationRow))(
+    database.prepare(
+      `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
+       phase, revision, record FROM work_lane_operations ORDER BY operation_id ASC LIMIT ?`
+    ).all(workLaneOperationMaxRecords + 1)
+  )
+  if (
+    eventRows.length > workHistoryMaxEvents || bindingRows.length > workLaneOperationMaxRecords ||
+    operationRows.length > workLaneOperationMaxRecords
+  ) {
+    throw new WorkStoreError({ cause: target, operation: "admission.inspect.capacity" })
+  }
+  const events = eventRows.map((row) => {
+    const decision = decodeAgentBindingGoalEvent(row, "admission.inspect.event")
+    if (decision._tag === "invalid") throw decision.error
+    return decision.checkpoint
+  })
+  const historyError = workHistoryError(events)
+  if (historyError !== undefined) throw historyError
+  const bindings = bindingRows.map((row) => {
+    const binding = Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record))
+    if (
+      row.dispatchRequestId !== binding.request.dispatchRequestId ||
+      row.laneId !== binding.request.laneId || row.revision !== binding.lane.revision ||
+      row.agentId !== binding.request.worker.agentId ||
+      row.host.toLowerCase() !== binding.request.worker.host.toLowerCase()
+    ) {
+      throw new WorkStoreError({ cause: row, operation: "admission.inspect.binding-identity" })
+    }
+    const readback = agentBindingReadbackError(
+      binding,
+      operationRows.find(({ operationId }) => operationId === binding.lane.operationId),
+      eventRows.find(({ eventId }) => eventId === binding.checkpoint.eventId),
+      "admission.inspect.binding"
+    )
+    if (readback !== undefined) throw readback
+    return binding
+  })
+  const latest = new Map<string, WorkGoalCheckpointType>()
+  for (const event of events) latest.set(event.goal.id, event)
+  const goal = [...latest.values()].find(({ goal }) => goal.review?.url === target.reviewUrl)
+  const lane = lanes.entries.find(({ claim }) => claim.laneId === target.laneId)?.claim
+  const binding = bindings.find(({ lane: bound }) => bound.laneId === target.laneId)
+  const foreignConflict =
+    events.some(({ goal: entry }) =>
+      (entry.review?.url === target.reviewUrl && entry.id !== target.goalId) ||
+      (entry.agentHierarchy?.agent.agentId === target.worker.agentId && entry.id !== target.goalId) ||
+      (entry.goalFamily?.canonicalGoalId === target.goalId && entry.id !== target.goalId)
+    ) || lanes.entries.some(({ claim }) =>
+      (claim.goalId === target.goalId && claim.laneId !== target.laneId) ||
+      (claim.worktree === target.worktree && claim.laneId !== target.laneId)
+    ) ||
+    bindings.some(({ request }) =>
+      (request.worker.agentId === target.worker.agentId && request.laneId !== target.laneId) ||
+      (request.prospectiveAdmission?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
+      (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
+    ) || bindings.filter(({ request }) => request.laneId === target.laneId).length > 1
+  const exact = goal !== undefined && lane !== undefined && binding !== undefined &&
+    goal.goal.id === target.goalId && goal.goal.state !== "completed" &&
+    goal.goal.state !== "deployed" && goal.goal.goalFamily?.role === "canonical" &&
+    goal.goal.goalFamily.canonicalGoalId === target.goalId &&
+    Equal.equals(goal.goal.owner, target.owner) &&
+    lane.goalId === target.goalId && lane.head === target.head &&
+    lane.worktree === target.worktree && lane.branch === target.branch &&
+    lane.phase !== "shipped" && Equal.equals(lane.owner, target.owner) &&
+    binding.lane.laneId === target.laneId &&
+    Equal.equals(binding.request.worker, target.worker) &&
+    (binding.request.prospectiveAdmission === undefined || (
+      binding.request.prospectiveAdmission.sessionId === target.sessionId &&
+      binding.request.prospectiveAdmission.workAssignment === target.expectedWork &&
+      binding.request.prospectiveAdmission.baseHead === target.baseHead
+    )) &&
+    (binding.request.existingGoalRecovery === undefined ||
+      (binding.request.existingGoalRecovery.sessionId === target.sessionId &&
+        binding.request.existingGoalRecovery.workAssignment === target.expectedWork &&
+        binding.request.existingGoalRecovery.baseHead === target.baseHead))
+  if (exact && !foreignConflict) {
+    return {
+      _tag: "existing",
+      target,
+      link: Schema.decodeUnknownSync(WorkPullRequestLink)({
+        request: {
+          repository: target.repository,
+          pullRequest: target.pullRequest,
+          goalId: target.goalId,
+          laneId: target.laneId
+        },
+        goalEventId: goal.eventId,
+        goal: goal.goal,
+        lane,
+        binding
+      })
+    }
+  }
+  const conflicts =
+    events.some(({ goal: entry }) =>
+      entry.id === target.goalId || entry.review?.url === target.reviewUrl ||
+      entry.goalFamily?.canonicalGoalId === target.goalId ||
+      entry.agentHierarchy?.agent.agentId === target.worker.agentId
+    ) || lanes.entries.some(({ claim }) =>
+      claim.laneId === target.laneId || claim.goalId === target.goalId ||
+      claim.worktree === target.worktree
+    ) || bindings.some(({ request }) =>
+      request.worker.agentId === target.worker.agentId ||
+      request.prospectiveAdmission?.sessionId === target.sessionId ||
+      request.existingGoalRecovery?.sessionId === target.sessionId
+    )
+  if (conflicts) {
+    return { _tag: "conflict", target, reason: "durable PR, goal, lane, worker, or worktree is already bound" }
+  }
+  const snapshot = JSON.stringify({
+    target,
+    eventRows,
+    lanes: lanes.entries.map(({ row }) => row),
+    bindingRows,
+    operationRows
+  })
+  return { _tag: "prospective", target, snapshot }
+}
+
+const readAdmissionState = (database: DatabaseSync, target: WorkAdmissionTargetType): AdmissionInspection => {
+  database.exec("BEGIN")
+  try {
+    const state = admissionState(database, target)
+    database.exec("ROLLBACK")
+    return state
+  } catch (cause) {
+    database.exec("ROLLBACK")
+    throw cause
+  }
+}
+
+type RecoveryInspection =
+  | Exclude<WorkRecoveryPreflightType, { readonly _tag: "recoverable" }>
+  | {
+    readonly _tag: "recoverable"
+    readonly target: WorkRecoveryTargetType
+    readonly snapshot: string
+    readonly original: WorkGoalCheckpointType
+    readonly history: ReadonlyArray<WorkGoalCheckpointType>
+  }
+
+const recoveryTables: ReadonlyArray<string> = [
+  "work_goal_events",
+  "work_lane_claims",
+  "work_lane_operations",
+  "work_agent_bindings",
+  "work_goal_transactions",
+  "work_goal_transaction_totals",
+  "work_lane_operation_totals",
+  "work_decision_handoffs",
+  "work_decision_totals"
+]
+
+/** Validates every historical operation against its indexed row and current lane. */
+const readRecoveryOperations = (database: DatabaseSync) => {
+  const lanes = readValidatedLaneLedger(database, "recovery.preflight")
+  if (lanes._tag === "invalid") throw lanes.error
+  const rows = Schema.decodeUnknownSync(Schema.Array(AgentBindingLaneOperationRow))(
+    database
+      .prepare(
+        `SELECT operation_id AS operationId, lane_id AS laneId, goal_id AS goalId,
+       phase, revision, record FROM work_lane_operations ORDER BY operation_id ASC LIMIT ?`
+      )
+      .all(workLaneOperationMaxRecords + 1)
+  )
+  if (rows.length > workLaneOperationMaxRecords) {
+    throw new WorkStoreError({ cause: rows.length, operation: "recovery.preflight.ledger-capacity" })
+  }
+  const current = new Map(lanes.entries.map(({ claim, row }) => [claim.laneId, { claim, row }]))
+  const revisions = new Set<string>()
+  const claims = rows.map((row) => {
+    let claim: WorkLaneClaimed
+    try {
+      claim = Schema.decodeUnknownSync(WorkLaneClaimed)(JSON.parse(row.record))
+    } catch (cause) {
+      throw new WorkStoreError({ cause, operation: "recovery.preflight.operation-decode" })
+    }
+    if (
+      claim.operationId !== row.operationId || claim.laneId !== row.laneId ||
+      claim.goalId !== row.goalId || claim.phase !== row.phase || claim.revision !== row.revision
+    ) {
+      throw new WorkStoreError({ cause: { claim, row }, operation: "recovery.preflight.operation-identity" })
+    }
+    const lane = current.get(claim.laneId)
+    const key = `${claim.laneId}\u0000${String(claim.revision)}`
+    if (
+      lane === undefined || lane.claim.goalId !== claim.goalId ||
+      claim.revision > lane.claim.revision || revisions.has(key) ||
+      (claim.revision === lane.claim.revision && row.record !== lane.row.record)
+    ) {
+      throw new WorkStoreError({ cause: { claim, row, lane }, operation: "recovery.preflight.operation-companion" })
+    }
+    revisions.add(key)
+    return claim
+  })
+  const byOperation = new Map(rows.map((row) => [row.operationId, row]))
+  if (
+    lanes.entries.some(({ claim, row }) => {
+      const latest = byOperation.get(claim.operationId)
+      return latest === undefined || latest.revision !== claim.revision || latest.record !== row.record
+    })
+  ) {
+    throw new WorkStoreError({ cause: lanes.entries, operation: "recovery.preflight.missing-latest-operation" })
+  }
+  return { lanes, rows, claims }
+}
+
+/** Reads the complete Work authority, including rows outside every projection window. */
+const recoveryState = (database: DatabaseSync, target: WorkRecoveryTargetType): RecoveryInspection => {
+  const inspected = admissionState(database, target)
+  const operations = readRecoveryOperations(database)
+  if (inspected._tag === "existing") return { _tag: "existing", target, link: inspected.link }
+  const conflict = (reason: string): RecoveryInspection => ({
+    _tag: "conflict",
+    target,
+    reason
+  })
+  const tables = recoveryTables.map((name) => {
+    const rows = database.prepare(`SELECT * FROM ${name} ORDER BY rowid ASC LIMIT ?`).all(workHistoryMaxEvents + 1)
+    if (rows.length > workHistoryMaxEvents) {
+      throw new WorkStoreError({
+        cause: name,
+        operation: "recovery.preflight.capacity"
+      })
+    }
+    return { name, rows }
+  })
+  const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
+    database
+      .prepare(
+        `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+       FROM work_goal_events ORDER BY occurred_at ASC, event_id ASC LIMIT ?`
+      )
+      .all(workHistoryMaxEvents + 1)
+  )
+  if (eventRows.length > workHistoryMaxEvents) {
+    throw new WorkStoreError({
+      cause: target,
+      operation: "recovery.preflight.history-capacity"
+    })
+  }
+  const history = eventRows.map((row) => {
+    const decision = decodeAgentBindingGoalEvent(row, "recovery.preflight.event")
+    if (decision._tag === "invalid") throw decision.error
+    return decision.checkpoint
+  })
+  const historyError = workHistoryError(history)
+  if (historyError !== undefined) throw historyError
+  const own = history.filter(({ goal }) => goal.id === target.goalId)
+  const original = own.at(-1)
+  if (original === undefined) return conflict("canonical goal does not exist")
+  if (original.eventId !== target.expectedGoalEventId || original.goal.updatedAt !== target.expectedGoalUpdatedAt) {
+    return conflict("approved goal event or revision is stale")
+  }
+  if (
+    own.some(
+      ({ goal }) =>
+        goal.goalFamily?.role !== "canonical" ||
+        goal.goalFamily.canonicalGoalId !== target.goalId ||
+        !Equal.equals(goal.owner, target.owner) ||
+        (goal.repository.repository !== target.repository &&
+          (goal.repository.repository !== target.worktree || goal.repository.branch !== target.branch)) ||
+        goal.connectTarget !== null ||
+        (goal.agentHierarchy !== undefined && goal.agentHierarchy !== null) ||
+        (goal.review?.url !== null && goal.review?.url !== undefined && goal.review.url !== target.reviewUrl) ||
+        goal.state === "completed" ||
+        goal.state === "deployed"
+    )
+  ) {
+    return conflict("canonical goal history is linked, terminal, or belongs to another owner")
+  }
+  const bindingRows = Schema.decodeUnknownSync(AgentBindingRows)(
+    database
+      .prepare(
+        `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+       expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+       FROM work_agent_bindings ORDER BY dispatch_request_id ASC LIMIT ?`
+      )
+      .all(workLaneOperationMaxRecords + 1)
+  )
+  if (bindingRows.length > workLaneOperationMaxRecords) {
+    throw new WorkStoreError({
+      cause: target,
+      operation: "recovery.preflight.ledger-capacity"
+    })
+  }
+  const bindings = bindingRows.map((row) => Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(row.record)))
+  const decisions = Schema.decodeUnknownSync(Schema.Array(DecisionRow))(
+    database
+      .prepare(
+        `SELECT handoff_id AS handoffId, session_id AS sessionId, lane_id AS laneId,
+       occurred_at AS occurredAt, record FROM work_decision_handoffs ORDER BY handoff_id ASC LIMIT ?`
+      )
+      .all(workHistoryMaxEvents + 1)
+  )
+  if (decisions.length > workHistoryMaxEvents) {
+    throw new WorkStoreError({
+      cause: target,
+      operation: "recovery.preflight.decision-capacity"
+    })
+  }
+  if (
+    history.some(
+      ({ goal }) =>
+        goal.id !== target.goalId &&
+        (goal.review?.url === target.reviewUrl ||
+          goal.goalFamily?.canonicalGoalId === target.goalId ||
+          goal.agentHierarchy?.agent.agentId === target.worker.agentId)
+    ) ||
+    operations.lanes.entries.some(
+      ({ claim }) =>
+        claim.goalId === target.goalId || claim.laneId === target.laneId || claim.worktree === target.worktree
+    ) ||
+    operations.claims.some(
+      ({ goalId, laneId, worktree }) =>
+        goalId === target.goalId || laneId === target.laneId || worktree === target.worktree
+    ) ||
+    bindings.some(
+      ({ request }) =>
+        request.laneId === target.laneId ||
+        request.worker.agentId === target.worker.agentId ||
+        request.prospectiveAdmission?.sessionId === target.sessionId ||
+        request.existingGoalRecovery?.sessionId === target.sessionId
+    ) ||
+    decisions.some(({ record }) => {
+      const handoff = Schema.decodeUnknownSync(WorkDecisionHandoff)(JSON.parse(record))
+      return (
+        handoff.goalId === target.goalId || handoff.laneId === target.laneId || handoff.sessionId === target.sessionId
+      )
+    })
+  ) {
+    return conflict("historical PR, goal, lane, worker, session, or worktree linkage conflicts")
+  }
+  return {
+    _tag: "recoverable",
+    target,
+    original,
+    history,
+    snapshot: JSON.stringify({ target, tables })
+  }
+}
+
+const readRecoveryState = (database: DatabaseSync, target: WorkRecoveryTargetType): RecoveryInspection => {
+  database.exec("BEGIN")
+  try {
+    const state = recoveryState(database, target)
+    database.exec("ROLLBACK")
+    return state
+  } catch (cause) {
+    database.exec("ROLLBACK")
+    throw cause
+  }
+}
+
 export interface WorkStoreService {
+  readonly recoveryPreflight: (
+    target: WorkRecoveryTargetType
+  ) => Effect.Effect<WorkRecoveryPreflightType, WorkProjectionError | WorkStoreError>
+  readonly recoverExistingGoal: (
+    request: WorkExistingGoalRecoveryType
+  ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  readonly admissionPreflight: (
+    target: WorkAdmissionTargetType
+  ) => Effect.Effect<WorkAdmissionPreflightType, WorkProjectionError | WorkStoreError>
+  readonly admitExistingOwner: (
+    request: WorkProspectiveAdmissionType
+  ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
   readonly bindAgent: (
     request: WorkAgentBindingRequestType
   ) => Effect.Effect<
@@ -1313,6 +1731,9 @@ export interface WorkStoreService {
   readonly agentBinding: (
     dispatchRequestId: string
   ) => Effect.Effect<Option.Option<WorkAgentBindingType>, WorkStoreError>
+  readonly bindingDispatchesForLane: (
+    laneId: string
+  ) => Effect.Effect<ReadonlyArray<string>, WorkStoreError>
   readonly append: (
     event: WorkGoalCheckpointType
   ) => Effect.Effect<
@@ -1336,6 +1757,7 @@ export interface WorkStoreService {
     | WorkLaneClaimConflictError
     | WorkLaneGoalConflictError
     | WorkLaneOperationConflictError
+    | WorkPullRequestLinkError
     | WorkProjectionError
     | WorkStoreError
   >
@@ -1591,6 +2013,556 @@ export class WorkStore implements WorkStoreService {
     })
     yield* store.secureFiles()
     return store
+  })
+
+  readonly recoveryPreflight = Effect.fn("WorkStore.recoveryPreflight")(function*(
+    this: WorkStore,
+    target: WorkRecoveryTargetType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkRecoveryTarget)(target).pipe(
+      Effect.mapError(storeError("recovery.preflight.decode"))
+    )
+    const state = yield* Effect.try({
+      try: () => readRecoveryState(this.#database, decoded),
+      catch: storeError("recovery.preflight.read")
+    })
+    if (state._tag !== "recoverable") return state
+    const historyToken = yield* this.#cryptoService
+      .digest("SHA-256", utf8.encode(state.snapshot))
+      .pipe(Effect.mapError(storeError("recovery.preflight.digest")), Effect.map(Encoding.encodeHex))
+    const preflight: WorkRecoveryPreflightType = {
+      _tag: "recoverable",
+      target: decoded,
+      historyToken
+    }
+    return preflight
+  })
+
+  readonly recoverExistingGoal = Effect.fn("WorkStore.recoverExistingGoal")(function*(
+    this: WorkStore,
+    request: WorkExistingGoalRecoveryType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkExistingGoalRecovery)(request).pipe(
+      Effect.mapError(storeError("recovery.decode"))
+    )
+    const target = Schema.decodeUnknownSync(WorkRecoveryTarget)(decoded)
+    const observedAt = yield* Clock.currentTimeMillis
+    yield* this.secureFiles()
+    const observed = yield* Effect.try({
+      try: () => readRecoveryState(this.#database, target),
+      catch: storeError("recovery.inspect")
+    })
+    const historyToken = observed._tag === "recoverable"
+      ? yield* this.#cryptoService
+        .digest("SHA-256", utf8.encode(observed.snapshot))
+        .pipe(Effect.mapError(storeError("recovery.digest")), Effect.map(Encoding.encodeHex))
+      : undefined
+    const decision = yield* Effect.try({
+      try: ():
+        | { readonly _tag: "linked"; readonly link: WorkPullRequestLinkType }
+        | {
+          readonly _tag: "rejected"
+          readonly error: WorkAdmissionConflictError | WorkProjectionError
+        } =>
+      {
+        let transaction = false
+        const reject = (reason: string): AdmissionRejection => ({
+          _tag: "rejected",
+          error: admissionConflict(target, reason)
+        })
+        try {
+          this.#database.exec("BEGIN IMMEDIATE")
+          transaction = true
+          const state = recoveryState(this.#database, target)
+          if (state._tag === "existing") {
+            const existing = state.link
+            const provenance = existing.binding.request.existingGoalRecovery
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return existing.goalEventId === existing.binding.checkpoint.eventId &&
+                existing.lane.revision === 1 &&
+                Equal.equals(existing.goal, existing.binding.checkpoint.goal) &&
+                existing.binding.request.dispatchRequestId === decoded.operationId &&
+                provenance?.expectedGoalEventId === decoded.expectedGoalEventId &&
+                provenance.expectedGoalUpdatedAt === decoded.expectedGoalUpdatedAt &&
+                provenance.expectedHistoryToken === decoded.expectedHistoryToken &&
+                provenance.approvalJobId === decoded.approvalJobId &&
+                provenance.approvalActor === decoded.approvalActor &&
+                provenance.approvalApprovedBy === decoded.approvalApprovedBy &&
+                provenance.approvalApprovedAt === decoded.approvalApprovedAt &&
+                provenance.approvalHash === decoded.approvalHash
+              ? { _tag: "linked", link: existing }
+              : reject("existing linkage is not this exact approved recovery")
+          }
+          if (
+            observed._tag !== "recoverable" ||
+            state._tag !== "recoverable" ||
+            state.snapshot !== observed.snapshot ||
+            historyToken !== decoded.expectedHistoryToken
+          ) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return reject(state._tag === "conflict" ? state.reason : "stale complete-history evidence")
+          }
+          if (
+            this.#database
+              .prepare(
+                `SELECT 1 FROM work_lane_operations WHERE operation_id = ?
+             UNION ALL SELECT 1 FROM work_goal_events WHERE event_id = ?
+             UNION ALL SELECT 1 FROM work_agent_bindings WHERE dispatch_request_id = ?
+             UNION ALL SELECT 1 FROM work_goal_transactions WHERE transaction_id = ?
+             UNION ALL SELECT 1 FROM work_decision_handoffs WHERE handoff_id = ? LIMIT 1`
+              )
+              .get(
+                decoded.operationId,
+                decoded.operationId,
+                decoded.operationId,
+                decoded.operationId,
+                decoded.operationId
+              ) !== undefined
+          ) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return reject("operation ID is already used by another durable record")
+          }
+          const at = Math.max(observedAt, state.original.goal.updatedAt + 1)
+          const previous = state.original.goal
+          const goal = Schema.decodeUnknownSync(WorkGoal)({
+            ...previous,
+            repository: {
+              repository: decoded.repository,
+              branch: decoded.branch
+            },
+            review: previous.review === null || previous.review === undefined
+              ? {
+                state: "not_requested",
+                summary: null,
+                updatedAt: at,
+                url: decoded.reviewUrl
+              }
+              : { ...previous.review, url: decoded.reviewUrl },
+            agentHierarchy: { agent: decoded.worker },
+            connectTarget: agentConnectTarget(decoded.worker),
+            activity: [
+              ...(previous.activity ?? []),
+              {
+                id: decoded.operationId,
+                kind: "status",
+                summary:
+                  `Existing canonical goal linked to settled owner by approved Fleet job ${decoded.approvalJobId}`,
+                occurredAt: at
+              }
+            ],
+            updatedAt: at
+          })
+          const checkpoint = Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+            version: "herdr.work.event.v1",
+            eventId: decoded.operationId,
+            occurredAt: at,
+            goal
+          })
+          const lane = Schema.decodeUnknownSync(WorkLaneClaimed)({
+            operationId: decoded.operationId,
+            goalId: decoded.goalId,
+            laneId: decoded.laneId,
+            worktree: decoded.worktree,
+            branch: decoded.branch,
+            head: decoded.head,
+            owner: decoded.owner,
+            parent: null,
+            phase: "claim",
+            expectedRevision: 0,
+            revision: 1
+          })
+          const binding = Schema.decodeUnknownSync(WorkAgentBinding)({
+            version: "herdr.work.agent-binding.v1",
+            request: {
+              version: "herdr.work.agent-binding-request.v1",
+              dispatchRequestId: decoded.operationId,
+              laneId: decoded.laneId,
+              expectedRevision: 0,
+              worker: decoded.worker,
+              existingGoalRecovery: {
+                sessionId: decoded.sessionId,
+                workAssignment: decoded.expectedWork,
+                baseHead: decoded.baseHead,
+                expectedHistoryToken: decoded.expectedHistoryToken,
+                expectedGoalEventId: decoded.expectedGoalEventId,
+                expectedGoalUpdatedAt: decoded.expectedGoalUpdatedAt,
+                approvalJobId: decoded.approvalJobId,
+                approvalActor: decoded.approvalActor,
+                approvalApprovedBy: decoded.approvalApprovedBy,
+                approvalApprovedAt: decoded.approvalApprovedAt,
+                approvalHash: decoded.approvalHash
+              }
+            },
+            lane,
+            checkpoint
+          })
+          const operationTotals = readLaneOperationLedgerTotals(this.#database)
+          const laneRecord = JSON.stringify(lane)
+          const operationBytes = utf8.encode(decoded.operationId).byteLength + utf8.encode(laneRecord).byteLength
+          const capacity = agentBindingAdmissionError({
+            history: state.history,
+            candidate: checkpoint,
+            operationCount: operationTotals.operationCount,
+            operationBytes: operationTotals.operationBytes,
+            candidateOperationBytes: operationBytes
+          })
+          const lanes = readValidatedLaneLedger(this.#database, "recovery.capacity")
+          if (lanes._tag === "invalid") throw lanes.error
+          const claimBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+            this.#database
+              .prepare(
+                `SELECT COALESCE(SUM(length(CAST(lane_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+               FROM work_lane_claims`
+              )
+              .get()
+          ).bytes
+          if (
+            capacity !== undefined ||
+            lanes.entries.length >= workLaneMaxRecords ||
+            claimBytes + utf8.encode(decoded.laneId).byteLength + utf8.encode(laneRecord).byteLength > workLaneMaxBytes
+          ) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return {
+              _tag: "rejected",
+              error: capacity ??
+                new WorkProjectionError({
+                  cause: decoded,
+                  detail: "existing-goal recovery exceeds Work capacity",
+                  reason: "capacity_exceeded"
+                })
+            }
+          }
+          const link = Schema.decodeUnknownSync(WorkPullRequestLink)({
+            request: {
+              repository: decoded.repository,
+              pullRequest: decoded.pullRequest,
+              goalId: decoded.goalId,
+              laneId: decoded.laneId
+            },
+            goalEventId: checkpoint.eventId,
+            goal,
+            lane,
+            binding
+          })
+          this.#database
+            .prepare(
+              `INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record)
+             VALUES (?, ?, ?, ?)`
+            )
+            .run(checkpoint.eventId, checkpoint.goal.id, checkpoint.occurredAt, JSON.stringify(checkpoint))
+          this.#database
+            .prepare(
+              `INSERT INTO work_lane_claims (lane_id, goal_id, operation_id, phase, revision, record)
+             VALUES (?, ?, ?, ?, ?, ?)`
+            )
+            .run(lane.laneId, lane.goalId, lane.operationId, lane.phase, lane.revision, laneRecord)
+          this.#database
+            .prepare(
+              `INSERT INTO work_lane_operations (operation_id, lane_id, goal_id, phase, revision, record)
+             VALUES (?, ?, ?, ?, ?, ?)`
+            )
+            .run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, laneRecord)
+          this.#database
+            .prepare(
+              `INSERT INTO work_agent_bindings
+             (dispatch_request_id, lane_id, expected_revision, revision, agent_id, host, record)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+            )
+            .run(
+              decoded.operationId,
+              decoded.laneId,
+              0,
+              1,
+              decoded.worker.agentId,
+              decoded.worker.host,
+              JSON.stringify(binding)
+            )
+          this.#database.exec("COMMIT")
+          transaction = false
+          return { _tag: "linked", link }
+        } catch (cause) {
+          if (transaction) this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      catch: storeError("recovery.transaction")
+    })
+    if (decision._tag === "rejected") return yield* decision.error
+    return decision.link
+  })
+
+  readonly admissionPreflight = Effect.fn("WorkStore.admissionPreflight")(function*(
+    this: WorkStore,
+    target: WorkAdmissionTargetType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkAdmissionTarget)(target).pipe(
+      Effect.mapError(storeError("admission.preflight.decode"))
+    )
+    const state = yield* Effect.try({
+      try: () => readAdmissionState(this.#database, decoded),
+      catch: storeError("admission.preflight.read")
+    })
+    if (state._tag !== "prospective") return state
+    const absenceToken = yield* this.#cryptoService.digest(
+      "SHA-256",
+      new TextEncoder().encode(state.snapshot)
+    ).pipe(
+      Effect.mapError(storeError("admission.preflight.digest")),
+      Effect.map(Encoding.encodeHex)
+    )
+    const preflight: WorkAdmissionPreflightType = { _tag: "prospective", target: state.target, absenceToken }
+    return preflight
+  })
+
+  readonly admitExistingOwner = Effect.fn("WorkStore.admitExistingOwner")(function*(
+    this: WorkStore,
+    request: WorkProspectiveAdmissionType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkProspectiveAdmission)(request).pipe(
+      Effect.mapError(storeError("admission.decode"))
+    )
+    const target = Schema.decodeUnknownSync(WorkAdmissionTarget)(decoded)
+    const now = yield* Clock.currentTimeMillis
+    yield* this.secureFiles()
+    const observed = yield* Effect.try({
+      try: () => readAdmissionState(this.#database, target),
+      catch: storeError("admission.inspect")
+    })
+    const absenceToken = observed._tag === "prospective"
+      ? yield* this.#cryptoService.digest("SHA-256", new TextEncoder().encode(observed.snapshot)).pipe(
+        Effect.mapError(storeError("admission.digest")),
+        Effect.map(Encoding.encodeHex)
+      )
+      : undefined
+    const decision = yield* Effect.try({
+      try: ():
+        | { readonly _tag: "admitted"; readonly link: WorkPullRequestLinkType }
+        | { readonly _tag: "rejected"; readonly error: WorkAdmissionConflictError | WorkProjectionError } =>
+      {
+        let transaction = false
+        try {
+          this.#database.exec("BEGIN IMMEDIATE")
+          transaction = true
+          const reject = (reason: string): AdmissionRejection => ({
+            _tag: "rejected",
+            error: admissionConflict(target, reason)
+          })
+          const state = admissionState(this.#database, target)
+          if (state._tag === "existing") {
+            const existing = state.link
+            const provenance = existing.binding.request.prospectiveAdmission
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return existing.binding.request.dispatchRequestId === decoded.operationId &&
+                provenance?.expectedAbsenceToken === decoded.expectedAbsenceToken &&
+                provenance?.approvalJobId === decoded.approvalJobId &&
+                provenance.approvalActor === decoded.approvalActor &&
+                existing.goal.title === decoded.title &&
+                existing.goal.summary === decoded.summary &&
+                existing.goal.detail === decoded.detail
+              ? { _tag: "admitted", link: existing }
+              : reject("existing admission is not this exact approved operation")
+          }
+          if (
+            state._tag !== "prospective" || observed._tag !== "prospective" ||
+            state.snapshot !== observed.snapshot || absenceToken !== decoded.expectedAbsenceToken
+          ) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return reject(state._tag === "conflict" ? state.reason : "stale absence evidence")
+          }
+          if (
+            this.#database.prepare(
+              `SELECT 1 FROM work_lane_operations WHERE operation_id = ?
+             UNION ALL SELECT 1 FROM work_goal_events WHERE event_id IN (?, ?)
+             UNION ALL SELECT 1 FROM work_agent_bindings WHERE dispatch_request_id = ? LIMIT 1`
+            ).get(decoded.operationId, decoded.operationId, `${decoded.operationId}.admission`, decoded.operationId) !==
+              undefined
+          ) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return reject("operation ID is already used by another durable record")
+          }
+          if (now < 1) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return reject("admission clock cannot produce two ordered checkpoints")
+          }
+          const createdAt = now - 1
+          const goal = Schema.decodeUnknownSync(WorkGoal)({
+            id: decoded.goalId,
+            title: decoded.title,
+            summary: decoded.summary,
+            detail: decoded.detail,
+            state: "review",
+            owner: decoded.owner,
+            repository: { repository: decoded.repository, branch: decoded.branch },
+            spend: null,
+            delivery: "pull_request",
+            blocker: null,
+            connectTarget: null,
+            goalFamily: { canonicalGoalId: decoded.goalId, role: "canonical" },
+            activity: [{
+              id: `${decoded.operationId}.admission`,
+              kind: "status",
+              summary: `Prospective admission of an existing owner by approved Fleet job ${decoded.approvalJobId}`,
+              occurredAt: createdAt
+            }],
+            review: { state: "requested", summary: null, updatedAt: createdAt, url: decoded.reviewUrl },
+            createdAt,
+            updatedAt: createdAt
+          })
+          const initial = Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+            version: "herdr.work.event.v1",
+            eventId: `${decoded.operationId}.admission`,
+            occurredAt: createdAt,
+            goal
+          })
+          const lane = Schema.decodeUnknownSync(WorkLaneClaimed)({
+            operationId: decoded.operationId,
+            goalId: decoded.goalId,
+            laneId: decoded.laneId,
+            worktree: decoded.worktree,
+            branch: decoded.branch,
+            head: decoded.head,
+            owner: decoded.owner,
+            parent: null,
+            phase: "review",
+            expectedRevision: 0,
+            revision: 1
+          })
+          const binding = Schema.decodeUnknownSync(WorkAgentBinding)({
+            version: "herdr.work.agent-binding.v1",
+            request: {
+              version: "herdr.work.agent-binding-request.v1",
+              dispatchRequestId: decoded.operationId,
+              laneId: decoded.laneId,
+              expectedRevision: 0,
+              worker: decoded.worker,
+              prospectiveAdmission: {
+                sessionId: decoded.sessionId,
+                workAssignment: decoded.expectedWork,
+                baseHead: decoded.baseHead,
+                expectedAbsenceToken: decoded.expectedAbsenceToken,
+                approvalJobId: decoded.approvalJobId,
+                approvalActor: decoded.approvalActor
+              }
+            },
+            lane,
+            checkpoint: {
+              version: "herdr.work.event.v1",
+              eventId: decoded.operationId,
+              occurredAt: now,
+              goal: {
+                ...goal,
+                agentHierarchy: { agent: decoded.worker },
+                connectTarget: agentConnectTarget(decoded.worker),
+                updatedAt: now
+              }
+            }
+          })
+          const existingRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
+            this.#database.prepare(
+              `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+               FROM work_goal_events ORDER BY occurred_at ASC, event_id ASC LIMIT ?`
+            ).all(workHistoryMaxEvents + 1)
+          )
+          const history = existingRows.map((row) => {
+            const result = decodeAgentBindingGoalEvent(row, "admission.history")
+            if (result._tag === "invalid") throw result.error
+            return result.checkpoint
+          })
+          const operationTotals = readLaneOperationLedgerTotals(this.#database)
+          const laneRecord = JSON.stringify(lane)
+          const operationBytes = utf8.encode(decoded.operationId).byteLength + utf8.encode(laneRecord).byteLength
+          const claimBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+            this.#database.prepare(
+              `SELECT COALESCE(SUM(length(CAST(lane_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+             FROM work_lane_claims`
+            ).get()
+          ).bytes
+          const capacity = agentBindingAdmissionError({
+            history: [...history, initial],
+            candidate: binding.checkpoint,
+            operationCount: operationTotals.operationCount,
+            operationBytes: operationTotals.operationBytes,
+            candidateOperationBytes: operationBytes
+          })
+          const lanes = readValidatedLaneLedger(this.#database, "admission.capacity")
+          if (lanes._tag === "invalid") throw lanes.error
+          if (
+            capacity !== undefined || lanes.entries.length >= workLaneMaxRecords ||
+            new Set(history.map(({ goal: previous }) => previous.id)).size >= workSnapshotMaxGoals ||
+            claimBytes + utf8.encode(decoded.laneId).byteLength + utf8.encode(laneRecord).byteLength > workLaneMaxBytes
+          ) {
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return {
+              _tag: "rejected",
+              error: capacity ?? new WorkProjectionError({
+                cause: decoded,
+                detail: "prospective admission exceeds Work capacity",
+                reason: "capacity_exceeded"
+              })
+            }
+          }
+          const link = Schema.decodeUnknownSync(WorkPullRequestLink)({
+            request: {
+              repository: decoded.repository,
+              pullRequest: decoded.pullRequest,
+              goalId: decoded.goalId,
+              laneId: decoded.laneId
+            },
+            goalEventId: binding.checkpoint.eventId,
+            goal: binding.checkpoint.goal,
+            lane,
+            binding
+          })
+          this.#database.prepare(
+            `INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record)
+             VALUES (?, ?, ?, ?)`
+          ).run(initial.eventId, initial.goal.id, initial.occurredAt, JSON.stringify(initial))
+          this.#database.prepare(
+            `INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record)
+             VALUES (?, ?, ?, ?)`
+          ).run(binding.checkpoint.eventId, decoded.goalId, now, JSON.stringify(binding.checkpoint))
+          this.#database.prepare(
+            `INSERT INTO work_lane_claims (lane_id, goal_id, operation_id, phase, revision, record)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).run(lane.laneId, lane.goalId, lane.operationId, lane.phase, lane.revision, laneRecord)
+          this.#database.prepare(
+            `INSERT INTO work_lane_operations (operation_id, lane_id, goal_id, phase, revision, record)
+             VALUES (?, ?, ?, ?, ?, ?)`
+          ).run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, laneRecord)
+          this.#database.prepare(
+            `INSERT INTO work_agent_bindings
+             (dispatch_request_id, lane_id, expected_revision, revision, agent_id, host, record)
+             VALUES (?, ?, ?, ?, ?, ?, ?)`
+          ).run(
+            decoded.operationId,
+            decoded.laneId,
+            0,
+            1,
+            decoded.worker.agentId,
+            decoded.worker.host,
+            JSON.stringify(binding)
+          )
+          this.#database.exec("COMMIT")
+          transaction = false
+          return { _tag: "admitted", link }
+        } catch (cause) {
+          if (transaction) this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      catch: storeError("admission.transaction")
+    })
+    if (decision._tag === "rejected") return yield* decision.error
+    return decision.link
   })
 
   readonly bindAgent = Effect.fn("WorkStore.bindAgent")(function*(
@@ -1926,6 +2898,27 @@ export class WorkStore implements WorkStoreService {
     return Option.some(binding)
   })
 
+  readonly bindingDispatchesForLane = Effect.fn("WorkStore.bindingDispatchesForLane")(function*(
+    this: WorkStore,
+    laneId: string
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkGoalId)(laneId).pipe(
+      Effect.mapError(storeError("agent-binding.lane.decode"))
+    )
+    const rows = yield* Effect.try({
+      try: () =>
+        this.#database.prepare(
+          `SELECT dispatch_request_id AS dispatchRequestId
+         FROM work_agent_bindings WHERE lane_id = ? ORDER BY revision DESC`
+        ).all(decoded),
+      catch: storeError("agent-binding.lane.read")
+    })
+    const entries = yield* Schema.decodeUnknownEffect(Schema.Array(
+      Schema.Struct({ dispatchRequestId: WorkAgentBindingRequest.fields.dispatchRequestId })
+    ))(rows).pipe(Effect.mapError(storeError("agent-binding.lane.rows")))
+    return entries.map(({ dispatchRequestId }) => dispatchRequestId)
+  })
+
   readonly append = Effect.fn("WorkStore.append")(function*(
     this: WorkStore,
     event: WorkGoalCheckpointType
@@ -2166,10 +3159,12 @@ export class WorkStore implements WorkStoreService {
             if (
               legacyRows.some((row, index) => {
                 const event = legacyTransaction[index]
-                return row === undefined ||
+                return (
+                  row === undefined ||
                   event === undefined ||
                   row.goalId !== event.goal.id ||
                   row.occurredAt !== event.occurredAt
+                )
               })
             ) {
               this.#database.exec("ROLLBACK")
@@ -2233,10 +3228,12 @@ export class WorkStore implements WorkStoreService {
             const denormalizedMismatch = decoded.some((event) => {
               const row = rowsByEventId.get(event.eventId) ??
                 rowsByGoalTime.get(JSON.stringify([event.goal.id, event.occurredAt]))
-              return row === undefined ||
+              return (
+                row === undefined ||
                 row.eventId !== event.eventId ||
                 row.goalId !== event.goal.id ||
                 row.occurredAt !== event.occurredAt
+              )
             })
             if (denormalizedMismatch) {
               this.#database.exec("ROLLBACK")
@@ -2251,10 +3248,12 @@ export class WorkStore implements WorkStoreService {
             const denormalizedMismatch = legacyCompactTransaction.events.some((identity, index) => {
               const event = decoded[index]
               const row = rowsByEventId.get(identity.eventId)
-              return row === undefined ||
+              return (
+                row === undefined ||
                 event === undefined ||
                 row.goalId !== event.goal.id ||
                 row.occurredAt !== event.occurredAt
+              )
             })
             if (denormalizedMismatch) {
               this.#database.exec("ROLLBACK")
@@ -2553,11 +3552,11 @@ export class WorkStore implements WorkStoreService {
             this.#database.exec("ROLLBACK")
             inTransaction = false
             return Equal.equals(claimInputFromClaimed(priorClaim), decoded)
-              ? { _tag: "claimed", value: priorClaim } satisfies ClaimDecision
-              : {
+              ? ({ _tag: "claimed", value: priorClaim } satisfies ClaimDecision)
+              : ({
                 _tag: "operation-conflict",
                 error: new WorkLaneOperationConflictError({ operationId: decoded.operationId })
-              } satisfies ClaimDecision
+              } satisfies ClaimDecision)
           }
 
           const laneLedger = readValidatedLaneLedger(this.#database, "claim.write")
@@ -2573,6 +3572,78 @@ export class WorkStore implements WorkStoreService {
           const existing = existingEntry?.row
           const existingClaim = existingEntry?.claim
           const actualRevision = existingClaim?.revision ?? 0
+          const reconciliation = decoded.reconciliation
+          if (reconciliation !== undefined) {
+            const rejectLink = (reason: WorkPullRequestLinkError["reason"]): ClaimDecision => {
+              this.#database.exec("ROLLBACK")
+              inTransaction = false
+              return {
+                _tag: "rejected",
+                error: new WorkPullRequestLinkError({
+                  goalId: decoded.goalId,
+                  laneId: decoded.laneId,
+                  reason
+                })
+              }
+            }
+            if (existingClaim === undefined || existingClaim.goalId !== decoded.goalId) {
+              return rejectLink("missing_lane")
+            }
+            if (existingClaim.revision !== decoded.expectedRevision) return rejectLink("stale_revision")
+            if (existingClaim.head !== reconciliation.expectedHead) return rejectLink("head_mismatch")
+            if (
+              !Equal.equals(existingClaim.owner, reconciliation.expectedOwner) ||
+              !Equal.equals(decoded.owner, existingClaim.owner)
+            ) return rejectLink("owner_mismatch")
+            if (
+              existingClaim.worktree !== decoded.worktree ||
+              existingClaim.branch !== decoded.branch ||
+              existingClaim.parent !== decoded.parent ||
+              existingClaim.phase !== decoded.phase ||
+              existingClaim.phase === "shipped"
+            ) return rejectLink("identity_mismatch")
+            const eventRaw = this.#database.prepare(
+              `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+               FROM work_goal_events WHERE goal_id = ? ORDER BY occurred_at DESC, event_id DESC LIMIT 1`
+            ).get(decoded.goalId)
+            if (eventRaw === undefined) return rejectLink("missing_provenance")
+            const event = Schema.decodeUnknownSync(WorkGoalCheckpoint)(
+              JSON.parse(Schema.decodeUnknownSync(AgentBindingGoalEventRow)(eventRaw).record)
+            )
+            const goal = event.goal
+            if (
+              event.eventId !== reconciliation.expectedGoalEventId ||
+              goal.review?.url !==
+                `https://github.com/${reconciliation.repository}/pull/${reconciliation.pullRequest}` ||
+              goal.goalFamily?.role !== "canonical" ||
+              goal.goalFamily.canonicalGoalId !== goal.id
+            ) return rejectLink("missing_provenance")
+            if (goal.state === "completed" || goal.state === "deployed") return rejectLink("terminal_goal")
+            if (!Equal.equals(goal.owner, reconciliation.expectedOwner)) return rejectLink("owner_mismatch")
+            const bindingRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingRow))(
+              this.#database.prepare(
+                `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+                  expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+                 FROM work_agent_bindings WHERE lane_id = ? ORDER BY revision DESC`
+              ).all(decoded.laneId)
+            )
+            const latest = bindingRows[0]
+            if (latest === undefined) return rejectLink("missing_binding")
+            if (latest.dispatchRequestId !== reconciliation.bindingDispatchRequestId) {
+              return rejectLink("ambiguous_binding")
+            }
+            const binding = Schema.decodeUnknownSync(WorkAgentBinding)(JSON.parse(latest.record))
+            if (
+              binding.request.laneId !== decoded.laneId ||
+              binding.lane.goalId !== decoded.goalId ||
+              !Equal.equals(binding.request.worker, reconciliation.worker) ||
+              !Equal.equals(goal.agentHierarchy?.agent, reconciliation.worker) ||
+              goal.connectTarget?.agentId !== reconciliation.worker.agentId ||
+              goal.connectTarget.host.toLowerCase() !== reconciliation.worker.host.toLowerCase()
+            ) {
+              return rejectLink("identity_mismatch")
+            }
+          }
           if (actualRevision !== decoded.expectedRevision) {
             this.#database.exec("ROLLBACK")
             inTransaction = false

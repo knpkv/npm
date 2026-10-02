@@ -373,6 +373,81 @@ const persistCoordinatorLifecycle = (
 }
 
 describe("durable Work projection", () => {
+  it.effect("inspects an existing PR without mutation and reconciles only its bound owner by CAS", () =>
+    Effect.scoped(
+      Effect.gen(function*() {
+        const directory = mkdtempSync(join(tmpdir(), "herdr-work-pr-link-"))
+        yield* Effect.addFinalizer(() => Effect.sync(() => rmSync(directory, { force: true, recursive: true })))
+        const opened = yield* openScopedStore(join(directory, "work.sqlite"))
+        const service = yield* makeWorkService(opened.store)
+        const initial: WorkGoalCheckpointType = {
+          ...history[0],
+          goal: {
+            ...history[0].goal,
+            goalFamily: { canonicalGoalId: history[0].goal.id, role: "canonical" },
+            review: { state: "requested", summary: null, updatedAt: 0, url: "https://github.com/knpkv/npm/pull/433" }
+          }
+        }
+        yield* service.record(initial)
+        const lane = yield* service.claim(laneClaim("lane:pr-owner", initial.goal.id))
+        yield* TestClock.setTime(0)
+        const binding = yield* service.bindAgent({
+          version: "herdr.work.agent-binding-request.v1",
+          dispatchRequestId: "dispatch:pr-owner",
+          expectedRevision: lane.revision,
+          laneId: lane.laneId,
+          worker: startedWorker
+        })
+        const identity = { repository: "knpkv/npm", pullRequest: 433, goalId: initial.goal.id, laneId: lane.laneId }
+        const before = yield* service.snapshots()
+        const linked = yield* service.inspectPullRequest(identity)
+        expect(linked.goalEventId).toBe(binding.checkpoint.eventId)
+        expect(linked.lane).toEqual(binding.lane)
+        expect(linked.binding.request.worker).toEqual(startedWorker)
+        expect(yield* service.snapshots()).toEqual(before)
+        expect(yield* Effect.result(service.inspectPullRequest({ ...identity, goalId: "goal:missing" })))
+          .toMatchObject({ failure: { _tag: "WorkPullRequestLinkError", reason: "missing_provenance" } })
+        const request = {
+          ...identity,
+          operationId: "operation:pr-reconcile",
+          expectedRevision: binding.lane.revision,
+          expectedHead: binding.lane.head,
+          newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+          expectedOwner: binding.lane.owner,
+          expectedGoalEventId: linked.goalEventId,
+          bindingDispatchRequestId: binding.request.dispatchRequestId,
+          sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+          worker: startedWorker,
+          worktree: binding.lane.worktree,
+          branch: binding.lane.branch
+        }
+        const updated = yield* service.reconcileExistingOwner(request)
+        expect(updated).toMatchObject({ revision: binding.lane.revision + 1, head: request.newHead })
+        expect(yield* service.reconcileExistingOwner(request)).toEqual(updated)
+        const changedReplay = { ...request, newHead: "ffffffffffffffffffffffffffffffffffffffff" }
+        expect(yield* Effect.result(service.reconcileExistingOwner(changedReplay)))
+          .toMatchObject({ failure: { _tag: "WorkLaneOperationConflictError" } })
+        expect(
+          yield* Effect.result(service.reconcileExistingOwner({
+            ...request,
+            operationId: "operation:stale",
+            expectedGoalEventId: "event:stale"
+          }))
+        ).toMatchObject({ failure: { _tag: "WorkPullRequestLinkError", reason: "stale_revision" } })
+        expect(
+          yield* Effect.result(service.reconcileExistingOwner({
+            ...request,
+            operationId: "operation:wrong-worker",
+            expectedRevision: updated.revision,
+            expectedHead: updated.head,
+            worker: { ...startedWorker, agentId: "agent-wrong" }
+          }))
+        ).toMatchObject({ failure: { _tag: "WorkPullRequestLinkError", reason: "identity_mismatch" } })
+        expect(Option.getOrThrow(yield* service.currentClaim(lane.laneId))).toEqual(updated)
+        expect(yield* Effect.result(service.inspectPullRequest({ ...identity, pullRequest: 434 })))
+          .toMatchObject({ failure: { _tag: "WorkPullRequestLinkError", reason: "missing_provenance" } })
+      }).pipe(provideNodeServices)
+    ))
   it("exports an exact typed dispatch, lane revision, and worker binding contract", () => {
     const request = {
       dispatchRequestId: "dispatch:worker-start",

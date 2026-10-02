@@ -117,6 +117,12 @@ export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string =>
       return delegateTitle(record.payload.mode)
     case "agent.message":
       return "Message an agent"
+    case "work.reconcile":
+      return "Reconcile existing Work owner"
+    case "work.admit":
+      return "Prospectively admit existing Work owner"
+    case "work.recover":
+      return "Link existing unlinked Work goal"
   }
 }
 
@@ -134,6 +140,12 @@ const safeSummary = (record: SanitizedJobRecord): string => {
         : `Started ${record.worker.name} through the persistent coordinator.`
     case "agent.message":
       return `Sent a typed message to ${record.payload.session}.`
+    case "work.reconcile":
+      return `Reconciled the existing owner for ${record.payload.repository}#${record.payload.pullRequest}.`
+    case "work.admit":
+      return `Prospectively admitted an existing owner for ${record.payload.repository}#${record.payload.pullRequest}.`
+    case "work.recover":
+      return `Linked the existing goal for ${record.payload.repository}#${record.payload.pullRequest}.`
   }
 }
 
@@ -144,6 +156,12 @@ const categoriesFor = (record: SanitizedJobRecord): ReadonlyArray<Exclude<Activi
   const categories: Array<Exclude<ActivityFilter, "all">> = []
   if (isException(record.status)) categories.push("exceptions")
   if (record.payload.kind.startsWith("agent.")) categories.push("work", "agent")
+  if (
+    record.payload.kind === "work.reconcile" ||
+    record.payload.kind === "work.admit" ||
+    record.payload.kind === "work.recover"
+  )
+    categories.push("work")
   if (requiresApproval(record.payload)) categories.push("approvals")
   if (
     record.payload.kind === "nix.apply" ||

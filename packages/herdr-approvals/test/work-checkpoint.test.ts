@@ -1,11 +1,14 @@
 import { describe, expect, it } from "@effect/vitest"
 import type { HostConfiguration } from "@knpkv/herdr-fleet"
-import type { WorkGoalCheckpoint, WorkSnapshots } from "@knpkv/herdr-work/model"
-import { Effect, Result } from "effect"
+import { type WorkGoalCheckpoint, WorkRecoveryContext, type WorkSnapshots } from "@knpkv/herdr-work/model"
+import { Effect, Result, Schema } from "effect"
 import {
+  workAdmissionPreflightUrl,
   workCheckpointFromJson,
   workCheckpointUrl,
   workDefaultTarget,
+  workRecoveryContextUrl,
+  workRecoveryPreflightUrl,
   workSnapshotFromJson,
   workSnapshotTarget,
   workSnapshotUrl
@@ -68,6 +71,69 @@ const config: HostConfiguration = {
 }
 
 describe("fleetctl work commands", () => {
+  it.effect("validates recovery context facts and retains authenticated listener targeting", () =>
+    Effect.gen(function*() {
+      expect(yield* workRecoveryContextUrl(config, "ALPHA", "goal-work")).toBe(
+        "http://127.0.0.1:4777/v1/work/recovery-context?goalId=goal-work"
+      )
+      const remote = { ...config, crossHost: true }
+      expect(yield* workRecoveryContextUrl(remote, "SER8", "goal-work")).toBe(
+        "https://ser8.example.test:4779/v1/work/recovery-context?goalId=goal-work"
+      )
+      for (
+        const [configuration, host, id] of [
+          [config, "SER8", "goal-work"],
+          [remote, "ALPHA", "goal-work"],
+          [config, "FOREIGN", "goal-work"],
+          [config, "ALPHA", ""]
+        ] satisfies ReadonlyArray<readonly [HostConfiguration, string, string]>
+      ) {
+        expect(yield* Effect.result(workRecoveryContextUrl(configuration, host, id))).toMatchObject({
+          failure: { _tag: "FleetValidationError" }
+        })
+      }
+      const decode = Schema.decodeUnknownEffect(WorkRecoveryContext, {
+        onExcessProperty: "error"
+      })
+      expect(
+        yield* decode({
+          goalId: "goal-work",
+          expectedGoalEventId: "checkpoint",
+          expectedGoalUpdatedAt: 1
+        })
+      ).toEqual({
+        goalId: "goal-work",
+        expectedGoalEventId: "checkpoint",
+        expectedGoalUpdatedAt: 1
+      })
+      for (
+        const invalid of [
+          {
+            goalId: "",
+            expectedGoalEventId: "checkpoint",
+            expectedGoalUpdatedAt: 1
+          },
+          {
+            goalId: "goal-work",
+            expectedGoalEventId: "",
+            expectedGoalUpdatedAt: 1
+          },
+          {
+            goalId: "goal-work",
+            expectedGoalEventId: "checkpoint",
+            expectedGoalUpdatedAt: -1
+          },
+          {
+            goalId: "goal-work",
+            expectedGoalEventId: "checkpoint",
+            expectedGoalUpdatedAt: 1,
+            ready: true
+          }
+        ]
+      ) {
+        expect((yield* Effect.result(decode(invalid)))._tag).toBe("Failure")
+      }
+    }))
   it.effect("decodes checkpoints and targets the local Work listener", () =>
     Effect.gen(function*() {
       expect(yield* workCheckpointFromJson(JSON.stringify(checkpoint))).toEqual(checkpoint)
@@ -77,6 +143,10 @@ describe("fleetctl work commands", () => {
       expect(yield* workSnapshotUrl(config, "ALPHA")).toBe(
         "http://127.0.0.1:4778/v1/work"
       )
+      expect(yield* workAdmissionPreflightUrl(config, "ALPHA")).toBe(
+        "http://127.0.0.1:4777/v1/work/admission-preflight"
+      )
+      expect(yield* workRecoveryPreflightUrl(config, "alpha")).toBe("http://127.0.0.1:4777/v1/work/recovery-preflight")
       const lanConfig = { ...config, workBindAddress: "192.168.1.24" }
       expect(yield* workCheckpointUrl(lanConfig, "ALPHA")).toBe(
         "http://192.168.1.24:4778/v1/work/checkpoints"
@@ -109,6 +179,18 @@ describe("fleetctl work commands", () => {
       expect(yield* workSnapshotUrl(crossHostConfig, omittedSnapshotTarget)).toBe(
         "https://ser8.example.test:4779/v1/work"
       )
+      expect(yield* workAdmissionPreflightUrl(crossHostConfig, "ser8")).toBe(
+        "https://ser8.example.test:4779/v1/work/admission-preflight"
+      )
+      expect(yield* workRecoveryPreflightUrl(crossHostConfig, "SER8")).toBe(
+        "https://ser8.example.test:4779/v1/work/recovery-preflight"
+      )
+      expect(yield* Effect.result(workRecoveryPreflightUrl(crossHostConfig, "ALPHA"))).toMatchObject({
+        failure: { _tag: "FleetValidationError", detail: "work commands can only target the canonical approval hub" }
+      })
+      expect(yield* Effect.result(workAdmissionPreflightUrl(crossHostConfig, "unknown"))).toMatchObject({
+        failure: { _tag: "FleetValidationError", detail: "unknown host: unknown" }
+      })
       const nonHub = yield* Effect.result(workSnapshotUrl(crossHostConfig, "ALPHA"))
       expect(nonHub).toMatchObject({
         failure: {

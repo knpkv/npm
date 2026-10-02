@@ -144,7 +144,11 @@ const sanitizeQuotedPlainCredentials = (value: string): string => {
 }
 
 type EncodedText =
-  | { readonly _tag: "encoded"; readonly value: string; readonly layers: number }
+  | {
+    readonly _tag: "encoded"
+    readonly value: string
+    readonly layers: number
+  }
   | { readonly _tag: "malformed" | "overflow" }
 
 const decodeEncodedRuns = (value: string): { readonly value: string; readonly hadDecodeError: boolean } | undefined => {
@@ -207,13 +211,10 @@ const sanitizeCredentialText = (value: string): string => {
   const sanitizeDockerCredentials = (text: string): string => {
     let sanitized = text
     while (true) {
-      const next = sanitized.replace(
-        dockerAuthAssignment,
-        (_match, prefix: string, credential: string) => {
-          const quote = credential.startsWith("'") ? "'" : "\""
-          return `${prefix}${quote}${redactedCredential}${quote}`
-        }
-      )
+      const next = sanitized.replace(dockerAuthAssignment, (_match, prefix: string, credential: string) => {
+        const quote = credential.startsWith("'") ? "'" : "\""
+        return `${prefix}${quote}${redactedCredential}${quote}`
+      })
       if (next === sanitized) return sanitized
       sanitized = next
     }
@@ -246,10 +247,7 @@ const sanitizeCredentialText = (value: string): string => {
       const quote = credential.startsWith("'") ? "'" : "\""
       return `${prefix}${quote}${redactedCredential}${quote}`
     })
-    .replace(
-      whitespaceCredentialAssignment,
-      (_match, prefix: string) => `${prefix}${redactedCredential}`
-    )
+    .replace(whitespaceCredentialAssignment, (_match, prefix: string) => `${prefix}${redactedCredential}`)
     .replace(
       malformedCredentialAssignment,
       (_match, prefix: string) => prefix + redactedCredential
@@ -470,6 +468,82 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
         kind: payload.kind,
         title: "Message an agent"
       }
+    case "work.reconcile":
+      return {
+        fields: [
+          field("repository", "Repository", payload.repository),
+          field("pullRequest", "Pull request", String(payload.pullRequest)),
+          field("goalId", "Existing Work goal", payload.goalId),
+          field("laneId", "Existing lane", payload.laneId),
+          field("expectedHead", "Expected old head", payload.expectedHead),
+          field("newHead", "New head", payload.newHead),
+          field("sessionId", "Existing session", payload.sessionId),
+          field("expectedWork", "Existing Work assignment", payload.expectedWork),
+          field("worker", "Existing stable agent", payload.worker.agentId)
+        ],
+        kind: payload.kind,
+        title: "Reconcile one existing PR owner"
+      }
+    case "work.admit":
+      return {
+        fields: [
+          field("repository", "Repository", payload.repository),
+          field("pullRequest", "Pull request", String(payload.pullRequest)),
+          field("reviewUrl", "PR URL", payload.reviewUrl),
+          field("goalId", "New canonical goal", payload.goalId),
+          field("laneId", "New lane", payload.laneId),
+          field("operationId", "Admission operation", payload.operationId),
+          field("absenceToken", "Exact durable absence evidence", payload.expectedAbsenceToken),
+          field("head", "Exact PR head", payload.head),
+          field("baseHead", "Exact base head", payload.baseHead),
+          field("owner", "Work owner", `${payload.owner.name} (${payload.owner.id})`),
+          field("sessionId", "Existing session", payload.sessionId),
+          field("expectedWork", "Existing Work assignment", payload.expectedWork),
+          field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerHost", "Existing worker host", payload.worker.host),
+          field("workerPane", "Existing worker pane", payload.worker.paneId),
+          field("worktree", "Existing worktree", payload.worktree),
+          field("branch", "Existing branch", payload.branch),
+          field("title", "New goal title", payload.title),
+          field("summary", "New goal summary", payload.summary),
+          field("detail", "New goal detail", payload.detail)
+        ],
+        kind: payload.kind,
+        title: "Prospectively admit an existing PR owner"
+      }
+    case "work.recover":
+      return {
+        fields: [
+          field("repository", "Repository", payload.repository),
+          field("pullRequest", "Pull request", String(payload.pullRequest)),
+          field("reviewUrl", "PR URL", payload.reviewUrl),
+          field("goalId", "Existing canonical goal", payload.goalId),
+          field("laneId", "Recovery lane", payload.laneId),
+          field("operationId", "Recovery operation", payload.operationId),
+          field("expectedGoalEventId", "Expected goal event", payload.expectedGoalEventId),
+          field("expectedGoalUpdatedAt", "Expected goal update", String(payload.expectedGoalUpdatedAt)),
+          field("expectedHistoryToken", "Complete Work history evidence", payload.expectedHistoryToken),
+          field("head", "Exact PR head", payload.head),
+          field("baseHead", "Exact base head", payload.baseHead),
+          field("owner", "Existing Work owner", `${payload.owner.name} (${payload.owner.id})`),
+          field("sessionId", "Existing session", payload.sessionId),
+          field("expectedWork", "Existing Work assignment", payload.expectedWork),
+          field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerHost", "Existing worker host", payload.worker.host),
+          field("workerPane", "Existing worker pane", payload.worker.paneId),
+          field(
+            "workerLineage",
+            "Existing worker lineage",
+            payload.worker.relationship === undefined
+              ? "root"
+              : `${payload.worker.relationship.relation}:${payload.worker.relationship.parentAgentId}`
+          ),
+          field("worktree", "Existing worktree", payload.worktree),
+          field("branch", "Existing branch", payload.branch)
+        ],
+        kind: payload.kind,
+        title: "Link one existing unlinked Work goal"
+      }
   }
 }
 
@@ -488,6 +562,10 @@ export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
       }
     case "agent.message":
       return { ...payload, message: redactedInternalPrompt }
+    case "work.reconcile":
+    case "work.admit":
+    case "work.recover":
+      return payload
   }
 }
 

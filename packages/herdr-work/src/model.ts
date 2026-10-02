@@ -1,4 +1,4 @@
-import { AgentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
+import { AgentConnectTarget, AgentWorkerIdentity, WorkAdmit, WorkRecover } from "@knpkv/herdr-fleet/model"
 import { Equal, Schema } from "effect"
 
 const Identifier = Schema.String.check(
@@ -112,7 +112,8 @@ export const WorkApprovalTarget = Schema.Struct({
       const queryKeys = [...parsed.searchParams.keys()]
       const approvalHosts = parsed.searchParams.getAll("approvalHost")
       const approvalJobs = parsed.searchParams.getAll("approvalJob")
-      return parsed.pathname === "/" &&
+      return (
+        parsed.pathname === "/" &&
         parsed.hash === "" &&
         queryKeys.length === 3 &&
         parsed.searchParams.getAll("tab").length === 1 &&
@@ -121,6 +122,7 @@ export const WorkApprovalTarget = Schema.Struct({
         approvalJobs.length === 1 &&
         approvalHosts[0]?.toLowerCase() === host.toLowerCase() &&
         approvalJobs[0] === jobId
+      )
     },
     { expected: "an approval URL with matching host and job identity" }
   )
@@ -224,21 +226,23 @@ export const WorkGoal = Schema.Struct({
       const family = goal.goalFamily
       const isDetailTimestamp = (timestamp: number): boolean =>
         timestamp >= goal.createdAt && timestamp <= goal.updatedAt
-      return goal.updatedAt >= goal.createdAt &&
-        ((goal.state === "blocked") === hasBlocker) &&
+      return (
+        goal.updatedAt >= goal.createdAt &&
+        (goal.state === "blocked") === hasBlocker &&
         (goal.blockers === undefined || goal.blocker === null) &&
         (goal.blocker === null || isDetailTimestamp(goal.blocker.since)) &&
         (goal.blockers === undefined || goal.blockers.every(({ since }) => isDetailTimestamp(since))) &&
         (goal.activity === undefined || goal.activity.every(({ occurredAt }) => isDetailTimestamp(occurredAt))) &&
         (goal.requests === undefined || goal.requests.every(({ requestedAt }) => isDetailTimestamp(requestedAt))) &&
         (goal.review === undefined || goal.review === null || isDetailTimestamp(goal.review.updatedAt)) &&
-        (family === undefined || ((family.role === "canonical") === (family.canonicalGoalId === goal.id))) &&
+        (family === undefined || (family.role === "canonical") === (family.canonicalGoalId === goal.id)) &&
         (agent === undefined || agent === null || (
           (agent.relationship === undefined || agent.relationship.parentAgentId !== agent.agentId) &&
           goal.connectTarget !== null &&
           goal.connectTarget.agentId === agent.agentId &&
           goal.connectTarget.host.toLowerCase() === agent.host.toLowerCase()
         ))
+      )
     },
     { expected: "ordered goal timestamps, blocker state, and non-cyclic authoritative agent target" }
   )
@@ -298,9 +302,7 @@ const CanonicalWorktree = Schema.String.check(
         part !== "." &&
         part !== ".." &&
         (!isWindows || (
-          !/[<>:"|?*]/.test(part) &&
-          !/[. ]$/.test(part) &&
-          !isReservedWindowsDevice(part)
+          !/[<>:"|?*]/.test(part) && !/[. ]$/.test(part) && !isReservedWindowsDevice(part)
         ))
       )
     },
@@ -351,6 +353,21 @@ export const WorkLanePhase = Schema.Literals([
 ])
 export type WorkLanePhase = typeof WorkLanePhase.Type
 
+const CodexSessionId = Schema.String.check(
+  Schema.isPattern(/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/)
+)
+
+export const WorkLaneReconciliationProof = Schema.Struct({
+  repository: Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/)),
+  pullRequest: Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0)),
+  expectedHead: ExactHead,
+  expectedOwner: WorkOwner,
+  expectedGoalEventId: Identifier,
+  bindingDispatchRequestId: WorkDispatchRequestId,
+  sessionId: CodexSessionId,
+  worker: AgentWorkerIdentity
+})
+
 /** Compare-and-set authority for one package-owned Work lane. */
 export const WorkLaneClaim = Schema.Struct({
   operationId: WorkLaneOperationId,
@@ -362,7 +379,8 @@ export const WorkLaneClaim = Schema.Struct({
   owner: WorkOwner,
   parent: Schema.NullOr(Identifier),
   phase: WorkLanePhase,
-  expectedRevision: ExpectedRevision
+  expectedRevision: ExpectedRevision,
+  reconciliation: Schema.optionalKey(WorkLaneReconciliationProof)
 })
 export interface WorkLaneClaim extends Schema.Schema.Type<typeof WorkLaneClaim> {}
 
@@ -383,8 +401,37 @@ export const WorkAgentBindingRequest = Schema.Struct({
   dispatchRequestId: WorkDispatchRequestId,
   laneId: WorkGoalId,
   expectedRevision: ExpectedRevision,
-  worker: AgentWorkerIdentity
-})
+  worker: AgentWorkerIdentity,
+  prospectiveAdmission: Schema.optionalKey(Schema.Struct({
+    sessionId: CodexSessionId,
+    workAssignment: Text,
+    baseHead: ExactHead,
+    expectedAbsenceToken: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+    approvalJobId: Identifier,
+    approvalActor: Identifier
+  })),
+  existingGoalRecovery: Schema.optionalKey(
+    Schema.Struct({
+      sessionId: CodexSessionId,
+      workAssignment: Text,
+      baseHead: ExactHead,
+      expectedHistoryToken: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)),
+      expectedGoalEventId: Identifier,
+      expectedGoalUpdatedAt: Timestamp,
+      approvalJobId: Identifier,
+      approvalActor: Identifier,
+      approvalApprovedBy: Identifier,
+      approvalApprovedAt: Timestamp,
+      approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+    })
+  )
+}).check(
+  Schema.makeFilter(
+    ({ existingGoalRecovery, prospectiveAdmission }) =>
+      prospectiveAdmission === undefined || existingGoalRecovery === undefined,
+    { expected: "one truthful owner-linkage provenance kind" }
+  )
+)
 export interface WorkAgentBindingRequest extends Schema.Schema.Type<typeof WorkAgentBindingRequest> {}
 
 /** Durable result of atomically binding a started worker to its Work goal. */
@@ -409,6 +456,139 @@ export const WorkAgentBinding = Schema.Struct({
   )
 )
 export interface WorkAgentBinding extends Schema.Schema.Type<typeof WorkAgentBinding> {}
+
+const PullRequestNumber = Schema.Number.check(Schema.isInt(), Schema.isGreaterThan(0))
+const RepositoryName = Schema.String.check(Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/))
+
+/** Exact authority requested by an existing-owner PR inspection. */
+export const WorkPullRequestLinkRequest = Schema.Struct({
+  repository: RepositoryName,
+  pullRequest: PullRequestNumber,
+  goalId: WorkGoalId,
+  laneId: WorkGoalId
+})
+export interface WorkPullRequestLinkRequest extends Schema.Schema.Type<typeof WorkPullRequestLinkRequest> {}
+
+export const WorkPullRequestLink = Schema.Struct({
+  request: WorkPullRequestLinkRequest,
+  goalEventId: Identifier,
+  goal: WorkGoal,
+  lane: WorkLaneClaimed,
+  binding: WorkAgentBinding
+}).check(Schema.makeFilter(
+  ({ binding, goal, lane, request }) =>
+    goal.id === request.goalId &&
+    goal.review?.url === `https://github.com/${request.repository}/pull/${request.pullRequest}` &&
+    lane.goalId === goal.id && lane.laneId === request.laneId &&
+    binding.lane.laneId === lane.laneId &&
+    binding.request.worker.agentId === goal.agentHierarchy?.agent.agentId &&
+    binding.request.worker.host.toLowerCase() === goal.agentHierarchy?.agent.host.toLowerCase() &&
+    goal.connectTarget?.agentId === binding.request.worker.agentId,
+  { expected: "one PR goal, lane, and durable started-worker binding" }
+))
+export interface WorkPullRequestLink extends Schema.Schema.Type<typeof WorkPullRequestLink> {}
+
+/** The session is checked against Herdr by the approval-bound host adapter before CAS. */
+export const WorkExistingOwnerReconciliation = Schema.Struct({
+  ...WorkPullRequestLinkRequest.fields,
+  operationId: WorkLaneOperationId,
+  expectedRevision: ExpectedRevision,
+  expectedHead: ExactHead,
+  newHead: ExactHead,
+  expectedOwner: WorkOwner,
+  expectedGoalEventId: Identifier,
+  bindingDispatchRequestId: WorkDispatchRequestId,
+  sessionId: CodexSessionId,
+  worker: AgentWorkerIdentity,
+  worktree: CanonicalWorktree,
+  branch: Branch
+})
+export interface WorkExistingOwnerReconciliation extends Schema.Schema.Type<typeof WorkExistingOwnerReconciliation> {}
+
+/** The authenticated preflight is evidence, never permission to create a worker. */
+export const WorkAdmissionTarget = Schema.Struct({
+  repository: WorkAdmit.fields.repository,
+  pullRequest: WorkAdmit.fields.pullRequest,
+  reviewUrl: WorkAdmit.fields.reviewUrl,
+  goalId: WorkAdmit.fields.goalId,
+  laneId: WorkAdmit.fields.laneId,
+  head: WorkAdmit.fields.head,
+  baseHead: WorkAdmit.fields.baseHead,
+  owner: WorkAdmit.fields.owner,
+  sessionId: WorkAdmit.fields.sessionId,
+  expectedWork: WorkAdmit.fields.expectedWork,
+  worker: WorkAdmit.fields.worker,
+  worktree: WorkAdmit.fields.worktree,
+  branch: WorkAdmit.fields.branch
+}).check(Schema.makeFilter(
+  ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+  { expected: "an exact canonical PR URL" }
+))
+export interface WorkAdmissionTarget extends Schema.Schema.Type<typeof WorkAdmissionTarget> {}
+
+export const WorkAdmissionPreflight = Schema.TaggedUnion({
+  prospective: { target: WorkAdmissionTarget, absenceToken: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/)) },
+  existing: { target: WorkAdmissionTarget, link: WorkPullRequestLink },
+  conflict: { target: WorkAdmissionTarget, reason: Schema.String }
+})
+export type WorkAdmissionPreflight = typeof WorkAdmissionPreflight.Type
+
+/** Runtime-only approval provenance is supplied by the approved Fleet job. */
+export const WorkProspectiveAdmission = Schema.Struct({
+  ...WorkAdmit.fields,
+  approvalJobId: Identifier,
+  approvalActor: Identifier
+}).check(Schema.makeFilter(
+  ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+  { expected: "an exact canonical PR URL" }
+))
+export type WorkProspectiveAdmission = typeof WorkProspectiveAdmission.Type
+
+/** Read-only evidence for a genuine, existing unlinked canonical goal. */
+export const WorkRecoveryTarget = Schema.Struct({
+  ...WorkAdmissionTarget.fields,
+  expectedGoalEventId: Identifier,
+  expectedGoalUpdatedAt: Timestamp
+}).check(
+  Schema.makeFilter(
+    ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+    { expected: "an exact canonical PR URL" }
+  )
+)
+export interface WorkRecoveryTarget extends Schema.Schema.Type<typeof WorkRecoveryTarget> {}
+
+export const WorkRecoveryContext = Schema.Struct({
+  goalId: WorkGoalId,
+  expectedGoalEventId: Identifier,
+  expectedGoalUpdatedAt: Timestamp
+})
+export interface WorkRecoveryContext extends Schema.Schema.Type<typeof WorkRecoveryContext> {}
+
+export const WorkRecoveryPreflight = Schema.TaggedUnion({
+  recoverable: {
+    target: WorkRecoveryTarget,
+    historyToken: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+  },
+  existing: { target: WorkRecoveryTarget, link: WorkPullRequestLink },
+  conflict: { target: WorkRecoveryTarget, reason: Schema.String }
+})
+export type WorkRecoveryPreflight = typeof WorkRecoveryPreflight.Type
+
+/** The approved Fleet job supplies actor, job identity, and immutable hash. */
+export const WorkExistingGoalRecovery = Schema.Struct({
+  ...WorkRecover.fields,
+  approvalJobId: Identifier,
+  approvalActor: Identifier,
+  approvalApprovedBy: Identifier,
+  approvalApprovedAt: Timestamp,
+  approvalHash: Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+}).check(
+  Schema.makeFilter(
+    ({ pullRequest, repository, reviewUrl }) => reviewUrl === `https://github.com/${repository}/pull/${pullRequest}`,
+    { expected: "an exact canonical PR URL" }
+  )
+)
+export type WorkExistingGoalRecovery = typeof WorkExistingGoalRecovery.Type
 
 export const WorkCoordinatorBlocker = Schema.Struct({
   id: Identifier,
@@ -497,7 +677,9 @@ export const WorkSnapshot = Schema.Struct({
       const families = snapshot.families ?? []
       const goalById = new Map<string, WorkGoal>()
       for (const goal of snapshot.goals) {
-        if (goal.goalFamily?.role === "superseded" || goalById.has(goal.id)) return false
+        if (goal.goalFamily?.role === "superseded" || goalById.has(goal.id)) {
+          return false
+        }
         goalById.set(goal.id, goal)
       }
       const seenCanonical = new Set<string>()
@@ -514,7 +696,9 @@ export const WorkSnapshot = Schema.Struct({
           if (goalById.has(member.id)) return false
         }
       }
-      if (snapshot.goals.length + seenMember.size > workSnapshotMaxGoals) return false
+      if (snapshot.goals.length + seenMember.size > workSnapshotMaxGoals) {
+        return false
+      }
       return true
     },
     {

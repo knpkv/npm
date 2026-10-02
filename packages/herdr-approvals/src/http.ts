@@ -55,12 +55,20 @@ import { authorizeWhois, discoverFleetPeers, layer as tailscaleLayer, Tailscale 
 import type {
   WorkCheckpointConflictError,
   WorkProjectionError,
+  WorkPullRequestLinkError,
+  WorkRecoveryContextError,
   WorkService,
   WorkSnapshots,
   WorkStoreError
 } from "@knpkv/herdr-work"
 import { approvalTargetMatchesOrigin, makeWorkService, WorkSnapshotWindow, WorkStore } from "@knpkv/herdr-work"
-import { WorkGoalCheckpoint, type WorkGoalCheckpoint as WorkGoalCheckpointType } from "@knpkv/herdr-work/model"
+import {
+  WorkAdmissionTarget,
+  WorkGoalCheckpoint,
+  type WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkPullRequestLinkRequest,
+  WorkRecoveryTarget
+} from "@knpkv/herdr-work/model"
 import {
   Cause,
   Clock,
@@ -246,7 +254,9 @@ type ApiError =
   | PushEndpointNotAllowedError
   | TerminalTransportError
   | WorkCheckpointConflictError
+  | WorkPullRequestLinkError
   | WorkProjectionError
+  | WorkRecoveryContextError
   | WorkStoreError
 
 type LanPairError =
@@ -366,8 +376,15 @@ const apiError = (error: ApiError): ApiErrorResponse => {
       return { status: 500, body: { error: error._tag, detail: error.detail } }
     case "WorkStoreError":
       return { status: 500, body: { error: error._tag, detail: error.operation } }
+    case "WorkRecoveryContextError":
+      return {
+        status: error.reason === "missing_goal" ? 404 : 400,
+        body: { error: error._tag, reason: error.reason }
+      }
     case "WorkCheckpointConflictError":
       return { status: 409, body: { error: error._tag, eventId: error.eventId } }
+    case "WorkPullRequestLinkError":
+      return { status: 409, body: { error: error._tag, reason: error.reason } }
     case "DashboardResponseBudgetError":
       return {
         status: 413,
@@ -1509,7 +1526,7 @@ export const startHttpServer = async (
       [...activeServers].map(
         (server) =>
           new Promise<void>((resolve, reject) => {
-            server.close((error) => error === undefined ? resolve() : reject(error))
+            server.close((error) => (error === undefined ? resolve() : reject(error)))
           })
       )
     )
@@ -1652,7 +1669,9 @@ export const startHttpServer = async (
       approvalProofMutationsByRequest.delete(request)
       approvalProofSessionsByRequest.delete(request)
       const { session } = mutation
-      for (const jobId of session.proofsByJob.keys()) releaseApprovalProofJob(jobId)
+      for (const jobId of session.proofsByJob.keys()) {
+        releaseApprovalProofJob(jobId)
+      }
       session.proofsByJob.clear()
       if (mutation.created) {
         approvalProofSessions.delete(session.token)
@@ -1663,7 +1682,9 @@ export const startHttpServer = async (
           retainApprovalProofJob(jobId)
         }
       }
-      for (const jobId of session.stagedJobIds) session.stagedJobIds.delete(jobId)
+      for (const jobId of session.stagedJobIds) {
+        session.stagedJobIds.delete(jobId)
+      }
       session.disclosing = false
       session.locked = false
       httpRuntime.runSync(session.lock.release(1))
@@ -1746,7 +1767,9 @@ export const startHttpServer = async (
             }
           } else {
             const mergedPendingJobIds = new Set(pendingApprovalProofSnapshot?.pendingJobIds ?? [])
-            for (const jobId of refreshedPendingJobIds) mergedPendingJobIds.add(jobId)
+            for (const jobId of refreshedPendingJobIds) {
+              mergedPendingJobIds.add(jobId)
+            }
             pendingApprovalProofSnapshot = {
               observedAt: Math.max(pendingApprovalProofSnapshot?.observedAt ?? 0, observedAt),
               pendingJobIds: mergedPendingJobIds
@@ -1877,7 +1900,9 @@ export const startHttpServer = async (
       const mutation = approvalProofMutationsByRequest.get(request)
       const session = mutation?.session ?? approvalProofSessionFor(request, completedAt)
       if (session === undefined) return {}
-      if (mutation !== undefined) renewApprovalProofSession(session, completedAt)
+      if (mutation !== undefined) {
+        renewApprovalProofSession(session, completedAt)
+      }
       const shouldSetCookie = records.some((record) => {
         const proof = session.proofsByJob.get(record.id)
         return proof !== undefined && proof.expiresAt > completedAt
@@ -1888,7 +1913,9 @@ export const startHttpServer = async (
       }
       if (mutation !== undefined) {
         approvalProofMutationsByRequest.delete(request)
-        for (const jobId of session.stagedJobIds) session.stagedJobIds.delete(jobId)
+        for (const jobId of session.stagedJobIds) {
+          session.stagedJobIds.delete(jobId)
+        }
         session.disclosing = false
         session.locked = false
         httpRuntime.runSync(session.lock.release(1))
@@ -1989,7 +2016,9 @@ export const startHttpServer = async (
       code: number,
       reason: string
     ): void => {
-      if (socket.readyState === WebSocketClient.OPEN) socket.close(code, reason)
+      if (socket.readyState === WebSocketClient.OPEN) {
+        socket.close(code, reason)
+      }
     }
 
     const attachTerminal = async (
@@ -2079,7 +2108,9 @@ export const startHttpServer = async (
         })
       )
       setImmediate(() => {
-        if (socket.readyState === WebSocketClient.OPEN) socket.send(readySignal)
+        if (socket.readyState === WebSocketClient.OPEN) {
+          socket.send(readySignal)
+        }
       })
       socket.on("message", (data, isBinary) => {
         if (isBinary) {
@@ -2358,7 +2389,7 @@ export const startHttpServer = async (
             const pairing = lanWorkPairing
             const origin = header(request, "origin")
             const requireLanOrigin = (required: boolean): Effect.Effect<void, LanWorkOriginRejectedError> =>
-              (origin === expectedOrigin() || (!required && origin === undefined))
+              origin === expectedOrigin() || (!required && origin === undefined)
                 ? Effect.void
                 : Effect.fail(
                   new LanWorkOriginRejectedError({
@@ -2548,7 +2579,9 @@ export const startHttpServer = async (
             const resolvedLocalPage = approvalSurface
               ? yield* service.pendingApprovalPage(null)
               : { records: [], nextCursor: null }
-            if (approvalSurface) yield* issueApprovalProofs(resolvedLocalPage.records, request)
+            if (approvalSurface) {
+              yield* issueApprovalProofs(resolvedLocalPage.records, request)
+            }
             const state = yield* Effect.all({
               history: dashboardHistory(service, null),
               status: service.status()
@@ -2726,6 +2759,111 @@ export const startHttpServer = async (
           }
 
           const servesWork = mode === "serve" || mode === "work" || (mode === "local" && !config.crossHost)
+          if (
+            (mode === "serve" || (mode === "local" && !config.crossHost)) &&
+            request.method === "GET" &&
+            url.pathname === "/v1/work/recovery-context"
+          ) {
+            const authorization = mode === "serve" ? authorized : loopbackAuthorized
+            const inspection = Effect.gen(function*() {
+              yield* authorization
+              const goalId = url.searchParams.get("goalId")
+              if (goalId === null) {
+                return yield* new FleetValidationError({
+                  detail: "missing Work goal ID"
+                })
+              }
+              return yield* work.recoveryContext(goalId)
+            })
+            await respond(response, inspection, 200, {
+              "cache-control": "no-store"
+            })
+            return
+          }
+          if (
+            (mode === "serve" || (mode === "local" && !config.crossHost)) &&
+            request.method === "GET" &&
+            url.pathname === "/v1/work/recovery-preflight"
+          ) {
+            const authorization = mode === "serve" ? authorized : loopbackAuthorized
+            const inspection = Effect.gen(function*() {
+              yield* authorization
+              const encoded = url.searchParams.get("target")
+              if (encoded === null) {
+                return yield* new FleetValidationError({
+                  detail: "missing Work recovery target"
+                })
+              }
+              const target = yield* Schema.decodeEffect(Schema.fromJsonString(WorkRecoveryTarget), {
+                onExcessProperty: "error"
+              })(encoded).pipe(
+                Effect.mapError(
+                  () =>
+                    new FleetValidationError({
+                      detail: "invalid Work recovery target"
+                    })
+                )
+              )
+              return yield* work.recoveryPreflight(target)
+            })
+            await respond(response, inspection, 200, {
+              "cache-control": "no-store"
+            })
+            return
+          }
+          if (
+            (mode === "serve" || (mode === "local" && !config.crossHost)) &&
+            request.method === "GET" &&
+            url.pathname === "/v1/work/admission-preflight"
+          ) {
+            const authorization = mode === "serve" ? authorized : loopbackAuthorized
+            const inspection = Effect.gen(function*() {
+              yield* authorization
+              const encoded = url.searchParams.get("target")
+              if (encoded === null) {
+                return yield* new FleetValidationError({ detail: "missing Work admission target" })
+              }
+              const target = yield* Schema.decodeEffect(Schema.fromJsonString(WorkAdmissionTarget), {
+                onExcessProperty: "error"
+              })(encoded).pipe(
+                Effect.mapError(() => new FleetValidationError({ detail: "invalid Work admission target" }))
+              )
+              return yield* work.admissionPreflight(target)
+            })
+            await respond(response, inspection, 200, { "cache-control": "no-store" })
+            return
+          }
+          if (
+            (mode === "serve" || (mode === "local" && !config.crossHost)) &&
+            request.method === "GET" &&
+            url.pathname === "/v1/work/pull-request-link"
+          ) {
+            const authorization = mode === "serve" ? authorized : loopbackAuthorized
+            const inspection = Effect.gen(function*() {
+              yield* authorization
+              const identity = yield* Schema.decodeUnknownEffect(WorkPullRequestLinkRequest)({
+                repository: url.searchParams.get("repository"),
+                pullRequest: Number(url.searchParams.get("pullRequest")),
+                goalId: url.searchParams.get("goalId"),
+                laneId: url.searchParams.get("laneId")
+              }).pipe(Effect.mapError(() => new FleetValidationError({ detail: "invalid PR Work link identity" })))
+              const link = yield* work.inspectPullRequest(identity)
+              return {
+                repository: identity.repository,
+                pullRequest: identity.pullRequest,
+                goalId: link.goal.id,
+                goalEventId: link.goalEventId,
+                goalOwner: link.goal.owner,
+                lane: link.lane,
+                binding: {
+                  dispatchRequestId: link.binding.request.dispatchRequestId,
+                  worker: link.binding.request.worker
+                }
+              }
+            })
+            await respond(response, inspection, 200, { "cache-control": "no-store" })
+            return
+          }
           if (
             servesWork &&
             request.method === "GET" &&
@@ -3089,7 +3227,9 @@ export const startHttpServer = async (
                 : yield* service.reject(jobId, approval, who)
               if (proofSessionToken !== undefined) {
                 const proofSession = approvalProofSessions.get(proofSessionToken)
-                if (proofSession !== undefined) deleteApprovalProof(proofSession, jobId)
+                if (proofSession !== undefined) {
+                  deleteApprovalProof(proofSession, jobId)
+                }
               }
               if (record.status === "queued") yield* enqueueJob(record.id)
               return sanitizeJobRecord(record)
@@ -3279,11 +3419,7 @@ export const startHttpServer = async (
       activeServers.add(server)
       return {
         server,
-        url: `${tls === null ? "http" : "https"}://${
-          mode === "lan"
-            ? expectedHost
-            : `${bound.address}:${bound.port}`
-        }`
+        url: `${tls === null ? "http" : "https"}://${mode === "lan" ? expectedHost : `${bound.address}:${bound.port}`}`
       }
     }
 
@@ -3307,7 +3443,9 @@ export const startHttpServer = async (
       : await listen(options.lanWork.address, options.lanWork.port, "lan")
     if (tailscaleIp === null) {
       const work = await listen(workBindAddress, config.port, "work")
-      for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
+      for (const jobId of recoveredJobIds) {
+        await Effect.runPromise(enqueueJob(jobId))
+      }
       lanWorkPairing = options.lanWork === undefined
         ? null
         : await httpRuntime.runPromise(makeLanWorkPairing(now))
@@ -3333,7 +3471,9 @@ export const startHttpServer = async (
     const serve = isHub
       ? await listen(tailscaleIp, config.approvalPort, "serve", tlsCredentials)
       : null
-    for (const jobId of recoveredJobIds) await Effect.runPromise(enqueueJob(jobId))
+    for (const jobId of recoveredJobIds) {
+      await Effect.runPromise(enqueueJob(jobId))
+    }
     if (pushSender !== null) {
       await httpRuntime.runPromise(
         Effect.forkIn(

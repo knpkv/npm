@@ -23,6 +23,23 @@ export const PullRequestEvidenceRequest = Schema.Struct({
 
 const CheckConclusion = Schema.Literals(["pending", "success", "failure"])
 const ReviewState = Schema.Literals(["approved", "changes_requested", "commented"])
+const BotReviewer = Schema.Literals(["chatgpt-codex-connector[bot]", "coderabbitai[bot]"])
+const BodyDigest = Schema.String.check(Schema.isPattern(/^[0-9a-f]{64}$/))
+
+/** Issue-comment review evidence is deliberately not a GitHub approval. */
+export const BotReviewEvidence = Schema.Struct({
+  id: Text,
+  reviewer: BotReviewer,
+  repository: Text,
+  pullRequest: PullRequestNumber,
+  head: CommitSha,
+  bodySha256: BodyDigest,
+  createdAt: Timestamp,
+  updatedAt: Timestamp,
+  verdict: Schema.Literals(["clean", "finding", "unknown"]),
+  runId: Schema.NullOr(Text)
+})
+export interface BotReviewEvidence extends Schema.Schema.Type<typeof BotReviewEvidence> {}
 
 export const PullRequestAtomicObservation = Schema.Struct({
   repository: Text,
@@ -49,6 +66,12 @@ export const PullRequestAtomicObservation = Schema.Struct({
     state: ReviewState,
     submittedAt: Timestamp
   })).check(Schema.isMaxLength(256)),
+  botReviews: Schema.Array(BotReviewEvidence).check(Schema.isMaxLength(2_048)),
+  formalReview: Schema.Struct({
+    requiredApprovals: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+    requiresCodeOwnerReview: Schema.Boolean,
+    decision: Schema.NullOr(Schema.Literals(["approved", "changes_requested", "review_required"]))
+  }),
   owner: Schema.Struct({ id: Text, name: Text }),
   work: Schema.Struct({
     goalId: WorkGoalId,
@@ -86,6 +109,12 @@ export const PullRequestGateInput = Schema.Struct({
     state: ReviewState,
     submittedAt: Timestamp
   })).check(Schema.isMaxLength(256)),
+  botReviews: Schema.Array(BotReviewEvidence).check(Schema.isMaxLength(2_048)),
+  formalReview: Schema.Struct({
+    requiredApprovals: Schema.Number.check(Schema.isInt(), Schema.isGreaterThanOrEqualTo(0)),
+    requiresCodeOwnerReview: Schema.Boolean,
+    decision: Schema.NullOr(Schema.Literals(["approved", "changes_requested", "review_required"]))
+  }),
   owner: Schema.Struct({ id: Text, name: Text }),
   work: Schema.Struct({
     goalId: WorkGoalId,
@@ -99,17 +128,23 @@ export const PullRequestGateInput = Schema.Struct({
       const checkNames = new Set(input.checks.map(({ name }) => name))
       const threadIds = new Set(input.threads.map(({ id }) => id))
       const reviewIds = new Set(input.reviews.map(({ id }) => id))
+      const botReviewIds = new Set(input.botReviews.map(({ id }) => id))
       return input.observedHead === input.expectedHead &&
         input.requiredChecks.length > 0 &&
         requiredChecks.size === input.requiredChecks.length &&
         checkNames.size === input.checks.length &&
         threadIds.size === input.threads.length &&
         reviewIds.size === input.reviews.length &&
+        botReviewIds.size === input.botReviews.length &&
         input.requiredChecks.every((name) => checkNames.has(name)) &&
         input.checks.every(({ head }) => head === input.expectedHead) &&
         input.threads.every(({ head }) => head === input.expectedHead) &&
         input.reviews.every(({ head, submittedAt }) =>
           head === input.expectedHead && submittedAt <= input.observedAt
+        ) &&
+        input.botReviews.every(({ createdAt, head, pullRequest, repository, updatedAt }) =>
+          repository === input.repository && pullRequest === input.pullRequest &&
+          head === input.expectedHead && createdAt <= updatedAt && updatedAt <= input.observedAt
         ) &&
         input.observedAt <= input.projectedAt &&
         input.projectedAt <= input.freshUntil &&

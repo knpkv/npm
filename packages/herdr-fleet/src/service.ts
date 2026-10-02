@@ -111,7 +111,8 @@ export type HostOperations = {
     workerStarted: WorkerStarted,
     jobId: string,
     actor: JobActor,
-    lifecycle: HostOperationLifecycle
+    lifecycle: HostOperationLifecycle,
+    approval?: ApprovedJobIdentity | null
   ) => Effect.Effect<string, FleetOperationError>
   readonly runLocal: (
     payload: LocalJobPayload
@@ -125,6 +126,13 @@ export type HostOperations = {
   ) => Effect.Effect<string, FleetOperationError>
   /** Explicit crash recovery for operations backed by another durable store. */
   readonly recovery?: HostOperationRecovery
+}
+
+/** Persisted Fleet approval, distinct from the job's submitting actor. */
+export type ApprovedJobIdentity = {
+  readonly approvedBy: string
+  readonly approvedAt: number
+  readonly hash: JobHash
 }
 
 export type Approval = {
@@ -527,7 +535,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       payload: JobPayload,
       workerStarted: WorkerStarted,
       actor: JobActor,
-      lifecycle: HostOperationLifecycle
+      lifecycle: HostOperationLifecycle,
+      approval: ApprovedJobIdentity | null
     ) => Effect.Effect<
       string,
       FleetOperationError | FleetValidationError
@@ -538,6 +547,20 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       return yield* new FleetApprovalError({
         jobId,
         detail: `job is ${record.status}, not queued`
+      })
+    }
+    if (
+      record.payload.kind === "work.recover" &&
+      (record.approvedBy === null ||
+        record.approvedAt === null || record.approvedAt === undefined ||
+        record.hash !==
+          (yield* jobHash(options.host, record.actor, record.payload).pipe(
+            Effect.provideService(Crypto.Crypto, cryptoService)
+          )))
+    ) {
+      return yield* new FleetApprovalError({
+        jobId,
+        detail: "approved recovery payload or actor changed"
       })
     }
     const corePayload = record.payload.kind === "browser.mcp.recover" ? null : record.payload
@@ -559,7 +582,15 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       false
     )
     const result = yield* Effect.result(
-      execute(running.payload, workerStarted, running.actor, lifecycle)
+      execute(
+        running.payload,
+        workerStarted,
+        running.actor,
+        lifecycle,
+        running.approvedBy === null || running.approvedAt === null || running.approvedAt === undefined
+          ? null
+          : { approvedBy: running.approvedBy, approvedAt: running.approvedAt, hash: running.hash }
+      )
     )
     return yield* transitions.withPermit(Effect.gen(function*() {
       const latest = yield* Ref.get(current)
@@ -616,10 +647,10 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
   })
 
   const run = Effect.fn("FleetService.run")((jobId: string) =>
-    runWith(jobId, (payload, workerStarted, actor, lifecycle) =>
+    runWith(jobId, (payload, workerStarted, actor, lifecycle, approval) =>
       payload.kind === "browser.mcp.recover"
         ? options.operations.runLocal(payload)
-        : options.operations.run(payload, workerStarted, jobId, actor, lifecycle))
+        : options.operations.run(payload, workerStarted, jobId, actor, lifecycle, approval))
   )
 
   const runCoordinatorChat = Effect.fn("FleetService.runCoordinatorChat")(

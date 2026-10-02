@@ -16,6 +16,33 @@ const observation = (overrides: Partial<PullRequestAtomicObservation> = {}): Pul
   headAtEnd: head,
   headAtStart: head,
   observedAt: 1_000,
+  botReviews: [
+    {
+      id: "bot:codex",
+      reviewer: "chatgpt-codex-connector[bot]",
+      repository: "knpkv/npm",
+      pullRequest: 417,
+      head,
+      bodySha256: "a".repeat(64),
+      createdAt: 900,
+      updatedAt: 900,
+      verdict: "clean",
+      runId: null
+    },
+    {
+      id: "bot:rabbit",
+      reviewer: "coderabbitai[bot]",
+      repository: "knpkv/npm",
+      pullRequest: 417,
+      head,
+      bodySha256: "b".repeat(64),
+      createdAt: 900,
+      updatedAt: 1_000,
+      verdict: "clean",
+      runId: "run-1"
+    }
+  ],
+  formalReview: { requiredApprovals: 0, requiresCodeOwnerReview: false, decision: null },
   owner: { id: "owner:andrey", name: "Andrey" },
   pullRequest: 417,
   repository: "knpkv/npm",
@@ -61,6 +88,7 @@ describe("atomic pull request evidence", () => {
         observedHead: head,
         projectedAt: 1_000,
         reviews: [{ head, id: "review:1", reviewer: "codex" }],
+        botReviews: [{ head, id: "bot:codex" }, { head, id: "bot:rabbit" }],
         threads: [{ head, id: "thread:1" }]
       })
       expect(Schema.decodeUnknownResult(PullRequestGateInput)(evidence)._tag).toBe("Success")
