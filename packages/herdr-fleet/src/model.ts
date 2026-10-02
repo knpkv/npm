@@ -246,6 +246,11 @@ export const WorkRecover = Schema.Struct({
 )
 export type WorkRecover = typeof WorkRecover.Type
 
+/** Fleet job kinds that change Work authority; only a composed Work adapter executes them. */
+export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover"])
+export type WorkJobKind = typeof WorkJobKind.Type
+export const isWorkJobKind = Schema.is(WorkJobKind)
+
 export const BrowserMcpRecover = Schema.Struct({
   kind: Schema.Literal("browser.mcp.recover")
 })
