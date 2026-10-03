@@ -1,9 +1,9 @@
 /**
  * Sync commands (pull, push, status) for Confluence CLI.
  */
+import { Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { ConfigError } from "../ConfluenceError.js"
 import { GitService } from "../GitService.js"
 import { writeStdout } from "../internal/stdio.js"
@@ -11,13 +11,15 @@ import type { ProgressCallback } from "../SyncEngine.js"
 import { SyncEngine } from "../SyncEngine.js"
 
 // === Pull command ===
-const forceOption = Options.boolean("force").pipe(
+const forceOption = Options.Boolean("force").pipe(
   Options.withAlias("f"),
-  Options.withDescription("Overwrite local changes")
+  Options.withDescription("Overwrite local changes"),
+  Options.withDefault(false)
 )
 
-const replayHistoryOption = Options.boolean("replay-history").pipe(
-  Options.withDescription("Replay version history as individual git commits")
+const replayHistoryOption = Options.Boolean("replay-history").pipe(
+  Options.withDescription("Replay version history as individual git commits"),
+  Options.withDefault(false)
 )
 
 export const pullCommand = Command.make(
@@ -43,21 +45,23 @@ export const pullCommand = Command.make(
       }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))
-        return yield* Effect.fail(new ConfigError({ message: `Pull failed:\n${result.errors.join("\n")}` }))
+        return yield* new ConfigError({ message: `Pull failed:\n${result.errors.join("\n")}` })
       }
     })
 ).pipe(Command.withDescription("Local write: download pages from Confluence to local markdown"))
 
 // === Push command ===
-const dryRunOption = Options.boolean("dry-run").pipe(
+const dryRunOption = Options.Boolean("dry-run").pipe(
   Options.withAlias("n"),
-  Options.withDescription("Show changes without applying")
+  Options.withDescription("Show changes without applying"),
+  Options.withDefault(false)
 )
 
-const pushForceOption = Options.boolean("force").pipe(
+const pushForceOption = Options.Boolean("force").pipe(
   Options.withDescription(
     "Push pages holding content markdown cannot represent (datasource cards, extensions), accepting that those nodes will be degraded"
-  )
+  ),
+  Options.withDefault(false)
 )
 
 export const pushCommand = Command.make(
@@ -88,25 +92,21 @@ export const pushCommand = Command.make(
         // must not describe either — under a "Push failed" heading that reads as
         // a real push that partly applied.
         if (dryRun) {
-          return yield* Effect.fail(
-            new ConfigError({
-              message: `Dry run found ${result.errors.length} problem(s) that would fail the push:\n${
-                result.errors.join("\n")
-              }`
-            })
-          )
+          return yield* new ConfigError({
+            message: `Dry run found ${result.errors.length} problem(s) that would fail the push:\n${
+              result.errors.join("\n")
+            }`
+          })
         }
         // Say that the branch was held, not just that something failed. Any
         // error keeps `origin/confluence` where it is so the unsent work stays
         // retryable — which also means every later push repeats this failure
         // until it is resolved. Silently, that reads as a broken workspace.
-        return yield* Effect.fail(
-          new ConfigError({
-            message: `Push failed:\n${result.errors.join("\n")}\n` +
-              `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
-              `push retries all of it. Resolve the errors above (or remove the file) to move on.`
-          })
-        )
+        return yield* new ConfigError({
+          message: `Push failed:\n${result.errors.join("\n")}\n` +
+            `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
+            `push retries all of it. Resolve the errors above (or remove the file) to move on.`
+        })
       }
     })
 ).pipe(Command.withDescription("Remote write: upload local markdown changes to Confluence"))

@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react"
 import { DateUtils } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom } from "../atoms/app.js"
 import { creatingPrAtom, viewAtom } from "../atoms/ui.js"

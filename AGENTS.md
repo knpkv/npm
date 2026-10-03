@@ -218,9 +218,9 @@ major for incompatible changes to stable packages.
 
 ## Effect Source Reference
 
-The Effect RC source is available in this workspace under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current RC APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
+The Effect source for the workspace's pinned release (`effect@4.0.0`) is available under `repos/effect`. Treat `repos/effect` as vendored reference material: read it for current APIs, tests, module structure, and local idioms, but do not import from it or edit it unless the task explicitly asks to update the subtree.
 
-Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current RC APIs.
+Before writing Effect code, read `repos/effect/LLMS.md` and use `rg` in `repos/effect/packages` to verify current APIs. Import Effect modules from stable paths such as `effect/http`, `effect/sql`, and `effect/process`; the former `effect/unstable/*` paths no longer exist.
 
 Recommended checks:
 
@@ -230,7 +230,7 @@ Recommended checks:
 
 The subtree is maintained from the canonical `effect-upstream` remote and must be pinned to the exact npm release tag used by the workspace. Before fetching, fail closed unless `effect-upstream` resolves to the exact canonical HTTPS URL. Preserve subtree update merge commits: PRs that update `repos/effect` must use GitHub's merge-commit method because squash or rebase merging discards the provenance checked by CI. See `docs/dependency-maintenance.md` for the tag-pinned subtree workflow and version-alignment checks.
 
-Use Effect Platform modules and `effect/unstable/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
+Use Effect Platform modules and `effect/process` for runtime access. Do not read `process` through `globalThis.process` or bare `process.*`.
 
 <!-- effect-reference:end -->
 
@@ -301,7 +301,7 @@ When writing Effect code:
 - Do not use raw host APIs in Effect code: no bare `process`, `fs`, `fetch`,
   `Date.now()`, zero-argument `new Date()`, `setTimeout`, or `setInterval`.
   Use `Stdio`, `FileSystem`, `HttpClient`, `Clock`, `Effect.sleep`,
-  `Schedule`, and `effect/unstable/process` instead. Framework/UI boundaries
+  `Schedule`, and `effect/process` instead. Framework/UI boundaries
   may use host APIs only where the framework requires them.
 - In `packages/*/src/client/**/*.css`, use Rly service-color tokens only for
   provider-owned provenance (such as a CodeCommit revision rail or provider

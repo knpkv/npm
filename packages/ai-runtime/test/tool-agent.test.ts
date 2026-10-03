@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Fiber, Layer, Schema, Stream } from "effect"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Response from "effect/ai/Response"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import { TestClock } from "effect/testing"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import type * as Response from "effect/unstable/ai/Response"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
 import { vi } from "vitest"
 
 import {
@@ -88,7 +88,7 @@ const inspectionLayer = (execute: (path: string) => Effect.Effect<{ readonly con
   })
 
 const successfulOptions = (
-  model: LanguageModel.Service,
+  model: LanguageModel.LanguageModel,
   toolkit: Toolkit.WithHandler<typeof InspectionTools.tools>
 ) => ({
   budget: "2 minutes",

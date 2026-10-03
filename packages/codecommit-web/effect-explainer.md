@@ -325,7 +325,7 @@ program.pipe(Logger.withMinimumLogLevel(LogLevel.Debug))
 CORS origins are configurable via `ALLOWED_ORIGINS` environment variable:
 
 ```typescript
-const AllowedOrigins = Config.string("ALLOWED_ORIGINS").pipe(
+const AllowedOrigins = Config.String("ALLOWED_ORIGINS").pipe(
   Config.map((s) => s.split(",")),
   Config.withDefault(["http://localhost:3000", "http://127.0.0.1:3000"])
 )

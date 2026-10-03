@@ -3,7 +3,7 @@ import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { assert, describe, it } from "@effect/vitest"
 import { Cause, Context, Deferred, Effect, Exit, Fiber, Layer, Option, Path, Result, Schema } from "effect"
 import * as FileSystem from "effect/FileSystem"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 import {
   BUSY_TIMEOUT_MILLISECONDS,

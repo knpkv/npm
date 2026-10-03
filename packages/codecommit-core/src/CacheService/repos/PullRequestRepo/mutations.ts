@@ -16,8 +16,8 @@
  * @category CacheService
  */
 import { Effect, Schema } from "effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
+import type * as SqlClient from "effect/sql/SqlClient"
+import * as SqlSchema from "effect/sql/SqlSchema"
 import { type CommentThreadJson, decodeCommentLocationJson } from "../commentLocations.js"
 import { cacheError, joinApprovedBy, UpsertInput } from "./internal.js"
 import { PullRequestAmbiguityError } from "./queries.js"

@@ -2,8 +2,8 @@ import { SandboxService } from "@knpkv/codecommit-core"
 import type { SandboxRow } from "@knpkv/codecommit-core/CacheService.js"
 import { SandboxStatus } from "@knpkv/codecommit-core/Domain.js"
 import { Effect, Predicate, Schema } from "effect"
-import { HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpServerResponse } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi, type SandboxResponse } from "../Api.js"
 
 // Explicit field mapping — prevents leaking server-internal fields (e.g. workspacePath)

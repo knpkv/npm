@@ -1,5 +1,5 @@
 import { Effect, Fiber, Option, Scope } from "effect"
-import type { KillOptions } from "effect/unstable/process/ChildProcess"
+import type { KillOptions } from "effect/process/ChildProcess"
 
 export const terminalKillOptions = {
   forceKillAfter: "1 second"
@@ -23,7 +23,9 @@ export const releaseTerminalControl = Effect.fn("HerdrTerminal.releaseControl")(
     Scope.make(),
     (releaseScope) =>
       Effect.gen(function*() {
-        const releaseFiber = yield* Effect.forkDetach( // eslint-disable-line local-rules/no-unowned-detached-fiber -- ast-grep-ignore: no-unowned-detached-fiber -- the release fiber must outlive scope close while the child process is being killed; its interruption is explicitly scheduled below.
+        // The release fiber must outlive scope close while the child process is being killed; its interruption is explicitly scheduled below.
+        // ast-grep-ignore: no-unowned-detached-fiber
+        const releaseFiber = yield* Effect.forkDetach( // eslint-disable-line local-rules/no-unowned-detached-fiber
           release.pipe(Effect.ignore, Effect.andThen(exitCode), Effect.ignore),
           { startImmediately: true, uninterruptible: false }
         )

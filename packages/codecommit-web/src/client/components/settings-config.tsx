@@ -1,6 +1,6 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { CheckCircleIcon, CopyIcon, RotateCcwIcon } from "lucide-react"
 import { useCallback, useState } from "react"
 import { configPathQueryAtom, configResetAtom, configValidateQueryAtom, databaseInfoQueryAtom } from "../atoms/app.js"

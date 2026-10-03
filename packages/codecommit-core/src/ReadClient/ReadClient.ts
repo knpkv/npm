@@ -89,7 +89,7 @@ const RawPullRequestResponse = Schema.Struct({
     // key"); the sibling AwsClient read paths already model it as optional.
     authorArn: Schema.optional(Schema.NullOr(Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty()))),
     pullRequestStatus: Schema.Literals(["OPEN", "CLOSED"]),
-    pullRequestTargets: Schema.Array(RawPullRequestTarget).check(Schema.isLengthBetween(1, 1)),
+    pullRequestTargets: Schema.Array(RawPullRequestTarget).check(Schema.isBetweenLength(1, 1)),
     creationDate: Schema.Date,
     lastActivityDate: Schema.Date
   })

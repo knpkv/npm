@@ -1,6 +1,6 @@
 import type * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 
 import type { WorkspaceId } from "../../../domain/identifiers.js"
 import type { UtcTimestamp } from "../../../domain/utcTimestamp.js"
@@ -36,14 +36,14 @@ export const makePersistedRowQuarantine = (
       catch: () => new PersistenceOperationError({ operation: "quarantine.encode-row" })
     })
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+      Base64.decode(Base64.encode(serialized))
     ).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "quarantine.encode-row" }))
     )
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "quarantine.digest-row" }))
     )
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    return ContentBlobDigest.make(Hex.encode(digest))
   })
 
   return Effect.fn("PersistedRowQuarantine.record")(function*(diagnostic: PersistedRowDiagnostic) {

@@ -3,11 +3,11 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
+import * as SqlSchema from "effect/sql/SqlSchema"
 
 import { Person, PersonAvatar, PersonSourceIdentity, Role, RoleAssignment } from "../../../domain/actors.js"
 import {
@@ -146,14 +146,14 @@ const makePeopleRepository = Effect.gen(function*() {
 
   const digestPersistedText = Effect.fn("PeopleRepository.digestPersistedText")(function*(value: string) {
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(value))
+      Base64.decode(Base64.encode(value))
     ).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "people.avatar-encode" }))
     )
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "people.avatar-digest" }))
     )
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    return ContentBlobDigest.make(Hex.encode(digest))
   })
 
   const decodePersistedAvatar = Effect.fn("PeopleRepository.decodePersistedAvatar")(function*(

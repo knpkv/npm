@@ -36,12 +36,12 @@
     "lint": "eslint src"
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.109",
-    "effect": "4.0.0-rc.109"
+    "@effect/platform-node": "4.0.0",
+    "effect": "4.0.0"
   },
   "devDependencies": {
     "@types/node": "latest",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   },
   "keywords": [

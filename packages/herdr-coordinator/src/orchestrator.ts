@@ -15,8 +15,8 @@ import {
   Schema,
   Stream
 } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
-import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
+import type { SqlClient as SqlClientService } from "effect/sql/SqlClient"
 import {
   OrchestratorConflictError,
   type OrchestratorError,

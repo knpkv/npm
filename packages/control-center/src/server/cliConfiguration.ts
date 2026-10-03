@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64Url, Hex } from "effect/encoding"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -216,7 +216,7 @@ const decodeMarkerBasename = (
   path: Path.Path,
   encodedBasename: string
 ): Result.Result<string, PersistenceConfigError> => {
-  const decodedBasename = Encoding.decodeBase64UrlString(encodedBasename)
+  const decodedBasename = Base64Url.decodeString(encodedBasename)
   if (
     Result.isFailure(decodedBasename) ||
     decodedBasename.success.length === 0 ||
@@ -225,7 +225,7 @@ const decodeMarkerBasename = (
     decodedBasename.success === "." ||
     decodedBasename.success === ".." ||
     path.basename(decodedBasename.success) !== decodedBasename.success ||
-    Encoding.encodeBase64Url(decodedBasename.success) !== encodedBasename
+    Base64Url.encode(decodedBasename.success) !== encodedBasename
   ) {
     return Result.fail(configurationError())
   }
@@ -460,7 +460,7 @@ const verifyProcessOwnership = Effect.fn("ControlCenterCli.verifyProcessOwnershi
 
         yield* assertIdentity
         const random = yield* mapConfigurationError(cryptoService.randomBytes(16))
-        const probePath = path.join(dataRoot, `${DATA_ROOT_OWNER_PROBE_PREFIX}${Encoding.encodeHex(random)}`)
+        const probePath = path.join(dataRoot, `${DATA_ROOT_OWNER_PROBE_PREFIX}${Hex.encode(random)}`)
         const probe = yield* mapConfigurationError(
           fileSystem.open(probePath, { flag: "wx", mode: DATA_ROOT_MARKER_MODE })
         )

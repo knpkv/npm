@@ -56,6 +56,18 @@ afterEach(() => {
 })
 
 describe("BrowserSessionProvider", () => {
+  it("ignores startup hydration that begins after this tab paired", () => {
+    const paired = makeSession("01890f6f-6d6a-7cc0-98d2-000000000006")
+    const csrf = Schema.decodeSync(CsrfToken)("ab".repeat(32))
+
+    act(() => sessionControls().establishSession(csrf, paired))
+    const lateAttempt = sessionControls().beginHydration()
+    act(() => sessionControls().completeHydration(lateAttempt, { _tag: "anonymous" }))
+
+    expect(sessionControls().state).toEqual({ _tag: "authenticated", session: paired })
+    expect(sessionStorage.getItem("cc_csrf")).toBe(csrf)
+  })
+
   it("does not let a late unauthorized response for session A invalidate replacement session B", () => {
     const sessionA = makeSession("01890f6f-6d6a-7cc0-98d2-000000000004")
     const sessionB = makeSession("01890f6f-6d6a-7cc0-98d2-000000000005")

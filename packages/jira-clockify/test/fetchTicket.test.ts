@@ -2,11 +2,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { JiraApiClient, make } from "@knpkv/jira-api-client"
 import { JiraAuth, type JiraAuthService } from "@knpkv/jira-cli/JiraAuth"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import { systemError } from "effect/PlatformError"
 import * as Redacted from "effect/Redacted"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { fetchTicketByKey } from "../src/cli/fetchTicket.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and

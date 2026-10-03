@@ -1,9 +1,9 @@
 /** @effect-diagnostics strictEffectProvide:skip-file */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Schema, Sink, Stream } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import { LanguageModel } from "effect/ai"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { model } from "../src/index.js"
 
 const fakeProcessLayer = (calls: Array<ChildProcess.Command>, stdout: string) =>

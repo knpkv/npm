@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
+import { Argument as Args, Command } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stdio from "effect/Stdio"
-import { Argument as Args, Command } from "effect/unstable/cli"
 import pkg from "../package.json" with { type: "json" }
 import {
   HomeDirectoryLive,
@@ -15,7 +15,7 @@ import {
   useProfileForAllTools
 } from "./config/index.js"
 
-const profileArg = Args.string("profile").pipe(
+const profileArg = Args.String("profile").pipe(
   Args.withDescription("Profile ID, name, site URL, cloud ID, or account ID")
 )
 

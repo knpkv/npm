@@ -1,6 +1,6 @@
 import { CacheService, Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { Crypto, Effect, Stream } from "effect"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import {
   relayFindingCanonicalIdentity,
   relayFindingCanPublishAutomatically,

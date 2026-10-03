@@ -18,8 +18,9 @@ import {
   Sink,
   Stream
 } from "effect"
+import * as ByteSize from "effect/ByteSize"
 import * as FileSystem from "effect/FileSystem"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/process"
 import { SandboxRepo, type SandboxRow } from "../src/CacheService/repos/SandboxRepo.js"
 import * as ChildEnv from "../src/ChildEnv.js"
 import { ConfigService, defaultSandboxConfig } from "../src/ConfigService/index.js"
@@ -363,8 +364,8 @@ const makeFixture = Effect.fn("SandboxWorkerScopeTest.makeFixture")(function*(
             uid: Option.none<number>(),
             gid: Option.none<number>(),
             rdev: Option.none<number>(),
-            size: FileSystem.Size(0),
-            blksize: Option.none<FileSystem.Size>(),
+            size: ByteSize.bytes(0),
+            blksize: Option.none<ByteSize.ByteSize>(),
             blocks: Option.none<number>()
           })
       })

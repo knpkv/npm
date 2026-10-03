@@ -2,8 +2,8 @@ import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Path from "effect/Path"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 // @effect-diagnostics strictEffectProvide:off
 

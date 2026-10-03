@@ -14,7 +14,7 @@
  * @module
  */
 import { Context, Effect, Layer, Stream } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { HttpClient } from "effect/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import type { PRCommentLocation, PullRequest } from "../Domain.js"
 import type { AwsApiError, AwsCredentialError, AwsThrottleError } from "../Errors.js"

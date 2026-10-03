@@ -6,7 +6,7 @@
 import { PermissionService } from "@knpkv/codecommit-core"
 import { PermissionGateLiveTag } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 const defaultPermissionState = "allow"

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import type * as SqlClient from "effect/sql/SqlClient"
 
 import { DatabaseInitializationError } from "./errors.js"
 import currentSchemaJson from "./schema.json" with { type: "json" }

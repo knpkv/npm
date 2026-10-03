@@ -8,7 +8,7 @@ import { UtcTimestamp } from "../../domain/utcTimestamp.js"
 
 const CANONICAL_LOWERCASE_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 
-const canonicalUuid7 = <const Brand extends string>(brand: Brand) =>
+const canonicalUuid7 = <const Brand extends string>(brand: Parameters<typeof Schema.brand<Brand>>[0]) =>
   Schema.String.check(Schema.isUUID(7)).pipe(
     Schema.decodeTo(
       Schema.String.check(
@@ -19,7 +19,7 @@ const canonicalUuid7 = <const Brand extends string>(brand: Brand) =>
       ),
       SchemaTransformation.toLowerCase()
     ),
-    Schema.brand(brand)
+    Schema.brand<Brand>(brand)
   )
 
 /** Canonical identifier of a single-use pairing credential. */

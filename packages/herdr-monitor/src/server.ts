@@ -1,5 +1,5 @@
-import { Clock, Effect, FileSystem, Ref, Schedule, Schema } from "effect"
-import { HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { ByteSize, Clock, Effect, Ref, Schedule, Schema } from "effect"
+import { HttpIncomingMessage, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { BoardId, decodeSnapshot, MAX_BYTES, RETENTION_MS, Snapshot, STALE_MS } from "./model.js"
 
 export class MonitorConfigurationError
@@ -128,7 +128,7 @@ export const makeMonitor = Effect.fn("Monitor.make")(function*(options: MonitorO
     })
     return empty(status)
   }).pipe(
-    Effect.provideService(HttpIncomingMessage.MaxBodySize, FileSystem.Size(MAX_BYTES)),
+    Effect.provideService(HttpIncomingMessage.MaxBodySize, ByteSize.bytes(MAX_BYTES)),
     Effect.timeout("5 seconds"),
     Effect.catch(() => Effect.succeed(empty(400)))
   )

@@ -25,11 +25,11 @@ import {
   requireLoopbackHostname
 } from "@knpkv/codecommit-web"
 import { Console, Deferred, Effect, Fiber, Layer, Stream } from "effect"
+import { Command, Flag as Options } from "effect/cli"
+import * as HttpClient from "effect/http/HttpClient"
+import * as ChildProcess from "effect/process/ChildProcess"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
-import { Command, Flag as Options } from "effect/unstable/cli"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import pkg from "../package.json"
 import { prCreateCommand } from "./PrCreate.js"
 import { prExportCommand } from "./PrExport.js"
@@ -47,8 +47,8 @@ const tui = Command.make("tui", {}, () => launchTui)
 
 // Web Command
 const web = Command.make("web", {
-  port: Options.integer("port").pipe(Options.withDefault(3000)),
-  hostname: Options.string("hostname").pipe(Options.withDefault("127.0.0.1"))
+  port: Options.Int("port").pipe(Options.withDefault(3000)),
+  hostname: Options.String("hostname").pipe(Options.withDefault("127.0.0.1"))
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)

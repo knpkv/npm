@@ -13,7 +13,7 @@ import {
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
 import { Effect, Path, Ref, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const HerdrAgentFields = {
   agent_status: Schema.String,

@@ -6,10 +6,10 @@
 import { make as makeClockifyApi } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import { Console, Effect, Predicate, Redacted, Schema } from "effect"
+import { Prompt } from "effect/cli"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Path from "effect/Path"
-import { Prompt } from "effect/unstable/cli"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as ChildProcess from "effect/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 declare const Bun: unknown
@@ -55,8 +55,8 @@ export const checkAuthOrSetup = Effect.gen(function*() {
       yield* Console.log("   Callback URL: http://localhost:8585/callback")
       yield* Console.log("")
 
-      const id = yield* Prompt.text({ message: "Enter OAuth client ID:" })
-      const secret = yield* Prompt.text({ message: "Enter OAuth client secret:" })
+      const id = yield* Prompt.String({ message: "Enter OAuth client ID:" })
+      const secret = yield* Prompt.String({ message: "Enter OAuth client secret:" })
       yield* jira.configure({ clientId: id, clientSecret: secret })
       yield* Console.log("OAuth configured.")
     }
@@ -79,7 +79,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
     yield* Console.log("─── Clockify ───")
     yield* Console.log("Get your API key from: https://app.clockify.me/manage-api-keys\n")
 
-    const apiKey = yield* Prompt.text({ message: "Enter Clockify API key:" })
+    const apiKey = yield* Prompt.String({ message: "Enter Clockify API key:" })
     if (!apiKey) {
       yield* Console.log("Skipped. Run: jcf auth clockify setup\n")
       return false
@@ -114,7 +114,7 @@ export const checkAuthOrSetup = Effect.gen(function*() {
         workspaceName = workspace.name
       }
     } else if (workspaces.length > 1) {
-      workspaceId = yield* Prompt.select({
+      workspaceId = yield* Prompt.Select({
         message: "Select workspace:",
         choices: workspaces.map((workspace) => ({ title: workspace.name, value: workspace.id }))
       })

@@ -14,9 +14,9 @@ import {
   Stream,
   SubscriptionRef
 } from "effect"
+import { Etag, HttpPlatform } from "effect/http"
+import { HttpApiTest } from "effect/http-api"
 import * as TestClock from "effect/testing/TestClock"
-import { Etag, HttpPlatform } from "effect/unstable/http"
-import { HttpApiTest } from "effect/unstable/httpapi"
 import { CodeCommitApi, OwnerSessionAuth } from "../src/server/Api.js"
 import { EventsLive } from "../src/server/handlers/events-live.js"
 

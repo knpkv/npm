@@ -5,7 +5,7 @@
  */
 import { AuditLogRepo } from "@knpkv/codecommit-core/PermissionService/AuditLog.js"
 import { Effect } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 export const AuditLive = HttpApiBuilder.group(

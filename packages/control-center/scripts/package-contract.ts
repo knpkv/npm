@@ -85,13 +85,13 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
   if (manifest.dependencies["@knpkv/rly"] !== "workspace:^") {
     violations.push("@knpkv/rly must use workspace:^")
   }
-  if (manifest.dependencies["@distilled.cloud/aws"] !== "1.0.0-rc.4") {
+  if (manifest.dependencies["@distilled.cloud/aws"] !== "1.0.0-rc.13") {
     violations.push("@distilled.cloud/aws must remain on the reviewed CodePipeline client version")
   }
-  if (manifest.dependencies["@aws-sdk/client-codepipeline"] !== "^3.1108.0") {
+  if (manifest.dependencies["@aws-sdk/client-codepipeline"] !== "^3.1145.0") {
     violations.push("AWS CodePipeline client must remain on the reviewed runtime version")
   }
-  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1108.0") {
+  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1145.0") {
     violations.push("AWS credential providers must remain on the reviewed runtime version")
   }
   const workspaceDependencies: ReadonlyArray<
@@ -129,20 +129,20 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
   if (manifest.dependencies["@knpkv/control-center-sql"] !== "workspace:^") {
     violations.push("@knpkv/control-center-sql must use workspace:^")
   }
-  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0-rc.109") {
-    violations.push("@effect/sql-libsql must align with the pinned Effect RC")
+  if (manifest.dependencies["@effect/sql-libsql"] !== "4.0.0") {
+    violations.push("@effect/sql-libsql must align with the pinned Effect release")
   }
-  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0-rc.109") {
-    violations.push("@effect/ai-openai-compat must align with the pinned Effect RC")
+  if (manifest.dependencies["@effect/ai-openai-compat"] !== "4.0.0") {
+    violations.push("@effect/ai-openai-compat must align with the pinned Effect release")
   }
-  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0-rc.109") {
-    violations.push("@effect/platform-node must align with the pinned Effect RC")
+  if (manifest.dependencies["@effect/platform-node"] !== "4.0.0") {
+    violations.push("@effect/platform-node must align with the pinned Effect release")
   }
-  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0-rc.109") {
-    violations.push("@effect/platform-browser must align with the pinned Effect RC")
+  if (manifest.dependencies["@effect/platform-browser"] !== "4.0.0") {
+    violations.push("@effect/platform-browser must align with the pinned Effect release")
   }
-  if (manifest.dependencies.effect !== "4.0.0-rc.109") {
-    violations.push("effect must align with the pinned Effect RC")
+  if (manifest.dependencies.effect !== "4.0.0") {
+    violations.push("effect must align with the pinned Effect release")
   }
 
   const expectedKeys = Object.keys(expectedExports).sort()

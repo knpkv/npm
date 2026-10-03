@@ -20,7 +20,7 @@
  */
 import { type Domain } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Logger, Option, Predicate, Schema } from "effect"
-import { Command, Flag as Options } from "effect/unstable/cli"
+import { Command, Flag as Options } from "effect/cli"
 import { reportFailure } from "./CliFailure.js"
 import {
   type CodeCommitRemote,
@@ -299,19 +299,19 @@ export const resolvePrOpenPresentation = Effect.fn("PrOpen.resolvePresentation")
 
 /** @category Command */
 export const prOpenCommand = Command.make("open", {
-  cwd: Options.string("cwd").pipe(
+  cwd: Options.String("cwd").pipe(
     Options.withDescription("Directory inside the repository (default: current directory)"),
     Options.withDefault(".")
   ),
-  remote: Options.string("remote").pipe(
+  remote: Options.String("remote").pipe(
     Options.withDescription("Git remote naming the CodeCommit repository"),
     Options.withDefault("origin")
   ),
-  json: Options.boolean("json").pipe(
+  json: Options.Boolean("json").pipe(
     Options.withDescription("Print the resolved PR as JSON instead of opening it"),
     Options.withDefault(false)
   ),
-  url: Options.boolean("url").pipe(
+  url: Options.Boolean("url").pipe(
     Options.withDescription("Print the console URL instead of opening it"),
     Options.withDefault(false)
   )

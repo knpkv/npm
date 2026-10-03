@@ -11,7 +11,7 @@
 import { PRService } from "@knpkv/codecommit-core/PRService/index.js"
 import { StatsService } from "@knpkv/codecommit-core/StatsService/index.js"
 import { Effect, Ref } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 

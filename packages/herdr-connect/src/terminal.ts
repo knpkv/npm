@@ -1,7 +1,7 @@
 import type { FleetService, HostConfiguration } from "@knpkv/herdr-fleet"
 import type { Scope } from "effect"
 import { Crypto, Effect, Predicate, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TerminalAgentNotFoundError, TerminalProtocolError, TerminalTransportError } from "./errors.js"
 import { connectAgentId } from "./id.js"
 import { releaseTerminalControl, terminalKillOptions, terminalReleaseKillOptions } from "./internal/terminal-release.js"

@@ -1,8 +1,8 @@
 import { Cause, Config, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
 import type { Duration } from "effect"
-import { LanguageModel, Model } from "effect/unstable/ai"
-import type { AiError, Response } from "effect/unstable/ai"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { LanguageModel, Model } from "effect/ai"
+import type { AiError, Response } from "effect/ai"
+import { ChildProcessSpawner } from "effect/process"
 import type { ClaudeActivity } from "./activity.js"
 import {
   configurationFailure,
@@ -22,7 +22,7 @@ const DEFAULT_TIMEOUT = "2 minutes"
 const STREAM_TEXT_ID = "claude-cli-output"
 const JsonString = Schema.fromJsonString(Schema.Json)
 
-const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
+const optionalEnvironmentValue = (name: string) => Config.option(Config.String(name))
 
 /**
  * The reviewed environment handed to the Claude CLI. Deliberately an allowlist: the child gets

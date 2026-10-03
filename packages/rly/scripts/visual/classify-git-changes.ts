@@ -4,9 +4,9 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { classifyVisualChanges } from "./classify-changes.js"
 import { collectBoundedGitProcess, recoverVisualGitFailure, VisualGitError } from "./classify-git-changes-effect.js"
 import { parseGitNameStatus } from "./git-changes.js"
@@ -40,7 +40,7 @@ const program = Effect.gen(function*() {
   const base = option(args, "--base")
   const head = option(args, "--head")
   if (base === undefined || head === undefined) {
-    return yield* Effect.fail(new VisualGitError({ reason: "Usage: --base <ref> --head <ref>" }))
+    return yield* new VisualGitError({ reason: "Usage: --base <ref> --head <ref>" })
   }
 
   const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))

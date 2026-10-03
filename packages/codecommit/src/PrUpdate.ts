@@ -11,7 +11,7 @@
  */
 import { AwsClient } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option } from "effect"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import { makeAccount } from "./CliAccount.js"
 import { reportFailure } from "./CliFailure.js"
 
@@ -65,23 +65,23 @@ export const PrUpdateLive = PrUpdateService.live
 
 /** @category Command */
 export const prUpdateCommand = Command.make("update", {
-  prId: Args.string("pr-id").pipe(Args.withDescription("Pull request ID")),
-  title: Options.string("title").pipe(
+  prId: Args.String("pr-id").pipe(Args.withDescription("Pull request ID")),
+  title: Options.String("title").pipe(
     Options.withAlias("t"),
     Options.withDescription("New PR title"),
     Options.optional
   ),
-  description: Options.string("description").pipe(
+  description: Options.String("description").pipe(
     Options.withAlias("d"),
     Options.withDescription("New PR description"),
     Options.optional
   ),
-  profile: Options.string("profile").pipe(
+  profile: Options.String("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile"),
     Options.withDefault("default")
   ),
-  region: Options.string("region").pipe(
+  region: Options.String("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region"),
     Options.withDefault("us-east-1")

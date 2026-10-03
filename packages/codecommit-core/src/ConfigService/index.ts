@@ -72,17 +72,17 @@ export class ConfigService extends Context.Service<
 const ConfigPathsLive = Layer.effect(
   ConfigPaths,
   Effect.gen(function*() {
-    const getConfigPath = Config.string("HOME").pipe(
+    const getConfigPath = Config.String("HOME").pipe(
       Config.map((h) => `${h}/.codecommit/config.json`),
       Config.orElse(() =>
-        Config.string("USERPROFILE").pipe(
+        Config.String("USERPROFILE").pipe(
           Config.map((h) => `${h}/.codecommit/config.json`)
         )
       )
     )
 
-    const getHomePath = Config.string("HOME").pipe(
-      Config.orElse(() => Config.string("USERPROFILE"))
+    const getHomePath = Config.String("HOME").pipe(
+      Config.orElse(() => Config.String("USERPROFILE"))
     )
 
     const configPath = getConfigPath.pipe(

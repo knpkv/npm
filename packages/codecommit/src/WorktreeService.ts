@@ -11,8 +11,8 @@ import { ChildEnv, type Domain, type ReadClient } from "@knpkv/codecommit-core"
 import { Config, Context, Crypto, Effect, Layer, Option, Schema, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as GitEnvironment from "./GitEnvironment.js"
 
 export class WorktreeError extends Schema.TaggedError<WorktreeError>()(
@@ -81,8 +81,8 @@ const WorktreeCoordinates = Schema.Struct({
   sourceCommit: Schema.String.check(Schema.isPattern(/^[0-9a-fA-F]{40}$/))
 })
 
-const homeDirectory = Config.string("HOME").pipe(
-  Config.orElse(() => Config.string("USERPROFILE"))
+const homeDirectory = Config.String("HOME").pipe(
+  Config.orElse(() => Config.String("USERPROFILE"))
 )
 
 const textEncoder = new TextEncoder()

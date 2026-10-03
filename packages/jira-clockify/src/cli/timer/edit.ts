@@ -5,7 +5,7 @@
  */
 import { ClockifyApiClient, type Project, type Tag } from "@knpkv/clockify-api-client"
 import { Console, Data, Effect, Runtime, SubscriptionRef } from "effect"
-import { Command, Prompt } from "effect/unstable/cli"
+import { Command, Prompt } from "effect/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { TimerService } from "../../services/TimerService.js"
 import * as WriterGuard from "../writerGuard.js"
@@ -54,7 +54,7 @@ export const edit = Command.make(
       }
       const clockifyEntryId = current.clockifyEntryId
 
-      const what = yield* Prompt.select({
+      const what = yield* Prompt.Select({
         message: "What to edit?",
         choices: [
           {
@@ -75,7 +75,7 @@ export const edit = Command.make(
         const projects = yield* clockifyClient.getProjects(auth.workspaceId).pipe(
           Effect.catch(() => Effect.succeed(emptyProjects()))
         )
-        const selected = yield* Prompt.select({
+        const selected = yield* Prompt.Select({
           message: "Select project:",
           choices: [
             ...projects.map((p) => ({ title: p.name, value: p.id })),
@@ -105,7 +105,7 @@ export const edit = Command.make(
       }
 
       if (what === "billable") {
-        const val = yield* Prompt.select({
+        const val = yield* Prompt.Select({
           message: "Billable?",
           choices: [
             { title: "Yes", value: true },
@@ -147,7 +147,7 @@ export const edit = Command.make(
         )
         yield* Console.log("")
 
-        const action = yield* Prompt.select({
+        const action = yield* Prompt.Select({
           message: "Action:",
           choices: [
             { title: "Add tag", value: addTagAction },
@@ -161,7 +161,7 @@ export const edit = Command.make(
             yield* Console.log("No more tags available.")
             return
           }
-          const tagId = yield* Prompt.select({
+          const tagId = yield* Prompt.Select({
             message: "Add tag:",
             choices: available.map((t) => ({ title: t.name, value: t.id }))
           })
@@ -192,7 +192,7 @@ export const edit = Command.make(
             yield* Console.log("No tags to remove.")
             return
           }
-          const tagId = yield* Prompt.select({
+          const tagId = yield* Prompt.Select({
             message: "Remove tag:",
             choices: current_tags.map((t) => ({ title: t.name, value: t.id }))
           })

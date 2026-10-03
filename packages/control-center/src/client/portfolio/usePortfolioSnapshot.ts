@@ -2,11 +2,11 @@ import * as Cause from "effect/Cause"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
 import * as Random from "effect/Random"
 import * as Result from "effect/Result"
 import * as Stream from "effect/Stream"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
@@ -169,7 +169,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
     minimumCursor: EventCursor
   ) {
     const snapshot = yield* transport.loadSnapshot
-    if (snapshot.eventCursor < minimumCursor) return yield* Effect.fail(new PortfolioStreamProtocolError())
+    if (snapshot.eventCursor < minimumCursor) return yield* new PortfolioStreamProtocolError()
     yield* publish({ _tag: "stream-snapshot", snapshot })
   })
 
@@ -248,7 +248,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
           return onUsable
         })
       ))
-    return yield* Effect.fail(new PortfolioStreamClosedError())
+    return yield* new PortfolioStreamClosedError()
   })
 
   const reconnect = Effect.fn("PortfolioLiveController.reconnect")(function*() {

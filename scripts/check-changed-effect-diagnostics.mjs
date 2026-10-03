@@ -12,7 +12,7 @@ import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 class ChangedEffectDiagnosticsError extends Data.TaggedError("ChangedEffectDiagnosticsError") {
   get message() {
@@ -48,6 +48,41 @@ const validateDiagnostics = (records) =>
   records.flatMap(({ diagnostics, file }) =>
     diagnostics.map(({ column, line, message, name }) => `${file}:${line}:${column}: effect(${name}): ${message}`)
   )
+
+const hunkHeader = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/u
+
+// Parse `git diff --unified=0` output into the 1-based post-image lines each file adds or changes.
+// A file present in the diff with only deletions maps to an empty set.
+export const changedLinesFromDiff = (diff) => {
+  const changedLines = new Map()
+  let current
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++ ")) {
+      const target = line.slice(4)
+      current = target === "/dev/null" ? undefined : target.replace(/^b\//u, "")
+      if (current !== undefined && !changedLines.has(current)) changedLines.set(current, new Set())
+      continue
+    }
+    if (!line.startsWith("@@")) continue
+    const match = hunkHeader.exec(line)
+    if (match === null || current === undefined) {
+      throw new ChangedEffectDiagnosticsError({ reason: `Unparseable diff hunk header: ${line}` })
+    }
+    const start = Number(match[1])
+    const count = match[2] === undefined ? 1 : Number(match[2])
+    const lines = changedLines.get(current)
+    for (let offset = 0; offset < count; offset += 1) lines.add(start + offset)
+  }
+  return changedLines
+}
+
+// Keep only diagnostics reported on lines this change touched, so pre-existing diagnostics elsewhere in a
+// touched file do not block unrelated work while every changed line still meets the gate.
+export const diagnosticsOnChangedLines = (records, changedLines) =>
+  records.map(({ diagnostics, file }) => {
+    const lines = changedLines.get(file) ?? new Set()
+    return { diagnostics: diagnostics.filter(({ line }) => lines.has(line)), file }
+  })
 
 const launchWaves = (files, concurrency = diagnosticConcurrency) =>
   Array.from({ length: Math.ceil(files.length / concurrency) }, (_, index) =>
@@ -131,6 +166,58 @@ assert.throws(
   /broken\.ts: Effect diagnostics process failed: spawn failed/u
 )
 
+const fixtureDiff = [
+  "diff --git a/changed.ts b/changed.ts",
+  "--- a/changed.ts",
+  "+++ b/changed.ts",
+  "@@ -2 +2 @@",
+  "-old",
+  "+new",
+  "@@ -9,0 +10,2 @@",
+  "+added",
+  "+added",
+  "diff --git a/deleted-lines.ts b/deleted-lines.ts",
+  "--- a/deleted-lines.ts",
+  "+++ b/deleted-lines.ts",
+  "@@ -4,2 +3,0 @@",
+  "-gone",
+  "-gone"
+].join("\n")
+const fixtureLines = changedLinesFromDiff(fixtureDiff)
+assert.deepEqual([...fixtureLines.get("changed.ts")], [2, 10, 11])
+assert.deepEqual([...fixtureLines.get("deleted-lines.ts")], [])
+const fixtureDiagnostic = (line) => ({
+  column: 1,
+  line,
+  message: "Use a strict boolean expression.",
+  name: "strictBooleanExpressions"
+})
+// A new diagnostic on a changed line still fails the gate.
+assert.deepEqual(
+  validateDiagnostics(
+    diagnosticsOnChangedLines([{ diagnostics: [fixtureDiagnostic(10)], file: "changed.ts" }], fixtureLines)
+  ),
+  ["changed.ts:10:1: effect(strictBooleanExpressions): Use a strict boolean expression."]
+)
+// An untouched pre-existing diagnostic passes.
+assert.deepEqual(
+  validateDiagnostics(
+    diagnosticsOnChangedLines([{ diagnostics: [fixtureDiagnostic(5)], file: "changed.ts" }], fixtureLines)
+  ),
+  []
+)
+// A changed line in a file with older diagnostics elsewhere reports only its own.
+assert.deepEqual(
+  validateDiagnostics(
+    diagnosticsOnChangedLines(
+      [{ diagnostics: [fixtureDiagnostic(1), fixtureDiagnostic(2), fixtureDiagnostic(7)], file: "changed.ts" }],
+      fixtureLines
+    )
+  ),
+  ["changed.ts:2:1: effect(strictBooleanExpressions): Use a strict boolean expression."]
+)
+assert.throws(() => changedLinesFromDiff("+++ b/broken.ts\n@@ malformed @@"), /Unparseable diff hunk header/u)
+
 const fail = (reason, cause) => Effect.fail(new ChangedEffectDiagnosticsError({ cause, reason }))
 
 const makeGit = Effect.fn("ChangedEffectDiagnostics.makeGit")(function* (repositoryRoot) {
@@ -177,10 +264,10 @@ assert.deepEqual(
 )
 
 const resolveMergeBase = Effect.fn("ChangedEffectDiagnostics.resolveMergeBase")(function* (git) {
-  const configuredBase = Option.getOrUndefined(yield* Config.option(Config.string("EFFECT_DIAGNOSTICS_BASE")))
-  const eventName = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_EVENT_NAME")))
-  const pushBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_EVENT_BEFORE")))
-  const githubBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_BASE_REF")))
+  const configuredBase = Option.getOrUndefined(yield* Config.option(Config.String("EFFECT_DIAGNOSTICS_BASE")))
+  const eventName = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_EVENT_NAME")))
+  const pushBase = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_EVENT_BEFORE")))
+  const githubBase = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_BASE_REF")))
   const candidates = baseCandidates({ configuredBase, eventName, githubBase, pushBase })
   for (const candidate of candidates) {
     if (candidate === undefined) continue
@@ -197,6 +284,28 @@ const changedFiles = Effect.fn("ChangedEffectDiagnostics.changedFiles")(function
     git(["diff", "--name-only", "-z", "--diff-filter=ACMR"])
   ])
   return [...new Set(outputs.flatMap((output) => output.split("\0")).filter(isCheckedSource))].toSorted()
+})
+
+const changedLines = Effect.fn("ChangedEffectDiagnostics.changedLines")(function* (git, mergeBase, files) {
+  if (files.length === 0) return new Map()
+  const diff = yield* git([
+    "diff",
+    "--unified=0",
+    "--no-color",
+    "--no-ext-diff",
+    "--no-renames",
+    "--diff-filter=ACMR",
+    mergeBase,
+    "--",
+    ...files
+  ])
+  return yield* Effect.try({
+    try: () => changedLinesFromDiff(diff),
+    catch: (cause) =>
+      cause instanceof ChangedEffectDiagnosticsError
+        ? cause
+        : new ChangedEffectDiagnosticsError({ cause, reason: "Could not read changed lines" })
+  })
 })
 
 export const inspectFile = Effect.fn("ChangedEffectDiagnostics.inspectFile")(
@@ -256,11 +365,13 @@ const program = Effect.gen(function* () {
     Clock.monotonicTimeNanos,
     Console.error
   )
-  const diagnostics = validateDiagnostics(records)
+  const diagnostics = validateDiagnostics(
+    diagnosticsOnChangedLines(records, yield* changedLines(git, mergeBase, files))
+  )
   if (diagnostics.length > 0) {
     return yield* fail(`Changed Effect diagnostics failed:\n- ${diagnostics.join("\n- ")}`)
   }
-  yield* Console.log(`Changed Effect diagnostics checked ${files.length} TypeScript files`)
+  yield* Console.log(`Changed Effect diagnostics checked changed lines in ${files.length} TypeScript files`)
 })
 
 if (import.meta.main) NodeRuntime.runMain(program.pipe(Effect.scoped, Effect.provide(NodeServices.layer)))

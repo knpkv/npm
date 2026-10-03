@@ -3,9 +3,9 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Path from "effect/Path"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { assertWarningFreeStorybookOutput } from "./storybook-build-output.js"
 
 class StorybookBuildError extends Data.TaggedError("StorybookBuildError")<{

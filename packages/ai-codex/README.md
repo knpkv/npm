@@ -6,7 +6,7 @@ An Effect AI `LanguageModel` and raw event stream backed by an authenticated loc
 import { NodeServices } from "@effect/platform-node"
 import { model } from "@knpkv/ai-codex"
 import { Effect } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel } from "effect/ai"
 
 const program = LanguageModel.generateText({
   prompt: "Summarize this repository in three sentences."

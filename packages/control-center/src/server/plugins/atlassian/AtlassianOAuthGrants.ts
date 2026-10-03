@@ -31,8 +31,9 @@ import {
 import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64Url } from "effect/encoding"
 import * as FileSystem from "effect/FileSystem"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -40,7 +41,6 @@ import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import {
   AtlassianOAuthGrantExchangeResponse,
@@ -524,7 +524,7 @@ export const makeAtlassianOAuthGrants = Effect.fn("AtlassianOAuthGrants.make")(f
     if (config === null) return { _tag: "configuration-required", callbackUrl: redirectUri }
 
     const stateBytes = yield* cryptoService.randomBytes(32).pipe(Effect.mapError(unavailable))
-    const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(Encoding.encodeBase64Url(stateBytes)).pipe(
+    const grantId = yield* Schema.decodeUnknownEffect(AtlassianOAuthGrantId)(Base64Url.encode(stateBytes)).pipe(
       Effect.mapError(unavailable)
     )
     const codeVerifier = yield* generateCodeVerifier().pipe(

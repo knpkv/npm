@@ -9,3 +9,5 @@ export { JiraApiClient, type JiraApiClientContract, layer, make, type UploadAtta
 export { JiraApiConfig, type JiraApiConfigContract, type JiraApiCredential } from "./JiraApiConfig.js"
 
 export * as JiraApi from "./generated/JiraApi.js"
+
+export { ownOptionalKey, type PrototypeKey } from "./OwnOptionalKey.js"

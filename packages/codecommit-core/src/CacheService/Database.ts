@@ -36,8 +36,8 @@ import migration0021 from "./migrations/0021_sandbox_legacy_retirement.js"
 
 export { ensurePrivateDatabasePath } from "./internal/PrivateDatabasePathNode.js"
 
-const homeDir = Config.string("HOME").pipe(
-  Config.orElse(() => Config.string("USERPROFILE"))
+const homeDir = Config.String("HOME").pipe(
+  Config.orElse(() => Config.String("USERPROFILE"))
 )
 
 const dbUrl = homeDir.pipe(Config.map((h) => `file:${h}/.codecommit/cache.db`))

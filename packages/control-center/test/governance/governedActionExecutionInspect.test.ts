@@ -111,11 +111,11 @@ describe("governed action execution inspection", () => {
         workspaceId: envelope.workspaceId,
         pluginConnectionId: envelope.pluginConnectionId
       })
-      const { authorizationId, ...request } = plan.request
+      const { authorizationId, idempotencyKey, ...request } = plan.request
       assert.strictEqual(authorizationId, AUTHORIZATION_ID)
+      assert.strictEqual<string>(idempotencyKey, envelope.idempotencyKey)
       assert.deepStrictEqual(request, {
         proposal: envelope.proposal,
-        idempotencyKey: envelope.idempotencyKey,
         payloadDigest: envelope.proposal.payloadDigest,
         authorizedAt: authorization.authorizedAt,
         expiresAt: authorization.expiresAt

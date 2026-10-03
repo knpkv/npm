@@ -180,8 +180,8 @@ without treating private renderer/worker declarations as public API.
 
 When writing or refactoring Effect code:
 
-- Inspect `repos/effect` before changing Effect-heavy code or adopting a new
-  beta API.
+- Inspect `repos/effect` before changing Effect-heavy code or adopting an API
+  tagged `@stability unstable`.
 - Prefer `Context.Service` class syntax plus explicit `Layer.effect` or
   `Layer.succeed` layers.
 - Accept both `Data.TaggedError` and `Schema.TaggedError`; use schema-backed
@@ -194,7 +194,7 @@ When writing or refactoring Effect code:
   `Schema.Json` for JSON text boundaries instead of raw `JSON.parse` or
   `JSON.stringify`.
 - Use `Clock`, `DateTime`, platform `FileSystem`, `HttpClient`, `Stdio`, and
-  `effect/unstable/process` in Effect code. Use `Crypto.Crypto` for secure
+  `effect/process` in Effect code. Use `Crypto.Crypto` for secure
   random bytes, UUIDs, and digests; use `Random` only for non-security
   randomness. Keep direct host APIs at framework or UI boundaries only when the
   framework requires them.

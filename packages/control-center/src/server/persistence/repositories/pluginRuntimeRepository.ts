@@ -8,7 +8,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
@@ -116,13 +116,13 @@ const makePluginRuntimeRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const digestText = Effect.fn("PluginRuntimeRepository.digestText")(function*(value: string) {
-    const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+    const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "plugin-runtime.digest" }))
     )
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "plugin-runtime.digest" }))
     )
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    return ContentBlobDigest.make(Hex.encode(digest))
   })
 
   const digestUnknown = Effect.fn("PluginRuntimeRepository.digestUnknown")(

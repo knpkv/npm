@@ -5,7 +5,7 @@ An Effect AI `LanguageModel` backed by a local Claude CLI process.
 ```ts
 import { NodeServices } from "@effect/platform-node"
 import { Effect } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel } from "effect/ai"
 import { model } from "@knpkv/ai-claude"
 
 const program = LanguageModel.generateText({ prompt: "Review the current change." }).pipe(

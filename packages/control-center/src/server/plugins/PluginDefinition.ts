@@ -1,6 +1,6 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
@@ -141,7 +141,7 @@ const validateDiffContentRange = Effect.fn("PluginDefinition.validateDiffContent
   response: DiffContentRangeV1
 ) {
   if (response.bytesBase64 === null) return response
-  const decoded = Encoding.decodeBase64(response.bytesBase64)
+  const decoded = Base64.decode(response.bytesBase64)
   if (Result.isFailure(decoded)) {
     return yield* new PluginMalformedResponseFailure({
       operation: "diff-content",
@@ -165,7 +165,7 @@ const validatePipelineArtifactRange = Effect.fn("PluginDefinition.validatePipeli
   request: PluginPipelineArtifactRangeRequestV1,
   response: PluginPipelineArtifactRangeV1
 ) {
-  const decoded = Encoding.decodeBase64(response.bytesBase64)
+  const decoded = Base64.decode(response.bytesBase64)
   if (Result.isFailure(decoded)) {
     return yield* new PluginMalformedResponseFailure({
       operation: "pipeline-artifact",

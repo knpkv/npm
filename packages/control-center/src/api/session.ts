@@ -4,15 +4,9 @@ import {
   SessionToken as BrowserSessionToken
 } from "@knpkv/browser-pairing/schema"
 import * as Context from "effect/Context"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSchema, HttpApiSecurity } from "effect/http-api"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import {
-  HttpApiEndpoint,
-  HttpApiGroup,
-  HttpApiMiddleware,
-  HttpApiSchema,
-  HttpApiSecurity
-} from "effect/unstable/httpapi"
 
 import { Actor, Role } from "../domain/actors.js"
 import { SessionId, WorkspaceId } from "../domain/identifiers.js"

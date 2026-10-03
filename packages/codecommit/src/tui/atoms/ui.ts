@@ -1,5 +1,5 @@
 import type { Domain } from "@knpkv/codecommit-core"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as Atom from "effect/reactivity/Atom"
 import type { AmbiguousMergeGuards } from "../details-model.js"
 
 /**

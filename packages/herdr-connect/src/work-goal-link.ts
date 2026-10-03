@@ -1,6 +1,6 @@
 import type { WorkGoalId, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { workNavigationHref } from "@knpkv/herdr-work/navigation"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { ConnectAgent } from "./model.js"
 
 export type ConnectWorkGoalResolution =

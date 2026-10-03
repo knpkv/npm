@@ -27,9 +27,9 @@
  * @module
  */
 import { Console, Data, Effect, Option, Runtime, Schedule } from "effect"
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Clock from "effect/Clock"
 import * as Duration from "effect/Duration"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import type { SessionProposal } from "../agent/sessions.js"
 import { decideWatchWrites, type HeldProposal, SETTLE_GRACE_SECONDS } from "../agent/watch.js"
 import { ConfigService } from "../services/ConfigService.js"
@@ -497,12 +497,12 @@ export const runWatch = (options: {
 export const watch = Command.make(
   "watch",
   {
-    agent: Args.string("agent").pipe(Args.optional),
-    interval: Options.integer("interval").pipe(
+    agent: Args.String("agent").pipe(Args.optional),
+    interval: Options.Int("interval").pipe(
       Options.withDescription(`Seconds between looks (default: ${DEFAULT_INTERVAL_SECONDS})`),
       Options.optional
     ),
-    dryRun: Options.boolean("dry-run").pipe(
+    dryRun: Options.Boolean("dry-run").pipe(
       Options.withDescription("Report what would be written without creating anything"),
       Options.withDefault(false)
     )

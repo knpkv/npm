@@ -54,14 +54,14 @@ import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import { HttpClient } from "effect/http"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
+import { ChildProcessSpawner } from "effect/process"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
-import { HttpClient } from "effect/unstable/http"
-import { ChildProcessSpawner } from "effect/unstable/process"
 import { AuthMissingError } from "./ConfluenceError.js"
 import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
 import { callbackUrl, startCallbackServer } from "./internal/oauthServer.js"
@@ -289,12 +289,10 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const config = yield* loadOAuthConfigOp()
       if (config === null) {
-        return yield* Effect.fail(
-          new OAuthError({
-            step: "authorize",
-            cause: "OAuth not configured. Run 'confluence auth configure' first."
-          })
-        )
+        return yield* new OAuthError({
+          step: "authorize",
+          cause: "OAuth not configured. Run 'confluence auth configure' first."
+        })
       }
       return config
     })
@@ -403,12 +401,10 @@ const make = Effect.gen(function*() {
       )
 
       if (sites.length === 0) {
-        return yield* Effect.fail(
-          new OAuthError({
-            step: "authorize",
-            cause: "No Confluence sites found for this account"
-          })
-        )
+        return yield* new OAuthError({
+          step: "authorize",
+          cause: "No Confluence sites found for this account"
+        })
       }
 
       let site: (typeof sites)[number]
@@ -418,12 +414,10 @@ const make = Effect.gen(function*() {
           const matched = sites.find((s) => s.url === options.siteUrl)
           if (!matched) {
             const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
-            return yield* Effect.fail(
-              new OAuthError({
-                step: "authorize",
-                cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
-              })
-            )
+            return yield* new OAuthError({
+              step: "authorize",
+              cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
+            })
           }
           site = matched
         } else {
@@ -474,7 +468,7 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       if (token === null) {
-        return yield* Effect.fail(new AuthMissingError())
+        return yield* new AuthMissingError()
       }
 
       const nowMs = yield* Clock.currentTimeMillis
@@ -511,14 +505,12 @@ const make = Effect.gen(function*() {
           if (error.step === "refresh" && rejected) {
             return Effect.gen(function*() {
               yield* deleteTokenOp()
-              return yield* Effect.fail(
-                new OAuthError({
-                  step: "refresh",
-                  cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
-                  status,
-                  errorCode
-                })
-              )
+              return yield* new OAuthError({
+                step: "refresh",
+                cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
+                status,
+                errorCode
+              })
             })
           }
           return Effect.fail(error)
@@ -539,7 +531,7 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       if (token === null) {
-        return yield* Effect.fail(new AuthMissingError())
+        return yield* new AuthMissingError()
       }
       return token.cloud_id
     })

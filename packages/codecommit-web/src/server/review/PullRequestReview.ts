@@ -6,11 +6,11 @@ import type * as ReadClient from "@knpkv/codecommit-core/ReadClient.js"
 import * as ReviewClient from "@knpkv/codecommit-core/ReviewClient.js"
 import { createTwoFilesPatch, parsePatch } from "diff"
 import { Cache, Cause, Data, Effect, Exit, Option, Predicate, Queue, Schema, Stream } from "effect"
+import { LanguageModel } from "effect/ai"
 import * as Crypto from "effect/Crypto"
 import * as FileSystem from "effect/FileSystem"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Semaphore from "effect/Semaphore"
-import { LanguageModel } from "effect/unstable/ai"
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import {
   type PullRequestDiffContentResponse,

@@ -1,7 +1,7 @@
 import { AgentReviewFailureCause, AgentRuntimeMetadata, MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH } from "@knpkv/ai-runtime"
 import * as Effect from "effect/Effect"
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import * as Schema from "effect/Schema"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { AgentProviderIdentifier } from "../domain/agentProviderIdentifier.js"
 import { GovernedActionState } from "../domain/governedAction/index.js"

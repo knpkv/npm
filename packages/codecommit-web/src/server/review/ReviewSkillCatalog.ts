@@ -222,8 +222,8 @@ const discoverRoot = Effect.fn("ReviewSkillCatalog.discoverRoot")(function*(
 /** Discover the bounded prompt catalog. Repository paths and client-provided paths never participate. */
 export const discoverReviewSkills = Effect.fn("ReviewSkillCatalog.discoverReviewSkills")(function*() {
   const path = yield* Path.Path
-  const home = yield* Config.string("HOME").pipe(Config.orElse(() => Config.string("USERPROFILE")))
-  const codexHome = yield* Config.option(Config.string("CODEX_HOME"))
+  const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
+  const codexHome = yield* Config.option(Config.String("CODEX_HOME"))
   const resolvedCodexHome = Option.getOrElse(codexHome, () => path.join(home, ".codex"))
   const roots: ReadonlyArray<SkillRoot> = [
     { label: "agents", path: path.join(home, ".agents", "skills") },

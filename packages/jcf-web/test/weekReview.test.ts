@@ -1,5 +1,5 @@
 import { Deferred, Effect } from "effect"
-import { AtomRegistry } from "effect/unstable/reactivity"
+import { AtomRegistry } from "effect/reactivity"
 import { afterEach, expect, it, vi } from "vitest"
 import { RequestFailure } from "../src/client/api.js"
 import { makeWeekReview, type WeekTransport } from "../src/client/weekReview.js"

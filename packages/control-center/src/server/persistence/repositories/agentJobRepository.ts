@@ -16,7 +16,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
@@ -326,7 +326,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const bytesFromText = Effect.fn("AgentJobRepository.bytesFromText")(function*(value: string) {
-    return yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+    return yield* Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.encode-utf8" }))
     )
   })
@@ -335,7 +335,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
     const digest = yield* cryptoService
       .digest("SHA-256", bytes)
       .pipe(Effect.mapError(() => new PersistenceOperationError({ operation: "agent-job.digest" })))
-    return `${SHA_256_PREFIX}${Encoding.encodeHex(digest)}`
+    return `${SHA_256_PREFIX}${Hex.encode(digest)}`
   })
 
   const encodePayload = Effect.fn("AgentJobRepository.encodePayload")(function*<UnparsedInput>(
@@ -2889,7 +2889,7 @@ const makeAgentJobRepository = Effect.gen(function*() {
         const attempt = Schema.decodeUnknownResult(RunningPrReviewAttempt)({
           jobId,
           attemptSequence,
-          attemptId: Encoding.encodeHex(digest).slice(0, 12),
+          attemptId: Hex.encode(digest).slice(0, 12),
           sessionRef: row.sessionRef
         })
         if (Result.isFailure(attempt)) {

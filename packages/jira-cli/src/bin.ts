@@ -8,10 +8,10 @@
  */
 import { NodeRuntime, NodeStdio } from "@effect/platform-node"
 import { makeInstallCommand } from "@knpkv/agent-skills"
+import { Command } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Stdio from "effect/Stdio"
-import { Command } from "effect/unstable/cli"
 import pkg from "../package.json" with { type: "json" }
 import {
   AppLayer,

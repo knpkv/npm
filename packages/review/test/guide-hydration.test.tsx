@@ -26,7 +26,7 @@ const clientDirectory = fileURLToPath(new URL("../src/guide/", import.meta.url))
 
 const bundleClient = async (mode: "development" | "production") => {
   // A private mutant may replace only the client entrypoint. The export still supplies the real SSR tree.
-  const mutantSource = Effect.runSync(Config.option(Config.string("REVIEW_HYDRATION_CLIENT_MUTANT_SOURCE")))
+  const mutantSource = Effect.runSync(Config.option(Config.String("REVIEW_HYDRATION_CLIENT_MUTANT_SOURCE")))
   const plugins: Array<Plugin> = Option.isNone(mutantSource)
     ? []
     : [

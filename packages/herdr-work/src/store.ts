@@ -1,5 +1,6 @@
 import { agentConnectTarget, fleetResponseBodyMaxBytes, workReassignActivitySummary } from "@knpkv/herdr-fleet"
-import { Clock, Crypto, Effect, Encoding, Equal, FileSystem, Option, Path, Schema } from "effect"
+import { Clock, Crypto, Effect, Equal, FileSystem, Option, Path, Schema } from "effect"
+import { Hex } from "effect/encoding"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
 import {
@@ -2102,7 +2103,7 @@ export class WorkStore implements WorkStoreService {
     if (state._tag !== "recoverable") return state
     const historyToken = yield* this.#cryptoService
       .digest("SHA-256", utf8.encode(state.snapshot))
-      .pipe(Effect.mapError(storeError("recovery.preflight.digest")), Effect.map(Encoding.encodeHex))
+      .pipe(Effect.mapError(storeError("recovery.preflight.digest")), Effect.map(Hex.encode))
     const preflight: WorkRecoveryPreflightType = {
       _tag: "recoverable",
       target: decoded,
@@ -2128,7 +2129,7 @@ export class WorkStore implements WorkStoreService {
     const historyToken = observed._tag === "recoverable"
       ? yield* this.#cryptoService
         .digest("SHA-256", utf8.encode(observed.snapshot))
-        .pipe(Effect.mapError(storeError("recovery.digest")), Effect.map(Encoding.encodeHex))
+        .pipe(Effect.mapError(storeError("recovery.digest")), Effect.map(Hex.encode))
       : undefined
     const decision = yield* Effect.try({
       try: ():
@@ -2724,7 +2725,7 @@ export class WorkStore implements WorkStoreService {
       new TextEncoder().encode(state.snapshot)
     ).pipe(
       Effect.mapError(storeError("admission.preflight.digest")),
-      Effect.map(Encoding.encodeHex)
+      Effect.map(Hex.encode)
     )
     const preflight: WorkAdmissionPreflightType = { _tag: "prospective", target: state.target, absenceToken }
     return preflight
@@ -2747,7 +2748,7 @@ export class WorkStore implements WorkStoreService {
     const absenceToken = observed._tag === "prospective"
       ? yield* this.#cryptoService.digest("SHA-256", new TextEncoder().encode(observed.snapshot)).pipe(
         Effect.mapError(storeError("admission.digest")),
-        Effect.map(Encoding.encodeHex)
+        Effect.map(Hex.encode)
       )
       : undefined
     const decision = yield* Effect.try({
@@ -3489,7 +3490,7 @@ export class WorkStore implements WorkStoreService {
       new TextEncoder().encode(transactionContent(decoded))
     ).pipe(
       Effect.mapError(storeError("appendMany.digest")),
-      Effect.map(Encoding.encodeHex)
+      Effect.map(Hex.encode)
     )
     const transactionRecord = JSON.stringify({ digest, version: "herdr.work.transaction.v3" })
     const transactionEntryBytes = utf8.encode(transaction).byteLength + utf8.encode(transactionRecord).byteLength

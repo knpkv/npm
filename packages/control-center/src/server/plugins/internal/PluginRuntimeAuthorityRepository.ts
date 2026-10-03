@@ -2,7 +2,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -192,14 +192,14 @@ export const digestPluginRuntimeAuthority = Effect.fn("PluginRuntimeAuthority.di
     input.accountDigest
   ])
   const bytes = yield* Effect.fromResult(
-    Encoding.decodeBase64(Encoding.encodeBase64(`${AUTHORITY_DOMAIN}${tuple}`))
+    Base64.decode(Base64.encode(`${AUTHORITY_DOMAIN}${tuple}`))
   ).pipe(
     Effect.mapError(() => new PersistenceOperationError({ operation: "plugin-runtime-authority.encode" }))
   )
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() => new PersistenceOperationError({ operation: "plugin-runtime-authority.digest" }))
   )
-  return PluginRuntimeAuthorityToken.make(`sha256:${Encoding.encodeHex(digest)}`)
+  return PluginRuntimeAuthorityToken.make(`sha256:${Hex.encode(digest)}`)
 })
 
 const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
@@ -208,13 +208,13 @@ const makePluginRuntimeAuthorityRepository = Effect.gen(function*() {
   const sql = database.sql
 
   const digestSourceText = Effect.fn("PluginRuntimeAuthority.digestSourceText")(function*(value: string) {
-    const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+    const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "plugin-runtime-authority.encode-source" }))
     )
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "plugin-runtime-authority.digest-source" }))
     )
-    return PluginRuntimeSourceDigest.make(Encoding.encodeHex(digest))
+    return PluginRuntimeSourceDigest.make(Hex.encode(digest))
   })
 
   const readSource = Effect.fn("PluginRuntimeAuthority.readSource")(function*(

@@ -5,7 +5,7 @@ import type { Credentials, Region } from "@distilled.cloud/aws"
 import type { ListBranchesError } from "@distilled.cloud/aws/codecommit"
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Option, Stream } from "effect"
-import type { HttpClient } from "effect/unstable/http"
+import type { HttpClient } from "effect/http"
 import { type ListBranchesParams, makeApiError, withAwsContext } from "./internal.js"
 
 type BranchPageError = ListBranchesError

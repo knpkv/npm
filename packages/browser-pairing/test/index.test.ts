@@ -1,5 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Crypto, Effect, Encoding, Redacted, Result } from "effect"
+import { Crypto, Effect, Redacted, Result } from "effect"
+import { Hex } from "effect/encoding"
 import {
   bootstrapRouteWithoutToken,
   BrowserPairingError,
@@ -40,7 +41,7 @@ describe("browser pairing primitives", () => {
       const issued = yield* issueCredential()
       expect(Redacted.value(issued)).toBe("ab".repeat(32))
       const digest = yield* hashCredential(credential)
-      expect(digest).toBe(CredentialDigest.make(Encoding.encodeHex(new Uint8Array(32).fill(0xab))))
+      expect(digest).toBe(CredentialDigest.make(Hex.encode(new Uint8Array(32).fill(0xab))))
       yield* verifyCredentialDigest(credential, digest)
     }).pipe(Effect.provideService(Crypto.Crypto, pairingCrypto)))
 

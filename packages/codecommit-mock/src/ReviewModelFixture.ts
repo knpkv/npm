@@ -1,8 +1,8 @@
 /** Deterministic OpenAI-compatible response for the bundled PR review. @module */
 import * as Effect from "effect/Effect"
+import { HttpServerRequest, HttpServerResponse } from "effect/http"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 
 import { REVISION_ONE_RETRY_SOURCE } from "./GitFixture.js"
 

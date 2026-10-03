@@ -10,7 +10,7 @@ import {
 import { Button, StateLabel, StatePanel, Surface, Text } from "@knpkv/rly/primitives"
 import * as Schema from "effect/Schema"
 import * as Result from "effect/Result"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import {
   BotIcon,
   CheckCircle2Icon,

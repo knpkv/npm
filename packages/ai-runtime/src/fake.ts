@@ -1,8 +1,8 @@
 /** Deterministic adapters for persistence, worker, and tool-loop tests. */
 import { Effect, Layer, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import type * as Response from "effect/unstable/ai/Response"
+import * as AiError from "effect/ai/AiError"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Response from "effect/ai/Response"
 
 import * as Predicate from "effect/Predicate"
 import type { AgentProviderError, AgentRunRequest, AgentRuntimeEvent } from "./model.js"

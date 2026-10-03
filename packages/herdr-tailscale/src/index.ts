@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Schema, SchemaGetter, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { isIPv4, isIPv6 } from "node:net"
 
 const BoundedName = Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(256))

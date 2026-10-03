@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, Layer, Result, Sink, Stream } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 
 import { readLocalCliRuntimeMetadata } from "../src/index.js"
 

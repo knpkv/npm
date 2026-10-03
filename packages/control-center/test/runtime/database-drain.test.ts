@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
+import { createClient } from "@libsql/client"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
@@ -19,22 +20,25 @@ const drainWithReader = Effect.fn("DatabaseDrainTest.drainWithReader")(function*
   const runtime = yield* Layer.build(
     databaseDrainLayer.pipe(Layer.provideMerge(dependencies))
   )
-  const readerRuntime = yield* Layer.build(databaseLayer(config))
   const database = Context.get(runtime, Database)
   const lifecycle = Context.get(runtime, ServerLifecycle)
-  const reader = Context.get(readerRuntime, Database)
   const readerEntered = yield* Deferred.make<void>()
   const releaseReader = yield* Deferred.make<void>()
 
   yield* database.sql`PRAGMA wal_checkpoint(TRUNCATE)`
+  // libSQL keeps a WAL read snapshot only inside a dedicated read transaction.
+  const readerClient = yield* Effect.acquireRelease(
+    Effect.sync(() => createClient({ url: config.databaseUrl })),
+    (client) => Effect.sync(() => client.close())
+  )
   const readerFiber = yield* Effect.acquireUseRelease(
-    reader.sql`BEGIN`,
-    () =>
-      reader.sql`SELECT COUNT(*) AS workspaceCount FROM workspaces`.pipe(
+    Effect.promise(() => readerClient.transaction("read")),
+    (reader) =>
+      Effect.promise(() => reader.execute("SELECT COUNT(*) AS workspaceCount FROM workspaces")).pipe(
         Effect.andThen(Deferred.succeed(readerEntered, undefined)),
         Effect.andThen(Deferred.await(releaseReader))
       ),
-    () => reader.sql`ROLLBACK`.pipe(Effect.ignore)
+    (reader) => Effect.sync(() => reader.close())
   ).pipe(Effect.forkChild)
   yield* Deferred.await(readerEntered)
   yield* database.sql`INSERT INTO workspaces (

@@ -336,8 +336,8 @@ const hasIsolatedChildEnvironment = (context, options, call) => {
   )
 }
 
-const CHILD_PROCESS_MODULE = "effect/unstable/process/ChildProcess"
-const CHILD_PROCESS_BARREL = "effect/unstable/process"
+const CHILD_PROCESS_MODULE = "effect/process/ChildProcess"
+const CHILD_PROCESS_BARREL = "effect/process"
 const COMMONJS_LOADER_MODULES = new Set(["module", "node:module"])
 const COMMONJS_LOADER_EXPORTS = new Set(["Module", "createRequire", "default"])
 const PROCESS_MODULES = new Set(["node:process", "process"])
@@ -2123,13 +2123,14 @@ module.exports = {
         isSchemaModule(context, call.callee.object)
       const isDecodeBase64Call = (call) => {
         if (call.callee.type === "Identifier") {
-          return isNamedImportFrom(context, call.callee, ["effect/Encoding"], ["decodeBase64"])
+          return isNamedImportFrom(context, call.callee, ["effect/encoding/Base64"], ["decode"])
         }
         return (
           call.callee.type === "MemberExpression" &&
-          staticPropertyName(call.callee.property) === "decodeBase64" &&
+          staticPropertyName(call.callee.property) === "decode" &&
           call.callee.object.type === "Identifier" &&
-          isNamespaceImportFrom(context, call.callee.object, ["effect/Encoding"])
+          (isNamespaceImportFrom(context, call.callee.object, ["effect/encoding/Base64"]) ||
+            isNamedImportFrom(context, call.callee.object, ["effect/encoding"], ["Base64"]))
         )
       }
       const enclosingInlineFilter = (node) => {

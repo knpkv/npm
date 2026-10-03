@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { DateTime, Effect, Result, Schema } from "effect"
+import { Arbitrary, DateTime, Effect, Order, Result, Schema } from "effect"
 
 import { ProviderId, Revision, SourceRevision, SourceUrl, VendorImmutableId } from "../../src/domain/sourceRevision.js"
 
@@ -153,9 +153,26 @@ describe("SourceRevision", () => {
     }
   )
 
+  // Generate the observation timestamps in order so the cross-field check never discards a sample.
+  const orderedSourceRevision = Arbitrary.map(
+    Arbitrary.schema(Schema.Struct(SourceRevision.fields)),
+    (fields): typeof SourceRevision.Type => {
+      const byTime = Order.mapInput(Order.Number, (time: DateTime.Utc) => DateTime.toEpochMillis(time))
+      const min = Order.min(byTime)
+      const max = Order.max(byTime)
+      const { firstObservedAt: a, lastObservedAt: b, synchronizedAt: c } = fields
+      return {
+        ...fields,
+        firstObservedAt: min(min(a, b), c),
+        lastObservedAt: max(min(a, b), min(max(a, b), c)),
+        synchronizedAt: max(max(a, b), c)
+      }
+    }
+  )
+
   it.effect.prop(
     "round-trips every generated valid source revision",
-    [SourceRevision],
+    [orderedSourceRevision],
     ([sourceRevision]) =>
       Effect.gen(function*() {
         const encoded = yield* Schema.encodeEffect(SourceRevision)(sourceRevision)

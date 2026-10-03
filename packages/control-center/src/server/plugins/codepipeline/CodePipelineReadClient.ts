@@ -8,7 +8,7 @@
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
@@ -1046,7 +1046,7 @@ export class CodePipelineReadClient extends Context.Service<
           return yield* malformed("codepipeline-get-artifact", "codepipeline-artifact-content-range-mismatch")
         }
         return yield* decodeModel("codepipeline-get-artifact", CodePipelineArtifactRange, {
-          bytesBase64: Encoding.encodeBase64(response.bytes),
+          bytesBase64: Base64.encode(response.bytes),
           totalBytes
         })
       })

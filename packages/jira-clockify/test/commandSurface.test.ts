@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
-import { Command } from "effect/unstable/cli"
 import { HeadlessLayer } from "../src/cli/layers.js"
 import { root } from "../src/cli/root.js"
 import { reportUnhandled } from "../src/cli/runtimeFailure.js"

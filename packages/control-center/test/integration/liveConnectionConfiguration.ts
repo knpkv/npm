@@ -101,19 +101,19 @@ export interface LiveConnectionConfiguration {
 }
 
 const rawConfiguration = Config.all({
-  activation: Config.string("CONTROL_CENTER_LIVE_INTEGRATION"),
-  atlassianSiteId: Config.string("CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID"),
-  atlassianSiteUrl: Config.string("CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL"),
-  awsRegion: Config.string("CONTROL_CENTER_TEST_AWS_REGION"),
-  codeCommitRepository: Config.string("CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY"),
-  codePipelinePipeline: Config.string("CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE"),
-  confluenceApiKey: Config.redacted("CONFLUENCE_API_KEY"),
-  confluenceEmail: Config.string("CONFLUENCE_EMAIL"),
-  confluenceProbePageId: Config.string("CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID"),
-  confluenceSpaceId: Config.string("CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID"),
-  jiraApiKey: Config.redacted("JIRA_API_KEY"),
-  jiraEmail: Config.string("JIRA_EMAIL"),
-  jiraProjectId: Config.string("CONTROL_CENTER_TEST_JIRA_PROJECT_ID")
+  activation: Config.String("CONTROL_CENTER_LIVE_INTEGRATION"),
+  atlassianSiteId: Config.String("CONTROL_CENTER_TEST_ATLASSIAN_SITE_ID"),
+  atlassianSiteUrl: Config.String("CONTROL_CENTER_TEST_ATLASSIAN_SITE_URL"),
+  awsRegion: Config.String("CONTROL_CENTER_TEST_AWS_REGION"),
+  codeCommitRepository: Config.String("CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY"),
+  codePipelinePipeline: Config.String("CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE"),
+  confluenceApiKey: Config.Redacted("CONFLUENCE_API_KEY"),
+  confluenceEmail: Config.String("CONFLUENCE_EMAIL"),
+  confluenceProbePageId: Config.String("CONTROL_CENTER_TEST_CONFLUENCE_PAGE_ID"),
+  confluenceSpaceId: Config.String("CONTROL_CENTER_TEST_CONFLUENCE_SPACE_ID"),
+  jiraApiKey: Config.Redacted("JIRA_API_KEY"),
+  jiraEmail: Config.String("JIRA_EMAIL"),
+  jiraProjectId: Config.String("CONTROL_CENTER_TEST_JIRA_PROJECT_ID")
 })
 
 const configurationError = () =>

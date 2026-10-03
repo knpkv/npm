@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type * as Response from "effect/unstable/ai/Response"
+import type * as Response from "effect/ai/Response"
 import { CodexFailureCause, CodexTransportError, sanitizeDiagnostic } from "./errors.js"
 
 const TokenCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))

@@ -37,7 +37,7 @@ const isKnownEffectDeclarationDiagnostic = (diagnostic: ts.Diagnostic): boolean 
       fileName.includes("/effect/dist/internal/schema/schema.d.ts") &&
       message.includes("SchemaErrorTypeId")) ||
     (diagnostic.code === 2305 &&
-      fileName.includes("/effect/dist/unstable/http/HttpEffect.d.ts") &&
+      fileName.includes("/effect/dist/http/HttpEffect.d.ts") &&
       message.includes("appendPreResponseHandlerUnsafe") &&
       message.includes("./internal/preResponseHandler.ts"))
   )
@@ -347,7 +347,7 @@ void [
   }
 
   if (failures.length > 0) {
-    return yield* Effect.fail(new DistValidationError({ reason: failures.join("\n") }))
+    return yield* new DistValidationError({ reason: failures.join("\n") })
   }
 })
 

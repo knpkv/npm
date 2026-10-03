@@ -3,13 +3,13 @@ import * as ConfigProvider from "effect/ConfigProvider"
 import * as Context from "effect/Context"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
+import type { HttpClientError, HttpClientRequest } from "effect/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Layer from "effect/Layer"
 import * as Metric from "effect/Metric"
 import * as Ref from "effect/Ref"
 import * as Result from "effect/Result"
 import * as TestClock from "effect/testing/TestClock"
-import type { HttpClientError, HttpClientRequest } from "effect/unstable/http"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 
 import { controlCenterTelemetryLayer } from "../../src/server/observability.js"
 
@@ -338,7 +338,7 @@ describe("Control Center observability", () => {
       }
     }))
 
-  it.effect("uses default schedule delays for non-positive and non-Config.int values", () =>
+  it.effect("uses default schedule delays for non-positive and non-Config.Int values", () =>
     Effect.gen(function*() {
       const fixtures: ReadonlyArray<{
         readonly key: string
@@ -365,7 +365,7 @@ describe("Control Center observability", () => {
       }
     }))
 
-  it.effect("accepts positive Config.int schedule delays", () =>
+  it.effect("accepts positive Config.Int schedule delays", () =>
     Effect.gen(function*() {
       const fixtures: ReadonlyArray<{
         readonly key: string

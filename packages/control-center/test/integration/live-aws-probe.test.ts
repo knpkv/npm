@@ -70,11 +70,11 @@ const configurationError = () =>
 
 const loadConfiguration = Effect.gen(function*() {
   const raw = yield* Config.all({
-    activation: Config.string("CONTROL_CENTER_LIVE_AWS_PROBE"),
-    awsRegion: Config.string("CONTROL_CENTER_TEST_AWS_REGION"),
-    codeCommitRepository: Config.string("CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY"),
-    codePipelinePipeline: Config.string("CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE"),
-    roleArn: Config.string("CONTROL_CENTER_TEST_AWS_ROLE_ARN")
+    activation: Config.String("CONTROL_CENTER_LIVE_AWS_PROBE"),
+    awsRegion: Config.String("CONTROL_CENTER_TEST_AWS_REGION"),
+    codeCommitRepository: Config.String("CONTROL_CENTER_TEST_CODECOMMIT_REPOSITORY"),
+    codePipelinePipeline: Config.String("CONTROL_CENTER_TEST_CODEPIPELINE_PIPELINE"),
+    roleArn: Config.String("CONTROL_CENTER_TEST_AWS_ROLE_ARN")
   }).pipe(Effect.mapError(configurationError))
   return yield* Schema.decodeUnknownEffect(LiveAwsProbeConfiguration)(raw).pipe(
     Effect.mapError(configurationError)

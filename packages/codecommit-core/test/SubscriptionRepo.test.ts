@@ -3,7 +3,7 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect, FileSystem, Layer } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 import { DatabaseLive } from "../src/CacheService/Database.js"
 import { SubscriptionRepo } from "../src/CacheService/repos/SubscriptionRepo.js"
 

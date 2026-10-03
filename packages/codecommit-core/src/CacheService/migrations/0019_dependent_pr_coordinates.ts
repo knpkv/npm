@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 /** Backfill uniquely attributable dependent rows while retaining ambiguous/orphan sentinels. */
 export default Effect.flatMap(SqlClient.SqlClient, (sql) =>

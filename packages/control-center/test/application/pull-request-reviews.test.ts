@@ -8,7 +8,7 @@ import {
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
 import { DateTime, Deferred, Duration, Effect, Fiber, Layer, Option, Ref, Result, Schema, Stream, Tracer } from "effect"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
+import * as LanguageModel from "effect/ai/LanguageModel"
 
 import * as Predicate from "effect/Predicate"
 import {

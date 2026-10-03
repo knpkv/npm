@@ -1,11 +1,11 @@
+import * as ByteSize from "effect/ByteSize"
 import * as Context from "effect/Context"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as FileSystem from "effect/FileSystem"
+import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as Layer from "effect/Layer"
+import * as RateLimiter from "effect/persistence/RateLimiter"
 import * as Schema from "effect/Schema"
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
-import * as RateLimiter from "effect/unstable/persistence/RateLimiter"
 
 export const RequestLimitProfile = Schema.Literals([
   "pairing",
@@ -160,7 +160,7 @@ export const withMaximumBodySize = <A, E, R>(
     Effect.provideService(
       effect,
       HttpServerRequest.MaxBodySize,
-      FileSystem.Size(policy.maximumBodyBytes)
+      ByteSize.bytes(policy.maximumBodyBytes)
     ))
 
 /** Process-local limiter suitable for the single-process local Control Center. */

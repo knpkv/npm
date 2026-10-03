@@ -24,22 +24,30 @@
   {
     "op": "add",
     "path": "/components/schemas/UserDto/properties/activeWorkspace",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/UserDto/properties/defaultWorkspace",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/UserDto/properties/profilePicture",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/UserDto/properties/status",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
@@ -61,22 +69,33 @@
   {
     "op": "add",
     "path": "/components/schemas/TimeEntryDto/properties/workspaceId",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/TimeEntryDto/properties/type",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/TimeEntryDto/properties/isLocked",
-    "value": { "type": "boolean" }
+    "value": {
+      "type": "boolean"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/TimeEntryDto/properties/tagIds",
-    "value": { "type": "array", "items": { "type": "string" } }
+    "value": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
   },
   {
     "op": "add",
@@ -91,12 +110,19 @@
   {
     "op": "add",
     "path": "/components/schemas/TimeIntervalDto/properties/end",
-    "value": { "type": "string", "format": "date-time", "nullable": true }
+    "value": {
+      "type": "string",
+      "format": "date-time",
+      "nullable": true
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/TimeIntervalDto/properties/duration",
-    "value": { "type": "string", "nullable": true }
+    "value": {
+      "type": "string",
+      "nullable": true
+    }
   },
   {
     "op": "replace",
@@ -145,22 +171,30 @@
   {
     "op": "add",
     "path": "/components/schemas/ProjectDtoV1/properties/name",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/ProjectDtoV1/properties/note",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/ProjectDtoV1/properties/workspaceId",
-    "value": { "type": "string" }
+    "value": {
+      "type": "string"
+    }
   },
   {
     "op": "add",
     "path": "/components/schemas/ProjectDtoV1/properties/public",
-    "value": { "type": "boolean" }
+    "value": {
+      "type": "boolean"
+    }
   },
   {
     "op": "add",
@@ -221,7 +255,17 @@
     "op": "replace",
     "path": "/components/schemas/TimeEntryDtoImplV1/properties/tagIds",
     "value": {
-      "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
       "description": "Represents a list of tag identifiers across the system."
     }
   },
@@ -229,7 +273,17 @@
     "op": "replace",
     "path": "/components/schemas/TimeEntryDtoV1/properties/tagIds",
     "value": {
-      "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
       "description": "Represents a list of tag identifiers across the system."
     }
   },
@@ -237,8 +291,109 @@
     "op": "replace",
     "path": "/components/schemas/TimeEntryWithRatesDtoV1/properties/tagIds",
     "value": {
-      "anyOf": [{ "type": "array", "items": { "type": "string" } }, { "type": "null" }],
+      "anyOf": [
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        {
+          "type": "null"
+        }
+      ],
       "description": "Represents a list of tag identifiers across the system."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldDefaultValuesDtoV1/properties/value",
+    "value": {
+      "description": "Represents a custom field's default value"
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldDtoV1/properties/workspaceDefaultValue",
+    "value": {
+      "description": "Represents a custom field's default value in the workspace."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldProjectDefaultValuesRequest/properties/defaultValue",
+    "value": {
+      "description": "Represents a custom field's default value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldRequestV1/properties/workspaceDefaultValue",
+    "value": {
+      "description": "Represents a custom field's default value in the workspace.<li>if type = NUMBER, then value must be a number</li><li>if type = DROPDOWN_MULTIPLE, value must be a list</li><li>if type = CHECKBOX, value must be true/false</li><li>otherwise any string</li>"
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldValueDto/properties/value",
+    "value": {
+      "description": "Represents custom field value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldValueDtoV1/properties/value",
+    "value": {
+      "description": "Represents custom field value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/UpdateCustomFieldRequest/properties/value",
+    "value": {
+      "description": "Represents a custom field's value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/UpdateCustomFieldRequestV1/properties/workspaceDefaultValue",
+    "value": {
+      "description": "Represents a custom field's default value in the workspace.<li>if type = NUMBER, then value must be a number</li><li>if type = DROPDOWN_MULTIPLE, value must be a list</li><li>if type = CHECKBOX, value must be true/false</li><li>otherwise any string</li>"
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/UpsertUserCustomFieldRequest/properties/value",
+    "value": {
+      "description": "Represents custom field value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/UpsertUserCustomFieldRequestV1/properties/value",
+    "value": {
+      "description": "Represents custom field value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/UserCustomFieldValueDtoV1/properties/value",
+    "value": {
+      "description": "Represents custom field value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/UserCustomFieldValueFullDtoV1/properties/value",
+    "value": {
+      "description": "Represents user custom field value."
+    }
+  },
+  {
+    "op": "replace",
+    "path": "/components/schemas/CustomFieldFilterV1/properties/value",
+    "value": {
+      "description": "Represents a custom field value."
     }
   }
 ]

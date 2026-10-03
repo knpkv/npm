@@ -3,7 +3,7 @@ import type { ComponentManifest, ComponentRecord, RegistryMetadata } from "../..
 
 const FORBIDDEN_APPLICATION_IMPORT =
   /^(?:@knpkv\/(?!rly(?:\/|$))|@aws-sdk\/|distilled-aws(?:\/|$)|react-router(?:-dom)?(?:\/|$))/
-const FORBIDDEN_BROWSER_IMPORT = /^(?:node:|@effect\/platform-node(?:\/|$)|effect\/unstable\/process(?:\/|$))/
+const FORBIDDEN_BROWSER_IMPORT = /^(?:node:|@effect\/platform-node(?:\/|$)|effect\/process(?:\/|$))/
 const ALLOWED_BROWSER_PACKAGE_IMPORT = /^(?:@pierre\/diffs|lucide-react|radix-ui|react|react-dom)(?:\/|$)/
 const FORBIDDEN_BROWSER_HOST_API = /\b(?:EventSource|WebSocket|fetch|localStorage|sessionStorage)\s*(?:\(|\.)/
 

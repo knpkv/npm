@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
 import * as TestClock from "effect/testing/TestClock"
-import { Command } from "effect/unstable/cli"
 import { root } from "../src/cli/root.js"
 import { FAKE_WORKSPACE_ID, makeFakeHeadless } from "../src/testing/fakeHeadless.js"
 

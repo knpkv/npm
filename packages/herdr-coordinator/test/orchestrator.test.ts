@@ -5,8 +5,8 @@ import { AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { makeWorkService, WorkAgentBinding, WorkGoalCheckpoint, WorkLaneClaimed, WorkStore } from "@knpkv/herdr-work"
 import { makeSqliteWorkBridge } from "@knpkv/herdr-work/sql"
 import { Deferred, Effect, Fiber, Option, Schema, Stream } from "effect"
+import * as SqlClient from "effect/sql/SqlClient"
 import { TestClock } from "effect/testing"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
 import { spawn } from "node:child_process"
 import {
   copyFileSync,

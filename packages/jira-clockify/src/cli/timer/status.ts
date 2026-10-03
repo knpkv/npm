@@ -5,8 +5,8 @@
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Clock, Console, Data, Effect, FileSystem, Option, Schema } from "effect"
+import { Command, Flag as Options } from "effect/cli"
 import type * as PlatformError from "effect/PlatformError"
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { StateWriter } from "../../services/StateWriter.js"
 
@@ -76,8 +76,8 @@ const resolveNvimPollGate = Effect.fn("TimerStatus.resolveNvimPollGate")(functio
 export const statusCmd = Command.make(
   "status",
   {
-    nvimPollStamp: Options.string("nvim-poll-stamp").pipe(Options.withHidden, Options.optional),
-    nvimPollIntervalMs: Options.integer("nvim-poll-interval-ms").pipe(Options.withHidden, Options.optional)
+    nvimPollStamp: Options.String("nvim-poll-stamp").pipe(Options.withHidden, Options.optional),
+    nvimPollIntervalMs: Options.Int("nvim-poll-interval-ms").pipe(Options.withHidden, Options.optional)
   },
   ({ nvimPollIntervalMs, nvimPollStamp }) =>
     Effect.gen(function*() {

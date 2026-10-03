@@ -6,12 +6,12 @@
  * for forty minutes would never be run.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { Command } from "effect/cli"
 import * as Deferred from "effect/Deferred"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { TestClock } from "effect/testing"
-import { Command } from "effect/unstable/cli"
 import {
   buildSessionProposals,
   type SessionAttribution,

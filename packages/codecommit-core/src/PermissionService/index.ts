@@ -50,8 +50,8 @@ const decodeConfigText = Schema.decodeUnknownEffect(Schema.fromJsonString(Permis
 // Uses Effect FileSystem — works in Bun, Node, tests.
 // Atomic write: write to .tmp, then rename. Prevents corruption on crash.
 
-const resolvePermissionsPath = Config.string("HOME").pipe(
-  Config.orElse(() => Config.string("USERPROFILE")),
+const resolvePermissionsPath = Config.String("HOME").pipe(
+  Config.orElse(() => Config.String("USERPROFILE")),
   Config.map((h) => `${h}/.codecommit/permissions.json`)
 )
 

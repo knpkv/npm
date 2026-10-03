@@ -7,7 +7,7 @@
  * @category CacheService
  */
 import { Effect } from "effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import type * as SqlClient from "effect/sql/SqlClient"
 import { CacheError } from "../../CacheError.js"
 import type { CommentLocationJson, CommentThreadJson } from "../commentLocations.js"
 

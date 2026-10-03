@@ -6,8 +6,10 @@ import { UtcTimestamp } from "../utcTimestamp.js"
 import { PluginPayloadJson } from "./bounds.js"
 import { PluginEntityReferenceV1 } from "./events.js"
 
-const boundedOpaque = (name: string, maximum: number) =>
-  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximum)).pipe(Schema.brand(name))
+const boundedOpaque = <const Name extends string>(name: Parameters<typeof Schema.brand<Name>>[0], maximum: number) =>
+  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximum)).pipe(
+    Schema.brand<Name>(name)
+  )
 
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 const SafeSummary = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
@@ -70,10 +72,12 @@ export const PluginActionProposalV1 = Schema.Struct({
   proposedAt: UtcTimestamp
 })
 
+const PluginActionIdempotencyKey = boundedOpaque("PluginActionIdempotencyKey", 512)
+
 /** Host-authorized request accepted only by the sealed internal executor. */
 export const AuthorizedPluginActionV1 = Schema.Struct({
   proposal: PluginActionProposalV1,
-  idempotencyKey: boundedOpaque("PluginActionIdempotencyKey", 512),
+  idempotencyKey: PluginActionIdempotencyKey,
   payloadDigest: PluginActionPayloadDigest,
   authorizationId: boundedOpaque("PluginActionAuthorizationId", 512),
   authorizedAt: UtcTimestamp,
@@ -183,7 +187,7 @@ export const PluginActionCancellationResultV1 = Schema.Union([
 /** Request to reconcile without replay; null locates the mutation by its durable idempotency key. */
 export const PluginActionReconciliationRequestV1 = Schema.Struct({
   reconciliationKey: Schema.NullOr(PluginActionReconciliationKey),
-  idempotencyKey: boundedOpaque("PluginReconciliationIdempotencyKey", 512),
+  idempotencyKey: PluginActionIdempotencyKey,
   payloadDigest: PluginActionPayloadDigest,
   authorizedAction: Schema.optionalKey(AuthorizedPluginActionV1)
 }).check(

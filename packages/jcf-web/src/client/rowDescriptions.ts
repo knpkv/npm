@@ -1,6 +1,6 @@
 import { Predicate } from "effect"
-import type { AtomRegistry } from "effect/unstable/reactivity"
-import { Atom } from "effect/unstable/reactivity"
+import type { AtomRegistry } from "effect/reactivity"
+import { Atom } from "effect/reactivity"
 import { describeRow, RequestFailure } from "./api.js"
 
 interface DescriptionDraft {

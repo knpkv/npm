@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
@@ -215,7 +215,7 @@ describe("CompleteDiffReads", () => {
         readContentRange: (request) =>
           Ref.update(providerCalls, (count) => count + 1).pipe(
             Effect.as({
-              bytesBase64: Encoding.encodeBase64(new TextEncoder().encode("abcdef")),
+              bytesBase64: Base64.encode(new TextEncoder().encode("abcdef")),
               totalBytes: 6,
               unavailableReason: null
             }),
@@ -245,8 +245,8 @@ describe("CompleteDiffReads", () => {
       } satisfies Parameters<typeof reads.content>[0]
       const first = yield* reads.content({ ...identity, offset: 1, length: 3 })
       const second = yield* reads.content({ ...identity, offset: 2, length: 2 })
-      const firstBytes = yield* Effect.fromResult(Encoding.decodeBase64(first.bytesBase64 ?? ""))
-      const secondBytes = yield* Effect.fromResult(Encoding.decodeBase64(second.bytesBase64 ?? ""))
+      const firstBytes = yield* Effect.fromResult(Base64.decode(first.bytesBase64 ?? ""))
+      const secondBytes = yield* Effect.fromResult(Base64.decode(second.bytesBase64 ?? ""))
 
       assert.strictEqual(new TextDecoder().decode(firstBytes), "bcd")
       assert.strictEqual(new TextDecoder().decode(secondBytes), "cd")
@@ -309,7 +309,7 @@ describe("CompleteDiffReads", () => {
         readContentRange: () =>
           Ref.update(providerCalls, (count) => count + 1).pipe(
             Effect.as({
-              bytesBase64: Encoding.encodeBase64(new TextEncoder().encode("repaired")),
+              bytesBase64: Base64.encode(new TextEncoder().encode("repaired")),
               totalBytes: 8,
               unavailableReason: null
             })
@@ -331,7 +331,7 @@ describe("CompleteDiffReads", () => {
         offset: 0,
         length: 8
       })
-      const contentBytes = yield* Effect.fromResult(Encoding.decodeBase64(content.bytesBase64 ?? ""))
+      const contentBytes = yield* Effect.fromResult(Base64.decode(content.bytesBase64 ?? ""))
 
       assert.strictEqual(new TextDecoder().decode(contentBytes), "repaired")
       assert.strictEqual(yield* Ref.get(providerCalls), 1)
@@ -384,7 +384,7 @@ describe("CompleteDiffReads", () => {
           readContentRange: () =>
             Ref.update(providerCalls, (count) => count + 1).pipe(
               Effect.as({
-                bytesBase64: Encoding.encodeBase64(new TextEncoder().encode("provider")),
+                bytesBase64: Base64.encode(new TextEncoder().encode("provider")),
                 totalBytes: 8,
                 unavailableReason: null
               })
@@ -406,7 +406,7 @@ describe("CompleteDiffReads", () => {
           offset: 0,
           length: 8
         })
-        const bytes = yield* Effect.fromResult(Encoding.decodeBase64(content.bytesBase64 ?? ""))
+        const bytes = yield* Effect.fromResult(Base64.decode(content.bytesBase64 ?? ""))
 
         assert.strictEqual(new TextDecoder().decode(bytes), "provider")
         assert.strictEqual(yield* Ref.get(providerCalls), 1)
@@ -467,7 +467,7 @@ describe("CompleteDiffReads", () => {
 
       const cached = yield* reads.content(identity)
       const mismatch = yield* reads.content({ ...identity, status: "deleted" }).pipe(Effect.result)
-      const cachedBytes = yield* Effect.fromResult(Encoding.decodeBase64(cached.bytesBase64 ?? ""))
+      const cachedBytes = yield* Effect.fromResult(Base64.decode(cached.bytesBase64 ?? ""))
 
       assert.strictEqual(new TextDecoder().decode(cachedBytes), "cached")
       assert.strictEqual(mismatch._tag, "Failure")

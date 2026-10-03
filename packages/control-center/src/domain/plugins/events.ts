@@ -1,4 +1,4 @@
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -11,8 +11,10 @@ import {
   PluginPayloadJson
 } from "./bounds.js"
 
-const boundedOpaque = (name: string, maximum: number) =>
-  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximum)).pipe(Schema.brand(name))
+const boundedOpaque = <const Name extends string>(name: Parameters<typeof Schema.brand<Name>>[0], maximum: number) =>
+  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximum)).pipe(
+    Schema.brand<Name>(name)
+  )
 
 /** Stable adapter event identity used to make checkpoint replay idempotent. */
 export const PluginEventId = boundedOpaque("PluginEventId", 512)
@@ -59,7 +61,7 @@ const hasSafeRelativePathContract = Schema.makeFilter(
 )
 const hasMaximumDecodedDiffBytes = Schema.makeFilter(
   (value: string) => {
-    const decoded = Encoding.decodeBase64(value)
+    const decoded = Base64.decode(value)
     return Result.isSuccess(decoded) && decoded.success.byteLength <= MaximumDiffContentBytes
   },
   { expected: `base64 data decoding to at most ${MaximumDiffContentBytes} bytes` }
@@ -124,7 +126,7 @@ const AppendEvidence = Schema.TaggedStruct("AppendEvidence", {
 
 const UpsertPerson = Schema.TaggedStruct("UpsertPerson", {
   ...commonEventFields,
-  vendorPersonId: boundedOpaque("PluginVendorPersonId", 512),
+  vendorPersonId: VendorImmutableId,
   displayName: Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(200)),
   avatarUrl: Schema.NullOr(SourceUrl),
   active: Schema.Boolean

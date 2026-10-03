@@ -1,15 +1,15 @@
 /**
  * Git commands (commit, log, diff) for Confluence CLI.
  */
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { ConfluenceConfig } from "../ConfluenceConfig.js"
 import { GitService } from "../GitService.js"
 
 // === Commit command ===
-const commitMessageOption = Options.string("message").pipe(
+const commitMessageOption = Options.String("message").pipe(
   Options.withAlias("m"),
   Options.withDescription("Commit message"),
   Options.optional
@@ -34,22 +34,23 @@ export const commitCommand = Command.make(
 ).pipe(Command.withDescription("Local write: stage and commit current changes"))
 
 // === Log command ===
-const logLimitOption = Options.integer("limit").pipe(
+const logLimitOption = Options.Int("limit").pipe(
   Options.withAlias("n"),
   Options.withDescription("Number of commits to show"),
   Options.withDefault(10)
 )
 
-const logOnelineOption = Options.boolean("oneline").pipe(
-  Options.withDescription("Show compact one-line format")
+const logOnelineOption = Options.Boolean("oneline").pipe(
+  Options.withDescription("Show compact one-line format"),
+  Options.withDefault(false)
 )
 
-const logSinceOption = Options.string("since").pipe(
+const logSinceOption = Options.String("since").pipe(
   Options.withDescription("Show commits since date (e.g., '2024-01-01')"),
   Options.optional
 )
 
-const logFileArg = Args.string("file").pipe(Args.optional)
+const logFileArg = Args.String("file").pipe(Args.optional)
 
 export const logCommand = Command.make(
   "log",
@@ -82,16 +83,17 @@ export const logCommand = Command.make(
 ).pipe(Command.withDescription("Read-only: show commit history"))
 
 // === Diff command ===
-const diffStagedOption = Options.boolean("staged").pipe(
-  Options.withDescription("Show staged changes")
+const diffStagedOption = Options.Boolean("staged").pipe(
+  Options.withDescription("Show staged changes"),
+  Options.withDefault(false)
 )
 
-const diffCommitOption = Options.string("commit").pipe(
+const diffCommitOption = Options.String("commit").pipe(
   Options.withDescription("Compare with specific commit"),
   Options.optional
 )
 
-const diffFileArg = Args.string("file").pipe(Args.optional)
+const diffFileArg = Args.String("file").pipe(Args.optional)
 
 export const diffCommand = Command.make(
   "diff",

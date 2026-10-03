@@ -4,7 +4,7 @@
  * @module
  */
 import { Console, Effect, Option } from "effect"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import { TimerService } from "../../services/TimerService.js"
 import { formatDuration, isFullIsoTimestamp, parseDuration, parseStartTime } from "../../utils/time.js"
 import { fetchTicketByKey, NOT_LOGGED_IN_HINT } from "../fetchTicket.js"
@@ -18,21 +18,21 @@ const localToday = (): string => {
 export const log = Command.make(
   "log",
   {
-    key: Args.string("key"),
-    time: Options.string("time").pipe(
+    key: Args.String("key"),
+    time: Options.String("time").pipe(
       Options.withAlias("t"),
       Options.withDescription("Duration (e.g. 1h30m, 2h, 45m)")
     ),
-    date: Options.string("date").pipe(
+    date: Options.String("date").pipe(
       Options.withAlias("d"),
       Options.withDescription("Date (YYYY-MM-DD, default today)"),
       Options.optional
     ),
-    at: Options.string("at").pipe(
+    at: Options.String("at").pipe(
       Options.withDescription("Start time on that date (HH:MM, default 09:00)"),
       Options.optional
     ),
-    comment: Options.string("comment").pipe(
+    comment: Options.String("comment").pipe(
       Options.withAlias("c"),
       Options.withDescription("Worklog comment"),
       Options.optional

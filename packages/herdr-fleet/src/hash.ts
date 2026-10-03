@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding } from "effect"
+import { Crypto, Effect } from "effect"
+import { Hex } from "effect/encoding"
 import { FleetOperationError } from "./errors.js"
 import type { JobPayload } from "./model.js"
 
@@ -163,5 +164,5 @@ export const jobHash = Effect.fn("Fleet.jobHash")(function*(
         })
     )
   )
-  return Encoding.encodeHex(digest)
+  return Hex.encode(digest)
 })

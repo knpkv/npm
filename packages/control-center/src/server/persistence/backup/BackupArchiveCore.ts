@@ -1,19 +1,8 @@
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
-import {
-  Crypto,
-  DateTime,
-  Effect,
-  Encoding,
-  Fiber,
-  FileSystem,
-  ManagedRuntime,
-  Path,
-  Ref,
-  Result,
-  Schema
-} from "effect"
+import { Crypto, DateTime, Effect, Fiber, FileSystem, ManagedRuntime, Path, Ref, Result, Schema } from "effect"
+import { Hex } from "effect/encoding"
 import type * as Scope from "effect/Scope"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 import { BlobDigest } from "../object-store/BlobDigest.js"
 import { blobPath } from "../object-store/BlobPath.js"
@@ -194,7 +183,7 @@ const digestFile = Effect.fn("BackupArchive.digestFile")(function*(
     })
   }
   const digestBytes = yield* mapStorage("digest", cryptoService.digest("SHA-256", bytes))
-  const digest = yield* Schema.decodeUnknownEffect(BlobDigest)(Encoding.encodeHex(digestBytes)).pipe(
+  const digest = yield* Schema.decodeUnknownEffect(BlobDigest)(Hex.encode(digestBytes)).pipe(
     Effect.mapError((cause) => storageError("decode-digest", cause))
   )
   return { byteLength, digest }
@@ -219,7 +208,7 @@ const readArtifactBytes = Effect.fn("BackupArchive.readArtifactBytes")(function*
     })
   }
   const digestBytes = yield* mapStorage("digest-restore-source", cryptoService.digest("SHA-256", bytes))
-  const digest = yield* Schema.decodeUnknownEffect(BlobDigest)(Encoding.encodeHex(digestBytes)).pipe(
+  const digest = yield* Schema.decodeUnknownEffect(BlobDigest)(Hex.encode(digestBytes)).pipe(
     Effect.mapError((cause) => storageError("decode-restore-digest", cause))
   )
   return { bytes, digest: { byteLength, digest } }

@@ -55,15 +55,15 @@ const requireNonEmptyRedacted = (
   Redacted.value(value).trim().length > 0 ? Effect.succeed(value) : Effect.fail(new Error(`${name} must be set`))
 
 const SHOULD_RUN_INTEGRATION = Effect.runSync(
-  Config.option(Config.string("JIRA_INTEGRATION")).pipe(
+  Config.option(Config.String("JIRA_INTEGRATION")).pipe(
     Effect.map((enabled) => Option.isSome(enabled) && envFlagEnabled(enabled.value))
   )
 )
 
 const SHOULD_RUN_ATTACHMENT_INTEGRATION = Effect.runSync(
   Effect.all([
-    Config.option(Config.string("JIRA_INTEGRATION")),
-    Config.option(Config.string("JIRA_ATTACHMENT_INTEGRATION"))
+    Config.option(Config.String("JIRA_INTEGRATION")),
+    Config.option(Config.String("JIRA_ATTACHMENT_INTEGRATION"))
   ]).pipe(
     Effect.map(([integration, attachment]) =>
       Option.isSome(integration) &&
@@ -75,10 +75,10 @@ const SHOULD_RUN_ATTACHMENT_INTEGRATION = Effect.runSync(
 )
 
 const readIntegrationConfig = Effect.gen(function*() {
-  const baseUrl = yield* Config.option(Config.string("JIRA_BASE_URL"))
-  const issueKey = yield* Config.option(Config.string("JIRA_ISSUE_KEY"))
-  const email = yield* Config.string("JIRA_EMAIL")
-  const apiKey = yield* Config.redacted("JIRA_API_KEY")
+  const baseUrl = yield* Config.option(Config.String("JIRA_BASE_URL"))
+  const issueKey = yield* Config.option(Config.String("JIRA_ISSUE_KEY"))
+  const email = yield* Config.String("JIRA_EMAIL")
+  const apiKey = yield* Config.Redacted("JIRA_API_KEY")
 
   return {
     baseUrl: nonEmptyOrDefault(baseUrl, DEFAULT_BASE_URL).replace(/\/+$/, ""),

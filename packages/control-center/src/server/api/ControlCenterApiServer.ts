@@ -1,5 +1,5 @@
+import { HttpApiBuilder } from "effect/http-api"
 import * as Layer from "effect/Layer"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
 
 import { ControlCenterApi } from "../../api/controlCenterApi.js"
 import { ServerLifecycle } from "../runtime/ServerLifecycle.js"

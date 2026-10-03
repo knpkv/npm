@@ -1,5 +1,5 @@
 import { Deferred, Effect } from "effect"
-import { AtomRegistry } from "effect/unstable/reactivity"
+import { AtomRegistry } from "effect/reactivity"
 import { afterEach, expect, it, vi } from "vitest"
 import { type describeRow, RequestFailure } from "../src/client/api.js"
 import { makeRowDescriptions } from "../src/client/rowDescriptions.js"

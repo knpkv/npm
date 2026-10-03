@@ -10,6 +10,7 @@ import * as Config from "effect/Config"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -19,7 +20,6 @@ import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import { AgentModelId, AgentProvider } from "../api/agent.js"
 import { PersonId, WorkspaceId } from "../domain/identifiers.js"
@@ -57,47 +57,47 @@ const commaSeparated = (value: string): ReadonlyArray<string> =>
     .map((part) => part.trim())
     .filter((part) => part.length > 0)
 
-const dataRootConfiguration = Config.string("CONTROL_CENTER_DATA_ROOT").pipe(Config.withDefault(".control-center"))
+const dataRootConfiguration = Config.String("CONTROL_CENTER_DATA_ROOT").pipe(Config.withDefault(".control-center"))
 
 const serverConfiguration = Config.all({
-  agentClaudeExecutable: Config.string("CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE").pipe(Config.withDefault("")),
-  agentClaudeModel: Config.string("CONTROL_CENTER_AGENT_CLAUDE_MODEL").pipe(Config.withDefault("")),
-  agentCodexExecutable: Config.string("CONTROL_CENTER_AGENT_CODEX_EXECUTABLE").pipe(Config.withDefault("")),
-  agentCodexModel: Config.string("CONTROL_CENTER_AGENT_CODEX_MODEL").pipe(Config.withDefault("")),
-  agentOpenAiApiKey: Config.redacted("CONTROL_CENTER_AGENT_OPENAI_API_KEY").pipe(
+  agentClaudeExecutable: Config.String("CONTROL_CENTER_AGENT_CLAUDE_EXECUTABLE").pipe(Config.withDefault("")),
+  agentClaudeModel: Config.String("CONTROL_CENTER_AGENT_CLAUDE_MODEL").pipe(Config.withDefault("")),
+  agentCodexExecutable: Config.String("CONTROL_CENTER_AGENT_CODEX_EXECUTABLE").pipe(Config.withDefault("")),
+  agentCodexModel: Config.String("CONTROL_CENTER_AGENT_CODEX_MODEL").pipe(Config.withDefault("")),
+  agentOpenAiApiKey: Config.Redacted("CONTROL_CENTER_AGENT_OPENAI_API_KEY").pipe(
     Config.withDefault(Redacted.make(""))
   ),
-  agentOpenAiApiUrl: Config.string("CONTROL_CENTER_AGENT_OPENAI_API_URL").pipe(Config.withDefault("")),
-  agentOpenAiModel: Config.string("CONTROL_CENTER_AGENT_OPENAI_MODEL").pipe(Config.withDefault("")),
-  agentCwd: Config.string("CONTROL_CENTER_AGENT_CWD").pipe(Config.withDefault("")),
-  agentProviders: Config.string("CONTROL_CENTER_AGENT_PROVIDERS").pipe(Config.withDefault("")),
-  prReviewSbxEnabled: Config.boolean("CONTROL_CENTER_PR_REVIEW_SBX_ENABLED").pipe(Config.withDefault(false)),
-  prReviewSbxExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE").pipe(Config.withDefault("sbx")),
-  prReviewSbxTemplate: Config.string("CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE").pipe(Config.withDefault("")),
-  prReviewCodexExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE").pipe(
+  agentOpenAiApiUrl: Config.String("CONTROL_CENTER_AGENT_OPENAI_API_URL").pipe(Config.withDefault("")),
+  agentOpenAiModel: Config.String("CONTROL_CENTER_AGENT_OPENAI_MODEL").pipe(Config.withDefault("")),
+  agentCwd: Config.String("CONTROL_CENTER_AGENT_CWD").pipe(Config.withDefault("")),
+  agentProviders: Config.String("CONTROL_CENTER_AGENT_PROVIDERS").pipe(Config.withDefault("")),
+  prReviewSbxEnabled: Config.Boolean("CONTROL_CENTER_PR_REVIEW_SBX_ENABLED").pipe(Config.withDefault(false)),
+  prReviewSbxExecutable: Config.String("CONTROL_CENTER_PR_REVIEW_SBX_EXECUTABLE").pipe(Config.withDefault("sbx")),
+  prReviewSbxTemplate: Config.String("CONTROL_CENTER_PR_REVIEW_SBX_TEMPLATE").pipe(Config.withDefault("")),
+  prReviewCodexExecutable: Config.String("CONTROL_CENTER_PR_REVIEW_CODEX_EXECUTABLE").pipe(
     Config.withDefault("codex")
   ),
-  prReviewClaudeExecutable: Config.string("CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE").pipe(
+  prReviewClaudeExecutable: Config.String("CONTROL_CENTER_PR_REVIEW_CLAUDE_EXECUTABLE").pipe(
     Config.withDefault("claude")
   ),
-  prReviewBudgetMillis: Config.int("CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS").pipe(
+  prReviewBudgetMillis: Config.Int("CONTROL_CENTER_PR_REVIEW_BUDGET_MILLIS").pipe(
     Config.withDefault(1_200_000)
   ),
-  prReviewMaximumDurationMillis: Config.int("CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS").pipe(
+  prReviewMaximumDurationMillis: Config.Int("CONTROL_CENTER_PR_REVIEW_MAXIMUM_DURATION_MILLIS").pipe(
     Config.withDefault(3_600_000)
   ),
-  allowedHosts: Config.string("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
-  allowedOrigins: Config.string("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
-  allowInsecureLan: Config.boolean("CONTROL_CENTER_ALLOW_INSECURE_LAN").pipe(Config.withDefault(false)),
-  directTlsCertificateRef: Config.string("CONTROL_CENTER_TLS_CERTIFICATE_REF").pipe(Config.withDefault("")),
-  directTlsPrivateKeyRef: Config.string("CONTROL_CENTER_TLS_PRIVATE_KEY_REF").pipe(Config.withDefault("")),
-  host: Config.string("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
-  codeCommitMockEndpoint: Config.string("CODECOMMIT_MOCK_ENDPOINT").pipe(Config.withDefault("")),
-  codeCommitMockGitRemote: Config.string("CODECOMMIT_MOCK_GIT_REMOTE").pipe(Config.withDefault("")),
-  codeCommitMockGitRepository: Config.string("CODECOMMIT_MOCK_GIT_REPOSITORY").pipe(Config.withDefault("")),
-  port: Config.int("CONTROL_CENTER_PORT").pipe(Config.withDefault(4173)),
-  publicOrigin: Config.string("CONTROL_CENTER_PUBLIC_ORIGIN").pipe(Config.withDefault("")),
-  trustedProxyAddresses: Config.string("CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES").pipe(Config.withDefault(""))
+  allowedHosts: Config.String("CONTROL_CENTER_ALLOWED_HOSTS").pipe(Config.withDefault("")),
+  allowedOrigins: Config.String("CONTROL_CENTER_ALLOWED_ORIGINS").pipe(Config.withDefault("")),
+  allowInsecureLan: Config.Boolean("CONTROL_CENTER_ALLOW_INSECURE_LAN").pipe(Config.withDefault(false)),
+  directTlsCertificateRef: Config.String("CONTROL_CENTER_TLS_CERTIFICATE_REF").pipe(Config.withDefault("")),
+  directTlsPrivateKeyRef: Config.String("CONTROL_CENTER_TLS_PRIVATE_KEY_REF").pipe(Config.withDefault("")),
+  host: Config.String("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
+  codeCommitMockEndpoint: Config.String("CODECOMMIT_MOCK_ENDPOINT").pipe(Config.withDefault("")),
+  codeCommitMockGitRemote: Config.String("CODECOMMIT_MOCK_GIT_REMOTE").pipe(Config.withDefault("")),
+  codeCommitMockGitRepository: Config.String("CODECOMMIT_MOCK_GIT_REPOSITORY").pipe(Config.withDefault("")),
+  port: Config.Int("CONTROL_CENTER_PORT").pipe(Config.withDefault(4173)),
+  publicOrigin: Config.String("CONTROL_CENTER_PUBLIC_ORIGIN").pipe(Config.withDefault("")),
+  trustedProxyAddresses: Config.String("CONTROL_CENTER_TRUSTED_PROXY_ADDRESSES").pipe(Config.withDefault(""))
 })
 
 const writeStdoutLine = (value: string) =>

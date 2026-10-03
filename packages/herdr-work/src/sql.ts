@@ -1,6 +1,6 @@
 import { Effect, Equal, Schema } from "effect"
-import type { SqlClient as SqlClientService } from "effect/unstable/sql/SqlClient"
-import type { SqlError } from "effect/unstable/sql/SqlError"
+import type { SqlClient as SqlClientService } from "effect/sql/SqlClient"
+import type { SqlError } from "effect/sql/SqlError"
 import { makeWorkAgentBinding } from "./agent-binding.js"
 import {
   WorkAgentBindingAuthorityError,

@@ -4,13 +4,13 @@
  * @module
  */
 import { Console, Effect, SubscriptionRef } from "effect"
-import { Command, Flag as Options } from "effect/unstable/cli"
+import { Command, Flag as Options } from "effect/cli"
 import { TicketService } from "../services/TicketService.js"
 
 /** `list` command — prints assigned tickets. */
 export const list = Command.make(
   "list",
-  { json: Options.boolean("json").pipe(Options.withDefault(false)) },
+  { json: Options.Boolean("json").pipe(Options.withDefault(false)) },
   ({ json }) =>
     Effect.gen(function*() {
       const ticketService = yield* TicketService

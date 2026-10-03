@@ -5,12 +5,15 @@ import { hasMaximumPluginJsonBytes, MaximumPluginDescriptorBytes } from "./bound
 const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 
-const boundedIdentifier = (name: string, maximum: number) =>
+const boundedIdentifier = <const Name extends string>(
+  name: Parameters<typeof Schema.brand<Name>>[0],
+  maximum: number
+) =>
   Schema.String.check(
     Schema.isTrimmed(),
     Schema.isNonEmpty(),
     Schema.isMaxLength(maximum)
-  ).pipe(Schema.brand(name))
+  ).pipe(Schema.brand<Name>(name))
 
 /** Stable reverse-DNS identity of a plugin, independent of package abbreviations. */
 export const PluginId = boundedIdentifier("PluginId", 200)

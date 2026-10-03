@@ -7,7 +7,7 @@
  */
 import { Context, Effect, Layer, Predicate, Schema, Stream } from "effect"
 import type { Success } from "effect/Effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { DockerError } from "../Errors.js"
 
 export interface ContainerConfig {

@@ -9,8 +9,8 @@
  * @module
  */
 import { Console, Data, Effect, Option, Runtime } from "effect"
+import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import * as Terminal from "effect/Terminal"
-import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import type { AttributionSignal, CreditedSpan, SessionProposal } from "../agent/sessions.js"
 import { ConfigService } from "../services/ConfigService.js"
 import { isOwnedByMe, type IssueFact, IssueFacts } from "../services/IssueFacts.js"
@@ -612,7 +612,7 @@ const runAgentMode = (options: {
     // One picker rather than a row-by-row interrogation: these rows are one reconstruction of one
     // period, and seeing them together is what lets a wrong attribution stand out against the
     // others. Everything starts checked, so the common "all of it" case is a single Enter.
-    const chosen = yield* Prompt.multiSelect({
+    const chosen = yield* Prompt.MultiSelect({
       message: "  Space toggles a row, Enter writes the checked ones:",
       maxPerPage: CHOICES_PER_PAGE,
       choices: choiceRows.map((row) => ({
@@ -730,34 +730,34 @@ const runAgentMode = (options: {
 export const reconcile = Command.make(
   "reconcile",
   {
-    direction: Args.string("direction").pipe(Args.optional),
-    week: Options.boolean("week").pipe(
+    direction: Args.String("direction").pipe(Args.optional),
+    week: Options.Boolean("week").pipe(
       Options.withDescription("Reconcile the last 7 days (default: today)"),
       Options.withDefault(false)
     ),
-    day: Options.boolean("day").pipe(
+    day: Options.Boolean("day").pipe(
       Options.withDescription("Reconcile today (the default)"),
       Options.withDefault(false)
     ),
-    since: Options.string("since").pipe(
+    since: Options.String("since").pipe(
       Options.withDescription("Start of a custom window, YYYY-MM-DD"),
       Options.optional
     ),
-    until: Options.string("until").pipe(
+    until: Options.String("until").pipe(
       Options.withDescription("End of a custom window (inclusive), YYYY-MM-DD"),
       Options.optional
     ),
-    agent: Options.string("agent").pipe(
+    agent: Options.String("agent").pipe(
       Options.withDescription(
         "Propose worklogs from a Coding Agent's sessions instead of comparing sides (claude)"
       ),
       Options.optional
     ),
-    json: Options.boolean("json").pipe(
+    json: Options.Boolean("json").pipe(
       Options.withDescription("With --agent: one JSON value on stdout; creates no Clockify entry or Jira worklog"),
       Options.withDefault(false)
     ),
-    calendar: Options.boolean("calendar").pipe(
+    calendar: Options.Boolean("calendar").pipe(
       Options.withDescription("With --agent: draw an hour-by-hour grid of when the time was credited"),
       Options.withDefault(false)
     )
@@ -867,7 +867,7 @@ export const reconcile = Command.make(
         const ticket = facts === undefined
           ? row.ticketKey
           : `${row.ticketKey} (${clip(facts.summary, CONFIRM_SUMMARY_WIDTH)})`
-        const apply = yield* Prompt.confirm({
+        const apply = yield* Prompt.Confirm({
           message: `  Add ${formatDuration(delta)} to ${target} for ${ticket} on ${row.day}?`,
           initial: true
         })

@@ -4,9 +4,9 @@ import { assert, describe, it } from "@effect/vitest"
 import { CsrfToken, SessionToken } from "@knpkv/browser-pairing/schema"
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import { Clock, Context, Deferred, Duration, Effect, Fiber, Layer, Redacted, Ref, Result, Schema, Stream } from "effect"
+import { HttpRouter, HttpServer } from "effect/http"
+import { HttpApiTest } from "effect/http-api"
 import * as TestClock from "effect/testing/TestClock"
-import { HttpRouter, HttpServer } from "effect/unstable/http"
-import { HttpApiTest } from "effect/unstable/httpapi"
 
 import {
   AgentModelId,

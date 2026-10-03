@@ -26,7 +26,7 @@ export const makeDiagramRenderer = (
       if (source === undefined) sources.set(node, node.textContent)
       else if (!printing.matches && node.dataset.diagramTheme !== theme) {
         node.textContent = source
-        delete node.dataset.processed
+        node.removeAttribute("data-processed")
       }
     }
     const pending = nodes.filter((node) => node.dataset.processed !== "true")

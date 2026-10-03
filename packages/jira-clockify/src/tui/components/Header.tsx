@@ -5,7 +5,7 @@
  */
 import { useAtomValue } from "@effect/atom-react"
 import type { JSX } from "@opentui/react/jsx-runtime"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { TimerState } from "../../services/TimerService.js"
 import { timerStateAtom } from "../atoms/timer.js"
 

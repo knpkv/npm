@@ -322,6 +322,10 @@ const unavailableWorker = (): Worker => {
   throw new Error("Worker unavailable in this controlled catalog state")
 }
 
+// @pierre/diffs mounts its items after React commits; wait for them before asserting on the rendered DOM.
+const waitForRenderedDiff = (canvasElement: HTMLElement): Promise<void> =>
+  waitFor(() => expect(canvasElement.querySelector("diffs-container")).not.toBeNull())
+
 const meta = {
   component: DiffCodeView,
   tags: ["autodocs"],
@@ -334,6 +338,7 @@ type Story = StoryObj<typeof meta>
 export const Workbench: Story = {
   args: { initialItems: [releaseItem], mode: "split", virtualization: "buffered" },
   play: async ({ canvas, canvasElement }) => {
+    await waitForRenderedDiff(canvasElement)
     await expect(canvasElement.querySelector("[data-rly-diff-code-view]")).not.toBeNull()
     await expect(canvasElement.querySelector("[data-rly-diff-mode='split']")).not.toBeNull()
     await expect(canvasElement.querySelector("diffs-container")).not.toBeNull()
@@ -356,6 +361,7 @@ export const StackedWrapped: Story = {
   },
   globals: { theme: "dark", viewport: { isRotated: false, value: "mobile1" } },
   play: async ({ canvasElement }) => {
+    await waitForRenderedDiff(canvasElement)
     await expect(canvasElement.querySelector("[data-rly-diff-mode='stacked']")).not.toBeNull()
     await expect(canvasElement.querySelectorAll("diffs-container").length).toBeGreaterThan(0)
     canvasElement.dataset.diffCodeViewStackedWrappedPlayComplete = "true"
@@ -376,7 +382,8 @@ export const RichAnnotations: Story = {
     selectedLines: { id: "release-gate", range: { end: 5, side: "additions", start: 2 } }
   },
   play: async ({ canvas, canvasElement }) => {
-    await expect(canvasElement.querySelectorAll("[data-rly-diff-annotation]")).toHaveLength(5)
+    await waitForRenderedDiff(canvasElement)
+    await waitFor(() => expect(canvasElement.querySelectorAll("[data-rly-diff-annotation]")).toHaveLength(5))
     for (const status of ["draft", "stale", "resolved", "dismissed"]) {
       await expect(canvasElement.querySelector(`[data-annotation-status='${status}']`)).not.toBeNull()
     }
@@ -395,7 +402,8 @@ export const RichAnnotationsDark: Story = {
   },
   globals: { theme: "dark" },
   play: async ({ canvasElement }) => {
-    await expect(canvasElement.querySelectorAll("[data-rly-diff-annotation]")).toHaveLength(5)
+    await waitForRenderedDiff(canvasElement)
+    await waitFor(() => expect(canvasElement.querySelectorAll("[data-rly-diff-annotation]")).toHaveLength(5))
     await expect(canvasElement.querySelector("[data-annotation-status='dismissed']")).not.toBeNull()
     canvasElement.dataset.diffCodeViewRichAnnotationsDarkPlayComplete = "true"
   }
@@ -404,6 +412,7 @@ export const RichAnnotationsDark: Story = {
 export const AnnotationStatePreservation: Story = {
   args: { initialItems: [longStateItem] },
   play: async ({ canvas, canvasElement }) => {
+    await waitForRenderedDiff(canvasElement)
     const view = canvasElement.querySelector<HTMLElement>("[data-rly-diff-code-view] > div")
     const item = canvasElement.querySelector("diffs-container")
     if (view === null || item === null || item.shadowRoot === null)

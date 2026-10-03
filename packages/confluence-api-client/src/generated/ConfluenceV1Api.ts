@@ -2,10 +2,10 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type { SchemaError } from "effect/Schema"
 import * as Schema from "effect/Schema"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import type * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientError from "effect/http/HttpClientError"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 // recursive declarations
 export type Space = { readonly "id"?: number, readonly "key": string, readonly "alias"?: string, readonly "name": string, readonly "icon"?: Icon, readonly "description"?: { readonly "plain"?: SpaceDescription, readonly "view"?: SpaceDescription, readonly "_expandable"?: { readonly "view"?: string, readonly "plain"?: string } }, readonly "homepage"?: Content, readonly "type": string, readonly "metadata"?: { readonly "labels"?: LabelArray, readonly "_expandable"?: {  } }, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "permissions"?: ReadonlyArray<Schema.Json>, readonly "status": string, readonly "settings"?: SpaceSettings, readonly "theme"?: Theme, readonly "lookAndFeel"?: LookAndFeel, readonly "history"?: { readonly "createdDate": string, readonly "createdBy"?: User }, readonly "_expandable": { readonly "settings"?: string, readonly "metadata"?: string, readonly "operations"?: string, readonly "lookAndFeel"?: string, readonly "permissions"?: string, readonly "icon"?: string, readonly "description"?: string, readonly "theme"?: string, readonly "history"?: string, readonly "homepage"?: string, readonly "identifiers"?: string }, readonly "_links": GenericLinks, readonly [x: string]: Schema.Json } | null
 export const Space = Schema.suspend((): Schema.Codec<Space> => __recursive_Space)

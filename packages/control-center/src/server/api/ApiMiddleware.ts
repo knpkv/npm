@@ -1,9 +1,9 @@
 import * as Effect from "effect/Effect"
+import * as HttpServerRequest from "effect/http/HttpServerRequest"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import * as HttpServerRequest from "effect/unstable/http/HttpServerRequest"
 
 import {
   CurrentSession,

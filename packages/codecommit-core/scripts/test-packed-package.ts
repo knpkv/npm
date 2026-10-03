@@ -4,15 +4,15 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
-import { ChildProcessSpawner } from "effect/unstable/process"
 import { PackedPackageError, runCheckedCommand } from "./checked-command.js"
 
 const PackageJson = Schema.fromJsonString(Schema.Struct({
   name: Schema.String,
   version: Schema.String,
   dependencies: Schema.Struct({
-    "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.4"),
+    "@distilled.cloud/aws": Schema.Literal("1.0.0-rc.13"),
     "@smithy/core": Schema.String
   })
 }))

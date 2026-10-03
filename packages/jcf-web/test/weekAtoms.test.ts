@@ -1,5 +1,5 @@
 import { expect, it } from "@effect/vitest"
-import { AtomRegistry } from "effect/unstable/reactivity"
+import { AtomRegistry } from "effect/reactivity"
 import { makeWeekAtoms, previewWrite, type QueuedConfirmation, settleEntries } from "../src/client/weekAtoms.js"
 import type { WeekPlanResponse } from "../src/shared/contracts.js"
 import { fixtureWeek } from "./fixture.js"

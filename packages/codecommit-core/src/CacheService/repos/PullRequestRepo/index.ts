@@ -9,7 +9,7 @@
  */
 import { Context, Effect, Layer } from "effect"
 import type { Success } from "effect/Effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 import { DatabaseLive } from "../../Database.js"
 import { EventsHub, RepoChange } from "../../EventsHub.js"
 import { mutations } from "./mutations.js"

@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import * as Stream from "effect/Stream"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { RequestFailure } from "./api.js"
 
 /** Keep the HTTP request alive through body consumption; aborting the read closes both. */

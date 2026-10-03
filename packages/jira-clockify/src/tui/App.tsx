@@ -5,7 +5,7 @@
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { useKeyboard } from "@opentui/react"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useCallback, useEffect, useState } from "react"
 import type { TicketState } from "../services/TicketService.js"
 import type { JiraWorklogOutcome, TimerState, WorklogParams } from "../services/TimerService.js"

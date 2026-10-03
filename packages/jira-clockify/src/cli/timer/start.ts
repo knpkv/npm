@@ -5,7 +5,7 @@
  */
 import { ClockifyApiClient, type Project } from "@knpkv/clockify-api-client"
 import { Clock, Console, Effect, Option, SubscriptionRef } from "effect"
-import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
 import { TicketService } from "../../services/TicketService.js"
@@ -24,27 +24,27 @@ const noSelectedKey = (): string | null => null
 export const start = Command.make(
   "start",
   {
-    key: Args.string("key").pipe(Args.optional),
-    project: Options.string("project").pipe(
+    key: Args.String("key").pipe(Args.optional),
+    project: Options.String("project").pipe(
       Options.withAlias("p"),
       Options.withDescription("Clockify project ID"),
       Options.optional
     ),
-    billable: Options.boolean("billable").pipe(
+    billable: Options.Boolean("billable").pipe(
       Options.withAlias("b"),
       Options.withDescription("Mark as billable"),
       Options.optional
     ),
-    saveDefaults: Options.boolean("save-defaults").pipe(
+    saveDefaults: Options.Boolean("save-defaults").pipe(
       Options.withDescription("Save project/billable as defaults"),
       Options.withDefault(false)
     ),
-    ago: Options.string("ago").pipe(
+    ago: Options.String("ago").pipe(
       Options.withAlias("a"),
       Options.withDescription("Backdate the start by a duration (e.g. 15m, 1h30m) — corrects a forgotten start"),
       Options.optional
     ),
-    since: Options.string("since").pipe(
+    since: Options.String("since").pipe(
       Options.withDescription("Backdate the start to a past time today (HH:MM) or an ISO timestamp"),
       Options.optional
     )
@@ -99,7 +99,7 @@ export const start = Command.make(
             String(m).padStart(2, "0")
           }:${String(s).padStart(2, "0")})`
         )
-        const action = yield* Prompt.select({
+        const action = yield* Prompt.Select({
           message: "What to do?",
           choices: [
             { title: "Stop current and start new", value: replaceTimerAction },
@@ -168,7 +168,7 @@ export const start = Command.make(
               Effect.catch(() => Effect.succeed(emptyProjects()))
             )
             if (projects.length > 0) {
-              const selected = yield* Prompt.select({
+              const selected = yield* Prompt.Select({
                 message: "Select Clockify project:",
                 choices: [
                   ...projects.map((p) => ({ title: p.name, value: p.id })),

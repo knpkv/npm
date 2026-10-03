@@ -1,8 +1,8 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Schema from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 
 import { makeControlCenterApiClient } from "../api/client.js"
 import { CsrfToken } from "../api/session.js"

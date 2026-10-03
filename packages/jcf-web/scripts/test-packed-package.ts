@@ -3,8 +3,8 @@ import { NodeHttpClient } from "@effect/platform-node"
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { Config, Console, Effect, FileSystem, Option, Path, Predicate, Schema, Stream } from "effect"
-import { HttpClient } from "effect/unstable/http"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { HttpClient } from "effect/http"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { createServer } from "node:net"
 import { admitExternalDependency } from "./packedDependencyAdmission.js"
 
@@ -266,7 +266,7 @@ void [request, result, invalidSeconds, invalidRoot, provider, invalidProvider, i
     const port = yield* availableLoopbackPort
     const home = path.join(temporary, "isolated-home")
     yield* fs.makeDirectory(home, { recursive: true })
-    const pathVariable = yield* Config.string("PATH")
+    const pathVariable = yield* Config.String("PATH")
     const child = yield* Effect.acquireRelease(
       spawner.spawn(ChildProcess.make("node", [path.join(installed, executable)], {
         cwd: consumer,

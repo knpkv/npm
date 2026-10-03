@@ -1,4 +1,5 @@
 /** Schema-backed Jira issue normalization for the vendor-neutral plugin event. @internal */
+import { ownOptionalKey } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -115,7 +116,7 @@ const JiraChangeItem = Schema.Struct({
   from: Schema.optionalKey(Schema.String),
   fromString: Schema.optionalKey(Schema.String),
   to: Schema.optionalKey(Schema.String),
-  toString: Schema.optionalKey(Schema.String)
+  toString: ownOptionalKey("toString", Schema.String)
 })
 
 const JiraChangelogResponse = Schema.Struct({

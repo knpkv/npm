@@ -2,8 +2,8 @@
 // @vitest-environment-options {"url":"http://127.0.0.1:4319/"}
 import { expect, it } from "@effect/vitest"
 import { Effect, Fiber } from "effect"
+import { FetchHttpClient } from "effect/http"
 import { TestClock } from "effect/testing"
-import { FetchHttpClient } from "effect/unstable/http"
 import { readBoard } from "../src/client/read-board.js"
 
 it.effect("non-success responses are cancelled at request scope exit", () =>

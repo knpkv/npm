@@ -3,7 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64Url } from "effect/encoding"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -67,8 +67,8 @@ describe("CodeCommit mock source configuration", () => {
 })
 
 const boundMarkerContent = (claimBasename: string, targetBasename: string): string =>
-  `@knpkv/control-center:data-root:v2\nclaim-basename:${Encoding.encodeBase64Url(claimBasename)}\n` +
-  `target-basename:${Encoding.encodeBase64Url(targetBasename)}\n`
+  `@knpkv/control-center:data-root:v2\nclaim-basename:${Base64Url.encode(claimBasename)}\n` +
+  `target-basename:${Base64Url.encode(targetBasename)}\n`
 
 interface RegularFileSnapshot {
   readonly bytes: Uint8Array
@@ -905,24 +905,24 @@ describe("Control Center CLI", () => {
         })
         yield* fileSystem.chmod(stagingRoot, 0o700)
         const stagingName = path.basename(stagingRoot)
-        const encodedClaim = Encoding.encodeBase64Url("data")
-        const encodedTarget = Encoding.encodeBase64Url(stagingName)
+        const encodedClaim = Base64Url.encode("data")
+        const encodedTarget = Base64Url.encode(stagingName)
         const validMarker = `${markerPrefix}${encodedClaim}\ntarget-basename:${encodedTarget}\n`
         const invalidMarker = invalidCase === "padded-base64url"
           ? `${markerPrefix}${encodedClaim}=\ntarget-basename:${encodedTarget}\n`
           : invalidCase === "empty-claim"
           ? `${markerPrefix}\ntarget-basename:${encodedTarget}\n`
           : invalidCase === "path-like-target"
-          ? `${markerPrefix}${encodedClaim}\ntarget-basename:${Encoding.encodeBase64Url("../target")}\n`
+          ? `${markerPrefix}${encodedClaim}\ntarget-basename:${Base64Url.encode("../target")}\n`
           : invalidCase === "reserved-claim"
-          ? `${markerPrefix}${Encoding.encodeBase64Url(".control-center-incoming-claim")}\n` +
+          ? `${markerPrefix}${Base64Url.encode(".control-center-incoming-claim")}\n` +
             `target-basename:${encodedTarget}\n`
           : invalidCase === "duplicate-target"
           ? `${validMarker.slice(0, -1)}\ntarget-basename:${encodedTarget}\n`
           : invalidCase === "trailing-field"
           ? `${validMarker}trailing:value\n`
           : invalidCase === "control-character"
-          ? `${markerPrefix}${Encoding.encodeBase64Url("data\nother")}\ntarget-basename:${encodedTarget}\n`
+          ? `${markerPrefix}${Base64Url.encode("data\nother")}\ntarget-basename:${encodedTarget}\n`
           : `${validMarker}${"x".repeat(8_192)}`
         const markerPath = path.join(stagingRoot, ".control-center-root")
         yield* fileSystem.writeFileString(markerPath, invalidMarker, { mode: 0o600 })

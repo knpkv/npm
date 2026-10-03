@@ -2,7 +2,7 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain } from "@knpkv/codecommit-core"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
 import { type ScrollBoxRenderable } from "@opentui/core"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { type AppState, appStateAtom, notificationsAtom, toggleAccountAtom } from "../atoms/app.js"
 import {

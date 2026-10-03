@@ -2,10 +2,10 @@ import { expect, it } from "@effect/vitest"
 import { ClockifyApi } from "@knpkv/clockify-api-client"
 import { JiraApi } from "@knpkv/jira-api-client"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import type * as Schema from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { readJiraDeletionEvidence } from "../src/services/ProviderDeletion.js"
 
 /** Exercise the pinned generated decoder, not a hand-written deletion DTO. */

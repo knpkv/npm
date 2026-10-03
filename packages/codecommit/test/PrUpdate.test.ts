@@ -2,8 +2,8 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { AwsClient } from "@knpkv/codecommit-core"
 import { Effect, Layer, Stream } from "effect"
+import { Command } from "effect/cli"
 import { TestConsole } from "effect/testing"
-import { Command } from "effect/unstable/cli"
 import { prUpdateCommand } from "../src/PrUpdate.js"
 
 const unused = (operation: string) => Effect.die(`unexpected ${operation}`)

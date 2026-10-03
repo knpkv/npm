@@ -1,5 +1,5 @@
 import { Config, Effect, Option } from "effect"
-import type * as AiError from "effect/unstable/ai/AiError"
+import type * as AiError from "effect/ai/AiError"
 import type { CodexModelOptions } from "../model.js"
 import { configurationFailure, invalidRequest } from "./errors.js"
 
@@ -167,7 +167,7 @@ export const PROMPT_ONLY_SAFE_FEATURES: ReadonlyArray<string> = Object.freeze([
   "write_stdin_approval"
 ])
 
-const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
+const optionalEnvironmentValue = (name: string) => Config.option(Config.String(name))
 
 const reviewedChildEnvironment = Config.all({
   codexAccessToken: optionalEnvironmentValue("CODEX_ACCESS_TOKEN"),

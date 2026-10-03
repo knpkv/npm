@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Schema from "effect/Schema"
 
 import type { PluginConnectionId } from "../../../../domain/identifiers.js"
@@ -71,7 +71,7 @@ const sourceIds = (assessment: ReadinessAssessmentType): Array<PluginConnectionI
   assessment.sourceFreshness.map(({ pluginConnectionId }) => pluginConnectionId)
 
 const encodeBytes = (value: string) =>
-  Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+  Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
     Effect.mapError(() => new PersistenceOperationError({ operation: "readiness.encode-utf8" }))
   )
 
@@ -83,7 +83,7 @@ export const makeReadinessCodec = Effect.gen(function*() {
     const digest = yield* cryptoService
       .digest("SHA-256", bytes)
       .pipe(Effect.mapError(() => new PersistenceOperationError({ operation: "readiness.digest-json" })))
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    return ContentBlobDigest.make(Hex.encode(digest))
   })
 
   const candidateDigest = Effect.fn("ReadinessCodec.candidateDigest")(function*(assessment: ReadinessAssessmentType) {

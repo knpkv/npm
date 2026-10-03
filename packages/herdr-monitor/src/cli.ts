@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { Clock, Config, Console, Effect, FileSystem, Path, Redacted, Schema } from "effect"
-import { Argument, Command } from "effect/unstable/cli"
-import { HttpServer } from "effect/unstable/http"
+import { Argument, Command } from "effect/cli"
+import { HttpServer } from "effect/http"
 import { createServer } from "node:http"
 import { MAX_BYTES, Snapshot } from "./model.js"
 import { publish, PublishFailed } from "./publisher.js"
 import { makeMonitor } from "./server.js"
 
-const origin = Config.string("MONITOR_ORIGIN").pipe(Config.withDefault("http://127.0.0.1:4319"))
-const board = Config.string("MONITOR_BOARD").pipe(Config.withDefault("main"))
+const origin = Config.String("MONITOR_ORIGIN").pipe(Config.withDefault("http://127.0.0.1:4319"))
+const board = Config.String("MONITOR_BOARD").pipe(Config.withDefault("main"))
 const serve = Command.make(
   "serve",
   {},
@@ -23,11 +23,11 @@ const serve = Command.make(
     const { handler } = yield* makeMonitor({
       boardId: yield* board,
       origin: yield* origin,
-      publishToken: Redacted.value(yield* Config.redacted("MONITOR_PUBLISH_TOKEN")),
-      viewToken: Redacted.value(yield* Config.redacted("MONITOR_VIEW_TOKEN"))
+      publishToken: Redacted.value(yield* Config.Redacted("MONITOR_PUBLISH_TOKEN")),
+      viewToken: Redacted.value(yield* Config.Redacted("MONITOR_VIEW_TOKEN"))
     }, { html, script, css })
-    const hostname = yield* Config.string("MONITOR_BIND").pipe(Config.withDefault("127.0.0.1"))
-    const port = yield* Config.port("MONITOR_PORT").pipe(Config.withDefault(4319))
+    const hostname = yield* Config.String("MONITOR_BIND").pipe(Config.withDefault("127.0.0.1"))
+    const port = yield* Config.Port("MONITOR_PORT").pipe(Config.withDefault(4319))
     return yield* HttpServer.serveEffect(handler).pipe(
       Effect.andThen(Console.log("Monitor ready. Waiting for explicit publication.")),
       Effect.andThen(Effect.never),
@@ -45,7 +45,7 @@ const serve = Command.make(
 )
 const send = Command.make(
   "publish",
-  { file: Argument.string("snapshot-file") },
+  { file: Argument.String("snapshot-file") },
   Effect.fn(function*({ file }) {
     const fs = yield* FileSystem.FileSystem
     const stat = yield* fs.stat(file)
@@ -54,7 +54,7 @@ const send = Command.make(
     const snapshot = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(Snapshot), { onExcessProperty: "error" })(
       input
     )
-    yield* publish(yield* origin, yield* Config.redacted("MONITOR_PUBLISH_TOKEN"), snapshot)
+    yield* publish(yield* origin, yield* Config.Redacted("MONITOR_PUBLISH_TOKEN"), snapshot)
     yield* Console.log("Published")
   })
 )
@@ -111,7 +111,7 @@ const demo = Command.make(
         }
       ]
     }
-    yield* publish(yield* origin, yield* Config.redacted("MONITOR_PUBLISH_TOKEN"), snapshot)
+    yield* publish(yield* origin, yield* Config.Redacted("MONITOR_PUBLISH_TOKEN"), snapshot)
     yield* Console.log("Published synthetic demo. No live session was read.")
   })
 )

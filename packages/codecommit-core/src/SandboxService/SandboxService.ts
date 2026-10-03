@@ -26,7 +26,7 @@ import {
 } from "effect"
 import type { Success } from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
-import { ChildProcess } from "effect/unstable/process"
+import { ChildProcess } from "effect/process"
 import { SandboxRepo, type SandboxRow } from "../CacheService/repos/SandboxRepo.js"
 import * as ChildEnv from "../ChildEnv.js"
 import {
@@ -98,8 +98,8 @@ const isOrdinaryStoppingSandbox = (
 
 const isDiscoveredAwsAccountId = (value: string): boolean => /^\d{12}$/u.test(value)
 
-const homeDir = Config.string("HOME").pipe(
-  Config.orElse(() => Config.string("USERPROFILE"))
+const homeDir = Config.String("HOME").pipe(
+  Config.orElse(() => Config.String("USERPROFILE"))
 )
 
 const sandboxesDir = homeDir.pipe(

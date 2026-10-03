@@ -45,7 +45,7 @@ Use `access: "prompt-only"` for untrusted review prompts: it disables built-in a
 import { NodeServices } from "@effect/platform-node"
 import { model } from "@knpkv/ai-claude"
 import { Effect } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel } from "effect/ai"
 
 const program = LanguageModel.generateText({
   prompt: "Explain the current change and identify one missing test."
@@ -60,7 +60,7 @@ The returned model can also provide `LanguageModel` to `Chat` and other Effect A
 
 ```typescript
 import { Schema } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel } from "effect/ai"
 
 const Check = Schema.Struct({
   summary: Schema.String,

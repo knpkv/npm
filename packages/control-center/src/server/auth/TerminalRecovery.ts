@@ -6,7 +6,6 @@ import {
   Crypto,
   DateTime,
   Effect,
-  Encoding,
   FileSystem,
   Layer,
   Option,
@@ -17,6 +16,7 @@ import {
   Stdio,
   Stream
 } from "effect"
+import { Hex } from "effect/encoding"
 
 import { Actor } from "../../domain/actors.js"
 import { WorkspaceId } from "../../domain/identifiers.js"
@@ -119,7 +119,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
           const random = yield* cryptoService.randomBytes(16).pipe(
             Effect.mapError(() => new AuthCryptoError())
           )
-          const probe = path.join(alias, `.recovery-owner-${Encoding.encodeHex(random)}`)
+          const probe = path.join(alias, `.recovery-owner-${Hex.encode(random)}`)
           const opened = yield* fileSystem.open(probe, { flag: "wx", mode: 0o600 }).pipe(
             Effect.mapError(() => new TerminalRecoveryRefusedError({ reason: "data-directory-unavailable" }))
           )
@@ -195,7 +195,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
       const bytes = yield* cryptoService.randomBytes(32).pipe(
         Effect.mapError(() => new AuthCryptoError())
       )
-      const pairingCode = yield* Schema.decodeUnknownEffect(PairingCode)(Encoding.encodeHex(bytes)).pipe(
+      const pairingCode = yield* Schema.decodeUnknownEffect(PairingCode)(Hex.encode(bytes)).pipe(
         Effect.mapError(() => new AuthCryptoError())
       )
       const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
@@ -204,7 +204,7 @@ const makeTerminalRecovery = Effect.fn("TerminalRecovery.make")(function*(
       const summary = yield* repository.recoverOwner({
         workspaceId: request.workspaceId,
         pairingCodeId: pairingCodeIdValue,
-        codeHash: Encoding.encodeHex(digest),
+        codeHash: Hex.encode(digest),
         purpose: "recovery",
         actor: request.actor,
         permission: "workspace-owner",

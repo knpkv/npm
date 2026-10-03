@@ -14,7 +14,7 @@
  */
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64Url } from "effect/encoding"
 import type * as PlatformError from "effect/PlatformError"
 
 /**
@@ -172,7 +172,7 @@ export const generateCodeVerifier = (): Effect.Effect<string, PlatformError.Plat
   Effect.gen(function*() {
     const cryptoService = yield* Crypto.Crypto
     const bytes = yield* cryptoService.randomBytes(32)
-    return Encoding.encodeBase64Url(bytes)
+    return Base64Url.encode(bytes)
   })
 
 /**
@@ -187,5 +187,5 @@ export const computeCodeChallenge = (
   Effect.gen(function*() {
     const cryptoService = yield* Crypto.Crypto
     const hash = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(verifier))
-    return Encoding.encodeBase64Url(hash)
+    return Base64Url.encode(hash)
   })

@@ -4,7 +4,7 @@ import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Result from "effect/Result"
@@ -160,7 +160,7 @@ const makeWorkspaceSettingsRepository = Effect.gen(function*() {
     const digest = yield* cryptoService.digest("SHA-256", utf8Encoder.encode(value)).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "workspace-settings.digest" }))
     )
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    return ContentBlobDigest.make(Hex.encode(digest))
   })
 
   const readRows = (workspaceId: WorkspaceId) =>

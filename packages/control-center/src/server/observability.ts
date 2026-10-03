@@ -1,27 +1,27 @@
 import * as Config from "effect/Config"
 import * as ConfigProvider from "effect/ConfigProvider"
 import * as Effect from "effect/Effect"
+import { FetchHttpClient } from "effect/http"
 import * as Layer from "effect/Layer"
+import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/observability"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import { FetchHttpClient } from "effect/unstable/http"
-import { OtlpLogger, OtlpSerialization, OtlpTracer } from "effect/unstable/observability"
 
 const resource = {
   serviceName: "control-center"
 }
 
 const activation = Config.all({
-  baseEndpoint: Config.string("OTEL_EXPORTER_OTLP_ENDPOINT").pipe(Config.withDefault("")),
-  disabled: Config.string("OTEL_SDK_DISABLED").pipe(Config.withDefault("")),
-  logsEndpoint: Config.string("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").pipe(Config.withDefault("")),
-  logsExporters: Config.string("OTEL_LOGS_EXPORTER").pipe(Config.withDefault("")),
-  logsProtocol: Config.string("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL").pipe(Config.withDefault("")),
-  protocol: Config.string("OTEL_EXPORTER_OTLP_PROTOCOL").pipe(Config.withDefault("http/protobuf")),
-  tracesEndpoint: Config.string("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").pipe(Config.withDefault("")),
-  tracesExporters: Config.string("OTEL_TRACES_EXPORTER").pipe(Config.withDefault("")),
-  tracesProtocol: Config.string("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL").pipe(Config.withDefault(""))
+  baseEndpoint: Config.String("OTEL_EXPORTER_OTLP_ENDPOINT").pipe(Config.withDefault("")),
+  disabled: Config.String("OTEL_SDK_DISABLED").pipe(Config.withDefault("")),
+  logsEndpoint: Config.String("OTEL_EXPORTER_OTLP_LOGS_ENDPOINT").pipe(Config.withDefault("")),
+  logsExporters: Config.String("OTEL_LOGS_EXPORTER").pipe(Config.withDefault("")),
+  logsProtocol: Config.String("OTEL_EXPORTER_OTLP_LOGS_PROTOCOL").pipe(Config.withDefault("")),
+  protocol: Config.String("OTEL_EXPORTER_OTLP_PROTOCOL").pipe(Config.withDefault("http/protobuf")),
+  tracesEndpoint: Config.String("OTEL_EXPORTER_OTLP_TRACES_ENDPOINT").pipe(Config.withDefault("")),
+  tracesExporters: Config.String("OTEL_TRACES_EXPORTER").pipe(Config.withDefault("")),
+  tracesProtocol: Config.String("OTEL_EXPORTER_OTLP_TRACES_PROTOCOL").pipe(Config.withDefault(""))
 })
 
 const includesOtlp = (exporters: string): boolean =>

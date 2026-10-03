@@ -1,7 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { AwsProfileName } from "@knpkv/codecommit-core/Domain.js"
 import { Schema } from "effect"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { InfoIcon, LogInIcon, LogOutIcon, SearchIcon, ServerIcon, UserIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import {

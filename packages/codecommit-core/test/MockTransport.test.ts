@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import * as Option from "effect/Option"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 
 import { decodeCodeCommitMockEndpoint, routeAwsRequestToCodeCommitMock } from "../src/MockTransport.js"
 

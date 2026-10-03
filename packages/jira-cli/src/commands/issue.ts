@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import { Command } from "effect/unstable/cli"
+import { Command } from "effect/cli"
 import { editCommand } from "./edit.js"
 import { getCommand } from "./get.js"
 import { attachmentCommand } from "./issueAttachment.js"

@@ -13,9 +13,9 @@ import { Config, Effect, Option, Schedule } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Schema from "effect/Schema"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { parseMarkdown } from "../src/internal/frontmatter.js"
 
@@ -29,10 +29,10 @@ let HAS_API_AUTH_CONFIG = false
 
 const SHOULD_RUN_INTEGRATION = Effect.runSync(
   Effect.all([
-    Config.option(Config.string("CONFLUENCE_BASE_URL")),
-    Config.option(Config.string("CONFLUENCE_ROOT_PAGE_ID")),
-    Config.option(Config.string("CONFLUENCE_EMAIL")),
-    Config.option(Config.string("CONFLUENCE_API_KEY"))
+    Config.option(Config.String("CONFLUENCE_BASE_URL")),
+    Config.option(Config.String("CONFLUENCE_ROOT_PAGE_ID")),
+    Config.option(Config.String("CONFLUENCE_EMAIL")),
+    Config.option(Config.String("CONFLUENCE_API_KEY"))
   ]).pipe(
     Effect.map(([baseUrl, rootPageId, email, apiKey]) =>
       Option.isSome(baseUrl) && Option.isSome(rootPageId) && Option.isSome(email) && Option.isSome(apiKey)
@@ -186,10 +186,10 @@ const initializeTestEnvironment = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   CLI_PATH = yield* path.fromFileUrl(new URL("../dist/bin.js", import.meta.url))
-  const baseUrl = yield* Config.option(Config.string("CONFLUENCE_BASE_URL"))
-  const rootPageId = yield* Config.option(Config.string("CONFLUENCE_ROOT_PAGE_ID"))
-  const email = yield* Config.option(Config.string("CONFLUENCE_EMAIL"))
-  const apiKey = yield* Config.option(Config.string("CONFLUENCE_API_KEY"))
+  const baseUrl = yield* Config.option(Config.String("CONFLUENCE_BASE_URL"))
+  const rootPageId = yield* Config.option(Config.String("CONFLUENCE_ROOT_PAGE_ID"))
+  const email = yield* Config.option(Config.String("CONFLUENCE_EMAIL"))
+  const apiKey = yield* Config.option(Config.String("CONFLUENCE_API_KEY"))
   if (Option.isNone(baseUrl) || Option.isNone(rootPageId)) {
     HAS_INTEGRATION_CONFIG = false
     return

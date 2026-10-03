@@ -4,39 +4,42 @@
  * @internal
  */
 import { renderAttachmentMarkdown } from "@knpkv/atlassian-common/attachments"
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { AttachmentService } from "../AttachmentService.js"
 import { insertJiraAttachmentReference } from "../internal/attachmentInsertion.js"
 import { JiraApiError, WriteError } from "../JiraCliError.js"
 
-const issueArg = Args.string("issue").pipe(
+const issueArg = Args.String("issue").pipe(
   Args.withDescription("Issue key or id, for example PROJ-123")
 )
 
-const fileArg = Args.string("file").pipe(
+const fileArg = Args.String("file").pipe(
   Args.withDescription("Local file to upload")
 )
 
-const documentOption = Options.file("document").pipe(
+const documentOption = Options.File("document").pipe(
   Options.withDescription("Local Jira Markdown document containing the attachment placeholder"),
   Options.optional
 )
 
-const noInsertOption = Options.boolean("no-insert").pipe(
-  Options.withDescription("Only upload and print the Attachment Reference")
+const noInsertOption = Options.Boolean("no-insert").pipe(
+  Options.withDescription("Only upload and print the Attachment Reference"),
+  Options.withDefault(false)
 )
 
-const dryRunOption = Options.boolean("dry-run").pipe(
+const dryRunOption = Options.Boolean("dry-run").pipe(
   Options.withAlias("n"),
-  Options.withDescription("Validate local insertion input without uploading")
+  Options.withDescription("Validate local insertion input without uploading"),
+  Options.withDefault(false)
 )
 
-const jsonOption = Options.boolean("json").pipe(
-  Options.withDescription("Write exactly one JSON value to stdout")
+const jsonOption = Options.Boolean("json").pipe(
+  Options.withDescription("Write exactly one JSON value to stdout"),
+  Options.withDefault(false)
 )
 
 const readDocument = (documentPath: string) =>
@@ -88,16 +91,16 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const matches = countPlaceholderMatches(documentInput.content, file)
         if (matches !== 1) {
-          return yield* Effect.fail(
-            new JiraApiError({ message: `Expected exactly one attachment placeholder for ${file}, found ${matches}` })
-          )
+          return yield* new JiraApiError({
+            message: `Expected exactly one attachment placeholder for ${file}, found ${matches}`
+          })
         }
       }
 
       if (dryRun) {
         const exists = yield* fileExists(file)
         if (!exists) {
-          return yield* Effect.fail(new JiraApiError({ message: `Attachment file does not exist: ${file}` }))
+          return yield* new JiraApiError({ message: `Attachment file does not exist: ${file}` })
         }
         const result = { dryRun: true, issue, file, insert: shouldInsert }
         yield* Console.log(json ? JSON.stringify(result) : `Dry run: ${file} can be uploaded to ${issue}`)
@@ -111,12 +114,10 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const result = insertJiraAttachmentReference(documentInput.content, file, attachment)
         if (result.replacements !== 1) {
-          return yield* Effect.fail(
-            new JiraApiError({
-              message:
-                `Uploaded attachment ${attachment.id}, but expected exactly one local placeholder for ${file}; found ${result.replacements}`
-            })
-          )
+          return yield* new JiraApiError({
+            message:
+              `Uploaded attachment ${attachment.id}, but expected exactly one local placeholder for ${file}; found ${result.replacements}`
+          })
         }
         yield* writeDocument(documentInput.path, result.content)
         inserted = true

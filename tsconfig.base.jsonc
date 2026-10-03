@@ -32,6 +32,10 @@
         "namespaceImportPackages": ["effect", "@effect/*"],
         "diagnosticSeverity": {
           "overriddenSchemaConstructor": "off",
+          // Effect 4.0.0 marks process, http, http-api, cli, sql, and ai `@stability unstable`. The workspace
+          // depends on them deliberately and pins every Effect package to one exact release, so the
+          // reference-alignment check, not a warning per call site, guards their stability.
+          "unstableApiUsage": "off",
           // Opt in to the language service's stricter, non-default patterns.
           "strictBooleanExpressions": "suggestion",
           "strictEffectProvide": "suggestion"

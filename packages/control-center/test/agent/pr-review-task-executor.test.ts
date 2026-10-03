@@ -9,9 +9,9 @@ import {
   makeDeterministicLanguageModel
 } from "@knpkv/ai-runtime"
 import { Config, Effect, FileSystem, Layer, Path, Result, Schema, Stream, Tracer } from "effect"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import type * as Response from "effect/unstable/ai/Response"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import * as LanguageModel from "effect/ai/LanguageModel"
+import type * as Response from "effect/ai/Response"
+import * as ChildProcess from "effect/process/ChildProcess"
 
 import * as Predicate from "effect/Predicate"
 import {
@@ -295,7 +295,7 @@ const runShellCommand = (
 ): Effect.Effect<PrReviewSandboxCommandResult, never> =>
   Effect.scoped(
     Effect.gen(function*() {
-      const executablePath = yield* Config.string("PATH")
+      const executablePath = yield* Config.String("PATH")
       const handle = yield* ChildProcess.make("sh", ["-c", command], {
         cwd,
         env: {

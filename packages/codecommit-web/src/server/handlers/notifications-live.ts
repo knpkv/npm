@@ -11,8 +11,8 @@
 import { AwsClient, CacheService, PRService } from "@knpkv/codecommit-core"
 import { AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { Duration, Effect, Schema, Semaphore, SubscriptionRef } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { HttpApiBuilder } from "effect/http-api"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { ApiError, CodeCommitApi } from "../Api.js"
 import { BackgroundScope } from "../internal/BackgroundScope.js"
 

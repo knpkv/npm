@@ -1,10 +1,10 @@
 /** Bounded discovery of local CLI implementation metadata. @module */
 import * as Config from "effect/Config"
 import * as Effect from "effect/Effect"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 const DEFAULT_DISCOVERY_TIMEOUT = "5 seconds"
 const MAXIMUM_VERSION_OUTPUT_BYTES = 4 * 1_024
@@ -142,7 +142,7 @@ export const readLocalCliRuntimeMetadata = Effect.fn("AgentRuntimeMetadata.readL
       })
     )
   )
-  const path = yield* Config.string("PATH").pipe(
+  const path = yield* Config.String("PATH").pipe(
     Effect.mapError(() => new AgentRuntimeMetadataError({ implementation, reason: "unavailable" }))
   )
   const executable = yield* Schema.decodeUnknownEffect(Executable)(unknownOptions.executable).pipe(

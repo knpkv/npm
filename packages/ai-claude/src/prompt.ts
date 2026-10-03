@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type { LanguageModel, Prompt } from "effect/unstable/ai"
+import type { LanguageModel, Prompt } from "effect/ai"
 import { invalidInput } from "./errors.js"
 
 const renderTextParts = (

@@ -15,19 +15,19 @@ import {
   MAXIMUM_AGENT_OUTPUT_TEXT_LENGTH,
   readLocalCliRuntimeMetadata
 } from "@knpkv/ai-runtime"
+import * as LanguageModel from "effect/ai/LanguageModel"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Hex } from "effect/encoding"
 import * as FileSystem from "effect/FileSystem"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import {
   AgentModelId,
@@ -83,7 +83,7 @@ export interface SelectedAgentRuntime {
    */
   readonly filesystemAccess?: "none" | "configured-workspace"
   /** Effect AI service used only by the typed Review Sandbox tool loop. */
-  readonly languageModel?: LanguageModel.Service
+  readonly languageModel?: LanguageModel.LanguageModel
   /** Server-owned implementation used to execute immutable PR review. */
   readonly reviewExecution?: "effect-ai" | "native-claude" | "native-codex"
   /** Executable resolved for a native review runner inside its sandbox. */
@@ -132,7 +132,7 @@ interface ConfiguredProvider {
   readonly catalog: AgentProviderCatalogEntry
   readonly runtime: AgentRuntimeService | null
   readonly runtimeMetadata?: Effect.Effect<AgentRuntimeMetadata, AgentProviderError>
-  readonly languageModel?: LanguageModel.Service
+  readonly languageModel?: LanguageModel.LanguageModel
   readonly reviewExecution?: SelectedAgentRuntime["reviewExecution"]
   readonly reviewExecutable?: string
 }
@@ -179,7 +179,7 @@ const reviewProfileIdentity = Effect.fn("AgentRuntimeRegistry.reviewProfileIdent
       profileId: ReviewAgentProfileId.make(`${providerId}:${model}:sbx`)
     }
   }
-  const digest = Encoding.encodeHex(
+  const digest = Hex.encode(
     yield* cryptoService.digest("SHA-256", new TextEncoder().encode(model)).pipe(Effect.orDie)
   )
   const component = `${ENCODED_REVIEW_PROFILE_COMPONENT_PREFIX}${digest}`

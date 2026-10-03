@@ -1,7 +1,7 @@
 import { Button, Field, Surface, Text } from "@knpkv/rly/primitives"
 import * as Effect from "effect/Effect"
 import * as Schema from "effect/Schema"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { type FormEvent, type ReactElement, useState } from "react"
 import { useNavigate, useSearchParams } from "react-router"
 

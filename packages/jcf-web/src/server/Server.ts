@@ -15,7 +15,7 @@
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { Layers } from "@knpkv/jira-clockify"
 import { Config, Deferred, Effect, Layer, Schema } from "effect"
-import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
+import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { createServer } from "node:http"
 import { application } from "./HttpApplication.js"
 import { activateOwnerSessionBootstrap, OwnerSessionSecrets, type OwnerSessionSecretsContract } from "./OwnerSession.js"
@@ -51,7 +51,7 @@ export const makeServer = (options: JcfWebServerOptions) =>
   )
 
 /** The port to bind. Deliberately not 3000: the CodeCommit web app already lives there. */
-export const Port = Config.int("PORT").pipe(Config.withDefault(3111))
+export const Port = Config.Int("PORT").pipe(Config.withDefault(3111))
 
 /** Set by `pnpm dev` so the printed URL points at the Vite dev server that proxies here. */
-export const PublicOrigin = Config.option(Config.string("JCF_WEB_PUBLIC_ORIGIN"))
+export const PublicOrigin = Config.option(Config.String("JCF_WEB_PUBLIC_ORIGIN"))

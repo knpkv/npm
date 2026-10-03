@@ -10,6 +10,8 @@ import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import type * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -17,8 +19,6 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type { PageId } from "./Brand.js"
 import { ApiError, RateLimitError } from "./ConfluenceError.js"
 import {
@@ -623,14 +623,12 @@ const make = (
 
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
-            return yield* Effect.fail(
-              new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
-                endpoint: `/pages/${id}/children`,
-                pageId: id
-              })
-            )
+            return yield* new ApiError({
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
+              endpoint: `/pages/${id}/children`,
+              pageId: id
+            })
           }
 
           const response = yield* apiClient.v2.getChildPages(id, {
@@ -707,14 +705,12 @@ const make = (
 
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
-            return yield* Effect.fail(
-              new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of versions`,
-                endpoint: `/pages/${id}/versions`,
-                pageId: id
-              })
-            )
+            return yield* new ApiError({
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of versions`,
+              endpoint: `/pages/${id}/versions`,
+              pageId: id
+            })
           }
 
           const response = yield* apiClient.v2.getPageVersions(id, {
@@ -756,14 +752,12 @@ const make = (
 
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
-            return yield* Effect.fail(
-              new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of attachments`,
-                endpoint: `/pages/${id}/attachments`,
-                pageId: id
-              })
-            )
+            return yield* new ApiError({
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of attachments`,
+              endpoint: `/pages/${id}/attachments`,
+              pageId: id
+            })
           }
 
           const response = yield* apiClient.v2.getPageAttachments(id, {
@@ -826,14 +820,12 @@ const make = (
 
         const attachment = extractUploadedAttachment(response)
         if (attachment === null) {
-          return yield* Effect.fail(
-            new ApiError({
-              status: 0,
-              message: `Confluence did not return an attachment for ${filename}`,
-              endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
-              pageId
-            })
-          )
+          return yield* new ApiError({
+            status: 0,
+            message: `Confluence did not return an attachment for ${filename}`,
+            endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
+            pageId
+          })
         }
         const decodedAttachment = yield* decodeAttachment(
           attachment,
@@ -864,14 +856,12 @@ const make = (
       Effect.gen(function*() {
         const page = yield* getPage(pageId)
         if (!page.spaceId) {
-          return yield* Effect.fail(
-            new ApiError({
-              status: 0,
-              message: `Page ${pageId} does not have spaceId`,
-              endpoint: `/pages/${pageId}`,
-              pageId
-            })
-          )
+          return yield* new ApiError({
+            status: 0,
+            message: `Page ${pageId} does not have spaceId`,
+            endpoint: `/pages/${pageId}`,
+            pageId
+          })
         }
         return page.spaceId
       })
@@ -928,13 +918,11 @@ const make = (
 
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
-            return yield* Effect.fail(
-              new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
-                endpoint
-              })
-            )
+            return yield* new ApiError({
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
+              endpoint
+            })
           }
 
           const response = yield* apiClient.v2.getFolderDirectChildren(id, {

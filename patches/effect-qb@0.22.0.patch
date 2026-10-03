@@ -1,0 +1,286 @@
+diff --git a/dist/index.js b/dist/index.js
+index cad857cd7a705c801a6da153b29d9677f222c296..6c373110f52fa83948f8f243d32c9e6deb089d7b 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -7059,7 +7059,7 @@ import * as Effect from "effect/Effect";
+ import * as Exit from "effect/Exit";
+ import * as Option from "effect/Option";
+ import * as Schema11 from "effect/Schema";
+-import * as SqlClient from "effect/unstable/sql/SqlClient";
++import * as SqlClient from "effect/sql/SqlClient";
+ import * as Stream from "effect/Stream";
+ 
+ // src/internal/runtime/driver-value-mapping.ts
+@@ -7306,7 +7306,7 @@ var unionAst = (asts) => {
+   if (asts.length === 1) {
+     return asts[0];
+   }
+-  return new SchemaAST.Union(asts, "anyOf");
++  return new SchemaAST.Union(asts, { mode: "anyOf" });
+ };
+ var propertyAstOf = (ast, key3) => {
+   switch (ast._tag) {
+diff --git a/dist/mysql.js b/dist/mysql.js
+index 75a01993b4283e4790a638c36042bb0ea5603c5b..b90150727463a9fb06939b695a924a12c4fca826 100644
+--- a/dist/mysql.js
++++ b/dist/mysql.js
+@@ -116884,7 +116884,7 @@ __export(exports_executor2, {
+   atMostOne: () => atMostOne2
+ });
+ import * as Effect2 from "effect/Effect";
+-import * as SqlClient3 from "effect/unstable/sql/SqlClient";
++import * as SqlClient3 from "effect/sql/SqlClient";
+ import * as Stream2 from "effect/Stream";
+ 
+ // src/internal/executor.ts
+@@ -116912,7 +116912,7 @@ import * as Effect from "effect/Effect";
+ import * as Exit from "effect/Exit";
+ import * as Option from "effect/Option";
+ import * as Schema10 from "effect/Schema";
+-import * as SqlClient from "effect/unstable/sql/SqlClient";
++import * as SqlClient from "effect/sql/SqlClient";
+ import * as Stream from "effect/Stream";
+ 
+ // src/internal/runtime/driver-value-mapping.ts
+@@ -117159,7 +117159,7 @@ var unionAst = (asts) => {
+   if (asts.length === 1) {
+     return asts[0];
+   }
+-  return new SchemaAST.Union(asts, "anyOf");
++  return new SchemaAST.Union(asts, { mode: "anyOf" });
+ };
+ var propertyAstOf = (ast, key2) => {
+   switch (ast._tag) {
+diff --git a/dist/postgres.js b/dist/postgres.js
+index 3954e86a7657c3291e1787f29ae2d5d9c4f2225f..ad8b4953feeb396f5c90928b586e9947d253c1b6 100644
+--- a/dist/postgres.js
++++ b/dist/postgres.js
+@@ -13627,7 +13627,7 @@ __export(exports_executor2, {
+   atMostOne: () => atMostOne2
+ });
+ import * as Effect2 from "effect/Effect";
+-import * as SqlClient3 from "effect/unstable/sql/SqlClient";
++import * as SqlClient3 from "effect/sql/SqlClient";
+ import * as Stream2 from "effect/Stream";
+ 
+ // src/internal/executor.ts
+@@ -13655,7 +13655,7 @@ import * as Effect from "effect/Effect";
+ import * as Exit from "effect/Exit";
+ import * as Option from "effect/Option";
+ import * as Schema12 from "effect/Schema";
+-import * as SqlClient from "effect/unstable/sql/SqlClient";
++import * as SqlClient from "effect/sql/SqlClient";
+ import * as Stream from "effect/Stream";
+ 
+ // src/internal/runtime/schema.ts
+@@ -13732,7 +13732,7 @@ var unionAst = (asts) => {
+   if (asts.length === 1) {
+     return asts[0];
+   }
+-  return new SchemaAST.Union(asts, "anyOf");
++  return new SchemaAST.Union(asts, { mode: "anyOf" });
+ };
+ var propertyAstOf = (ast, key3) => {
+   switch (ast._tag) {
+diff --git a/dist/sqlite.js b/dist/sqlite.js
+index 167538c8896ed0222ce2ae9fad2333ffedb56b02..b2a24c668e295b7a0f5c8dcea1d0ce3a42c831ad 100644
+--- a/dist/sqlite.js
++++ b/dist/sqlite.js
+@@ -7990,7 +7990,7 @@ __export(exports_executor2, {
+   atMostOne: () => atMostOne2
+ });
+ import * as Effect2 from "effect/Effect";
+-import * as SqlClient3 from "effect/unstable/sql/SqlClient";
++import * as SqlClient3 from "effect/sql/SqlClient";
+ import * as Stream2 from "effect/Stream";
+ 
+ // src/internal/executor.ts
+@@ -8018,7 +8018,7 @@ import * as Effect from "effect/Effect";
+ import * as Exit from "effect/Exit";
+ import * as Option from "effect/Option";
+ import * as Schema10 from "effect/Schema";
+-import * as SqlClient from "effect/unstable/sql/SqlClient";
++import * as SqlClient from "effect/sql/SqlClient";
+ import * as Stream from "effect/Stream";
+ 
+ // src/internal/runtime/driver-value-mapping.ts
+@@ -8265,7 +8265,7 @@ var unionAst = (asts) => {
+   if (asts.length === 1) {
+     return asts[0];
+   }
+-  return new SchemaAST.Union(asts, "anyOf");
++  return new SchemaAST.Union(asts, { mode: "anyOf" });
+ };
+ var propertyAstOf = (ast, key2) => {
+   switch (ast._tag) {
+diff --git a/dist/standard.js b/dist/standard.js
+index dc6572832e5aa61b4d83c306d9e02ca82d6d5d55..baa7adfe5fb433a83ab3aa05803b22a66b5e17b2 100644
+--- a/dist/standard.js
++++ b/dist/standard.js
+@@ -7059,7 +7059,7 @@ import * as Effect from "effect/Effect";
+ import * as Exit from "effect/Exit";
+ import * as Option from "effect/Option";
+ import * as Schema11 from "effect/Schema";
+-import * as SqlClient from "effect/unstable/sql/SqlClient";
++import * as SqlClient from "effect/sql/SqlClient";
+ import * as Stream from "effect/Stream";
+ 
+ // src/internal/runtime/driver-value-mapping.ts
+@@ -7306,7 +7306,7 @@ var unionAst = (asts) => {
+   if (asts.length === 1) {
+     return asts[0];
+   }
+-  return new SchemaAST.Union(asts, "anyOf");
++  return new SchemaAST.Union(asts, { mode: "anyOf" });
+ };
+ var propertyAstOf = (ast, key3) => {
+   switch (ast._tag) {
+diff --git a/src/internal/column-state.ts b/src/internal/column-state.ts
+index b41d095e4e82825818c625f5fe2c1c4dc5561757..333b4bbec6dd266504e52f369873bcbe47d51574 100644
+--- a/src/internal/column-state.ts
++++ b/src/internal/column-state.ts
+@@ -445,7 +445,7 @@ export const bindColumn = <
+ ): BoundColumnFrom<Column, TableName, ColumnName, BaseTableName> => {
+   const brandName = `${tableName}.${columnName}`
+   const schema = column.metadata.brand === true
+-    ? Schema.brand(brandName)(column.schema)
++    ? Schema.brand(brandName as never)(column.schema)
+     : column.schema
+   const bound = attachPipe(Object.create(ColumnProto))
+   bound.schema = schema
+diff --git a/src/internal/column.ts b/src/internal/column.ts
+index 484aa4dde71b5fc2bb0485dc0896fb1aedabe49a..7ade52cff3523aa83bf4f27d4b9cbdf6d0bf49e7 100644
+--- a/src/internal/column.ts
++++ b/src/internal/column.ts
+@@ -493,7 +493,7 @@ export const brand = <Column extends AnyColumnDefinition>(
+     const boundColumn = column as unknown as AnyBoundColumn
+     const brandName = `${boundColumn[BoundColumnTypeId].tableName}.${boundColumn[BoundColumnTypeId].columnName}`
+     return remapColumnDefinition(boundColumn, {
+-      schema: Schema.brand(brandName)(boundColumn.schema),
++      schema: Schema.brand(brandName as never)(boundColumn.schema),
+       metadata: {
+         ...boundColumn.metadata,
+         brand: true
+diff --git a/src/internal/executor.ts b/src/internal/executor.ts
+index 8b1266be4667f2cdb8c56b23c555e2016c3cced9..b826cff529e71b01250dce75744aa24202a10599 100644
+--- a/src/internal/executor.ts
++++ b/src/internal/executor.ts
+@@ -3,8 +3,8 @@ import * as Effect from "effect/Effect"
+ import * as Exit from "effect/Exit"
+ import * as Option from "effect/Option"
+ import * as Schema from "effect/Schema"
+-import * as SqlClient from "effect/unstable/sql/SqlClient"
+-import * as SqlError from "effect/unstable/sql/SqlError"
++import * as SqlClient from "effect/sql/SqlClient"
++import * as SqlError from "effect/sql/SqlError"
+ import * as Stream from "effect/Stream"
+ 
+ import * as Expression from "./scalar.js"
+@@ -771,7 +771,7 @@ export const fromSqlClient = <Dialect extends string>(
+   }))
+ 
+ /**
+- * Runs an effect within the ambient `effect/unstable/sql` transaction service.
++ * Runs an effect within the ambient `effect/sql` transaction service.
+  *
+  * Nested calls rely on the underlying client transaction implementation for
+  * savepoint behavior.
+diff --git a/src/internal/runtime/schema.ts b/src/internal/runtime/schema.ts
+index 21fe0e575ce6cfe77cea73a6558f4792925e1728..81b5df6d4caf5c0e68e8defc342b7decde228014 100644
+--- a/src/internal/runtime/schema.ts
++++ b/src/internal/runtime/schema.ts
+@@ -120,7 +120,7 @@ const unionAst = (asts: ReadonlyArray<SchemaAST.AST>): SchemaAST.AST | undefined
+   if (asts.length === 1) {
+     return asts[0]
+   }
+-  return new SchemaAST.Union(asts, "anyOf")
++  return new SchemaAST.Union(asts, { mode: "anyOf" })
+ }
+ 
+ const propertyAstOf = (
+diff --git a/src/internal/runtime/value.ts b/src/internal/runtime/value.ts
+index 72b2b30d6df6292eeeabd7e12cce343f4d894123..d5a7aa420ad4c8fbb33b7742f628ce7280d2a249 100644
+--- a/src/internal/runtime/value.ts
++++ b/src/internal/runtime/value.ts
+@@ -20,7 +20,7 @@ const brandString = <BrandName extends string>(
+ ): Schema.Schema<string & Brand.Brand<BrandName>> =>
+   Schema.String.pipe(
+     Schema.check(Schema.isPattern(pattern)),
+-    Schema.brand(brand)
++    Schema.brand(brand as never)
+   ) as unknown as Schema.Schema<string & Brand.Brand<BrandName>>
+ 
+ export const localDatePattern = /^(\d{4})-(\d{2})-(\d{2})$/
+diff --git a/src/internal/schema-derivation.ts b/src/internal/schema-derivation.ts
+index 66b794b2cbb39fc95ded2afdf9e6ec4e889c47ae..d60813bcf387f93e5dbe5cb2ada0bb2b31ac3e00 100644
+--- a/src/internal/schema-derivation.ts
++++ b/src/internal/schema-derivation.ts
+@@ -107,7 +107,7 @@ const maybeBrandSchema = (
+   columnName: string
+ ): Schema.Top =>
+   column.metadata.brand === true
+-    ? Schema.brand(`${tableName}.${columnName}`)(column.schema)
++    ? Schema.brand(`${tableName}.${columnName}` as never)(column.schema)
+     : column.schema
+ 
+ const selectSchema = (
+diff --git a/src/mysql/executor.ts b/src/mysql/executor.ts
+index 1c49bc3daf44e636296436bd7b21d307af440b57..b8d7df866ac2cc027c22c58aeb7c067282aa2129 100644
+--- a/src/mysql/executor.ts
++++ b/src/mysql/executor.ts
+@@ -1,5 +1,5 @@
+ import * as Effect from "effect/Effect"
+-import * as SqlClient from "effect/unstable/sql/SqlClient"
++import * as SqlClient from "effect/sql/SqlClient"
+ import * as Stream from "effect/Stream"
+ 
+ import * as CoreExecutor from "../internal/executor.js"
+@@ -245,7 +245,7 @@ const sqlClientDriver = (): Driver<any, SqlClient.SqlClient> =>
+  * Creates the standard MySQL executor pipeline.
+  *
+  * By default this uses the built-in MySQL renderer plus the ambient
+- * `effect/unstable/sql` `SqlClient`. Advanced callers can override the renderer,
++ * `effect/sql` `SqlClient`. Advanced callers can override the renderer,
+  * driver, or both.
+  */
+ export function make(): QueryExecutor<SqlClient.SqlClient>
+diff --git a/src/postgres/executor.ts b/src/postgres/executor.ts
+index a5bad767c5ecb40994da92964432593de0d8ae76..d7cb2d1ce97de94828fab10b64dde0db73e24a09 100644
+--- a/src/postgres/executor.ts
++++ b/src/postgres/executor.ts
+@@ -1,5 +1,5 @@
+ import * as Effect from "effect/Effect"
+-import * as SqlClient from "effect/unstable/sql/SqlClient"
++import * as SqlClient from "effect/sql/SqlClient"
+ import * as Stream from "effect/Stream"
+ 
+ import * as CoreExecutor from "../internal/executor.js"
+@@ -239,7 +239,7 @@ const sqlClientDriver = (): Driver<any, SqlClient.SqlClient> =>
+  * Creates the standard Postgres executor pipeline.
+  *
+  * By default this uses the built-in Postgres renderer plus the ambient
+- * `effect/unstable/sql` `SqlClient`. Advanced callers can override the renderer,
++ * `effect/sql` `SqlClient`. Advanced callers can override the renderer,
+  * driver, or both.
+  */
+ export function make(): QueryExecutor<SqlClient.SqlClient>
+diff --git a/src/sqlite/executor.ts b/src/sqlite/executor.ts
+index 2ec5544a07b7a43d0d3a817c5d20780e148e247d..eaf9892392dad2bc01596fde4bf804ffd10671c6 100644
+--- a/src/sqlite/executor.ts
++++ b/src/sqlite/executor.ts
+@@ -1,5 +1,5 @@
+ import * as Effect from "effect/Effect"
+-import * as SqlClient from "effect/unstable/sql/SqlClient"
++import * as SqlClient from "effect/sql/SqlClient"
+ import * as Stream from "effect/Stream"
+ 
+ import * as CoreExecutor from "../internal/executor.js"
+@@ -230,7 +230,7 @@ const sqlClientDriver = (): Driver<any, SqlClient.SqlClient> =>
+  * Creates the standard SQLite executor pipeline.
+  *
+  * By default this uses the built-in SQLite renderer plus the ambient
+- * `effect/unstable/sql` `SqlClient`. Advanced callers can override the renderer,
++ * `effect/sql` `SqlClient`. Advanced callers can override the renderer,
+  * driver, or both.
+  */
+ export function make(): QueryExecutor<SqlClient.SqlClient>

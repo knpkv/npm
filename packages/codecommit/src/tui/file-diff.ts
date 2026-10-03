@@ -1,8 +1,8 @@
 /** Lossless, bounded changed-file loading for the exact-revision workspace. */
 import { type Domain, ReadClient } from "@knpkv/codecommit-core"
 import { Effect, Schema, Stream } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as GitEnvironment from "../GitEnvironment.js"
 import { WorktreeError } from "../WorktreeService.js"
 import {

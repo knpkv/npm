@@ -9,7 +9,7 @@ import {
 } from "@knpkv/browser-pairing"
 import type { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
 import { Clock, Context, Effect, Layer, Redacted, Ref, Schema } from "effect"
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "../Api.js"
 
 export interface OwnerSessionSecretsContract {

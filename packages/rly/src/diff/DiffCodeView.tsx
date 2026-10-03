@@ -22,8 +22,8 @@ export interface AnnotationMetadata {
 }
 
 export interface DiffCodeRendererAdapterProps {
-  readonly rendererProps: CodeViewProps<AnnotationMetadata> & {
-    readonly ref: Ref<CodeViewHandle<AnnotationMetadata>>
+  readonly rendererProps: CodeViewProps<AnnotationMetadata, undefined> & {
+    readonly ref: Ref<CodeViewHandle<AnnotationMetadata, undefined>>
   }
 }
 
@@ -145,7 +145,7 @@ export const createDiffCodeView = (Renderer: DiffCodeRendererAdapter) =>
 
     const workerState = useDiffWorkerState()
     const rendererContainerRef = useRef<HTMLDivElement>(null)
-    const rendererRef = useRef<CodeViewHandle<AnnotationMetadata>>(null)
+    const rendererRef = useRef<CodeViewHandle<AnnotationMetadata, undefined>>(null)
     const annotationsRef = useRef(annotations)
     const previousAnnotationsRef = useRef(annotations)
     annotationsRef.current = annotations

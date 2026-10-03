@@ -1,8 +1,8 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Stream from "effect/Stream"
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import type { VisualClassification } from "./classify-changes.js"
 
 export class VisualGitError extends Data.TaggedError("VisualGitError")<{

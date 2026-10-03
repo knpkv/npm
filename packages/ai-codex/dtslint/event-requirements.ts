@@ -1,6 +1,6 @@
 import { Schema, type Stream } from "effect"
 import type * as FileSystem from "effect/FileSystem"
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { streamEvents } from "../src/index.js"
 
 type Requirements<Value> = Value extends Stream.Stream<unknown, unknown, infer Requirement> ? Requirement : never

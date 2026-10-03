@@ -30,8 +30,8 @@ export const originOf = (input: string): string | undefined => {
 }
 
 const AuthConfig = Config.all({
-  apiKey: Config.string("CONFLUENCE_API_KEY"),
-  email: Config.string("CONFLUENCE_EMAIL")
+  apiKey: Config.String("CONFLUENCE_API_KEY"),
+  email: Config.String("CONFLUENCE_EMAIL")
 })
 
 /**
@@ -93,12 +93,10 @@ export const assertSiteMatchesAuth = (
     )
     const siteUrl = profile?.token.site_url
     if (siteUrl === undefined) {
-      return yield* Effect.fail(
-        new ConfigError({
-          message: `The active auth profile names no site, so the site this would act on cannot be confirmed. ` +
-            `Re-run 'confluence auth login'.`
-        })
-      )
+      return yield* new ConfigError({
+        message: `The active auth profile names no site, so the site this would act on cannot be confirmed. ` +
+          `Re-run 'confluence auth login'.`
+      })
     }
 
     const requested = originOf(baseUrl)
@@ -106,21 +104,17 @@ export const assertSiteMatchesAuth = (
     // Fail closed on either side: an origin that will not parse is an origin
     // this has not verified, and "unverified" must not read as "matches".
     if (requested === undefined || active === undefined) {
-      return yield* Effect.fail(
-        new ConfigError({
-          message: `Could not compare the requested site (${JSON.stringify(baseUrl)}) with the active profile's ` +
-            `site (${JSON.stringify(siteUrl)}); one of them is not a usable URL, so the site this would act on ` +
-            `cannot be confirmed.`
-        })
-      )
+      return yield* new ConfigError({
+        message: `Could not compare the requested site (${JSON.stringify(baseUrl)}) with the active profile's ` +
+          `site (${JSON.stringify(siteUrl)}); one of them is not a usable URL, so the site this would act on ` +
+          `cannot be confirmed.`
+      })
     }
     if (requested === active) return
 
-    return yield* Effect.fail(
-      new ConfigError({
-        message: `--base-url names ${requested}, but the active auth profile is signed in to ${active}. ` +
-          `OAuth requests route to the profile's site, so this would act on ${active} instead. ` +
-          `Switch with 'confluence auth use <profile>' or pass a URL from ${active}.`
-      })
-    )
+    return yield* new ConfigError({
+      message: `--base-url names ${requested}, but the active auth profile is signed in to ${active}. ` +
+        `OAuth requests route to the profile's site, so this would act on ${active} instead. ` +
+        `Switch with 'confluence auth use <profile>' or pass a URL from ${active}.`
+    })
   })

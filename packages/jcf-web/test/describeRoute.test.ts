@@ -4,7 +4,7 @@ import { ConfigService, IssueFacts, ReconcileService } from "@knpkv/jira-clockif
 import type { SessionAgentSettings } from "@knpkv/jira-clockify/agent/agentSettings.js"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
 import { Deferred, Effect, Layer, Redacted, Schema } from "effect"
-import { Etag, HttpPlatform, HttpRouter } from "effect/unstable/http"
+import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { readWeekStream } from "../src/client/api.js"
 import { application } from "../src/server/HttpApplication.js"
 import { makeOwnerSessionSecrets, ownerSessionCookie, OwnerSessionSecrets } from "../src/server/OwnerSession.js"

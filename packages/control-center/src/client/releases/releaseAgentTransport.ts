@@ -1,6 +1,6 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 
 import type { ReleasePublicationProvider } from "../../api/agent.js"
 import type { EntityId, GovernedActionId, ReleaseId } from "../../domain/identifiers.js"

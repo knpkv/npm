@@ -4,9 +4,9 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { ChildProcessSpawner } from "effect/process"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import { ChildProcessSpawner } from "effect/unstable/process"
 import { HerdrPackContractError, runPackContractCommand as run } from "./pack-contract-command.js"
 
 const PackageSideEffects = Schema.Array(Schema.String)

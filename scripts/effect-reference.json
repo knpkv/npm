@@ -1,6 +1,6 @@
 {
-  "tag": "effect@4.0.0-rc.109",
-  "upstreamCommit": "b5946ece2b33a4468ef927a39821d7c3db463af3",
-  "tree": "d0308e864242aab0c8b03a0e8811e99a3e7919b7",
-  "version": "4.0.0-rc.109"
+  "tag": "effect@4.0.0",
+  "upstreamCommit": "67ba4e46a11ccda0b6761578bfd22c04ae00167d",
+  "tree": "8c284e05a89a10ecda5a3ce2f84678935e66ee9a",
+  "version": "4.0.0"
 }

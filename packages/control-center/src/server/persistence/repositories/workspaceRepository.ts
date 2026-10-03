@@ -6,7 +6,7 @@ import type { Success } from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
+import * as SqlSchema from "effect/sql/SqlSchema"
 
 import { WorkspaceId } from "../../../domain/identifiers.js"
 import { UtcTimestamp } from "../../../domain/utcTimestamp.js"

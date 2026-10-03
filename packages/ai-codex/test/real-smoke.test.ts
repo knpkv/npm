@@ -1,9 +1,10 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
-import { Effect, Encoding, FileSystem, Layer, Path, Schema, Stream } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import { Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
+import { LanguageModel } from "effect/ai"
+import { Base64 } from "effect/encoding"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { model, streamEvents } from "../src/index.js"
 import { version as expectedCodexVersion } from "./fixtures/codex-0.154.0.js"
 
@@ -46,7 +47,7 @@ it.effect("keeps real prompt-only turns free of external and host-reading tools"
     const workspace = path.join(root, "workspace")
     const outsideImage = path.join(root, "outside.png")
     yield* fs.makeDirectory(workspace)
-    const imageBytes = yield* Effect.fromResult(Encoding.decodeBase64(png))
+    const imageBytes = yield* Effect.fromResult(Base64.decode(png))
     yield* fs.writeFile(outsideImage, imageBytes)
 
     const events = yield* streamEvents({

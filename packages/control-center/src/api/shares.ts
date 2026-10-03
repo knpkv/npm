@@ -1,5 +1,5 @@
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import * as Schema from "effect/Schema"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { EntityId, PersonId, ShareId, WorkspaceId } from "../domain/identifiers.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"

@@ -3,8 +3,8 @@
  *
  * @module
  */
+import { Command } from "effect/cli"
 import * as Console from "effect/Console"
-import { Command } from "effect/unstable/cli"
 import { discard, edit, log, start, statusCmd, stop } from "./timer/index.js"
 
 export { discard, edit, log, start, statusCmd, stop } from "./timer/index.js"

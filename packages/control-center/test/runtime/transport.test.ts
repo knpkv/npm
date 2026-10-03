@@ -2,7 +2,7 @@ import { NodeHttpServer } from "@effect/platform-node"
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Schema } from "effect"
-import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/http"
 
 import { DEFAULT_HTTP_SECURITY_LIMITS } from "../../src/server/http/security/HttpLimits.js"
 import {

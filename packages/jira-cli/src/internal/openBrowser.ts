@@ -5,7 +5,7 @@
  */
 import * as Effect from "effect/Effect"
 import type * as PlatformError from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const run = (
   command: string,

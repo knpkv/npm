@@ -1,4 +1,4 @@
-import { Casing, Column, Query, Renderer } from "effect-qb"
+import { Casing, Column, Query, Renderer } from "./vendor/effect-qb/index.js"
 
 import type { RenderedSql } from "./types.js"
 

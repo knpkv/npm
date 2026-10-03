@@ -4,7 +4,7 @@
  * @module
  */
 import { Effect, Schema, Stream } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
+import * as AiError from "effect/ai/AiError"
 
 import {
   AgentProviderError,

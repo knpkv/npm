@@ -6,7 +6,7 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type * as PlatformError from "effect/PlatformError"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 export class BrowserOpenError extends Data.TaggedError("BrowserOpenError")<{
   readonly command: string
@@ -27,7 +27,7 @@ const run = (
       })
     )
     if (exitCode !== 0) {
-      return yield* Effect.fail(new BrowserOpenError({ command, exitCode }))
+      return yield* new BrowserOpenError({ command, exitCode })
     }
   })
 

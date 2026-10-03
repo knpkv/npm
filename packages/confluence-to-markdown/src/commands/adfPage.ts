@@ -9,6 +9,7 @@
  * @internal
  */
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import { Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
@@ -16,7 +17,6 @@ import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { AdfSchemaValidator } from "../AdfSchemaValidator.js"
 import { PageId } from "../Brand.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
@@ -25,26 +25,26 @@ import { deleteAdfNodes, parseNodeSelector, replaceAdfText, structuralCensusDelt
 import { baseUrlFromWorkspace, resolvePageInputWithWorkspace, validateBaseUrl } from "./pageInput.js"
 import { getAuth } from "./shared.js"
 
-const urlOption = Options.string("url").pipe(
+const urlOption = Options.String("url").pipe(
   Options.withDescription("Confluence page URL"),
   Options.optional
 )
 
-const pageIdOption = Options.string("page-id").pipe(
+const pageIdOption = Options.String("page-id").pipe(
   Options.withDescription("Confluence page ID"),
   Options.optional
 )
 
-const baseUrlOption = Options.string("base-url").pipe(
+const baseUrlOption = Options.String("base-url").pipe(
   Options.withDescription("Confluence Cloud base URL (e.g., https://yoursite.atlassian.net)"),
   Options.optional
 )
 
-const adfOption = Options.file("adf").pipe(
+const adfOption = Options.File("adf").pipe(
   Options.withDescription("Path to the ADF document (JSON) to write")
 )
 
-const titleOption = Options.string("title").pipe(
+const titleOption = Options.String("title").pipe(
   Options.withDescription("New page title (defaults to the current title)"),
   Options.optional
 )
@@ -59,38 +59,39 @@ const titleOption = Options.string("title").pipe(
  * between would be overwritten with no conflict. Pass the version the file was
  * read at and a concurrent edit surfaces as a 409 instead.
  */
-const ifVersionOption = Options.integer("if-version").pipe(
+const ifVersionOption = Options.Int("if-version").pipe(
   Options.withDescription("Fail with a conflict unless the page is still at this version"),
   Options.optional
 )
 
-const messageOption = Options.string("message").pipe(
+const messageOption = Options.String("message").pipe(
   Options.withAlias("m"),
   Options.withDescription("Version message recorded on the update"),
   Options.optional
 )
 
-const dryRunOption = Options.boolean("dry-run").pipe(
+const dryRunOption = Options.Boolean("dry-run").pipe(
   Options.withAlias("n"),
-  Options.withDescription("Report what would change without writing to Confluence")
+  Options.withDescription("Report what would change without writing to Confluence"),
+  Options.withDefault(false)
 )
 
-const replaceOption = Options.string("replace").pipe(
+const replaceOption = Options.String("replace").pipe(
   Options.withDescription("Literal text to find in the page's text nodes"),
   Options.optional
 )
 
-const withOption = Options.string("with").pipe(
+const withOption = Options.String("with").pipe(
   Options.withDescription("Replacement text for --replace"),
   Options.optional
 )
 
-const deleteNodeOption = Options.string("delete-node").pipe(
+const deleteNodeOption = Options.String("delete-node").pipe(
   Options.withDescription("Delete nodes matching a `type` or `type[index]` selector, e.g. blockCard[1]"),
   Options.optional
 )
 
-const setOption = Options.string("set").pipe(
+const setOption = Options.String("set").pipe(
   Options.withDescription(
     "Template substitution `name=value`, replacing every {{name}} in the ADF file (repeatable)"
   ),
@@ -140,9 +141,7 @@ const parseSetFlags = (entries: ReadonlyArray<string>): Effect.Effect<ReadonlyMa
       // the slot the user meant to fill is written to Confluence verbatim.
       const name = separator < 0 ? "" : entry.slice(0, separator).trim()
       if (separator < 0 || !/^[A-Za-z0-9_.-]+$/.test(name)) {
-        return yield* Effect.fail(
-          new ConfigError({ message: `Invalid --set ${JSON.stringify(entry)}. Expected name=value.` })
-        )
+        return yield* new ConfigError({ message: `Invalid --set ${JSON.stringify(entry)}. Expected name=value.` })
       }
       values.set(name, entry.slice(separator + 1))
     }
@@ -157,13 +156,11 @@ const readAdfFile = (path: string, values: ReadonlyMap<string, string>) =>
     )
     const { rendered, unresolved } = applyAdfTemplate(raw, values)
     if (unresolved.length > 0) {
-      return yield* Effect.fail(
-        new ConfigError({
-          message: `${path} still has unfilled slots: ${
-            unresolved.map((n) => `{{${n}}}`).join(", ")
-          }. Pass them with --set name=value.`
-        })
-      )
+      return yield* new ConfigError({
+        message: `${path} still has unfilled slots: ${
+          unresolved.map((n) => `{{${n}}}`).join(", ")
+        }. Pass them with --set name=value.`
+      })
     }
     return yield* parseAdf(rendered, path, "outgoing")
   })
@@ -358,23 +355,19 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         const selector = optionValue(deleteNode)
 
         if (search !== undefined && replacement === undefined) {
-          return yield* Effect.fail(new ConfigError({ message: "--replace requires --with." }))
+          return yield* new ConfigError({ message: "--replace requires --with." })
         }
         if (search === undefined && replacement !== undefined) {
-          return yield* Effect.fail(new ConfigError({ message: "--with requires --replace." }))
+          return yield* new ConfigError({ message: "--with requires --replace." })
         }
         if (search === undefined && selector === undefined) {
-          return yield* Effect.fail(
-            new ConfigError({ message: "Nothing to do: pass --replace/--with or --delete-node." })
-          )
+          return yield* new ConfigError({ message: "Nothing to do: pass --replace/--with or --delete-node." })
         }
         // `includes("")` is true of every string and `replaceAll("", x)` splices
         // x between every character, so an empty search would rewrite the whole
         // page. An empty --with stays valid: that is how you delete matched text.
         if (search !== undefined && search.length === 0) {
-          return yield* Effect.fail(
-            new ConfigError({ message: "--replace needs a non-empty search string." })
-          )
+          return yield* new ConfigError({ message: "--replace needs a non-empty search string." })
         }
 
         const input = yield* resolvePageInputWithWorkspace({
@@ -391,7 +384,7 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
           const page = yield* client.getPage(id)
           const raw = page.body?.atlas_doc_format?.value
           if (!raw) {
-            return yield* Effect.fail(new ConfigError({ message: `Page ${id} did not include ADF content.` }))
+            return yield* new ConfigError({ message: `Page ${id} did not include ADF content.` })
           }
           const parsed = yield* parseAdf(raw, `page ${id}`, "incoming")
           return { doc: parsed, base: { version: page.version.number, title: page.title } }
@@ -403,12 +396,10 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         if (search !== undefined && replacement !== undefined) {
           const result = replaceAdfText(doc, search, replacement)
           if (result.replacements === 0) {
-            return yield* Effect.fail(
-              new ConfigError({
-                message: `No text node contains ${JSON.stringify(search)}. ADF splits a run at every mark boundary, ` +
-                  `so a phrase crossing inline code or bold lives in several nodes — match a shorter span.`
-              })
-            )
+            return yield* new ConfigError({
+              message: `No text node contains ${JSON.stringify(search)}. ADF splits a run at every mark boundary, ` +
+                `so a phrase crossing inline code or bold lives in several nodes — match a shorter span.`
+            })
           }
           yield* Console.log(`Replaced ${result.replacements} occurrence(s).`)
           doc = result.doc
@@ -417,13 +408,13 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         if (selector !== undefined) {
           const parsed = parseNodeSelector(selector)
           if (parsed === null) {
-            return yield* Effect.fail(
-              new ConfigError({ message: `Invalid --delete-node selector: ${selector}. Expected type or type[index].` })
-            )
+            return yield* new ConfigError({
+              message: `Invalid --delete-node selector: ${selector}. Expected type or type[index].`
+            })
           }
           const result = deleteAdfNodes(doc, parsed)
           if (result.deleted === 0) {
-            return yield* Effect.fail(new ConfigError({ message: `No node matched ${selector}.` }))
+            return yield* new ConfigError({ message: `No node matched ${selector}.` })
           }
           yield* Console.log(`Deleted ${result.deleted} node(s) matching ${selector}.`)
           doc = result.doc
@@ -461,7 +452,7 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
   )
 }
 
-const spaceOption = Options.string("space").pipe(
+const spaceOption = Options.String("space").pipe(
   Options.withDescription("Numeric space id — the v2 API takes the id, not the space key")
 )
 
@@ -479,16 +470,16 @@ const validateSpaceId = (space: string) =>
     })
   )
 
-const parentOption = Options.string("parent").pipe(
+const parentOption = Options.String("parent").pipe(
   Options.withDescription("Parent container id — a page or a folder"),
   Options.optional
 )
 
-const createTitleOption = Options.string("title").pipe(
+const createTitleOption = Options.String("title").pipe(
   Options.withDescription("Title for the new page")
 )
 
-const createBaseUrlOption = Options.string("base-url").pipe(
+const createBaseUrlOption = Options.String("base-url").pipe(
   Options.withDescription("Confluence Cloud base URL (e.g., https://yoursite.atlassian.net)"),
   Options.optional
 )
@@ -527,11 +518,9 @@ export const makePageCreateCommand = (options: AdfPageCommandOptions = {}) => {
           ? yield* baseUrlFromWorkspace((yield* Path.Path).resolve("."))
           : yield* validateBaseUrl(baseUrlFlag)
         if (resolvedBaseUrl === undefined) {
-          return yield* Effect.fail(
-            new ConfigError({
-              message: "--base-url is required (or run inside a cloned workspace)."
-            })
-          )
+          return yield* new ConfigError({
+            message: "--base-url is required (or run inside a cloned workspace)."
+          })
         }
 
         yield* validateSpaceId(space)

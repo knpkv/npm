@@ -7,7 +7,7 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as ManagedRuntime from "effect/ManagedRuntime"
 import * as Schema from "effect/Schema"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { parseDocument } from "yaml"
 
 const runtime = ManagedRuntime.make(NodeServices.layer)
@@ -58,6 +58,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "node scripts/check-effect-tsconfig-coverage.mjs",
     "node scripts/check-effect-reference-alignment.mjs",
     "node scripts/check-changed-effect-diagnostics.mjs",
+    "node --test scripts/check-changed-effect-diagnostics.test.mjs",
     "node scripts/check-package-script-portability.mjs",
     "node scripts/check-workflow-action-pins.mjs",
     "node scripts/check-workflow-secret-boundaries.mjs",
@@ -77,6 +78,7 @@ test("default lint retains every original check and both CI partitions", () => {
     "check-effect-tsconfig-coverage.mjs",
     "check-effect-reference-alignment.mjs",
     "check-changed-effect-diagnostics.mjs",
+    "check-changed-effect-diagnostics.test.mjs",
     "check-package-script-portability.mjs",
     "check-workflow-action-pins.mjs",
     "check-workflow-secret-boundaries.mjs",
@@ -114,7 +116,7 @@ test("the existing Lint check depends on both bounded jobs without a skip-succes
   assert.equal(requiredJob["continue-on-error"], undefined)
   assert.equal(requiredJob["timeout-minutes"] <= 2, true)
   for (const [job, command, timeout] of [
-    [staticJob, "pnpm lint:static", 15],
+    [staticJob, "pnpm lint:static", 40],
     [coverageJob, "pnpm lint:changeset-coverage", 20]
   ]) {
     assert.equal(job["timeout-minutes"], timeout)

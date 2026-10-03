@@ -9,7 +9,7 @@ import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
-import { ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcessSpawner } from "effect/process"
 import {
   GitError,
   GitMergeConflictError,
@@ -358,7 +358,7 @@ const ensureInitializedFn = (fs: FileSystem.FileSystem, gitDir: string) =>
   Effect.gen(function*() {
     const initialized = yield* existsOrFalse(fs.exists(gitDir))
     if (!initialized) {
-      return yield* Effect.fail(new GitNotInitializedError())
+      return yield* new GitNotInitializedError()
     }
   })
 
@@ -436,7 +436,7 @@ const make = Effect.gen(function*() {
         // Check for changes
         const statusOutput = yield* runGitAllowEmpty(["status", "--porcelain"], confluenceDir)
         if (statusOutput.trim() === "") {
-          return yield* Effect.fail(new GitNoChangesError())
+          return yield* new GitNoChangesError()
         }
 
         const args: Array<string> = ["commit", "-m", options.message]
@@ -546,7 +546,7 @@ const make = Effect.gen(function*() {
         const output = yield* runGitAllowEmpty(["status", "--porcelain"], confluenceDir)
         const files = getConflictedFiles(output)
         if (files.length > 0) {
-          return yield* Effect.fail(new GitMergeConflictError({ files }))
+          return yield* new GitMergeConflictError({ files })
         }
 
         yield* runGit(["commit", "--no-edit"], confluenceDir)

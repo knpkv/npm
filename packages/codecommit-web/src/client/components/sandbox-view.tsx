@@ -1,7 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import { SandboxId } from "@knpkv/codecommit-core/Domain.js"
 import { Button, StateLabel, StatePanel, type RlyStateTone } from "@knpkv/rly/primitives"
-import { AsyncResult } from "effect/unstable/reactivity"
+import { AsyncResult } from "effect/reactivity"
 import { CopyIcon, EyeIcon, EyeOffIcon } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useNavigate, useParams, useSearchParams } from "react-router"

@@ -4,8 +4,8 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { FileSystem, Layer, Path, Schema } from "effect"
+import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
-import { Command } from "effect/unstable/cli"
 import { agentEfforts, defaultSessionAgentSettings, SessionAgentSettings } from "../src/agent/agentSettings.js"
 import { root } from "../src/cli/root.js"
 import { ConfigService, layer as ConfigLayer, parseConfigPatch } from "../src/services/ConfigService.js"
