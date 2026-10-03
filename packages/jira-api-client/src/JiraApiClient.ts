@@ -19,7 +19,7 @@ import type * as HttpClientError from "effect/unstable/http/HttpClientError"
 import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Generated from "./generated/JiraApi.js"
-import { JiraApiConfig, type JiraApiConfigContract } from "./JiraApiConfig.js"
+import { JiraApiConfig, type JiraApiConfigContract, type JiraApiCredential } from "./JiraApiConfig.js"
 
 export interface UploadAttachmentInput {
   readonly bytes: Uint8Array
@@ -34,26 +34,48 @@ export interface JiraApiClientContract extends Generated.JiraApi {
   ) => Effect.Effect<Generated.AddAttachment200, HttpClientError.HttpClientError | SchemaError>
 }
 
-const authorizationHeader = (config: JiraApiConfigContract): string =>
-  config.auth.type === "basic"
-    ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
-    : `Bearer ${Redacted.value(config.auth.accessToken)}`
+const authorizationHeader = (auth: JiraApiCredential): string =>
+  auth.type === "basic"
+    ? `Basic ${Encoding.encodeBase64(`${auth.email}:${Redacted.value(auth.apiToken)}`)}`
+    : `Bearer ${Redacted.value(auth.accessToken)}`
 
-const apiBaseUrl = (config: JiraApiConfigContract): string =>
-  config.auth.type === "oauth2"
-    ? `https://api.atlassian.com/ex/jira/${config.auth.cloudId}`
-    : config.baseUrl
+const apiBaseUrl = (baseUrl: string, auth: JiraApiCredential): string =>
+  auth.type === "oauth2" ? `https://api.atlassian.com/ex/jira/${auth.cloudId}` : baseUrl
+
+/**
+ * Where the credential is turned into a header.
+ *
+ * Both the host and the `Authorization` header come from `auth`, so they are derived together from
+ * one value rather than separately from two reads that could disagree about which site is being
+ * addressed. When `resolveAuth` is present that pair is recomputed per request, which is the only
+ * way a token refreshed mid-run reaches the wire — `mapRequest` would capture the startup value.
+ */
+const addressAndAuthorize = (
+  config: JiraApiConfigContract
+): (client: HttpClient.HttpClient) => HttpClient.HttpClient => {
+  const resolve = config.resolveAuth
+  if (resolve === undefined) {
+    return HttpClient.mapRequest(flow(
+      HttpClientRequest.prependUrl(apiBaseUrl(config.baseUrl, config.auth)),
+      HttpClientRequest.setHeader("Authorization", authorizationHeader(config.auth))
+    ))
+  }
+  return HttpClient.mapRequestEffect((request) =>
+    Effect.map(resolve, (auth) =>
+      request.pipe(
+        HttpClientRequest.prependUrl(apiBaseUrl(config.baseUrl, auth)),
+        HttpClientRequest.setHeader("Authorization", authorizationHeader(auth))
+      ))
+  )
+}
 
 export const make = (
   httpClient: HttpClient.HttpClient,
   config: JiraApiConfigContract
 ): Generated.JiraApi =>
   Generated.make(httpClient.pipe(
-    HttpClient.mapRequest(flow(
-      HttpClientRequest.prependUrl(apiBaseUrl(config)),
-      HttpClientRequest.setHeader("Authorization", authorizationHeader(config)),
-      HttpClientRequest.setHeader("Accept", "application/json")
-    ))
+    addressAndAuthorize(config),
+    HttpClient.mapRequest(HttpClientRequest.setHeader("Accept", "application/json"))
   ))
 
 const makeUploadAttachment =

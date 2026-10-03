@@ -1,12 +1,12 @@
 import { NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
-import { Effect, Encoding, FileSystem, Path, Schema, Stream } from "effect"
+import { Effect, Encoding, FileSystem, Layer, Path, Schema, Stream } from "effect"
 import { LanguageModel } from "effect/unstable/ai"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { model, streamEvents } from "../src/index.js"
+import { version as expectedCodexVersion } from "./fixtures/codex-0.154.0.js"
 
-const expectedCodexVersion = "codex-cli 0.147.0"
 const smokeModel = "gpt-5.6-luna"
 const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
 const EventWithOptionalItem = Schema.fromJsonString(
@@ -15,18 +15,24 @@ const EventWithOptionalItem = Schema.fromJsonString(
     type: Schema.String
   })
 )
+const decodeEvent = Schema.decodeUnknownEffect(EventWithOptionalItem)
 
 it.effect("calls the real authenticated Codex CLI through the public model", () =>
   Effect.gen(function*() {
     const response = yield* LanguageModel.generateText({
       prompt: "Reply with exactly CODEX_SMOKE_OK and nothing else."
-    }).pipe(
-      Effect.provide(model({ cwd: ".", model: smokeModel, promptOnly: true, timeout: "2 minutes" })),
-      Effect.provide(NodeServices.layer)
-    )
+    })
 
     expect(response.text.trim()).toBe("CODEX_SMOKE_OK")
-  }))
+  }).pipe(
+    // This opt-in test is the executable boundary; its model and process services share one lifetime.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(
+      model({ cwd: ".", model: smokeModel, promptOnly: true, timeout: "2 minutes" }).pipe(
+        Layer.provide(NodeServices.layer)
+      )
+    )
+  ))
 
 it.effect("keeps real prompt-only turns free of external and host-reading tools", () =>
   Effect.gen(function*() {
@@ -55,10 +61,15 @@ it.effect("keeps real prompt-only turns free of external and host-reading tools"
       ].join("\n"),
       promptOnly: true,
       timeout: "2 minutes"
-    }).pipe(Stream.mapEffect(Schema.decodeUnknownEffect(EventWithOptionalItem)), Stream.runCollect)
+    }).pipe(Stream.mapEffect((line) => decodeEvent(line)), Stream.runCollect)
 
     const itemTypes = Array.from(events, (event) => event.item?.type)
     expect(itemTypes).not.toContain("web_search")
     expect(itemTypes).not.toContain("image_view")
     expect(itemTypes).not.toContain("view_image")
-  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)))
+  }).pipe(
+    Effect.scoped,
+    // This opt-in test owns the filesystem and child-process scope for its complete scenario.
+    // @effect-diagnostics-next-line strictEffectProvide:off
+    Effect.provide(NodeServices.layer)
+  ))

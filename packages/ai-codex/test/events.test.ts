@@ -1,7 +1,20 @@
 import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
 import * as NodePath from "@effect/platform-node/NodePath"
 import { describe, expect, it } from "@effect/vitest"
-import { ConfigProvider, Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Schema, Sink, Stream } from "effect"
+import {
+  Cause,
+  ConfigProvider,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Path,
+  Schema,
+  Sink,
+  Stream
+} from "effect"
 import * as TestClock from "effect/testing/TestClock"
 import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
@@ -37,7 +50,6 @@ const fakeProcessLayer = (
             options?.kills?.push("killed")
           }),
         pid: ChildProcessSpawner.ProcessId(42),
-        reref: Effect.void,
         stderr: options?.stderr ?? Stream.empty,
         stdin: Sink.drain,
         stdout,
@@ -168,7 +180,7 @@ describe("streamEvents", () => {
       }
       expect(Exit.isFailure(result)).toBe(true)
       if (Exit.isFailure(result)) {
-        expect(result.cause.reasons[0]?.error).toMatchObject({
+        expect(result.cause.reasons.find(Cause.isFailReason)?.error).toMatchObject({
           _tag: "CodexTransportError",
           phase: "configuration"
         })

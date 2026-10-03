@@ -46,12 +46,14 @@ const protocolError = (diagnostic: string, cause: unknown): CodexTransportError 
     phase: "protocol"
   })
 
+export const decodeLine = (line: string) =>
+  decodeEvent(line).pipe(
+    Effect.mapError((cause) => protocolError("Codex emitted malformed JSONL", cause))
+  )
+
 export const decodeTranscript = Effect.fn("CodexProtocol.decodeTranscript")(function*(stdout: string) {
   const lines = stdout.split(/\r?\n/u).filter((line) => line.trim().length > 0)
-  const events = yield* Effect.forEach(lines, (line) =>
-    decodeEvent(line).pipe(
-      Effect.mapError((cause) => protocolError("Codex emitted malformed JSONL", cause))
-    ))
+  const events = yield* Effect.forEach(lines, decodeLine)
 
   let threadId: string | undefined
   let completed = false

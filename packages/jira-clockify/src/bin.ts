@@ -11,6 +11,7 @@ import * as Stdio from "effect/Stdio"
 import { Command } from "effect/unstable/cli"
 import { HeadlessLayer } from "./cli/layers.js"
 import { root } from "./cli/root.js"
+import { reportUnhandled } from "./cli/runtimeFailure.js"
 
 const processArgv = Effect.gen(function*() {
   const stdio = yield* Stdio.Stdio
@@ -22,8 +23,11 @@ const cli = Command.runWith(root, {
   version: "0.1.0"
 })
 
-const program = processArgv.pipe(
-  Effect.flatMap((argv) => cli(argv)),
+const program = reportUnhandled(processArgv.pipe(
+  Effect.flatMap((argv) => cli(argv))
+)).pipe(
+  // This *is* the entry point: the one place the whole layer graph is composed and provided.
+  // @effect-diagnostics-next-line strictEffectProvide:off
   Effect.provide(HeadlessLayer)
 )
 
@@ -35,4 +39,6 @@ const program = processArgv.pipe(
 // parent, so both processes need the explicit exit. Always terminate.
 const forceExitTeardown: Runtime.Teardown = (exit) => Runtime.defaultTeardown(exit, (code) => process.exit(code))
 
-NodeRuntime.runMain(program, { teardown: forceExitTeardown })
+// The command boundary above renders unreported failures once. Runtime reporting stays disabled so
+// it cannot add a second stack trace after that concise diagnostic.
+NodeRuntime.runMain(program, { disableErrorReporting: true, teardown: forceExitTeardown })

@@ -20,7 +20,6 @@ const fakeProcessLayer = (calls: Array<ChildProcess.Command>, stdout: string) =>
         isRunning: Effect.succeed(false),
         kill: () => Effect.void,
         pid: ChildProcessSpawner.ProcessId(42),
-        reref: Effect.void,
         stderr: Stream.empty,
         stdin: Sink.drain,
         stdout: output,
@@ -90,7 +89,7 @@ describe("Claude Relay adapter boundary", () => {
         model({ cwd: "/workspace" }),
         fakeProcessLayer(calls, success({ value: "ok" }))
       )
-      const schema = Schema.Struct({ value: Schema.String }).annotate({
+      const schema = Schema.Struct({ value: Schema.Json }).annotate({
         default: { value: { allOf: "keep", uniqueItems: true } },
         examples: [{ value: { allOf: "keep", uniqueItems: true } }]
       })

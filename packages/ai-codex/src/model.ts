@@ -1,10 +1,17 @@
 import type * as Duration from "effect/Duration"
+import type * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as LanguageModel from "effect/unstable/ai/LanguageModel"
 import * as AiModel from "effect/unstable/ai/Model"
 import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { makeLanguageModel } from "./internal/languageModel.js"
+
+/** Supplied request, visible agent text, final answer or a fixed milestone; excludes reasoning and tool events. */
+export interface CodexActivity {
+  readonly kind: "request" | "status" | "text" | "response"
+  readonly text: string
+}
 
 /** Configuration for a local Codex-backed Effect AI model. */
 export interface CodexModelOptions {
@@ -13,7 +20,11 @@ export interface CodexModelOptions {
   /** Codex executable name or absolute path. Defaults to `codex`. */
   readonly executable?: string
   /** Optional Codex model override. */
-  readonly model?: string
+  readonly model?: string | undefined
+  /** Optional reasoning effort override. Omission preserves the configured default. */
+  readonly effort?: "minimal" | "low" | "medium" | "high" | "xhigh" | undefined
+  /** Observes live visible activity. Backpressure and cancellation follow the generation call. */
+  readonly onActivity?: ((activity: CodexActivity) => Effect.Effect<void>) | undefined
   /** Explicit extra variables for custom Codex providers. Parent variables are not inherited. */
   readonly environment?: Readonly<Record<string, string>>
   /** Filesystem access granted to Codex. Defaults to `read-only`. */

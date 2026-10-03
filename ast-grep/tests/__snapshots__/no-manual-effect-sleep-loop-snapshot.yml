@@ -1,0 +1,36 @@
+id: no-manual-effect-sleep-loop
+snapshots:
+  ? |
+    for (;;) {
+      yield* tick
+      yield* Effect.sleep("1 second")
+    }
+  : labels:
+      - source: |-
+          for (;;) {
+            yield* tick
+            yield* Effect.sleep("1 second")
+          }
+        style: primary
+        start: 0
+        end: 60
+      - source: yield* Effect.sleep("1 second")
+        style: secondary
+        start: 27
+        end: 58
+  ? |
+    while (true) {
+      yield* Effect.sleep("1 second")
+    }
+  : labels:
+      - source: |-
+          while (true) {
+            yield* Effect.sleep("1 second")
+          }
+        style: primary
+        start: 0
+        end: 50
+      - source: yield* Effect.sleep("1 second")
+        style: secondary
+        start: 17
+        end: 48

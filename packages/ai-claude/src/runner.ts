@@ -1,11 +1,15 @@
 import { Cause, Effect, Predicate, Stream } from "effect"
 import type { Duration } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { type ClaudeActivity, collectActivity } from "./activity.js"
 import { ClaudeFailureCause, transportFailure, transportToAiError } from "./errors.js"
 import type { ClaudeTransportError } from "./errors.js"
+import type { ClaudeModelOptions } from "./model.js"
 import { type ClaudeResult, decodeClaudeOutput } from "./protocol.js"
 
 interface RunOptions {
+  readonly effort: ClaudeModelOptions["effort"]
+  readonly onActivity?: ((activity: ClaudeActivity) => Effect.Effect<void>) | undefined
   readonly access: "prompt-only" | "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
@@ -69,6 +73,8 @@ const redactDiagnostic = (diagnostic: string, cwd: string): string => {
 }
 
 const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
+  // `prompt-only` passes an empty tool list, which is what stops the CLI exploring the filesystem to
+  // answer a prompt that already contains everything it needs.
   const tools = options.access === "workspace-write"
     ? "Read,Glob,Grep,Edit,Write"
     : options.access === "read-only"
@@ -82,7 +88,7 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
   const arguments_: Array<string> = [
     "--print",
     "--output-format",
-    "json",
+    options.onActivity === undefined ? "json" : "stream-json",
     "--input-format",
     "text",
     "--permission-mode",
@@ -92,6 +98,7 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
     "--no-session-persistence",
     "--safe-mode"
   ]
+  if (options.onActivity !== undefined) arguments_.push("--verbose", "--include-partial-messages")
   if (options.access === "prompt-only") {
     arguments_.push(
       "--setting-sources",
@@ -101,6 +108,7 @@ const makeArguments = (options: RunOptions): ReadonlyArray<string> => {
     )
   }
   if (options.model !== undefined) arguments_.push("--model", options.model)
+  if (options.effort !== undefined) arguments_.push("--effort", options.effort)
   if (options.jsonSchema !== undefined) arguments_.push("--json-schema", options.jsonSchema)
   return arguments_
 }
@@ -136,12 +144,18 @@ export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*
     const handle = yield* spawner.spawn(command).pipe(
       Effect.mapError((cause) => transportFailure("process", "Unable to start Claude CLI", cause))
     )
+    if (options.onActivity !== undefined) {
+      yield* options.onActivity({ kind: "request", text: options.prompt })
+      yield* options.onActivity({ kind: "status", text: "Agent started" })
+    }
     const collected = yield* Effect.all({
       exitCode: handle.exitCode.pipe(
         Effect.mapError((cause) => transportFailure("process", "Unable to read Claude CLI exit status", cause))
       ),
       stderr: collectBounded(handle.stderr, options.maxStderrBytes, "stderr", method),
-      stdout: collectBounded(handle.stdout, options.maxOutputBytes, "stdout", method)
+      stdout: options.onActivity === undefined
+        ? collectBounded(handle.stdout, options.maxOutputBytes, "stdout", method)
+        : collectActivity(handle.stdout, options.maxOutputBytes, method, options.onActivity)
     }, { concurrency: "unbounded" })
 
     if (collected.exitCode !== ChildProcessSpawner.ExitCode(0)) {
@@ -162,6 +176,7 @@ export const runClaude = Effect.fn("ClaudeCliLanguageModel.runClaude")(function*
         new ClaudeFailureCause({ reason: "error-result" })
       )
     }
+    if (options.onActivity !== undefined) yield* options.onActivity({ kind: "status", text: "Answer received" })
     return result
   }).pipe(Effect.scoped)
 

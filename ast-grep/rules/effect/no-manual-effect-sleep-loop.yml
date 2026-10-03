@@ -1,0 +1,35 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-manual-effect-sleep-loop
+language: tsx
+severity: error
+message: "Use Effect.repeat with a Schedule for polling; do not sleep inside an infinite loop"
+
+rule:
+  any:
+    - all:
+        - pattern: |
+            for (;;) {
+              $$$BODY
+            }
+        - has:
+            pattern: yield* Effect.sleep($$$ARGS)
+            stopBy: end
+    - all:
+        - pattern: |
+            while (true) {
+              $$$BODY
+            }
+        - has:
+            pattern: yield* Effect.sleep($$$ARGS)
+            stopBy: end
+
+files:
+  - "packages/jira-clockify/src/**/*.ts"
+  - "packages/jira-clockify/src/**/*.tsx"
+
+ignores:
+  - "**/generated/**"
+  - "**/vendor/**"
+
+note: Polling cadence, interruption, and testing belong to Effect.repeat plus Schedule.spaced.

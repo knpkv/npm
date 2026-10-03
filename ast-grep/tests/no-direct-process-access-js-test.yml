@@ -1,0 +1,31 @@
+id: no-direct-process-access-js
+valid:
+  - |
+    import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+    const command = ChildProcess.make("/bin/bash", ["-c", "true"], { env: {}, extendEnv: false })
+  - |
+    const source = 'import { spawnSync } from "node:child_process"'
+  - |
+    import { Readable } from "node:stream"
+invalid:
+  - |
+    import { spawnSync } from "node:child_process"
+    spawnSync("bash", ["-c", "true"])
+  - |
+    import ChildProcess from "child_process"
+  - |
+    import * as ChildProcess from "node:child_process"
+  - |
+    const childProcess = require("child_process")
+  - |
+    const childProcess = require("node:child_process")
+  - |
+    const childProcess = await import("child_process")
+  - |
+    const childProcess = await import("node:child_process")
+  - |
+    process.env.CI
+  - |
+    import hostProcess from "node:process"
+  - |
+    const hostProcess = require("process")

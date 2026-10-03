@@ -1,0 +1,73 @@
+id: no-direct-process-access-js
+snapshots:
+  ? |
+    const childProcess = await import("child_process")
+  : labels:
+      - source: import("child_process")
+        style: primary
+        start: 27
+        end: 50
+  ? |
+    const childProcess = await import("node:child_process")
+  : labels:
+      - source: import("node:child_process")
+        style: primary
+        start: 27
+        end: 55
+  ? |
+    const childProcess = require("child_process")
+  : labels:
+      - source: require("child_process")
+        style: primary
+        start: 21
+        end: 45
+  ? |
+    const childProcess = require("node:child_process")
+  : labels:
+      - source: require("node:child_process")
+        style: primary
+        start: 21
+        end: 50
+  ? |
+    const hostProcess = require("process")
+  : labels:
+      - source: require("process")
+        style: primary
+        start: 20
+        end: 38
+  ? |
+    import * as ChildProcess from "node:child_process"
+  : labels:
+      - source: import * as ChildProcess from "node:child_process"
+        style: primary
+        start: 0
+        end: 50
+  ? |
+    import ChildProcess from "child_process"
+  : labels:
+      - source: import ChildProcess from "child_process"
+        style: primary
+        start: 0
+        end: 40
+  ? |
+    import hostProcess from "node:process"
+  : labels:
+      - source: import hostProcess from "node:process"
+        style: primary
+        start: 0
+        end: 38
+  ? |
+    import { spawnSync } from "node:child_process"
+    spawnSync("bash", ["-c", "true"])
+  : labels:
+      - source: import { spawnSync } from "node:child_process"
+        style: primary
+        start: 0
+        end: 46
+  ? |
+    process.env.CI
+  : labels:
+      - source: process.env
+        style: primary
+        start: 0
+        end: 11

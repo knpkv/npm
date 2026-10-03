@@ -3,6 +3,15 @@ import * as Effect from "effect/Effect"
 import { Command } from "effect/unstable/cli"
 import { HeadlessLayer } from "../src/cli/layers.js"
 import { root } from "../src/cli/root.js"
+import { reportUnhandled } from "../src/cli/runtimeFailure.js"
+import { ReconcileError } from "../src/services/ReconcileService.js"
+import { makeFakeHeadless } from "../src/testing/fakeHeadless.js"
+
+// A test case is its own entry point: it composes exactly the layers that case needs and
+// provides them there. Both provide diagnostics are about production wiring, where a Layer
+// provided mid-graph can cut a scope short.
+// @effect-diagnostics strictEffectProvide:off
+// @effect-diagnostics multipleEffectProvide:off
 
 const run = (args: ReadonlyArray<string>) =>
   Command.runWith(root, { version: "0.0.0-test" })(args).pipe(
@@ -20,7 +29,11 @@ describe("jcf command surface", () => {
     ["timer", "log", "--help"],
     ["timer", "edit", "--help"],
     ["issue", "list", "--help"],
-    ["sync", "reconcile", "--help"]
+    ["sync", "reconcile", "--help"],
+    ["watch", "--help"],
+    ["config", "set", "session-root", "--help"],
+    ["config", "set", "session-ticket", "--help"],
+    ["config", "set", "idle-cap", "--help"]
   ]
 
   for (const args of canonicalCommands) {
@@ -51,4 +64,46 @@ describe("jcf command surface", () => {
         expect(exit._tag).toBe("Failure")
       }))
   }
+
+  it.effect("reports an unhandled timer safety-read failure before exiting", () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless({ clockifyRunningTimerReadFails: true })
+      const exit = yield* reportUnhandled(
+        Command.runWith(root, { version: "0.0.0-test" })(["timer", "start", "PROJ-1"])
+      ).pipe(
+        Effect.provide(fake.layer),
+        Effect.exit
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(fake.world.stderr.join("\n")).toContain("Could not check for a running Clockify timer")
+    }))
+
+  it.effect("reports a propagated pre-write refresh failure", () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless()
+      const exit = yield* reportUnhandled(
+        Effect.fail(new ReconcileError({ message: "Could not refresh providers before writing" }))
+      ).pipe(
+        Effect.provide(fake.layer),
+        Effect.exit
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(fake.world.stderr).toEqual(["Could not refresh providers before writing"])
+    }))
+
+  it.effect("does not print an already-reported usage failure twice", () =>
+    Effect.gen(function*() {
+      const fake = makeFakeHeadless()
+      const exit = yield* reportUnhandled(
+        Command.runWith(root, { version: "0.0.0-test" })(["watch", "codex"])
+      ).pipe(
+        Effect.provide(fake.layer),
+        Effect.exit
+      )
+
+      expect(exit._tag).toBe("Failure")
+      expect(fake.world.stderr.filter((line) => line.includes("Unsupported agent"))).toHaveLength(1)
+    }))
 })

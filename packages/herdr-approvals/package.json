@@ -52,7 +52,7 @@
   },
   "scripts": {
     "build": "rimraf dist && tsc -b --force && node scripts/build-assets.mjs",
-    "check": "tsc -b tsconfig.json && tsc -p tsconfig.worker.json --noEmit",
+    "check": "tsc -b tsconfig.json && tsc -p tsconfig.worker.json --noEmit && tsc -p scripts/tsconfig.json",
     "clean": "rimraf dist *.tsbuildinfo",
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\"",
     "pack:deterministic": "pnpm build && node ../../scripts/pack-herdr.mjs .",

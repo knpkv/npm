@@ -7,12 +7,14 @@ describe("Codex configuration", () => {
       {
         access: "read-only",
         cwd: "/workspace",
+        effort: undefined,
         environment: {},
         executable: "codex",
         maxOutputBytes: 1_048_576,
         maxPromptBytes: 1_048_576,
         maxStderrBytes: 65_536,
         model: undefined,
+        promptOnly: false,
         timeout: "2 minutes"
       },
       undefined,

@@ -15,8 +15,9 @@ const textEncoder = new TextEncoder()
  * contact external systems. Prompt-only turns receive supplied text and must
  * never gain one of these capabilities from a user's Codex installation.
  *
- * Keep this list synchronized with `codex features list`; new host-facing
- * features require an explicit classification before prompt-only use.
+ * Reviewed against Codex 0.154.0; see docs/prompt-only-features.md for decisions.
+ * The captured inventory fixture is independent of these lists. New features
+ * require explicit classification before prompt-only use.
  */
 export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freeze([
   "apply_patch_freeform",
@@ -25,15 +26,20 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "apps_mcp_path_override",
   "artifact",
   "auth_elicitation",
+  "background_paginated_rollout_migration",
+  "bedrock_setup_wizard",
   "browser_use",
   "browser_use_external",
   "browser_use_full_cdp_access",
+  "chronicle",
   "code_mode",
   "code_mode_buffered_exec",
   "code_mode_host",
   "code_mode_only",
+  "code_mode_prewarm",
   "computer_use",
   "codex_git_commit",
+  "context_management",
   "default_mode_request_user_input",
   "deferred_executor",
   "deferred_tool_world_state",
@@ -43,12 +49,20 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "executor_capability_discovery",
   "external_agent_memory_import",
   "goals",
+  "guardian_enhanced_node_repl_transcripts",
+  "guardian_ext",
+  "guardian_node_repl_transcript_images",
+  "guardian_reuse_parent_compaction",
   "hooks",
   "image_generation",
   "in_app_browser",
+  "in_app_chat",
+  "in_app_dictation",
+  "in_app_local_automation",
   "js_repl",
   "js_repl_tools_only",
   "mcp_2026_07_28",
+  "mcp_oauth_refresh_coordination",
   "memories",
   "multi_agent",
   "multi_agent_v2",
@@ -58,6 +72,8 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "plugin_hooks",
   "plugin_sharing",
   "plugins",
+  "powershell_shell_version",
+  "psp",
   "recommended_plugins",
   "remote_control",
   "remote_models",
@@ -67,12 +83,15 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "respect_system_proxy",
   "search_tool",
   "shell_snapshot",
+  "shell_snapshot_v2",
   "shell_tool",
   "shell_zsh_fork",
   "skill_env_var_dependency_prompt",
   "skill_mcp_dependency_install",
   "skill_search",
+  "sleep_tool",
   "standalone_web_search",
+  "step_model_switching",
   "tool_call_mcp_elicitation",
   "tool_search",
   "tool_search_always_defer_mcp_tools",
@@ -80,21 +99,28 @@ export const PROMPT_ONLY_DISABLED_FEATURES: ReadonlyArray<string> = Object.freez
   "tui_app_server",
   "unavailable_dummy_tools",
   "undo",
+  // 0.153.4 keeps this implementation enabled; shell_tool=false is the registration gate.
   "unified_exec",
+  "unified_exec_tty",
   "unified_exec_zsh_fork",
   "use_agent_identity",
   "view_image",
   "web_search_cached",
   "web_search_request",
-  "workspace_dependencies"
+  "workspace_dependencies",
+  "worktrees"
 ])
 
-/** Installed features that do not add a host or external capability. */
+/** Features with no additional authority, including safeguards, metadata and removed compatibility flags. */
 export const PROMPT_ONLY_SAFE_FEATURES: ReadonlyArray<string> = Object.freeze([
-  "chronicle",
+  "apply_patch_preserve_line_endings",
+  "code_mode_interrupt",
   "collaboration_modes",
+  "compaction_image_budget",
   "concurrent_reasoning_summaries",
+  "content_item_kinds",
   "current_time_reminder",
+  "cwd_relative_turn_diffs",
   "elevated_windows_sandbox",
   "enable_request_compression",
   "executed_tool_call_metadata",
@@ -103,30 +129,42 @@ export const PROMPT_ONLY_SAFE_FEATURES: ReadonlyArray<string> = Object.freeze([
   "fast_mode",
   "guardian_approval",
   "guardianv2",
+  "guardianv2.thread_context",
   "image_detail_original",
   "image_resize_notice",
   "in_app_updates",
   "item_ids",
   "local_thread_store_compression",
+  "local_thread_store_shared_compression",
   "mentions_v2",
+  "omit_app_server_notification_media",
   "personality",
   "prevent_idle_sleep",
   "realtime_conversation",
+  "reasoning_effort_override",
   "remote_compaction_v2",
   "resize_all_images",
   "responses_websockets",
   "responses_websockets_v2",
+  "retain_client_developer_messages",
   "rollout_budget",
   "runtime_metrics",
   "secret_auth_storage",
+  "send_async_message",
+  "skip_host_skill_discovery",
   "sqlite",
   "steer",
   "terminal_resize_reflow",
   "terminal_visualization_instructions",
   "token_budget",
+  "transcript_v2",
+  "unbounded_connection_retries",
+  "unified_image_budget",
   "use_legacy_landlock",
   "use_linux_sandbox_bwrap",
-  "workspace_owner_usage_nudge"
+  "windows_sandbox_service",
+  "workspace_owner_usage_nudge",
+  "write_stdin_approval"
 ])
 
 const optionalEnvironmentValue = (name: string) => Config.option(Config.string(name))
@@ -167,6 +205,7 @@ const reviewedChildEnvironment = Config.all({
 )
 
 export interface NormalizedOptions {
+  readonly effort: CodexModelOptions["effort"]
   readonly access: "read-only" | "workspace-write"
   readonly cwd: string
   readonly environment: Readonly<Record<string, string>>
@@ -200,6 +239,7 @@ export const normalizeOptions = (
       return yield* invalidRequest(method, "cwd", "must not be empty")
     }
     return {
+      effort: options.effort,
       access: options.access ?? "read-only",
       cwd: options.cwd,
       environment: {
@@ -252,6 +292,7 @@ export const makeArguments = (
     }
   }
   if (options.model !== undefined) args.push("--model", options.model)
+  if (options.effort !== undefined) args.push("-c", `model_reasoning_effort=${JSON.stringify(options.effort)}`)
   if (schemaFile !== undefined) args.push("--output-schema", schemaFile)
   args.push("-")
   return Object.freeze(args)

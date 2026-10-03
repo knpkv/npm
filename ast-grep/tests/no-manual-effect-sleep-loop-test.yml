@@ -1,0 +1,20 @@
+id: no-manual-effect-sleep-loop
+valid:
+  - |
+    const poll = tick.pipe(Effect.repeat({ schedule: Schedule.spaced("1 second") }))
+  - |
+    yield* Effect.sleep("1 second")
+  - |
+    while (true) {
+      yield* Queue.take(queue)
+    }
+invalid:
+  - |
+    for (;;) {
+      yield* tick
+      yield* Effect.sleep("1 second")
+    }
+  - |
+    while (true) {
+      yield* Effect.sleep("1 second")
+    }

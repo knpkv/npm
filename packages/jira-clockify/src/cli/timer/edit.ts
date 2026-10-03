@@ -4,10 +4,18 @@
  * @module
  */
 import { ClockifyApiClient, type Project, type Tag } from "@knpkv/clockify-api-client"
-import { Console, Effect, SubscriptionRef } from "effect"
+import { Console, Data, Effect, Runtime, SubscriptionRef } from "effect"
 import { Command, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { TimerService } from "../../services/TimerService.js"
+import * as WriterGuard from "../writerGuard.js"
+
+/** A guarded edit was refused after its reason was printed; fails so a script sees non-zero. */
+export class TimerEditFailedError extends Data.TaggedError("TimerEditFailedError")<{
+  readonly message: string
+}> {
+  override readonly [Runtime.errorReported] = false
+}
 
 type EditableField = "project" | "billable" | "tags"
 type TagEditAction = "add" | "remove"
@@ -40,10 +48,11 @@ export const edit = Command.make(
       const clockifyAuth = yield* ClockifyAuth
       const clockifyClient = yield* ClockifyApiClient
       const auth = yield* clockifyAuth.getConfig.pipe(Effect.catch(() => Effect.succeed(null)))
-      if (!auth || !current.clockifyEntryId) {
+      if (auth === null || current.clockifyEntryId === null) {
         yield* Console.log("Cannot edit: missing Clockify auth or entry ID.")
         return
       }
+      const clockifyEntryId = current.clockifyEntryId
 
       const what = yield* Prompt.select({
         message: "What to edit?",
@@ -73,16 +82,23 @@ export const edit = Command.make(
             { title: "(none)", value: "" }
           ]
         })
-        if (!current.startedAt) return
-        // Fetch existing entry to preserve tags
-        const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-          Effect.catch(() => Effect.succeed(null))
+        const startedAt = current.startedAt
+        if (startedAt === null) return
+        yield* WriterGuard.mutate(Effect.gen(function*() {
+          const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
+          yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
+            start: startedAt.toISOString(),
+            ...(selected && { projectId: selected }),
+            ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] }),
+            ...((entry?.billable !== undefined) && { billable: entry.billable })
+          })
+        })).pipe(
+          Effect.catch((error) =>
+            Console.log(`Error: ${error.message}`).pipe(
+              Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+            )
+          )
         )
-        yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
-          start: current.startedAt.toISOString(),
-          ...(selected && { projectId: selected }),
-          ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] })
-        }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
 
         const name = projects.find((p) => p.id === selected)?.name ?? null
         yield* Console.log(`Project updated: ${name ?? "(none)"}`)
@@ -96,16 +112,23 @@ export const edit = Command.make(
             { title: "No", value: false }
           ]
         })
-        if (!current.startedAt) return
-        const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
-          Effect.catch(() => Effect.succeed(null))
+        const startedAt = current.startedAt
+        if (startedAt === null) return
+        yield* WriterGuard.mutate(Effect.gen(function*() {
+          const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
+          yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
+            start: startedAt.toISOString(),
+            billable: val,
+            ...((entry?.projectId) && { projectId: entry.projectId }),
+            ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] })
+          })
+        })).pipe(
+          Effect.catch((error) =>
+            Console.log(`Error: ${error.message}`).pipe(
+              Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+            )
+          )
         )
-        yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
-          start: current.startedAt.toISOString(),
-          billable: val,
-          ...((entry?.projectId) && { projectId: entry.projectId }),
-          ...((entry?.tagIds && entry.tagIds.length > 0) && { tagIds: [...entry.tagIds] })
-        }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
 
         yield* Console.log(`Billable updated: ${val ? "yes" : "no"}`)
       }
@@ -114,7 +137,7 @@ export const edit = Command.make(
         const allTags = yield* clockifyClient.getTags(auth.workspaceId).pipe(
           Effect.catch(() => Effect.succeed(emptyTags()))
         )
-        const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, current.clockifyEntryId).pipe(
+        const entry = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId).pipe(
           Effect.catch(() => Effect.succeed(null))
         )
         const currentTagIds = new Set(entry?.tagIds ?? [])
@@ -142,14 +165,24 @@ export const edit = Command.make(
             message: "Add tag:",
             choices: available.map((t) => ({ title: t.name, value: t.id }))
           })
-          if (!current.startedAt) return
-          const newTagIds = [...currentTagIds, tagId]
-          yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
-            start: current.startedAt.toISOString(),
-            tagIds: newTagIds,
-            ...((entry?.projectId) && { projectId: entry.projectId }),
-            ...((entry?.billable !== undefined) && { billable: entry.billable })
-          }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
+          const startedAt = current.startedAt
+          if (startedAt === null) return
+          yield* WriterGuard.mutate(Effect.gen(function*() {
+            const latest = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
+            const newTagIds = [...new Set([...(latest?.tagIds ?? []), tagId])]
+            yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
+              start: startedAt.toISOString(),
+              tagIds: newTagIds,
+              ...((latest?.projectId) && { projectId: latest.projectId }),
+              ...((latest?.billable !== undefined) && { billable: latest.billable })
+            })
+          })).pipe(
+            Effect.catch((error) =>
+              Console.log(`Error: ${error.message}`).pipe(
+                Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+              )
+            )
+          )
           yield* Console.log(`Tag added: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
 
@@ -163,14 +196,24 @@ export const edit = Command.make(
             message: "Remove tag:",
             choices: current_tags.map((t) => ({ title: t.name, value: t.id }))
           })
-          if (!current.startedAt) return
-          const newTagIds = [...currentTagIds].filter((id) => id !== tagId)
-          yield* clockifyClient.updateTimeEntry(auth.workspaceId, current.clockifyEntryId, {
-            start: current.startedAt.toISOString(),
-            tagIds: newTagIds,
-            ...((entry?.projectId) && { projectId: entry.projectId }),
-            ...((entry?.billable !== undefined) && { billable: entry.billable })
-          }).pipe(Effect.catch((e) => Console.log(`Error: ${e.message}`)))
+          const startedAt = current.startedAt
+          if (startedAt === null) return
+          yield* WriterGuard.mutate(Effect.gen(function*() {
+            const latest = yield* clockifyClient.getTimeEntry(auth.workspaceId, clockifyEntryId)
+            const newTagIds = (latest?.tagIds ?? []).filter((id) => id !== tagId)
+            yield* clockifyClient.updateTimeEntry(auth.workspaceId, clockifyEntryId, {
+              start: startedAt.toISOString(),
+              tagIds: newTagIds,
+              ...((latest?.projectId) && { projectId: latest.projectId }),
+              ...((latest?.billable !== undefined) && { billable: latest.billable })
+            })
+          })).pipe(
+            Effect.catch((error) =>
+              Console.log(`Error: ${error.message}`).pipe(
+                Effect.andThen(Effect.fail(new TimerEditFailedError({ message: error.message })))
+              )
+            )
+          )
           yield* Console.log(`Tag removed: ${allTags.find((t) => t.id === tagId)?.name}`)
         }
       }

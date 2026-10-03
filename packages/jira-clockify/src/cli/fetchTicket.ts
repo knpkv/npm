@@ -24,7 +24,7 @@ import * as Predicate from "effect/Predicate"
 import { type JiraTicket, mapIssueToTicket } from "../services/TicketService.js"
 
 /** Shared user hint for the {@link FetchTicketResult} `NotLoggedIn` case. */
-export const NOT_LOGGED_IN_HINT = "Not logged in to Jira. Run: jcf auth jira login"
+export { NOT_LOGGED_IN_HINT } from "../utils/hints.js"
 
 /** Outcome of {@link fetchTicketByKey}. */
 export type FetchTicketResult =
@@ -32,6 +32,32 @@ export type FetchTicketResult =
   | { readonly _tag: "NotLoggedIn" }
   | { readonly _tag: "NotFound" }
   | { readonly _tag: "FetchError"; readonly message: string }
+
+/**
+ * A best-effort reader of issue titles, bound to the services it needs.
+ *
+ * Returns a function rather than taking a key, so a caller resolves the Jira services once and then
+ * asks about many issues without carrying their requirements through its own signatures — which is
+ * what lets a web handler ask for a title without importing a Jira client.
+ *
+ * Best-effort by construction: {@link fetchTicketByKey} reports "not found" and "not logged in" as
+ * values rather than failures, and both become a null title. A title Clockify cannot be told is a
+ * worse entry; a title that costs the write is a worse outcome.
+ */
+export const ticketSummaryReader: Effect.Effect<
+  (ticketKey: string) => Effect.Effect<string | null>,
+  never,
+  JiraApiClient | JiraAuth
+> = Effect.gen(function*() {
+  const jira = yield* JiraApiClient
+  const auth = yield* JiraAuth
+  return (ticketKey: string) =>
+    fetchTicketByKey(ticketKey).pipe(
+      Effect.map((result) => (result._tag === "Found" ? result.ticket.summary : null)),
+      Effect.provideService(JiraApiClient, jira),
+      Effect.provideService(JiraAuth, auth)
+    )
+})
 
 export const fetchTicketByKey = (
   key: string
@@ -47,7 +73,7 @@ export const fetchTicketByKey = (
       Effect.map((loggedIn): FetchTicketResult | null => (loggedIn ? null : { _tag: "NotLoggedIn" })),
       Effect.catch((e) => Effect.succeed<FetchTicketResult>({ _tag: "FetchError", message: e.message }))
     )
-    if (loginCheck) return loginCheck
+    if (loginCheck !== null) return loginCheck
 
     const jira = yield* JiraApiClient
     return yield* jira.getIssue(key, {
