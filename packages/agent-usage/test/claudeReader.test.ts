@@ -36,6 +36,12 @@ describe("readClaude", () => {
     expect(result.events[0]?.fast).toBe(true)
   })
 
+  it("reads a message whose speed is null as standard speed", () => {
+    const result = read(lines(claudeAssistant({ id: "m", at: "2026-09-01T10:00:00.000Z", speed: null })))
+    expect(result.events[0]?.fast).toBe(false)
+    expect(result.skipped.unparseableLine).toBe(0)
+  })
+
   it("skips zero-token placeholder messages without counting them as problems", () => {
     const result = read(lines(claudeAssistant({ id: "m", at: "2026-09-01T10:00:00.000Z", input: 0, output: 0 })))
     expect(result.events).toHaveLength(0)

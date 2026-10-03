@@ -34,7 +34,7 @@ const Usage = Schema.Struct({
     ephemeral_5m_input_tokens: Schema.optionalKey(Count),
     ephemeral_1h_input_tokens: Schema.optionalKey(Count)
   })),
-  speed: Schema.optionalKey(Schema.String)
+  speed: Schema.optionalKey(Schema.NullOr(Schema.String))
 })
 
 const AssistantLine = Schema.Struct({

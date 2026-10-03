@@ -146,3 +146,10 @@ export const BalanceReading = Schema.Struct({
   value: BalanceValue
 })
 export type BalanceReading = typeof BalanceReading.Type
+
+/** A ticket's Jira title, or why there is none. */
+export const TicketTitleValue = Schema.Union([
+  Schema.TaggedStruct("Known", { summary: Schema.String }),
+  Schema.TaggedStruct("Unknown", { reason: Schema.Literals(["NotFound", "NotLookedUp"]) })
+])
+export type TicketTitleValue = typeof TicketTitleValue.Type

@@ -31,7 +31,7 @@ export const claudeAssistant = (options: {
   readonly cacheRead?: number
   readonly write5m?: number
   readonly write1h?: number
-  readonly speed?: string
+  readonly speed?: string | null
 }) => ({
   type: "assistant",
   timestamp: options.at,

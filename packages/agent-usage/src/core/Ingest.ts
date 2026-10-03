@@ -73,7 +73,9 @@ interface Source<State> {
   readonly decodeState: (json: string) => Option.Option<State>
   readonly encodeState: (state: State) => string
   readonly read: (file: SourceFile, lines: ReadonlyArray<SourceLine>, state: State) => ReadResult<State>
-  /** The files under the root worth reading, given every path relative to it. */
+  /** Whether to list a directory, given its path segments below the root. */
+  readonly descend: (segments: ReadonlyArray<string>) => boolean
+  /** The files worth reading among the `.jsonl` paths found, relative to the root. */
   readonly select: (relativePaths: ReadonlyArray<string>, path: Path.Path) => ReadonlyArray<ListedFile>
 }
 
@@ -87,6 +89,7 @@ const claudeSource: Source<ClaudeReaderState> = {
   decodeState: Schema.decodeUnknownOption(ClaudeStateJson),
   encodeState: Schema.encodeSync(ClaudeStateJson),
   read: readClaude,
+  descend: (segments) => segments.length <= 2 || (segments.length === 3 && segments[2] === "subagents"),
   select: (paths, path) =>
     paths.flatMap((fileKey) => {
       if (!fileKey.endsWith(".jsonl")) return []
@@ -108,6 +111,7 @@ const codexSource: Source<CodexReaderState> = {
   decodeState: Schema.decodeUnknownOption(CodexStateJson),
   encodeState: Schema.encodeSync(CodexStateJson),
   read: readCodex,
+  descend: (segments) => segments.length <= 3,
   select: (paths, path) =>
     paths.flatMap((fileKey) => {
       const name = path.basename(fileKey)
@@ -217,19 +221,60 @@ const emptyStatus = (rootMissing: boolean): SourceStatus => ({
   unreadable: []
 })
 
-const ingestSource = <State>(source: Source<State>, root: string, machine: string, chunkBytes: number) =>
+interface Walk {
+  readonly rootMissing: boolean
+  readonly files: ReadonlyArray<string>
+  readonly unreadable: ReadonlyArray<UnreadableFile>
+}
+
+/**
+ * Every `.jsonl` path under the root, listing one directory at a time so that one directory this
+ * user cannot read (a container's, owned by another uid) is reported on its own instead of
+ * hiding the rest of the root.
+ */
+const walk = (root: string, descend: (segments: ReadonlyArray<string>) => boolean) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
-    const listing = yield* Effect.result(fs.readDirectory(root, { recursive: true }))
-    if (listing._tag === "Failure") {
-      const reason = listing.failure.reason._tag
-      return reason === "NotFound"
-        ? emptyStatus(true)
-        : { ...emptyStatus(false), unreadable: [{ fileKey: ".", reason }] }
+    const files: Array<string> = []
+    const unreadable: Array<UnreadableFile> = []
+    const pending: Array<ReadonlyArray<string>> = [[]]
+    for (let segments = pending.shift(); segments !== undefined; segments = pending.shift()) {
+      const relative = segments.join(path.sep)
+      const listing = yield* Effect.result(fs.readDirectory(path.join(root, relative)))
+      if (listing._tag === "Failure") {
+        const reason = listing.failure.reason._tag
+        if (segments.length === 0 && reason === "NotFound") {
+          const missing: Walk = { rootMissing: true, files: [], unreadable: [] }
+          return missing
+        }
+        if (reason !== "NotFound") unreadable.push({ fileKey: relative === "" ? "." : relative, reason })
+        continue
+      }
+      for (const name of [...listing.success].sort()) {
+        const child = [...segments, name]
+        if (name.endsWith(".jsonl")) {
+          files.push(child.join(path.sep))
+          continue
+        }
+        if (!descend(child)) continue
+        const info = yield* Effect.result(fs.stat(path.join(root, ...child)))
+        if (info._tag === "Failure") {
+          unreadable.push({ fileKey: child.join(path.sep), reason: info.failure.reason._tag })
+        } else if (info.success.type === "Directory") pending.push(child)
+      }
     }
-    const files = source.select([...listing.success].sort(), path)
-    let status = { ...emptyStatus(false), filesScanned: files.length }
+    const found: Walk = { rootMissing: false, files: files.sort(), unreadable }
+    return found
+  })
+
+const ingestSource = <State>(source: Source<State>, root: string, machine: string, chunkBytes: number) =>
+  Effect.gen(function*() {
+    const path = yield* Path.Path
+    const walked = yield* walk(root, source.descend)
+    if (walked.rootMissing) return emptyStatus(true)
+    const files = source.select(walked.files, path)
+    let status: SourceStatus = { ...emptyStatus(false), filesScanned: files.length, unreadable: walked.unreadable }
     for (const listed of files) {
       const outcome = yield* ingestFile(source, root, machine, listed, chunkBytes).pipe(
         Effect.catchTag(

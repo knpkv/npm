@@ -14,15 +14,10 @@
  */
 import { Clock, Data, Effect, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
+import type { TicketTitleValue } from "./Model.js"
 import { type StoreError, UsageStore } from "./Store.js"
 
 export class TicketLookupFailed extends Data.TaggedError("TicketLookupFailed")<{ readonly reason: string }> {}
-
-export const TicketTitleValue = Schema.Union([
-  Schema.TaggedStruct("Known", { summary: Schema.String }),
-  Schema.TaggedStruct("Unknown", { reason: Schema.Literals(["NotFound", "NotLookedUp"]) })
-])
-export type TicketTitleValue = typeof TicketTitleValue.Type
 
 /** Finds the summaries of the given keys; a key Jira does not return is absent from the map. */
 export type TicketSearch = (

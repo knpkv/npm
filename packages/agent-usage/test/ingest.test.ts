@@ -121,4 +121,22 @@ describe("ingestOnce", () => {
         expect(status.codex.rootMissing).toBe(true)
       }))
   })
+
+  it.layer(TestLayer)((it) => {
+    it.effect("reads every other project when one project directory belongs to someone else", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        yield* fs.writeFileString(
+          path.join(roots.claudeProjects, "-w-app", "sess-1.jsonl"),
+          jsonl(claudeAssistant({ id: "a", at: "2026-09-01T10:00:00.000Z" }))
+        )
+        const foreign = path.join(roots.claudeProjects, "-usr-src-app")
+        yield* fs.makeDirectory(foreign)
+        yield* fs.chmod(foreign, 0o000)
+        const status = yield* ingestOnce(roots)
+        yield* fs.chmod(foreign, 0o700)
+        expect(status.claude.eventsAdded).toBe(1)
+        expect(status.claude.unreadable).toEqual([{ fileKey: "-usr-src-app", reason: "PermissionDenied" }])
+      }))
+  })
 })
