@@ -21,7 +21,13 @@ export default defineConfig(({ mode }) => {
             "server/index": "src/server/index.ts"
           },
           output: {
-            entryFileNames: "[name].js"
+            entryFileNames: "[name].js",
+            // Persistence is a deliberate runtime boundary: keep it out of the shared server chunk so
+            // per-file budgets track each graph instead of whatever the bundler happens to merge.
+            manualChunks: (id) =>
+              id.replaceAll("\\", "/").includes("/src/server/persistence/")
+                ? "persistence"
+                : undefined
           }
         },
         sourcemap: true,

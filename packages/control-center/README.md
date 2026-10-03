@@ -36,13 +36,13 @@ delivery evidence as one connected release.
 | Target | Largest measured artifact   |       Measured raw / gzip | Per-artifact raw / gzip budget |
 | ------ | --------------------------- | ------------------------: | -----------------------------: |
 | Client | generated API client chunk  |    283,518 / 84,693 bytes |         288,000 / 86,000 bytes |
-| Server | shared `BindConfig-*` chunk | 1,511,834 / 289,432 bytes |      1,650,000 / 292,000 bytes |
+| Server | shared `BindConfig-*` chunk | 1,474,487 / 283,075 bytes |      1,650,000 / 292,000 bytes |
 
 These initial ceilings were measured from a production build on 2026-07-19 and leave roughly four to six percent headroom, enough for build variance while rejecting meaningful per-file growth. The server chunk was about 6.87 MB raw and 1.09 MB gzip before the server build externalized declared runtime dependencies. Vite had followed linked workspace packages into their transitive graphs, including `confluence-to-markdown`'s Atlaskit schema/transformer, AJV, Markdown, and ProseMirror dependencies, `control-center-sql`'s query parser, and the broad `codecommit-core` root barrel. The server now keeps dependencies as runtime imports and uses narrow CodeCommit subpaths.
 
 The client measurement was refreshed on 2026-10-03 after the Effect 4.0.0 stable upgrade grew the generated client chunk, which bundles Effect's Schema and HTTP API client runtime, from 270,002 to 283,518 raw bytes and from 80,249 to 84,693 level-9 gzip bytes. Its ceilings are 288,000 raw and 86,000 gzip bytes; further growth still requires a new measurement and cause here.
 
-The server measurement was refreshed on 2026-08-29 after native review cleanup classification added its runtime path to the shared chunk. It now measures 1,511,834 raw bytes and 289,432 level-9 gzip bytes; the 292,000-byte gzip ceiling keeps less than one percent headroom so further growth requires a new measurement and cause here. This shared chunk remains bounded technical debt: it is primarily Control Center's own application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries.
+The server measurement was refreshed on 2026-10-03 after rolldown 1.2.12 began merging the persistence graph into the shared chunk (2,697,894 raw bytes). The server build now emits `src/server/persistence/**` as its own `persistence-*` chunk (1,556,801 raw and 251,944 level-9 gzip bytes), leaving the shared chunk at 1,474,487 raw and 283,075 gzip bytes; the 292,000-byte gzip ceiling still requires a new measurement and cause here for further growth. This shared chunk remains bounded technical debt: it is primarily Control Center's own application, persistence, plugin, API, and schema-snapshot graph. `BindConfig` is only Vite's generated chunk name, not the size owner. Future work should split that internal graph at deliberate runtime boundaries.
 
 ## Run the application
 
