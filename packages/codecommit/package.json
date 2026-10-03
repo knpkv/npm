@@ -38,11 +38,11 @@
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/codecommit-core": "workspace:^",
     "@knpkv/codecommit-web": "workspace:^",
-    "@opentui/core": "0.5.1",
-    "@opentui/react": "0.5.1",
+    "@opentui/core": "0.5.14",
+    "@opentui/react": "0.5.14",
     "diff": "9.0.0",
     "effect": "4.0.0",
-    "react": "^19.2.8",
+    "react": "^19.3.0",
     "tslib": "^2.8.1"
   },
   "devDependencies": {
@@ -50,7 +50,7 @@
     "@storybook/react": "^10.6.1",
     "@types/bun": "^1.4.2",
     "@types/node": "latest",
-    "@types/react": "^19.2.18",
+    "@types/react": "^19.3.0",
     "storybook": "^10.6.1",
     "vitest": "catalog:"
   }

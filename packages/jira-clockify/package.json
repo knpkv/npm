@@ -56,15 +56,15 @@
     "@knpkv/clockify-api-client": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
     "@knpkv/jira-cli": "workspace:^",
-    "@opentui/core": "0.5.1",
-    "@opentui/react": "0.5.1",
+    "@opentui/core": "0.5.14",
+    "@opentui/react": "0.5.14",
     "effect": "4.0.0",
-    "react": "^19.2.8"
+    "react": "^19.3.0"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",
     "@types/node": "latest",
-    "@types/react": "^19.2.18",
+    "@types/react": "^19.3.0",
     "tsx": "^4.23.15",
     "vitest": "catalog:"
   }
