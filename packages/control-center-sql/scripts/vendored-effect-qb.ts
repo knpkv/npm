@@ -19,10 +19,10 @@ export const vendoredEntries: ReadonlyArray<{ readonly specifier: string; readon
 export const vendorDirectory = "vendor/effect-qb"
 
 /** Evidence that a copied file carries the workspace patch rather than the pristine release. */
-export const patchedRuntimeMarkers: { readonly forbidden: string; readonly required: string } = {
+export const patchedRuntimeMarkers = {
   forbidden: "effect/unstable/",
   required: "\"effect/sql/SqlClient\""
-}
+} satisfies Readonly<Record<"forbidden" | "required", string>>
 
 export class VendoredEffectQbError extends Data.TaggedError("VendoredEffectQbError")<{
   readonly cause?: unknown
