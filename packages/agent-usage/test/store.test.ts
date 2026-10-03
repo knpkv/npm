@@ -56,7 +56,48 @@ describe("UsageStore", () => {
         const store = yield* UsageStore
         yield* store.recordObservations([snapshot(1_000, 10), snapshot(2_000, 10), snapshot(3_000, 12)], [])
         const series = yield* store.limitSnapshots({ from: 0, to: 10_000 })
-        expect(series.map((row) => row.observedAt)).toEqual([1_000, 3_000])
+        expect(series.map((row) => [row.observedAt, row.confirmedAt])).toEqual([[1_000, 2_000], [3_000, 3_000]])
+      }))
+
+    it.effect("keeps every transition when a series arrives interleaved across files", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const at = (observedAt: number, usedPercent: number): LimitSnapshot => ({
+          ...snapshot(observedAt, usedPercent),
+          label: "interleaved"
+        })
+        yield* store.recordObservations([at(20_000, 20)], [])
+        yield* store.recordObservations([at(10_000, 10), at(30_000, 10)], [])
+        const series = (yield* store.limitSnapshots({ from: 0, to: 40_000 }))
+          .filter((row) => row.label === "interleaved")
+        expect(series.map((row) => row.observedAt)).toEqual([10_000, 20_000, 30_000])
+      }))
+
+    it.effect("stores an unchanged window again when it recovers from a failed poll", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const claude = (label: string, observedAt: number, reading: LimitSnapshot["reading"]): LimitSnapshot => ({
+          agent: "claude",
+          machine: "mac",
+          source: "claude-oauth-usage",
+          label,
+          windowMinutes: label === "five_hour" ? 300 : null,
+          observedAt,
+          reading
+        })
+        const known: LimitSnapshot["reading"] = { _tag: "Known", usedPercent: 40, resetsAt: null }
+        yield* store.recordObservations([
+          claude("five_hour", 100_000, known),
+          claude("*", 200_000, { _tag: "Unknown", reason: "Fetch" }),
+          claude("five_hour", 300_000, known),
+          claude("five_hour", 400_000, known)
+        ], [])
+        const fiveHour = (yield* store.limitSnapshots({ from: 0, to: 500_000 }))
+          .filter((row) => row.machine === "mac" && row.label === "five_hour")
+        expect(fiveHour.map((row) => [row.observedAt, row.confirmedAt])).toEqual([
+          [100_000, 100_000],
+          [300_000, 400_000]
+        ])
       }))
 
     it.effect("stores Unknown limit readings so a gap stays visible", () =>
@@ -73,7 +114,7 @@ describe("UsageStore", () => {
         }
         yield* store.recordObservations([unknown], [])
         const series = yield* store.limitSnapshots({ from: 4_000, to: 6_000 })
-        expect(series).toEqual([unknown])
+        expect(series).toEqual([{ ...unknown, confirmedAt: 5_000 }])
       }))
 
     it.effect("keeps the latest balance per kind, storing only changes", () =>
@@ -87,6 +128,9 @@ describe("UsageStore", () => {
         })
         yield* store.recordObservations([], [reading(1, 50), reading(2, 50), reading(3, 40)])
         expect(yield* store.latestBalances).toEqual([reading(3, 40)])
+        yield* store.recordObservations([], [reading(4, 40)])
+        // An unchanged reading confirms the stored one, so "read … ago" stays true.
+        expect(yield* store.latestBalances).toEqual([reading(4, 40)])
       }))
 
     it.effect("pre-aggregates usage into 15-minute buckets by pricing and attribution dimensions", () =>
@@ -161,9 +205,10 @@ describe("UsageStore", () => {
             "label",
             "window_minutes",
             "observed_at",
+            "confirmed_at",
             "reading"
           ],
-          balance_readings: ["kind", "machine", "observed_at", "value"],
+          balance_readings: ["kind", "machine", "observed_at", "confirmed_at", "value"],
           tickets: ["key", "summary", "fetched_at"]
         })
       }))

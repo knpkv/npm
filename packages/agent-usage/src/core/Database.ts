@@ -13,19 +13,22 @@
  * @module
  */
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Effect, FileSystem, Layer, Path } from "effect"
+import { Effect, FileSystem, Layer, Path, Schema } from "effect"
 import { StoreError, UsageStore } from "./Store.js"
 
 const DATABASE_FILE = "usage.db"
 
 const fail = (operation: string, cause: unknown) => Effect.fail(new StoreError({ operation, cause }))
 
+/** `readlink` on something that is not a link fails with EINVAL; nothing else means "not a link". */
+const isNotALink = Schema.is(Schema.Struct({ code: Schema.Literal("EINVAL") }))
+
 const refuseSymlink = (fs: FileSystem.FileSystem, path: string) =>
   fs.readLink(path).pipe(
     Effect.matchEffect({
-      // Not a link (EINVAL surfaces as Unknown) or not there: both are fine.
+      // Not a link, or not there: both are fine. Any other failure (ELOOP, EIO) fails closed.
       onFailure: (error) =>
-        error.reason._tag === "NotFound" || error.reason._tag === "Unknown"
+        error.reason._tag === "NotFound" || isNotALink(error.cause)
           ? Effect.void
           : fail("secure.readlink", error),
       onSuccess: (target) => fail("secure.symlink", { path, target })

@@ -12,19 +12,30 @@ const balanceName = (kind: BalanceReading["kind"]): string =>
   kind === "claude-extra-usage" ? "Claude extra usage" : "Codex credits"
 
 /**
- * Which snapshots get a tile: none whose window reset since it was read. A source-wide Unknown reading only gets one while it is newer than
- * every window read from that agent: then the windows' values are stale, and the tile says why.
+ * Which snapshots get a tile. A source-wide Unknown reading takes the place of every window read
+ * before it, and says why; a window that reset since it was read gets none.
  */
-export const tileSnapshots = (latest: ReadonlyArray<LimitSnapshot>, now: number): ReadonlyArray<LimitSnapshot> =>
-  latest.filter(
-    (snapshot) =>
-      // A window that has reset since it was last read says nothing about now.
-      !(snapshot.reading._tag === "Known" && snapshot.reading.resetsAt !== null && snapshot.reading.resetsAt <= now) &&
-      (snapshot.label !== "*" ||
-        latest.every(
-          (other) => other.agent !== snapshot.agent || other.label === "*" || other.observedAt < snapshot.observedAt
-        ))
-  )
+export const tileSnapshots = (latest: ReadonlyArray<LimitSnapshot>, now: number): ReadonlyArray<LimitSnapshot> => {
+  const newestFailure = (agent: LimitSnapshot["agent"]) =>
+    latest.find((snapshot) => snapshot.agent === agent && snapshot.label === "*")?.observedAt ??
+    Number.NEGATIVE_INFINITY
+  const newestWindow = (agent: LimitSnapshot["agent"]) =>
+    Math.max(
+      Number.NEGATIVE_INFINITY,
+      ...latest
+        .filter((snapshot) => snapshot.agent === agent && snapshot.label !== "*")
+        .map((snapshot) => snapshot.observedAt)
+    )
+  return latest.filter((snapshot) => {
+    if (snapshot.label === "*") return snapshot.observedAt > newestWindow(snapshot.agent)
+    // A window that has reset since it was last read, or was read before a poll that failed, says
+    // nothing about now.
+    if (snapshot.reading._tag === "Known" && snapshot.reading.resetsAt !== null && snapshot.reading.resetsAt <= now) {
+      return false
+    }
+    return snapshot.observedAt > newestFailure(snapshot.agent)
+  })
+}
 
 export const Tiles = (props: {
   readonly latest: ReadonlyArray<LimitSnapshot>

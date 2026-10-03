@@ -15,7 +15,7 @@
  *
  * @module
  */
-import { Option } from "effect"
+import { Data, Effect, Option } from "effect"
 import type { BookingSummary, LimitSeries, LimitsReport, Period, UsageCell, UsageReport } from "../shared/contracts.js"
 import { attribute, bookingId, projectOf } from "./Attribution.js"
 import type { Agent, LimitSnapshot, TicketTitleValue, Tokens } from "./Model.js"
@@ -25,8 +25,18 @@ import { BUCKET_MILLIS, type Range, type UsageGroup } from "./Store.js"
 
 export type PeriodBucket = "hour" | "day" | "week"
 
-/** True for a zone the runtime knows by its IANA name, or UTC. */
-export const isTimeZone = (zone: string): boolean => zone === "UTC" || Intl.supportedValuesOf("timeZone").includes(zone)
+export class UnknownTimeZone extends Data.TaggedError("UnknownTimeZone")<{ readonly zone: string }> {}
+
+/**
+ * Accepts any zone `Intl.DateTimeFormat` accepts, aliases and `Etc/GMT+5` included. The list
+ * `Intl.supportedValuesOf` returns is narrower than what the formatter takes, and a browser sends
+ * whatever its own runtime resolved.
+ */
+export const checkTimeZone = (zone: string): Effect.Effect<string, UnknownTimeZone> =>
+  Effect.try({
+    try: () => new Intl.DateTimeFormat("en-CA", { timeZone: zone }).resolvedOptions().timeZone,
+    catch: () => new UnknownTimeZone({ zone })
+  }).pipe(Effect.as(zone))
 
 const formatters = new Map<string, Intl.DateTimeFormat>()
 
@@ -79,8 +89,13 @@ export const periodsOf = (options: {
 }
 
 /** Which period a bucket start belongs to, by binary search over period starts. */
-const periodIndex = (periods: ReadonlyArray<Period>, instant: number, end: number): number | null => {
-  if (periods.length === 0 || instant < (periods[0]?.start ?? 0) || instant >= end) return null
+const periodIndex = (periods: ReadonlyArray<Period>, bucketStart: number, end: number): number | null => {
+  const first = periods[0]?.start
+  if (first === undefined) return null
+  // The range may start inside a 15-minute bucket; the store already kept only the events inside
+  // the range, so that first partial bucket belongs to the first period.
+  const instant = bucketStart < first && bucketStart + BUCKET_MILLIS > first ? first : bucketStart
+  if (instant < first || instant >= end) return null
   let low = 0
   let high = periods.length - 1
   while (low < high) {
@@ -220,34 +235,59 @@ const seriesKey = (snapshot: LimitSnapshot): string =>
  * at `from` with the reading in force there when one exists.
  */
 export const buildLimitsReport = (
-  snapshots: ReadonlyArray<LimitSnapshot>,
+  snapshots: ReadonlyArray<LimitSnapshot & { readonly confirmedAt?: number }>,
   range: Range
 ): Omit<LimitsReport, "balances"> => {
   const series = new Map<string, LimitSeries>()
+  const sources = new Map<string, LimitSnapshot["source"]>()
   const latest = new Map<string, LimitSnapshot>()
+  const append = (key: string, at: number, reading: LimitSnapshot["reading"]) => {
+    const current = series.get(key)
+    if (current === undefined) return
+    const point = { at: Math.max(at, range.from), reading }
+    // Before the range, only the newest reading matters: it becomes the left-edge point.
+    series.set(key, { ...current, points: at < range.from ? [point] : [...current.points, point] })
+  }
   const ordered = [...snapshots].sort((left, right) => left.observedAt - right.observedAt)
   for (const snapshot of ordered) {
     if (snapshot.observedAt >= range.to) continue
     const key = seriesKey(snapshot)
-    latest.set(key, snapshot)
-    const current = series.get(key) ?? {
+    // The tiles show when the reading was last seen, which an unchanged later reading moves on.
+    latest.set(key, {
+      agent: snapshot.agent,
+      machine: snapshot.machine,
+      source: snapshot.source,
+      label: snapshot.label,
+      windowMinutes: snapshot.windowMinutes,
+      observedAt: snapshot.confirmedAt ?? snapshot.observedAt,
+      reading: snapshot.reading
+    })
+    sources.set(key, snapshot.source)
+    const current = series.get(key)
+    series.set(key, {
       agent: snapshot.agent,
       label: snapshot.label,
       windowMinutes: snapshot.windowMinutes,
-      points: []
+      points: current?.points ?? []
+    })
+    append(key, snapshot.observedAt, snapshot.reading)
+    // A source that could not be read at all breaks every window it reports, so no level is
+    // carried across the outage.
+    if (snapshot.label === "*") {
+      for (const [other, entry] of series) {
+        if (other !== key && entry.agent === snapshot.agent && sources.get(other) === snapshot.source) {
+          append(other, snapshot.observedAt, snapshot.reading)
+        }
+      }
     }
-    const point = { at: Math.max(snapshot.observedAt, range.from), reading: snapshot.reading }
-    // Before the range, only the newest reading matters: it becomes the left-edge point.
-    const points = snapshot.observedAt < range.from ? [point] : [...current.points, point]
-    series.set(key, { ...current, label: snapshot.label, windowMinutes: snapshot.windowMinutes, points })
   }
   const byOrder = (left: { readonly agent: string; readonly label: string }, right: typeof left) =>
     left.agent.localeCompare(right.agent) || left.label.localeCompare(right.label)
-  // A series whose every reading reset before the range began has nothing to say about it.
+  // A series with no Known reading still in force inside the range has nothing to draw.
   const live = [...series.values()].filter((entry) =>
     entry.points.some((point) =>
-      point.at > range.from || point.reading._tag === "Unknown" || point.reading.resetsAt === null ||
-      point.reading.resetsAt > range.from
+      point.reading._tag === "Known" &&
+      (point.at > range.from || point.reading.resetsAt === null || point.reading.resetsAt > range.from)
     )
   )
   return {

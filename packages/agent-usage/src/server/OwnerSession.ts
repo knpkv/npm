@@ -5,8 +5,8 @@
  *
  * - **One process, one operator.** The server binds a loopback address and mints a session token for
  *   itself at startup. There is no user table and no login: the person who can read the terminal is
- *   the person who gets in, which is exactly the authority a tool that writes to their own timesheet
- *   should have.
+ *   the person who gets in, which is the authority a page showing their own agents' usage, ticket
+ *   keys and working directories should demand.
  * - **The URL is the handshake.** The bootstrap code is printed once, in a fragment the browser
  *   never sends upstream, and is spent the first time it is exchanged for the session cookie.
  * - **Every route only reads, and a read needs the cookie and must not be a browser cross-origin
@@ -14,7 +14,7 @@
  *   Metadata keeps that page from reading usage without an Origin. With no writes there is no CSRF
  *   token to issue.
  *
- * The rules are `@knpkv/agent-usage`'s owner session minus its write path, over the same
+ * The rules are `@knpkv/jcf-web`'s owner session minus its write path, over the same
  * `@knpkv/browser-pairing` credential primitives. They are re-stated rather than imported because
  * that module is private to that application; duplicating the *policy* while sharing the
  * *primitives* is the smaller of the two mistakes available.

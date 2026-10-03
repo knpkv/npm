@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
+import { Effect } from "effect"
 import type { AttributionInputs, LimitSnapshot, Tokens } from "../src/core/Model.js"
-import { buildLimitsReport, buildUsageReport, isTimeZone, periodsOf } from "../src/core/Report.js"
+import { buildLimitsReport, buildUsageReport, checkTimeZone, periodsOf } from "../src/core/Report.js"
 import type { UsageGroup } from "../src/core/Store.js"
 
 const tokens = (input: number, output = 0): Tokens => ({
@@ -56,11 +57,13 @@ describe("periodsOf", () => {
     expect(periods.map((period) => period.key)).toEqual(["2026-09-07", "2026-09-14"])
   })
 
-  it("accepts IANA zones and UTC, and nothing else", () => {
-    expect(isTimeZone("Europe/Berlin")).toBe(true)
-    expect(isTimeZone("UTC")).toBe(true)
-    expect(isTimeZone("Mars/Olympus")).toBe(false)
-  })
+  it.effect("accepts every zone the formatter takes, aliases and fixed offsets included", () =>
+    Effect.gen(function*() {
+      for (const zone of ["Europe/Berlin", "UTC", "Etc/GMT+5", "Europe/Kyiv", "Asia/Calcutta"]) {
+        expect(yield* checkTimeZone(zone)).toBe(zone)
+      }
+      expect((yield* Effect.flip(checkTimeZone("Mars/Olympus")))._tag).toBe("UnknownTimeZone")
+    }))
 })
 
 describe("buildUsageReport", () => {
@@ -109,6 +112,20 @@ describe("buildUsageReport", () => {
     )
     expect(report.bookings.map((booking) => booking.id).sort()).toEqual(["repo:app", "ticket:RPS-7071"])
     expect(report.ignoredKeys).toEqual([{ prefix: "GPT", requests: 3 }])
+  })
+
+  it("counts a request in the first, partial 15-minute bucket of a range that starts mid-bucket", () => {
+    const from = Date.parse("2026-09-01T10:07:00Z")
+    const report = buildUsageReport(
+      [group({
+        bucketStart: Date.parse("2026-09-01T10:00:00Z"),
+        attribution: { cwd: "/w/a", branch: "", activeTicket: null }
+      })],
+      periodsOf({ from, to: from + 3_600_000, timeZone: "UTC", bucket: "hour" }),
+      {},
+      new Set()
+    )
+    expect(report.cells.map((cell) => cell.period)).toEqual([0])
   })
 
   it("drops groups outside every period", () => {
@@ -203,5 +220,34 @@ describe("buildLimitsReport", () => {
     }], { from: 1_000, to: 2_000 })
     expect(report.series).toEqual([])
     expect(report.latest).toHaveLength(1)
+  })
+
+  const claude = (label: string, observedAt: number, reading: LimitSnapshot["reading"]): LimitSnapshot => ({
+    agent: "claude",
+    machine: "ser8",
+    source: "claude-oauth-usage",
+    label,
+    windowMinutes: label === "five_hour" ? 300 : null,
+    observedAt,
+    reading
+  })
+
+  it("breaks every Claude window across a poll that could not read any of them", () => {
+    const report = buildLimitsReport([
+      claude("five_hour", 1_100, { _tag: "Known", usedPercent: 40, resetsAt: null }),
+      claude("*", 1_200, { _tag: "Unknown", reason: "AuthExpired" }),
+      claude("five_hour", 1_300, { _tag: "Known", usedPercent: 55, resetsAt: null })
+    ], { from: 1_000, to: 2_000 })
+    expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
+      .toEqual(["Known", "Unknown", "Known"])
+  })
+
+  it("adds no gap when the failed poll came before every window reading", () => {
+    const report = buildLimitsReport([
+      claude("*", 1_050, { _tag: "Unknown", reason: "Fetch" }),
+      claude("five_hour", 1_100, { _tag: "Known", usedPercent: 40, resetsAt: null })
+    ], { from: 1_000, to: 2_000 })
+    expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
+      .toEqual(["Known"])
   })
 })

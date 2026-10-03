@@ -76,6 +76,17 @@ describe("readClaude", () => {
     expect(result.events.map((event) => event.attribution.activeTicket)).toEqual(["RPS-1", null])
   })
 
+  it("reads the ticket typed after a slash command, but not one inside a reminder", () => {
+    const result = read(lines(
+      claudeUser(
+        "<command-name>/pr-review</command-name><command-message>pr-review</command-message>" +
+          "<command-args>RPS-7071</command-args><system-reminder>AGENTS.md: RPS-4242</system-reminder>"
+      ),
+      claudeAssistant({ id: "a", at: "2026-09-01T10:00:00.000Z" })
+    ))
+    expect(result.events[0]?.attribution.activeTicket).toBe("RPS-7071")
+  })
+
   it("never mines keys from injected context: reminders quoting AGENTS.md or meta turns", () => {
     const result = read(lines(
       claudeUser("<system-reminder>AGENTS.md: approved RPS-4242 ✅</system-reminder>"),

@@ -124,4 +124,12 @@ describe("tileSnapshots", () => {
     expect(tileSnapshots([snapshot("primary", 0, 50), snapshot("secondary", 0, 500)], 100).map((tile) => tile.label))
       .toEqual(["secondary"])
   })
+
+  it("lets a newer failed poll stand in for the windows read before it", () => {
+    const failure: LimitSnapshot = {
+      ...snapshot("*", 20, null),
+      reading: { _tag: "Unknown", reason: "AuthExpired" }
+    }
+    expect(tileSnapshots([snapshot("primary", 10, 500), failure], 100).map((tile) => tile.label)).toEqual(["*"])
+  })
 })

@@ -9,9 +9,9 @@
  * - **A chunk commits whole.** A file chunk's events, observations and the cursor past them land in
  *   one transaction, so a pass killed mid-backfill neither loses nor double-counts: the next pass
  *   resumes from the cursor, and event keys absorb any overlap.
- * - **Series store changes, not ticks.** A Limit Snapshot or Balance Reading equal to the one before
- *   it in its series is dropped, which bounds Codex's per-request rate-limit echoes; graphs draw the
- *   series as steps.
+ * - **Series store changes, not ticks.** A Limit Snapshot or Balance Reading equal to the one stored
+ *   before it only moves that row's `confirmed_at`, which bounds Codex's per-request rate-limit
+ *   echoes while keeping "last read" true; graphs draw the series as steps.
  * - **Usage is pre-aggregated into 15-minute buckets** by every dimension pricing and Booking need.
  *   Every time zone's offset is a multiple of 15 minutes, so callers roll buckets up into local
  *   hours, days and weeks without touching raw events.
@@ -89,6 +89,9 @@ export const TicketTitle = Schema.Struct({
 })
 export type TicketTitle = typeof TicketTitle.Type
 
+/** A stored Limit Snapshot and when an equal reading was last observed. */
+export type StoredSnapshot = LimitSnapshot & { readonly confirmedAt: number }
+
 export const BUCKET_MILLIS = 15 * 60 * 1000
 
 const EVENT_BATCH = 400
@@ -118,13 +121,14 @@ const SnapshotRow = Schema.Struct({
   label: Schema.String,
   window_minutes: WindowMinutes,
   observed_at: Schema.Int,
+  confirmed_at: Schema.Int,
   reading: Schema.fromJsonString(LimitReading)
 })
 
 const BalanceRow = Schema.Struct({
   kind: BalanceKind,
   machine: Schema.String,
-  observed_at: Schema.Int,
+  confirmed_at: Schema.Int,
   value: Schema.fromJsonString(BalanceValue)
 })
 
@@ -134,7 +138,8 @@ const ReadingJson = Schema.fromJsonString(LimitReading)
 const BalanceJson = Schema.fromJsonString(BalanceValue)
 const encodeReading = Schema.encodeSync(ReadingJson)
 const encodeBalance = Schema.encodeSync(BalanceJson)
-const Existing = Schema.Struct({ value: Schema.String })
+const Existing = Schema.Struct({ observed_at: Schema.Int, value: Schema.String })
+const Found = Schema.Struct({ found: Schema.Int })
 
 const migrations = SqliteMigrator.fromRecord({
   "0001_usage": Effect.gen(function*() {
@@ -179,6 +184,7 @@ const migrations = SqliteMigrator.fromRecord({
         label TEXT NOT NULL,
         window_minutes INTEGER,
         observed_at INTEGER NOT NULL,
+        confirmed_at INTEGER NOT NULL,
         reading TEXT NOT NULL,
         PRIMARY KEY (agent, machine, source, label, observed_at)
       )
@@ -188,6 +194,7 @@ const migrations = SqliteMigrator.fromRecord({
         kind TEXT NOT NULL,
         machine TEXT NOT NULL,
         observed_at INTEGER NOT NULL,
+        confirmed_at INTEGER NOT NULL,
         value TEXT NOT NULL,
         PRIMARY KEY (kind, machine, observed_at)
       )
@@ -202,9 +209,6 @@ const migrations = SqliteMigrator.fromRecord({
   })
 })
 
-const seriesKey = (snapshot: LimitSnapshot): string =>
-  [snapshot.agent, snapshot.machine, snapshot.source, snapshot.label].join("\u0000")
-
 export class UsageStore extends Context.Service<UsageStore, {
   readonly cursor: (agent: Agent, fileKey: string) => Effect.Effect<Option.Option<Cursor>, StoreError>
   /** Writes a chunk's events, observations and cursor in one transaction. */
@@ -217,7 +221,7 @@ export class UsageStore extends Context.Service<UsageStore, {
   readonly usageGroups: (range: Range) => Effect.Effect<ReadonlyArray<UsageGroup>, StoreError>
   /** Every distinct branch and working directory ever recorded: what vouches for Known Projects. */
   readonly places: Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly cwd: string }>, StoreError>
-  readonly limitSnapshots: (range: Range) => Effect.Effect<ReadonlyArray<LimitSnapshot>, StoreError>
+  readonly limitSnapshots: (range: Range) => Effect.Effect<ReadonlyArray<StoredSnapshot>, StoreError>
   /** The newest reading of each balance kind on each machine. */
   readonly latestBalances: Effect.Effect<ReadonlyArray<BalanceReading>, StoreError>
   readonly tickets: (keys: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<TicketTitle>, StoreError>
@@ -260,27 +264,41 @@ export class UsageStore extends Context.Service<UsageStore, {
         return added
       })
 
+      // Each observation is compared with the row actually stored before it, rows written earlier
+      // in this transaction included: rollouts are read file by file, so a series' history arrives
+      // interleaved and a chunk-local memory would skip real transitions.
       const insertSnapshots = Effect.fnUntraced(function*(snapshots: ReadonlyArray<LimitSnapshot>) {
-        const latest = new Map<string, string>()
         const ordered = [...snapshots].sort((left, right) => left.observedAt - right.observedAt)
         for (const snapshot of ordered) {
-          const key = seriesKey(snapshot)
           const encoded = encodeReading(snapshot.reading)
-          const window = String(snapshot.windowMinutes)
-          let previous = latest.get(key)
-          if (previous === undefined) {
-            const rows = yield* sql`
-              SELECT coalesce(window_minutes, 'null') || ' ' || reading AS value FROM limit_snapshots
+          const current = `${String(snapshot.windowMinutes)} ${encoded}`
+          const previous = (yield* sql`
+            SELECT observed_at, coalesce(window_minutes, 'null') || ' ' || reading AS value FROM limit_snapshots
+            WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
+              AND source = ${snapshot.source} AND label = ${snapshot.label}
+              AND observed_at <= ${snapshot.observedAt}
+            ORDER BY observed_at DESC LIMIT 1
+          `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Existing)))))[0]
+          if (previous !== undefined && previous.value === current) {
+            // An unchanged window still starts a new row when the whole source failed in between:
+            // that row is the recovery, and without it the failure would look permanent.
+            const failedSince = snapshot.label !== "*" && (yield* sql`
+              SELECT 1 AS found FROM limit_snapshots
               WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
-                AND source = ${snapshot.source} AND label = ${snapshot.label}
-                AND observed_at <= ${snapshot.observedAt}
-              ORDER BY observed_at DESC LIMIT 1
-            `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Existing))))
-            previous = rows[0]?.value
+                AND source = ${snapshot.source} AND label = '*'
+                AND observed_at > ${previous.observed_at} AND observed_at <= ${snapshot.observedAt}
+              LIMIT 1
+            `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Found))))).length > 0
+            if (!failedSince) {
+              yield* sql`
+                UPDATE limit_snapshots SET confirmed_at = max(confirmed_at, ${snapshot.observedAt})
+                WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
+                  AND source = ${snapshot.source} AND label = ${snapshot.label}
+                  AND observed_at = ${previous.observed_at}
+              `
+              continue
+            }
           }
-          const current = `${window} ${encoded}`
-          if (previous === current) continue
-          latest.set(key, current)
           yield* sql`
             INSERT INTO limit_snapshots ${
             sql.insert({
@@ -290,6 +308,7 @@ export class UsageStore extends Context.Service<UsageStore, {
               label: snapshot.label,
               window_minutes: snapshot.windowMinutes,
               observed_at: snapshot.observedAt,
+              confirmed_at: snapshot.observedAt,
               reading: encoded
             })
           }
@@ -299,28 +318,28 @@ export class UsageStore extends Context.Service<UsageStore, {
       })
 
       const insertBalances = Effect.fnUntraced(function*(balances: ReadonlyArray<BalanceReading>) {
-        const latest = new Map<string, string>()
         const ordered = [...balances].sort((left, right) => left.observedAt - right.observedAt)
         for (const balance of ordered) {
-          const key = `${balance.kind}\u0000${balance.machine}`
           const encoded = encodeBalance(balance.value)
-          let previous = latest.get(key)
-          if (previous === undefined) {
-            const rows = yield* sql`
-              SELECT value FROM balance_readings
-              WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at <= ${balance.observedAt}
-              ORDER BY observed_at DESC LIMIT 1
-            `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Existing))))
-            previous = rows[0]?.value
+          const previous = (yield* sql`
+            SELECT observed_at, value FROM balance_readings
+            WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at <= ${balance.observedAt}
+            ORDER BY observed_at DESC LIMIT 1
+          `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Existing)))))[0]
+          if (previous !== undefined && previous.value === encoded) {
+            yield* sql`
+              UPDATE balance_readings SET confirmed_at = max(confirmed_at, ${balance.observedAt})
+              WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at = ${previous.observed_at}
+            `
+            continue
           }
-          if (previous === encoded) continue
-          latest.set(key, encoded)
           yield* sql`
             INSERT INTO balance_readings ${
             sql.insert({
               kind: balance.kind,
               machine: balance.machine,
               observed_at: balance.observedAt,
+              confirmed_at: balance.observedAt,
               value: encoded
             })
           }
@@ -412,19 +431,20 @@ export class UsageStore extends Context.Service<UsageStore, {
 
       const limitSnapshots = (range: Range) =>
         sql`
-          SELECT agent, machine, source, label, window_minutes, observed_at, reading FROM limit_snapshots
+          SELECT agent, machine, source, label, window_minutes, observed_at, confirmed_at, reading FROM limit_snapshots
           WHERE observed_at >= ${range.from} AND observed_at < ${range.to}
           ORDER BY observed_at, agent, label
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SnapshotRow))),
           Effect.map((rows) =>
-            rows.map((row): LimitSnapshot => ({
+            rows.map((row): StoredSnapshot => ({
               agent: row.agent,
               machine: row.machine,
               source: row.source,
               label: row.label,
               windowMinutes: row.window_minutes,
               observedAt: row.observed_at,
+              confirmedAt: row.confirmed_at,
               reading: row.reading
             }))
           ),
@@ -432,7 +452,7 @@ export class UsageStore extends Context.Service<UsageStore, {
         )
 
       const latestBalances = sql`
-        SELECT kind, machine, observed_at, value FROM balance_readings AS outer_reading
+        SELECT kind, machine, confirmed_at, value FROM balance_readings AS outer_reading
         WHERE observed_at = (
           SELECT max(observed_at) FROM balance_readings AS inner_reading
           WHERE inner_reading.kind = outer_reading.kind AND inner_reading.machine = outer_reading.machine
@@ -441,10 +461,11 @@ export class UsageStore extends Context.Service<UsageStore, {
       `.pipe(
         Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BalanceRow))),
         Effect.map((rows) =>
+          // The value as last observed: an unchanged reading confirms the stored one.
           rows.map((row): BalanceReading => ({
             kind: row.kind,
             machine: row.machine,
-            observedAt: row.observed_at,
+            observedAt: row.confirmed_at,
             value: row.value
           }))
         ),

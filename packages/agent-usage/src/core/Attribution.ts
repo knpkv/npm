@@ -113,8 +113,12 @@ export const attribute = (inputs: AttributionInputs, projects: ReadonlySet<strin
 export const bookingId = (booking: Booking): string =>
   booking._tag === "Ticket" ? `ticket:${booking.key}` : `repo:${booking.name}`
 
-/** Blocks Claude Code wraps around context it injects into a user turn. */
-const CLAUDE_INJECTED = /<(system-reminder|command-[a-z-]+|local-command-[a-z-]+)>[\s\S]*?<\/\1>/gu
+/**
+ * Blocks Claude Code wraps around context it injects into a user turn. `command-args` is not one:
+ * it is what the human typed after a slash command, so only its tags are removed.
+ */
+const CLAUDE_INJECTED = /<(system-reminder|command-name|command-message|local-command-[a-z-]+)>[\s\S]*?<\/\1>/gu
+const COMMAND_ARGS_TAG = /<\/?command-args>/gu
 
 /** A Claude user turn's content: a string, or blocks of which only `text` blocks are typed words. */
 export type ClaudeContent = string | ReadonlyArray<{ readonly type: string; readonly text?: string | undefined }>
@@ -127,7 +131,7 @@ export const claudeHumanText = (content: ClaudeContent): string => {
   const raw = Predicate.isString(content)
     ? content
     : content.flatMap((block) => block.type === "text" && block.text !== undefined ? [block.text] : []).join("\n")
-  return raw.replace(CLAUDE_INJECTED, "").trim()
+  return raw.replace(CLAUDE_INJECTED, "").replace(COMMAND_ARGS_TAG, " ").trim()
 }
 
 /** Codex input items that are context it injected, not words the human typed. */

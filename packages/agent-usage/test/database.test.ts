@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path } from "effect"
+import { systemError } from "effect/PlatformError"
 import { databaseLayer } from "../src/core/Database.js"
 
 const openStore = (directory: string) => Effect.scoped(Layer.build(databaseLayer(directory)).pipe(Effect.asVoid))
@@ -41,6 +42,35 @@ describe("databaseLayer", () => {
         yield* fs.chmod(directory, 0o755)
         const error = yield* Effect.flip(openStore(directory))
         expect(error).toMatchObject({ _tag: "StoreError", operation: "secure.directory-mode" })
+      }))
+  })
+
+  /** The real file system, except that every readlink fails with EIO. */
+  const failingReadLink = Layer.merge(
+    NodeServices.layer,
+    Layer.effect(
+      FileSystem.FileSystem,
+      Effect.map(FileSystem.FileSystem, (fs) => ({
+        ...fs,
+        readLink: (path: string) =>
+          Effect.fail(
+            systemError({
+              _tag: "Unknown",
+              module: "FileSystem",
+              method: "readLink",
+              pathOrDescriptor: path,
+              cause: { code: "EIO" }
+            })
+          )
+      }))
+    ).pipe(Layer.provide(NodeServices.layer))
+  )
+
+  it.layer(failingReadLink)((it) => {
+    it.effect("fails closed when readlink fails for any reason other than \"not a link\"", () =>
+      Effect.gen(function*() {
+        const error = yield* Effect.flip(openStore("/nonexistent/agent-usage"))
+        expect(error).toMatchObject({ _tag: "StoreError", operation: "secure.readlink" })
       }))
   })
 })

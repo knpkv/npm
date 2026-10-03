@@ -6,7 +6,7 @@
 import { Effect, Ref } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { attribute } from "../core/Attribution.js"
-import { buildLimitsReport, buildUsageReport, isTimeZone, periodsOf } from "../core/Report.js"
+import { buildLimitsReport, buildUsageReport, checkTimeZone, periodsOf } from "../core/Report.js"
 import { type StoreError, UsageStore } from "../core/Store.js"
 import { ticketTitles } from "../core/Tickets.js"
 import { AgentUsageApi, ApiError } from "./Api.js"
@@ -30,9 +30,9 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
       .handle("usage", ({ query }) =>
         Effect.gen(function*() {
           yield* checkRange(query.from, query.to)
-          if (!isTimeZone(query.timeZone)) {
-            return yield* new ApiError({ message: `Unknown time zone: ${query.timeZone}` })
-          }
+          yield* checkTimeZone(query.timeZone).pipe(
+            Effect.mapError((error) => new ApiError({ message: `Unknown time zone: ${error.zone}` }))
+          )
           if ((query.to - query.from) / (query.bucket === "hour" ? 3_600_000 : 86_400_000) > MAX_PERIODS) {
             return yield* new ApiError({ message: "Too many periods: choose a shorter range or a larger bucket" })
           }
