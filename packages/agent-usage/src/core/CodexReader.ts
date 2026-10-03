@@ -160,6 +160,8 @@ const RolloutLine = Schema.Union([
   })
 ])
 
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
+
 const decodeLine = Schema.decodeUnknownOption(Schema.fromJsonString(RolloutLine))
 
 /** Lines a decode is spent on; everything else in a rollout is conversation or tool traffic. */
@@ -230,11 +232,14 @@ export const readCodex = (
     switch (record.type) {
       case "session_meta": {
         // A fork copies its parent's session_meta too; only this rollout's own one describes it.
+        // The rollout's file name carries its own id, so the order of the two lines does not matter;
+        // without an id in the name, the first session_meta is taken as the rollout's own.
         const id = record.payload.id ?? null
-        if (state.ownSession !== null && id !== null && id !== state.ownSession) break
+        const own = state.ownSession ?? (SESSION_ID.test(file.sessionId) ? file.sessionId : id)
+        if (own !== null && id !== null && id !== own) break
         state = {
           ...state,
-          ownSession: state.ownSession ?? id,
+          ownSession: own,
           historyStart: state.historyStart ?? record.payload.subagent_history_start_ordinal ?? null,
           cwd: record.payload.cwd ?? state.cwd,
           branch: record.payload.git?.branch ?? state.branch

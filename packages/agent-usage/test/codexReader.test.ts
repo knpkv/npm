@@ -209,6 +209,23 @@ describe("readCodex", () => {
     expect(result.state.ownSession).toBe("child-0000")
   })
 
+  it("finds the fork's own session_meta by the id in its file name, whichever line comes first", () => {
+    const child = "019ef5b6-0000-7000-8000-000000000001"
+    const result = readCodex(
+      { ...file, sessionId: child },
+      lines(
+        codexMeta("/w/svc", "main", { id: "019eef9d-0000-7000-8000-000000000002", historyStart: 0, ordinal: 1 }),
+        codexMeta("/w/svc", "main", { id: child, historyStart: 4, ordinal: 0 }),
+        withOrdinal(2, codexTurn("gpt-6-sol")),
+        withOrdinal(3, codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [100, 0, 20, 0], total: 120 })),
+        withOrdinal(4, codexTokenCount({ at: "2026-09-01T10:05:00.000Z", last: [15, 0, 5, 0], total: 140 }))
+      ),
+      initialCodexState
+    )
+    expect(result.state.ownSession).toBe(child)
+    expect(result.events.map((event) => event.tokens.input + event.tokens.output)).toEqual([20])
+  })
+
   it("still books a request with the same counts when it is not copied history", () => {
     const result = readCodex(
       file,
