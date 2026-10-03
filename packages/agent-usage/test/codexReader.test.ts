@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { initialCodexState, readCodex } from "../src/core/CodexReader.js"
-import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines } from "./fixtures.js"
+import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines, withOrdinal } from "./fixtures.js"
 
 const file = { fileKey: "2026/09/01/rollout-x.jsonl", machine: "ser8", sessionId: "sess" }
 
@@ -181,5 +181,60 @@ describe("readCodex", () => {
     const secondHalf = readCodex(file, source.slice(2), firstHalf.state)
     expect([...firstHalf.events, ...secondHalf.events]).toEqual(onePass.events)
     expect(secondHalf.state).toEqual(onePass.state)
+  })
+
+  it("books a fork's copied parent history once: only the fork's own requests count", () => {
+    const parent = "parent-0000"
+    const result = readCodex(
+      { ...file, sessionId: "child-0000" },
+      lines(
+        codexMeta("/w/svc", "main", { id: "child-0000", historyStart: 4, ordinal: 0 }),
+        codexMeta("/w/svc", "main", { id: parent, historyStart: 0, ordinal: 1 }),
+        withOrdinal(2, codexTurn("gpt-6-sol")),
+        withOrdinal(
+          3,
+          codexTokenCount({
+            at: "2026-09-01T10:00:05.000Z",
+            last: [100, 0, 20, 0],
+            total: 120,
+            primary: { used: 50, minutes: 300, resets: 1_790_000_000 }
+          })
+        ),
+        withOrdinal(4, codexTokenCount({ at: "2026-09-01T10:05:00.000Z", last: [15, 0, 5, 0], total: 140 }))
+      ),
+      initialCodexState
+    )
+    expect(result.events.map((event) => event.tokens.input + event.tokens.output)).toEqual([20])
+    expect(result.snapshots).toEqual([])
+    expect(result.state.ownSession).toBe("child-0000")
+  })
+
+  it("still books a request with the same counts when it is not copied history", () => {
+    const result = readCodex(
+      file,
+      lines(
+        codexMeta("/w/svc", "main"),
+        withOrdinal(3, codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [100, 0, 20, 0], total: 120 }))
+      ),
+      initialCodexState
+    )
+    expect(result.events).toHaveLength(1)
+  })
+
+  it("follows each turn's working directory, keeping the last one when a turn names none", () => {
+    const source = lines(
+      codexMeta("/w/repo-old", "main"),
+      codexTurn("gpt-6-sol", "/w/worktrees/repo-new/RPS-82"),
+      codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 }),
+      codexTurn("gpt-6-sol"),
+      codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [1, 0, 1, 0], total: 4 })
+    )
+    const onePass = readCodex(file, source, initialCodexState)
+    expect(onePass.events.map((event) => event.attribution.cwd)).toEqual([
+      "/w/worktrees/repo-new/RPS-82",
+      "/w/worktrees/repo-new/RPS-82"
+    ])
+    const first = readCodex(file, source.slice(0, 3), initialCodexState)
+    expect(readCodex(file, source.slice(3), first.state).events).toEqual(onePass.events.slice(1))
   })
 })

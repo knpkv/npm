@@ -138,7 +138,7 @@ const ReadingJson = Schema.fromJsonString(LimitReading)
 const BalanceJson = Schema.fromJsonString(BalanceValue)
 const encodeReading = Schema.encodeSync(ReadingJson)
 const encodeBalance = Schema.encodeSync(BalanceJson)
-const Existing = Schema.Struct({ observed_at: Schema.Int, value: Schema.String })
+const Existing = Schema.Struct({ observed_at: Schema.Int, confirmed_at: Schema.Int, value: Schema.String })
 const Found = Schema.Struct({ found: Schema.Int })
 
 const migrations = SqliteMigrator.fromRecord({
@@ -273,7 +273,8 @@ export class UsageStore extends Context.Service<UsageStore, {
           const encoded = encodeReading(snapshot.reading)
           const current = `${String(snapshot.windowMinutes)} ${encoded}`
           const previous = (yield* sql`
-            SELECT observed_at, coalesce(window_minutes, 'null') || ' ' || reading AS value FROM limit_snapshots
+            SELECT observed_at, confirmed_at, coalesce(window_minutes, 'null') || ' ' || reading AS value
+            FROM limit_snapshots
             WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
               AND source = ${snapshot.source} AND label = ${snapshot.label}
               AND observed_at <= ${snapshot.observedAt}
@@ -299,6 +300,24 @@ export class UsageStore extends Context.Service<UsageStore, {
               continue
             }
           }
+          if (previous !== undefined && previous.confirmed_at > snapshot.observedAt) {
+            // A different reading lands inside an interval an equal reading had confirmed: split it,
+            // so the earlier reading is seen again where it was last confirmed.
+            yield* sql`
+              INSERT INTO limit_snapshots (agent, machine, source, label, window_minutes, observed_at, confirmed_at, reading)
+              SELECT agent, machine, source, label, window_minutes, confirmed_at, confirmed_at, reading FROM limit_snapshots
+              WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
+                AND source = ${snapshot.source} AND label = ${snapshot.label}
+                AND observed_at = ${previous.observed_at}
+              ON CONFLICT DO NOTHING
+            `
+            yield* sql`
+              UPDATE limit_snapshots SET confirmed_at = observed_at
+              WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
+                AND source = ${snapshot.source} AND label = ${snapshot.label}
+                AND observed_at = ${previous.observed_at}
+            `
+          }
           yield* sql`
             INSERT INTO limit_snapshots ${
             sql.insert({
@@ -322,7 +341,7 @@ export class UsageStore extends Context.Service<UsageStore, {
         for (const balance of ordered) {
           const encoded = encodeBalance(balance.value)
           const previous = (yield* sql`
-            SELECT observed_at, value FROM balance_readings
+            SELECT observed_at, confirmed_at, value FROM balance_readings
             WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at <= ${balance.observedAt}
             ORDER BY observed_at DESC LIMIT 1
           `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Existing)))))[0]
@@ -332,6 +351,18 @@ export class UsageStore extends Context.Service<UsageStore, {
               WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at = ${previous.observed_at}
             `
             continue
+          }
+          if (previous !== undefined && previous.confirmed_at > balance.observedAt) {
+            yield* sql`
+              INSERT INTO balance_readings (kind, machine, observed_at, confirmed_at, value)
+              SELECT kind, machine, confirmed_at, confirmed_at, value FROM balance_readings
+              WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at = ${previous.observed_at}
+              ON CONFLICT DO NOTHING
+            `
+            yield* sql`
+              UPDATE balance_readings SET confirmed_at = observed_at
+              WHERE kind = ${balance.kind} AND machine = ${balance.machine} AND observed_at = ${previous.observed_at}
+            `
           }
           yield* sql`
             INSERT INTO balance_readings ${

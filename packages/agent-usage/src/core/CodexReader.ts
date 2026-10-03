@@ -12,6 +12,8 @@
  *   change; the running total not moving is how that shows.
  * - **Only the `codex` limit is the account's.** Model-scoped limits arrive in their own blocks and
  *   are not the weekly or five-hour allowance; they are ignored here.
+ * - **A fork repeats its parent.** A forked subagent rollout starts with a copy of the parent's
+ *   history, below `subagent_history_start_ordinal`; that copy only advances the running total.
  * - **Every token_count backfills limit history**, so Codex limits are recoverable from old rollouts
  *   in a way Claude's are not.
  *
@@ -61,7 +63,14 @@ export const CodexReaderState = Schema.Struct({
   model: Schema.NullOr(Schema.String),
   activeTicket: Schema.NullOr(Schema.String),
   /** The session's running usage at the last valid token_count read. */
-  previousTotal: Schema.NullOr(CodexUsage)
+  previousTotal: Schema.NullOr(CodexUsage),
+  /** This rollout's own session id, from its first session_meta. */
+  ownSession: Schema.NullOr(Schema.String),
+  /**
+   * A forked subagent rollout copies its parent's history first; lines with an ordinal below this
+   * one are that copy, already booked from the parent's own rollout.
+   */
+  historyStart: Schema.NullOr(Schema.Int)
 })
 export type CodexReaderState = typeof CodexReaderState.Type
 
@@ -70,7 +79,9 @@ export const initialCodexState: CodexReaderState = {
   branch: "",
   model: null,
   activeTicket: null,
-  previousTotal: null
+  previousTotal: null,
+  ownSession: null,
+  historyStart: null
 }
 
 const TokenUsage = Schema.Struct({
@@ -107,7 +118,10 @@ const RateLimits = Schema.Struct({
 const RolloutLine = Schema.Union([
   Schema.Struct({
     type: Schema.Literal("session_meta"),
+    ordinal: Schema.optionalKey(Schema.Int),
     payload: Schema.Struct({
+      id: Schema.optionalKey(Schema.String),
+      subagent_history_start_ordinal: Schema.optionalKey(Schema.NullOr(Schema.Int)),
       cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
       git: Schema.optionalKey(
         Schema.NullOr(Schema.Struct({ branch: Schema.optionalKey(Schema.NullOr(Schema.String)) }))
@@ -116,6 +130,7 @@ const RolloutLine = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("turn_context"),
+    ordinal: Schema.optionalKey(Schema.Int),
     payload: Schema.Struct({
       model: Schema.optionalKey(Schema.NullOr(Schema.String)),
       cwd: Schema.optionalKey(Schema.NullOr(Schema.String))
@@ -123,6 +138,7 @@ const RolloutLine = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("response_item"),
+    ordinal: Schema.optionalKey(Schema.Int),
     payload: Schema.Struct({
       type: Schema.Literal("message"),
       role: Schema.Literal("user"),
@@ -131,6 +147,7 @@ const RolloutLine = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("event_msg"),
+    ordinal: Schema.optionalKey(Schema.Int),
     timestamp: Schema.String,
     payload: Schema.Struct({
       type: Schema.Literal("token_count"),
@@ -209,21 +226,24 @@ export const readCodex = (
       continue
     }
     const record = decoded.value
+    const copied = state.historyStart !== null && record.ordinal !== undefined && record.ordinal < state.historyStart
     switch (record.type) {
       case "session_meta": {
+        // A fork copies its parent's session_meta too; only this rollout's own one describes it.
+        const id = record.payload.id ?? null
+        if (state.ownSession !== null && id !== null && id !== state.ownSession) break
         state = {
           ...state,
+          ownSession: state.ownSession ?? id,
+          historyStart: state.historyStart ?? record.payload.subagent_history_start_ordinal ?? null,
           cwd: record.payload.cwd ?? state.cwd,
           branch: record.payload.git?.branch ?? state.branch
         }
         break
       }
       case "turn_context": {
-        state = {
-          ...state,
-          model: record.payload.model ?? state.model,
-          cwd: state.cwd === "" ? record.payload.cwd ?? "" : state.cwd
-        }
+        // Each turn says where it ran; a resumed session may have moved to another worktree.
+        state = { ...state, model: record.payload.model ?? state.model, cwd: record.payload.cwd ?? state.cwd }
         break
       }
       case "response_item": {
@@ -254,7 +274,9 @@ export const readCodex = (
             cacheWrite5m: Math.max(0, delta.cacheWrite),
             cacheWrite1h: 0
           }
-          if (delta.total !== 0) {
+          // Copied fork history only advances the running total, so the fork's own first request
+          // diffs against the right baseline; its requests were booked from the parent's rollout.
+          if (delta.total !== 0 && !copied) {
             events.push({
               agent: "codex",
               dedupeKey: `${file.sessionId}@${line.offset}`,
@@ -270,7 +292,8 @@ export const readCodex = (
           state = { ...state, previousTotal: total }
         }
         const limits = record.payload.rate_limits
-        if (limits !== undefined && limits !== null && limits.limit_id === "codex") {
+        // Copied history carries the parent's limit readings restamped at fork time: not observations.
+        if (!copied && limits !== undefined && limits !== null && limits.limit_id === "codex") {
           for (const snapshot of snapshotsOf(file, observedAt, limits)) snapshots.push(snapshot)
           if (limits.credits !== undefined && limits.credits !== null) {
             balances.push({

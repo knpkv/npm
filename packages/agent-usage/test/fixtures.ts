@@ -78,16 +78,29 @@ const usage = (input: number, cached: number, output: number, reasoning: number,
   total_tokens: total
 })
 
-export const codexMeta = (cwd: string, branch: string) => ({
+export const codexMeta = (
+  cwd: string,
+  branch: string,
+  fork?: { readonly id: string; readonly historyStart: number; readonly ordinal: number }
+) => ({
   timestamp: "2026-09-01T10:00:00.000Z",
   type: "session_meta",
-  payload: { id: "22222222-2222-2222-2222-222222222222", cwd, git: { branch } }
+  ordinal: fork?.ordinal,
+  payload: {
+    id: fork?.id ?? "22222222-2222-2222-2222-222222222222",
+    subagent_history_start_ordinal: fork?.historyStart,
+    cwd,
+    git: { branch }
+  }
 })
 
-export const codexTurn = (model: string) => ({
+/** Gives a rollout line the ordinal Codex numbers it with. */
+export const withOrdinal = <A extends object>(ordinal: number, line: A) => ({ ...line, ordinal })
+
+export const codexTurn = (model: string, cwd?: string) => ({
   timestamp: "2026-09-01T10:00:01.000Z",
   type: "turn_context",
-  payload: { model, cwd: "/home/dev/code/svc" }
+  payload: { model, cwd }
 })
 
 export const codexUserItem = (...texts: ReadonlyArray<string>) => ({

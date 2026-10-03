@@ -49,7 +49,8 @@ const formatterFor = (timeZone: string): Intl.DateTimeFormat => {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
-    hourCycle: "h23"
+    hourCycle: "h23",
+    timeZoneName: "longOffset"
   })
   formatters.set(timeZone, created)
   return created
@@ -63,7 +64,10 @@ const periodKey = (instant: number, timeZone: string, bucket: PeriodBucket): str
   const year = Number(parts.get("year"))
   const month = Number(parts.get("month"))
   const day = Number(parts.get("day"))
-  if (bucket === "hour") return `${year}-${pad(month)}-${pad(day)}T${parts.get("hour") ?? "00"}`
+  // The offset keeps the hour that repeats when clocks go back apart from its first occurrence.
+  if (bucket === "hour") {
+    return `${year}-${pad(month)}-${pad(day)}T${parts.get("hour") ?? "00"}${parts.get("timeZoneName") ?? ""}`
+  }
   if (bucket === "day") return `${year}-${pad(month)}-${pad(day)}`
   // Calendar arithmetic on the local date alone: back up to Monday.
   const date = new Date(Date.UTC(year, month - 1, day))

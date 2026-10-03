@@ -73,6 +73,31 @@ describe("UsageStore", () => {
         expect(series.map((row) => row.observedAt)).toEqual([10_000, 20_000, 30_000])
       }))
 
+    it.effect("splits a compressed interval when a different reading arrives inside it", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const at = (observedAt: number, usedPercent: number): LimitSnapshot => ({
+          ...snapshot(observedAt, usedPercent),
+          label: "split"
+        })
+        yield* store.recordObservations([at(1_000, 10), at(3_000, 10)], [])
+        yield* store.recordObservations([at(2_000, 20)], [])
+        const series = (yield* store.limitSnapshots({ from: 0, to: 10_000 })).filter((row) => row.label === "split")
+        expect(series.map((row) => [row.observedAt, row.reading._tag === "Known" ? row.reading.usedPercent : null]))
+          .toEqual([[1_000, 10], [2_000, 20], [3_000, 10]])
+        const balance = (observedAt: number, credits: number): BalanceReading => ({
+          kind: "codex-credits",
+          machine: "split",
+          observedAt,
+          value: { _tag: "Known", balance: { _tag: "Credits", credits } }
+        })
+        yield* store.recordObservations([], [balance(1_000, 50), balance(3_000, 50)])
+        yield* store.recordObservations([], [balance(2_000, 40)])
+        expect((yield* store.latestBalances).filter((reading) => reading.machine === "split")).toEqual([
+          balance(3_000, 50)
+        ])
+      }))
+
     it.effect("stores an unchanged window again when it recovers from a failed poll", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore
@@ -127,10 +152,11 @@ describe("UsageStore", () => {
           value: { _tag: "Known", balance: { _tag: "Credits", credits } }
         })
         yield* store.recordObservations([], [reading(1, 50), reading(2, 50), reading(3, 40)])
-        expect(yield* store.latestBalances).toEqual([reading(3, 40)])
+        const ours = Effect.map(store.latestBalances, (all) => all.filter((entry) => entry.machine === "ser8"))
+        expect(yield* ours).toEqual([reading(3, 40)])
         yield* store.recordObservations([], [reading(4, 40)])
         // An unchanged reading confirms the stored one, so "read … ago" stays true.
-        expect(yield* store.latestBalances).toEqual([reading(4, 40)])
+        expect(yield* ours).toEqual([reading(4, 40)])
       }))
 
     it.effect("pre-aggregates usage into 15-minute buckets by pricing and attribution dimensions", () =>

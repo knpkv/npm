@@ -37,6 +37,27 @@ describe("periodsOf", () => {
     expect(periods[2]?.start).toBe(Date.parse("2026-03-30T00:00:00+02:00"))
   })
 
+  it("keeps both 02:00 hours apart on the night clocks go back", () => {
+    const periods = periodsOf({
+      from: Date.parse("2026-10-25T00:00:00+02:00"),
+      to: Date.parse("2026-10-26T00:00:00+01:00"),
+      timeZone: "Europe/Amsterdam",
+      bucket: "hour"
+    })
+    expect(periods).toHaveLength(25)
+    expect(periods.every((period, index) => index === 0 || period.start > (periods[index - 1]?.start ?? 0))).toBe(true)
+  })
+
+  it("has 23 hours on the night clocks go forward", () => {
+    const periods = periodsOf({
+      from: Date.parse("2026-03-29T00:00:00+01:00"),
+      to: Date.parse("2026-03-30T00:00:00+02:00"),
+      timeZone: "Europe/Amsterdam",
+      bucket: "hour"
+    })
+    expect(periods).toHaveLength(23)
+  })
+
   it("keeps half-hour zones whole: an Indian day starts at 18:30 UTC", () => {
     const periods = periodsOf({
       from: Date.parse("2026-09-01T00:00:00+05:30"),
