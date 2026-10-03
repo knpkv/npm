@@ -1,5 +1,5 @@
 /**
- * Copy the patched effect-qb runtime into `dist/vendor/effect-qb` and point the compiled modules at it.
+ * Replace the development shims in `dist/vendor/effect-qb` with the patched effect-qb runtime.
  * Runs after `tsc` as part of `build`; see `vendored-effect-qb.ts` for why and when to remove it.
  */
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime"
@@ -31,19 +31,12 @@ const program = Effect.gen(function*() {
   // effect-qb is MIT-licensed; its manifest carries the license, author, and repository with the copy.
   yield* fileSystem.copyFile(path.join(source, "..", "package.json"), path.join(target, "package.json"))
 
+  // Compiled modules import the vendored files directly; any bare effect-qb import would bypass the copy.
   const compiled = (yield* fileSystem.readDirectory(dist)).filter((file) => file.endsWith(".js"))
   for (const file of compiled) {
-    const modulePath = path.join(dist, file)
-    const original = yield* fileSystem.readFileString(modulePath)
-    const rewritten = vendoredEntries.reduce(
-      (text, { file: vendored, specifier }) =>
-        text.replaceAll(`from "${specifier}"`, `from "./${vendorDirectory}/${vendored}"`),
-      original
-    )
-    if (rewritten.includes("from \"effect-qb")) {
-      return yield* new VendoredEffectQbError({ reason: `${file} imports an effect-qb entry that is not vendored` })
+    if ((yield* fileSystem.readFileString(path.join(dist, file))).includes("from \"effect-qb")) {
+      return yield* new VendoredEffectQbError({ reason: `${file} imports effect-qb instead of the vendored copy` })
     }
-    if (rewritten !== original) yield* fileSystem.writeFileString(modulePath, rewritten)
   }
   yield* Console.log(`vendored patched effect-qb into dist/${vendorDirectory}`)
 }).pipe(

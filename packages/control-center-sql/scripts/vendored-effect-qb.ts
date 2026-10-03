@@ -3,7 +3,9 @@
  *
  * TEMPORARY: effect-qb has no release that supports Effect 4.0.0 (0.22–0.23 import the removed
  * `effect/unstable/sql` paths). The workspace patches it, but pnpm patches do not travel with a
- * published package, so the build copies the patched runtime into `dist/vendor/effect-qb`. Drop this
+ * published package, so `src` imports `./vendor/effect-qb/*.js` (development shims that re-export
+ * the workspace-patched package) and the build replaces them in `dist/vendor/effect-qb` with the
+ * patched runtime. Drop this
  * once an upstream effect-qb release supports Effect 4.0.0, and depend on it directly again.
  */
 import * as Data from "effect/Data"
@@ -17,10 +19,10 @@ export const vendoredEntries: ReadonlyArray<{ readonly specifier: string; readon
 export const vendorDirectory = "vendor/effect-qb"
 
 /** Evidence that a copied file carries the workspace patch rather than the pristine release. */
-export const patchedRuntimeMarkers = {
+export const patchedRuntimeMarkers: { readonly forbidden: string; readonly required: string } = {
   forbidden: "effect/unstable/",
   required: "\"effect/sql/SqlClient\""
-} as const
+}
 
 export class VendoredEffectQbError extends Data.TaggedError("VendoredEffectQbError")<{
   readonly cause?: unknown

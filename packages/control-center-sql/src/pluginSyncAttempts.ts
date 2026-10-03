@@ -1,5 +1,5 @@
-import { Casing, Column, Query, Table } from "effect-qb"
-import * as Sqlite from "effect-qb/sqlite"
+import { Casing, Column, Query, Table } from "./vendor/effect-qb/index.js"
+import * as Sqlite from "./vendor/effect-qb/sqlite.js"
 
 import type { RenderedSql } from "./types.js"
 
