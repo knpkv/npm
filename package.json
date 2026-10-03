@@ -74,6 +74,6 @@
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "typescript-eslint": "^8.71.0",
     "vitest": "catalog:",
-    "yaml": "2.9.0"
+    "yaml": "2.9.1"
   }
 }
