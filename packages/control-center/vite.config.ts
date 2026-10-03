@@ -22,12 +22,23 @@ export default defineConfig(({ mode }) => {
           },
           output: {
             entryFileNames: "[name].js",
-            // Persistence is a deliberate runtime boundary: keep it out of the shared server chunk so
+            // Persistence and governance are deliberate runtime boundaries: keep them out of the shared server chunk so
             // per-file budgets track each graph instead of whatever the bundler happens to merge.
-            manualChunks: (id) =>
-              id.replaceAll("\\", "/").includes("/src/server/persistence/")
-                ? "persistence"
-                : undefined
+            // Only the matched modules move; their shared dependencies stay where entry graphs find them.
+            codeSplitting: {
+              groups: [
+                {
+                  name: "persistence",
+                  test: /[\\/]src[\\/]server[\\/]persistence[\\/]/,
+                  includeDependenciesRecursively: false
+                },
+                {
+                  name: "governance",
+                  test: /[\\/]src[\\/]server[\\/]governance[\\/]/,
+                  includeDependenciesRecursively: false
+                }
+              ]
+            }
           }
         },
         sourcemap: true,
