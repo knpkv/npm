@@ -1,5 +1,34 @@
 # @knpkv/control-center
 
+## 0.9.0
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+- [#408](https://github.com/knpkv/npm/pull/408) [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e) Thanks [@konopkov](https://github.com/konopkov)! - Share typed, redacted browser-pairing credentials and transport primitives between Control Center and CodeCommit.
+
+### Patch Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`448d81d`](https://github.com/knpkv/npm/commit/448d81d7cf9ee019c2a032e0be97c9d45cdaf1cc) Thanks [@konopkov](https://github.com/konopkov)! - Keep a freshly paired browser session when the startup session check finishes after pairing. With React 19.3 the lazily loaded check can start late, and its stale result no longer signs the tab out.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Decode Jira change items that omit `toString`. Effect 4.0.0 reads declared struct keys through the prototype, so an omitted `toString` resolved to `Object.prototype.toString` and failed decoding. The new `ownOptionalKey` schema treats that inherited member as an absent key.
+- Updated dependencies [[`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`adfad78`](https://github.com/knpkv/npm/commit/adfad78662f20b698a2c6d76a70e824c52e22029), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`e17fbbb`](https://github.com/knpkv/npm/commit/e17fbbb8760f5f8bcf9a73b7d2d11a526c37fadd), [`bd45f8c`](https://github.com/knpkv/npm/commit/bd45f8cdeb1e8301bfcde42254792a488734d7e5), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`ce35f96`](https://github.com/knpkv/npm/commit/ce35f96b35ac0c8e8098da815770a0d46e6ddbad), [`8e1ab9c`](https://github.com/knpkv/npm/commit/8e1ab9ca35c8d87d6d361f6cf3472ada3f9f5c93), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`b2d229d`](https://github.com/knpkv/npm/commit/b2d229d2208fb9e7f2d9dc174ff12d769c5b8225), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`8022091`](https://github.com/knpkv/npm/commit/802209142207593461eaef384d31757f746a2452), [`fa377ce`](https://github.com/knpkv/npm/commit/fa377ce975cccd594da8f7a370eb14f7f48d0039), [`fa695f0`](https://github.com/knpkv/npm/commit/fa695f0179c67701e468fcedcd07c4b738c9734a), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`acb8b25`](https://github.com/knpkv/npm/commit/acb8b25772cc188a0cc1299a1b591903240cfc7c), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e), [`af0c0e0`](https://github.com/knpkv/npm/commit/af0c0e09ef9ceabda7fd819bced7eb6d1b33e3c3), [`6ce5d6a`](https://github.com/knpkv/npm/commit/6ce5d6a1919515b9701ba0f0ec78c01cb408b623)]:
+  - @knpkv/ai-claude@0.4.0
+  - @knpkv/rly@0.6.0
+  - @knpkv/confluence-to-markdown@2.3.0
+  - @knpkv/clockify-api-client@2.0.0
+  - @knpkv/ai-codex@0.5.0
+  - @knpkv/confluence-api-client@2.0.0
+  - @knpkv/control-center-sql@0.5.0
+  - @knpkv/ai-runtime@0.5.0
+  - @knpkv/atlassian-common@1.5.0
+  - @knpkv/browser-pairing@0.2.0
+  - @knpkv/codecommit-core@0.17.0
+  - @knpkv/jira-api-client@2.0.0
+  - @knpkv/relay-product@0.2.0
+  - @knpkv/review@0.3.0
+
 ## 0.8.1
 
 ### Patch Changes

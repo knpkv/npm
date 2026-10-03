@@ -1,6 +1,6 @@
 {
   "name": "@knpkv/herdr-monitor",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Explicitly published, isolated read-only agent status boards",
   "license": "MIT",
   "author": "knpkv",
