@@ -1,5 +1,24 @@
 # @knpkv/ai-claude
 
+## 0.4.0
+
+### Minor Changes
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Add an optional reasoning effort override to the Claude model adapter. Omitting it preserves the CLI-configured default.
+
+  Add optional bounded, cancellable visible activity callbacks. `onActivity` enables CLI partial-message output and reports the supplied request prompt, process milestones, visible assistant text, `StructuredOutput` JSON fragments and the final response, including for `generateObject`. System events, reasoning and other tool inputs are excluded; request events carry caller-supplied prompt content and stay within that prompt's authorization boundary. The stdout byte limit covers every event and the final result still passes schema validation. Without the callback, output remains buffered.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+### Patch Changes
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Forward `USER` to the Claude CLI. Every call failed on macOS with `Not logged in · Please run
+/login` even for a signed-in user, because the reviewed child environment withheld it. Login
+  Keychain items are scoped to the account name, so the CLI could not find its own credentials. It
+  carries no secret, being the account name the process already runs as.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Preserve tuple positions, length bounds and rest-item types when sending structured-output schemas to a draft-07 consumer.
+
 ## 0.3.0
 
 ### Minor Changes

@@ -1,5 +1,46 @@
 # @knpkv/rly
 
+## 0.6.0
+
+### Minor Changes
+
+- [#433](https://github.com/knpkv/npm/pull/433) [`8022091`](https://github.com/knpkv/npm/commit/802209142207593461eaef384d31757f746a2452) Thanks [@konopkov](https://github.com/konopkov)! - Add patch-based diff presentation and a reusable guided review reader with portable HTML export. Guides retain chapter coverage and source-line findings, use Rly presentation, and display attributable token usage, cost, and execution time.
+
+  Accept no-prefix and explicitly configured custom-prefix Git patches, CRLF patch
+  records, and copied-file identities. Validate usage subsets and source coordinates,
+  and replace stale fix guidance when a finding has status.
+
+  Reject overlapping or surplus hunk records, retain diagram updates during active rendering, and keep source attribution and review-context categories visible. Standalone test commands build the export assets first.
+
+  Preserve recorded cost precision and copied source paths, recognize punctuated code-fence languages, and reject non-UTF-8 path bytes instead of collapsing file identities.
+
+  Require file markers for text hunks, document explicit empty prefixes for ambiguous no-prefix paths, and print both guide and review panels through opt-in tab content retention.
+  Retain completed diagrams during print media transitions instead of clearing them for an asynchronous system-theme redraw.
+  Measure diagrams outside hidden tabs so theme changes preserve their printable dimensions.
+
+  Reject duplicate or contradictory patch records, isolate diagram failures, and display a supplied comparison base.
+
+  Expose a bundled diagram initializer for embedded guides, with host-owned cleanup, theme updates and print preservation. Retain variable-length code fences and ordered-list continuations; reject mode transitions on absent patch sides.
+
+- [#424](https://github.com/knpkv/npm/pull/424) [`fa695f0`](https://github.com/knpkv/npm/commit/fa695f0179c67701e468fcedcd07c4b738c9734a) Thanks [@konopkov](https://github.com/konopkov)! - Keep Fleet tabs in one compact iPhone row, preserve terminal pointer access, and distinguish Work loading and failure states.
+
+### Patch Changes
+
+- [#425](https://github.com/knpkv/npm/pull/425) [`adfad78`](https://github.com/knpkv/npm/commit/adfad78662f20b698a2c6d76a70e824c52e22029) Thanks [@konopkov](https://github.com/konopkov)! - Remove the scrollbar-like selection line from stacked mobile tabs.
+
+- [#432](https://github.com/knpkv/npm/pull/432) [`b2d229d`](https://github.com/knpkv/npm/commit/b2d229d2208fb9e7f2d9dc174ff12d769c5b8225) Thanks [@konopkov](https://github.com/konopkov)! - Replace employer-specific names in fixtures, comments and prototype storage keys with neutral placeholders.
+
+  The Control Center prototype uses a new demo storage namespace. Saved prototype state and theme preferences from the previous namespace are not loaded.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Replace internal project names, keys and work descriptions in fixtures, examples and documentation
+  with neutral placeholders. Nothing about behaviour changes; these are the strings a reader of a
+  public package would otherwise see.
+
+  `ClockifyApiClient`'s tests now compose their client once through `it.layer`, with each case
+  declaring the response it wants, instead of providing a layer inside every test body.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`6ce5d6a`](https://github.com/knpkv/npm/commit/6ce5d6a1919515b9701ba0f0ec78c01cb408b623) Thanks [@konopkov](https://github.com/konopkov)! - Update `@pierre/diffs` to 1.5.1, keeping the strict style-src theme patch, and `lucide-react` to 1.50.
+
 ## 0.5.1
 
 ### Patch Changes

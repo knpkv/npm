@@ -1,5 +1,25 @@
 # @knpkv/confluence-to-markdown
 
+## 2.3.0
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+### Patch Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Keep boolean flags such as `--dry-run`, `--json`, and `--force` optional. Effect 4.0.0 made omitted boolean flags required, so each now defaults to `false`.
+
+- [#440](https://github.com/knpkv/npm/pull/440) [`ce35f96`](https://github.com/knpkv/npm/commit/ce35f96b35ac0c8e8098da815770a0d46e6ddbad) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Confluence API clients from Atlassian's latest OpenAPI specifications and regenerate them with the current Effect OpenAPI generator.
+
+  Breaking: the generator no longer emits component schemas that no operation reaches. The published V1 client drops `AddContentRestriction`, `ConnectModule`, `ContentBodyCreateStorage`, `ContentMetadata`, `ContentProperty`, `GlobalSpaceIdentifier`, `PropertyValue`, `SpaceProperty`, and `Task`; the V2 client drops `DatabaseLinks`, `FolderLinks`, `SmartLinkLinks`, and `WhiteboardLinks`. The V1 client adds `SpacePermissionCreate`. Consumers importing the removed models must define them locally before upgrading. Several V1 models are now nullable: `ButtonLookAndFeel`, `Container`, `ContainerLookAndFeel`, `Icon`, `NavigationLookAndFeel`, `SearchFieldLookAndFeel`, `Space`, `SpaceDescriptionCreate`, `SpaceSettings`, `SystemInfoEntity`, `User`, `UsersUserKeys`, and `Version`; the V2 `Icon` model is nullable too. Except `SpaceDescriptionCreate`, each of these also accepts unknown keys through an index signature, as do the V1 `LookAndFeel`, `LookAndFeelWithLinks`, `ScreenLookAndFeel`, and `WatchUser` models. `User.operations` and `ContentBlueprintDraft.ancestors` also gain `| null`. Code that reads these models must handle `null`.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Depend on the patched `js-yaml` 5.4.2 directly, matching the workspace security override, so installs and packed consumers resolve the version the manifest names.
+- Updated dependencies [[`ce35f96`](https://github.com/knpkv/npm/commit/ce35f96b35ac0c8e8098da815770a0d46e6ddbad), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e)]:
+  - @knpkv/confluence-api-client@2.0.0
+  - @knpkv/atlassian-common@1.5.0
+  - @knpkv/agent-skills@0.3.2
+
 ## 2.2.1
 
 ### Patch Changes

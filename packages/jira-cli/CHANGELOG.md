@@ -1,5 +1,25 @@
 # @knpkv/jira-cli
 
+## 1.4.0
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+### Patch Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Keep boolean flags such as `--dry-run`, `--json`, and `--force` optional. Effect 4.0.0 made omitted boolean flags required, so each now defaults to `false`.
+
+- [#438](https://github.com/knpkv/npm/pull/438) [`acb8b25`](https://github.com/knpkv/npm/commit/acb8b25772cc188a0cc1299a1b591903240cfc7c) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Schema-backed Jira API client.
+
+  Breaking: these exported types now include `null`, so code that reads them must handle it: `ApprovalConfiguration`, `BoardFeaturesPayload`, `BoardsPayload`, `ConditionGroupConfiguration`, `ConditionGroupUpdate`, `CustomFieldPayload`, `FieldCapabilityPayload`, `FieldLayoutPayload`, `FieldLayoutSchemePayload`, `FieldSchemePayload`, `IssueLayoutPayload`, `IssueTypeHierarchyPayload`, `IssueTypePayload`, `IssueTypeProjectCreatePayload`, `IssueTypeScreenSchemePayload`, `NotificationSchemePayload`, `PermissionPayloadDTO`, `PreviewConditionGroupConfiguration`, `PreviewRuleConfiguration`, `ProjectId`, `RolesCapabilityPayload`, `ScopePayload`, `ScreenPayload`, `ScreenSchemePayload`, `SecuritySchemePayload`, `TargetClassification`, `TargetMandatoryFields`, `TargetStatus`, `WorkflowCapabilityPayload`, `WorkflowLayout`, `WorkflowProjectIdScope`, `WorkflowRuleConfiguration`, `WorkflowStatusLayout`, and `WorkflowTransitionLinks`. `ProjectId` and `WorkflowLayout` also appear in responses. No exports are removed; 129 are added.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Depend on the patched `js-yaml` 5.4.2 directly, matching the workspace security override, so installs and packed consumers resolve the version the manifest names.
+- Updated dependencies [[`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`acb8b25`](https://github.com/knpkv/npm/commit/acb8b25772cc188a0cc1299a1b591903240cfc7c), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e)]:
+  - @knpkv/atlassian-common@1.5.0
+  - @knpkv/jira-api-client@2.0.0
+  - @knpkv/agent-skills@0.3.2
+
 ## 1.3.1
 
 ### Patch Changes

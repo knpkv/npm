@@ -1,5 +1,33 @@
 # @knpkv/jira-api-client
 
+## 2.0.0
+
+### Major Changes
+
+- [#438](https://github.com/knpkv/npm/pull/438) [`acb8b25`](https://github.com/knpkv/npm/commit/acb8b25772cc188a0cc1299a1b591903240cfc7c) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Schema-backed Jira API client.
+
+  Breaking: these exported types now include `null`, so code that reads them must handle it: `ApprovalConfiguration`, `BoardFeaturesPayload`, `BoardsPayload`, `ConditionGroupConfiguration`, `ConditionGroupUpdate`, `CustomFieldPayload`, `FieldCapabilityPayload`, `FieldLayoutPayload`, `FieldLayoutSchemePayload`, `FieldSchemePayload`, `IssueLayoutPayload`, `IssueTypeHierarchyPayload`, `IssueTypePayload`, `IssueTypeProjectCreatePayload`, `IssueTypeScreenSchemePayload`, `NotificationSchemePayload`, `PermissionPayloadDTO`, `PreviewConditionGroupConfiguration`, `PreviewRuleConfiguration`, `ProjectId`, `RolesCapabilityPayload`, `ScopePayload`, `ScreenPayload`, `ScreenSchemePayload`, `SecuritySchemePayload`, `TargetClassification`, `TargetMandatoryFields`, `TargetStatus`, `WorkflowCapabilityPayload`, `WorkflowLayout`, `WorkflowProjectIdScope`, `WorkflowRuleConfiguration`, `WorkflowStatusLayout`, and `WorkflowTransitionLinks`. `ProjectId` and `WorkflowLayout` also appear in responses. No exports are removed; 129 are added.
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Let a client re-read its credential per request. `JiraApiConfigContract` gains an optional
+  `resolveAuth`, and the credential union it yields is now exported as `JiraApiCredential`.
+
+  Without it, a client is pinned for life to the token that existed when its layer was built. That is
+  invisible in a command that exits in seconds and fatal in one that does not: an Atlassian access
+  token lasts about an hour, after which every request 401s and no retry inside the process can
+  recover, because the expired token is already baked into the header. `jcf watch` is meant to run all
+  day.
+
+  Omitting `resolveAuth` keeps the previous behaviour exactly — the credential in `auth` is used as
+  given, which is right for a basic-auth API token that cannot expire. When it is supplied, both the
+  `Authorization` header and the API host are derived from the same resolved value, so a resolver
+  cannot address one site while authenticating against another.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Decode Jira change items that omit `toString`. Effect 4.0.0 reads declared struct keys through the prototype, so an omitted `toString` resolved to `Object.prototype.toString` and failed decoding. The new `ownOptionalKey` schema treats that inherited member as an absent key.
+
 ## 1.1.1
 
 ### Patch Changes
