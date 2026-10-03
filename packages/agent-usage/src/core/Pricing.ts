@@ -60,9 +60,19 @@ interface CodexRates {
 }
 
 interface CodexPrice extends CodexRates {
-  /** Rates that apply once the prompt exceeds `context` tokens. */
-  readonly longContext: (CodexRates & { readonly context: number }) | null
+  /** Rates that apply to a Long Prompt. */
+  readonly longContext: CodexRates | null
 }
+
+/** A Codex request whose prompt exceeds this many tokens is billed at its model's long-context tier. */
+export const LONG_PROMPT_TOKENS = 272_000
+
+/** Every token of a request's prompt: uncached input, cache reads and cache writes. */
+export const promptTokens = (tokens: Tokens): number =>
+  tokens.input + tokens.cacheRead + tokens.cacheWrite5m + tokens.cacheWrite1h
+
+/** True when one request's prompt falls in the long-context tier. */
+export const isLongPrompt = (tokens: Tokens): boolean => promptTokens(tokens) > LONG_PROMPT_TOKENS
 
 const flat = (input: number, output: number, cacheRead: number | null): CodexPrice => ({
   input,
@@ -74,7 +84,7 @@ const flat = (input: number, output: number, cacheRead: number | null): CodexPri
 
 const tiered = (base: CodexRates, long: CodexRates): CodexPrice => ({
   ...base,
-  longContext: { ...long, context: 272_000 }
+  longContext: long
 })
 
 const rates = (input: number, output: number, cacheRead: number | null, cacheWrite: number | null): CodexRates => ({
@@ -121,14 +131,11 @@ const claudeCost = (model: string, fast: boolean, tokens: Tokens): Option.Option
   return Option.some((input * found.input + (tokens.output + tokens.reasoning) * found.output) / PER_MTOK)
 }
 
-const codexCost = (model: string, tokens: Tokens): Option.Option<number> => {
+const codexCost = (model: string, longPrompt: boolean, tokens: Tokens): Option.Option<number> => {
   const price = CODEX.get(model)
   if (price === undefined) return Option.none()
   const cacheWrite = tokens.cacheWrite5m + tokens.cacheWrite1h
-  const prompt = tokens.input + tokens.cacheRead + cacheWrite
-  const applied: CodexRates = price.longContext !== null && prompt > price.longContext.context
-    ? price.longContext
-    : price
+  const applied: CodexRates = longPrompt && price.longContext !== null ? price.longContext : price
   const cacheReadUsd = tokens.cacheRead === 0
     ? 0
     : applied.cacheRead === null
@@ -142,13 +149,26 @@ const codexCost = (model: string, tokens: Tokens): Option.Option<number> => {
   )
 }
 
+/** Requests that price alike: one agent, model and speed, all Long Prompts or none. */
+export interface PricedGroup {
+  readonly agent: Agent
+  readonly model: string
+  readonly fast: boolean
+  readonly longPrompt: boolean
+  /** The group's summed tokens. Pricing is linear within a group, so a sum prices like its parts. */
+  readonly tokens: Tokens
+}
+
+/** A group's cost at current list price, or none when its model or a needed rate is unpriced. */
+export const groupCost = (group: PricedGroup): Option.Option<number> =>
+  group.agent === "claude"
+    ? claudeCost(group.model, group.fast, group.tokens)
+    : codexCost(group.model, group.longPrompt, group.tokens)
+
 /** One request's cost at current list price, or none when its model or a needed rate is unpriced. */
 export const apiEquivalentCost = (request: {
   readonly agent: Agent
   readonly model: string
   readonly fast: boolean
   readonly tokens: Tokens
-}): Option.Option<number> =>
-  request.agent === "claude"
-    ? claudeCost(request.model, request.fast, request.tokens)
-    : codexCost(request.model, request.tokens)
+}): Option.Option<number> => groupCost({ ...request, longPrompt: isLongPrompt(request.tokens) })
