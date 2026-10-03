@@ -175,10 +175,11 @@ it.effect("rejects unsafe PR numbers and preserves provider-native identifiers t
     }
   }))
 
+// The export inlines Mermaid 12 with ELK (about 5 MB); evaluating it alone takes seconds under suite load.
 it("ships the documented embedded diagram initializer as a self-contained package export", async () => {
   const diagrams = await import("@knpkv/review/guide/diagrams")
   expect(diagrams.mountGuideDiagrams).toBeTypeOf("function")
-})
+}, 20_000)
 
 it.effect("exports ordered-list starting numbers before client hydration", () =>
   Effect.gen(function*() {
