@@ -117,3 +117,18 @@ it.each(["directive", "frontmatter"])("retains protected config through real Mer
     fontSize: 31
   })
 })
+
+/** Mermaid 12 switched defaults to ELK and `neo`; guides keep the dagre layout and classic look they shipped with. */
+it("keeps the dagre layout and classic look", async () => {
+  const configs: Array<unknown> = []
+  const draw = makeMermaidDrawer({
+    initialize: (config) => {
+      configs.push(config)
+    },
+    render: async () => ({ svg: "<svg></svg>", diagramType: "flowchart-v2" })
+  })
+  const node = document.createElement("pre")
+  node.textContent = "flowchart LR; A-->B"
+  await draw([node], "neutral")
+  expect(configs).toEqual([expect.objectContaining({ layout: "dagre", look: "classic", theme: "neutral" })])
+})
