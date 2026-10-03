@@ -41,7 +41,7 @@
   },
   "devDependencies": {
     "@types/node": "latest",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2"
   },
   "keywords": [

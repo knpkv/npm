@@ -91,8 +91,8 @@
     "@knpkv/confluence-to-markdown": "workspace:^",
     "@knpkv/control-center-sql": "workspace:^",
     "@knpkv/jira-api-client": "workspace:^",
-    "@knpkv/review": "workspace:^",
     "@knpkv/relay-product": "workspace:^",
+    "@knpkv/review": "workspace:^",
     "@knpkv/rly": "workspace:^",
     "effect": "4.0.0",
     "react": "^19.2.8",
@@ -111,7 +111,7 @@
     "@vitejs/plugin-react": "^6.0.5",
     "axe-core": "4.13.0",
     "rimraf": "^6.1.3",
-    "tsx": "^4.23.12",
+    "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.2.1",
     "vitest": "catalog:"
