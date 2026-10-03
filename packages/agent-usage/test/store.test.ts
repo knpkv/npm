@@ -52,12 +52,12 @@ describe("UsageStore", () => {
         expect(yield* store.cursor("codex", "proj/a.jsonl")).toEqual(Option.none())
       }))
 
-    it.effect("stores a limit series only when its reading changes", () =>
+    it.effect("reads a limit series back as its changes", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore
         yield* store.recordObservations([snapshot(1_000, 10), snapshot(2_000, 10), snapshot(3_000, 12)], [])
         const series = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "ser8" })
-        expect(series.map((row) => [row.observedAt, row.confirmedAt])).toEqual([[1_000, 2_000], [3_000, 3_000]])
+        expect(series.map((row) => row.observedAt)).toEqual([1_000, 3_000])
       }))
 
     it.effect("keeps every transition when a series arrives interleaved across files", () =>
@@ -74,20 +74,21 @@ describe("UsageStore", () => {
         expect(series.map((row) => row.observedAt)).toEqual([10_000, 20_000, 30_000])
       }))
 
-    it.effect("splits a compressed interval when a different reading arrives inside it", () =>
+    it.effect("finds a change that arrives late, inside a run of equal readings", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore
         const at = (observedAt: number, usedPercent: number): LimitSnapshot => ({
           ...snapshot(observedAt, usedPercent),
           label: "split"
         })
-        yield* store.recordObservations([at(1_000, 10), at(3_000, 10)], [])
+        yield* store.recordObservations([at(1_000, 10), at(3_000, 10), at(5_000, 10)], [])
         yield* store.recordObservations([at(2_000, 20)], [])
         const series = (yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "ser8" })).filter((row) =>
           row.label === "split"
         )
+        // The change back to 10% is where it was next observed (t=3000); t=5000 is the last read.
         expect(series.map((row) => [row.observedAt, row.reading._tag === "Known" ? row.reading.usedPercent : null]))
-          .toEqual([[1_000, 10], [2_000, 20], [3_000, 10]])
+          .toEqual([[1_000, 10], [2_000, 20], [3_000, 10], [5_000, 10]])
         const balance = (observedAt: number, credits: number): BalanceReading => ({
           kind: "codex-credits",
           machine: "split",
@@ -101,7 +102,7 @@ describe("UsageStore", () => {
         ])
       }))
 
-    it.effect("stores an unchanged window again when it recovers from a failed poll", () =>
+    it.effect("keeps every Claude poll, so a recovery after a failed poll is visible", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore
         const claude = (label: string, observedAt: number, reading: LimitSnapshot["reading"]): LimitSnapshot => ({
@@ -122,10 +123,7 @@ describe("UsageStore", () => {
         ], [])
         const fiveHour = (yield* store.limitSnapshots({ from: 0, to: 500_000, machine: "mac" }))
           .filter((row) => row.label === "five_hour")
-        expect(fiveHour.map((row) => [row.observedAt, row.confirmedAt])).toEqual([
-          [100_000, 100_000],
-          [300_000, 400_000]
-        ])
+        expect(fiveHour.map((row) => row.observedAt)).toEqual([100_000, 300_000, 400_000])
       }))
 
     it.effect("keeps two outages apart when a recovery came between them", () =>
@@ -154,9 +152,7 @@ describe("UsageStore", () => {
         const report = buildLimitsReport(stored, { from: 0, to: 100 })
         expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
           .toEqual(["Known", "Unknown", "Known", "Unknown", "Known"])
-        // Fetch, Fetch with no recovery between them is still one row.
-        expect(stored.filter((row) => row.label === "*").map((row) => [row.observedAt, row.confirmedAt]))
-          .toEqual([[20, 20], [40, 45]])
+        expect(stored.filter((row) => row.label === "*").map((row) => row.observedAt)).toEqual([20, 40, 45])
       }))
 
     it.effect("stores Unknown limit readings so a gap stays visible", () =>
@@ -172,8 +168,10 @@ describe("UsageStore", () => {
           reading: { _tag: "Unknown", reason: "AuthExpired" }
         }
         yield* store.recordObservations([unknown], [])
-        const series = yield* store.limitSnapshots({ from: 4_000, to: 6_000, machine: "ser8" })
-        expect(series).toEqual([{ ...unknown, confirmedAt: 5_000 }])
+        const series = (yield* store.limitSnapshots({ from: 4_000, to: 6_000, machine: "ser8" })).filter((row) =>
+          row.agent === "claude"
+        )
+        expect(series).toEqual([unknown])
       }))
 
     it.effect("keeps the latest balance per kind, storing only changes", () =>
@@ -189,7 +187,7 @@ describe("UsageStore", () => {
         const ours = store.latestBalances("ser8")
         expect(yield* ours).toEqual([reading(3, 40)])
         yield* store.recordObservations([], [reading(4, 40)])
-        // An unchanged reading confirms the stored one, so "read … ago" stays true.
+        // The newest observation is the latest reading, so "read … ago" stays true.
         expect(yield* ours).toEqual([reading(4, 40)])
       }))
 
@@ -299,10 +297,9 @@ describe("UsageStore", () => {
             "label",
             "window_minutes",
             "observed_at",
-            "confirmed_at",
             "reading"
           ],
-          balance_readings: ["kind", "machine", "observed_at", "confirmed_at", "value"],
+          balance_readings: ["kind", "machine", "observed_at", "value"],
           tickets: ["key", "summary", "fetched_at"]
         })
       }))

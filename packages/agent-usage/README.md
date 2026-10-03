@@ -85,7 +85,8 @@ https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code's `/usage` 
 - **Codex** writes its account limits and credit balance into every rollout, so its limit history
   is backfilled from old sessions. Only the account-level `codex` limit is read; model-scoped limits
   are left out. A forked subagent rollout begins with a copy of its parent's history; that copy is
-  not counted again.
+  not counted again. Codex repeats its limits on every request, so a reading is kept when it
+  changes and otherwise at most every ten minutes.
 
 A reading holds until the next one or until its window resets, whichever comes first. The page
 never splits a limit's percentage across tickets: providers weight models and caching in ways they

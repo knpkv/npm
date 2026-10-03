@@ -183,5 +183,19 @@ describe("ingestOnce", () => {
         const second = yield* ingestOnce(roots, { chunkBytes: 64, maxLineBytes: 500 })
         expect(second.claude.skipped.oversizedLine).toBe(0)
       }))
+
+    it.effect("skips an oversized line whose newline falls inside the chunk it was read in", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const session = path.join(roots.claudeProjects, "-w-app", "sess-2.jsonl")
+        yield* fs.writeFileString(
+          session,
+          `${JSON.stringify(claudeUser("y".repeat(600)))}\n` +
+            jsonl(claudeAssistant({ id: "after-2", at: "2026-09-01T10:00:00.000Z" }))
+        )
+        const status = yield* ingestOnce(roots, { chunkBytes: 4_000, maxLineBytes: 500 })
+        expect(status.claude.eventsAdded).toBe(1)
+        expect(status.claude.skipped.oversizedLine).toBe(1)
+      }))
   })
 })

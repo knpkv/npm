@@ -234,53 +234,65 @@ const seriesKey = (snapshot: LimitSnapshot): string =>
     ? `${snapshot.agent}\u0000${snapshot.windowMinutes}m`
     : `${snapshot.agent}\u0000${snapshot.label}`
 
+const sameReading = (left: LimitSnapshot["reading"], right: LimitSnapshot["reading"]): boolean =>
+  left._tag === "Known" && right._tag === "Known"
+    ? left.usedPercent === right.usedPercent && left.resetsAt === right.resetsAt
+    : left._tag === "Unknown" && right._tag === "Unknown" && left.reason === right.reason
+
 /**
  * Limit series over a range, from every snapshot up to its end in time order. Each series starts
  * at `from` with the reading in force there when one exists.
  */
 export const buildLimitsReport = (
-  snapshots: ReadonlyArray<LimitSnapshot & { readonly confirmedAt?: number }>,
+  snapshots: ReadonlyArray<LimitSnapshot>,
   range: Range
 ): Omit<LimitsReport, "balances"> => {
-  const series = new Map<string, LimitSeries>()
-  const sources = new Map<string, LimitSnapshot["source"]>()
+  interface Building {
+    agent: LimitSnapshot["agent"]
+    label: string
+    windowMinutes: LimitSnapshot["windowMinutes"]
+    readonly source: LimitSnapshot["source"]
+    points: Array<LimitSeries["points"][number]>
+  }
+  const series = new Map<string, Building>()
   const latest = new Map<string, LimitSnapshot>()
-  const append = (key: string, at: number, reading: LimitSnapshot["reading"]) => {
-    const current = series.get(key)
-    if (current === undefined) return
+  const append = (entry: Building, at: number, reading: LimitSnapshot["reading"]) => {
     const point = { at: Math.max(at, range.from), reading }
     // Before the range, only the newest reading matters: it becomes the left-edge point.
-    series.set(key, { ...current, points: at < range.from ? [point] : [...current.points, point] })
+    if (at < range.from) {
+      entry.points = [point]
+      return
+    }
+    // An unchanged reading continues the step it repeats; a failed poll in between has already
+    // broken it with an Unknown point, so a recovery still starts a new one.
+    const last = entry.points.at(-1)
+    if (last !== undefined && sameReading(last.reading, reading)) return
+    entry.points.push(point)
   }
   const ordered = [...snapshots].sort((left, right) => left.observedAt - right.observedAt)
   for (const snapshot of ordered) {
     if (snapshot.observedAt >= range.to) continue
     const key = seriesKey(snapshot)
-    // The tiles show when the reading was last seen, which an unchanged later reading moves on.
-    latest.set(key, {
-      agent: snapshot.agent,
-      machine: snapshot.machine,
-      source: snapshot.source,
-      label: snapshot.label,
-      windowMinutes: snapshot.windowMinutes,
-      observedAt: snapshot.confirmedAt ?? snapshot.observedAt,
-      reading: snapshot.reading
-    })
-    sources.set(key, snapshot.source)
-    const current = series.get(key)
-    series.set(key, {
-      agent: snapshot.agent,
-      label: snapshot.label,
-      windowMinutes: snapshot.windowMinutes,
-      points: current?.points ?? []
-    })
-    append(key, snapshot.observedAt, snapshot.reading)
+    // The tiles show the newest observation, so "read … ago" moves on with unchanged readings.
+    latest.set(key, snapshot)
+    const entry = series.get(key) ??
+      {
+        agent: snapshot.agent,
+        label: snapshot.label,
+        windowMinutes: snapshot.windowMinutes,
+        source: snapshot.source,
+        points: []
+      }
+    entry.label = snapshot.label
+    entry.windowMinutes = snapshot.windowMinutes
+    series.set(key, entry)
+    append(entry, snapshot.observedAt, snapshot.reading)
     // A source that could not be read at all breaks every window it reports, so no level is
     // carried across the outage.
     if (snapshot.label === "*") {
-      for (const [other, entry] of series) {
-        if (other !== key && entry.agent === snapshot.agent && sources.get(other) === snapshot.source) {
-          append(other, snapshot.observedAt, snapshot.reading)
+      for (const [other, otherEntry] of series) {
+        if (other !== key && otherEntry.agent === snapshot.agent && otherEntry.source === snapshot.source) {
+          append(otherEntry, snapshot.observedAt, snapshot.reading)
         }
       }
     }
@@ -288,7 +300,12 @@ export const buildLimitsReport = (
   const byOrder = (left: { readonly agent: string; readonly label: string }, right: typeof left) =>
     left.agent.localeCompare(right.agent) || left.label.localeCompare(right.label)
   // A series with no Known reading still in force inside the range has nothing to draw.
-  const live = [...series.values()].filter((entry) =>
+  const live = [...series.values()].map((entry): LimitSeries => ({
+    agent: entry.agent,
+    label: entry.label,
+    windowMinutes: entry.windowMinutes,
+    points: entry.points
+  })).filter((entry) =>
     entry.points.some((point) =>
       point.reading._tag === "Known" &&
       (point.at > range.from || point.reading.resetsAt === null || point.reading.resetsAt > range.from)

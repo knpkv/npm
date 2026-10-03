@@ -90,6 +90,9 @@ describe("labels", () => {
     expect(limitLabel("codex", "secondary", 10_080)).toBe("Codex weekly")
     expect(limitLabel("claude", "iguana_necktie", null)).toBe("Claude iguana_necktie")
     expect(limitLabel("claude", "*", null)).toBe("Claude limits")
+    expect(limitLabel("claude", "seven_day", 10_080)).toBe("Claude weekly")
+    expect(limitLabel("claude", "seven_day_opus", 10_080)).toBe("Claude seven_day_opus")
+    expect(limitLabel("codex", "primary", 10_080)).toBe("Codex weekly")
   })
 })
 

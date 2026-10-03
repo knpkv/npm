@@ -108,6 +108,23 @@ describe("readCodex", () => {
     }])
   })
 
+  it("keeps an unchanged limit reading at most every ten minutes, and every change", () => {
+    const at = (minute: number, used: number) =>
+      codexTokenCount({
+        at: new Date(Date.parse("2026-09-01T10:00:00.000Z") + minute * 60_000).toISOString(),
+        last: [1, 0, 1, 0],
+        total: 2 + minute,
+        primary: { used, minutes: 300, resets: 1_790_000_000 }
+      })
+    const result = readCodex(
+      file,
+      lines(at(0, 10), at(1, 10), at(5, 10), at(11, 10), at(12, 20), at(13, 20)),
+      initialCodexState
+    )
+    expect(result.snapshots.map((snapshot) => (snapshot.observedAt - Date.parse("2026-09-01T10:00:00.000Z")) / 60_000))
+      .toEqual([0, 11, 12])
+  })
+
   it("reads an account with no credits as NotSupported, not as an empty balance", () => {
     const result = readCodex(
       file,
@@ -151,6 +168,34 @@ describe("readCodex", () => {
       initialCodexState
     )
     expect(result.events.map((event) => event.attribution.activeTicket)).toEqual(["RPS-1", "RPS-2"])
+  })
+
+  it("never mines the task a parent agent hands a subagent, but does in a root session", () => {
+    const subagentMeta = {
+      ...codexMeta("/w/app", "main"),
+      payload: { ...codexMeta("/w/app", "main").payload, thread_source: "subagent", parent_thread_id: "parent-1" }
+    }
+    const delegated = readCodex(
+      file,
+      lines(
+        subagentMeta,
+        codexUserItem("Check the RPS-7071 example in docs"),
+        codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })
+      ),
+      initialCodexState
+    )
+    expect(delegated.events[0]?.attribution.activeTicket).toBeNull()
+    expect(delegated.state.delegated).toBe(true)
+    const root = readCodex(
+      file,
+      lines(
+        codexMeta("/w/app", "main"),
+        codexUserItem("Check the RPS-7071 example in docs"),
+        codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })
+      ),
+      initialCodexState
+    )
+    expect(root.events[0]?.attribution.activeTicket).toBe("RPS-7071")
   })
 
   it("records a request whose model was never announced under an unpriced placeholder model", () => {

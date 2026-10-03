@@ -14,6 +14,8 @@
  *   are not the weekly or five-hour allowance; they are ignored here.
  * - **A fork repeats its parent.** A forked subagent rollout starts with a copy of the parent's
  *   history, below `subagent_history_start_ordinal`; that copy only advances the running total.
+ * - **Limits are kept on change, and at least every ten minutes.** Codex repeats them on every
+ *   request; the repeats in between say nothing new.
  * - **Every token_count backfills limit history**, so Codex limits are recoverable from old rollouts
  *   in a way Claude's are not.
  *
@@ -22,7 +24,7 @@
 import { Option, Schema } from "effect"
 import { codexHumanText, singleTicket } from "./Attribution.js"
 import { classifyCodexCredits, CodexCredits } from "./Balances.js"
-import { type BalanceReading, Count, type LimitSnapshot, type UsageEvent } from "./Model.js"
+import { type BalanceReading, BalanceValue, Count, LimitReading, type LimitSnapshot, type UsageEvent } from "./Model.js"
 import { countSkip, noSkips, parseInstant, type ReadResult, type SourceFile, type SourceLine } from "./Readers.js"
 
 /** A Codex usage block with optional fields filled in, as codex-session-cost.jq normalizes it. */
@@ -57,6 +59,16 @@ export const usageDelta = (previous: CodexUsage | null, total: CodexUsage, last:
   }
 }
 
+/** The last observation of one series this rollout kept: what it said, and when. */
+const Kept = Schema.NullOr(Schema.Struct({ signature: Schema.String, at: Schema.Int }))
+
+/**
+ * How long an unchanged reading may go unrecorded. Codex repeats its limits on every request; one
+ * observation per window of this length keeps the series honest about when it was last seen, and
+ * bounds how far a change back can land from where it happened when rollouts interleave.
+ */
+export const RESAMPLE_MILLIS = 10 * 60 * 1000
+
 export const CodexReaderState = Schema.Struct({
   cwd: Schema.String,
   branch: Schema.String,
@@ -70,7 +82,12 @@ export const CodexReaderState = Schema.Struct({
    * A forked subagent rollout copies its parent's history first; lines with an ordinal below this
    * one are that copy, already booked from the parent's own rollout.
    */
-  historyStart: Schema.NullOr(Schema.Int)
+  historyStart: Schema.NullOr(Schema.Int),
+  /** A subagent's rollout: its user items are the parent agent delegating, not the human typing. */
+  delegated: Schema.Boolean,
+  keptPrimary: Kept,
+  keptSecondary: Kept,
+  keptCredits: Kept
 })
 export type CodexReaderState = typeof CodexReaderState.Type
 
@@ -81,7 +98,11 @@ export const initialCodexState: CodexReaderState = {
   activeTicket: null,
   previousTotal: null,
   ownSession: null,
-  historyStart: null
+  historyStart: null,
+  delegated: false,
+  keptPrimary: null,
+  keptSecondary: null,
+  keptCredits: null
 }
 
 const TokenUsage = Schema.Struct({
@@ -122,6 +143,8 @@ const RolloutLine = Schema.Union([
     payload: Schema.Struct({
       id: Schema.optionalKey(Schema.String),
       subagent_history_start_ordinal: Schema.optionalKey(Schema.NullOr(Schema.Int)),
+      thread_source: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      parent_thread_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
       cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
       git: Schema.optionalKey(
         Schema.NullOr(Schema.Struct({ branch: Schema.optionalKey(Schema.NullOr(Schema.String)) }))
@@ -162,6 +185,9 @@ const RolloutLine = Schema.Union([
 
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu
 
+const encodeReading = Schema.encodeSync(Schema.fromJsonString(LimitReading))
+const encodeBalance = Schema.encodeSync(Schema.fromJsonString(BalanceValue))
+
 const decodeLine = Schema.decodeUnknownOption(Schema.fromJsonString(RolloutLine))
 
 /** Lines a decode is spent on; everything else in a rollout is conversation or tool traffic. */
@@ -171,6 +197,10 @@ const mayMatter = (text: string): boolean => RELEVANT.some((marker) => text.incl
 /** User-role response items that fail to decode are other item kinds; only these count as damage. */
 const mustDecode = (text: string): boolean =>
   text.includes("\"session_meta\"") || text.includes("\"turn_context\"") || text.includes("\"token_count\"")
+
+/** Keep an observation when it says something new, or when the last kept one is getting old. */
+const worthKeeping = (kept: typeof Kept.Type, signature: string, at: number): boolean =>
+  kept === null || kept.signature !== signature || at - kept.at >= RESAMPLE_MILLIS || at < kept.at
 
 type RolloutWindow = typeof Window.Type
 
@@ -241,6 +271,8 @@ export const readCodex = (
           ...state,
           ownSession: own,
           historyStart: state.historyStart ?? record.payload.subagent_history_start_ordinal ?? null,
+          delegated: state.delegated || record.payload.thread_source === "subagent" ||
+            (record.payload.parent_thread_id !== undefined && record.payload.parent_thread_id !== null),
           cwd: record.payload.cwd ?? state.cwd,
           branch: record.payload.git?.branch ?? state.branch
         }
@@ -260,6 +292,7 @@ export const readCodex = (
         break
       }
       case "response_item": {
+        if (state.delegated) break
         const typed = record.payload.content
           .filter((item) => item.type === "input_text")
           .map((item) => codexHumanText(item.text ?? ""))
@@ -307,14 +340,22 @@ export const readCodex = (
         const limits = record.payload.rate_limits
         // Copied history carries the parent's limit readings restamped at fork time: not observations.
         if (!copied && limits !== undefined && limits !== null && limits.limit_id === "codex") {
-          for (const snapshot of snapshotsOf(file, observedAt, limits)) snapshots.push(snapshot)
+          for (const snapshot of snapshotsOf(file, observedAt, limits)) {
+            const signature = `${snapshot.windowMinutes} ${encodeReading(snapshot.reading)}`
+            const kept = snapshot.label === "primary" ? state.keptPrimary : state.keptSecondary
+            if (!worthKeeping(kept, signature, observedAt)) continue
+            snapshots.push(snapshot)
+            state = snapshot.label === "primary"
+              ? { ...state, keptPrimary: { signature, at: observedAt } }
+              : { ...state, keptSecondary: { signature, at: observedAt } }
+          }
           if (limits.credits !== undefined && limits.credits !== null) {
-            balances.push({
-              kind: "codex-credits",
-              machine: file.machine,
-              observedAt,
-              value: classifyCodexCredits(limits.credits)
-            })
+            const value = classifyCodexCredits(limits.credits)
+            const signature = encodeBalance(value)
+            if (worthKeeping(state.keptCredits, signature, observedAt)) {
+              balances.push({ kind: "codex-credits", machine: file.machine, observedAt, value })
+              state = { ...state, keptCredits: { signature, at: observedAt } }
+            }
           }
         }
         break

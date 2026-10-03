@@ -118,6 +118,8 @@ const agentName = (agent: Agent): string => agent === "claude" ? "Claude" : "Cod
 /** A limit's name: by window length when known, else by the provider's own key. */
 export const limitLabel = (agent: Agent, label: string, windowMinutes: number | null): string => {
   if (label === "*") return `${agentName(agent)} limits`
+  // Claude names its windows, and seven_day_opus is a different allowance from seven_day.
+  if (agent === "claude" && label !== "five_hour" && label !== "seven_day") return `Claude ${label}`
   if (windowMinutes === 300) return `${agentName(agent)} 5h`
   if (windowMinutes === 10_080) return `${agentName(agent)} weekly`
   if (windowMinutes !== null && windowMinutes % 60 === 0) return `${agentName(agent)} ${windowMinutes / 60}h`

@@ -141,19 +141,28 @@ const codexSource: Source<CodexReaderState> = {
 
 const decoder = new TextDecoder()
 
-/** Splits complete, newline-terminated bytes into lines with their absolute byte offsets. */
-const splitLines = (bytes: Uint8Array, startOffset: number): ReadonlyArray<SourceLine> => {
+/**
+ * Splits complete, newline-terminated bytes into lines with their absolute byte offsets. Lines longer
+ * than `maxLineBytes` are counted and left undecoded.
+ */
+const splitLines = (
+  bytes: Uint8Array,
+  startOffset: number,
+  maxLineBytes: number
+): { readonly lines: ReadonlyArray<SourceLine>; readonly oversized: number } => {
   const lines: Array<SourceLine> = []
+  let oversized = 0
   let lineStart = 0
   for (let index = 0; index <= bytes.length; index++) {
     if (index === bytes.length || bytes[index] === NEWLINE) {
-      if (index > lineStart) {
+      if (index - lineStart > maxLineBytes) oversized++
+      else if (index > lineStart) {
         lines.push({ offset: startOffset + lineStart, text: decoder.decode(bytes.subarray(lineStart, index)) })
       }
       lineStart = index + 1
     }
   }
-  return lines
+  return { lines, oversized }
 }
 
 const concatAll = (pieces: ReadonlyArray<Uint8Array>): Uint8Array => {
@@ -251,7 +260,9 @@ const ingestFile = <State>(
         continue
       }
       const complete = concatAll([...pending, rest.subarray(0, lastNewline)])
-      const result = source.read(file, splitLines(complete, offset), state)
+      const split = splitLines(complete, offset, maxLineBytes)
+      const result = source.read(file, split.lines, state)
+      for (let count = 0; count < split.oversized; count++) skipped = countSkip(skipped, "oversizedLine")
       const next = offset + complete.length + 1
       const committed = yield* commit(next, result)
       eventsAdded += committed.eventsAdded
