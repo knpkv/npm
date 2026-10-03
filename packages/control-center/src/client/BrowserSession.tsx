@@ -79,10 +79,13 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
   const [state, setState] = useState<BrowserSessionState>({ _tag: "checking" })
   const hydrationAttempt = useRef<symbol | undefined>(undefined)
   const currentSessionId = useRef<string | null>(null)
+  // Startup hydration recovers a session only until this tab establishes or loses one itself. The
+  // hydrator is lazy, so its request can start after pairing; that late attempt must stay inert.
+  const sessionDecidedLocally = useRef(false)
 
   const beginHydration = useCallback((): symbol => {
     const attempt = Symbol("browser-session-hydration")
-    hydrationAttempt.current = attempt
+    if (!sessionDecidedLocally.current) hydrationAttempt.current = attempt
     return attempt
   }, [])
 
@@ -107,6 +110,7 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
   }, [])
 
   const establishSession = useCallback((csrfToken: CsrfToken, session: SessionSummary): void => {
+    sessionDecidedLocally.current = true
     hydrationAttempt.current = undefined
     currentSessionId.current = session.sessionId
     setState(
@@ -118,6 +122,7 @@ export const BrowserSessionProvider = ({ children }: BrowserSessionProviderProps
 
   const invalidateSession = useCallback((expectedSessionId: string): void => {
     if (currentSessionId.current !== expectedSessionId) return
+    sessionDecidedLocally.current = true
     hydrationAttempt.current = undefined
     currentSessionId.current = null
     setState(clearMutationProof() ? { _tag: "anonymous" } : { _tag: "storage-unavailable", session: null })
