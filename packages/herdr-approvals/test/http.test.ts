@@ -3709,6 +3709,84 @@ esac
     )
   })
 
+  it.effect("derives job approval from the authenticated listener, never from request content", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-http-local-policy-test-"))
+    const tailscaleCommand = join(root, "tailscale-test")
+    writeFileSync(
+      tailscaleCommand,
+      `#!/bin/sh
+case "$1" in
+  ip) printf '%s\n' '127.0.0.1' ;;
+  whois) printf '%s\n' '{"Node":{"StableID":"node-alpha"},"UserProfile":{"LoginName":"andrey@example.com"}}' ;;
+esac
+`,
+      { mode: 0o700 }
+    )
+    const hostConfig = {
+      ...config(root),
+      crossHost: true,
+      port: 0,
+      tailscaleCommand
+    }
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const fleet = yield* makeFleetService({
+            approvalEnabled: true,
+            host: hostConfig.host,
+            operations,
+            store
+          })
+          const server = yield* Effect.acquireRelease(
+            Effect.promise(() =>
+              startHttpServer(hostConfig, fleet, assets, {
+                terminalConnector: unusedTerminal
+              })
+            ),
+            (running) => Effect.promise(running.close)
+          )
+          const tailnetUrl = server.tailnetUrl
+          if (tailnetUrl === null) return yield* Effect.die("tailnet listener missing")
+          const submit = (url: string, headers: Record<string, string>, extra: Record<string, string> = {}) =>
+            Effect.promise(async () => {
+              const response = await fetch(`${url}/v1/jobs`, {
+                body: JSON.stringify({ payload: { kind: "nix.apply", ref: "abc123" }, ...extra }),
+                headers: { "content-type": "application/json", ...headers },
+                method: "POST"
+              })
+              return { body: await response.json(), status: response.status }
+            })
+          expect(yield* submit(server.url, {})).toMatchObject({
+            body: { approvalNonce: null, approvedBy: null, status: "queued" },
+            status: 202
+          })
+          expect(yield* submit(tailnetUrl, { "x-forwarded-for": "127.0.0.1" })).toMatchObject({
+            body: { status: "pending_approval" },
+            status: 202
+          })
+          expect(yield* submit(server.url, { forwarded: "for=192.0.2.1" })).toMatchObject({
+            body: { status: "pending_approval" },
+            status: 202
+          })
+          expect(yield* submit(server.url, { "x-forwarded-for": "192.0.2.1" })).toMatchObject({
+            body: { status: "pending_approval" },
+            status: 202
+          })
+          expect((yield* submit(server.url, { "tailscale-user-login": "local" })).status).toBe(403)
+          expect(yield* submit(tailnetUrl, {}, { provenance: "verified_local_listener" })).toMatchObject({
+            body: { error: "FleetValidationError" },
+            status: 400
+          })
+        }).pipe(Effect.scoped),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
   it.effect("releases earlier resources when a later store cannot open", () => {
     const root = mkdtempSync(join(tmpdir(), "herdr-http-store-failure-test-"))
     const statePath = join(root, "approval-app.sqlite")

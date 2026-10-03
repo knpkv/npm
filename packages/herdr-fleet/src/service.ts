@@ -28,7 +28,8 @@ import {
   type JobRequest,
   type LocalJobPayload,
   type PendingApprovalCursor,
-  requiresApproval,
+  type SubmissionProvenance,
+  submissionRequiresApproval,
   workerObservationMaxLength,
   type WorkJobKind
 } from "./model.js"
@@ -254,7 +255,8 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
 
   const submit = Effect.fn("FleetService.submit")(function*(
     request: JobRequest,
-    actor: string
+    actor: string,
+    provenance: SubmissionProvenance = "authenticated_remote"
   ) {
     const validatedActor = yield* decodeActor(actor)
     const kind = request.payload.kind
@@ -265,7 +267,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       })
     }
     const timestamp = yield* now
-    const approval = requiresApproval(request.payload)
+    const approval = submissionRequiresApproval(request.payload, provenance)
     if (approval && options.approvalEnabled === false) {
       return yield* new FleetValidationError({
         detail: "cross-host approval is disabled on this machine"
