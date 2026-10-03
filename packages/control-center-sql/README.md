@@ -6,6 +6,13 @@ The public boundary returns only rendered SQL and parameters. `effect-qb` plans,
 tables, and types stay private so persistence repositories remain independent of
 query-builder implementation details.
 
+The package temporarily ships a patched copy of `effect-qb` 0.22.0 in
+`dist/vendor/effect-qb`, because no `effect-qb` release supports Effect 4.0.0
+yet. The build copies the workspace-patched runtime there and rejects an
+unpatched copy, and `test:pack` renders a query in a clean consumer that has no
+`effect-qb` installed. Remove the copy and depend on `effect-qb` directly once an
+upstream release supports Effect 4.0.0.
+
 The first plan reads current readiness for a bounded set of releases in one
 workspace-scoped query. It replaces portfolio N+1 reads while retaining Control
 Center's Schema decoding, materialization verification, and quarantine boundary.

@@ -62,6 +62,7 @@ patchedDependencies:
   "@pierre/diffs@1.5.1": patches/@pierre__diffs@1.5.1.patch
   # effect-qb 0.22–0.23 target Effect 4.0.0-rc and import the removed effect/unstable/sql paths.
   # Remap them to effect/sql and adapt to the single-key Schema.brand and UnionOptions APIs.
+  # control-center-sql ships this patched runtime in dist/vendor/effect-qb until upstream supports Effect 4.0.0.
   "effect-qb@0.22.0": patches/effect-qb@0.22.0.patch
 
 auditConfig:
