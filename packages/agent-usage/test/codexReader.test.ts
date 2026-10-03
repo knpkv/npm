@@ -125,6 +125,23 @@ describe("readCodex", () => {
       .toEqual([0, 11, 12])
   })
 
+  it("reads the account limit from older rollouts that wrote it with no limit id", () => {
+    const result = readCodex(
+      file,
+      lines(codexTokenCount({
+        at: "2026-01-31T10:00:05.000Z",
+        last: [1, 0, 1, 0],
+        total: 2,
+        limitId: null,
+        primary: { used: 86, minutes: 300, resets: 1_769_883_405 },
+        credits: { has_credits: true, unlimited: false, balance: "100" }
+      })),
+      initialCodexState
+    )
+    expect(result.snapshots.map((snapshot) => snapshot.windowMinutes)).toEqual([300])
+    expect(result.balances).toHaveLength(1)
+  })
+
   it("reads an account with no credits as NotSupported, not as an empty balance", () => {
     const result = readCodex(
       file,

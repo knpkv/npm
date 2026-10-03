@@ -114,7 +114,7 @@ export const codexTokenCount = (options: {
   readonly at: string
   readonly last: readonly [input: number, cached: number, output: number, reasoning: number]
   readonly total: number
-  readonly limitId?: string
+  readonly limitId?: string | null
   readonly primary?: { readonly used: number; readonly minutes: number; readonly resets: number } | null
   readonly secondary?: { readonly used: number; readonly minutes: number; readonly resets: number } | null
   readonly credits?: { readonly has_credits: boolean; readonly unlimited: boolean; readonly balance: string | null }
@@ -133,7 +133,7 @@ export const codexTokenCount = (options: {
         model_context_window: 258_400
       },
       rate_limits: {
-        limit_id: options.limitId ?? "codex",
+        limit_id: options.limitId === undefined ? "codex" : options.limitId,
         primary: window(options.primary ?? null),
         secondary: window(options.secondary ?? null),
         credits: options.credits ?? null

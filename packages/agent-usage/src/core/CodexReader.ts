@@ -10,8 +10,9 @@
  *   pass books its requests exactly as one long read would.
  * - **A repeated token_count is not a request.** Codex re-emits the event when only rate limits
  *   change; the running total not moving is how that shows.
- * - **Only the `codex` limit is the account's.** Model-scoped limits arrive in their own blocks and
- *   are not the weekly or five-hour allowance; they are ignored here.
+ * - **Only the `codex` limit is the account's** (or, in rollouts before it was named, the block with
+ *   no limit id). Model-scoped limits arrive in their own blocks and are not the weekly or five-hour
+ *   allowance; they are ignored here.
  * - **A fork repeats its parent.** A forked subagent rollout starts with a copy of the parent's
  *   history, below `subagent_history_start_ordinal`; that copy only advances the running total.
  * - **Limits are kept on change, and at least every ten minutes.** Codex repeats them on every
@@ -341,7 +342,11 @@ export const readCodex = (
         }
         const limits = record.payload.rate_limits
         // Copied history carries the parent's limit readings restamped at fork time: not observations.
-        if (!copied && limits !== undefined && limits !== null && limits.limit_id === "codex") {
+        // Older rollouts (to early 2026) wrote the account limit with no limit_id; newer ones name it
+        // "codex". Any other id is a model-scoped limit.
+        const accountLimit = limits !== undefined && limits !== null &&
+          (limits.limit_id === "codex" || limits.limit_id === undefined || limits.limit_id === null)
+        if (!copied && accountLimit) {
           for (const snapshot of snapshotsOf(file, observedAt, limits)) {
             const signature = `${snapshot.windowMinutes} ${encodeReading(snapshot.reading)}`
             const kept = snapshot.label === "primary" ? state.keptPrimary : state.keptSecondary
