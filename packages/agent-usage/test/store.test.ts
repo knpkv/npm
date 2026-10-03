@@ -65,12 +65,11 @@ describe("UsageStore", () => {
         const store = yield* UsageStore
         const at = (observedAt: number, usedPercent: number): LimitSnapshot => ({
           ...snapshot(observedAt, usedPercent),
-          label: "interleaved"
+          machine: "interleaved"
         })
         yield* store.recordObservations([at(20_000, 20)], [])
         yield* store.recordObservations([at(10_000, 10), at(30_000, 10)], [])
-        const series = (yield* store.limitSnapshots({ from: 0, to: 40_000, machine: "ser8" }))
-          .filter((row) => row.label === "interleaved")
+        const series = yield* store.limitSnapshots({ from: 0, to: 40_000, machine: "interleaved" })
         expect(series.map((row) => row.observedAt)).toEqual([10_000, 20_000, 30_000])
       }))
 
@@ -79,13 +78,11 @@ describe("UsageStore", () => {
         const store = yield* UsageStore
         const at = (observedAt: number, usedPercent: number): LimitSnapshot => ({
           ...snapshot(observedAt, usedPercent),
-          label: "split"
+          machine: "split"
         })
         yield* store.recordObservations([at(1_000, 10), at(3_000, 10), at(5_000, 10)], [])
         yield* store.recordObservations([at(2_000, 20)], [])
-        const series = (yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "ser8" })).filter((row) =>
-          row.label === "split"
-        )
+        const series = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "split" })
         // The change back to 10% is where it was next observed (t=3000); t=5000 is the last read.
         expect(series.map((row) => [row.observedAt, row.reading._tag === "Known" ? row.reading.usedPercent : null]))
           .toEqual([[1_000, 10], [2_000, 20], [3_000, 10], [5_000, 10]])
@@ -157,6 +154,36 @@ describe("UsageStore", () => {
         // each series' last row is kept for "read … ago".
         expect(stored.filter((row) => row.label === "*").map((row) => row.observedAt)).toEqual([20, 40, 45])
         expect(stored.filter((row) => row.label === "five_hour").map((row) => row.observedAt)).toEqual([10, 30, 50])
+      }))
+
+    it.effect("compresses Codex windows by length, so a slot change cannot hide a transition", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const weekly = (label: string, observedAt: number, usedPercent: number): LimitSnapshot => ({
+          agent: "codex",
+          machine: "slots",
+          source: "codex-rollout",
+          label,
+          windowMinutes: 10_080,
+          observedAt,
+          reading: { _tag: "Known", usedPercent, resetsAt: null }
+        })
+        yield* store.recordObservations([
+          weekly("secondary", 100, 40),
+          weekly("primary", 200, 20),
+          weekly("secondary", 300, 40),
+          weekly("secondary", 400, 40)
+        ], [])
+        const stored = yield* store.limitSnapshots({ from: 0, to: 1_000, machine: "slots" })
+        const report = buildLimitsReport(stored, { from: 0, to: 1_000 })
+        expect(report.series).toHaveLength(1)
+        expect(
+          report.series[0]?.points.map((
+            point
+          ) => [point.at, point.reading._tag === "Known" ? point.reading.usedPercent : null])
+        )
+          .toEqual([[100, 40], [200, 20], [300, 40]])
+        expect(report.latest[0]?.observedAt).toBe(400)
       }))
 
     it.effect("prices a bucket's requests without cache writes even when those with them have no rate", () =>

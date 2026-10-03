@@ -99,6 +99,15 @@ export const BUCKET_MILLIS = 15 * 60 * 1000
 
 const EVENT_BATCH = 400
 
+/**
+ * A limit series' identity, as the report draws it: Codex windows by length (a plan change moves the
+ * weekly window between its primary and secondary slots), everything else by the provider's key.
+ * Compression must use the same identity, or a slot change hides a real transition.
+ */
+const seriesOf = (table: string): string =>
+  `CASE WHEN ${table}source = 'codex-rollout' AND ${table}window_minutes IS NOT NULL` +
+  ` THEN 'w' || ${table}window_minutes ELSE ${table}label END`
+
 const GroupRow = Schema.Struct({
   bucket_start: Schema.Int,
   agent: Agent,
@@ -390,32 +399,36 @@ export class UsageStore extends Context.Service<UsageStore, {
       const limitSnapshots = Effect.fn("UsageStore.limitSnapshots")((range: MachineRange) =>
         sql`
           WITH in_range AS (
-            SELECT agent, machine, source, label, window_minutes, observed_at, reading,
+            SELECT agent, machine, source, label, window_minutes, observed_at, reading, series,
               coalesce(window_minutes, 'null') || ' ' || reading AS signature,
               lag(coalesce(window_minutes, 'null') || ' ' || reading)
-                OVER (PARTITION BY agent, source, label ORDER BY observed_at) AS previous,
-              lag(observed_at) OVER (PARTITION BY agent, source, label ORDER BY observed_at) AS previous_at,
+                OVER (PARTITION BY agent, source, series ORDER BY observed_at) AS previous,
+              lag(observed_at) OVER (PARTITION BY agent, source, series ORDER BY observed_at) AS previous_at,
               max(CASE WHEN label = '*' THEN observed_at END) OVER (
                 PARTITION BY agent, source ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
               ) AS failed_at,
               max(CASE WHEN label <> '*' THEN observed_at END) OVER (
                 PARTITION BY agent, source ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
               ) AS succeeded_at,
-              row_number() OVER (PARTITION BY agent, source, label ORDER BY observed_at DESC) AS from_end
-            FROM limit_snapshots
-            WHERE machine = ${range.machine} AND observed_at >= ${range.from} AND observed_at < ${range.to}
+              row_number() OVER (PARTITION BY agent, source, series ORDER BY observed_at DESC) AS from_end
+            FROM (
+              SELECT *, ${sql.literal(seriesOf(""))} AS series FROM limit_snapshots
+              WHERE machine = ${range.machine} AND observed_at >= ${range.from} AND observed_at < ${range.to}
+            )
           ),
           series_before AS (
-            SELECT agent, source, label, max(observed_at) AS observed_at FROM limit_snapshots
+            SELECT agent, source, ${
+          sql.literal(seriesOf(""))
+        } AS series, max(observed_at) AS observed_at FROM limit_snapshots
             WHERE machine = ${range.machine} AND observed_at < ${range.from}
-            GROUP BY agent, source, label
+            GROUP BY agent, source, series
           )
           SELECT snapshot.agent, snapshot.machine, snapshot.source, snapshot.label, snapshot.window_minutes,
             snapshot.observed_at, snapshot.reading
           FROM series_before JOIN limit_snapshots AS snapshot
             ON snapshot.machine = ${range.machine} AND snapshot.agent = series_before.agent
-            AND snapshot.source = series_before.source AND snapshot.label = series_before.label
-            AND snapshot.observed_at = series_before.observed_at
+            AND snapshot.source = series_before.source AND snapshot.observed_at = series_before.observed_at
+            AND ${sql.literal(seriesOf("snapshot."))} = series_before.series
           UNION ALL
           -- A row starts a new step when its reading changed, or when the other kind of reading (a
           -- source-wide failure for a window, a window for a failure) came since this series' last row.
