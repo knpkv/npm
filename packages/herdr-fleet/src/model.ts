@@ -643,3 +643,30 @@ export const requiresApproval = (payload: JobPayload): boolean =>
   payload.kind === "work.recover" ||
   payload.kind === "work.reassign" ||
   (payload.kind === "agent.delegate" && payload.mode === "work")
+
+/**
+ * Which listener delivered a submission. Only the HTTP listener sets it, after
+ * transport authorization; it is never decoded from a request body.
+ */
+export type SubmissionProvenance = "verified_local_listener" | "authenticated_remote"
+
+/**
+ * Job kinds a verified local listener may queue without approval. Work kinds
+ * change Work authority, so they always require approval; the `satisfies`
+ * constraint fails to compile if one is ever added here.
+ */
+export const LocalListenerApprovalExemptKind = Schema.Literals(
+  [
+    "nix.check",
+    "nix.apply",
+    "agent.delegate",
+    "agent.message"
+  ] satisfies ReadonlyArray<Exclude<JobPayload["kind"], WorkJobKind>>
+)
+export type LocalListenerApprovalExemptKind = typeof LocalListenerApprovalExemptKind.Type
+export const isLocalListenerApprovalExempt = Schema.is(LocalListenerApprovalExemptKind)
+
+/** Whether a submission from `provenance` must wait for an approval. */
+export const submissionRequiresApproval = (payload: JobPayload, provenance: SubmissionProvenance): boolean =>
+  requiresApproval(payload) &&
+  !(provenance === "verified_local_listener" && isLocalListenerApprovalExempt(payload.kind))

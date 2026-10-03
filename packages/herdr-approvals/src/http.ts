@@ -30,7 +30,8 @@ import type {
   FleetStoreError,
   FleetTransitionConflictError,
   HostConfiguration,
-  JobRecord
+  JobRecord,
+  SubmissionProvenance
 } from "@knpkv/herdr-fleet"
 import {
   decodeBoundedResponseJson,
@@ -542,6 +543,18 @@ const authorizeOriginlessMutation = (request: IncomingMessage) => {
       new FleetAuthorizationError({ actor: origin ?? fetchSite ?? "browser" })
     )
 }
+
+const proxyHeaders = ["forwarded", "x-forwarded-for", "x-forwarded-host", "x-forwarded-proto", "x-real-ip", "via"]
+
+/**
+ * Provenance of an authorized job submission. Only a direct, unproxied request
+ * on the loopback listener is a verified local submission; anything a proxy may
+ * have relayed is treated as remote and so still needs approval.
+ */
+const submissionProvenance = (mode: ListenerMode, request: IncomingMessage): SubmissionProvenance =>
+  mode === "local" && proxyHeaders.every((name) => header(request, name) === undefined)
+    ? "verified_local_listener"
+    : "authenticated_remote"
 
 export const recordWorkCheckpointRequest = Effect.fn("ApprovalHttp.recordWorkCheckpointRequest")(
   function*<Authorization, AuthorizationError, AuthorizationRequirements, DecodeError, DecodeRequirements>(
@@ -3186,7 +3199,7 @@ export const startHttpServer = async (
               const who = yield* authorized
               yield* authorizeOriginlessMutation(request)
               const input = yield* readJson(request, JobRequest)
-              const record = yield* service.submit(input, who)
+              const record = yield* service.submit(input, who, submissionProvenance(mode, request))
               if (record.status === "queued") yield* enqueueJob(record.id)
               return record
             })

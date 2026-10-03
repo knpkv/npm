@@ -18,6 +18,7 @@ import {
   type HostOperationLifecycle,
   type HostOperations,
   hostOperationTerminalDetailMaxLength,
+  isLocalListenerApprovalExempt,
   JobHash,
   jobHash,
   JobIdentifier,
@@ -1700,6 +1701,85 @@ describe("fleet local authority", () => {
           yield* service.approve(pending.id, { hash: pending.hash, nonce: "nonce-reassign" }, "andrey")
           yield* service.run(pending.id)
           expect(approvals).toEqual([{ approvedBy: "andrey", approvedAt: 1_000, hash: pending.hash }])
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("queues nix and agent jobs from the verified local listener without approval", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-local-submission-test-"))
+    const payloads: ReadonlyArray<JobPayload> = [
+      { kind: "nix.check" },
+      { kind: "nix.apply", ref: "abc123" },
+      { kind: "agent.message", message: "synthetic message", session: "agent-1" },
+      { kind: "agent.delegate", mode: "work", prompt: "synthetic task", repository: "/repo" }
+    ]
+    let nextId = 0
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.sync(() => `job-local-${++nextId}`),
+            nonce: Effect.succeed("remote-nonce"),
+            now: Effect.succeed(1_000),
+            operations,
+            store
+          })
+          for (const payload of payloads) {
+            const local = yield* service.submit({ payload }, "local", "verified_local_listener")
+            expect(local).toMatchObject({ approvalNonce: null, approvedBy: null, status: "queued" })
+            expect((yield* service.run(local.id)).status).toBe("succeeded")
+          }
+          for (const payload of payloads.filter(requiresApproval)) {
+            const remote = yield* service.submit({ payload }, "andrey@example.com", "authenticated_remote")
+            expect(remote).toMatchObject({ approvalNonce: "remote-nonce", status: "pending_approval" })
+            const unstated = yield* service.submit({ payload }, "local")
+            expect(unstated.status).toBe("pending_approval")
+          }
+          const browser = yield* service.submit(
+            { payload: { kind: "browser.mcp.recover" } },
+            "local",
+            "verified_local_listener"
+          )
+          expect(browser.status).toBe("pending_approval")
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("keeps every Work kind behind approval even from the verified local listener", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-local-work-submission-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-local-reassign"),
+            nonce: Effect.succeed("nonce-local-reassign"),
+            now: Effect.succeed(1_000),
+            operations: { ...operations, workJobKinds: new Set(["work.reassign"]) },
+            store
+          })
+          const payload = Schema.decodeUnknownSync(JobPayload)(reassignBaseline)
+          const local = yield* service.submit({ payload }, "local", "verified_local_listener")
+          expect(local).toMatchObject({ approvalNonce: "nonce-local-reassign", status: "pending_approval" })
+          expect((yield* Effect.result(service.run(local.id)))._tag).toBe("Failure")
+          for (const kind of WorkJobKind.literals) {
+            expect(isLocalListenerApprovalExempt(kind)).toBe(false)
+          }
         }),
       (store) =>
         Effect.sync(() => {

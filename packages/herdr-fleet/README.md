@@ -2,7 +2,7 @@
 
 Fleet job protocol and local decision authority for Herdr hosts.
 
-The host that receives a job owns its durable SQLite record and every state transition. Risky work starts as `pending_approval`; approval is bound to the job's canonical hash and one-time nonce. Rejection and expiry clear that nonce. Safe work queues immediately. Recovery resumes queued jobs and expires stale approvals without moving authority to a coordinator.
+The host that receives a job owns its durable SQLite record and every state transition. Risky work starts as `pending_approval`; approval is bound to the job's canonical hash and one-time nonce. Rejection and expiry clear that nonce. Safe work queues immediately. `submit` takes a `SubmissionProvenance`, defaulting to `authenticated_remote`. With `verified_local_listener`, the `nix.*` and `agent.*` kinds in `LocalListenerApprovalExemptKind` queue without approval; Work authority kinds and `browser.mcp.recover` still start as `pending_approval`. The exempt list is typed to exclude every Work kind, so adding one fails to compile. Recovery resumes queued jobs and expires stale approvals without moving authority to a coordinator.
 
 `JobRecord.hash` persists a lowercase hex SHA-256 digest. Its canonical JSON input contains the host, actor, payload discriminant, and every identity field for that variant: `ref` for `nix.apply`; `repository`, `prompt`, `mode`, and the optional `channel` for `agent.delegate`; `session` and `message` for `agent.message`; no extra field for `nix.check` or `browser.mcp.recover`. Raw credentials and provider secrets never enter this hash or the persisted job payload.
 

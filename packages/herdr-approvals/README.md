@@ -19,7 +19,7 @@ On the approval hub, `approvalTls` names absolute certificate and private-key pa
 
 Fleet-wide submission preserves partial results. One unreachable host does not erase successful submissions to other hosts, but the command exits with a typed failure after printing all outcomes. The runtime performs no Tailscale mutation; Nix remains responsible for certificates, ACLs, node enrollment, secrets, and service lifecycle.
 
-Approval mutations require the exact active listener origin, including HTML form submissions. Originless fleet submission remains a separate authenticated CLI path. Existing browser push subscriptions are reconciled with the server on page load, so server-side expiry or revocation cannot leave a false enabled state.
+Approval mutations require the exact active listener origin, including HTML form submissions. Originless fleet submission remains a separate authenticated CLI path. Only hostd sets submission provenance, never the request body, which rejects unknown fields. A `POST /v1/jobs` on the local listener that passed loopback authorization and carries no proxy header (`Forwarded`, `X-Forwarded-*`, `X-Real-IP`, `Via`) is a verified local submission: its `nix.*` and `agent.*` jobs queue without approval. Every other listener or proxied request is remote, and Work authority jobs always wait for approval. Existing browser push subscriptions are reconciled with the server on page load, so server-side expiry or revocation cannot leave a false enabled state.
 
 ## Approval request disclosure
 
