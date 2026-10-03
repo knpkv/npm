@@ -451,7 +451,7 @@ const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
     toolkit.handle(call.name, call.params).pipe(Effect.flatMap(Stream.runLast))
   )
   if (Result.isFailure(handled)) {
-    return yield* Effect.fail(handled.failure)
+    return yield* handled.failure
   }
 
   const finalResult = Option.getOrUndefined(handled.success)

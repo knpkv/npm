@@ -67,8 +67,7 @@ export const layer = Layer.effect(
       getConfig: Effect.gen(function*() {
         const exists = yield* fs.exists(filePath)
         if (!exists) {
-          return yield* Effect.fail(
-            new ClockifyAuthMissingError({
+          return yield* new ClockifyAuthMissingError({
               message: "Clockify not configured. Run: jcf auth clockify setup"
             })
         }

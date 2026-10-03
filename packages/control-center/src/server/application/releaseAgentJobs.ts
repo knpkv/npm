@@ -281,7 +281,7 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
         )
         if (page.events.length === 0) break
         if (page.nextCursor <= nextAgentCursor) {
-          return yield* Effect.fail(unavailable())
+          return yield* unavailable()
         }
         nextAgentCursor = page.nextCursor
         const visiblePage = yield* Effect.forEach(

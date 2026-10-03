@@ -91,16 +91,14 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const matches = countPlaceholderMatches(documentInput.content, file)
         if (matches !== 1) {
-          return yield* Effect.fail(
-            new JiraApiError({ message: `Expected exactly one attachment placeholder for ${file}, found ${matches}` })
-          )
+          return yield* new JiraApiError({ message: `Expected exactly one attachment placeholder for ${file}, found ${matches}` })
         }
       }
 
       if (dryRun) {
         const exists = yield* fileExists(file)
         if (!exists) {
-          return yield* Effect.fail(new JiraApiError({ message: `Attachment file does not exist: ${file}` }))
+          return yield* new JiraApiError({ message: `Attachment file does not exist: ${file}` })
         }
         const result = { dryRun: true, issue, file, insert: shouldInsert }
         yield* Console.log(json ? JSON.stringify(result) : `Dry run: ${file} can be uploaded to ${issue}`)
@@ -114,8 +112,7 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const result = insertJiraAttachmentReference(documentInput.content, file, attachment)
         if (result.replacements !== 1) {
-          return yield* Effect.fail(
-            new JiraApiError({
+          return yield* new JiraApiError({
               message:
                 `Uploaded attachment ${attachment.id}, but expected exactly one local placeholder for ${file}; found ${result.replacements}`
             })

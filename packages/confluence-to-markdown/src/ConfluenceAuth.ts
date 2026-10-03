@@ -289,8 +289,7 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const config = yield* loadOAuthConfigOp()
       if (config === null) {
-        return yield* Effect.fail(
-          new OAuthError({
+        return yield* new OAuthError({
             step: "authorize",
             cause: "OAuth not configured. Run 'confluence auth configure' first."
           })
@@ -402,8 +401,7 @@ const make = Effect.gen(function*() {
       )
 
       if (sites.length === 0) {
-        return yield* Effect.fail(
-          new OAuthError({
+        return yield* new OAuthError({
             step: "authorize",
             cause: "No Confluence sites found for this account"
           })
@@ -416,8 +414,7 @@ const make = Effect.gen(function*() {
           const matched = sites.find((s) => s.url === options.siteUrl)
           if (!matched) {
             const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
-            return yield* Effect.fail(
-              new OAuthError({
+            return yield* new OAuthError({
                 step: "authorize",
                 cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
               })
@@ -471,7 +468,7 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       if (token === null) {
-        return yield* Effect.fail(new AuthMissingError())
+        return yield* new AuthMissingError()
       }
 
       const nowMs = yield* Clock.currentTimeMillis
@@ -508,8 +505,7 @@ const make = Effect.gen(function*() {
           if (error.step === "refresh" && rejected) {
             return Effect.gen(function*() {
               yield* deleteTokenOp()
-              return yield* Effect.fail(
-                new OAuthError({
+              return yield* new OAuthError({
                   step: "refresh",
                   cause: "Refresh token expired. Please run 'confluence auth login' to re-authenticate.",
                   status,
@@ -535,7 +531,7 @@ const make = Effect.gen(function*() {
     Effect.gen(function*() {
       const token = yield* loadTokenOp()
       if (token === null) {
-        return yield* Effect.fail(new AuthMissingError())
+        return yield* new AuthMissingError()
       }
       return token.cloud_id
     })

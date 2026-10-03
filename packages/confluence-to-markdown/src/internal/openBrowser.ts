@@ -27,7 +27,7 @@ const run = (
       })
     )
     if (exitCode !== 0) {
-      return yield* Effect.fail(new BrowserOpenError({ command, exitCode }))
+      return yield* new BrowserOpenError({ command, exitCode })
     }
   })
 

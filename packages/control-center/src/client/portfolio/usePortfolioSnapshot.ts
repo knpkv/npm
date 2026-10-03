@@ -169,7 +169,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
     minimumCursor: EventCursor
   ) {
     const snapshot = yield* transport.loadSnapshot
-    if (snapshot.eventCursor < minimumCursor) return yield* Effect.fail(new PortfolioStreamProtocolError())
+    if (snapshot.eventCursor < minimumCursor) return yield* new PortfolioStreamProtocolError()
     yield* publish({ _tag: "stream-snapshot", snapshot })
   })
 
@@ -248,7 +248,7 @@ const runController = Effect.fn("PortfolioLiveController.run")(function*({
           return onUsable
         })
       ))
-    return yield* Effect.fail(new PortfolioStreamClosedError())
+    return yield* new PortfolioStreamClosedError()
   })
 
   const reconnect = Effect.fn("PortfolioLiveController.reconnect")(function*() {

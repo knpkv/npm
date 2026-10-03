@@ -227,7 +227,7 @@ export const useProfileForAllTools = (
     ).find((profile): profile is AuthProfile =>
       profile !== null
     )
-    if (!selected) return yield* Effect.fail(new ProfileNotFoundError({ selector }))
+    if (!selected) return yield* new ProfileNotFoundError({ selector })
 
     yield* Effect.forEach(stores, ([tool, store]) => {
       const matching = findProfile(store.profiles, selector) ?? findProfile(store.profiles, selected.id)
@@ -298,7 +298,7 @@ export const refreshActiveProfiles = (
         if (!active || !isTokenExpiredAt(active.token, nowMs, 0)) return
         const config = yield* loadOAuthConfig(storeName)
         if (!config) {
-          return yield* Effect.fail(new MissingOAuthConfigError({ authStoreName: storeName, profileId: active.id }))
+          return yield* new MissingOAuthConfigError({ authStoreName: storeName, profileId: active.id })
         }
         // Rotating refresh tokens: the grant consumes the stored token
         // server-side and the response carries its replacement, so an interrupt

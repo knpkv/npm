@@ -95,8 +95,7 @@ export const resolveParentId = (input: string, baseUrl: string): Effect.Effect<s
   Effect.gen(function*() {
     const parentId = parentIdFromInput(input)
     if (parentId === undefined) {
-      return yield* Effect.fail(
-        new ConfigError({
+      return yield* new ConfigError({
           message: `Could not read a parent id from --parent ${JSON.stringify(input)}. ` +
             `Expected a numeric id or a URL containing /pages/<id>/ or /folder/<id>/.`
         })
@@ -104,8 +103,7 @@ export const resolveParentId = (input: string, baseUrl: string): Effect.Effect<s
     const parentOrigin = yield* originOfContentInput(input, "--parent")
     const targetOrigin = originOf(baseUrl)
     if (parentOrigin !== undefined && targetOrigin !== undefined && parentOrigin !== targetOrigin) {
-      return yield* Effect.fail(
-        new ConfigError({
+      return yield* new ConfigError({
           message: `--parent names ${parentOrigin} but the folder would be created on ${targetOrigin}. ` +
             `Content ids are per-site, so this would nest under an unrelated container. ` +
             `Pass a parent from ${targetOrigin}, or its bare id if that is what you meant.`
@@ -151,13 +149,11 @@ export const resolveFolderTarget = (
     const folderIdRaw = optionValue(folderId)
     const urlRaw = optionValue(url)
     if (folderIdRaw !== undefined && urlRaw !== undefined) {
-      return yield* Effect.fail(
-        new ConfigError({ message: "Use either --url or --folder-id, not both." })
-      )
+      return yield* new ConfigError({ message: "Use either --url or --folder-id, not both." })
     }
     const raw = folderIdRaw ?? urlRaw
     if (raw === undefined) {
-      return yield* Effect.fail(new ConfigError({ message: "Pass --folder-id or --url." }))
+      return yield* new ConfigError({ message: "Pass --folder-id or --url." })
     }
     const id = yield* folderIdFrom(raw)
     const flagBaseUrl = optionValue(baseUrl)
@@ -165,17 +161,14 @@ export const resolveFolderTarget = (
 
     if (urlOrigin === undefined) {
       if (flagBaseUrl === undefined) {
-        return yield* Effect.fail(
-          new ConfigError({ message: "Pass --base-url, or a folder URL that names the site." })
-        )
+        return yield* new ConfigError({ message: "Pass --base-url, or a folder URL that names the site." })
       }
       return { baseUrl: yield* validateBaseUrl(flagBaseUrl), id }
     }
 
     const resolved = yield* validateBaseUrl(urlOrigin)
     if (flagBaseUrl !== undefined && (yield* validateBaseUrl(flagBaseUrl)) !== resolved) {
-      return yield* Effect.fail(
-        new ConfigError({
+      return yield* new ConfigError({
           message: `--base-url ${JSON.stringify(flagBaseUrl)} is a different site than the URL (${resolved}). ` +
             `The folder id belongs to the site in the URL.`
         })

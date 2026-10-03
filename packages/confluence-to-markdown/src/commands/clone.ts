@@ -74,9 +74,7 @@ export const cloneCommand = Command.make(
       // Fail if .confluence already exists
       const isGitInit = yield* git.isInitialized()
       if (isGitInit) {
-        return yield* Effect.fail(
-          new ConfigError({ message: "Already cloned. Use 'confluence sync pull' to update." })
-        )
+        return yield* new ConfigError({ message: "Already cloned. Use 'confluence sync pull' to update." })
       }
 
       // Validate git is installed
@@ -143,9 +141,7 @@ export const cloneCommand = Command.make(
         })
         if (pullResult.errors.length > 0) {
           yield* writeStdout("\r" + " ".repeat(80) + "\r")
-          return yield* Effect.fail(
-            new ConfigError({ message: `Clone failed:\n${pullResult.errors.join("\n")}` })
-          )
+          return yield* new ConfigError({ message: `Clone failed:\n${pullResult.errors.join("\n")}` })
         }
 
         // Create origin/confluence branch at HEAD to track remote state

@@ -347,7 +347,7 @@ void [
   }
 
   if (failures.length > 0) {
-    return yield* Effect.fail(new DistValidationError({ reason: failures.join("\n") }))
+    return yield* new DistValidationError({ reason: failures.join("\n") })
   }
 })
 

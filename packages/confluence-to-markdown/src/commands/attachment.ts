@@ -87,18 +87,14 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const matches = countPlaceholderMatches(documentInput.content, file)
         if (matches === 0) {
-          return yield* Effect.fail(
-            new ConfigError({ message: `No attachment placeholders found for ${file}` })
-          )
+          return yield* new ConfigError({ message: `No attachment placeholders found for ${file}` })
         }
       }
 
       if (dryRun) {
         const exists = yield* fileExists(file)
         if (!exists) {
-          return yield* Effect.fail(
-            new ConfigError({ message: `Attachment file does not exist: ${file}` })
-          )
+          return yield* new ConfigError({ message: `Attachment file does not exist: ${file}` })
         }
         const result = { dryRun: true, pageId, file, insert: shouldInsert }
         yield* Console.log(json ? JSON.stringify(result) : `Dry run: ${file} can be uploaded to page ${pageId}`)
@@ -113,8 +109,7 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const result = insertConfluenceAttachmentReference(documentInput.content, file, pageId, attachment)
         if (result.replacements === 0) {
-          return yield* Effect.fail(
-            new ApiError({
+          return yield* new ApiError({
               status: 0,
               message: `Uploaded attachment ${attachment.id}, but no local placeholders matched ${file}`,
               endpoint: "attachment insertion",

@@ -40,7 +40,7 @@ const program = Effect.gen(function*() {
   const base = option(args, "--base")
   const head = option(args, "--head")
   if (base === undefined || head === undefined) {
-    return yield* Effect.fail(new VisualGitError({ reason: "Usage: --base <ref> --head <ref>" }))
+    return yield* new VisualGitError({ reason: "Usage: --base <ref> --head <ref>" })
   }
 
   const packageRoot = path.dirname(path.dirname(path.dirname(yield* path.fromFileUrl(new URL(import.meta.url)))))

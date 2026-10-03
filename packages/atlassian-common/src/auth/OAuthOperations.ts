@@ -89,9 +89,7 @@ export const exchangeCodeForTokens = (
     if (response.status >= 400) {
       const text = yield* response.text
       yield* Effect.logDebug(`Token exchange failed (${response.status}): ${text}`)
-      return yield* Effect.fail(
-        new OAuthError({ step: "token", cause: `HTTP ${response.status}` })
-      )
+      return yield* new OAuthError({ step: "token", cause: `HTTP ${response.status}` })
     }
 
     const body = yield* response.json
@@ -123,9 +121,7 @@ export const getAccessibleResources = (
     if (response.status >= 400) {
       const text = yield* response.text
       yield* Effect.logDebug(`Accessible resources failed (${response.status}): ${text}`)
-      return yield* Effect.fail(
-        new OAuthError({ step: "resources", cause: `HTTP ${response.status}` })
-      )
+      return yield* new OAuthError({ step: "resources", cause: `HTTP ${response.status}` })
     }
 
     const body = yield* response.json
@@ -157,9 +153,7 @@ export const getUserInfo = (
     if (response.status >= 400) {
       const text = yield* response.text
       yield* Effect.logDebug(`User info failed (${response.status}): ${text}`)
-      return yield* Effect.fail(
-        new OAuthError({ step: "user-info", cause: `HTTP ${response.status}` })
-      )
+      return yield* new OAuthError({ step: "user-info", cause: `HTTP ${response.status}` })
     }
 
     const body = yield* response.json
@@ -210,8 +204,7 @@ export const refreshToken = (
         Effect.map((decoded) => decoded.error),
         Effect.catch(() => Effect.succeed(undefined))
       )
-      return yield* Effect.fail(
-        new OAuthError({
+      return yield* new OAuthError({
           step: "refresh",
           cause: `HTTP ${response.status}: ${text}`,
           status: response.status,
@@ -265,8 +258,7 @@ export const revokeToken = (
     )
 
     if (response.status >= 400) {
-      return yield* Effect.fail(
-        new OAuthError({
+      return yield* new OAuthError({
           step: "revoke",
           cause: `Token revocation failed with status ${response.status}`
         })

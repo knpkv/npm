@@ -45,7 +45,7 @@ export const pullCommand = Command.make(
       }
       if (result.errors.length > 0) {
         yield* Console.error("Errors:", result.errors.join("\n"))
-        return yield* Effect.fail(new ConfigError({ message: `Pull failed:\n${result.errors.join("\n")}` }))
+        return yield* new ConfigError({ message: `Pull failed:\n${result.errors.join("\n")}` })
       }
     })
 ).pipe(Command.withDescription("Local write: download pages from Confluence to local markdown"))
@@ -92,8 +92,7 @@ export const pushCommand = Command.make(
         // must not describe either — under a "Push failed" heading that reads as
         // a real push that partly applied.
         if (dryRun) {
-          return yield* Effect.fail(
-            new ConfigError({
+          return yield* new ConfigError({
               message: `Dry run found ${result.errors.length} problem(s) that would fail the push:\n${
                 result.errors.join("\n")
               }`
@@ -103,8 +102,7 @@ export const pushCommand = Command.make(
         // error keeps `origin/confluence` where it is so the unsent work stays
         // retryable — which also means every later push repeats this failure
         // until it is resolved. Silently, that reads as a broken workspace.
-        return yield* Effect.fail(
-          new ConfigError({
+        return yield* new ConfigError({
             message: `Push failed:\n${result.errors.join("\n")}\n` +
               `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
               `push retries all of it. Resolve the errors above (or remove the file) to move on.`

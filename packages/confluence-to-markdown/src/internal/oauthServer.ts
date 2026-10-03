@@ -119,10 +119,8 @@ export const startCallbackServer = (
       Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
     )
 
-    if (server.address._tag !== "TcpAddress") {
-      return yield* Effect.fail(
-        new OAuthError({ step: "authorize", cause: "OAuth callback server did not bind to a TCP address" })
-      )
+    if (!NetAddress.isInetAddress(server.address)) {
+      return yield* new OAuthError({ step: "authorize", cause: "OAuth callback server did not bind to a TCP address" })
     }
     const port = server.address.port
 

@@ -105,8 +105,7 @@ const acquireNetworkProbe = (
     const server = yield* Effect.acquireRelease(startNetworkProbe, release)
     const address = addressOf(server)
     if (address === null || Predicate.isString(address)) {
-      return yield* Effect.fail(
-        new NetworkProbeFixtureError({
+      return yield* new NetworkProbeFixtureError({
           message: "Network probe did not expose an internet port"
         })
     }

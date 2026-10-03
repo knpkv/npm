@@ -141,9 +141,7 @@ const parseSetFlags = (entries: ReadonlyArray<string>): Effect.Effect<ReadonlyMa
       // the slot the user meant to fill is written to Confluence verbatim.
       const name = separator < 0 ? "" : entry.slice(0, separator).trim()
       if (separator < 0 || !/^[A-Za-z0-9_.-]+$/.test(name)) {
-        return yield* Effect.fail(
-          new ConfigError({ message: `Invalid --set ${JSON.stringify(entry)}. Expected name=value.` })
-        )
+        return yield* new ConfigError({ message: `Invalid --set ${JSON.stringify(entry)}. Expected name=value.` })
       }
       values.set(name, entry.slice(separator + 1))
     }
@@ -158,8 +156,7 @@ const readAdfFile = (path: string, values: ReadonlyMap<string, string>) =>
     )
     const { rendered, unresolved } = applyAdfTemplate(raw, values)
     if (unresolved.length > 0) {
-      return yield* Effect.fail(
-        new ConfigError({
+      return yield* new ConfigError({
           message: `${path} still has unfilled slots: ${
             unresolved.map((n) => `{{${n}}}`).join(", ")
           }. Pass them with --set name=value.`
@@ -358,23 +355,19 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         const selector = optionValue(deleteNode)
 
         if (search !== undefined && replacement === undefined) {
-          return yield* Effect.fail(new ConfigError({ message: "--replace requires --with." }))
+          return yield* new ConfigError({ message: "--replace requires --with." })
         }
         if (search === undefined && replacement !== undefined) {
-          return yield* Effect.fail(new ConfigError({ message: "--with requires --replace." }))
+          return yield* new ConfigError({ message: "--with requires --replace." })
         }
         if (search === undefined && selector === undefined) {
-          return yield* Effect.fail(
-            new ConfigError({ message: "Nothing to do: pass --replace/--with or --delete-node." })
-          )
+          return yield* new ConfigError({ message: "Nothing to do: pass --replace/--with or --delete-node." })
         }
         // `includes("")` is true of every string and `replaceAll("", x)` splices
         // x between every character, so an empty search would rewrite the whole
         // page. An empty --with stays valid: that is how you delete matched text.
         if (search !== undefined && search.length === 0) {
-          return yield* Effect.fail(
-            new ConfigError({ message: "--replace needs a non-empty search string." })
-          )
+          return yield* new ConfigError({ message: "--replace needs a non-empty search string." })
         }
 
         const input = yield* resolvePageInputWithWorkspace({
@@ -391,7 +384,7 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
           const page = yield* client.getPage(id)
           const raw = page.body?.atlas_doc_format?.value
           if (!raw) {
-            return yield* Effect.fail(new ConfigError({ message: `Page ${id} did not include ADF content.` }))
+            return yield* new ConfigError({ message: `Page ${id} did not include ADF content.` })
           }
           const parsed = yield* parseAdf(raw, `page ${id}`, "incoming")
           return { doc: parsed, base: { version: page.version.number, title: page.title } }
@@ -403,8 +396,7 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         if (search !== undefined && replacement !== undefined) {
           const result = replaceAdfText(doc, search, replacement)
           if (result.replacements === 0) {
-            return yield* Effect.fail(
-              new ConfigError({
+            return yield* new ConfigError({
                 message: `No text node contains ${JSON.stringify(search)}. ADF splits a run at every mark boundary, ` +
                   `so a phrase crossing inline code or bold lives in several nodes — match a shorter span.`
               })
@@ -416,13 +408,11 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         if (selector !== undefined) {
           const parsed = parseNodeSelector(selector)
           if (parsed === null) {
-            return yield* Effect.fail(
-              new ConfigError({ message: `Invalid --delete-node selector: ${selector}. Expected type or type[index].` })
-            )
+            return yield* new ConfigError({ message: `Invalid --delete-node selector: ${selector}. Expected type or type[index].` })
           }
           const result = deleteAdfNodes(doc, parsed)
           if (result.deleted === 0) {
-            return yield* Effect.fail(new ConfigError({ message: `No node matched ${selector}.` }))
+            return yield* new ConfigError({ message: `No node matched ${selector}.` })
           }
           yield* Console.log(`Deleted ${result.deleted} node(s) matching ${selector}.`)
           doc = result.doc
@@ -526,8 +516,7 @@ export const makePageCreateCommand = (options: AdfPageCommandOptions = {}) => {
           ? yield* baseUrlFromWorkspace((yield* Path.Path).resolve("."))
           : yield* validateBaseUrl(baseUrlFlag)
         if (resolvedBaseUrl === undefined) {
-          return yield* Effect.fail(
-            new ConfigError({
+          return yield* new ConfigError({
               message: "--base-url is required (or run inside a cloned workspace)."
             })
         }

@@ -95,8 +95,7 @@ const listCommand = Command.make("list", {
 }, ({ customFields, emails, json, max, project, released, unreleased }) =>
   Effect.gen(function*() {
     if (released && unreleased) {
-      return yield* Effect.fail(
-        new JiraApiError({
+      return yield* new JiraApiError({
           message: "--released and --unreleased are mutually exclusive; pass at most one (omit both to list all)."
         })
     }
@@ -367,14 +366,12 @@ const relatedWorkSyncCommand = Command.make("sync", {
       const title = separator < 0 ? "" : raw.slice(0, separator).trim()
       const url = separator < 0 ? "" : raw.slice(separator + 1).trim()
       if (separator < 0 || title.length === 0 || url.length === 0) {
-        return yield* Effect.fail(
-          new JiraApiError({ message: `Invalid --link ${JSON.stringify(raw)}. Expected title=url.` })
-        )
+        return yield* new JiraApiError({ message: `Invalid --link ${JSON.stringify(raw)}. Expected title=url.` })
       }
       desired.push({ title, url })
     }
     if (desired.length === 0) {
-      return yield* Effect.fail(new JiraApiError({ message: "Pass at least one --link title=url." }))
+      return yield* new JiraApiError({ message: "Pass at least one --link title=url." })
     }
 
     const service = yield* VersionService
