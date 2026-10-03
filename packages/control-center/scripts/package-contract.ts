@@ -88,10 +88,10 @@ export const inspectPackageContract = <UnparsedInput>(value: UnparsedInput): Rea
   if (manifest.dependencies["@distilled.cloud/aws"] !== "1.0.0-rc.13") {
     violations.push("@distilled.cloud/aws must remain on the reviewed CodePipeline client version")
   }
-  if (manifest.dependencies["@aws-sdk/client-codepipeline"] !== "^3.1108.0") {
+  if (manifest.dependencies["@aws-sdk/client-codepipeline"] !== "^3.1145.0") {
     violations.push("AWS CodePipeline client must remain on the reviewed runtime version")
   }
-  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1108.0") {
+  if (manifest.dependencies["@aws-sdk/credential-providers"] !== "^3.1145.0") {
     violations.push("AWS credential providers must remain on the reviewed runtime version")
   }
   const workspaceDependencies: ReadonlyArray<

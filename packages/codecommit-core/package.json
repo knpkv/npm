@@ -39,11 +39,11 @@
     "docgen": "docgen"
   },
   "dependencies": {
-    "@aws-sdk/credential-providers": "^3.1108.0",
+    "@aws-sdk/credential-providers": "^3.1145.0",
     "@distilled.cloud/aws": "1.0.0-rc.13",
     "@effect/sql-libsql": "4.0.0",
     "@libsql/client": "^0.17.4",
-    "@smithy/core": "^3.32.0",
+    "@smithy/core": "^3.35.1",
     "effect": "4.0.0"
   },
   "devDependencies": {

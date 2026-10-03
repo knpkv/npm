@@ -14,8 +14,8 @@ const provideNodeServices = Effect.provide(NodeServices.layer)
 const validManifest = {
   bin: { "control-center": "./dist/server/server/cli.js" },
   dependencies: {
-    "@aws-sdk/client-codepipeline": "^3.1108.0",
-    "@aws-sdk/credential-providers": "^3.1108.0",
+    "@aws-sdk/client-codepipeline": "^3.1145.0",
+    "@aws-sdk/credential-providers": "^3.1145.0",
     "@effect/ai-openai-compat": "4.0.0",
     "@effect/platform-browser": "4.0.0",
     "@effect/platform-node": "4.0.0",
