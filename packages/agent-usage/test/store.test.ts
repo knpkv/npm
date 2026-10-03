@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import type { BalanceReading, LimitSnapshot, UsageEvent } from "../src/core/Model.js"
-import { UsageStore } from "../src/core/Store.js"
+import { type Chunk, UsageStore } from "../src/core/Store.js"
 
 const TestStore = UsageStore.layer.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
 
@@ -37,8 +37,8 @@ describe("UsageStore", () => {
     it.effect("commits a chunk's events and its cursor together, and a re-read adds nothing", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore
-        const chunk = {
-          agent: "claude" as const,
+        const chunk: Chunk = {
+          agent: "claude",
           fileKey: "proj/a.jsonl",
           cursor,
           events: [event("m1"), event("m2")],

@@ -153,35 +153,41 @@ const mayMatter = (text: string): boolean => RELEVANT.some((marker) => text.incl
 const mustDecode = (text: string): boolean =>
   text.includes("\"session_meta\"") || text.includes("\"turn_context\"") || text.includes("\"token_count\"")
 
+type RolloutWindow = typeof Window.Type
+
+const snapshotOf = (
+  file: SourceFile,
+  observedAt: number,
+  label: "primary" | "secondary",
+  window: RolloutWindow | null | undefined
+): ReadonlyArray<LimitSnapshot> => {
+  if (window === undefined || window === null) return []
+  const minutes = window.window_minutes
+  const resets = window.resets_at
+  const snapshot: LimitSnapshot = {
+    agent: "codex",
+    machine: file.machine,
+    source: "codex-rollout",
+    label,
+    windowMinutes: minutes !== undefined && minutes !== null && minutes > 0 ? minutes : null,
+    observedAt,
+    reading: {
+      _tag: "Known",
+      usedPercent: window.used_percent,
+      resetsAt: resets === undefined || resets === null ? null : Math.round(resets * 1000)
+    }
+  }
+  return [snapshot]
+}
+
 const snapshotsOf = (
   file: SourceFile,
   observedAt: number,
   limits: typeof RateLimits.Type
-): ReadonlyArray<LimitSnapshot> => {
-  const windows = [["primary", limits.primary], ["secondary", limits.secondary]] as const
-  return windows.flatMap(([label, window]) =>
-    window === undefined || window === null
-      ? []
-      : [{
-        agent: "codex" as const,
-        machine: file.machine,
-        source: "codex-rollout" as const,
-        label,
-        windowMinutes: window.window_minutes !== undefined && window.window_minutes !== null &&
-            window.window_minutes > 0
-          ? window.window_minutes
-          : null,
-        observedAt,
-        reading: {
-          _tag: "Known" as const,
-          usedPercent: window.used_percent,
-          resetsAt: window.resets_at === undefined || window.resets_at === null
-            ? null
-            : Math.round(window.resets_at * 1000)
-        }
-      }]
-  )
-}
+): ReadonlyArray<LimitSnapshot> => [
+  ...snapshotOf(file, observedAt, "primary", limits.primary),
+  ...snapshotOf(file, observedAt, "secondary", limits.secondary)
+]
 
 /** Reads one chunk of a rollout, continuing from the state the previous chunk ended in. */
 export const readCodex = (

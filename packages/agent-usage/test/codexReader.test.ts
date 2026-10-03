@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { initialCodexState, readCodex } from "../src/core/CodexReader.js"
-import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines, Raw } from "./fixtures.js"
+import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines } from "./fixtures.js"
 
 const file = { fileKey: "2026/09/01/rollout-x.jsonl", machine: "ser8", sessionId: "sess" }
 
@@ -154,7 +154,7 @@ describe("readCodex", () => {
       lines(
         codexTurn("gpt-6-sol"),
         first,
-        new Raw("{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\""),
+        "{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\"",
         third
       ),
       initialCodexState

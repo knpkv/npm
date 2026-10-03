@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { readClaude } from "../src/core/ClaudeReader.js"
-import { claudeAssistant, claudeUser, lines, Raw } from "./fixtures.js"
+import { claudeAssistant, claudeUser, lines } from "./fixtures.js"
 
 const read = (source: ReturnType<typeof lines>, activeTicket: string | null = null) =>
   readClaude({ fileKey: "proj/s.jsonl", machine: "ser8", sessionId: "s-1" }, source, { activeTicket })
@@ -43,7 +43,7 @@ describe("readClaude", () => {
   })
 
   it("counts a relevant line that does not decode instead of dropping it silently", () => {
-    const result = read(lines(new Raw("{\"type\":\"assistant\",\"message\":{\"usage\":"), new Raw("not json at all")))
+    const result = read(lines("{\"type\":\"assistant\",\"message\":{\"usage\":", "not json at all"))
     expect(result.skipped).toEqual({ unparseableLine: 1, missingTimestamp: 0 })
   })
 

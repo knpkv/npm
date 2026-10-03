@@ -2,21 +2,17 @@
  * Synthetic transcript and rollout lines in the shapes Claude Code and Codex write. Nothing here is
  * copied from a real session.
  */
+import { Predicate } from "effect"
 import type { SourceLine } from "../src/core/Readers.js"
 
-/** A line given as raw text, for content that is deliberately not valid JSON. */
-export class Raw {
-  readonly text: string
-  constructor(text: string) {
-    this.text = text
-  }
-}
-
-/** Numbers lines with the byte offsets a file holding them, newline-separated, would give. */
-export const lines = (...values: ReadonlyArray<Raw | object>): ReadonlyArray<SourceLine> => {
+/**
+ * Numbers lines with the byte offsets a file holding them, newline-separated, would give. Objects
+ * are written as JSON; a string is written as-is, for content that is deliberately not valid JSON.
+ */
+export const lines = (...values: ReadonlyArray<string | object>): ReadonlyArray<SourceLine> => {
   let offset = 0
   return values.map((value) => {
-    const text = value instanceof Raw ? value.text : JSON.stringify(value)
+    const text = Predicate.isString(value) ? value : JSON.stringify(value)
     const line = { offset, text }
     offset += Buffer.byteLength(text) + 1
     return line
