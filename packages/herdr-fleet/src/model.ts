@@ -246,8 +246,72 @@ export const WorkRecover = Schema.Struct({
 )
 export type WorkRecover = typeof WorkRecover.Type
 
+/**
+ * The agent target a reassigned goal ends with: `set` points it at a new
+ * worker, `clear` removes it, and `keep` is accepted only when the goal has no
+ * target, so a reassignment never leaves the previous owner's agent in place.
+ */
+export const WorkReassignAgent = Schema.TaggedUnion({
+  set: { agent: AgentWorkerIdentity },
+  clear: {},
+  keep: {}
+})
+export type WorkReassignAgent = typeof WorkReassignAgent.Type
+
+const workReassignOwnerIdMaxLength = 256
+const workReassignActivityMaxLength = 4_096
+const workReassignActivityText = /^[^\p{Cc}\p{Cs}]+$/u
+
+/** Activity text the Work store records for an approved reassignment. */
+export const workReassignActivitySummary = (
+  payload: {
+    readonly from: { readonly id: string; readonly name: string }
+    readonly to: { readonly id: string; readonly name: string }
+    readonly reason: string
+  },
+  approvalJobId: string,
+  approvalHash: string
+): string =>
+  `Reassigned from ${payload.from.name} (${payload.from.id}) to ${payload.to.name} (${payload.to.id}): ` +
+  `${payload.reason} (approved Fleet job ${approvalJobId}, hash ${approvalHash})`
+
+/**
+ * Accepts a reassignment only when its target owner and its longest possible
+ * activity summary fit Work's durable limits, so nothing approved can fail to
+ * record for size or control characters.
+ */
+export const workReassignIsRecordable = (
+  payload: Parameters<typeof workReassignActivitySummary>[0]
+): boolean => {
+  const summary = workReassignActivitySummary(payload, "j".repeat(256), "0".repeat(64))
+  return payload.from.id !== payload.to.id &&
+    payload.to.id.length <= workReassignOwnerIdMaxLength &&
+    summary.length <= workReassignActivityMaxLength &&
+    workReassignActivityText.test(summary)
+}
+
+/**
+ * Approval-bound transfer of one Work goal, and its active lane, from the exact
+ * current owner to a new owner.
+ */
+export const WorkReassign = Schema.Struct({
+  kind: Schema.Literal("work.reassign"),
+  goalId: WorkAdmit.fields.goalId,
+  from: WorkAdmit.fields.owner,
+  to: WorkAdmit.fields.owner,
+  toAgent: WorkReassignAgent,
+  reason: Schema.String.check(Schema.isNonEmpty(), Schema.isMaxLength(1_024)),
+  expectedGoalEventId: WorkRecover.fields.expectedGoalEventId,
+  expectedGoalUpdatedAt: WorkRecover.fields.expectedGoalUpdatedAt
+}).check(
+  Schema.makeFilter(workReassignIsRecordable, {
+    expected: "a different, recordable target owner and a bounded single-line activity summary"
+  })
+)
+export type WorkReassign = typeof WorkReassign.Type
+
 /** Fleet job kinds that change Work authority; only a composed Work adapter executes them. */
-export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover"])
+export const WorkJobKind = Schema.Literals(["work.reconcile", "work.admit", "work.recover", "work.reassign"])
 export type WorkJobKind = typeof WorkJobKind.Type
 export const isWorkJobKind = Schema.is(WorkJobKind)
 
@@ -260,7 +324,8 @@ export const CoreJobPayload = Schema.Union([
   Schema.Union([NixCheck, NixApply, AgentDelegate, AgentMessage]),
   WorkReconcile,
   WorkAdmit,
-  WorkRecover
+  WorkRecover,
+  WorkReassign
 ])
 export type CoreJobPayload = typeof CoreJobPayload.Type
 
@@ -576,4 +641,5 @@ export const requiresApproval = (payload: JobPayload): boolean =>
   payload.kind === "work.reconcile" ||
   payload.kind === "work.admit" ||
   payload.kind === "work.recover" ||
+  payload.kind === "work.reassign" ||
   (payload.kind === "agent.delegate" && payload.mode === "work")

@@ -566,7 +566,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
       })
     }
     if (
-      record.payload.kind === "work.recover" &&
+      (record.payload.kind === "work.recover" || record.payload.kind === "work.reassign") &&
       (record.approvedBy === null ||
         record.approvedAt === null || record.approvedAt === undefined ||
         record.hash !==
@@ -576,7 +576,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     ) {
       return yield* new FleetApprovalError({
         jobId,
-        detail: "approved recovery payload or actor changed"
+        detail: `approved ${record.payload.kind} payload or actor changed`
       })
     }
     const corePayload = record.payload.kind === "browser.mcp.recover" ? null : record.payload

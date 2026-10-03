@@ -6,7 +6,12 @@ import {
   JobPayload,
   JobStatus
 } from "@knpkv/herdr-fleet/model"
-import type { AgentDelegate, JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
+import type {
+  AgentDelegate,
+  JobPayload as JobPayloadType,
+  JobRecord,
+  WorkReassignAgent
+} from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 
 const requestTextMaxLength = 16 * 1_024
@@ -428,6 +433,31 @@ const field = (key: string, label: string, value: string, redacted = false): App
   value
 })
 
+/** `root`, or `relation:parentAgentId`: the lineage fields bound into the approval hash. */
+const agentLineage = (agent: AgentWorkerIdentity): string =>
+  agent.relationship === undefined ? "root" : `${agent.relationship.relation}:${agent.relationship.parentAgentId}`
+
+const reassignAgentFields = (toAgent: WorkReassignAgent): ReadonlyArray<ApprovalRequestField> => {
+  switch (toAgent._tag) {
+    case "clear":
+      return [field("toAgent", "New agent target", "clear the agent target")]
+    case "keep":
+      return [field("toAgent", "New agent target", "keep (only when the goal has no agent target)")]
+    case "set":
+      return [
+        field("toAgent", "New agent target", toAgent.agent.agentId),
+        field("toAgentName", "New agent name", toAgent.agent.name),
+        field("toAgentHost", "New agent host", toAgent.agent.host),
+        field("toAgentPane", "New agent pane", toAgent.agent.paneId),
+        field(
+          "toAgentLineage",
+          "New agent lineage",
+          agentLineage(toAgent.agent)
+        )
+      ]
+  }
+}
+
 export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => {
   switch (payload.kind) {
     case "browser.mcp.recover":
@@ -485,14 +515,13 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
           field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerName", "Existing worker name", payload.worker.name),
           field("workerHost", "Existing worker host", payload.worker.host),
           field("workerPane", "Existing worker pane", payload.worker.paneId),
           field(
             "workerLineage",
             "Existing worker lineage",
-            payload.worker.relationship === undefined
-              ? "root"
-              : `${payload.worker.relationship.relation}:${payload.worker.relationship.parentAgentId}`
+            agentLineage(payload.worker)
           ),
           field("worktree", "Existing worktree", payload.worktree),
           field("branch", "Existing branch", payload.branch)
@@ -516,8 +545,14 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
           field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerName", "Existing worker name", payload.worker.name),
           field("workerHost", "Existing worker host", payload.worker.host),
           field("workerPane", "Existing worker pane", payload.worker.paneId),
+          field(
+            "workerLineage",
+            "Existing worker lineage",
+            agentLineage(payload.worker)
+          ),
           field("worktree", "Existing worktree", payload.worktree),
           field("branch", "Existing branch", payload.branch),
           field("title", "New goal title", payload.title),
@@ -545,20 +580,33 @@ export const approvalRequestFor = (payload: JobPayloadType): ApprovalRequest => 
           field("sessionId", "Existing session", payload.sessionId),
           field("expectedWork", "Existing Work assignment", payload.expectedWork),
           field("worker", "Existing stable agent", payload.worker.agentId),
+          field("workerName", "Existing worker name", payload.worker.name),
           field("workerHost", "Existing worker host", payload.worker.host),
           field("workerPane", "Existing worker pane", payload.worker.paneId),
           field(
             "workerLineage",
             "Existing worker lineage",
-            payload.worker.relationship === undefined
-              ? "root"
-              : `${payload.worker.relationship.relation}:${payload.worker.relationship.parentAgentId}`
+            agentLineage(payload.worker)
           ),
           field("worktree", "Existing worktree", payload.worktree),
           field("branch", "Existing branch", payload.branch)
         ],
         kind: payload.kind,
         title: "Link one existing unlinked Work goal"
+      }
+    case "work.reassign":
+      return {
+        fields: [
+          field("goalId", "Work goal", payload.goalId),
+          field("from", "Current Work owner", `${payload.from.name} (${payload.from.id})`),
+          field("to", "New Work owner", `${payload.to.name} (${payload.to.id})`),
+          ...reassignAgentFields(payload.toAgent),
+          field("reason", "Reason", payload.reason),
+          field("expectedGoalEventId", "Expected goal event", payload.expectedGoalEventId),
+          field("expectedGoalUpdatedAt", "Expected goal update", String(payload.expectedGoalUpdatedAt))
+        ],
+        kind: payload.kind,
+        title: "Reassign one Work goal to a new owner"
       }
   }
 }
@@ -581,6 +629,7 @@ export const sanitizeJobPayload = (payload: JobPayloadType): JobPayloadType => {
     case "work.reconcile":
     case "work.admit":
     case "work.recover":
+    case "work.reassign":
       return payload
   }
 }

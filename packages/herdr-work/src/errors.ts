@@ -127,3 +127,58 @@ export class WorkAdmissionConflictError extends Schema.TaggedError<WorkAdmission
   "WorkAdmissionConflictError",
   { goalId: Schema.String, laneId: Schema.String, reason: Schema.String }
 ) {}
+
+/** The goal, or its active lane when `laneId` is set, is not owned by the approved source owner. */
+export class WorkGoalOwnerMismatchError extends Schema.TaggedError<WorkGoalOwnerMismatchError>()(
+  "WorkGoalOwnerMismatchError",
+  {
+    goalId: Schema.String,
+    laneId: Schema.NullOr(Schema.String),
+    expectedOwner: Schema.Struct({ id: Schema.String, name: Schema.String }),
+    actualOwner: Schema.Struct({ id: Schema.String, name: Schema.String })
+  }
+) {}
+
+/** The goal's durable head is not the approved expected event; `actual*` is null when the goal is absent. */
+export class WorkGoalRevisionConflictError extends Schema.TaggedError<WorkGoalRevisionConflictError>()(
+  "WorkGoalRevisionConflictError",
+  {
+    goalId: Schema.String,
+    expectedEventId: Schema.String,
+    expectedUpdatedAt: Schema.Number,
+    actualEventId: Schema.NullOr(Schema.String),
+    actualUpdatedAt: Schema.NullOr(Schema.Number)
+  }
+) {}
+
+/** The approval job id already names a different reassignment or another durable record. */
+export class WorkGoalReassignmentConflictError extends Schema.TaggedError<WorkGoalReassignmentConflictError>()(
+  "WorkGoalReassignmentConflictError",
+  {
+    approvalJobId: Schema.String,
+    reason: Schema.Literals(["payload_mismatch", "identifier_in_use"])
+  }
+) {}
+
+/** The goal's active lane has a started-worker binding, so a reassignment must name the agent that takes it over. */
+export class WorkGoalBindingRequiresAgentError extends Schema.TaggedError<WorkGoalBindingRequiresAgentError>()(
+  "WorkGoalBindingRequiresAgentError",
+  { goalId: Schema.String, laneId: Schema.String, dispatchRequestId: Schema.String }
+) {}
+
+/**
+ * The requested agent target cannot be written. `keep_existing_target`: keeping
+ * would leave the previous owner's agent on the goal (`holderId` is that goal).
+ * `held_by_other_goal` / `held_by_other_lane`: the new agent is already the
+ * current target of another goal, or the authoritative binding of another
+ * goal's lane (`holderId` is that goal or lane).
+ */
+export class WorkGoalAgentTargetConflictError extends Schema.TaggedError<WorkGoalAgentTargetConflictError>()(
+  "WorkGoalAgentTargetConflictError",
+  {
+    goalId: Schema.String,
+    agentId: Schema.String,
+    reason: Schema.Literals(["keep_existing_target", "held_by_other_goal", "held_by_other_lane"]),
+    holderId: Schema.String
+  }
+) {}

@@ -123,6 +123,8 @@ export const jobTitle = (record: Pick<SanitizedJobRecord, "payload">): string =>
       return "Prospectively admit existing Work owner"
     case "work.recover":
       return "Link existing unlinked Work goal"
+    case "work.reassign":
+      return "Reassign Work goal owner"
   }
 }
 
@@ -146,6 +148,8 @@ const safeSummary = (record: SanitizedJobRecord): string => {
       return `Prospectively admitted an existing owner for ${record.payload.repository}#${record.payload.pullRequest}.`
     case "work.recover":
       return `Linked the existing goal for ${record.payload.repository}#${record.payload.pullRequest}.`
+    case "work.reassign":
+      return `Reassigned ${record.payload.goalId} from ${record.payload.from.name} to ${record.payload.to.name}.`
   }
 }
 
@@ -159,7 +163,8 @@ const categoriesFor = (record: SanitizedJobRecord): ReadonlyArray<Exclude<Activi
   if (
     record.payload.kind === "work.reconcile" ||
     record.payload.kind === "work.admit" ||
-    record.payload.kind === "work.recover"
+    record.payload.kind === "work.recover" ||
+    record.payload.kind === "work.reassign"
   )
     categories.push("work")
   if (requiresApproval(record.payload)) categories.push("approvals")

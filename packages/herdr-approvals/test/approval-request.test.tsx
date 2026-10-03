@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@effect/vitest"
+import { canonicalJobPayload } from "@knpkv/herdr-fleet"
 import { renderToStaticMarkup } from "react-dom/server"
 import { JobPayload } from "@knpkv/herdr-fleet/model"
-import type { JobPayload as JobPayloadType, JobRecord } from "@knpkv/herdr-fleet/model"
+import type { JobPayload as JobPayloadType, JobRecord, WorkReassignAgent } from "@knpkv/herdr-fleet/model"
 import { Schema } from "effect"
 import { ApprovalRequestDisclosure } from "../src/approval-request-view.js"
 import type { DashboardSnapshot } from "../src/dashboard-model.js"
@@ -1069,6 +1070,133 @@ describe("sanitized approval requests", () => {
     expect(regions).toEqual(controls)
   })
 
+  const workWorker = {
+    host: "SER8",
+    agentId: "agent-433",
+    name: "Owner worker",
+    paneId: "w1:p3",
+    relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+  }
+  const workPayloads = [
+    {
+      kind: "work.reconcile",
+      repository: "knpkv/npm",
+      pullRequest: 433,
+      goalId: "goal-433",
+      laneId: "lane-433",
+      operationId: "operation-433",
+      expectedRevision: 2,
+      expectedHead: "0123456789abcdef0123456789abcdef01234567",
+      newHead: "abcdefabcdefabcdefabcdefabcdefabcdefabcd",
+      expectedOwner: { id: "owner-1", name: "Owner" },
+      expectedGoalEventId: "event-433",
+      bindingDispatchRequestId: "dispatch-433",
+      sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+      expectedWork: "feat/guided-review-rly",
+      worker: workWorker,
+      worktree: "/worktrees/npm/feat/guided-review-rly",
+      branch: "feat/guided-review-rly"
+    },
+    {
+      kind: "work.admit",
+      repository: "knpkv/npm",
+      pullRequest: 433,
+      reviewUrl: "https://github.com/knpkv/npm/pull/433",
+      goalId: "goal-433",
+      laneId: "lane-433",
+      operationId: "admit-433",
+      expectedAbsenceToken: "a".repeat(64),
+      head: "b".repeat(40),
+      baseHead: "c".repeat(40),
+      owner: { id: "owner-1", name: "Owner" },
+      sessionId: "01a0ae7d-ed74-73c1-8454-4aed86de10cc",
+      expectedWork: "feat/guided-review-rly",
+      worker: workWorker,
+      worktree: "/worktrees/npm/feat/guided-review-rly",
+      branch: "feat/guided-review-rly",
+      title: "Review PR 433",
+      summary: "Guided review",
+      detail: "Admit the running owner"
+    },
+    {
+      kind: "work.recover",
+      repository: "knpkv/npm",
+      pullRequest: 376,
+      reviewUrl: "https://github.com/knpkv/npm/pull/376",
+      goalId: "jcf-ai-review",
+      laneId: "jcf-release",
+      operationId: "recover-jcf",
+      expectedGoalEventId: "original-event",
+      expectedGoalUpdatedAt: 500,
+      expectedHistoryToken: "d".repeat(64),
+      head: "b".repeat(40),
+      baseHead: "c".repeat(40),
+      owner: { id: "original-owner", name: "Original" },
+      sessionId: "01a0ae54-197e-72b2-914f-8d5d22abe522",
+      expectedWork: "work:jcf",
+      worker: workWorker,
+      worktree: "/worktrees/jcf",
+      branch: "feat/jcf"
+    },
+    {
+      kind: "work.reassign",
+      goalId: "goal-ser8-control-surface",
+      from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      to: { id: "agent-claude-coord", name: "Claude coordinator" },
+      toAgent: { _tag: "set", agent: { ...workWorker, agentId: "agent-claude-coord", name: "coord" } },
+      reason: "Codex identities retired",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
+    }
+  ]
+  // Canonical leaf paths whose display key differs from the path itself.
+  const displayKeyFor = new Map([
+    ["expectedAbsenceToken", "absenceToken"],
+    ["worker.agentId", "worker"],
+    ["worker.host", "workerHost"],
+    ["worker.paneId", "workerPane"],
+    ["worker.name", "workerName"],
+    ["worker.relationship.parentAgentId", "workerLineage"],
+    ["worker.relationship.relation", "workerLineage"],
+    ["owner.id", "owner"],
+    ["owner.name", "owner"],
+    ["expectedOwner.id", "expectedOwner"],
+    ["expectedOwner.name", "expectedOwner"],
+    ["from.id", "from"],
+    ["from.name", "from"],
+    ["to.id", "to"],
+    ["to.name", "to"],
+    ["toAgent._tag", "toAgent"],
+    ["toAgent.agent.agentId", "toAgent"],
+    ["toAgent.agent.host", "toAgentHost"],
+    ["toAgent.agent.paneId", "toAgentPane"],
+    ["toAgent.agent.name", "toAgentName"],
+    ["toAgent.agent.relationship.parentAgentId", "toAgentLineage"],
+    ["toAgent.agent.relationship.relation", "toAgentLineage"]
+  ])
+  type Json = typeof Schema.Json.Type
+  const isJsonObject = Schema.is(Schema.Record(Schema.String, Schema.Json))
+  const canonicalLeaves = (value: Json, path: string): ReadonlyArray<readonly [string, Json]> =>
+    isJsonObject(value)
+      ? Object.entries(value).flatMap(([key, child]) => canonicalLeaves(child, path === "" ? key : `${path}.${key}`))
+      : [[path, value]]
+
+  for (const raw of workPayloads) {
+    it(`displays every canonical hash-bound ${raw.kind} field and its value`, () => {
+      const payload = Schema.decodeUnknownSync(JobPayload)(raw)
+      const displayed = new Map(approvalRequestFor(payload).fields.map(({ key, value }) => [key, value]))
+      const canonical = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))(canonicalJobPayload(payload))
+      const missing = canonicalLeaves(canonical, "")
+        .filter(([path]) => path !== "kind")
+        .filter(([path, leaf]) => {
+          const shown = displayed.get(displayKeyFor.get(path) ?? path)
+          return shown === undefined || (!path.endsWith("._tag") && leaf !== null && !shown.includes(String(leaf)))
+        })
+        .map(([path]) => path)
+      expect(missing).toEqual([])
+    })
+  }
+
   it("shows every hash-bound existing-owner reconciliation field", () => {
     const payload = Schema.decodeUnknownSync(JobPayload)({
       kind: "work.reconcile",
@@ -1175,6 +1303,51 @@ describe("sanitized approval requests", () => {
     ]) {
       expect(values.has(key), key).toBe(true)
     }
+  })
+
+  it("shows every authority-bearing goal reassignment field", () => {
+    const payload = Schema.decodeUnknownSync(JobPayload)({
+      kind: "work.reassign",
+      goalId: "goal-ser8-control-surface",
+      from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      to: { id: "agent-claude-coord", name: "Claude coordinator" },
+      toAgent: {
+        _tag: "set",
+        agent: {
+          host: "SER8",
+          agentId: "agent-claude-coord",
+          name: "coord",
+          paneId: "w1J:p9",
+          relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+        }
+      },
+      reason: "Codex identities retired",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
+    })
+    const request = approvalRequestFor(payload)
+    const values = new Map(request.fields.map(({ key, value }) => [key, value]))
+    expect(request.title).toBe("Reassign one Work goal to a new owner")
+    expect(values.get("from")).toBe("Codex host coordinator (owner-host-coordinator)")
+    expect(values.get("to")).toBe("Claude coordinator (agent-claude-coord)")
+    expect(values.get("toAgent")).toBe("agent-claude-coord")
+    expect(values.get("toAgentHost")).toBe("SER8")
+    expect(values.get("toAgentName")).toBe("coord")
+    expect(values.get("toAgentPane")).toBe("w1J:p9")
+    expect(values.get("toAgentLineage")).toBe("delegated:agent-lead")
+    expect(values.get("reason")).toBe("Codex identities retired")
+    expect(values.get("expectedGoalEventId")).toBe("goal-event-7")
+    expect(values.get("expectedGoalUpdatedAt")).toBe("500")
+    expect(values.get("goalId")).toBe("goal-ser8-control-surface")
+    expect(sanitizeJobPayload(payload)).toEqual(payload)
+    const agentField = (toAgent: WorkReassignAgent) =>
+      new Map(
+        approvalRequestFor(Schema.decodeUnknownSync(JobPayload)({ ...payload, toAgent })).fields.map(
+          ({ key, value }) => [key, value]
+        )
+      ).get("toAgent")
+    expect(agentField({ _tag: "clear" })).toBe("clear the agent target")
+    expect(agentField({ _tag: "keep" })).toBe("keep (only when the goal has no agent target)")
   })
 
   it.each(approvalDashboardStatuses)(

@@ -7,6 +7,7 @@ import { fleetConfigPath } from "./internal/config-path.js"
 import { makeHostOperations } from "./operations.js"
 
 export { HostdOperationsCompositionError } from "./errors.js"
+export { runWorkReassign } from "./work-reassign.js"
 
 export type HostdLifetimeFork = <A, E>(effect: Effect.Effect<A, E>) => Effect.Effect<void>
 

@@ -1,4 +1,4 @@
-import { agentConnectTarget, fleetResponseBodyMaxBytes } from "@knpkv/herdr-fleet"
+import { agentConnectTarget, fleetResponseBodyMaxBytes, workReassignActivitySummary } from "@knpkv/herdr-fleet"
 import { Clock, Crypto, Effect, Encoding, Equal, FileSystem, Option, Path, Schema } from "effect"
 import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
@@ -11,6 +11,11 @@ import {
   WorkDecisionAuthorityConflictError,
   WorkDecisionHandoffConflictError,
   WorkDecisionRevisionConflictError,
+  WorkGoalAgentTargetConflictError,
+  WorkGoalBindingRequiresAgentError,
+  WorkGoalOwnerMismatchError,
+  WorkGoalReassignmentConflictError,
+  WorkGoalRevisionConflictError,
   WorkLaneClaimConflictError,
   WorkLaneGoalConflictError,
   WorkLaneOperationConflictError,
@@ -72,6 +77,8 @@ import {
   WorkGoal,
   WorkGoalCheckpoint,
   WorkGoalId,
+  WorkGoalReassigned,
+  WorkGoalReassignment,
   workHistoryMaxEvents,
   WorkLaneClaim,
   WorkLaneClaimed,
@@ -88,6 +95,8 @@ import type {
   WorkDecisionHandoff as WorkDecisionHandoffType,
   WorkExistingGoalRecovery as WorkExistingGoalRecoveryType,
   WorkGoalCheckpoint as WorkGoalCheckpointType,
+  WorkGoalReassigned as WorkGoalReassignedType,
+  WorkGoalReassignment as WorkGoalReassignmentType,
   WorkProspectiveAdmission as WorkProspectiveAdmissionType,
   WorkPullRequestLink as WorkPullRequestLinkType,
   WorkRecoveryPreflight as WorkRecoveryPreflightType,
@@ -1201,6 +1210,34 @@ type ClaimDecision =
   | { readonly _tag: "rejected"; readonly error: WorkProjectionError | WorkStoreError | WorkPullRequestLinkError }
   | { readonly _tag: "claimed"; readonly value: WorkLaneClaimed }
 
+type ReassignRejection =
+  | WorkGoalAgentTargetConflictError
+  | WorkGoalBindingRequiresAgentError
+  | WorkGoalOwnerMismatchError
+  | WorkGoalReassignmentConflictError
+  | WorkGoalRevisionConflictError
+  | WorkProjectionError
+  | WorkStoreError
+type ReassignDecision =
+  | { readonly _tag: "reassigned"; readonly result: WorkGoalReassignedType }
+  | { readonly _tag: "rejected"; readonly error: ReassignRejection }
+const ReassignmentRow = Schema.Struct({ approvalJobId: Schema.String, goalId: Schema.String, record: Schema.String })
+
+/** Applies a reassignment's agent choice; `keep` is only reached when the goal has no target. */
+const withReassignedAgent = <G extends object>(
+  goal: G,
+  toAgent: WorkGoalReassignmentType["toAgent"]
+) => {
+  switch (toAgent._tag) {
+    case "set":
+      return { ...goal, agentHierarchy: { agent: toAgent.agent }, connectTarget: agentConnectTarget(toAgent.agent) }
+    case "clear":
+      return { ...goal, agentHierarchy: null, connectTarget: null }
+    case "keep":
+      return goal
+  }
+}
+
 type AgentBindingDecision =
   | { readonly _tag: "bound"; readonly binding: WorkAgentBindingType }
   | {
@@ -1337,6 +1374,26 @@ type AdmissionRejection = {
   readonly error: WorkAdmissionConflictError
 }
 
+/**
+ * Splits bindings into each lane's authoritative row (highest lane revision)
+ * and the lanes where that revision is shared by more than one row. Earlier
+ * rows on a lane were superseded, for example by an approved reassignment.
+ */
+const authoritativeBindings = (bindings: ReadonlyArray<WorkAgentBindingType>) => {
+  const maxRevision = new Map<string, number>()
+  for (const binding of bindings) {
+    const laneId = binding.request.laneId
+    maxRevision.set(laneId, Math.max(maxRevision.get(laneId) ?? 0, binding.lane.revision))
+  }
+  const latest = bindings.filter((binding) => binding.lane.revision === maxRevision.get(binding.request.laneId))
+  const ambiguousLanes = new Set(
+    latest
+      .map(({ request }) => request.laneId)
+      .filter((laneId, index, laneIds) => laneIds.indexOf(laneId) !== index)
+  )
+  return { latest, ambiguousLanes }
+}
+
 /** Reads every durable identity row, including entries omitted by time-window projections. */
 const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType): AdmissionInspection => {
   const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
@@ -1396,7 +1453,8 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
   for (const event of events) latest.set(event.goal.id, event)
   const goal = [...latest.values()].find(({ goal }) => goal.review?.url === target.reviewUrl)
   const lane = lanes.entries.find(({ claim }) => claim.laneId === target.laneId)?.claim
-  const binding = bindings.find(({ lane: bound }) => bound.laneId === target.laneId)
+  const authority = authoritativeBindings(bindings)
+  const binding = authority.latest.find(({ lane: bound }) => bound.laneId === target.laneId)
   const foreignConflict =
     events.some(({ goal: entry }) =>
       (entry.review?.url === target.reviewUrl && entry.id !== target.goalId) ||
@@ -1406,11 +1464,14 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
       (claim.goalId === target.goalId && claim.laneId !== target.laneId) ||
       (claim.worktree === target.worktree && claim.laneId !== target.laneId)
     ) ||
+    authority.latest.some(({ request }) =>
+      request.worker.agentId === target.worker.agentId && request.laneId !== target.laneId
+    ) ||
+    // A session id stays claimed by its lane even after a reassignment supersedes that binding.
     bindings.some(({ request }) =>
-      (request.worker.agentId === target.worker.agentId && request.laneId !== target.laneId) ||
       (request.prospectiveAdmission?.sessionId === target.sessionId && request.laneId !== target.laneId) ||
       (request.existingGoalRecovery?.sessionId === target.sessionId && request.laneId !== target.laneId)
-    ) || bindings.filter(({ request }) => request.laneId === target.laneId).length > 1
+    ) || authority.ambiguousLanes.has(target.laneId)
   const exact = goal !== undefined && lane !== undefined && binding !== undefined &&
     goal.goal.id === target.goalId && goal.goal.state !== "completed" &&
     goal.goal.state !== "deployed" && goal.goal.goalFamily?.role === "canonical" &&
@@ -1456,8 +1517,8 @@ const admissionState = (database: DatabaseSync, target: WorkAdmissionTargetType)
     ) || lanes.entries.some(({ claim }) =>
       claim.laneId === target.laneId || claim.goalId === target.goalId ||
       claim.worktree === target.worktree
-    ) || bindings.some(({ request }) =>
-      request.worker.agentId === target.worker.agentId ||
+    ) || authority.latest.some(({ request }) => request.worker.agentId === target.worker.agentId) ||
+    bindings.some(({ request }) =>
       request.prospectiveAdmission?.sessionId === target.sessionId ||
       request.existingGoalRecovery?.sessionId === target.sessionId
     )
@@ -1716,6 +1777,10 @@ export interface WorkStoreService {
   readonly recoverExistingGoal: (
     request: WorkExistingGoalRecoveryType
   ) => Effect.Effect<WorkPullRequestLinkType, WorkAdmissionConflictError | WorkProjectionError | WorkStoreError>
+  /** Moves one goal, and its active lane, from the exact current owner under an approved Fleet job. */
+  readonly reassign: (
+    request: WorkGoalReassignmentType
+  ) => Effect.Effect<WorkGoalReassignedType, ReassignRejection>
   readonly admissionPreflight: (
     target: WorkAdmissionTargetType
   ) => Effect.Effect<WorkAdmissionPreflightType, WorkProjectionError | WorkStoreError>
@@ -1889,6 +1954,14 @@ export class WorkStore implements WorkStoreService {
                 length(CAST(NEW.operation_id AS BLOB)) + length(CAST(NEW.record AS BLOB))
           WHERE singleton = 1;
         END;
+        -- One row per approved reassignment. Every row commits together with the
+        -- goal checkpoint whose event id equals its approval job id, so the
+        -- work_goal_events capacity bounds this table too.
+        CREATE TABLE IF NOT EXISTS work_goal_reassignments (
+          approval_job_id TEXT PRIMARY KEY,
+          goal_id TEXT NOT NULL,
+          record TEXT NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS work_decision_handoffs (
           handoff_id TEXT PRIMARY KEY,
           session_id TEXT NOT NULL UNIQUE,
@@ -2293,6 +2366,345 @@ export class WorkStore implements WorkStoreService {
     })
     if (decision._tag === "rejected") return yield* decision.error
     return decision.link
+  })
+
+  readonly reassign = Effect.fn("WorkStore.reassign")(function*(
+    this: WorkStore,
+    request: WorkGoalReassignmentType
+  ) {
+    const decoded = yield* Schema.decodeUnknownEffect(WorkGoalReassignment)(request).pipe(
+      Effect.mapError(storeError("reassign.decode"))
+    )
+    const jobId = decoded.approvalJobId
+    const observedAt = yield* Clock.currentTimeMillis
+    yield* this.secureFiles()
+    const decision = yield* Effect.try({
+      try: (): ReassignDecision => {
+        let transaction = false
+        const reject = (error: ReassignRejection): ReassignDecision => {
+          this.#database.exec("ROLLBACK")
+          transaction = false
+          return { _tag: "rejected", error }
+        }
+        const ownerMismatch = (laneId: string | null, actual: WorkGoalReassignmentType["from"]) =>
+          reject(
+            new WorkGoalOwnerMismatchError({
+              goalId: decoded.goalId,
+              laneId,
+              expectedOwner: { id: decoded.from.id, name: decoded.from.name },
+              actualOwner: { id: actual.id, name: actual.name }
+            })
+          )
+        try {
+          this.#database.exec("BEGIN IMMEDIATE")
+          transaction = true
+          const priorRaw = this.#database
+            .prepare(
+              `SELECT approval_job_id AS approvalJobId, goal_id AS goalId, record
+               FROM work_goal_reassignments WHERE approval_job_id = ?`
+            )
+            .get(jobId)
+          if (priorRaw !== undefined) {
+            const row = Schema.decodeUnknownSync(ReassignmentRow)(priorRaw)
+            const prior = Schema.decodeUnknownSync(WorkGoalReassigned)(JSON.parse(row.record))
+            if (row.approvalJobId !== prior.reassignment.approvalJobId || row.goalId !== prior.reassignment.goalId) {
+              return reject(
+                new WorkStoreError({ cause: { prior, row }, operation: "reassign.replay.identity-mismatch" })
+              )
+            }
+            if (!Equal.equals(prior.reassignment, decoded)) {
+              return reject(new WorkGoalReassignmentConflictError({ approvalJobId: jobId, reason: "payload_mismatch" }))
+            }
+            this.#database.exec("ROLLBACK")
+            transaction = false
+            return { _tag: "reassigned", result: prior }
+          }
+          const collision = this.#database
+            .prepare(
+              `SELECT 1 FROM work_goal_events WHERE event_id = ?
+               UNION ALL SELECT 1 FROM work_lane_operations WHERE operation_id = ?
+               UNION ALL SELECT 1 FROM work_agent_bindings WHERE dispatch_request_id = ? LIMIT 1`
+            )
+            .get(jobId, jobId, jobId)
+          if (collision !== undefined) {
+            return reject(new WorkGoalReassignmentConflictError({ approvalJobId: jobId, reason: "identifier_in_use" }))
+          }
+          const eventRows = Schema.decodeUnknownSync(Schema.Array(AgentBindingGoalEventRow))(
+            this.#database
+              .prepare(
+                `SELECT event_id AS eventId, goal_id AS goalId, occurred_at AS occurredAt, record
+                 FROM work_goal_events ORDER BY occurred_at ASC, event_id ASC LIMIT ?`
+              )
+              .all(workHistoryMaxEvents + 1)
+          )
+          const history: Array<WorkGoalCheckpointType> = []
+          for (const row of eventRows) {
+            const event = decodeAgentBindingGoalEvent(row, "reassign.history")
+            if (event._tag === "invalid") return reject(event.error)
+            history.push(event.checkpoint)
+          }
+          const head = history.filter(({ goal }) => goal.id === decoded.goalId).at(-1)
+          if (
+            head === undefined ||
+            head.eventId !== decoded.expectedGoalEventId ||
+            head.goal.updatedAt !== decoded.expectedGoalUpdatedAt
+          ) {
+            return reject(
+              new WorkGoalRevisionConflictError({
+                goalId: decoded.goalId,
+                expectedEventId: decoded.expectedGoalEventId,
+                expectedUpdatedAt: decoded.expectedGoalUpdatedAt,
+                actualEventId: head?.eventId ?? null,
+                actualUpdatedAt: head?.goal.updatedAt ?? null
+              })
+            )
+          }
+          if (!Equal.equals(head.goal.owner, decoded.from)) return ownerMismatch(null, head.goal.owner)
+          const ledger = readValidatedLaneLedger(this.#database, "reassign.lane")
+          if (ledger._tag === "invalid") return reject(ledger.error)
+          const active = ledger.entries.filter(({ claim }) =>
+            claim.goalId === decoded.goalId && claim.phase !== "shipped"
+          )
+          if (active.length > 1) {
+            return reject(new WorkStoreError({ cause: active, operation: "reassign.lane.ambiguous" }))
+          }
+          const current = active[0]
+          if (current !== undefined && !Equal.equals(current.claim.owner, decoded.from)) {
+            return ownerMismatch(current.claim.laneId, current.claim.owner)
+          }
+          const latestBindingRaw = current === undefined ? undefined : this.#database
+            .prepare(
+              `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+                 expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+               FROM work_agent_bindings WHERE lane_id = ? ORDER BY revision DESC LIMIT 1`
+            )
+            .get(current.claim.laneId)
+          const latestBindingRow = latestBindingRaw === undefined
+            ? undefined
+            : Schema.decodeUnknownSync(AgentBindingRow)(latestBindingRaw)
+          const bindingDecision = latestBindingRow === undefined ? null : decodeAgentBindingRow(
+            latestBindingRow,
+            { dispatchRequestId: latestBindingRow.dispatchRequestId, laneId: latestBindingRow.laneId },
+            "reassign.binding"
+          )
+          if (bindingDecision?._tag === "invalid") return reject(bindingDecision.error)
+          const previousBinding = bindingDecision === null ? null : bindingDecision.binding
+          if (previousBinding !== null && decoded.toAgent._tag !== "set") {
+            return reject(
+              new WorkGoalBindingRequiresAgentError({
+                goalId: decoded.goalId,
+                laneId: previousBinding.request.laneId,
+                dispatchRequestId: previousBinding.request.dispatchRequestId
+              })
+            )
+          }
+          const previous = head.goal
+          const currentAgentId = previous.agentHierarchy?.agent.agentId ?? previous.connectTarget?.agentId
+          if (decoded.toAgent._tag === "keep" && currentAgentId !== undefined) {
+            return reject(
+              new WorkGoalAgentTargetConflictError({
+                goalId: decoded.goalId,
+                agentId: currentAgentId,
+                reason: "keep_existing_target",
+                holderId: decoded.goalId
+              })
+            )
+          }
+          if (decoded.toAgent._tag === "set") {
+            const agentId = decoded.toAgent.agent.agentId
+            const agentConflict = (reason: "held_by_other_goal" | "held_by_other_lane", holderId: string) =>
+              reject(new WorkGoalAgentTargetConflictError({ goalId: decoded.goalId, agentId, reason, holderId }))
+            const latestGoals = new Map<string, WorkGoalCheckpointType["goal"]>()
+            for (const { goal } of history) latestGoals.set(goal.id, goal)
+            const goalHolder = [...latestGoals.values()].find((goal) =>
+              goal.id !== decoded.goalId &&
+              (goal.agentHierarchy?.agent.agentId === agentId || goal.connectTarget?.agentId === agentId)
+            )
+            if (goalHolder !== undefined) return agentConflict("held_by_other_goal", goalHolder.id)
+            const holderRows = Schema.decodeUnknownSync(AgentBindingRows)(
+              this.#database
+                .prepare(
+                  `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+                     expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+                   FROM work_agent_bindings ORDER BY dispatch_request_id ASC LIMIT ?`
+                )
+                .all(workLaneOperationMaxRecords + 1)
+            )
+            if (holderRows.length > workLaneOperationMaxRecords) {
+              return reject(
+                new WorkStoreError({ cause: holderRows.length, operation: "reassign.agent-holders.capacity" })
+              )
+            }
+            const holders: Array<WorkAgentBindingType> = []
+            for (const row of holderRows) {
+              const holder = decodeAgentBindingRow(
+                row,
+                { dispatchRequestId: row.dispatchRequestId, laneId: row.laneId },
+                "reassign.agent-holders"
+              )
+              if (holder._tag === "invalid") return reject(holder.error)
+              holders.push(holder.binding)
+            }
+            const laneHolder = authoritativeBindings(holders).latest.find(({ lane, request }) =>
+              lane.goalId !== decoded.goalId && request.worker.agentId === agentId
+            )
+            if (laneHolder !== undefined) return agentConflict("held_by_other_lane", laneHolder.request.laneId)
+          }
+          // occurredAt equals updatedAt for every valid checkpoint; both bound the ordering defensively.
+          const at = Math.max(observedAt, head.occurredAt + 1, head.goal.updatedAt + 1)
+          const reassigned = {
+            ...previous,
+            owner: decoded.to,
+            activity: [
+              ...(previous.activity ?? []),
+              {
+                id: jobId,
+                kind: "status",
+                summary: workReassignActivitySummary(decoded, jobId, decoded.approvalHash),
+                occurredAt: at
+              }
+            ],
+            updatedAt: at
+          }
+          const goal = Schema.decodeUnknownSync(WorkGoal)(withReassignedAgent(reassigned, decoded.toAgent))
+          const checkpoint = Schema.decodeUnknownSync(WorkGoalCheckpoint)({
+            version: "herdr.work.event.v1",
+            eventId: jobId,
+            occurredAt: at,
+            goal
+          })
+          const lane = current === undefined ? null : Schema.decodeUnknownSync(WorkLaneClaimed)({
+            operationId: jobId,
+            goalId: current.claim.goalId,
+            laneId: current.claim.laneId,
+            worktree: current.claim.worktree,
+            branch: current.claim.branch,
+            head: current.claim.head,
+            owner: decoded.to,
+            parent: current.claim.parent,
+            phase: current.claim.phase,
+            expectedRevision: current.claim.revision,
+            revision: current.claim.revision + 1
+          })
+          const binding = previousBinding === null || lane === null || decoded.toAgent._tag !== "set"
+            ? null
+            : Schema.decodeUnknownSync(WorkAgentBinding)({
+              version: "herdr.work.agent-binding.v1",
+              request: {
+                version: "herdr.work.agent-binding-request.v1",
+                dispatchRequestId: jobId,
+                laneId: lane.laneId,
+                expectedRevision: lane.expectedRevision,
+                worker: decoded.toAgent.agent,
+                ownerReassignment: {
+                  previousDispatchRequestId: previousBinding.request.dispatchRequestId,
+                  approvalJobId: jobId,
+                  approvalActor: decoded.approvalActor,
+                  approvalApprovedBy: decoded.approvalApprovedBy,
+                  approvalApprovedAt: decoded.approvalApprovedAt,
+                  approvalHash: decoded.approvalHash
+                }
+              },
+              lane,
+              checkpoint
+            })
+          const result = Schema.decodeUnknownSync(WorkGoalReassigned)({
+            reassignment: decoded,
+            checkpoint,
+            lane,
+            binding
+          })
+          const familyError = validateGoalFamilyHistory([...history, checkpoint])
+          if (familyError !== undefined) return reject(familyError)
+          const laneRecord = lane === null ? null : JSON.stringify(lane)
+          // A goal without a lane appends no lane operation, so only a lane rewrite is held to that ledger.
+          const operationTotals = lane === null
+            ? { operationCount: 0, operationBytes: 0 }
+            : readLaneOperationLedgerTotals(this.#database)
+          const capacity = agentBindingAdmissionError({
+            history,
+            candidate: checkpoint,
+            operationCount: operationTotals.operationCount,
+            operationBytes: operationTotals.operationBytes,
+            candidateOperationBytes: laneRecord === null
+              ? 0
+              : utf8.encode(jobId).byteLength + utf8.encode(laneRecord).byteLength
+          })
+          if (capacity !== undefined) return reject(capacity)
+          if (current !== undefined && laneRecord !== null) {
+            const claimBytes = Schema.decodeUnknownSync(LedgerBytesRow)(
+              this.#database
+                .prepare(
+                  `SELECT COALESCE(SUM(length(CAST(lane_id AS BLOB)) + length(CAST(record AS BLOB))), 0) AS bytes
+                   FROM work_lane_claims`
+                )
+                .get()
+            ).bytes
+            if (
+              claimBytes - utf8.encode(current.row.record).byteLength + utf8.encode(laneRecord).byteLength >
+                workLaneMaxBytes
+            ) {
+              return reject(
+                new WorkProjectionError({
+                  cause: decoded,
+                  detail: `work lane claims cannot exceed ${workLaneMaxBytes} encoded bytes`,
+                  reason: "capacity_exceeded"
+                })
+              )
+            }
+          }
+          this.#database
+            .prepare("INSERT INTO work_goal_events (event_id, goal_id, occurred_at, record) VALUES (?, ?, ?, ?)")
+            .run(checkpoint.eventId, checkpoint.goal.id, checkpoint.occurredAt, JSON.stringify(checkpoint))
+          if (lane !== null && laneRecord !== null) {
+            const changes = this.#database
+              .prepare(
+                `UPDATE work_lane_claims SET operation_id = ?, revision = ?, record = ?
+                 WHERE lane_id = ? AND revision = ?`
+              )
+              .run(lane.operationId, lane.revision, laneRecord, lane.laneId, lane.expectedRevision).changes
+            if (changes !== 1 && changes !== 1n) {
+              return reject(new WorkStoreError({ cause: lane, operation: "reassign.lane.update" }))
+            }
+            this.#database
+              .prepare(
+                `INSERT INTO work_lane_operations (operation_id, lane_id, goal_id, phase, revision, record)
+                 VALUES (?, ?, ?, ?, ?, ?)`
+              )
+              .run(lane.operationId, lane.laneId, lane.goalId, lane.phase, lane.revision, laneRecord)
+          }
+          if (binding !== null) {
+            this.#database
+              .prepare(
+                `INSERT INTO work_agent_bindings
+                   (dispatch_request_id, lane_id, expected_revision, revision, agent_id, host, record)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)`
+              )
+              .run(
+                binding.request.dispatchRequestId,
+                binding.request.laneId,
+                binding.request.expectedRevision,
+                binding.lane.revision,
+                binding.request.worker.agentId,
+                binding.request.worker.host,
+                JSON.stringify(binding)
+              )
+          }
+          this.#database
+            .prepare("INSERT INTO work_goal_reassignments (approval_job_id, goal_id, record) VALUES (?, ?, ?)")
+            .run(jobId, decoded.goalId, JSON.stringify(result))
+          this.#database.exec("COMMIT")
+          transaction = false
+          return { _tag: "reassigned", result }
+        } catch (cause) {
+          if (transaction) this.#database.exec("ROLLBACK")
+          throw cause
+        }
+      },
+      catch: storeError("reassign.transaction")
+    })
+    if (decision._tag === "rejected") return yield* decision.error
+    return decision.result
   })
 
   readonly admissionPreflight = Effect.fn("WorkStore.admissionPreflight")(function*(

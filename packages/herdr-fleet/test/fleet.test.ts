@@ -1297,6 +1297,16 @@ describe("fleet local authority", () => {
       worker: { host: "SER8", agentId: "agent-jcf", name: "Original", paneId: "w1K:p1" },
       worktree: "/worktrees/jcf",
       branch: "feat/jcf"
+    },
+    {
+      kind: "work.reassign",
+      goalId: "goal-ser8-control-surface",
+      from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+      to: { id: "agent-claude-coord", name: "Claude coordinator" },
+      toAgent: { _tag: "keep" },
+      reason: "Codex identities retired",
+      expectedGoalEventId: "goal-event-7",
+      expectedGoalUpdatedAt: 500
     }
   ]
 
@@ -1636,6 +1646,157 @@ describe("fleet local authority", () => {
           })
         )
       ).toBe(original)
+    }).pipe(provideNodeServices))
+
+  const reassignBaseline = {
+    kind: "work.reassign",
+    goalId: "goal-ser8-control-surface",
+    from: { id: "owner-host-coordinator", name: "Codex host coordinator" },
+    to: { id: "agent-claude-coord", name: "Claude coordinator" },
+    toAgent: {
+      _tag: "set",
+      agent: {
+        host: "SER8",
+        agentId: "agent-claude-coord",
+        name: "coord",
+        paneId: "w1J:p9",
+        relationship: { parentAgentId: "agent-lead", relation: "delegated" }
+      }
+    },
+    reason: "Codex identities retired",
+    expectedGoalEventId: "goal-event-7",
+    expectedGoalUpdatedAt: 500
+  }
+
+  it.effect("keeps goal reassignment behind approval and hands the persisted approval to its executor", () => {
+    const root = mkdtempSync(join(tmpdir(), "herdr-reassign-approval-test-"))
+    return Effect.acquireUseRelease(
+      JobStore.open(join(root, "jobs.sqlite")),
+      (store) =>
+        Effect.gen(function*() {
+          const approvals: Array<unknown> = []
+          const service = yield* makeFleetService({
+            approvalEnabled: true,
+            host: "SER8",
+            id: Effect.succeed("job-reassign"),
+            nonce: Effect.succeed("nonce-reassign"),
+            now: Effect.succeed(1_000),
+            operations: {
+              ...operations,
+              workJobKinds: new Set(["work.reassign"]),
+              run: (_payload, _started, _jobId, _actor, _lifecycle, approval) =>
+                Effect.sync(() => {
+                  approvals.push(approval)
+                  return "reassigned"
+                })
+            },
+            store
+          })
+          const payload = Schema.decodeUnknownSync(JobPayload)(reassignBaseline)
+          expect(requiresApproval(payload)).toBe(true)
+          const pending = yield* service.submit({ payload }, "coord")
+          expect(pending.status).toBe("pending_approval")
+          expect((yield* Effect.result(service.run(pending.id)))._tag).toBe("Failure")
+          yield* service.approve(pending.id, { hash: pending.hash, nonce: "nonce-reassign" }, "andrey")
+          yield* service.run(pending.id)
+          expect(approvals).toEqual([{ approvedBy: "andrey", approvedAt: 1_000, hash: pending.hash }])
+        }),
+      (store) =>
+        Effect.sync(() => {
+          store.close()
+          rmSync(root, { force: true, recursive: true })
+        })
+    ).pipe(provideNodeServices)
+  })
+
+  it.effect("rejects a reassignment to the same owner", () =>
+    Effect.sync(() => {
+      expect(
+        Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, to: reassignBaseline.from })._tag
+      ).toBe("Failure")
+      expect(Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, reason: "" })._tag).toBe("Failure")
+      expect(Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, toAgent: null })._tag).toBe("Failure")
+    }))
+
+  it.effect("bounds the recorded activity summary before a reassignment can be approved", () =>
+    Effect.sync(() => {
+      type Owner = { readonly id: string; readonly name: string }
+      const decode = (
+        change: { readonly reason?: string; readonly from?: Owner; readonly to?: Owner }
+      ) => Schema.decodeUnknownExit(JobPayload)({ ...reassignBaseline, ...change })._tag
+      expect(decode({ reason: "r".repeat(1_024) })).toBe("Success")
+      expect(decode({ reason: "line\nbreak" })).toBe("Failure")
+      const longName = "n".repeat(1_900)
+      expect(decode({ from: { id: "owner-a", name: longName }, to: { id: "owner-b", name: longName } })).toBe(
+        "Failure"
+      )
+      expect(decode({ from: { id: "owner-a", name: "a" }, to: { id: "owner-b", name: longName } })).toBe("Success")
+      expect(decode({ from: { id: "owner-a", name: "bad\u0007name" } })).toBe("Failure")
+    }))
+
+  it.effect("binds every reassignment field and owner identity into approval", () =>
+    Effect.gen(function*() {
+      const baseline = Schema.decodeUnknownSync(JobPayload)(reassignBaseline)
+      if (baseline.kind !== "work.reassign" || baseline.toAgent._tag !== "set") return
+      const agent = baseline.toAgent.agent
+      const original = yield* jobHash("SER8", "coord", baseline)
+      const changes = [
+        { goalId: "other-goal" },
+        { from: { ...baseline.from, id: "other-owner" } },
+        { from: { ...baseline.from, name: "Changed" } },
+        { to: { ...baseline.to, id: "other-target" } },
+        { to: { ...baseline.to, name: "Changed" } },
+        { toAgent: { _tag: "clear" } },
+        { toAgent: { _tag: "keep" } },
+        { toAgent: { _tag: "set", agent: { ...agent, host: "OTHER" } } },
+        { toAgent: { _tag: "set", agent: { ...agent, agentId: "agent-other" } } },
+        { toAgent: { _tag: "set", agent: { ...agent, name: "Changed" } } },
+        { toAgent: { _tag: "set", agent: { ...agent, paneId: "w2:p2" } } },
+        {
+          toAgent: {
+            _tag: "set",
+            agent: { host: agent.host, agentId: agent.agentId, name: agent.name, paneId: agent.paneId }
+          }
+        },
+        {
+          toAgent: {
+            _tag: "set",
+            agent: { ...agent, relationship: { parentAgentId: "agent-other", relation: "delegated" } }
+          }
+        },
+        {
+          toAgent: { _tag: "set", agent: { ...agent, relationship: { parentAgentId: "agent-lead", relation: "pair" } } }
+        },
+        { reason: "Another reason" },
+        { expectedGoalEventId: "other-event" },
+        { expectedGoalUpdatedAt: 501 }
+      ]
+      for (const change of changes) {
+        const changed = Schema.decodeUnknownSync(JobPayload)({ ...reassignBaseline, ...change })
+        expect(yield* jobHash("SER8", "coord", changed)).not.toBe(original)
+      }
+      expect(yield* jobHash("OTHER", "coord", baseline)).not.toBe(original)
+      expect(yield* jobHash("SER8", "other-actor", baseline)).not.toBe(original)
+      const reordered = Schema.decodeUnknownSync(JobPayload)({
+        expectedGoalUpdatedAt: baseline.expectedGoalUpdatedAt,
+        expectedGoalEventId: baseline.expectedGoalEventId,
+        reason: baseline.reason,
+        toAgent: {
+          agent: {
+            relationship: { relation: "delegated", parentAgentId: "agent-lead" },
+            paneId: agent.paneId,
+            name: agent.name,
+            agentId: agent.agentId,
+            host: agent.host
+          },
+          _tag: "set"
+        },
+        to: { name: baseline.to.name, id: baseline.to.id },
+        from: { name: baseline.from.name, id: baseline.from.id },
+        goalId: baseline.goalId,
+        kind: baseline.kind
+      })
+      expect(yield* jobHash("SER8", "coord", reordered)).toBe(original)
     }).pipe(provideNodeServices))
 
   it.effect("rejects a generated job ID collision without replacing authority", () => {
