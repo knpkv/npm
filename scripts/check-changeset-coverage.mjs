@@ -14,7 +14,7 @@ import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as TypeScript from "typescript"
 import { parse } from "yaml"
 
@@ -89,7 +89,12 @@ const isParameterProperty = (parameter) =>
       kind === TypeScript.SyntaxKind.ReadonlyKeyword
   ) === true
 
-const sourceAnalysisCache = new WeakMap()
+// Analyses retain TypeScript programs. Their keys stay reachable for the rest of the run, so the
+// cache lives for one package's analysis: `resetSourceAnalysisCache` starts the next package empty.
+let sourceAnalysisCache = new WeakMap()
+const resetSourceAnalysisCache = () => {
+  sourceAnalysisCache = new WeakMap()
+}
 
 const isLexicalScopeNode = (node) => TypeScript.isBlock(node) || TypeScript.isModuleBlock(node)
 
@@ -9927,6 +9932,7 @@ const changedPublicCallableChanges = Effect.fn("ChangesetCoverage.changedPublicC
           .map(relativeConfigurationPath)
           .some((configPath) => paths.has(configPath))
       if (!shouldAnalyzePublicCallableChanges(record, changedSourceFiles, changedCompilerConfiguration)) continue
+      resetSourceAnalysisCache()
       const sourceRoot = path.join(repositoryRoot, record.directory, "src")
       const relativeSourceFiles = yield* collectSourceFiles(fileSystem, path, sourceRoot, `${record.directory}/src`)
       const currentSources = new Map()
@@ -10045,7 +10051,7 @@ const runPendingMergeSelfTest = Effect.fn("ChangesetCoverage.runPendingMergeSelf
   // A pre-commit caller may export GIT_INDEX_FILE or GIT_DIR. The fixture must
   // never inherit those pointers or the caller's Git configuration.
   const git = yield* makeGit(root, {
-    PATH: yield* Config.string("PATH"),
+    PATH: yield* Config.String("PATH"),
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1"
   })
@@ -10176,7 +10182,7 @@ const runGeneratedAdmissionSelfTest = Effect.fn("ChangesetCoverage.runGeneratedA
   const path = yield* Path.Path
   const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "changeset-generated-admission-" })
   const git = yield* makeGit(root, {
-    PATH: yield* Config.string("PATH"),
+    PATH: yield* Config.String("PATH"),
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1"
   })
@@ -10321,8 +10327,8 @@ const program = Effect.gen(function* () {
   const repositoryRoot = path.dirname(path.dirname(scriptPath))
   const packagesRoot = path.join(repositoryRoot, "packages")
   const git = yield* makeGit(repositoryRoot)
-  const configuredBase = Option.getOrUndefined(yield* Config.option(Config.string("CHANGESET_COVERAGE_BASE")))
-  const githubBase = Option.getOrUndefined(yield* Config.option(Config.string("GITHUB_BASE_REF")))
+  const configuredBase = Option.getOrUndefined(yield* Config.option(Config.String("CHANGESET_COVERAGE_BASE")))
+  const githubBase = Option.getOrUndefined(yield* Config.option(Config.String("GITHUB_BASE_REF")))
   const pendingMergeHead = yield* readPendingMergeHead(git)
   const mergeBase = yield* resolveMergeBase(git, configuredBase, githubBase, pendingMergeHead)
   const paths = yield* changedPaths(git, mergeBase)
