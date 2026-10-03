@@ -45,8 +45,9 @@
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts",
-    "dev": "AGENT_USAGE_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts serve & vite --clearScreen false"
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts playwright.config.ts",
+    "dev": "AGENT_USAGE_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts serve & vite --clearScreen false",
+    "test:browser": "pnpm --filter '@knpkv/agent-usage^...' --sort run build && vite build && playwright test"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",
@@ -60,13 +61,14 @@
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",
+    "@playwright/test": "1.63.0",
     "@types/node": "^26.6.4",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^6.1.1",
+    "tsx": "^4.23.15",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.3.2",
-    "vitest": "catalog:",
-    "tsx": "^4.23.15"
+    "vitest": "catalog:"
   }
 }
