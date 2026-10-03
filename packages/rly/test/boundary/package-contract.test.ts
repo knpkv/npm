@@ -51,8 +51,8 @@ describe("package contract", () => {
     expect(manifest.dependencies).toEqual({
       "@fontsource-variable/geist": "5.3.0",
       "@fontsource-variable/geist-mono": "5.3.0",
-      "@pierre/diffs": "1.3.5",
-      "lucide-react": "1.31.0",
+      "@pierre/diffs": "1.5.1",
+      "lucide-react": "1.50.0",
       "radix-ui": "1.6.7"
     })
     expect(manifest.name).toBe("@knpkv/rly")

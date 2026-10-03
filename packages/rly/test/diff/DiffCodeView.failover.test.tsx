@@ -24,7 +24,7 @@ const CodeViewProbe = ({ rendererProps }: DiffCodeRendererAdapterProps) => {
     rendererMounts.push(initialItems)
     return initialItems
   })
-  useImperativeHandle(rendererProps.ref, (): CodeViewHandle<AnnotationMetadata> => ({
+  useImperativeHandle(rendererProps.ref, (): CodeViewHandle<AnnotationMetadata, undefined> => ({
     addItems: () => undefined,
     clearSelectedLines: () => undefined,
     getEditor: () => undefined,
