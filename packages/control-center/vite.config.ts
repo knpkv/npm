@@ -20,8 +20,11 @@ export default defineConfig(({ mode }) => {
             "server/internal/codepipeline-state-probe": "src/server/plugins/codepipeline/CodePipelineStateProbe.ts",
             "server/index": "src/server/index.ts"
           },
+          // Required with non-recursive split groups so cross-chunk module initialization stays ordered.
+          preserveEntrySignatures: "allow-extension",
           output: {
             entryFileNames: "[name].js",
+            strictExecutionOrder: true,
             // Persistence and governance are deliberate runtime boundaries: keep them out of the shared server chunk so
             // per-file budgets track each graph instead of whatever the bundler happens to merge.
             // Only the matched modules move; their shared dependencies stay where entry graphs find them.
