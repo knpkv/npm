@@ -34,7 +34,9 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    timeout-minutes: 15
+    # Changed Effect diagnostics start one language-service process per changed file (about ten
+    # seconds per four-file wave on hosted runners), so repository-wide changes need the headroom.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
