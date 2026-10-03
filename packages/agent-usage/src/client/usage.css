@@ -140,12 +140,16 @@
 }
 
 .usage-chart {
+  min-width: 0;
+  overflow: hidden;
   position: relative;
   width: 100%;
 }
 
+/* The first render uses a fallback width until the container is measured; never let it push the page. */
 .usage-chart svg {
   display: block;
+  max-width: 100%;
 }
 
 .usage-grid {

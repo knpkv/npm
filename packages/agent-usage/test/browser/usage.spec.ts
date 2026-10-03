@@ -51,6 +51,8 @@ test("picking a booking draws only it, and Show all brings the rest back", async
 test("the page fits a phone without horizontal page scroll", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await signIn(page)
+  await expect(page.getByRole("img", { name: "Usage per day, stacked by booking" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Claude 5h" })).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })
