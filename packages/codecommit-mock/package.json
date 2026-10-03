@@ -20,7 +20,7 @@
   "devDependencies": {
     "@distilled.cloud/aws": "1.0.0-rc.13",
     "@effect/vitest": "4.0.0",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.4",
     "tsx": "^4.23.15",
     "vitest": "catalog:"
   }

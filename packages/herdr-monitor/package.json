@@ -50,17 +50,17 @@
     "test:pack": "node scripts/packed.mjs"
   },
   "dependencies": {
-    "effect": "4.0.0",
-    "@effect/platform-node": "4.0.0"
+    "@effect/platform-node": "4.0.0",
+    "effect": "4.0.0"
   },
   "devDependencies": {
     "@effect/vitest": "4.0.0",
     "@knpkv/rly": "workspace:^",
-    "@types/node": "^26.2.0",
+    "@types/node": "^26.6.4",
+    "happy-dom": "20.14.5",
     "rimraf": "^6.1.3",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
-    "vite": "8.2.1",
-    "vitest": "catalog:",
-    "happy-dom": "20.11.2"
+    "vite": "8.3.2",
+    "vitest": "catalog:"
   }
 }

@@ -23,7 +23,7 @@ overrides:
   "@effect/platform-node": 4.0.0
   "@atlaskit/react-ufo": 7.1.0
   effect: 4.0.0
-  happy-dom: 20.11.2
+  happy-dom: 20.14.5
   # GHSA-253c-mchw-3w2r: markdown-it <14.3.1; keep prosemirror-markdown on 14.x
   markdown-it@<14.3.1: 14.3.2
   file-type@>=13.0.0 <21.3.1: 21.3.3
