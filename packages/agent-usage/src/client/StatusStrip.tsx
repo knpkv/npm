@@ -10,7 +10,7 @@ type Source = NonNullable<ServerStatus["ingest"]>["claude"]
 
 const describeSource = (name: string, source: Source): string => {
   if (source.rootMissing) return `${name}: no sessions on this machine`
-  const skipped = source.skipped.unparseableLine + source.skipped.missingTimestamp
+  const skipped = source.skipped.unparseableLine + source.skipped.missingTimestamp + source.skipped.oversizedLine
   const parts = [`${name}: ${source.filesScanned} files`]
   if (skipped > 0) parts.push(`${skipped} lines skipped`)
   if (source.unreadable.length > 0) parts.push(`${source.unreadable.length} unreadable`)

@@ -62,10 +62,11 @@ type UserContent =
   | string
   | ReadonlyArray<{ readonly type: string; readonly text?: string; readonly content?: string }>
 
-export const claudeUser = (content: UserContent, isMeta?: boolean) => ({
+export const claudeUser = (content: UserContent, isMeta?: boolean, isSidechain?: boolean) => ({
   type: "user",
   timestamp: "2026-09-01T10:00:00.000Z",
   isMeta,
+  isSidechain,
   message: { role: "user", content }
 })
 

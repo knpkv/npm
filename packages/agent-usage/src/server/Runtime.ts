@@ -47,7 +47,7 @@ export class RuntimeState extends Context.Service<RuntimeState, {
 export const currentKnownProjects = Effect.gen(function*() {
   const store = yield* UsageStore
   const state = yield* RuntimeState
-  return knownProjects(yield* store.places, state.projects)
+  return knownProjects(yield* store.places(state.machine), state.projects)
 })
 
 export interface BackgroundOptions {
@@ -60,7 +60,8 @@ export interface BackgroundOptions {
 const recentTicketKeys = Effect.gen(function*() {
   const store = yield* UsageStore
   const now = yield* Clock.currentTimeMillis
-  const groups = yield* store.usageGroups({ from: now - TITLE_HORIZON_MILLIS, to: now + 1 })
+  const state = yield* RuntimeState
+  const groups = yield* store.usageGroups({ from: now - TITLE_HORIZON_MILLIS, to: now + 1, machine: state.machine })
   const projects = yield* currentKnownProjects
   const keys = new Set<string>()
   for (const group of groups) {

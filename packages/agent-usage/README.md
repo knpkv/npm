@@ -28,21 +28,22 @@ one-time code in its fragment; opening it exchanges the code for a session cooki
 the address bar. The code expires a minute after the server binds, so restart for a fresh one. The
 server only listens on loopback and only answers reads.
 
-The first pass backfills everything on disk (on a machine with ~9 GB of Codex rollouts, about 45
-seconds); later passes read only what was appended.
+The first pass backfills everything on disk (on a machine with ~9 GB of Codex rollouts, under a
+minute); later passes read only what was appended. A line longer than 32 MiB (a huge pasted tool
+output) is skipped and counted in the status line rather than held in memory.
 
 For development, `pnpm --filter @knpkv/agent-usage dev` runs the server and Vite together.
 
 ## Configuration
 
-| Variable               | Default                      | Meaning                                                              |
-| ---------------------- | ---------------------------- | -------------------------------------------------------------------- |
-| `PORT`                 | `3112`                       | Port to bind on `127.0.0.1`                                          |
-| `AGENT_USAGE_HOME`     | `~/.local/share/agent-usage` | Store directory; must be `0700`, created so when missing             |
-| `AGENT_USAGE_MACHINE`  | short, lower-cased hostname  | Machine name stamped on every row                                    |
-| `AGENT_USAGE_PROJECTS` | none                         | Extra Known Projects, comma-separated (`RPS,ABC`)                    |
-| `CLAUDE_CONFIG_DIR`    | `~/.claude`                  | Claude Code's config; transcripts are read from `projects/` below it |
-| `CODEX_HOME`           | `~/.codex`                   | Codex's home; rollouts are read from `sessions/` below it            |
+| Variable               | Default                      | Meaning                                                                   |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------------- |
+| `PORT`                 | `3112`                       | Port to bind on `127.0.0.1`                                               |
+| `AGENT_USAGE_HOME`     | `~/.local/share/agent-usage` | Store directory; must be `0700`, created so when missing                  |
+| `AGENT_USAGE_MACHINE`  | short, lower-cased hostname  | Machine name stamped on every row                                         |
+| `AGENT_USAGE_PROJECTS` | none                         | Extra Known Projects, comma-separated (`RPS,ABC`)                         |
+| `CLAUDE_CONFIG_DIR`    | `~/.claude`                  | Claude Code's config; transcripts are read from `projects/` below it      |
+| `CODEX_HOME`           | `~/.codex`                   | Codex's home; rollouts are read from `sessions/` and `archived_sessions/` |
 
 Ticket titles come from `acli jira workitem search` when `acli` is installed, cached for a day in
 the store. Without it, tickets show their key and the status line says why.
@@ -59,7 +60,8 @@ A request's **booking** is the first of:
 Known Projects are those some branch or worktree path has named, plus `AGENT_USAGE_PROJECTS`. Typed
 text is full of ticket-shaped strings that are not tickets (`GPT-6`, `SHA-256`, `CVE-2026`); those
 book to the repo, and the page lists them by prefix with their request counts. Keys inside text the
-agent injected (instruction files, system reminders, environment blocks) are never read.
+agent injected (instruction files, system reminders, environment blocks) and the task a parent agent
+hands a subagent are never read.
 
 Bookings and costs are worked out when the page asks, not when a request is stored, so a sharper
 rule or a newly priced model applies to all history, including sessions whose transcripts Claude
@@ -82,7 +84,8 @@ https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code's `/usage` 
   Unknown reading with its reason, so the gap shows.
 - **Codex** writes its account limits and credit balance into every rollout, so its limit history
   is backfilled from old sessions. Only the account-level `codex` limit is read; model-scoped limits
-  are left out.
+  are left out. A forked subagent rollout begins with a copy of its parent's history; that copy is
+  not counted again.
 
 A reading holds until the next one or until its window resets, whichever comes first. The page
 never splits a limit's percentage across tickets: providers weight models and caching in ways they

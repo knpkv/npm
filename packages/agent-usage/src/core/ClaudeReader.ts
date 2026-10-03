@@ -9,7 +9,8 @@
  *   across chunks and re-reads.
  * - **Zero-token messages are placeholders** (`<synthetic>` local replies), not requests.
  * - **The Active Ticket follows the human.** Each typed user turn sets it to the one ticket it names,
- *   or clears it; tool results, meta turns and injected reminders never touch it.
+ *   or clears it; tool results, meta turns, sidechain (subagent) prompts and injected reminders
+ *   never touch it.
  * - **Prompt and response text is read here and dropped here.** Nothing but counts and metadata
  *   leaves this module.
  *
@@ -52,6 +53,7 @@ const AssistantLine = Schema.Struct({
 const UserLine = Schema.Struct({
   type: Schema.Literal("user"),
   isMeta: Schema.optionalKey(Schema.Boolean),
+  isSidechain: Schema.optionalKey(Schema.Boolean),
   message: Schema.Struct({
     content: Schema.Union([
       Schema.String,
@@ -122,7 +124,8 @@ export const readClaude = (
       const user = decodeUser(line.text)
       if (Option.isSome(user)) {
         const content = user.value.message.content
-        if (user.value.isMeta !== true && !isToolResultTurn(content)) {
+        // A sidechain's user turns are the parent agent delegating, not the human typing.
+        if (user.value.isMeta !== true && user.value.isSidechain !== true && !isToolResultTurn(content)) {
           const typed = claudeHumanText(content)
           if (typed !== "") activeTicket = singleTicket(typed)
         }

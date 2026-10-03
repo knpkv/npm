@@ -66,7 +66,7 @@ export const loadConfig = (hostname: string) =>
       claudeConfigDir,
       roots: {
         claudeProjects: path.join(claudeConfigDir, "projects"),
-        codexSessions: path.join(codexHome, "sessions"),
+        codexHome,
         machine
       }
     }

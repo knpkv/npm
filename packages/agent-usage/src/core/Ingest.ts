@@ -19,15 +19,23 @@ import type { PlatformError } from "effect/PlatformError"
 import { ClaudeReaderState, initialClaudeState, readClaude } from "./ClaudeReader.js"
 import { CodexReaderState, initialCodexState, readCodex } from "./CodexReader.js"
 import type { Agent } from "./Model.js"
-import { mergeSkips, noSkips, type ReadResult, type SkipCounts, type SourceFile, type SourceLine } from "./Readers.js"
+import {
+  countSkip,
+  mergeSkips,
+  noSkips,
+  type ReadResult,
+  type SkipCounts,
+  type SourceFile,
+  type SourceLine
+} from "./Readers.js"
 import { type StoreError, UsageStore } from "./Store.js"
 
 /** Where this Machine's agents keep their sessions, and the Machine's name. */
 export interface SourceRoots {
   /** `<claude config>/projects` */
   readonly claudeProjects: string
-  /** `<CODEX_HOME>/sessions` */
-  readonly codexSessions: string
+  /** `<CODEX_HOME>`: rollouts live in `sessions/`, and Codex moves archived ones to `archived_sessions/`. */
+  readonly codexHome: string
   readonly machine: string
 }
 
@@ -57,9 +65,13 @@ export interface IngestStatus {
 export interface IngestOptions {
   /** How many bytes to read and commit at a time; bounds memory during a backfill. */
   readonly chunkBytes?: number
+  /** Lines longer than this are skipped and counted rather than held in memory. */
+  readonly maxLineBytes?: number
 }
 
 const DEFAULT_CHUNK_BYTES = 8 * 1024 * 1024
+/** Far above any usage-bearing line; only huge pasted tool output or images come near it. */
+const DEFAULT_MAX_LINE_BYTES = 32 * 1024 * 1024
 const NEWLINE = 10
 
 interface ListedFile {
@@ -104,18 +116,25 @@ const claudeSource: Source<ClaudeReaderState> = {
 
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu
 
-/** `YYYY/MM/DD/rollout-<time>-<session uuid>.jsonl` */
+const CODEX_ROLLOUT_DIRECTORIES = new Set(["sessions", "archived_sessions"])
+
+/**
+ * `sessions/YYYY/MM/DD/rollout-<time>-<session uuid>.jsonl`, and archived rollouts below
+ * `archived_sessions/`. An archived rollout keeps its session id and byte offsets, so its requests
+ * deduplicate against the ones read before it moved.
+ */
 const codexSource: Source<CodexReaderState> = {
   agent: "codex",
   initial: initialCodexState,
   decodeState: Schema.decodeUnknownOption(CodexStateJson),
   encodeState: Schema.encodeSync(CodexStateJson),
   read: readCodex,
-  descend: (segments) => segments.length <= 3,
+  descend: (segments) => CODEX_ROLLOUT_DIRECTORIES.has(segments[0] ?? "") && segments.length <= 4,
   select: (paths, path) =>
     paths.flatMap((fileKey) => {
       const name = path.basename(fileKey)
-      if (!name.startsWith("rollout-") || !name.endsWith(".jsonl")) return []
+      const top = fileKey.split(path.sep)[0] ?? ""
+      if (!CODEX_ROLLOUT_DIRECTORIES.has(top) || !name.startsWith("rollout-") || !name.endsWith(".jsonl")) return []
       return [{ fileKey, sessionId: ROLLOUT_ID.exec(name)?.[1] ?? path.basename(name, ".jsonl") }]
     })
 }
@@ -137,11 +156,14 @@ const splitLines = (bytes: Uint8Array, startOffset: number): ReadonlyArray<Sourc
   return lines
 }
 
-const concat = (left: Uint8Array, right: Uint8Array): Uint8Array => {
-  if (left.length === 0) return right
-  const joined = new Uint8Array(left.length + right.length)
-  joined.set(left, 0)
-  joined.set(right, left.length)
+const concatAll = (pieces: ReadonlyArray<Uint8Array>): Uint8Array => {
+  if (pieces.length === 1 && pieces[0] !== undefined) return pieces[0]
+  const joined = new Uint8Array(pieces.reduce((length, piece) => length + piece.length, 0))
+  let at = 0
+  for (const piece of pieces) {
+    joined.set(piece, at)
+    at += piece.length
+  }
   return joined
 }
 
@@ -158,7 +180,8 @@ const ingestFile = <State>(
   root: string,
   machine: string,
   listed: ListedFile,
-  chunkBytes: number
+  chunkBytes: number,
+  maxLineBytes: number
 ): Effect.Effect<FileOutcome, StoreError | PlatformError, UsageStore | FileSystem.FileSystem | Path.Path> =>
   Effect.scoped(Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
@@ -181,21 +204,16 @@ const ingestFile = <State>(
     const file: SourceFile = { fileKey: listed.fileKey, machine, sessionId: listed.sessionId }
     const handle = yield* fs.open(absolute)
     yield* handle.seek(BigInt(offset), "start")
-    let pending: Uint8Array = new Uint8Array(0)
     let eventsAdded = 0
     let skipped = noSkips
-    while (offset + pending.length < size) {
-      const chunk = yield* handle.readAlloc(Math.min(chunkBytes, size - offset - pending.length))
-      if (Option.isNone(chunk)) break
-      const buffer = concat(pending, chunk.value)
-      const lastNewline = buffer.lastIndexOf(NEWLINE)
-      if (lastNewline < 0) {
-        pending = buffer
-        continue
-      }
-      const result = source.read(file, splitLines(buffer.subarray(0, lastNewline), offset), state)
-      const next = offset + lastNewline + 1
-      const committed = yield* store.commitChunk({
+    // Bytes after `offset` with no newline yet, kept as pieces so a long line is copied once.
+    let pending: Array<Uint8Array> = []
+    let pendingLength = 0
+    // Inside a line longer than `maxLineBytes`: its bytes are dropped until its newline arrives.
+    let discarding = false
+    let readPosition = offset
+    const commit = (next: number, result: ReadResult<State>) =>
+      store.commitChunk({
         agent: source.agent,
         fileKey: listed.fileKey,
         cursor: { identity, offset: next, state: source.encodeState(result.state) },
@@ -203,11 +221,46 @@ const ingestFile = <State>(
         snapshots: result.snapshots,
         balances: result.balances
       })
+    while (readPosition < size) {
+      const chunk = yield* handle.readAlloc(Math.min(chunkBytes, size - readPosition))
+      if (Option.isNone(chunk)) break
+      const bytes = chunk.value
+      const chunkStart = readPosition
+      readPosition += bytes.length
+      let start = 0
+      if (discarding) {
+        const end = bytes.indexOf(NEWLINE)
+        if (end < 0) continue
+        // The oversized line ends here: count it once and move the cursor past it.
+        discarding = false
+        start = end + 1
+        offset = chunkStart + start
+        skipped = countSkip(skipped, "oversizedLine")
+        yield* commit(offset, { events: [], snapshots: [], balances: [], skipped: noSkips, state })
+      }
+      const rest = bytes.subarray(start)
+      const lastNewline = rest.lastIndexOf(NEWLINE)
+      if (lastNewline < 0) {
+        pending.push(rest)
+        pendingLength += rest.length
+        if (pendingLength > maxLineBytes) {
+          discarding = true
+          pending = []
+          pendingLength = 0
+        }
+        continue
+      }
+      const complete = concatAll([...pending, rest.subarray(0, lastNewline)])
+      const result = source.read(file, splitLines(complete, offset), state)
+      const next = offset + complete.length + 1
+      const committed = yield* commit(next, result)
       eventsAdded += committed.eventsAdded
       skipped = mergeSkips(skipped, result.skipped)
       state = result.state
       offset = next
-      pending = buffer.subarray(lastNewline + 1)
+      const tail = rest.subarray(lastNewline + 1)
+      pending = tail.length === 0 ? [] : [tail]
+      pendingLength = tail.length
     }
     return { read: true, eventsAdded, skipped }
   }))
@@ -268,7 +321,13 @@ const walk = (root: string, descend: (segments: ReadonlyArray<string>) => boolea
     return found
   })
 
-const ingestSource = <State>(source: Source<State>, root: string, machine: string, chunkBytes: number) =>
+const ingestSource = <State>(
+  source: Source<State>,
+  root: string,
+  machine: string,
+  chunkBytes: number,
+  maxLineBytes: number
+) =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     const walked = yield* walk(root, source.descend)
@@ -276,7 +335,7 @@ const ingestSource = <State>(source: Source<State>, root: string, machine: strin
     const files = source.select(walked.files, path)
     let status: SourceStatus = { ...emptyStatus(false), filesScanned: files.length, unreadable: walked.unreadable }
     for (const listed of files) {
-      const outcome = yield* ingestFile(source, root, machine, listed, chunkBytes).pipe(
+      const outcome = yield* ingestFile(source, root, machine, listed, chunkBytes, maxLineBytes).pipe(
         Effect.catchTag(
           "PlatformError",
           (error) => Effect.succeed({ unreadable: { fileKey: listed.fileKey, reason: error.reason._tag } })
@@ -301,9 +360,10 @@ export const ingestOnce = (
 ): Effect.Effect<IngestStatus, StoreError, UsageStore | FileSystem.FileSystem | Path.Path> =>
   Effect.gen(function*() {
     const chunkBytes = options.chunkBytes ?? DEFAULT_CHUNK_BYTES
+    const maxLineBytes = options.maxLineBytes ?? DEFAULT_MAX_LINE_BYTES
     const startedAt = yield* Clock.currentTimeMillis
-    const claude = yield* ingestSource(claudeSource, roots.claudeProjects, roots.machine, chunkBytes)
-    const codex = yield* ingestSource(codexSource, roots.codexSessions, roots.machine, chunkBytes)
+    const claude = yield* ingestSource(claudeSource, roots.claudeProjects, roots.machine, chunkBytes, maxLineBytes)
+    const codex = yield* ingestSource(codexSource, roots.codexHome, roots.machine, chunkBytes, maxLineBytes)
     const finishedAt = yield* Clock.currentTimeMillis
     return { startedAt, finishedAt, claude, codex }
   })

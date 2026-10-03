@@ -56,7 +56,7 @@ describe("UsageStore", () => {
       Effect.gen(function*() {
         const store = yield* UsageStore
         yield* store.recordObservations([snapshot(1_000, 10), snapshot(2_000, 10), snapshot(3_000, 12)], [])
-        const series = yield* store.limitSnapshots({ from: 0, to: 10_000 })
+        const series = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "ser8" })
         expect(series.map((row) => [row.observedAt, row.confirmedAt])).toEqual([[1_000, 2_000], [3_000, 3_000]])
       }))
 
@@ -69,7 +69,7 @@ describe("UsageStore", () => {
         })
         yield* store.recordObservations([at(20_000, 20)], [])
         yield* store.recordObservations([at(10_000, 10), at(30_000, 10)], [])
-        const series = (yield* store.limitSnapshots({ from: 0, to: 40_000 }))
+        const series = (yield* store.limitSnapshots({ from: 0, to: 40_000, machine: "ser8" }))
           .filter((row) => row.label === "interleaved")
         expect(series.map((row) => row.observedAt)).toEqual([10_000, 20_000, 30_000])
       }))
@@ -83,7 +83,9 @@ describe("UsageStore", () => {
         })
         yield* store.recordObservations([at(1_000, 10), at(3_000, 10)], [])
         yield* store.recordObservations([at(2_000, 20)], [])
-        const series = (yield* store.limitSnapshots({ from: 0, to: 10_000 })).filter((row) => row.label === "split")
+        const series = (yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "ser8" })).filter((row) =>
+          row.label === "split"
+        )
         expect(series.map((row) => [row.observedAt, row.reading._tag === "Known" ? row.reading.usedPercent : null]))
           .toEqual([[1_000, 10], [2_000, 20], [3_000, 10]])
         const balance = (observedAt: number, credits: number): BalanceReading => ({
@@ -94,7 +96,7 @@ describe("UsageStore", () => {
         })
         yield* store.recordObservations([], [balance(1_000, 50), balance(3_000, 50)])
         yield* store.recordObservations([], [balance(2_000, 40)])
-        expect((yield* store.latestBalances).filter((reading) => reading.machine === "split")).toEqual([
+        expect(yield* store.latestBalances("split")).toEqual([
           balance(3_000, 50)
         ])
       }))
@@ -118,8 +120,8 @@ describe("UsageStore", () => {
           claude("five_hour", 300_000, known),
           claude("five_hour", 400_000, known)
         ], [])
-        const fiveHour = (yield* store.limitSnapshots({ from: 0, to: 500_000 }))
-          .filter((row) => row.machine === "mac" && row.label === "five_hour")
+        const fiveHour = (yield* store.limitSnapshots({ from: 0, to: 500_000, machine: "mac" }))
+          .filter((row) => row.label === "five_hour")
         expect(fiveHour.map((row) => [row.observedAt, row.confirmedAt])).toEqual([
           [100_000, 100_000],
           [300_000, 400_000]
@@ -148,7 +150,7 @@ describe("UsageStore", () => {
           claude("*", 45, failed),
           claude("five_hour", 50, known)
         ], [])
-        const stored = (yield* store.limitSnapshots({ from: 0, to: 100 })).filter((row) => row.machine === "outages")
+        const stored = yield* store.limitSnapshots({ from: 0, to: 100, machine: "outages" })
         const report = buildLimitsReport(stored, { from: 0, to: 100 })
         expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
           .toEqual(["Known", "Unknown", "Known", "Unknown", "Known"])
@@ -170,7 +172,7 @@ describe("UsageStore", () => {
           reading: { _tag: "Unknown", reason: "AuthExpired" }
         }
         yield* store.recordObservations([unknown], [])
-        const series = yield* store.limitSnapshots({ from: 4_000, to: 6_000 })
+        const series = yield* store.limitSnapshots({ from: 4_000, to: 6_000, machine: "ser8" })
         expect(series).toEqual([{ ...unknown, confirmedAt: 5_000 }])
       }))
 
@@ -184,7 +186,7 @@ describe("UsageStore", () => {
           value: { _tag: "Known", balance: { _tag: "Credits", credits } }
         })
         yield* store.recordObservations([], [reading(1, 50), reading(2, 50), reading(3, 40)])
-        const ours = Effect.map(store.latestBalances, (all) => all.filter((entry) => entry.machine === "ser8"))
+        const ours = store.latestBalances("ser8")
         expect(yield* ours).toEqual([reading(3, 40)])
         yield* store.recordObservations([], [reading(4, 40)])
         // An unchanged reading confirms the stored one, so "read … ago" stays true.
@@ -207,6 +209,7 @@ describe("UsageStore", () => {
           balances: []
         })
         const groups = yield* store.usageGroups({
+          machine: "ser8",
           from: Date.parse("2026-09-01T10:00:00.000Z"),
           to: Date.parse("2026-09-01T11:00:00.000Z")
         })
@@ -217,6 +220,39 @@ describe("UsageStore", () => {
         ])
         expect(codex[0]?.attribution).toEqual({ cwd: "/w/app", branch: "feat/RPS-1", activeTicket: null })
         expect(codex[0]?.longPrompt).toBe(false)
+      }))
+  })
+
+  it.layer(TestStore)((it) => {
+    it.effect("reads only the Machine it is asked for", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        yield* store.commitChunk({
+          agent: "claude",
+          fileKey: "machines.jsonl",
+          cursor,
+          events: [
+            event("on-a-1", { machine: "a", occurredAt: 1_000 }),
+            event("on-a-2", { machine: "a", occurredAt: 2_000 }),
+            event("on-b", {
+              machine: "b",
+              occurredAt: 1_500,
+              attribution: { cwd: "/w/b", branch: "feat/OPS-1", activeTicket: null }
+            })
+          ],
+          snapshots: [{ ...snapshot(1_000, 10), machine: "b" }],
+          balances: [{
+            kind: "codex-credits",
+            machine: "b",
+            observedAt: 1_000,
+            value: { _tag: "Known", balance: { _tag: "Credits", credits: 1 } }
+          }]
+        })
+        const groups = yield* store.usageGroups({ from: 0, to: 10_000, machine: "a" })
+        expect(groups.reduce((sum, group) => sum + group.requests, 0)).toBe(2)
+        expect((yield* store.places("a")).map((place) => place.branch)).toEqual(["feat/RPS-1"])
+        expect(yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "a" })).toEqual([])
+        expect(yield* store.latestBalances("a")).toEqual([])
       }))
   })
 

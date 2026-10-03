@@ -138,6 +138,21 @@ describe("readCodex", () => {
     expect(result.events.map((event) => event.attribution.activeTicket)).toEqual([null, "RPS-7071"])
   })
 
+  it("keeps the Active Ticket when a reminder, not the human, mentions another key", () => {
+    const result = readCodex(
+      file,
+      lines(
+        codexUserItem("work on RPS-1"),
+        codexUserItem("<system-reminder>docs mention RPS-2</system-reminder>"),
+        codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 }),
+        codexUserItem("now RPS-2 please"),
+        codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [1, 0, 1, 0], total: 4 })
+      ),
+      initialCodexState
+    )
+    expect(result.events.map((event) => event.attribution.activeTicket)).toEqual(["RPS-1", "RPS-2"])
+  })
+
   it("records a request whose model was never announced under an unpriced placeholder model", () => {
     const result = readCodex(
       file,

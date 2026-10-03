@@ -25,11 +25,13 @@ export interface SourceFile {
 export interface SkipCounts {
   readonly unparseableLine: number
   readonly missingTimestamp: number
+  /** Lines too long to hold in memory, skipped whole. */
+  readonly oversizedLine: number
 }
 
 export type SkipReason = keyof SkipCounts
 
-export const noSkips: SkipCounts = { unparseableLine: 0, missingTimestamp: 0 }
+export const noSkips: SkipCounts = { unparseableLine: 0, missingTimestamp: 0, oversizedLine: 0 }
 
 export interface ReadResult<State> {
   readonly events: ReadonlyArray<UsageEvent>
@@ -48,7 +50,8 @@ export const countSkip = (counts: SkipCounts, reason: SkipReason): SkipCounts =>
 /** Sums two skip counts. */
 export const mergeSkips = (left: SkipCounts, right: SkipCounts): SkipCounts => ({
   unparseableLine: left.unparseableLine + right.unparseableLine,
-  missingTimestamp: left.missingTimestamp + right.missingTimestamp
+  missingTimestamp: left.missingTimestamp + right.missingTimestamp,
+  oversizedLine: left.oversizedLine + right.oversizedLine
 })
 
 /** Epoch milliseconds of an ISO timestamp, or null when it does not parse. */

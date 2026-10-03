@@ -24,7 +24,7 @@ describe("configuration", () => {
           claudeConfigDir: "/home/a/.claude",
           roots: {
             claudeProjects: "/home/a/.claude/projects",
-            codexSessions: "/home/a/.codex/sessions",
+            codexHome: "/home/a/.codex",
             machine: "andreys-macbook"
           }
         })

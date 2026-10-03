@@ -45,12 +45,12 @@ describe("readClaude", () => {
   it("skips zero-token placeholder messages without counting them as problems", () => {
     const result = read(lines(claudeAssistant({ id: "m", at: "2026-09-01T10:00:00.000Z", input: 0, output: 0 })))
     expect(result.events).toHaveLength(0)
-    expect(result.skipped).toEqual({ unparseableLine: 0, missingTimestamp: 0 })
+    expect(result.skipped).toEqual({ unparseableLine: 0, missingTimestamp: 0, oversizedLine: 0 })
   })
 
   it("counts a relevant line that does not decode instead of dropping it silently", () => {
     const result = read(lines("{\"type\":\"assistant\",\"message\":{\"usage\":", "not json at all"))
-    expect(result.skipped).toEqual({ unparseableLine: 1, missingTimestamp: 0 })
+    expect(result.skipped).toEqual({ unparseableLine: 1, missingTimestamp: 0, oversizedLine: 0 })
   })
 
   it("sets the Active Ticket from what the human typed and carries it to later requests", () => {
@@ -85,6 +85,17 @@ describe("readClaude", () => {
       claudeAssistant({ id: "a", at: "2026-09-01T10:00:00.000Z" })
     ))
     expect(result.events[0]?.attribution.activeTicket).toBe("RPS-7071")
+  })
+
+  it("ignores the task a parent agent hands a subagent", () => {
+    const result = read(
+      lines(
+        claudeUser("investigate RPS-2 for me", false, true),
+        claudeAssistant({ id: "a", at: "2026-09-01T10:00:00.000Z" })
+      ),
+      "RPS-1"
+    )
+    expect(result.events[0]?.attribution.activeTicket).toBe("RPS-1")
   })
 
   it("never mines keys from injected context: reminders quoting AGENTS.md or meta turns", () => {

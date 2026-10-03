@@ -117,7 +117,7 @@ export const LimitsReport = Schema.Struct({
 })
 export type LimitsReport = typeof LimitsReport.Type
 
-const SkipCounts = Schema.Struct({ unparseableLine: Count, missingTimestamp: Count })
+const SkipCounts = Schema.Struct({ unparseableLine: Count, missingTimestamp: Count, oversizedLine: Count })
 
 export const SourceStatus = Schema.Struct({
   rootMissing: Schema.Boolean,

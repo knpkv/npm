@@ -122,7 +122,8 @@ export const normalizeClaudeModel = (model: string): string => model.replace(/\[
 
 const claudeCost = (model: string, fast: boolean, tokens: Tokens): Option.Option<number> => {
   const id = normalizeClaudeModel(model)
-  const found = (fast ? CLAUDE_FAST.get(id) : undefined) ?? CLAUDE_STANDARD.get(id)
+  // A fast request without a fast rate is unpriced, not priced at the standard rate.
+  const found = fast ? CLAUDE_FAST.get(id) : CLAUDE_STANDARD.get(id)
   if (found === undefined) return Option.none()
   const input = tokens.input +
     tokens.cacheWrite5m * CLAUDE_CACHE_WRITE_5M +

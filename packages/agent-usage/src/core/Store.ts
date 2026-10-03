@@ -68,6 +68,11 @@ export interface Range {
   readonly to: number
 }
 
+/** A range on one Machine: every read is scoped to the Machine this server runs as (ADR 0001). */
+export interface MachineRange extends Range {
+  readonly machine: string
+}
+
 /** Usage summed over one 15-minute bucket and every dimension that prices or books it. */
 export const UsageGroup = Schema.Struct({
   bucketStart: Schema.Int,
@@ -218,12 +223,14 @@ export class UsageStore extends Context.Service<UsageStore, {
     snapshots: ReadonlyArray<LimitSnapshot>,
     balances: ReadonlyArray<BalanceReading>
   ) => Effect.Effect<void, StoreError>
-  readonly usageGroups: (range: Range) => Effect.Effect<ReadonlyArray<UsageGroup>, StoreError>
+  readonly usageGroups: (range: MachineRange) => Effect.Effect<ReadonlyArray<UsageGroup>, StoreError>
   /** Every distinct branch and working directory ever recorded: what vouches for Known Projects. */
-  readonly places: Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly cwd: string }>, StoreError>
-  readonly limitSnapshots: (range: Range) => Effect.Effect<ReadonlyArray<StoredSnapshot>, StoreError>
+  readonly places: (
+    machine: string
+  ) => Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly cwd: string }>, StoreError>
+  readonly limitSnapshots: (range: MachineRange) => Effect.Effect<ReadonlyArray<StoredSnapshot>, StoreError>
   /** The newest reading of each balance kind on each machine. */
-  readonly latestBalances: Effect.Effect<ReadonlyArray<BalanceReading>, StoreError>
+  readonly latestBalances: (machine: string) => Effect.Effect<ReadonlyArray<BalanceReading>, StoreError>
   readonly tickets: (keys: ReadonlyArray<string>) => Effect.Effect<ReadonlyArray<TicketTitle>, StoreError>
   readonly saveTicket: (ticket: TicketTitle) => Effect.Effect<void, StoreError>
 }>()("@knpkv/agent-usage/core/Store/UsageStore") {
@@ -418,7 +425,7 @@ export class UsageStore extends Context.Service<UsageStore, {
           Effect.mapError(storeError("read-cursor"))
         )
 
-      const usageGroups = (range: Range) =>
+      const usageGroups = (range: MachineRange) =>
         sql`
           SELECT
             (occurred_at - occurred_at % ${BUCKET_MILLIS}) AS bucket_start,
@@ -429,7 +436,7 @@ export class UsageStore extends Context.Service<UsageStore, {
             sum(input) AS input, sum(output) AS output, sum(reasoning) AS reasoning,
             sum(cache_read) AS cache_read, sum(cache_write_5m) AS cache_write_5m, sum(cache_write_1h) AS cache_write_1h
           FROM usage_events
-          WHERE occurred_at >= ${range.from} AND occurred_at < ${range.to}
+          WHERE machine = ${range.machine} AND occurred_at >= ${range.from} AND occurred_at < ${range.to}
           GROUP BY bucket_start, agent, model, fast, long_prompt, cwd, branch, active_ticket
           ORDER BY bucket_start, agent, model
         `.pipe(
@@ -456,17 +463,18 @@ export class UsageStore extends Context.Service<UsageStore, {
           Effect.mapError(storeError("usage-groups"))
         )
 
-      const places = sql`SELECT DISTINCT branch, cwd FROM usage_events`.pipe(
-        Effect.flatMap(
-          Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ branch: Schema.String, cwd: Schema.String })))
-        ),
-        Effect.mapError(storeError("places"))
-      )
+      const places = (machine: string) =>
+        sql`SELECT DISTINCT branch, cwd FROM usage_events WHERE machine = ${machine}`.pipe(
+          Effect.flatMap(
+            Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ branch: Schema.String, cwd: Schema.String })))
+          ),
+          Effect.mapError(storeError("places"))
+        )
 
-      const limitSnapshots = (range: Range) =>
+      const limitSnapshots = (range: MachineRange) =>
         sql`
           SELECT agent, machine, source, label, window_minutes, observed_at, confirmed_at, reading FROM limit_snapshots
-          WHERE observed_at >= ${range.from} AND observed_at < ${range.to}
+          WHERE machine = ${range.machine} AND observed_at >= ${range.from} AND observed_at < ${range.to}
           ORDER BY observed_at, agent, label
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SnapshotRow))),
@@ -485,26 +493,27 @@ export class UsageStore extends Context.Service<UsageStore, {
           Effect.mapError(storeError("limit-snapshots"))
         )
 
-      const latestBalances = sql`
+      const latestBalances = (machine: string) =>
+        sql`
         SELECT kind, machine, confirmed_at, value FROM balance_readings AS outer_reading
-        WHERE observed_at = (
+        WHERE machine = ${machine} AND observed_at = (
           SELECT max(observed_at) FROM balance_readings AS inner_reading
           WHERE inner_reading.kind = outer_reading.kind AND inner_reading.machine = outer_reading.machine
         )
         ORDER BY kind, machine
       `.pipe(
-        Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BalanceRow))),
-        Effect.map((rows) =>
-          // The value as last observed: an unchanged reading confirms the stored one.
-          rows.map((row): BalanceReading => ({
-            kind: row.kind,
-            machine: row.machine,
-            observedAt: row.confirmed_at,
-            value: row.value
-          }))
-        ),
-        Effect.mapError(storeError("latest-balances"))
-      )
+          Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(BalanceRow))),
+          Effect.map((rows) =>
+            // The value as last observed: an unchanged reading confirms the stored one.
+            rows.map((row): BalanceReading => ({
+              kind: row.kind,
+              machine: row.machine,
+              observedAt: row.confirmed_at,
+              value: row.value
+            }))
+          ),
+          Effect.mapError(storeError("latest-balances"))
+        )
 
       const tickets = (keys: ReadonlyArray<string>) =>
         keys.length === 0

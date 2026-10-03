@@ -33,6 +33,11 @@ describe("Claude pricing", () => {
     expect(Option.getOrThrow(cost("claude", "claude-opus-5", { output: 1_000_000 }, true))).toBeCloseTo(50, 6)
   })
 
+  it("leaves a fast request unpriced when its model has no fast rate", () => {
+    expect(Option.isNone(cost("claude", "claude-opus-4-6", { input: 1_000_000 }, true))).toBe(true)
+    expect(Option.getOrThrow(cost("claude", "claude-opus-4-6", { input: 1_000_000 }))).toBeCloseTo(5, 6)
+  })
+
   it("prices dated and 1M-context ids as their base model", () => {
     expect(normalizeClaudeModel("claude-opus-5[1m]")).toBe("claude-opus-5")
     expect(normalizeClaudeModel("claude-opus-5-20260101")).toBe("claude-opus-5")

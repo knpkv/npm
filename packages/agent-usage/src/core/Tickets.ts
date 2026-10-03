@@ -12,7 +12,7 @@
  *
  * @module
  */
-import { Clock, Data, Effect, Schema } from "effect"
+import { Clock, Data, Duration, Effect, Schema } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { TicketTitleValue } from "./Model.js"
 import { type StoreError, UsageStore } from "./Store.js"
@@ -24,6 +24,7 @@ export type TicketSearch = (
   keys: ReadonlyArray<string>
 ) => Effect.Effect<ReadonlyMap<string, string>, TicketLookupFailed>
 
+const ACLI_TIMEOUT = Duration.seconds(30)
 const FRESH_FOR_MILLIS = 24 * 60 * 60 * 1000
 const KEYS_PER_SEARCH = 50
 
@@ -101,8 +102,13 @@ export const acliTicketSearch = Effect.gen(function*() {
         "--json"
       ])
     ).pipe(
+      // A hung acli (waiting on a login, a dead network) must not hold up the ingest pass behind it.
+      Effect.timeoutOrElse({
+        duration: ACLI_TIMEOUT,
+        orElse: () => Effect.fail(new TicketLookupFailed({ reason: "acli did not answer within 30 seconds" }))
+      }),
       Effect.mapError((error) =>
-        new TicketLookupFailed({
+        error._tag === "TicketLookupFailed" ? error : new TicketLookupFailed({
           reason: error.reason._tag === "NotFound"
             ? "ticket titles need acli, which is not installed"
             : `acli could not run (${error.reason._tag})`

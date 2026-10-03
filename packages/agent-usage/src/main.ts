@@ -50,7 +50,7 @@ const serve = Command.make(
 
 const describeSource = (name: string, status: SourceStatus): string => {
   if (status.rootMissing) return `${name}: no sessions directory`
-  const skipped = status.skipped.unparseableLine + status.skipped.missingTimestamp
+  const skipped = status.skipped.unparseableLine + status.skipped.missingTimestamp + status.skipped.oversizedLine
   return [
     `${name}: ${status.filesRead}/${status.filesScanned} files read, ${status.eventsAdded} events added`,
     skipped > 0 ? `, ${skipped} lines skipped` : "",

@@ -37,7 +37,7 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
             return yield* new ApiError({ message: "Too many periods: choose a shorter range or a larger bucket" })
           }
           const periods = periodsOf({ ...query })
-          const groups = (yield* store.usageGroups(query)).filter((group) =>
+          const groups = (yield* store.usageGroups({ ...query, machine: state.machine })).filter((group) =>
             query.agent === "all" || group.agent === query.agent
           )
           const projects = yield* currentKnownProjects.pipe(
@@ -56,8 +56,8 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
       .handle("limits", ({ query }) =>
         Effect.gen(function*() {
           yield* checkRange(query.from, query.to)
-          const snapshots = yield* store.limitSnapshots({ from: 0, to: query.to })
-          const balances = yield* store.latestBalances
+          const snapshots = yield* store.limitSnapshots({ from: 0, to: query.to, machine: state.machine })
+          const balances = yield* store.latestBalances(state.machine)
           return { ...buildLimitsReport(snapshots, query), balances }
         }).pipe(Effect.catchTag("StoreError", (error) => Effect.fail(storeUnavailable(error)))))
       .handle("status", () => Ref.get(state.status))

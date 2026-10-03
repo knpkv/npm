@@ -137,8 +137,11 @@ export const claudeHumanText = (content: ClaudeContent): string => {
 /** Codex input items that are context it injected, not words the human typed. */
 const CODEX_INJECTED_PREFIXES = ["# AGENTS.md instructions", "<environment_context>", "<user_instructions>"]
 
+/** Reminder blocks the harness wraps around context it adds to a Codex user item. */
+const CODEX_REMINDER = /<system-reminder>[\s\S]*?<\/system-reminder>/gu
+
 /** The text a human typed in one Codex `input_text` item; injected context yields "". */
 export const codexHumanText = (text: string): string => {
-  const trimmed = text.trim()
+  const trimmed = text.replace(CODEX_REMINDER, "").trim()
   return CODEX_INJECTED_PREFIXES.some((prefix) => trimmed.startsWith(prefix)) ? "" : trimmed
 }
