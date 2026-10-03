@@ -47,7 +47,7 @@ A rolling subscription allowance the provider meters as a percentage, such as Cl
 _Avoid_: Quota, rate limit bucket
 
 **Limit Snapshot**:
-One observation of a Limit Window's used percentage and reset time, or a typed reason it could not be read.
+One observation of a Limit Window's used percentage and reset time, or a typed reason it could not be read. Every one is kept; a series is read back as its changes.
 _Avoid_: Limit sample, usage reading
 
 **Balance Reading**:

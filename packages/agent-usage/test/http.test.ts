@@ -63,6 +63,20 @@ describe("HTTP boundary", () => {
         expect(yield* response.json).toMatchObject({ _tag: "ApiError" })
       }))
 
+    it.effect("marks every API response private and uncacheable, refusals included", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpClient.HttpClient
+        const security = yield* OwnerSessionSecrets
+        const refused = yield* client.get("/api/status")
+        expect(refused.status).toBe(401)
+        expect(refused.headers["cache-control"]).toBe("private, no-store")
+        const served = yield* client.get("/api/status", {
+          headers: { cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}` }
+        })
+        expect(served.status).toBe(200)
+        expect(served.headers["cache-control"]).toBe("private, no-store")
+      }))
+
     it.effect("refuses a browser read started by another site", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient

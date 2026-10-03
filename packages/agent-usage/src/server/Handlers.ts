@@ -56,7 +56,7 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
       .handle("limits", ({ query }) =>
         Effect.gen(function*() {
           yield* checkRange(query.from, query.to)
-          const snapshots = yield* store.limitSnapshots({ from: 0, to: query.to, machine: state.machine })
+          const snapshots = yield* store.limitSnapshots({ from: query.from, to: query.to, machine: state.machine })
           const balances = yield* store.latestBalances(state.machine)
           return { ...buildLimitsReport(snapshots, query), balances }
         }).pipe(Effect.catchTag("StoreError", (error) => Effect.fail(storeUnavailable(error)))))

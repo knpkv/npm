@@ -198,6 +198,23 @@ describe("readCodex", () => {
     expect(root.events[0]?.attribution.activeTicket).toBe("RPS-7071")
   })
 
+  it("still takes the Active Ticket from the human turns a delegated fork copied from its parent", () => {
+    const child = "019ef5b6-0000-7000-8000-000000000009"
+    const meta = codexMeta("/w/app", "main", { id: child, historyStart: 3, ordinal: 0 })
+    const result = readCodex(
+      { ...file, sessionId: child },
+      lines(
+        { ...meta, payload: { ...meta.payload, thread_source: "subagent", parent_thread_id: "parent-1" } },
+        withOrdinal(1, codexUserItem("pick up RPS-7")),
+        withOrdinal(2, codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })),
+        withOrdinal(3, codexUserItem("Check the RPS-7071 example in docs")),
+        withOrdinal(4, codexTokenCount({ at: "2026-09-01T10:05:00.000Z", last: [1, 0, 1, 0], total: 4 }))
+      ),
+      initialCodexState
+    )
+    expect(result.events.map((event) => event.attribution.activeTicket)).toEqual(["RPS-7"])
+  })
+
   it("records a request whose model was never announced under an unpriced placeholder model", () => {
     const result = readCodex(
       file,

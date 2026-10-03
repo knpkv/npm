@@ -64,9 +64,15 @@ const serveStatic = Effect.gen(function*() {
 
 const StaticRouter = HttpRouter.use((router) => router.add("GET", "/*", serveStatic))
 
+/** Usage, tickets and paths are private to the owner: no API response may be kept by a cache. */
+const NoStore = HttpRouter.middleware((httpEffect) =>
+  Effect.map(httpEffect, HttpServerResponse.setHeader("cache-control", "private, no-store"))
+)
+
 const ApiRoutes = HttpApiBuilder.layer(AgentUsageApi).pipe(
   Layer.provide(UsageLive),
-  Layer.provide(ownerSessionAuthLayer)
+  Layer.provide(ownerSessionAuthLayer),
+  Layer.provide(NoStore.layer)
 )
 
 /** Supply the store, runtime state and owner secrets; listener and platform belong to the executable. */

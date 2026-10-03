@@ -127,7 +127,15 @@ const Dashboard = () => {
           options={PRESETS.map((value) => ({ value, label: value }))}
           value={preset}
         />
-        <Choice label="Agent" onChange={setAgent} options={AGENTS} value={agent} />
+        <Choice
+          label="Agent"
+          onChange={(value) => {
+            setAgent(value)
+            setSelected(null)
+          }}
+          options={AGENTS}
+          value={agent}
+        />
         <Choice label="Measure" onChange={setMeasure} options={MEASURES} value={measure} />
       </div>
 

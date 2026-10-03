@@ -292,7 +292,9 @@ export const readCodex = (
         break
       }
       case "response_item": {
-        if (state.delegated) break
+        // A subagent's own user items are its delegated task; the parent history it copied holds the
+        // human's turns, which still set the Active Ticket.
+        if (state.delegated && !copied) break
         const typed = record.payload.content
           .filter((item) => item.type === "input_text")
           .map((item) => codexHumanText(item.text ?? ""))
@@ -352,7 +354,7 @@ export const readCodex = (
           if (limits.credits !== undefined && limits.credits !== null) {
             const value = classifyCodexCredits(limits.credits)
             const signature = encodeBalance(value)
-            if (worthKeeping(state.keptCredits, signature, observedAt)) {
+            if (value._tag === "Unknown" || worthKeeping(state.keptCredits, signature, observedAt)) {
               balances.push({ kind: "codex-credits", machine: file.machine, observedAt, value })
               state = { ...state, keptCredits: { signature, at: observedAt } }
             }

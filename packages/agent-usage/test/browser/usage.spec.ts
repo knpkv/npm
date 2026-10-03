@@ -48,6 +48,14 @@ test("picking a booking draws only it, and Show all brings the rest back", async
   await expect(page.getByRole("heading", { name: "Usage by booking", exact: true })).toBeVisible()
 })
 
+test("changing the agent filter drops a picked booking, so the chart is never left empty", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("button", { name: "tools (repo)" }).click()
+  await expect(page.getByRole("heading", { name: "Usage by booking — tools (repo) only" })).toBeVisible()
+  await page.getByRole("button", { name: "Codex", exact: true }).click()
+  await expect(page.getByRole("heading", { name: "Usage by booking", exact: true })).toBeVisible()
+})
+
 test("the page fits a phone without horizontal page scroll", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await signIn(page)

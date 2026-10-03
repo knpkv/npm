@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import type { BalanceReading, LimitSnapshot, UsageEvent } from "../src/core/Model.js"
-import { buildLimitsReport } from "../src/core/Report.js"
+import { buildLimitsReport, buildUsageReport } from "../src/core/Report.js"
 import { type Chunk, UsageStore } from "../src/core/Store.js"
 
 const TestStore = UsageStore.layer.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
@@ -142,6 +142,7 @@ describe("UsageStore", () => {
         const failed: LimitSnapshot["reading"] = { _tag: "Unknown", reason: "Fetch" }
         yield* store.recordObservations([
           claude("five_hour", 10, known),
+          claude("five_hour", 15, known),
           claude("*", 20, failed),
           claude("five_hour", 30, known),
           claude("*", 40, failed),
@@ -152,7 +153,38 @@ describe("UsageStore", () => {
         const report = buildLimitsReport(stored, { from: 0, to: 100 })
         expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
           .toEqual(["Known", "Unknown", "Known", "Unknown", "Known"])
+        // Equal readings compress (15 joins 10, 45 joins 40) unless the other kind came between;
+        // each series' last row is kept for "read … ago".
         expect(stored.filter((row) => row.label === "*").map((row) => row.observedAt)).toEqual([20, 40, 45])
+        expect(stored.filter((row) => row.label === "five_hour").map((row) => row.observedAt)).toEqual([10, 30, 50])
+      }))
+
+    it.effect("prices a bucket's requests without cache writes even when those with them have no rate", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const at = Date.parse("2026-09-03T10:01:00.000Z")
+        const plain = { input: 1_000, output: 100, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
+        yield* store.commitChunk({
+          agent: "codex",
+          fileKey: "mixed.jsonl",
+          cursor,
+          events: [
+            event("mixed-1", { agent: "codex", model: "gpt-5.5", machine: "mixed", occurredAt: at, tokens: plain }),
+            event("mixed-2", {
+              agent: "codex",
+              model: "gpt-5.5",
+              machine: "mixed",
+              occurredAt: at + 1_000,
+              tokens: { ...plain, cacheWrite5m: 1 }
+            })
+          ],
+          snapshots: [],
+          balances: []
+        })
+        const groups = yield* store.usageGroups({ from: at - 60_000, to: at + 60_000, machine: "mixed" })
+        const report = buildUsageReport(groups, [{ key: "day", start: at - 60_000 }], {}, new Set())
+        expect(report.bookings[0]?.costUsd).toBeCloseTo(0.008, 6)
+        expect(report.unpriced.tokens).toBe(1_101)
       }))
 
     it.effect("stores Unknown limit readings so a gap stays visible", () =>

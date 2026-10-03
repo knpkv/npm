@@ -224,8 +224,8 @@ export class UsageStore extends Context.Service<UsageStore, {
   ) => Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly cwd: string }>, StoreError>
   /**
    * A Machine's limit history for a range, compressed: per series, the last observation before the
-   * range, every change inside it (Claude rows uncompressed; there are few and a failed poll between
-   * equal readings must stay visible), and the last observation before the range ends.
+   * range, every change inside it (an equal reading after a failed poll counts as a change, so the
+   * recovery shows), and the last observation before the range ends.
    */
   readonly limitSnapshots: (range: MachineRange) => Effect.Effect<ReadonlyArray<LimitSnapshot>, StoreError>
   /** The newest reading of each balance kind on each machine. */
@@ -297,15 +297,16 @@ export class UsageStore extends Context.Service<UsageStore, {
         }
       })
 
-      const recordObservations = (
+      const recordObservations = Effect.fn("UsageStore.recordObservations")((
         snapshots: ReadonlyArray<LimitSnapshot>,
         balances: ReadonlyArray<BalanceReading>
       ) =>
         sql.withTransaction(Effect.andThen(insertSnapshots(snapshots), insertBalances(balances))).pipe(
           Effect.mapError(storeError("record-observations"))
         )
+      )
 
-      const commitChunk = (chunk: Chunk) =>
+      const commitChunk = Effect.fn("UsageStore.commitChunk")((chunk: Chunk) =>
         sql.withTransaction(Effect.gen(function*() {
           const eventsAdded = yield* insertEvents(chunk.events)
           yield* insertSnapshots(chunk.snapshots)
@@ -325,15 +326,17 @@ export class UsageStore extends Context.Service<UsageStore, {
           `
           return { eventsAdded }
         })).pipe(Effect.mapError(storeError("commit-chunk")))
+      )
 
-      const cursor = (agent: Agent, fileKey: string) =>
+      const cursor = Effect.fn("UsageStore.cursor")((agent: Agent, fileKey: string) =>
         sql`SELECT identity, offset, state FROM ingest_cursors WHERE agent = ${agent} AND file_key = ${fileKey}`.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(CursorRow))),
           Effect.map((rows) => Option.fromNullishOr(rows[0])),
           Effect.mapError(storeError("read-cursor"))
         )
+      )
 
-      const usageGroups = (range: MachineRange) =>
+      const usageGroups = Effect.fn("UsageStore.usageGroups")((range: MachineRange) =>
         sql`
           SELECT
             (occurred_at - occurred_at % ${BUCKET_MILLIS}) AS bucket_start,
@@ -345,7 +348,10 @@ export class UsageStore extends Context.Service<UsageStore, {
             sum(cache_read) AS cache_read, sum(cache_write_5m) AS cache_write_5m, sum(cache_write_1h) AS cache_write_1h
           FROM usage_events
           WHERE machine = ${range.machine} AND occurred_at >= ${range.from} AND occurred_at < ${range.to}
-          GROUP BY bucket_start, agent, model, fast, long_prompt, cwd, branch, active_ticket
+          -- Requests with and without cache traffic price apart: a model may lack a cache rate, and
+          -- that must leave only those requests unpriced, not the whole bucket.
+          GROUP BY bucket_start, agent, model, fast, long_prompt, cache_read > 0,
+            cache_write_5m + cache_write_1h > 0, cwd, branch, active_ticket
           ORDER BY bucket_start, agent, model
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(GroupRow))),
@@ -370,21 +376,31 @@ export class UsageStore extends Context.Service<UsageStore, {
           ),
           Effect.mapError(storeError("usage-groups"))
         )
+      )
 
-      const places = (machine: string) =>
+      const places = Effect.fn("UsageStore.places")((machine: string) =>
         sql`SELECT DISTINCT branch, cwd FROM usage_events WHERE machine = ${machine}`.pipe(
           Effect.flatMap(
             Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ branch: Schema.String, cwd: Schema.String })))
           ),
           Effect.mapError(storeError("places"))
         )
+      )
 
-      const limitSnapshots = (range: MachineRange) =>
+      const limitSnapshots = Effect.fn("UsageStore.limitSnapshots")((range: MachineRange) =>
         sql`
           WITH in_range AS (
             SELECT agent, machine, source, label, window_minutes, observed_at, reading,
+              coalesce(window_minutes, 'null') || ' ' || reading AS signature,
               lag(coalesce(window_minutes, 'null') || ' ' || reading)
                 OVER (PARTITION BY agent, source, label ORDER BY observed_at) AS previous,
+              lag(observed_at) OVER (PARTITION BY agent, source, label ORDER BY observed_at) AS previous_at,
+              max(CASE WHEN label = '*' THEN observed_at END) OVER (
+                PARTITION BY agent, source ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+              ) AS failed_at,
+              max(CASE WHEN label <> '*' THEN observed_at END) OVER (
+                PARTITION BY agent, source ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+              ) AS succeeded_at,
               row_number() OVER (PARTITION BY agent, source, label ORDER BY observed_at DESC) AS from_end
             FROM limit_snapshots
             WHERE machine = ${range.machine} AND observed_at >= ${range.from} AND observed_at < ${range.to}
@@ -401,9 +417,12 @@ export class UsageStore extends Context.Service<UsageStore, {
             AND snapshot.source = series_before.source AND snapshot.label = series_before.label
             AND snapshot.observed_at = series_before.observed_at
           UNION ALL
+          -- A row starts a new step when its reading changed, or when the other kind of reading (a
+          -- source-wide failure for a window, a window for a failure) came since this series' last row.
           SELECT agent, machine, source, label, window_minutes, observed_at, reading FROM in_range
-          WHERE from_end = 1 OR source = 'claude-oauth-usage' OR previous IS NULL
-            OR previous <> coalesce(window_minutes, 'null') || ' ' || reading
+          WHERE from_end = 1 OR previous IS NULL OR previous <> signature
+            OR (label <> '*' AND failed_at > previous_at)
+            OR (label = '*' AND succeeded_at > previous_at)
           ORDER BY observed_at, agent, label
         `.pipe(
           Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(SnapshotRow))),
@@ -420,8 +439,9 @@ export class UsageStore extends Context.Service<UsageStore, {
           ),
           Effect.mapError(storeError("limit-snapshots"))
         )
+      )
 
-      const latestBalances = (machine: string) =>
+      const latestBalances = Effect.fn("UsageStore.latestBalances")((machine: string) =>
         sql`
         SELECT kind, machine, observed_at, value FROM balance_readings AS outer_reading
         WHERE machine = ${machine} AND observed_at = (
@@ -441,8 +461,9 @@ export class UsageStore extends Context.Service<UsageStore, {
           ),
           Effect.mapError(storeError("latest-balances"))
         )
+      )
 
-      const tickets = (keys: ReadonlyArray<string>) =>
+      const tickets = Effect.fn("UsageStore.tickets")((keys: ReadonlyArray<string>) =>
         keys.length === 0
           ? Effect.succeed([])
           : sql`SELECT key, summary, fetched_at FROM tickets WHERE ${sql.in("key", keys)}`.pipe(
@@ -452,12 +473,14 @@ export class UsageStore extends Context.Service<UsageStore, {
             ),
             Effect.mapError(storeError("tickets"))
           )
+      )
 
-      const saveTicket = (ticket: TicketTitle) =>
+      const saveTicket = Effect.fn("UsageStore.saveTicket")((ticket: TicketTitle) =>
         sql`
           INSERT INTO tickets ${sql.insert({ key: ticket.key, summary: ticket.summary, fetched_at: ticket.fetchedAt })}
           ON CONFLICT (key) DO UPDATE SET summary = excluded.summary, fetched_at = excluded.fetched_at
         `.pipe(Effect.asVoid, Effect.mapError(storeError("save-ticket")))
+      )
 
       return UsageStore.of({
         cursor,
