@@ -190,7 +190,9 @@ describe("approved goal reassignment", () => {
       expect(yield* Effect.flip(work.reassign({ ...expected, toAgent: { _tag: "keep" } }))).toMatchObject({
         _tag: "WorkGoalAgentTargetConflictError",
         goalId: original.goal.id,
-        currentAgentId: "agent-codex-owner"
+        agentId: "agent-codex-owner",
+        reason: "keep_existing_target",
+        holderId: original.goal.id
       })
       expect(yield* store.list()).toHaveLength(2)
     })))
@@ -505,5 +507,69 @@ describe("approved goal reassignment", () => {
         branch: "feat/pr500"
       })
       expect(preflight._tag).toBe("conflict")
+    })))
+
+  it.effect("refuses to set an agent that another goal currently targets, writing nothing", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { path, store, work } = yield* fixture({ lane: true })
+      const other = {
+        ...original,
+        eventId: "goal-a-created",
+        goal: {
+          ...original.goal,
+          id: "goal-a",
+          owner: { id: "agent-goal-a-owner", name: "Goal A owner" },
+          agentHierarchy: { agent: toAgent },
+          connectTarget: agentConnectTarget(toAgent)
+        }
+      } satisfies WorkGoalCheckpoint
+      yield* work.record(other)
+      const before = yield* store.list()
+      expect(yield* Effect.flip(work.reassign(request))).toMatchObject({
+        _tag: "WorkGoalAgentTargetConflictError",
+        goalId: original.goal.id,
+        agentId: toAgent.agentId,
+        reason: "held_by_other_goal",
+        holderId: "goal-a"
+      })
+      expect(yield* store.list()).toEqual(before)
+      expect(yield* store.currentClaim(laneClaim.laneId)).toMatchObject({ value: { owner: from, revision: 1 } })
+      const sql = new DatabaseSync(path)
+      yield* Effect.addFinalizer(() => Effect.sync(() => sql.close()))
+      expect(sql.prepare("SELECT COUNT(*) AS count FROM work_goal_reassignments").get()).toEqual({ count: 0 })
+    })))
+
+  it.effect("refuses to set an agent that another lane's authoritative binding holds", () =>
+    Effect.scoped(Effect.gen(function*() {
+      const { store, work } = yield* fixture({ lane: false })
+      const bindingHolder = yield* bound(work)
+      const link = yield* work.inspectPullRequest({
+        repository: recoveryTarget.repository,
+        pullRequest: recoveryTarget.pullRequest,
+        goalId: recoveryTarget.goalId,
+        laneId: recoveryTarget.laneId
+      })
+      // The holder goal's own target moves away, while its lane binding still holds the worker.
+      yield* work.record({
+        version: "herdr.work.event.v1",
+        eventId: "pr433-untargeted",
+        occurredAt: link.goal.updatedAt + 1,
+        goal: { ...link.goal, agentHierarchy: null, connectTarget: null, updatedAt: link.goal.updatedAt + 1 }
+      })
+      const before = yield* store.list()
+      expect(
+        yield* Effect.flip(work.reassign({
+          ...request,
+          toAgent: { _tag: "set", agent: recoveryTarget.worker }
+        }))
+      ).toMatchObject({
+        _tag: "WorkGoalAgentTargetConflictError",
+        goalId: original.goal.id,
+        agentId: recoveryTarget.worker.agentId,
+        reason: "held_by_other_lane",
+        holderId: recoveryTarget.laneId
+      })
+      expect(yield* store.list()).toEqual(before)
+      expect(bindingHolder.goalId).toBe(recoveryTarget.goalId)
     })))
 })

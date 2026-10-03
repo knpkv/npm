@@ -2501,7 +2501,54 @@ export class WorkStore implements WorkStoreService {
           const previous = head.goal
           const currentAgentId = previous.agentHierarchy?.agent.agentId ?? previous.connectTarget?.agentId
           if (decoded.toAgent._tag === "keep" && currentAgentId !== undefined) {
-            return reject(new WorkGoalAgentTargetConflictError({ goalId: decoded.goalId, currentAgentId }))
+            return reject(
+              new WorkGoalAgentTargetConflictError({
+                goalId: decoded.goalId,
+                agentId: currentAgentId,
+                reason: "keep_existing_target",
+                holderId: decoded.goalId
+              })
+            )
+          }
+          if (decoded.toAgent._tag === "set") {
+            const agentId = decoded.toAgent.agent.agentId
+            const agentConflict = (reason: "held_by_other_goal" | "held_by_other_lane", holderId: string) =>
+              reject(new WorkGoalAgentTargetConflictError({ goalId: decoded.goalId, agentId, reason, holderId }))
+            const latestGoals = new Map<string, WorkGoalCheckpointType["goal"]>()
+            for (const { goal } of history) latestGoals.set(goal.id, goal)
+            const goalHolder = [...latestGoals.values()].find((goal) =>
+              goal.id !== decoded.goalId &&
+              (goal.agentHierarchy?.agent.agentId === agentId || goal.connectTarget?.agentId === agentId)
+            )
+            if (goalHolder !== undefined) return agentConflict("held_by_other_goal", goalHolder.id)
+            const holderRows = Schema.decodeUnknownSync(AgentBindingRows)(
+              this.#database
+                .prepare(
+                  `SELECT dispatch_request_id AS dispatchRequestId, lane_id AS laneId,
+                     expected_revision AS expectedRevision, revision, agent_id AS agentId, host, record
+                   FROM work_agent_bindings ORDER BY dispatch_request_id ASC LIMIT ?`
+                )
+                .all(workLaneOperationMaxRecords + 1)
+            )
+            if (holderRows.length > workLaneOperationMaxRecords) {
+              return reject(
+                new WorkStoreError({ cause: holderRows.length, operation: "reassign.agent-holders.capacity" })
+              )
+            }
+            const holders: Array<WorkAgentBindingType> = []
+            for (const row of holderRows) {
+              const holder = decodeAgentBindingRow(
+                row,
+                { dispatchRequestId: row.dispatchRequestId, laneId: row.laneId },
+                "reassign.agent-holders"
+              )
+              if (holder._tag === "invalid") return reject(holder.error)
+              holders.push(holder.binding)
+            }
+            const laneHolder = authoritativeBindings(holders).latest.find(({ lane, request }) =>
+              lane.goalId !== decoded.goalId && request.worker.agentId === agentId
+            )
+            if (laneHolder !== undefined) return agentConflict("held_by_other_lane", laneHolder.request.laneId)
           }
           // occurredAt equals updatedAt for every valid checkpoint; both bound the ordering defensively.
           const at = Math.max(observedAt, head.occurredAt + 1, head.goal.updatedAt + 1)

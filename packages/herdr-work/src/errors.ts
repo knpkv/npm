@@ -166,8 +166,19 @@ export class WorkGoalBindingRequiresAgentError extends Schema.TaggedError<WorkGo
   { goalId: Schema.String, laneId: Schema.String, dispatchRequestId: Schema.String }
 ) {}
 
-/** `keep` would leave the previous owner's agent target on the reassigned goal. */
+/**
+ * The requested agent target cannot be written. `keep_existing_target`: keeping
+ * would leave the previous owner's agent on the goal (`holderId` is that goal).
+ * `held_by_other_goal` / `held_by_other_lane`: the new agent is already the
+ * current target of another goal, or the authoritative binding of another
+ * goal's lane (`holderId` is that goal or lane).
+ */
 export class WorkGoalAgentTargetConflictError extends Schema.TaggedError<WorkGoalAgentTargetConflictError>()(
   "WorkGoalAgentTargetConflictError",
-  { goalId: Schema.String, currentAgentId: Schema.String }
+  {
+    goalId: Schema.String,
+    agentId: Schema.String,
+    reason: Schema.Literals(["keep_existing_target", "held_by_other_goal", "held_by_other_lane"]),
+    holderId: Schema.String
+  }
 ) {}
