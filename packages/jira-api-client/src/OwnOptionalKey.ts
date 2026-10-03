@@ -22,7 +22,10 @@ export type PrototypeKey = "toString"
 export const ownOptionalKey = <S extends Schema.Top>(key: PrototypeKey, schema: S) => {
   const inherited = Object.prototype[key]
   // Typed `never`: the inherited member is not a domain value and never survives decoding.
-  const isInherited = Predicate.compose(Predicate.isFunction, (member: Function): member is never => member === inherited)
+  const isInherited = Predicate.compose(
+    Predicate.isFunction,
+    (member: Function): member is never => member === inherited
+  )
   const InheritedMember = Schema.declare(isInherited, { expected: `the inherited Object.prototype.${key}` })
   return Schema.optionalKey(Schema.Union([schema, InheritedMember])).pipe(
     Schema.decodeTo(Schema.optionalKey(Schema.toType(schema)), {
