@@ -141,6 +141,12 @@ const codexSource: Source<CodexReaderState> = {
 
 const decoder = new TextDecoder()
 
+/** Complete lines read from a chunk, and how many were too long to decode. */
+interface SplitLines {
+  readonly lines: ReadonlyArray<SourceLine>
+  readonly oversized: number
+}
+
 /**
  * Splits complete, newline-terminated bytes into lines with their absolute byte offsets. Lines longer
  * than `maxLineBytes` are counted and left undecoded.
@@ -149,7 +155,7 @@ const splitLines = (
   bytes: Uint8Array,
   startOffset: number,
   maxLineBytes: number
-): { readonly lines: ReadonlyArray<SourceLine>; readonly oversized: number } => {
+): SplitLines => {
   const lines: Array<SourceLine> = []
   let oversized = 0
   let lineStart = 0
