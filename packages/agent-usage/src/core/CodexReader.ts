@@ -23,13 +23,45 @@ import { classifyCodexCredits, CodexCredits } from "./Balances.js"
 import { type BalanceReading, Count, type LimitSnapshot, type UsageEvent } from "./Model.js"
 import { countSkip, noSkips, parseInstant, type ReadResult, type SourceFile, type SourceLine } from "./Readers.js"
 
+/** A Codex usage block with optional fields filled in, as codex-session-cost.jq normalizes it. */
+export const CodexUsage = Schema.Struct({
+  input: Count,
+  cached: Count,
+  cacheWrite: Count,
+  output: Count,
+  reasoning: Count,
+  total: Count
+})
+export type CodexUsage = typeof CodexUsage.Type
+
+const zeroUsage: CodexUsage = { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, total: 0 }
+
+/**
+ * The tokens one token_count adds, ported exactly from codex-session-cost.jq's `usage_delta`:
+ * an unchanged running total adds nothing (a rate-limit-only re-emit); a first event, a reset
+ * total, or a last usage equal to the whole total adds the last usage; otherwise the difference of
+ * running totals, which also recovers tokens of any token_count in between that failed to decode.
+ */
+export const usageDelta = (previous: CodexUsage | null, total: CodexUsage, last: CodexUsage): CodexUsage => {
+  if (previous !== null && total.total === previous.total) return zeroUsage
+  if (previous === null || total.total < previous.total || total.total === last.total) return last
+  return {
+    input: total.input - previous.input,
+    cached: total.cached - previous.cached,
+    cacheWrite: total.cacheWrite - previous.cacheWrite,
+    output: total.output - previous.output,
+    reasoning: total.reasoning - previous.reasoning,
+    total: total.total - previous.total
+  }
+}
+
 export const CodexReaderState = Schema.Struct({
   cwd: Schema.String,
   branch: Schema.String,
   model: Schema.NullOr(Schema.String),
   activeTicket: Schema.NullOr(Schema.String),
-  /** The session's running token total at the last token_count read. */
-  lastTotal: Schema.NullOr(Count)
+  /** The session's running usage at the last valid token_count read. */
+  previousTotal: Schema.NullOr(CodexUsage)
 })
 export type CodexReaderState = typeof CodexReaderState.Type
 
@@ -38,7 +70,7 @@ export const initialCodexState: CodexReaderState = {
   branch: "",
   model: null,
   activeTicket: null,
-  lastTotal: null
+  previousTotal: null
 }
 
 const TokenUsage = Schema.Struct({
@@ -48,6 +80,15 @@ const TokenUsage = Schema.Struct({
   output_tokens: Count,
   reasoning_output_tokens: Schema.optionalKey(Count),
   total_tokens: Count
+})
+
+const normalizeUsage = (usage: typeof TokenUsage.Type): CodexUsage => ({
+  input: usage.input_tokens,
+  cached: usage.cached_input_tokens ?? 0,
+  cacheWrite: usage.cache_write_input_tokens ?? 0,
+  output: usage.output_tokens,
+  reasoning: usage.reasoning_output_tokens ?? 0,
+  total: usage.total_tokens
 })
 
 const Window = Schema.Struct({
@@ -196,35 +237,31 @@ export const readCodex = (
         }
         const info = record.payload.info
         if (info !== undefined && info !== null) {
-          const total = info.total_token_usage.total_tokens
-          if (state.lastTotal === null || total !== state.lastTotal) {
-            const last = info.last_token_usage
-            const cached = last.cached_input_tokens ?? 0
-            const written = last.cache_write_input_tokens ?? 0
-            const reasoning = last.reasoning_output_tokens ?? 0
-            const tokens = {
-              input: Math.max(0, last.input_tokens - cached - written),
-              output: Math.max(0, last.output_tokens - reasoning),
-              reasoning,
-              cacheRead: cached,
-              cacheWrite5m: written,
-              cacheWrite1h: 0
-            }
-            if (tokens.input + tokens.output + tokens.reasoning + tokens.cacheRead + tokens.cacheWrite5m > 0) {
-              events.push({
-                agent: "codex",
-                dedupeKey: `${file.sessionId}@${line.offset}`,
-                machine: file.machine,
-                sessionId: file.sessionId,
-                occurredAt: observedAt,
-                model: state.model ?? "unknown",
-                fast: false,
-                tokens,
-                attribution: { cwd: state.cwd, branch: state.branch, activeTicket: state.activeTicket }
-              })
-            }
+          const total = normalizeUsage(info.total_token_usage)
+          const delta = usageDelta(state.previousTotal, total, normalizeUsage(info.last_token_usage))
+          // Codex counts cache hits inside input and reasoning inside output; split them out.
+          const tokens = {
+            input: Math.max(0, delta.input - delta.cached - delta.cacheWrite),
+            output: Math.max(0, delta.output - delta.reasoning),
+            reasoning: Math.max(0, delta.reasoning),
+            cacheRead: Math.max(0, delta.cached),
+            cacheWrite5m: Math.max(0, delta.cacheWrite),
+            cacheWrite1h: 0
           }
-          state = { ...state, lastTotal: total }
+          if (delta.total !== 0) {
+            events.push({
+              agent: "codex",
+              dedupeKey: `${file.sessionId}@${line.offset}`,
+              machine: file.machine,
+              sessionId: file.sessionId,
+              occurredAt: observedAt,
+              model: state.model ?? "unknown",
+              fast: false,
+              tokens,
+              attribution: { cwd: state.cwd, branch: state.branch, activeTicket: state.activeTicket }
+            })
+          }
+          state = { ...state, previousTotal: total }
         }
         const limits = record.payload.rate_limits
         if (limits !== undefined && limits !== null && limits.limit_id === "codex") {

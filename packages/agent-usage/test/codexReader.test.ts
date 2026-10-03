@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { initialCodexState, readCodex } from "../src/core/CodexReader.js"
-import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines } from "./fixtures.js"
+import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines, Raw } from "./fixtures.js"
 
 const file = { fileKey: "2026/09/01/rollout-x.jsonl", machine: "ser8", sessionId: "sess" }
 
@@ -37,7 +37,7 @@ describe("readCodex", () => {
       initialCodexState
     )
     expect(result.events).toHaveLength(1)
-    expect(result.state.lastTotal).toBe(130)
+    expect(result.state.previousTotal?.total).toBe(130)
   })
 
   it("resumes from carried state, so a later chunk keeps the model and the running total", () => {
@@ -144,5 +144,42 @@ describe("readCodex", () => {
       initialCodexState
     )
     expect(result.events[0]?.model).toBe("unknown")
+  })
+
+  it("recovers the tokens of a token_count that failed to decode by diffing running totals", () => {
+    const first = codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [100, 0, 30, 0], total: 130 })
+    const third = codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [10, 0, 5, 0], total: 300 })
+    const result = readCodex(
+      file,
+      lines(
+        codexTurn("gpt-6-sol"),
+        first,
+        new Raw("{\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\""),
+        third
+      ),
+      initialCodexState
+    )
+    const booked = result.events.reduce(
+      (sum, event) => sum + event.tokens.input + event.tokens.output + event.tokens.reasoning + event.tokens.cacheRead,
+      0
+    )
+    expect(booked).toBe(300)
+    expect(result.skipped.unparseableLine).toBe(1)
+  })
+
+  it("books the same events read in two halves split after turn_context as in one pass", () => {
+    const source = lines(
+      codexMeta("/home/dev/code/svc", "feat/RPS-12"),
+      codexTurn("gpt-6-sol"),
+      codexUserItem("pick up RPS-7071"),
+      codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [100, 40, 30, 10], total: 130 }),
+      codexTokenCount({ at: "2026-09-01T10:00:06.000Z", last: [100, 40, 30, 10], total: 130 }),
+      codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [50, 10, 20, 0], total: 200 })
+    )
+    const onePass = readCodex(file, source, initialCodexState)
+    const firstHalf = readCodex(file, source.slice(0, 2), initialCodexState)
+    const secondHalf = readCodex(file, source.slice(2), firstHalf.state)
+    expect([...firstHalf.events, ...secondHalf.events]).toEqual(onePass.events)
+    expect(secondHalf.state).toEqual(onePass.state)
   })
 })
