@@ -66,7 +66,7 @@ const configuration = {
 
 const emptyCustomFieldValues: ReadonlyArray<{
   readonly customFieldId: string
-  readonly value?: {}
+  readonly value?: Schema.Json
 }> = []
 
 interface TimeEntryOverrides extends Readonly<Record<string, Schema.Json | undefined>> {}
@@ -1045,7 +1045,7 @@ describe("ClockifyReadPlugin", () => {
         ReturnType<typeof timeEntry> & {
           readonly customFieldValues: ReadonlyArray<{
             readonly customFieldId: string
-            readonly value?: {}
+            readonly value?: Schema.Json
           }>
           readonly taskId: string
           readonly type: string
