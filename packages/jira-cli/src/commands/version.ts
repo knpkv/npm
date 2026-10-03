@@ -96,8 +96,8 @@ const listCommand = Command.make("list", {
   Effect.gen(function*() {
     if (released && unreleased) {
       return yield* new JiraApiError({
-          message: "--released and --unreleased are mutually exclusive; pass at most one (omit both to list all)."
-        })
+        message: "--released and --unreleased are mutually exclusive; pass at most one (omit both to list all)."
+      })
     }
     const service = yield* VersionService
     const versions = yield* service.listProjectVersions(project, {

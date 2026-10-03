@@ -110,11 +110,11 @@ const uploadCommand = Command.make(
         const result = insertConfluenceAttachmentReference(documentInput.content, file, pageId, attachment)
         if (result.replacements === 0) {
           return yield* new ApiError({
-              status: 0,
-              message: `Uploaded attachment ${attachment.id}, but no local placeholders matched ${file}`,
-              endpoint: "attachment insertion",
-              pageId
-            })
+            status: 0,
+            message: `Uploaded attachment ${attachment.id}, but no local placeholders matched ${file}`,
+            endpoint: "attachment insertion",
+            pageId
+          })
         }
         yield* writeDocument(documentInput.path, result.content)
         inserted = true

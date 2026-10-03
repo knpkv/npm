@@ -205,11 +205,11 @@ export const refreshToken = (
         Effect.catch(() => Effect.succeed(undefined))
       )
       return yield* new OAuthError({
-          step: "refresh",
-          cause: `HTTP ${response.status}: ${text}`,
-          status: response.status,
-          ...(!(errorCode === undefined) && { errorCode })
-        })
+        step: "refresh",
+        cause: `HTTP ${response.status}: ${text}`,
+        status: response.status,
+        ...(!(errorCode === undefined) && { errorCode })
+      })
     }
 
     const body = yield* response.json.pipe(
@@ -259,9 +259,9 @@ export const revokeToken = (
 
     if (response.status >= 400) {
       return yield* new OAuthError({
-          step: "revoke",
-          cause: `Token revocation failed with status ${response.status}`
-        })
+        step: "revoke",
+        cause: `Token revocation failed with status ${response.status}`
+      })
     }
   })
 

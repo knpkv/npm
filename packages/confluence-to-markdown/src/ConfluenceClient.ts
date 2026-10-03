@@ -624,11 +624,11 @@ const make = (
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
             return yield* new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
-                endpoint: `/pages/${id}/children`,
-                pageId: id
-              })
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
+              endpoint: `/pages/${id}/children`,
+              pageId: id
+            })
           }
 
           const response = yield* apiClient.v2.getChildPages(id, {
@@ -706,11 +706,11 @@ const make = (
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
             return yield* new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of versions`,
-                endpoint: `/pages/${id}/versions`,
-                pageId: id
-              })
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of versions`,
+              endpoint: `/pages/${id}/versions`,
+              pageId: id
+            })
           }
 
           const response = yield* apiClient.v2.getPageVersions(id, {
@@ -753,11 +753,11 @@ const make = (
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
             return yield* new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of attachments`,
-                endpoint: `/pages/${id}/attachments`,
-                pageId: id
-              })
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of attachments`,
+              endpoint: `/pages/${id}/attachments`,
+              pageId: id
+            })
           }
 
           const response = yield* apiClient.v2.getPageAttachments(id, {
@@ -821,11 +821,11 @@ const make = (
         const attachment = extractUploadedAttachment(response)
         if (attachment === null) {
           return yield* new ApiError({
-              status: 0,
-              message: `Confluence did not return an attachment for ${filename}`,
-              endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
-              pageId
-            })
+            status: 0,
+            message: `Confluence did not return an attachment for ${filename}`,
+            endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
+            pageId
+          })
         }
         const decodedAttachment = yield* decodeAttachment(
           attachment,
@@ -857,11 +857,11 @@ const make = (
         const page = yield* getPage(pageId)
         if (!page.spaceId) {
           return yield* new ApiError({
-              status: 0,
-              message: `Page ${pageId} does not have spaceId`,
-              endpoint: `/pages/${pageId}`,
-              pageId
-            })
+            status: 0,
+            message: `Page ${pageId} does not have spaceId`,
+            endpoint: `/pages/${pageId}`,
+            pageId
+          })
         }
         return page.spaceId
       })
@@ -919,10 +919,10 @@ const make = (
         do {
           if (iterations >= MAX_PAGINATION_ITERATIONS) {
             return yield* new ApiError({
-                status: 0,
-                message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
-                endpoint
-              })
+              status: 0,
+              message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
+              endpoint
+            })
           }
 
           const response = yield* apiClient.v2.getFolderDirectChildren(id, {

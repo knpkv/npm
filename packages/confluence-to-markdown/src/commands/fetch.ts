@@ -104,7 +104,9 @@ export const makeFetchCommand = (options: FetchCommandOptions = {}) => {
         // beside --format adf and dropping it silently hands back raw ADF to
         // someone who asked for cleaned output.
         if (format === "adf" && cleanMarkdown) {
-          return yield* new ConfigError({ message: "--clean-markdown applies to --format md; it has no effect on raw ADF." })
+          return yield* new ConfigError({
+            message: "--clean-markdown applies to --format md; it has no effect on raw ADF."
+          })
         }
 
         const input = yield* resolvePageInputWithWorkspace({

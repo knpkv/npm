@@ -106,8 +106,8 @@ const acquireNetworkProbe = (
     const address = addressOf(server)
     if (address === null || Predicate.isString(address)) {
       return yield* new NetworkProbeFixtureError({
-          message: "Network probe did not expose an internet port"
-        })
+        message: "Network probe did not expose an internet port"
+      })
     }
     return { port: address.port, server }
   })

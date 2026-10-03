@@ -255,9 +255,9 @@ const make = Effect.gen(function*() {
       const config = yield* loadOAuthConfigOp()
       if (config === null) {
         return yield* new OAuthError({
-            step: "authorize",
-            cause: "OAuth not configured. Run 'jira auth configure' first."
-          })
+          step: "authorize",
+          cause: "OAuth not configured. Run 'jira auth configure' first."
+        })
       }
       return config
     })
@@ -386,9 +386,9 @@ const make = Effect.gen(function*() {
 
       if (sites.length === 0) {
         return yield* new OAuthError({
-            step: "authorize",
-            cause: "No Jira sites found for this account"
-          })
+          step: "authorize",
+          cause: "No Jira sites found for this account"
+        })
       }
 
       let site: (typeof sites)[number]
@@ -399,9 +399,9 @@ const make = Effect.gen(function*() {
           if (!matched) {
             const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
             return yield* new OAuthError({
-                step: "authorize",
-                cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
-              })
+              step: "authorize",
+              cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
+            })
           }
           site = matched
         } else {
@@ -520,11 +520,11 @@ const make = Effect.gen(function*() {
             return Effect.gen(function*() {
               yield* deleteTokenOp()
               return yield* new OAuthError({
-                  step: "refresh",
-                  cause: "Refresh token expired. Please run 'jira auth login' to re-authenticate.",
-                  status,
-                  errorCode
-                })
+                step: "refresh",
+                cause: "Refresh token expired. Please run 'jira auth login' to re-authenticate.",
+                status,
+                errorCode
+              })
             })
           }
           return Effect.fail(error)

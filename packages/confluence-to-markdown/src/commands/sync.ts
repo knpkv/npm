@@ -93,20 +93,20 @@ export const pushCommand = Command.make(
         // a real push that partly applied.
         if (dryRun) {
           return yield* new ConfigError({
-              message: `Dry run found ${result.errors.length} problem(s) that would fail the push:\n${
-                result.errors.join("\n")
-              }`
-            })
+            message: `Dry run found ${result.errors.length} problem(s) that would fail the push:\n${
+              result.errors.join("\n")
+            }`
+          })
         }
         // Say that the branch was held, not just that something failed. Any
         // error keeps `origin/confluence` where it is so the unsent work stays
         // retryable — which also means every later push repeats this failure
         // until it is resolved. Silently, that reads as a broken workspace.
         return yield* new ConfigError({
-            message: `Push failed:\n${result.errors.join("\n")}\n` +
-              `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
-              `push retries all of it. Resolve the errors above (or remove the file) to move on.`
-          })
+          message: `Push failed:\n${result.errors.join("\n")}\n` +
+            `origin/confluence was not advanced, so nothing here is recorded as pushed and the next ` +
+            `push retries all of it. Resolve the errors above (or remove the file) to move on.`
+        })
       }
     })
 ).pipe(Command.withDescription("Remote write: upload local markdown changes to Confluence"))

@@ -91,7 +91,9 @@ const uploadCommand = Command.make(
       if (documentInput !== null) {
         const matches = countPlaceholderMatches(documentInput.content, file)
         if (matches !== 1) {
-          return yield* new JiraApiError({ message: `Expected exactly one attachment placeholder for ${file}, found ${matches}` })
+          return yield* new JiraApiError({
+            message: `Expected exactly one attachment placeholder for ${file}, found ${matches}`
+          })
         }
       }
 
@@ -113,9 +115,9 @@ const uploadCommand = Command.make(
         const result = insertJiraAttachmentReference(documentInput.content, file, attachment)
         if (result.replacements !== 1) {
           return yield* new JiraApiError({
-              message:
-                `Uploaded attachment ${attachment.id}, but expected exactly one local placeholder for ${file}; found ${result.replacements}`
-            })
+            message:
+              `Uploaded attachment ${attachment.id}, but expected exactly one local placeholder for ${file}; found ${result.replacements}`
+          })
         }
         yield* writeDocument(documentInput.path, result.content)
         inserted = true

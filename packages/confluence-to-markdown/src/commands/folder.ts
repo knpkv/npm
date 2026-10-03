@@ -96,18 +96,18 @@ export const resolveParentId = (input: string, baseUrl: string): Effect.Effect<s
     const parentId = parentIdFromInput(input)
     if (parentId === undefined) {
       return yield* new ConfigError({
-          message: `Could not read a parent id from --parent ${JSON.stringify(input)}. ` +
-            `Expected a numeric id or a URL containing /pages/<id>/ or /folder/<id>/.`
-        })
+        message: `Could not read a parent id from --parent ${JSON.stringify(input)}. ` +
+          `Expected a numeric id or a URL containing /pages/<id>/ or /folder/<id>/.`
+      })
     }
     const parentOrigin = yield* originOfContentInput(input, "--parent")
     const targetOrigin = originOf(baseUrl)
     if (parentOrigin !== undefined && targetOrigin !== undefined && parentOrigin !== targetOrigin) {
       return yield* new ConfigError({
-          message: `--parent names ${parentOrigin} but the folder would be created on ${targetOrigin}. ` +
-            `Content ids are per-site, so this would nest under an unrelated container. ` +
-            `Pass a parent from ${targetOrigin}, or its bare id if that is what you meant.`
-        })
+        message: `--parent names ${parentOrigin} but the folder would be created on ${targetOrigin}. ` +
+          `Content ids are per-site, so this would nest under an unrelated container. ` +
+          `Pass a parent from ${targetOrigin}, or its bare id if that is what you meant.`
+      })
     }
     return parentId
   })
@@ -169,9 +169,9 @@ export const resolveFolderTarget = (
     const resolved = yield* validateBaseUrl(urlOrigin)
     if (flagBaseUrl !== undefined && (yield* validateBaseUrl(flagBaseUrl)) !== resolved) {
       return yield* new ConfigError({
-          message: `--base-url ${JSON.stringify(flagBaseUrl)} is a different site than the URL (${resolved}). ` +
-            `The folder id belongs to the site in the URL.`
-        })
+        message: `--base-url ${JSON.stringify(flagBaseUrl)} is a different site than the URL (${resolved}). ` +
+          `The folder id belongs to the site in the URL.`
+      })
     }
     return { baseUrl: resolved, id }
   })

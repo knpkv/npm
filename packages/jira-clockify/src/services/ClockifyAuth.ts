@@ -68,8 +68,8 @@ export const layer = Layer.effect(
         const exists = yield* fs.exists(filePath)
         if (!exists) {
           return yield* new ClockifyAuthMissingError({
-              message: "Clockify not configured. Run: jcf auth clockify setup"
-            })
+            message: "Clockify not configured. Run: jcf auth clockify setup"
+          })
         }
         const content = yield* fs.readFileString(filePath).pipe(
           Effect.mapError(() => new ClockifyAuthMissingError({ message: "Failed to read Clockify auth file" }))

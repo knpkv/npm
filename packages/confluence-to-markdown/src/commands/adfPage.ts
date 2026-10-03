@@ -157,10 +157,10 @@ const readAdfFile = (path: string, values: ReadonlyMap<string, string>) =>
     const { rendered, unresolved } = applyAdfTemplate(raw, values)
     if (unresolved.length > 0) {
       return yield* new ConfigError({
-          message: `${path} still has unfilled slots: ${
-            unresolved.map((n) => `{{${n}}}`).join(", ")
-          }. Pass them with --set name=value.`
-        })
+        message: `${path} still has unfilled slots: ${
+          unresolved.map((n) => `{{${n}}}`).join(", ")
+        }. Pass them with --set name=value.`
+      })
     }
     return yield* parseAdf(rendered, path, "outgoing")
   })
@@ -397,9 +397,9 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
           const result = replaceAdfText(doc, search, replacement)
           if (result.replacements === 0) {
             return yield* new ConfigError({
-                message: `No text node contains ${JSON.stringify(search)}. ADF splits a run at every mark boundary, ` +
-                  `so a phrase crossing inline code or bold lives in several nodes — match a shorter span.`
-              })
+              message: `No text node contains ${JSON.stringify(search)}. ADF splits a run at every mark boundary, ` +
+                `so a phrase crossing inline code or bold lives in several nodes — match a shorter span.`
+            })
           }
           yield* Console.log(`Replaced ${result.replacements} occurrence(s).`)
           doc = result.doc
@@ -408,7 +408,9 @@ export const makePagePatchCommand = (options: AdfPageCommandOptions = {}) => {
         if (selector !== undefined) {
           const parsed = parseNodeSelector(selector)
           if (parsed === null) {
-            return yield* new ConfigError({ message: `Invalid --delete-node selector: ${selector}. Expected type or type[index].` })
+            return yield* new ConfigError({
+              message: `Invalid --delete-node selector: ${selector}. Expected type or type[index].`
+            })
           }
           const result = deleteAdfNodes(doc, parsed)
           if (result.deleted === 0) {
@@ -517,8 +519,8 @@ export const makePageCreateCommand = (options: AdfPageCommandOptions = {}) => {
           : yield* validateBaseUrl(baseUrlFlag)
         if (resolvedBaseUrl === undefined) {
           return yield* new ConfigError({
-              message: "--base-url is required (or run inside a cloned workspace)."
-            })
+            message: "--base-url is required (or run inside a cloned workspace)."
+          })
         }
 
         yield* validateSpaceId(space)
