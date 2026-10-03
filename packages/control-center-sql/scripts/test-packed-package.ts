@@ -14,8 +14,11 @@ import { unpatchedReason, vendorDirectory, VendoredEffectQbError, vendoredEntrie
 
 const PackageJson = Schema.fromJsonString(Schema.Struct({ name: Schema.String, version: Schema.String }))
 
-// Declared runtime dependencies the consumer gets; effect-qb is deliberately absent.
-const runtimeDependencies: ReadonlyArray<string> = ["effect", "pgsql-ast-parser"]
+// The packed manifest decides what the consumer gets, so a dependency missing from it fails the run.
+const PackedManifest = Schema.fromJsonString(Schema.Struct({
+  dependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String)),
+  peerDependencies: Schema.optionalKey(Schema.Record(Schema.String, Schema.String))
+}))
 
 const run = Effect.fn("controlCenterSql.runPackedCommand")(function*(
   command: string,
@@ -59,6 +62,17 @@ const program = Effect.scoped(
       if (reason !== undefined) return yield* new VendoredEffectQbError({ reason })
     }
 
+    const manifest = yield* fileSystem.readFileString(path.join(installed, "package.json")).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(PackedManifest)),
+      Effect.mapError((cause) => new VendoredEffectQbError({ cause, reason: "Could not decode the packed manifest" }))
+    )
+    const runtimeDependencies = [
+      ...Object.keys(manifest.dependencies ?? {}),
+      ...Object.keys(manifest.peerDependencies ?? {})
+    ]
+    if (runtimeDependencies.includes("effect-qb")) {
+      return yield* new VendoredEffectQbError({ reason: "the packed manifest still depends on effect-qb" })
+    }
     for (const dependency of runtimeDependencies) {
       const link = path.join(consumer, "node_modules", dependency)
       yield* fileSystem.makeDirectory(path.dirname(link), { recursive: true })
