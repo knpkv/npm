@@ -59,7 +59,7 @@ jobs:
         if: steps.check.outputs.updated == 'true'
         run: |
           mkdir -p .changeset
-          cat > .changeset/confluence-api-spec-update.md <<'CHANGESET'
+          cat > .changeset/confluence-api-spec-update-${GITHUB_RUN_ID}.md <<'CHANGESET'
           ---
           "@knpkv/confluence-api-client": minor
           "@knpkv/confluence-to-markdown": patch

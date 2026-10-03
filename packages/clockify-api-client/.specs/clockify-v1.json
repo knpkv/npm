@@ -324,7 +324,7 @@
               "uniqueItems": true,
               "type": "array",
               "items": { "type": "string", "enum": ["TIMESHEET", "EXPENSE", "TIMESHEET_AND_EXPENSE"] },
-              "default": ["TIMESHEET", "TIMESHEET_AND_EXPENSE", "EXPENSE"]
+              "default": ["TIMESHEET", "TIMESHEET_AND_EXPENSE"]
             }
           }
         ],
@@ -357,6 +357,19 @@
               "description": "Represents workspace identifier across the system.",
               "example": "dd087fe2dd087fe2dd087fe2",
               "default": ""
+            }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -391,6 +404,19 @@
               "description": "Represents workspace identifier across the system.",
               "example": "dd087fe2dd087fe2dd087fe2",
               "default": ""
+            }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -440,6 +466,19 @@
               "example": "ff9ef6ffff9ef6ffff9ef6ff",
               "default": ""
             }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "requestBody": {
@@ -486,6 +525,19 @@
               "description": "Represents user identifier across the system.",
               "example": "ff9ef6ffff9ef6ffff9ef6ff",
               "default": ""
+            }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -542,6 +594,19 @@
             "name": "type",
             "required": true,
             "schema": { "type": "string", "enum": ["TIMESHEET", "EXPENSE", "TIMESHEET_AND_EXPENSE"] }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "requestBody": {
@@ -633,6 +698,19 @@
             "name": "type",
             "required": true,
             "schema": { "type": "string", "enum": ["TIMESHEET", "EXPENSE"] }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "requestBody": {
@@ -1206,9 +1284,9 @@
             "description": "OK"
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Created entities (Experimental)",
-        "tags": ["Entity changes (Experimental)"],
-        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+        "tags": ["Entity changes (Experimental)"]
       }
     },
     "/v1/workspaces/{workspaceId}/entities/deleted": {
@@ -1286,9 +1364,9 @@
             "description": "OK"
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Deleted entities (Experimental)",
-        "tags": ["Entity changes (Experimental)"],
-        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+        "tags": ["Entity changes (Experimental)"]
       }
     },
     "/v1/workspaces/{workspaceId}/entities/updated": {
@@ -1368,9 +1446,9 @@
             "description": "OK"
           }
         },
+        "security": [{ "ApiKeyAuth": [] }],
         "summary": "Updated entities (Experimental)",
-        "tags": ["Entity changes (Experimental)"],
-        "security": [{ "ApiKeyAuth": [] }, { "AddonKeyAuth": [] }]
+        "tags": ["Entity changes (Experimental)"]
       }
     },
     "/v1/workspaces/{workspaceId}/expenses": {
@@ -6917,6 +6995,20 @@
               "example": "63034cd0cb0fb876a57e93ad",
               "default": ""
             }
+          },
+          {
+            "description": "Represents time view mode used to display dates.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display dates.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "enum": ["TIME_SENSITIVE_VIEW", "AGGREGATED_TIME_VIEW"],
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "requestBody": {
@@ -6979,6 +7071,20 @@
               "example": "6308850156b7d75ea8fd3fbd",
               "default": ""
             }
+          },
+          {
+            "description": "Represents time view mode used to display dates.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display dates.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "enum": ["TIME_SENSITIVE_VIEW", "AGGREGATED_TIME_VIEW"],
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "responses": {
@@ -7031,6 +7137,20 @@
               "description": "Represents a time off request identifier across the system.",
               "example": "6308850156b7d75ea8fd3fbd",
               "default": ""
+            }
+          },
+          {
+            "description": "Represents time view mode used to display dates.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display dates.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "enum": ["TIME_SENSITIVE_VIEW", "AGGREGATED_TIME_VIEW"],
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -7093,6 +7213,20 @@
               "description": "Represents a user identifier across the system.",
               "example": "60f924bafdaf031696ec6218",
               "default": ""
+            }
+          },
+          {
+            "description": "Represents time view mode used to display dates.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display dates.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "enum": ["TIME_SENSITIVE_VIEW", "AGGREGATED_TIME_VIEW"],
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -7745,6 +7879,19 @@
               "example": "2020-01-01T00:00:00Z",
               "default": ""
             }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "responses": {
@@ -7846,6 +7993,16 @@
               "example": "64c777ddd3fcab07cfbb210c",
               "default": ""
             }
+          },
+          {
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["TIME_SENSITIVE_VIEW", "AGGREGATED_TIME_VIEW"],
+              "default": "TIME_SENSITIVE_VIEW"
+            }
           }
         ],
         "requestBody": {
@@ -7900,6 +8057,19 @@
               "type": "boolean",
               "description": "If set to true, results will contain additional information about the time entry.",
               "default": false
+            }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -7973,6 +8143,19 @@
               "description": "Represents a time entry identifier across the system.",
               "example": "8j39fn9307hh5125439g2ast",
               "default": ""
+            }
+          },
+          {
+            "description": "Represents time view mode used to display time entries.",
+            "example": "TIME_SENSITIVE_VIEW",
+            "in": "query",
+            "name": "timeViewMode",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Represents time view mode used to display time entries.",
+              "example": "TIME_SENSITIVE_VIEW",
+              "default": "TIME_SENSITIVE_VIEW"
             }
           }
         ],
@@ -11148,7 +11331,7 @@
           "itemType": {
             "minLength": 1,
             "type": "string",
-            "description": "Represents an item type.",
+            "description": "Represents an item type.`Service` will be default",
             "example": "Service",
             "default": ""
           },
@@ -12050,7 +12233,7 @@
         "type": "object",
         "default": null,
         "description": "Represents an entity creation permission enum.",
-        "example": "EVERYONE",
+        "example": "ADMINS",
         "oneOf": [{ "type": "string", "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "EVERYONE"] }],
         "properties": {
           "ADMINS": { "type": "string", "enum": ["ADMINS", "ADMINS_AND_PROJECT_MANAGERS", "EVERYONE"] },
@@ -12075,7 +12258,7 @@
       "EntityIdNameDto": {
         "type": "object",
         "properties": { "id": { "type": "string" }, "name": { "type": "string" } },
-        "description": "Contains names of user groups that are assigned to holiday.",
+        "description": "Contains names of users that are assigned to holiday.",
         "default": null
       },
       "EstimateDtoV1": {
@@ -12780,6 +12963,7 @@
           {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -12869,9 +13053,101 @@
           }
         ],
         "properties": {
+          "ACTIVITY_MONITORING": {
+            "type": "string",
+            "enum": [
+              "ACTIVITY_MONITORING",
+              "ADD_TIME_FOR_OTHERS",
+              "ADMIN_PANEL",
+              "ALERTS",
+              "APPROVAL",
+              "AUDIT_LOG",
+              "AUTOMATIC_LOCK",
+              "BRANDED_REPORTS",
+              "BULK_EDIT",
+              "CUSTOM_FIELDS",
+              "CUSTOM_REPORTING",
+              "CUSTOM_SUBDOMAIN",
+              "CREATION_PERMISSIONS",
+              "DECIMAL_FORMAT",
+              "DISABLE_MANUAL_MODE",
+              "EDIT_MEMBER_PROFILE",
+              "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE",
+              "EXPENSES",
+              "FILE_IMPORT",
+              "TIMESHEET_IMPORT",
+              "USER_IMPORT",
+              "HIDE_PAGES",
+              "HISTORIC_RATES",
+              "INVOICING",
+              "INVOICE_EMAILS",
+              "INVOICE_REMINDERS",
+              "LABOR_COST",
+              "LOCATIONS",
+              "MANAGER_ROLE",
+              "MULTI_FACTOR_AUTHENTICATION",
+              "PROJECT_BUDGET",
+              "PROJECT_TEMPLATES",
+              "GRANT_PROJECT_MANAGER_ROLE",
+              "PRIVATE_PROJECT_ACCESS",
+              "QUICKBOOKS_INTEGRATION",
+              "RECURRING_ESTIMATES",
+              "RECURRING_INVOICES",
+              "REQUIRED_FIELDS",
+              "SCHEDULED_REPORTS",
+              "SCHEDULING",
+              "SCHEDULING_BILLABLE_AND_COST_AMOUNT",
+              "SCREENSHOTS",
+              "SSO",
+              "SUMMARY_ESTIMATE",
+              "TARGETS_AND_REMINDERS",
+              "TASK_RATES",
+              "TASK_COST_RATES",
+              "TASK_HOURLY_RATES",
+              "TIME_OFF",
+              "UNLIMITED_REPORTS",
+              "USER_CUSTOM_FIELDS",
+              "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY",
+              "BREAKS",
+              "KIOSK_SESSION_DURATION",
+              "KIOSK_PIN_REQUIRED",
+              "WHO_CAN_SEE_ALL_TIME_ENTRIES",
+              "WHO_CAN_SEE_PROJECT_STATUS",
+              "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES",
+              "WHO_CAN_SEE_TEAMS_DASHBOARD",
+              "WORKSPACE_LOCK_TIMEENTRIES",
+              "WORKSPACE_TIME_AUDIT",
+              "WORKSPACE_TIME_ROUNDING",
+              "KIOSK",
+              "KIOSK_SIX_DIGIT_PIN",
+              "KIOSK_QR_CODE",
+              "KIOSK_PHOTO_CAPTURE",
+              "LIMITED_USERS",
+              "FORECASTING",
+              "TIME_TRACKING",
+              "ATTENDANCE_REPORT",
+              "WEEKLY_OVERTIME_CALCULATION_PERIOD",
+              "MONTHLY_OVERTIME_CALCULATION_PERIOD",
+              "WORKSPACE_TRANSFER",
+              "FAVORITE_ENTRIES",
+              "SPLIT_TIME_ENTRY",
+              "CLIENT_CURRENCY",
+              "SCHEDULING_FORECASTING",
+              "SCIM",
+              "UNLIMITED_USER_SEATS",
+              "BILLABLE_HOURS",
+              "PROJECT_ESTIMATE",
+              "CSV_EXPORT",
+              "XLSX_EXPORT",
+              "ONE_MONTH_RANGE_REPORTS",
+              "ONE_YEAR_RANGE_REPORTS",
+              "SHARED_REPORTS"
+            ]
+          },
           "ADD_TIME_FOR_OTHERS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -12962,6 +13238,7 @@
           "ADMIN_PANEL": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13052,6 +13329,7 @@
           "ALERTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13142,6 +13420,7 @@
           "APPROVAL": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13232,6 +13511,7 @@
           "ATTENDANCE_REPORT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13322,6 +13602,7 @@
           "AUDIT_LOG": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13412,6 +13693,7 @@
           "AUTOMATIC_LOCK": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13502,6 +13784,7 @@
           "BILLABLE_HOURS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13592,6 +13875,7 @@
           "BRANDED_REPORTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13682,6 +13966,7 @@
           "BREAKS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13772,6 +14057,7 @@
           "BULK_EDIT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13862,6 +14148,7 @@
           "CLIENT_CURRENCY": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -13952,6 +14239,7 @@
           "CREATION_PERMISSIONS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14042,6 +14330,7 @@
           "CSV_EXPORT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14132,6 +14421,7 @@
           "CUSTOM_FIELDS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14222,6 +14512,7 @@
           "CUSTOM_REPORTING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14312,6 +14603,7 @@
           "CUSTOM_SUBDOMAIN": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14402,6 +14694,7 @@
           "DECIMAL_FORMAT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14492,6 +14785,7 @@
           "DISABLE_MANUAL_MODE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14582,6 +14876,7 @@
           "EDIT_MEMBER_PROFILE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14672,6 +14967,7 @@
           "EXCLUDE_NON_BILLABLE_FROM_ESTIMATE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14762,6 +15058,7 @@
           "EXPENSES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14852,6 +15149,7 @@
           "FAVORITE_ENTRIES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -14942,6 +15240,7 @@
           "FILE_IMPORT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15032,6 +15331,7 @@
           "FORECASTING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15122,6 +15422,7 @@
           "GRANT_PROJECT_MANAGER_ROLE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15212,6 +15513,7 @@
           "HIDE_PAGES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15302,6 +15604,7 @@
           "HISTORIC_RATES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15392,6 +15695,7 @@
           "INVOICE_EMAILS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15482,6 +15786,7 @@
           "INVOICE_REMINDERS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15572,6 +15877,7 @@
           "INVOICING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15662,6 +15968,7 @@
           "KIOSK": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15752,6 +16059,7 @@
           "KIOSK_PHOTO_CAPTURE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15842,6 +16150,7 @@
           "KIOSK_PIN_REQUIRED": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -15932,6 +16241,7 @@
           "KIOSK_QR_CODE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16022,6 +16332,7 @@
           "KIOSK_SESSION_DURATION": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16112,6 +16423,7 @@
           "KIOSK_SIX_DIGIT_PIN": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16202,6 +16514,7 @@
           "LABOR_COST": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16292,6 +16605,7 @@
           "LIMITED_USERS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16382,6 +16696,7 @@
           "LOCATIONS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16472,6 +16787,7 @@
           "MANAGER_ROLE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16562,6 +16878,7 @@
           "MONTHLY_OVERTIME_CALCULATION_PERIOD": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16652,6 +16969,7 @@
           "MULTI_FACTOR_AUTHENTICATION": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16742,6 +17060,7 @@
           "ONE_MONTH_RANGE_REPORTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16832,6 +17151,7 @@
           "ONE_YEAR_RANGE_REPORTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -16922,6 +17242,7 @@
           "PRIVATE_PROJECT_ACCESS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17012,6 +17333,7 @@
           "PROJECT_BUDGET": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17102,6 +17424,7 @@
           "PROJECT_ESTIMATE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17192,6 +17515,7 @@
           "PROJECT_TEMPLATES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17282,6 +17606,7 @@
           "QUICKBOOKS_INTEGRATION": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17372,6 +17697,7 @@
           "RECURRING_ESTIMATES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17462,6 +17788,7 @@
           "RECURRING_INVOICES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17552,6 +17879,7 @@
           "REQUIRED_FIELDS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17642,6 +17970,7 @@
           "SCHEDULED_REPORTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17732,6 +18061,7 @@
           "SCHEDULING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17822,6 +18152,7 @@
           "SCHEDULING_BILLABLE_AND_COST_AMOUNT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -17912,6 +18243,7 @@
           "SCHEDULING_FORECASTING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18002,6 +18334,7 @@
           "SCIM": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18092,6 +18425,7 @@
           "SCREENSHOTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18182,6 +18516,7 @@
           "SHARED_REPORTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18272,6 +18607,7 @@
           "SPLIT_TIME_ENTRY": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18362,6 +18698,7 @@
           "SSO": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18452,6 +18789,7 @@
           "SUMMARY_ESTIMATE": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18542,6 +18880,7 @@
           "TARGETS_AND_REMINDERS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18632,6 +18971,7 @@
           "TASK_COST_RATES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18722,6 +19062,7 @@
           "TASK_HOURLY_RATES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18812,6 +19153,7 @@
           "TASK_RATES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18902,6 +19244,7 @@
           "TIMESHEET_IMPORT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -18992,6 +19335,7 @@
           "TIME_OFF": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19082,6 +19426,7 @@
           "TIME_TRACKING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19172,6 +19517,7 @@
           "UNLIMITED_REPORTS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19262,6 +19608,7 @@
           "UNLIMITED_USER_SEATS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19352,6 +19699,7 @@
           "USER_CUSTOM_FIELDS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19442,6 +19790,7 @@
           "USER_IMPORT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19532,6 +19881,7 @@
           "WEEKLY_OVERTIME_CALCULATION_PERIOD": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19622,6 +19972,7 @@
           "WHO_CAN_CHANGE_TIMEENTRY_BILLABILITY": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19712,6 +20063,7 @@
           "WHO_CAN_SEE_ALL_TIME_ENTRIES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19802,6 +20154,7 @@
           "WHO_CAN_SEE_PROJECT_STATUS": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19892,6 +20245,7 @@
           "WHO_CAN_SEE_PUBLIC_PROJECTS_ENTRIES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -19982,6 +20336,7 @@
           "WHO_CAN_SEE_TEAMS_DASHBOARD": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -20072,6 +20427,7 @@
           "WORKSPACE_LOCK_TIMEENTRIES": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -20162,6 +20518,7 @@
           "WORKSPACE_TIME_AUDIT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -20252,6 +20609,7 @@
           "WORKSPACE_TIME_ROUNDING": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -20342,6 +20700,7 @@
           "WORKSPACE_TRANSFER": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -20432,6 +20791,7 @@
           "XLSX_EXPORT": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",
@@ -20535,6 +20895,7 @@
             "items": {
               "type": "string",
               "enum": [
+                "ACTIVITY_MONITORING",
                 "ADD_TIME_FOR_OTHERS",
                 "ADMIN_PANEL",
                 "ALERTS",
@@ -23075,7 +23436,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents cost rate object.",
+        "description": "Represents hourly rate object.",
         "default": null
       },
       "RateDtoV1": {
@@ -23089,7 +23450,7 @@
           },
           "currency": { "type": "string", "description": "Represents a currency.", "example": "USD", "default": "" }
         },
-        "description": "Represents cost rate object.",
+        "description": "Represents hourly rate object.",
         "default": null
       },
       "RateWithCurrencyRequestV1": {
@@ -23943,6 +24304,7 @@
             },
             "default": null
           },
+          "timeViewMode": { "type": "string" },
           "weekStart": {
             "type": "string",
             "description": "Represents a date of the starting day of the week in the yyyy-MM-dd format.",
@@ -24478,6 +24840,22 @@
             "description": "Represents a start date in yyyy-MM-ddThh:mm:ssZ format.",
             "format": "date-time",
             "example": "2020-01-01T00:00:00Z"
+          },
+          "timeZone": {
+            "type": "string",
+            "description": "Represents the user's timezone.",
+            "example": "America/New_York",
+            "default": ""
+          },
+          "zonedEnd": {
+            "type": "string",
+            "description": "Represents the end time in the user's timezone.",
+            "format": "date-time"
+          },
+          "zonedStart": {
+            "type": "string",
+            "description": "Represents the start time in the user's timezone.",
+            "format": "date-time"
           }
         },
         "description": "Represents a time interval object.",
@@ -24645,6 +25023,7 @@
         "type": "object",
         "properties": {
           "changedAt": { "type": "string", "format": "date-time" },
+          "changedAtTimeZone": { "type": "string" },
           "changedByUserId": { "type": "string" },
           "changedByUserName": { "type": "string" },
           "changedForUserName": { "type": "string" },
@@ -29260,9 +29639,11 @@
               "BILLABLE_RATE_UPDATED"
             ]
           },
+          "delayedDelete": { "type": "boolean" },
           "feature": {
             "type": "string",
             "enum": [
+              "ACTIVITY_MONITORING",
               "ADD_TIME_FOR_OTHERS",
               "ADMIN_PANEL",
               "ALERTS",

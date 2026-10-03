@@ -70,7 +70,7 @@ jobs:
         if: steps.regenerate.outputs.updated == 'true'
         run: |
           mkdir -p .changeset
-          cat > .changeset/jira-api-spec-update.md <<'CHANGESET'
+          cat > .changeset/jira-api-spec-update-${GITHUB_RUN_ID}.md <<'CHANGESET'
           ---
           "@knpkv/jira-api-client": minor
           "@knpkv/jira-cli": patch

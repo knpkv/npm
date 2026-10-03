@@ -98,6 +98,15 @@ const patchGuidanceDiagnostics = (
   })
 }
 
+// Generated changesets must not reuse a fixed path: the workflow regenerates the PR branch
+// from the base, so a fixed name overwrites a still-pending changeset from an earlier update.
+const changesetPathDiagnostics = (source: string): ReadonlyArray<string> =>
+  [...source.matchAll(/cat\s+>\s+(\.changeset\/[^\s]+\.md)/gu)].flatMap(([, changesetPath]) =>
+    changesetPath !== undefined && changesetPath.includes("${GITHUB_RUN_ID}")
+      ? []
+      : [`Generated changeset ${changesetPath ?? ""} must be unique per workflow run`]
+  )
+
 const releaseWorkflow = (name: string, release: string, guidance = "Review the generated API.") => `
 jobs:
   update:
@@ -292,6 +301,24 @@ jobs:
         "confluence-api-update.yml"
       ]))
       expect(yield* inspectApiUpdateWorkflows(root)).toEqual([])
+    }))
+
+  it("rejects a fixed generated changeset path and accepts a per-run path", () => {
+    expect(changesetPathDiagnostics("run: cat > .changeset/clockify-api-spec-update.md <<'CHANGESET'")).toEqual([
+      "Generated changeset .changeset/clockify-api-spec-update.md must be unique per workflow run"
+    ])
+    expect(
+      changesetPathDiagnostics("run: cat > .changeset/clockify-api-spec-update-${GITHUB_RUN_ID}.md <<'CHANGESET'")
+    ).toEqual([])
+  })
+
+  it.effect("writes every generated changeset to a per-run path", () =>
+    Effect.gen(function*() {
+      for (const name of ["clockify-api-update.yml", "jira-api-update.yml", "confluence-api-update.yml"]) {
+        const source = yield* loadWorkflow(name)
+        expect(source).toMatch(/cat\s+>\s+\.changeset\//u)
+        expect(changesetPathDiagnostics(source)).toEqual([])
+      }
     }))
 
   it("rejects a bare consumer build and accepts a dependency-closed build", () => {
