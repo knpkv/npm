@@ -1,0 +1,68 @@
+{
+  "name": "@knpkv/agent-usage",
+  "version": "0.0.0",
+  "description": "Claude and Codex subscription usage over time, per ticket and against limits, in a local browser view",
+  "license": "MIT",
+  "author": "knpkv",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/knpkv/npm.git",
+    "directory": "packages/agent-usage"
+  },
+  "type": "module",
+  "main": "src/index.ts",
+  "bin": {
+    "agent-usage": "dist/main.js"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./*.js": "./src/*.ts"
+  },
+  "publishConfig": {
+    "access": "public",
+    "main": "dist/index.js",
+    "types": "dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "./*.js": {
+        "types": "./dist/*.d.ts",
+        "default": "./dist/*.js"
+      }
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=26"
+  },
+  "scripts": {
+    "start": "node dist/main.js",
+    "build": "tsc -b && vite build",
+    "prepack": "tsc -b && vite build",
+    "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
+    "test": "vitest",
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts"
+  },
+  "dependencies": {
+    "@effect/atom-react": "4.0.0",
+    "@effect/platform-node": "4.0.0",
+    "@effect/sql-sqlite-node": "4.0.0",
+    "effect": "4.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0"
+  },
+  "devDependencies": {
+    "@effect/vitest": "4.0.0",
+    "@types/node": "^26.6.4",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "typescript": "npm:@typescript/typescript6@^6.0.2",
+    "vite": "^8.3.2",
+    "vitest": "catalog:"
+  }
+}

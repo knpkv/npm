@@ -1,0 +1,148 @@
+import { describe, expect, it } from "@effect/vitest"
+import { initialCodexState, readCodex } from "../src/core/CodexReader.js"
+import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines } from "./fixtures.js"
+
+const file = { fileKey: "2026/09/01/rollout-x.jsonl", machine: "ser8", sessionId: "sess" }
+
+describe("readCodex", () => {
+  it("books each token_count's last usage with the session's cwd, branch and model", () => {
+    const source = lines(
+      codexMeta("/home/dev/worktrees/npm/feat/RPS-9", "feat/RPS-9"),
+      codexTurn("gpt-6-sol"),
+      codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [100, 40, 30, 10], total: 130 })
+    )
+    const result = readCodex(file, source, initialCodexState)
+    expect(result.events).toEqual([{
+      agent: "codex",
+      dedupeKey: `sess@${source[2]?.offset}`,
+      machine: "ser8",
+      sessionId: "sess",
+      occurredAt: Date.parse("2026-09-01T10:00:05.000Z"),
+      model: "gpt-6-sol",
+      fast: false,
+      // input excludes the 40 cached; output excludes the 10 reasoning.
+      tokens: { input: 60, output: 20, reasoning: 10, cacheRead: 40, cacheWrite5m: 0, cacheWrite1h: 0 },
+      attribution: { cwd: "/home/dev/worktrees/npm/feat/RPS-9", branch: "feat/RPS-9", activeTicket: null }
+    }])
+  })
+
+  it("does not book a repeated token_count whose running total did not move", () => {
+    const result = readCodex(
+      file,
+      lines(
+        codexTurn("gpt-6-sol"),
+        codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [100, 0, 30, 0], total: 130 }),
+        codexTokenCount({ at: "2026-09-01T10:00:06.000Z", last: [100, 0, 30, 0], total: 130 })
+      ),
+      initialCodexState
+    )
+    expect(result.events).toHaveLength(1)
+    expect(result.state.lastTotal).toBe(130)
+  })
+
+  it("resumes from carried state, so a later chunk keeps the model and the running total", () => {
+    const first = readCodex(
+      file,
+      lines(codexTurn("gpt-6-sol"), codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })),
+      initialCodexState
+    )
+    const second = readCodex(
+      file,
+      [{
+        offset: 900,
+        text: JSON.stringify(codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [1, 0, 1, 0], total: 2 }))
+      }],
+      first.state
+    )
+    expect(second.events).toHaveLength(0)
+  })
+
+  it("takes Limit Snapshots and the credit balance only from the account-level codex limit", () => {
+    const result = readCodex(
+      file,
+      lines(
+        codexTokenCount({
+          at: "2026-09-01T10:00:05.000Z",
+          last: [1, 0, 1, 0],
+          total: 2,
+          primary: { used: 12.5, minutes: 300, resets: 1_790_000_000 },
+          secondary: { used: 40, minutes: 10080, resets: 1_790_500_000 },
+          credits: { has_credits: true, unlimited: false, balance: "5000.5" }
+        }),
+        codexTokenCount({
+          at: "2026-09-01T10:00:06.000Z",
+          last: [1, 0, 1, 0],
+          total: 4,
+          limitId: "gpt-6-astra",
+          primary: { used: 99, minutes: 10080, resets: 1_790_500_000 }
+        })
+      ),
+      initialCodexState
+    )
+    expect(result.snapshots).toEqual([
+      {
+        agent: "codex",
+        machine: "ser8",
+        source: "codex-rollout",
+        label: "primary",
+        windowMinutes: 300,
+        observedAt: Date.parse("2026-09-01T10:00:05.000Z"),
+        reading: { _tag: "Known", usedPercent: 12.5, resetsAt: 1_790_000_000_000 }
+      },
+      {
+        agent: "codex",
+        machine: "ser8",
+        source: "codex-rollout",
+        label: "secondary",
+        windowMinutes: 10080,
+        observedAt: Date.parse("2026-09-01T10:00:05.000Z"),
+        reading: { _tag: "Known", usedPercent: 40, resetsAt: 1_790_500_000_000 }
+      }
+    ])
+    expect(result.balances).toEqual([{
+      kind: "codex-credits",
+      machine: "ser8",
+      observedAt: Date.parse("2026-09-01T10:00:05.000Z"),
+      value: { _tag: "Known", balance: { _tag: "Credits", credits: 5000.5 } }
+    }])
+  })
+
+  it("reads an account with no credits as NotSupported, not as an empty balance", () => {
+    const result = readCodex(
+      file,
+      lines(codexTokenCount({
+        at: "2026-09-01T10:00:05.000Z",
+        last: [1, 0, 1, 0],
+        total: 2,
+        credits: { has_credits: false, unlimited: false, balance: "0" }
+      })),
+      initialCodexState
+    )
+    expect(result.balances[0]?.value).toEqual({ _tag: "Unknown", reason: "NotSupported" })
+  })
+
+  it("mines the Active Ticket from typed input, never from injected AGENTS.md or environment items", () => {
+    const result = readCodex(
+      file,
+      lines(
+        codexTurn("gpt-6-sol"),
+        codexUserItem("# AGENTS.md instructions\n\n<INSTRUCTIONS>approved RPS-1234 and RPS-4242</INSTRUCTIONS>"),
+        codexUserItem("<environment_context>\n  <cwd>/w/RPS-4243</cwd>\n</environment_context>"),
+        codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 }),
+        codexUserItem("work on RPS-7071"),
+        codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [1, 0, 1, 0], total: 4 })
+      ),
+      initialCodexState
+    )
+    expect(result.events.map((event) => event.attribution.activeTicket)).toEqual([null, "RPS-7071"])
+  })
+
+  it("records a request whose model was never announced under an unpriced placeholder model", () => {
+    const result = readCodex(
+      file,
+      lines(codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })),
+      initialCodexState
+    )
+    expect(result.events[0]?.model).toBe("unknown")
+  })
+})
