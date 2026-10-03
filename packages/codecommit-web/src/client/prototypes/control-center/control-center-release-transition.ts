@@ -33,6 +33,6 @@ export function runReleaseViewTransition(
   root.dataset.ccReleaseTransition = kind
   const transition = document.startViewTransition(update)
   void transition.finished.finally(() => {
-    delete root.dataset.ccReleaseTransition
+    root.removeAttribute("data-cc-release-transition")
   })
 }

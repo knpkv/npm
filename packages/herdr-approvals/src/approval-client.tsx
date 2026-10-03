@@ -595,7 +595,7 @@ const DashboardApp = ({ atoms }: { readonly atoms: DashboardAtoms }) => {
     target.focus({ preventScroll: true })
     target.scrollIntoView({ behavior: "smooth", block: "center" })
     return () => {
-      delete target.dataset.approvalTarget
+      target.removeAttribute("data-approval-target")
     }
   }, [currentSnapshot?.observedAt, deepLinkTarget])
   if (currentSnapshot === null) {
