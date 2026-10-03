@@ -68,6 +68,8 @@ const ingest = Command.make(
   Effect.fn(function*({ json }) {
     const settings = yield* config
     const status: IngestStatus = yield* ingestOnce(settings.roots).pipe(
+      // This subcommand's entry point: the store opens for this one pass and closes with it.
+      // @effect-diagnostics-next-line strictEffectProvide:off
       Effect.provide(databaseLayer(settings.storeDirectory))
     )
     if (json) return yield* Console.log(encodeStatus(status))
@@ -84,5 +86,4 @@ const cli = Command.make("agent-usage").pipe(
 )
 
 // Executable entry point: the host platform is provided once for this process.
-// @effect-diagnostics-next-line strictEffectProvide:off
 NodeRuntime.runMain(cli.pipe(Effect.provide(NodeServices.layer)))
