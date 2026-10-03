@@ -101,7 +101,13 @@ export const acliTicketSearch = Effect.gen(function*() {
         "--json"
       ])
     ).pipe(
-      Effect.mapError((error) => new TicketLookupFailed({ reason: `acli failed: ${error._tag}` })),
+      Effect.mapError((error) =>
+        new TicketLookupFailed({
+          reason: error.reason._tag === "NotFound"
+            ? "ticket titles need acli, which is not installed"
+            : `acli could not run (${error.reason._tag})`
+        })
+      ),
       Effect.flatMap((output) =>
         decodeSearch(output).pipe(
           Effect.mapError(() => new TicketLookupFailed({ reason: "acli returned an unreadable reply" }))

@@ -28,8 +28,12 @@ _Avoid_: Bucket, attribution
 The single ticket key the human typed into an otherwise shared session at the time of a request. Keys inside injected context (agent instructions, system reminders, environment blocks) never count.
 _Avoid_: Current ticket, mentioned ticket
 
+**Known Project**:
+A Jira project a branch or worktree path in the store has named, or one listed in configuration. An Active Ticket only counts when its project is a Known Project.
+_Avoid_: Allowed prefix, project allowlist
+
 **Booking**:
-What a Usage Event's consumption counts toward: a Ticket when its Attribution Inputs name one, otherwise its Repo. Derived when read, never stored.
+What a Usage Event's consumption counts toward: a Ticket when its branch or path names one, or its Active Ticket belongs to a Known Project; otherwise its Repo. Derived when read, never stored.
 _Avoid_: Bucket (session-counter's word for the same thing), project, category
 
 **API-Equivalent Cost**:

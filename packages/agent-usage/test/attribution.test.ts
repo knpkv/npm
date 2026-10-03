@@ -1,9 +1,10 @@
 import { describe, expect, it } from "@effect/vitest"
 import {
+  attribute,
   bookingId,
-  bookingOf,
   claudeHumanText,
   codexHumanText,
+  knownProjects,
   repoName,
   singleTicket,
   ticketKeyFromBranch,
@@ -31,26 +32,42 @@ describe("ticket keys", () => {
   })
 })
 
-describe("bookingOf", () => {
+describe("attribute", () => {
+  const known = new Set(["RPS"])
+
   it("prefers the branch, then the path, then the active ticket", () => {
-    expect(bookingOf({ branch: "feat/RPS-1", cwd: "/w/RPS-2", activeTicket: "RPS-3" })).toEqual({
+    expect(attribute({ branch: "feat/RPS-1", cwd: "/w/RPS-2", activeTicket: "RPS-3" }, known).booking).toEqual({
       _tag: "Ticket",
       key: "RPS-1"
     })
-    expect(bookingOf({ branch: "main", cwd: "/w/RPS-2", activeTicket: "RPS-3" })).toEqual({
+    expect(attribute({ branch: "main", cwd: "/w/RPS-2", activeTicket: "RPS-3" }, known).booking).toEqual({
       _tag: "Ticket",
       key: "RPS-2"
     })
-    expect(bookingOf({ branch: "main", cwd: "/w/app", activeTicket: "RPS-3" })).toEqual({
+    expect(attribute({ branch: "main", cwd: "/w/app", activeTicket: "RPS-3" }, known).booking).toEqual({
       _tag: "Ticket",
       key: "RPS-3"
     })
   })
 
   it("books to the repo when nothing names a ticket", () => {
-    expect(bookingOf({ branch: "main", cwd: "/home/a/code/app", activeTicket: null })).toEqual({
-      _tag: "Repo",
-      name: "app"
+    expect(attribute({ branch: "main", cwd: "/home/a/code/app", activeTicket: null }, known)).toEqual({
+      booking: { _tag: "Repo", name: "app" },
+      ignoredKey: null
+    })
+  })
+
+  it("books a typed key of an unknown project to the repo and reports it", () => {
+    expect(attribute({ branch: "main", cwd: "/w/app", activeTicket: "GPT-6" }, known)).toEqual({
+      booking: { _tag: "Repo", name: "app" },
+      ignoredKey: "GPT-6"
+    })
+  })
+
+  it("trusts branch and path keys whatever their project", () => {
+    expect(attribute({ branch: "feat/ABC-9", cwd: "/w/app", activeTicket: null }, new Set()).booking).toEqual({
+      _tag: "Ticket",
+      key: "ABC-9"
     })
   })
 
@@ -61,6 +78,24 @@ describe("bookingOf", () => {
   it("keeps tickets and repos apart in their ids", () => {
     expect(bookingId({ _tag: "Ticket", key: "RPS-1" })).toBe("ticket:RPS-1")
     expect(bookingId({ _tag: "Repo", name: "npm" })).toBe("repo:npm")
+  })
+})
+
+describe("knownProjects", () => {
+  it("collects the projects branches and paths name, plus the configured ones", () => {
+    const projects = knownProjects(
+      [{ branch: "feat/RPS-12", cwd: "/w/app" }, { branch: "main", cwd: "/w/worktrees/x/OPS-3" }],
+      ["ABC"]
+    )
+    expect([...projects].sort()).toEqual(["ABC", "OPS", "RPS"])
+  })
+
+  it("admits a typed key of a configured project that no branch has named", () => {
+    const projects = knownProjects([], ["ABC"])
+    expect(attribute({ branch: "main", cwd: "/w/app", activeTicket: "ABC-1" }, projects).booking).toEqual({
+      _tag: "Ticket",
+      key: "ABC-1"
+    })
   })
 })
 

@@ -48,7 +48,7 @@ describe("HTTP boundary", () => {
         })
         expect(response.status).toBe(200)
         const body = yield* response.json
-        expect(body).toMatchObject({ bookings: [], cells: [], unpriced: { tokens: 0, models: [] } })
+        expect(body).toMatchObject({ bookings: [], cells: [], unpriced: { tokens: 0, models: [] }, ignoredKeys: [] })
         expect(body).toHaveProperty("periods.length", 8)
       }))
 

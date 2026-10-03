@@ -7,7 +7,8 @@
  * - **Periods are the viewer's.** The browser sends its IANA zone; hours, days and weeks start at
  *   local midnight (weeks on Monday), so a daylight-saving day is 23 or 25 hours long. Each stored
  *   15-minute bucket belongs to exactly one period, because every zone offset is a multiple of 15.
- * - **Bookings and costs are derived here** (ADR 0002), from Attribution Inputs and today's prices.
+ * - **Bookings and costs are derived here** (ADR 0002), from Attribution Inputs, the Known
+ *   Projects and today's prices. Typed keys of unknown projects are counted by prefix, not hidden.
  *   Unpriced tokens are carried beside the cost, never folded into it as zero.
  * - **A step line needs its starting value.** Each limit series begins at the range's left edge
  *   with the reading in force there, taken from the last snapshot before it.
@@ -16,7 +17,7 @@
  */
 import { Option } from "effect"
 import type { BookingSummary, LimitSeries, LimitsReport, Period, UsageCell, UsageReport } from "../shared/contracts.js"
-import { bookingId, bookingOf } from "./Attribution.js"
+import { attribute, bookingId, projectOf } from "./Attribution.js"
 import type { Agent, LimitSnapshot, TicketTitleValue, Tokens } from "./Model.js"
 import { totalTokens } from "./Model.js"
 import { groupCost } from "./Pricing.js"
@@ -115,17 +116,23 @@ export const buildUsageReport = (
   groups: ReadonlyArray<UsageGroup>,
   periods: ReadonlyArray<Period>,
   titles: Readonly<Record<string, TicketTitleValue>>,
+  projects: ReadonlySet<string>,
   end: number = Number.POSITIVE_INFINITY
 ): UsageReport => {
   const bookings = new Map<string, MutableBooking>()
   const cells = new Map<string, UsageCell>()
   const unpricedModels = new Set<string>()
   let unpricedTokens = 0
+  const ignored = new Map<string, number>()
 
   for (const group of groups) {
     const period = periodIndex(periods, group.bucketStart, end)
     if (period === null) continue
-    const booking = bookingOf(group.attribution)
+    const { booking, ignoredKey } = attribute(group.attribution, projects)
+    if (ignoredKey !== null) {
+      const prefix = projectOf(ignoredKey)
+      ignored.set(prefix, (ignored.get(prefix) ?? 0) + group.requests)
+    }
     const id = bookingId(booking)
     const tokens = totalTokens(group.tokens)
     const cost = groupCost(group)
@@ -190,11 +197,23 @@ export const buildUsageReport = (
     cells: [...cells.values()].sort((left, right) =>
       left.period - right.period || (order.get(left.booking) ?? 0) - (order.get(right.booking) ?? 0)
     ),
-    unpriced: { tokens: unpricedTokens, models: [...unpricedModels].sort() }
+    unpriced: { tokens: unpricedTokens, models: [...unpricedModels].sort() },
+    ignoredKeys: [...ignored]
+      .map(([prefix, requests]) => ({ prefix, requests }))
+      .sort((left, right) => right.requests - left.requests || left.prefix.localeCompare(right.prefix))
   }
 }
 
-const seriesKey = (snapshot: LimitSnapshot): string => `${snapshot.agent}\u0000${snapshot.label}`
+/**
+ * Which series a snapshot continues. Codex reports windows by slot (`primary`, `secondary`) and a
+ * plan change moves the weekly window between slots, so Codex series follow the window's length.
+ * Claude names each window, and two weekly windows (`seven_day`, `seven_day_opus`) are different
+ * allowances, so Claude series follow the name.
+ */
+const seriesKey = (snapshot: LimitSnapshot): string =>
+  snapshot.source === "codex-rollout" && snapshot.windowMinutes !== null
+    ? `${snapshot.agent}\u0000${snapshot.windowMinutes}m`
+    : `${snapshot.agent}\u0000${snapshot.label}`
 
 /**
  * Limit series over a range, from every snapshot up to its end in time order. Each series starts
@@ -220,12 +239,19 @@ export const buildLimitsReport = (
     const point = { at: Math.max(snapshot.observedAt, range.from), reading: snapshot.reading }
     // Before the range, only the newest reading matters: it becomes the left-edge point.
     const points = snapshot.observedAt < range.from ? [point] : [...current.points, point]
-    series.set(key, { ...current, windowMinutes: snapshot.windowMinutes, points })
+    series.set(key, { ...current, label: snapshot.label, windowMinutes: snapshot.windowMinutes, points })
   }
   const byOrder = (left: { readonly agent: string; readonly label: string }, right: typeof left) =>
     left.agent.localeCompare(right.agent) || left.label.localeCompare(right.label)
+  // A series whose every reading reset before the range began has nothing to say about it.
+  const live = [...series.values()].filter((entry) =>
+    entry.points.some((point) =>
+      point.at > range.from || point.reading._tag === "Unknown" || point.reading.resetsAt === null ||
+      point.reading.resetsAt > range.from
+    )
+  )
   return {
-    series: [...series.values()].sort(byOrder),
+    series: live.sort(byOrder),
     latest: [...latest.values()].sort(byOrder)
   }
 }

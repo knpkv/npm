@@ -5,12 +5,12 @@
  */
 import { Effect, Ref } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
-import { bookingOf } from "../core/Attribution.js"
+import { attribute } from "../core/Attribution.js"
 import { buildLimitsReport, buildUsageReport, isTimeZone, periodsOf } from "../core/Report.js"
 import { type StoreError, UsageStore } from "../core/Store.js"
 import { ticketTitles } from "../core/Tickets.js"
 import { AgentUsageApi, ApiError } from "./Api.js"
-import { RuntimeState } from "./Runtime.js"
+import { currentKnownProjects, RuntimeState } from "./Runtime.js"
 
 /** More periods than any chart can draw legibly; a range that needs more wants a coarser bucket. */
 export const MAX_PERIODS = 2_500
@@ -40,14 +40,18 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
           const groups = (yield* store.usageGroups(query)).filter((group) =>
             query.agent === "all" || group.agent === query.agent
           )
+          const projects = yield* currentKnownProjects.pipe(
+            Effect.provideService(UsageStore, store),
+            Effect.provideService(RuntimeState, state)
+          )
           const keys = [
             ...new Set(groups.flatMap((group) => {
-              const booking = bookingOf(group.attribution)
+              const { booking } = attribute(group.attribution, projects)
               return booking._tag === "Ticket" ? [booking.key] : []
             }))
           ]
           const titles = yield* ticketTitles(keys).pipe(Effect.provideService(UsageStore, store))
-          return buildUsageReport(groups, periods, titles, query.to)
+          return buildUsageReport(groups, periods, titles, projects, query.to)
         }).pipe(Effect.catchTag("StoreError", (error) => Effect.fail(storeUnavailable(error)))))
       .handle("limits", ({ query }) =>
         Effect.gen(function*() {

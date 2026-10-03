@@ -15,7 +15,7 @@
  */
 import type { FileSystem, Path } from "effect"
 import { Clock, Context, Duration, Effect, Layer, Ref, Schedule } from "effect"
-import { bookingOf } from "../core/Attribution.js"
+import { attribute, knownProjects } from "../core/Attribution.js"
 import { type ClaudeUsageDeps, pollClaudeLimits } from "../core/ClaudeLimits.js"
 import { ingestOnce, type SourceRoots } from "../core/Ingest.js"
 import { UsageStore } from "../core/Store.js"
@@ -29,17 +29,26 @@ const TITLE_HORIZON_MILLIS = 90 * 24 * 60 * 60 * 1000
 
 export class RuntimeState extends Context.Service<RuntimeState, {
   readonly machine: string
+  /** Known Projects from configuration. */
+  readonly projects: ReadonlyArray<string>
   readonly status: Ref.Ref<ServerStatus>
 }>()("@knpkv/agent-usage/server/Runtime/RuntimeState") {
-  static readonly layer = (machine: string) =>
+  static readonly layer = (machine: string, projects: ReadonlyArray<string> = []) =>
     Layer.effect(
       RuntimeState,
       Effect.map(
         Ref.make<ServerStatus>({ machine, ingest: null, ingestFailure: null, ticketLookupFailures: [] }),
-        (status) => RuntimeState.of({ machine, status })
+        (status) => RuntimeState.of({ machine, projects, status })
       )
     )
 }
+
+/** The Known Projects now: those the store's branches and paths name, plus the configured ones. */
+export const currentKnownProjects = Effect.gen(function*() {
+  const store = yield* UsageStore
+  const state = yield* RuntimeState
+  return knownProjects(yield* store.places, state.projects)
+})
 
 export interface BackgroundOptions {
   readonly roots: SourceRoots
@@ -52,9 +61,10 @@ const recentTicketKeys = Effect.gen(function*() {
   const store = yield* UsageStore
   const now = yield* Clock.currentTimeMillis
   const groups = yield* store.usageGroups({ from: now - TITLE_HORIZON_MILLIS, to: now + 1 })
+  const projects = yield* currentKnownProjects
   const keys = new Set<string>()
   for (const group of groups) {
-    const booking = bookingOf(group.attribution)
+    const { booking } = attribute(group.attribution, projects)
     if (booking._tag === "Ticket") keys.add(booking.key)
   }
   return [...keys]

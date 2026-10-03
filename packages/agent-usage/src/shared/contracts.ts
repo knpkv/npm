@@ -93,7 +93,9 @@ export const UsageReport = Schema.Struct({
   /** Most API-Equivalent Cost first, then most tokens. */
   bookings: Schema.Array(BookingSummary),
   cells: Schema.Array(UsageCell),
-  unpriced: Schema.Struct({ tokens: Count, models: Schema.Array(Schema.String) })
+  unpriced: Schema.Struct({ tokens: Count, models: Schema.Array(Schema.String) }),
+  /** Typed keys whose project is not a Known Project, by prefix, with the requests they did not book. */
+  ignoredKeys: Schema.Array(Schema.Struct({ prefix: Schema.String, requests: Count }))
 })
 export type UsageReport = typeof UsageReport.Type
 

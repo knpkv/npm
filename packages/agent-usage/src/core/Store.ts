@@ -215,6 +215,8 @@ export class UsageStore extends Context.Service<UsageStore, {
     balances: ReadonlyArray<BalanceReading>
   ) => Effect.Effect<void, StoreError>
   readonly usageGroups: (range: Range) => Effect.Effect<ReadonlyArray<UsageGroup>, StoreError>
+  /** Every distinct branch and working directory ever recorded: what vouches for Known Projects. */
+  readonly places: Effect.Effect<ReadonlyArray<{ readonly branch: string; readonly cwd: string }>, StoreError>
   readonly limitSnapshots: (range: Range) => Effect.Effect<ReadonlyArray<LimitSnapshot>, StoreError>
   /** The newest reading of each balance kind on each machine. */
   readonly latestBalances: Effect.Effect<ReadonlyArray<BalanceReading>, StoreError>
@@ -401,6 +403,13 @@ export class UsageStore extends Context.Service<UsageStore, {
           Effect.mapError(storeError("usage-groups"))
         )
 
+      const places = sql`SELECT DISTINCT branch, cwd FROM usage_events`.pipe(
+        Effect.flatMap(
+          Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ branch: Schema.String, cwd: Schema.String })))
+        ),
+        Effect.mapError(storeError("places"))
+      )
+
       const limitSnapshots = (range: Range) =>
         sql`
           SELECT agent, machine, source, label, window_minutes, observed_at, reading FROM limit_snapshots
@@ -464,6 +473,7 @@ export class UsageStore extends Context.Service<UsageStore, {
         commitChunk,
         recordObservations,
         usageGroups,
+        places,
         limitSnapshots,
         latestBalances,
         tickets,

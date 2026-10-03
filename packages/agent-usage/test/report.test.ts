@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
-import type { AttributionInputs, Tokens } from "../src/core/Model.js"
+import type { AttributionInputs, LimitSnapshot, Tokens } from "../src/core/Model.js"
 import { buildLimitsReport, buildUsageReport, isTimeZone, periodsOf } from "../src/core/Report.js"
 import type { UsageGroup } from "../src/core/Store.js"
 
@@ -80,7 +80,8 @@ describe("buildUsageReport", () => {
         group({ model: "claude-unreleased-9", attribution: { cwd: "/w/app", branch: "main", activeTicket: null } })
       ],
       periods,
-      { "RPS-1": { _tag: "Known", summary: "Fix login" } }
+      { "RPS-1": { _tag: "Known", summary: "Fix login" } },
+      new Set(["RPS"])
     )
     expect(report.bookings.map((booking) => [booking.id, booking.costUsd, booking.unpricedTokens])).toEqual([
       ["ticket:RPS-1", 10, 0],
@@ -96,6 +97,20 @@ describe("buildUsageReport", () => {
     expect(report.unpriced).toEqual({ tokens: 1_000_000, models: ["claude-unreleased-9"] })
   })
 
+  it("books typed keys of unknown projects to the repo and counts them by prefix", () => {
+    const report = buildUsageReport(
+      [
+        group({ requests: 3, attribution: { cwd: "/w/app", branch: "main", activeTicket: "GPT-6" } }),
+        group({ requests: 2, attribution: { cwd: "/w/app", branch: "main", activeTicket: "RPS-7071" } })
+      ],
+      periods,
+      {},
+      new Set(["RPS"])
+    )
+    expect(report.bookings.map((booking) => booking.id).sort()).toEqual(["repo:app", "ticket:RPS-7071"])
+    expect(report.ignoredKeys).toEqual([{ prefix: "GPT", requests: 3 }])
+  })
+
   it("drops groups outside every period", () => {
     const report = buildUsageReport(
       [group({
@@ -103,7 +118,8 @@ describe("buildUsageReport", () => {
         attribution: { cwd: "/w/a", branch: "", activeTicket: null }
       })],
       periods,
-      {}
+      {},
+      new Set()
     )
     expect(report.cells).toEqual([])
   })
@@ -144,5 +160,48 @@ describe("buildLimitsReport", () => {
       ]
     }])
     expect(report.latest.map((snapshot) => snapshot.observedAt)).toEqual([1_500])
+  })
+
+  it("joins Codex windows of one length whatever slot the plan put them in, and keeps Claude keys apart", () => {
+    const snapshot = (
+      agent: "claude" | "codex",
+      source: "claude-oauth-usage" | "codex-rollout",
+      label: string,
+      observedAt: number
+    ): LimitSnapshot => ({
+      agent,
+      machine: "ser8",
+      source,
+      label,
+      windowMinutes: 10_080,
+      observedAt,
+      reading: { _tag: "Known", usedPercent: observedAt / 100, resetsAt: null }
+    })
+    const report = buildLimitsReport([
+      snapshot("codex", "codex-rollout", "secondary", 1_100),
+      snapshot("codex", "codex-rollout", "primary", 1_200),
+      snapshot("claude", "claude-oauth-usage", "seven_day", 1_300),
+      snapshot("claude", "claude-oauth-usage", "seven_day_opus", 1_400)
+    ], { from: 1_000, to: 2_000 })
+    expect(report.series.map((series) => [series.agent, series.label, series.points.length])).toEqual([
+      ["claude", "seven_day", 1],
+      ["claude", "seven_day_opus", 1],
+      ["codex", "primary", 2]
+    ])
+    expect(report.latest.map((latest) => latest.label)).toEqual(["seven_day", "seven_day_opus", "primary"])
+  })
+
+  it("drops a series whose last reading before the range had already reset", () => {
+    const report = buildLimitsReport([{
+      agent: "codex",
+      machine: "ser8",
+      source: "codex-rollout",
+      label: "primary",
+      windowMinutes: 300,
+      observedAt: 100,
+      reading: { _tag: "Known", usedPercent: 65, resetsAt: 500 }
+    }], { from: 1_000, to: 2_000 })
+    expect(report.series).toEqual([])
+    expect(report.latest).toHaveLength(1)
   })
 })

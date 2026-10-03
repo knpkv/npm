@@ -45,13 +45,15 @@
     "prepack": "tsc -b && vite build",
     "check": "tsc -b tsconfig.json && tsc --noEmit -p test/tsconfig.json",
     "test": "vitest",
-    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts"
+    "lint": "eslint \"{src,test}/**/*.{ts,tsx}\" vite.config.ts vitest.config.ts",
+    "dev": "AGENT_USAGE_PUBLIC_ORIGIN=http://localhost:5173 tsx watch src/main.ts serve & vite --clearScreen false"
   },
   "dependencies": {
     "@effect/atom-react": "4.0.0",
     "@effect/platform-node": "4.0.0",
     "@effect/sql-sqlite-node": "4.0.0",
     "@knpkv/browser-pairing": "workspace:^",
+    "@knpkv/rly": "workspace:^",
     "effect": "4.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
@@ -64,6 +66,7 @@
     "@vitejs/plugin-react": "^6.1.1",
     "typescript": "npm:@typescript/typescript6@^6.0.2",
     "vite": "^8.3.2",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "tsx": "^4.23.15"
   }
 }

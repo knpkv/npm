@@ -7,7 +7,8 @@
  * - **A Booking is computed, never stored** (ADR 0002): {@link bookingOf} is pure, so a sharper
  *   rule reaches every event already recorded, including those whose transcripts were pruned.
  * - **Branch, then path, then Active Ticket.** Naming a branch or a worktree is deliberate; a key
- *   typed into a shared session is the weakest signal and only counts when it is the only one.
+ *   typed into a shared session is the weakest signal and only counts when it is the only one and
+ *   its project is a Known Project, so `GPT-6` or `SHA-256` in a prompt books nothing.
  * - **Only the human's words count.** Agents inject instruction files and environment blocks as
  *   user-role messages, and those quote ticket-shaped examples. They are stripped before mining.
  *
@@ -67,10 +68,45 @@ export const repoName = (cwd: string): string => {
   return base ?? "unknown"
 }
 
-/** Branch first, then path, then the Active Ticket; otherwise the repo. */
-export const bookingOf = (inputs: AttributionInputs): Booking => {
-  const key = ticketKeyFromBranch(inputs.branch) ?? ticketKeyFromPath(inputs.cwd) ?? inputs.activeTicket
-  return key === null ? { _tag: "Repo", name: repoName(inputs.cwd) } : { _tag: "Ticket", key }
+/** The project a key belongs to: `RPS` for `RPS-7071`. */
+export const projectOf = (key: string): string => key.slice(0, key.lastIndexOf("-"))
+
+/**
+ * The Known Projects: every project a branch or worktree path has named, plus the configured ones.
+ * Naming a branch is deliberate, so those keys vouch for their project.
+ */
+export const knownProjects = (
+  places: Iterable<{ readonly branch: string; readonly cwd: string }>,
+  configured: Iterable<string>
+): ReadonlySet<string> => {
+  const projects = new Set(configured)
+  for (const place of places) {
+    for (const key of [ticketKeyFromBranch(place.branch), ticketKeyFromPath(place.cwd)]) {
+      if (key !== null) projects.add(projectOf(key))
+    }
+  }
+  return projects
+}
+
+/** A Usage Event's Booking, and the typed key it set aside, if any. */
+export interface Attribution {
+  readonly booking: Booking
+  /** An Active Ticket whose project is not a Known Project: `GPT-6`, `SHA-256`. */
+  readonly ignoredKey: string | null
+}
+
+/**
+ * Branch first, then path, then the Active Ticket when its project is known; otherwise the repo.
+ * Branch and path keys are trusted as they are; only typed text is checked against the projects.
+ */
+export const attribute = (inputs: AttributionInputs, projects: ReadonlySet<string>): Attribution => {
+  const deliberate = ticketKeyFromBranch(inputs.branch) ?? ticketKeyFromPath(inputs.cwd)
+  if (deliberate !== null) return { booking: { _tag: "Ticket", key: deliberate }, ignoredKey: null }
+  const typed = inputs.activeTicket
+  if (typed !== null && projects.has(projectOf(typed))) {
+    return { booking: { _tag: "Ticket", key: typed }, ignoredKey: null }
+  }
+  return { booking: { _tag: "Repo", name: repoName(inputs.cwd) }, ignoredKey: typed }
 }
 
 /** A stable id that keeps a ticket and a repo of the same spelling apart. */

@@ -46,7 +46,7 @@ export const makeServer = (options: AgentUsageServerOptions) =>
     Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1").pipe(Effect.map((hostname) => {
       const services = Layer.mergeAll(
         databaseLayer(options.config.storeDirectory),
-        RuntimeState.layer(options.config.roots.machine)
+        RuntimeState.layer(options.config.roots.machine, options.config.projects)
       )
       return Layer.mergeAll(HttpRouter.serve(application), background(options.config)).pipe(
         Layer.provide(services),
