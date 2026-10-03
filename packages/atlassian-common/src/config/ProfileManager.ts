@@ -227,7 +227,7 @@ export const useProfileForAllTools = (
     ).find((profile): profile is AuthProfile =>
       profile !== null
     )
-    if (!selected) return yield* new ProfileNotFoundError({ selector })
+    if (selected === undefined) return yield* new ProfileNotFoundError({ selector })
 
     yield* Effect.forEach(stores, ([tool, store]) => {
       const matching = findProfile(store.profiles, selector) ?? findProfile(store.profiles, selected.id)
