@@ -7,7 +7,7 @@
  *   user ID, and base URL. The API key is wrapped in `Redacted` on read.
  * - **Schema-gated**: JSON is parsed then validated via `Schema.decodeUnknownEffect(StoredAuth)` —
  *   corrupt data yields {@link ClockifyAuthMissingError} instead of a crash.
- * - **Config-based home dir**: Uses Effect `Config.string("HOME")` for testable env access.
+ * - **Config-based home dir**: Uses Effect `Config.String("HOME")` for testable env access.
  *
  * @module
  */
@@ -71,7 +71,6 @@ export const layer = Layer.effect(
             new ClockifyAuthMissingError({
               message: "Clockify not configured. Run: jcf auth clockify setup"
             })
-          )
         }
         const content = yield* fs.readFileString(filePath).pipe(
           Effect.mapError(() => new ClockifyAuthMissingError({ message: "Failed to read Clockify auth file" }))

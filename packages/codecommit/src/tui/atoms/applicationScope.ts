@@ -1,8 +1,8 @@
 import { ChildEnv } from "@knpkv/codecommit-core"
 import type { Scope } from "effect"
 import { Context, Effect, Layer } from "effect"
-import * as Atom from "effect/unstable/reactivity/Atom"
-import * as AtomRegistry from "effect/unstable/reactivity/AtomRegistry"
+import * as Atom from "effect/reactivity/Atom"
+import * as AtomRegistry from "effect/reactivity/AtomRegistry"
 
 export class TuiApplicationScope extends Context.Service<TuiApplicationScope, Scope.Scope>()(
   "@knpkv/codecommit/TuiApplicationScope"

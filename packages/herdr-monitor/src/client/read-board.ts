@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/unstable/http"
+import { FetchHttpClient, HttpClient, HttpClientResponse } from "effect/http"
 import { BoardView } from "../model.js"
 
 export const readBoard = Effect.fn("Monitor.readBoard")(

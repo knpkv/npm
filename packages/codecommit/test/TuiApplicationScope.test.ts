@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Deferred, Effect, Layer } from "effect"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as Atom from "effect/reactivity/Atom"
 import {
   makeTuiApplicationRegistry,
   TuiApplicationScope,

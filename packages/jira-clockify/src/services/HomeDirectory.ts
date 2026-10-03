@@ -14,8 +14,8 @@ export interface HomeDirectoryContract {
 
 export class HomeDirectory extends Context.Service<HomeDirectory, HomeDirectoryContract>()("jcf/HomeDirectory") {}
 
-const homePath = Config.string("HOME").pipe(
-  Config.orElse(() => Config.string("USERPROFILE")),
+const homePath = Config.String("HOME").pipe(
+  Config.orElse(() => Config.String("USERPROFILE")),
   Config.orElse(() => Config.succeed("/"))
 )
 

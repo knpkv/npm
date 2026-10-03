@@ -6,10 +6,10 @@
  *
  * @internal
  */
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { JiraApiError } from "../JiraCliError.js"
 import type { Person, Version } from "../VersionService.js"
 import { planRelatedWorkSync, VersionService } from "../VersionService.js"
@@ -48,27 +48,27 @@ const ensureNumericId = (id: string): Effect.Effect<void, JiraApiError> =>
       })
     )
 
-const projectOption = Options.string("project").pipe(
+const projectOption = Options.String("project").pipe(
   Options.withAlias("p"),
   Options.withDescription("Jira project key (e.g. RPS)")
 )
-const releasedOption = Options.boolean("released").pipe(
+const releasedOption = Options.Boolean("released").pipe(
   Options.withDescription("Only list released versions"),
   Options.withDefault(false)
 )
-const unreleasedOption = Options.boolean("unreleased").pipe(
+const unreleasedOption = Options.Boolean("unreleased").pipe(
   Options.withDescription("Only list unreleased versions"),
   Options.withDefault(false)
 )
-const jsonOption = Options.boolean("json").pipe(
+const jsonOption = Options.Boolean("json").pipe(
   Options.withDescription("Output as JSON"),
   Options.withDefault(false)
 )
-const emailsOption = Options.boolean("emails").pipe(
+const emailsOption = Options.Boolean("emails").pipe(
   Options.withDescription("Include resolved user email addresses in --json output"),
   Options.withDefault(false)
 )
-const customFieldOption = Options.string("custom-field").pipe(
+const customFieldOption = Options.String("custom-field").pipe(
   Options.withDescription(
     "Custom field display name to include on each ticket (repeatable, e.g. " +
       "--custom-field \"Security & Compliance Impact\"). Values are exposed in " +
@@ -76,13 +76,13 @@ const customFieldOption = Options.string("custom-field").pipe(
   ),
   Options.atLeast(0)
 )
-const maxOption = Options.integer("max").pipe(
+const maxOption = Options.Int("max").pipe(
   Options.withAlias("m"),
   Options.withDescription("Maximum number of versions to fetch (default: all)"),
   Options.optional
 )
 
-const idArg = Args.string("id").pipe(Args.withDescription("Version id (numeric)"))
+const idArg = Args.String("id").pipe(Args.withDescription("Version id (numeric)"))
 
 const listCommand = Command.make("list", {
   project: projectOption,
@@ -99,7 +99,6 @@ const listCommand = Command.make("list", {
         new JiraApiError({
           message: "--released and --unreleased are mutually exclusive; pass at most one (omit both to list all)."
         })
-      )
     }
     const service = yield* VersionService
     const versions = yield* service.listProjectVersions(project, {
@@ -169,7 +168,7 @@ const formatTicketKeys = (tickets: Version["tickets"]): string => {
   return remaining > 0 ? `${shown} (+${remaining} more)` : shown
 }
 
-const descriptionOption = Options.string("description").pipe(
+const descriptionOption = Options.String("description").pipe(
   Options.withAlias("d"),
   Options.withDescription("New version description")
 )
@@ -197,19 +196,19 @@ const ensureIsoDate = (flag: string, value: string): Effect.Effect<void, JiraApi
 // No `-n` alias: it means `--dry-run` everywhere else in these CLIs, and both
 // `getLayerType` implementations route on `argv.includes("-n")`. Reusing it for
 // a value on a remote-write command is the wrong default.
-const nameOption = Options.string("name").pipe(
+const nameOption = Options.String("name").pipe(
   Options.withDescription("Version name (e.g. \"OOB 100\")")
 )
-const optionalDescriptionOption = Options.string("description").pipe(
+const optionalDescriptionOption = Options.String("description").pipe(
   Options.withAlias("d"),
   Options.withDescription("Version description"),
   Options.optional
 )
-const startDateOption = Options.string("start-date").pipe(
+const startDateOption = Options.String("start-date").pipe(
   Options.withDescription("Start date, ISO 8601 (yyyy-mm-dd)"),
   Options.optional
 )
-const releaseDateOption = Options.string("release-date").pipe(
+const releaseDateOption = Options.String("release-date").pipe(
   Options.withDescription("Release date, ISO 8601 (yyyy-mm-dd)"),
   Options.optional
 )
@@ -269,15 +268,15 @@ const updateCommand = Command.make("update", { id: idArg, description: descripti
 
 // === related-work ===
 
-const titleOption = Options.string("title").pipe(
+const titleOption = Options.String("title").pipe(
   Options.withAlias("t"),
   Options.withDescription("Related-work link title (e.g. \"Release notes\")")
 )
-const urlOption = Options.string("url").pipe(
+const urlOption = Options.String("url").pipe(
   Options.withAlias("u"),
   Options.withDescription("Related-work link URL (e.g. a Confluence page)")
 )
-const categoryOption = Options.string("category").pipe(
+const categoryOption = Options.String("category").pipe(
   Options.withAlias("c"),
   Options.withDescription("Related-work category (Jira groups by this; e.g. Communication, Testing, Design)"),
   Options.withDefault("Communication")
@@ -330,14 +329,15 @@ const relatedWorkAddCommand = Command.make("add", {
     )
   )
 
-const linkOption = Options.string("link").pipe(
+const linkOption = Options.String("link").pipe(
   Options.withAlias("l"),
   Options.withDescription("Desired link as `title=url` (repeatable). Category comes from --category."),
   Options.atLeast(0)
 )
 
-const pruneOption = Options.boolean("prune").pipe(
-  Options.withDescription("Also remove links in the category that are not in the desired set")
+const pruneOption = Options.Boolean("prune").pipe(
+  Options.withDescription("Also remove links in the category that are not in the desired set"),
+  Options.withDefault(false)
 )
 
 /**

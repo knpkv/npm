@@ -3,40 +3,43 @@
  *
  * @internal
  */
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { PageId } from "../Brand.js"
 import { ConfluenceClient } from "../ConfluenceClient.js"
 import { ApiError, ConfigError, FileSystemError } from "../ConfluenceError.js"
 import { insertConfluenceAttachmentReference, renderConfluenceAttachmentReference } from "../internal/attachments.js"
 
-const pageIdArg = Args.string("page-id").pipe(
+const pageIdArg = Args.String("page-id").pipe(
   Args.withDescription("Confluence page id")
 )
 
-const fileArg = Args.string("file").pipe(
+const fileArg = Args.String("file").pipe(
   Args.withDescription("Local file to upload")
 )
 
-const documentOption = Options.file("document").pipe(
+const documentOption = Options.File("document").pipe(
   Options.withDescription("Local Markdown page containing the attachment placeholder"),
   Options.optional
 )
 
-const noInsertOption = Options.boolean("no-insert").pipe(
-  Options.withDescription("Only upload and print the Attachment Reference")
+const noInsertOption = Options.Boolean("no-insert").pipe(
+  Options.withDescription("Only upload and print the Attachment Reference"),
+  Options.withDefault(false)
 )
 
-const dryRunOption = Options.boolean("dry-run").pipe(
+const dryRunOption = Options.Boolean("dry-run").pipe(
   Options.withAlias("n"),
-  Options.withDescription("Validate local insertion input without uploading")
+  Options.withDescription("Validate local insertion input without uploading"),
+  Options.withDefault(false)
 )
 
-const jsonOption = Options.boolean("json").pipe(
-  Options.withDescription("Write exactly one JSON value to stdout")
+const jsonOption = Options.Boolean("json").pipe(
+  Options.withDescription("Write exactly one JSON value to stdout"),
+  Options.withDefault(false)
 )
 
 const readDocument = (documentPath: string) =>
@@ -117,7 +120,6 @@ const uploadCommand = Command.make(
               endpoint: "attachment insertion",
               pageId
             })
-          )
         }
         yield* writeDocument(documentInput.path, result.content)
         inserted = true

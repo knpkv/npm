@@ -1,6 +1,6 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 export class PackedPackageError extends Data.TaggedError("PackedPackageError")<{
   readonly cause?: unknown

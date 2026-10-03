@@ -9,11 +9,11 @@
  * @internal
  */
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import { Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import type { CqlSearchHit } from "../Schemas.js"
 import { validateBaseUrl } from "./pageInput.js"
@@ -22,22 +22,22 @@ import { assertSiteMatchesAuth, getAuth } from "./shared.js"
 const makeClientLayer = (clientConfig: ConfluenceClientConfig) =>
   ConfluenceClientLayer(clientConfig).pipe(Layer.provide(NodeHttpClient.layerFetch))
 
-const cqlOption = Options.string("cql").pipe(
+const cqlOption = Options.String("cql").pipe(
   Options.withDescription(
     "CQL query, e.g. 'title ~ \"OOB 98\" AND type = page' or 'parent = 12345 AND type = page'"
   )
 )
 
-const baseUrlOption = Options.string("base-url").pipe(
+const baseUrlOption = Options.String("base-url").pipe(
   Options.withDescription("Confluence Cloud base URL (e.g., https://yoursite.atlassian.net)")
 )
 
-const limitOption = Options.integer("limit").pipe(
+const limitOption = Options.Int("limit").pipe(
   Options.withDescription("Maximum number of results (default: Confluence's own, 25)"),
   Options.optional
 )
 
-const jsonOption = Options.boolean("json").pipe(
+const jsonOption = Options.Boolean("json").pipe(
   Options.withDescription("Output as JSON"),
   Options.withDefault(false)
 )

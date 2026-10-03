@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 
 import type { WorkspaceId } from "../../../../domain/identifiers.js"
 import { PersistenceOperationError } from "../../errors.js"
@@ -12,14 +12,14 @@ export const makeDeliveryGraphIntegrity = Effect.gen(function*() {
 
   const digestText = Effect.fn("DeliveryGraphRepository.digestText")(function*(value: string) {
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(value))
+      Base64.decode(Base64.encode(value))
     ).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "delivery-graph.encode" }))
     )
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "delivery-graph.digest" }))
     )
-    return ContentBlobDigest.make(Encoding.encodeHex(digest))
+    return ContentBlobDigest.make(Hex.encode(digest))
   })
 
   const verifyDigest = Effect.fn("DeliveryGraphRepository.verifyDigest")(function*(options: {

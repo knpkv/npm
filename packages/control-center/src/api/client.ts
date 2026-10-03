@@ -1,6 +1,6 @@
 import type * as Effect from "effect/Effect"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
-import { HttpApiClient } from "effect/unstable/httpapi"
+import { HttpApiClient } from "effect/http-api"
+import type * as HttpClient from "effect/http/HttpClient"
 
 import { ControlCenterApi } from "./controlCenterApi.js"
 

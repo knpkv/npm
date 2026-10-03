@@ -22,12 +22,13 @@ Upgrade normal dependencies to the latest registry versions:
 pnpm update -r --latest <package...>
 ```
 
-Effect v4 packages are published on RC versions while some package `latest`
-tags still point at Effect v3-compatible releases. Upgrade Effect packages by
-the RC tag or by the exact version from `repos/effect/packages/*/package.json`:
+All Effect packages share one version and are released together. Pin `effect`
+and every `@effect/*` package (except tooling such as `@effect/language-service`
+and `@effect/tsgo`) to the same exact version, matching
+`repos/effect/packages/*/package.json`:
 
 ```bash
-pnpm update -r @effect/atom-react@rc @effect/platform-bun@rc @effect/platform-node@rc @effect/sql-libsql@rc @effect/vitest@rc effect@rc
+pnpm update -r @effect/atom-react@latest @effect/platform-bun@latest @effect/platform-node@latest @effect/sql-libsql@latest @effect/vitest@latest effect@latest
 ```
 
 After changing manifests, regenerate the lockfile:
@@ -111,10 +112,10 @@ add the canonical URL again before continuing.
 
 Choose the exact Effect release used by the workspace, then fetch and update the
 vendored source from that release tag. Do not pull `main`: it can contain APIs
-that have not reached the installed RC yet.
+that have not reached the installed release yet.
 
 ```bash
-effect_version=4.0.0-rc.109
+effect_version=4.0.0
 effect_tag="effect@${effect_version}"
 git fetch effect-upstream "refs/tags/${effect_tag}"
 git subtree pull --prefix=repos/effect effect-upstream "${effect_tag}" --squash

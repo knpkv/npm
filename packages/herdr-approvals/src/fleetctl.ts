@@ -25,8 +25,8 @@ import {
   WorkSnapshots
 } from "@knpkv/herdr-work/model"
 import { Console, Effect, Layer, Schema, Stdio } from "effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
 import { resolveApprovalPage } from "./approval-url.js"
 import { submitToHost } from "./fleetctl-submission.js"
 import { fleetConfigPath } from "./internal/config-path.js"

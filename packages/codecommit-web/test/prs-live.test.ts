@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigService, Domain, Errors, PRService } from "@knpkv/codecommit-core"
-import { Deferred, Effect, Encoding, Schema } from "effect"
+import { Deferred, Effect, Schema } from "effect"
+import { Base64Url } from "effect/encoding"
 import {
   coordinateRouterMaxParamLength,
   decodePullRequestCoordinates,
@@ -323,7 +324,7 @@ describe("PR handler selection", () => {
       expect(invalidToken.message).toContain("not available")
 
       const whitespaceAccountToken = `cc1_${
-        Encoding.encodeBase64Url(JSON.stringify([
+        Base64Url.encode(JSON.stringify([
           "  production  ",
           String(regionalPullRequest.id),
           `  ${String(regionalPullRequest.repositoryName)}  `,
@@ -341,7 +342,7 @@ describe("PR handler selection", () => {
       }
 
       const emptyPartToken = `cc1_${
-        Encoding.encodeBase64Url(JSON.stringify([
+        Base64Url.encode(JSON.stringify([
           "production",
           String(regionalPullRequest.id),
           "   ",
@@ -351,7 +352,7 @@ describe("PR handler selection", () => {
       const emptyPartCoordinates = yield* decodePullRequestCoordinates(emptyPartToken)
       expect(emptyPartCoordinates._tag).toBe("None")
 
-      const jsonScalarProfile = `cc1_${Encoding.encodeBase64Url(JSON.stringify(123))}`
+      const jsonScalarProfile = `cc1_${Base64Url.encode(JSON.stringify(123))}`
       const scalarCoordinates = yield* decodePullRequestCoordinates(jsonScalarProfile)
       expect(scalarCoordinates._tag).toBe("None")
       const scalarProfile = new Domain.PullRequest({

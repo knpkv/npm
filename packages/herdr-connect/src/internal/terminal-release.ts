@@ -1,5 +1,5 @@
 import { Effect, Fiber, Option, Scope } from "effect"
-import type { KillOptions } from "effect/unstable/process/ChildProcess"
+import type { KillOptions } from "effect/process/ChildProcess"
 
 export const terminalKillOptions = {
   forceKillAfter: "1 second"

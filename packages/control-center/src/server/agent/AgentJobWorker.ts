@@ -11,7 +11,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Ref from "effect/Ref"
@@ -541,7 +541,7 @@ const makeAgentJobWorker = Effect.gen(function*() {
       const leaseDuration = Duration.fromInputUnsafe(options.leaseDuration)
       const claimedAt = yield* DateTime.now
       const leaseToken = AgentLeaseToken.make(
-        Encoding.encodeHex(yield* cryptoService.randomBytes(32))
+        Hex.encode(yield* cryptoService.randomBytes(32))
       )
       const claim = yield* jobs.claimNext({
         workspaceId,

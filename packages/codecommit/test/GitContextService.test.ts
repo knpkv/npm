@@ -7,8 +7,8 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, PlatformError, Sink, Stream } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { type GitContextError, GitContextService } from "../src/GitContextService.js"
 
 const handleWith = (stdoutText: string, exitCode = 0, stderrText = "") =>

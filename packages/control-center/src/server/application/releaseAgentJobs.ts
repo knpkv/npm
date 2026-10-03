@@ -3,7 +3,7 @@ import { AgentContextFingerprint, AgentProviderError, AgentProviderId, AgentRunt
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
 
@@ -139,11 +139,11 @@ export const makeReleaseAgentJobs = Effect.gen(function*() {
       Effect.mapError(unavailable)
     )
     const contextBytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(contextJson))
+      Base64.decode(Base64.encode(contextJson))
     ).pipe(Effect.mapError(unavailable))
     const digest = yield* cryptoService.digest("SHA-256", contextBytes).pipe(Effect.mapError(unavailable))
     return yield* Schema.decodeUnknownEffect(AgentContextFingerprint)(
-      `sha256:${Encoding.encodeHex(digest)}`
+      `sha256:${Hex.encode(digest)}`
     ).pipe(Effect.mapError(unavailable))
   })
 

@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Schema from "effect/Schema"
 
 import {
@@ -29,13 +29,13 @@ const encodeRuleMaterial = Schema.encodeEffect(ruleMaterialJson)
 
 const digestCanonicalJson = Effect.fn("ReadinessDigests.digestCanonicalJson")(function*(value: string) {
   const cryptoService = yield* Crypto.Crypto
-  const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+  const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
     Effect.mapError(() => new ReadinessDigestError({ operation: "encode-utf8" }))
   )
   const digest = yield* cryptoService
     .digest("SHA-256", bytes)
     .pipe(Effect.mapError(() => new ReadinessDigestError({ operation: "digest" })))
-  return ReadinessCandidateDigest.make(`sha256:${Encoding.encodeHex(digest)}`)
+  return ReadinessCandidateDigest.make(`sha256:${Hex.encode(digest)}`)
 })
 
 /** Hash the complete environment candidate after deterministic nested normalization. */

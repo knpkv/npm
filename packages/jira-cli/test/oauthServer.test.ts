@@ -3,9 +3,10 @@ import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
+import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/http"
 import * as Layer from "effect/Layer"
+import { NetAddress } from "effect/net"
 import * as Ref from "effect/Ref"
-import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/unstable/http"
 import { createServer } from "node:http"
 import { HttpServerFactoryLive } from "../src/internal/NodeLayers.js"
 import {
@@ -22,7 +23,7 @@ const EphemeralHttpServerFactoryLive = makeHttpServerFactory(
 const HttpClientLive = NodeHttpClient.layerUndici
 const fakeHttpServer = (port: number): HttpServer.HttpServer["Service"] =>
   HttpServer.make({
-    address: { _tag: "TcpAddress", hostname: "127.0.0.1", port },
+    address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", port),
     serve: () => Effect.void
   })
 
@@ -37,7 +38,7 @@ describe("oauth callback server lifecycle", () => {
         )
         const advertisedUrl = new URL(callbackUrl(8585))
         const ipv6OnlyLocalhost = (hostname: string) => (hostname === "localhost" ? "::1" : undefined)
-        expect(server.address._tag).toBe("TcpAddress")
+        expect(NetAddress.isInetAddress(server.address)).toBe(true)
         expect(listenOptions.host).toBe(advertisedUrl.hostname)
         expect(ipv6OnlyLocalhost(listenOptions.host)).toBe("::1")
         expect(ipv6OnlyLocalhost(advertisedUrl.hostname)).toBe("::1")

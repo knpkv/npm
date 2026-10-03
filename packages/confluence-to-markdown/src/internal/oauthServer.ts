@@ -6,11 +6,12 @@
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import type { HttpServerError } from "effect/http"
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"
 import * as Layer from "effect/Layer"
+import { NetAddress } from "effect/net"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
-import type { HttpServerError } from "effect/unstable/http"
-import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { OAuthError } from "../ConfluenceError.js"
 
 const DEFAULT_PORT = 8585

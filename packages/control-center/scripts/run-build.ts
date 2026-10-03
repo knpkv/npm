@@ -4,7 +4,7 @@ import * as Clock from "effect/Clock"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { type BuildPhase, controlCenterBuildPhases } from "./build-phases.js"
 
 class BuildPhaseError extends Data.TaggedError("BuildPhaseError")<{

@@ -61,11 +61,11 @@
   },
   "dependencies": {
     "@knpkv/rly": "workspace:^",
-    "effect": "4.0.0-rc.109"
+    "effect": "4.0.0"
   },
   "devDependencies": {
-    "@effect/platform-node": "4.0.0-rc.109",
-    "@effect/vitest": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0",
+    "@effect/vitest": "4.0.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "esbuild": "^0.28.2",

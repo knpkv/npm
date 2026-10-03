@@ -1,12 +1,12 @@
 /** Fenced, cursor-paged durable history tools for one immutable PR-review run. @module */
 import { MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES } from "@knpkv/ai-runtime"
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Schema from "effect/Schema"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
 
 import {
   AgentEventCursor,
@@ -91,7 +91,7 @@ const encodedPageByteLength = Effect.fn("PrReviewThreadHistory.encodedPageByteLe
     Effect.mapError(unavailable)
   )
   const bytes = yield* Effect.fromResult(
-    Encoding.decodeBase64(Encoding.encodeBase64(json))
+    Base64.decode(Base64.encode(json))
   ).pipe(Effect.mapError(unavailable))
   return bytes.byteLength
 })

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Result, Schema } from "effect"
-import * as FastCheck from "fast-check"
 import { ReleaseId } from "../../src/domain/identifiers.js"
 import {
   deriveReleaseRelay,
@@ -98,7 +97,7 @@ describe("Release Relay domain projection", () => {
 
   it.prop(
     "keeps every generated release ID stable, distinct, and bounded",
-    [Schema.toArbitrary(ReleaseId)(FastCheck)],
+    [ReleaseId],
     ([releaseId]) => {
       const projection = deriveReleaseRelay(releaseId)
       return (

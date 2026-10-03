@@ -17,8 +17,8 @@
 import { ChildEnv } from "@knpkv/codecommit-core"
 import { Effect, Schema } from "effect"
 import type * as PlatformError from "effect/PlatformError"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { TuiTerminalSession } from "./atoms/applicationScope.js"
 import { assumeConsoleArgs } from "./browser-command.js"
 

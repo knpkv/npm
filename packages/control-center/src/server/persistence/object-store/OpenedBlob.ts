@@ -1,5 +1,5 @@
-import type { Path } from "effect"
-import { Effect, FileSystem, Option, Result, Stream } from "effect"
+import type { FileSystem, Path } from "effect"
+import { ByteSize, Effect, Option, Result, Stream } from "effect"
 
 import { nodeFileDescriptor } from "../NodeFileDescriptor.js"
 import type { BlobDigest } from "./BlobDigest.js"
@@ -148,7 +148,11 @@ export const makeOpenedBlobReader = (
       Effect.gen(function*() {
         const opened = yield* openExpected(operation, location, location.info)
 
-        if (offset > 0) yield* opened.file.seek(FileSystem.Size(offset), "start")
+        if (offset > 0) {
+          yield* opened.file.seek(ByteSize.bytes(offset), "start").pipe(
+            Effect.mapError((cause) => blobStoreIoError(operation, cause))
+          )
+        }
 
         return streamFromFile(operation, opened.file, length)
       })

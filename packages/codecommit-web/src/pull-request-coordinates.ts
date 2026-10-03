@@ -1,6 +1,7 @@
 /** Exact CodeCommit PR coordinates carried through browser review requests. @module */
 import { AwsRegion, PullRequestId, RepositoryName } from "@knpkv/codecommit-core/Domain.js"
-import { Data, Effect, Encoding, Option, Schema } from "effect"
+import { Data, Effect, Option, Schema } from "effect"
+import { Base64Url } from "effect/encoding"
 
 const coordinateTokenPrefix = "cc1_"
 const legacyCoordinateTokenPrefix = "ccpr:"
@@ -15,7 +16,7 @@ export const PullRequestCoordinates = Schema.Struct({
   region: AwsRegion
 }).check(
   Schema.makeFilter((coordinates) => {
-    const encoded = Encoding.encodeBase64Url(JSON.stringify([
+    const encoded = Base64Url.encode(JSON.stringify([
       coordinates.accountId,
       coordinates.pullRequestId,
       coordinates.repositoryName,
@@ -62,7 +63,7 @@ export class PullRequestCoordinateDecodeError extends Data.TaggedError(
 export const encodePullRequestCoordinates = (coordinates: PullRequestCoordinates): string => {
   const validated = Schema.decodeUnknownSync(PullRequestCoordinates)(coordinates)
   return `${coordinateTokenPrefix}${
-    Encoding.encodeBase64Url(JSON.stringify([
+    Base64Url.encode(JSON.stringify([
       validated.accountId,
       validated.pullRequestId,
       validated.repositoryName,
@@ -95,7 +96,7 @@ export const decodePullRequestCoordinates = (
   }
   if (!value.startsWith(coordinateTokenPrefix)) return Effect.succeed(Option.none())
   const encoded = value.slice(coordinateTokenPrefix.length)
-  return Effect.fromResult(Encoding.decodeBase64UrlString(encoded)).pipe(
+  return Effect.fromResult(Base64Url.decodeString(encoded)).pipe(
     Effect.matchEffect({
       // Profile aliases may legitimately begin with the token prefix. A value
       // that is not even base64 is therefore still an ordinary account route.

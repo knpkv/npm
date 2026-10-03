@@ -365,7 +365,7 @@ export const CodeCommitPullRequestUrl = Schema.String.check(
   Schema.isMaxLength(2_048)
 ).pipe(
   Schema.decodeTo(CodeCommitPullRequestLocator, {
-    decode: SchemaGetter.transformOrFail((input, options) => {
+    decode: SchemaGetter.transformEffect((input, options) => {
       const locator = parseCodeCommitPullRequestUrl(input)
       return locator === null
         ? Effect.fail(

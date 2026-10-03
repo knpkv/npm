@@ -1,9 +1,9 @@
 import { describe, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
+import type { HttpClientRequest } from "effect/http"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Layer from "effect/Layer"
 import { TestClock } from "effect/testing"
-import type { HttpClientRequest } from "effect/unstable/http"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import { expect } from "vitest"
 import { OAuthError } from "../src/auth/OAuthErrors.js"
 import {

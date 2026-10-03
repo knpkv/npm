@@ -12,7 +12,7 @@
 import type { Credentials, Region } from "@distilled.cloud/aws"
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect } from "effect"
-import type { HttpClient } from "effect/unstable/http"
+import type { HttpClient } from "effect/http"
 import type { DiffStats, GetDifferencesParams } from "./internal.js"
 import { makeApiError, withAwsContext } from "./internal.js"
 

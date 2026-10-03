@@ -8,13 +8,13 @@ import { RelaySelectorState } from "./model.js"
 const trimmedIdentifier = (maximumLength: number) =>
   Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximumLength))
 
-const canonicalUuid = <const Brand extends string>(brand: Brand) =>
+const canonicalUuid = <const Brand extends string>(brand: Parameters<typeof Schema.brand<Brand>>[0]) =>
   Schema.String.check(
     Schema.isUUID(7),
     Schema.isPattern(/^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u, {
       expected: "a canonical lowercase UUID v7"
     })
-  ).pipe(Schema.brand(brand))
+  ).pipe(Schema.brand<Brand>(brand))
 
 export const AgenticProduct = Schema.Literals(["codecommit", "control-center"])
 export type AgenticProduct = typeof AgenticProduct.Type

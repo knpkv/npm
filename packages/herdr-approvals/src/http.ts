@@ -89,8 +89,8 @@ import {
   Stream
 } from "effect"
 import type { Redacted } from "effect"
+import * as HttpClient from "effect/http/HttpClient"
 import type * as SemaphoreModule from "effect/Semaphore"
-import * as HttpClient from "effect/unstable/http/HttpClient"
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http"
 import { createServer as createSecureServer } from "node:https"
 import type { Duplex } from "node:stream"

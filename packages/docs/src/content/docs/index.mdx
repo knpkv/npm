@@ -52,7 +52,7 @@ packages/
 
 Most packages use Effect services at their boundaries:
 
-- CLI commands are built with `effect/unstable/cli`.
+- CLI commands are built with `effect/cli`.
 - Remote API clients expose `Context.Service` layers.
 - Errors are tagged so callers can recover by tag instead of parsing strings.
 - Commands that support `--json` keep machine-readable stdout clean.

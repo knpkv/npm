@@ -6,9 +6,9 @@
 import { make as makeClockifyApi } from "@knpkv/clockify-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
 import { Console, Data, Effect, Option, Predicate, Redacted, Schema } from "effect"
-import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { Command, Flag as Options, Prompt } from "effect/cli"
+import * as HttpClient from "effect/http/HttpClient"
+import * as ChildProcess from "effect/process/ChildProcess"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 
 class InvalidClockifyApiKeyError extends Data.TaggedError("InvalidClockifyApiKeyError")<{}> {
@@ -74,8 +74,8 @@ Create OAuth app in Atlassian Developer Console:
 const jiraConfigure = Command.make(
   "configure",
   {
-    clientId: Options.string("client-id").pipe(Options.withDescription("OAuth client ID"), Options.optional),
-    clientSecret: Options.string("client-secret").pipe(Options.withDescription("OAuth client secret"), Options.optional)
+    clientId: Options.String("client-id").pipe(Options.withDescription("OAuth client ID"), Options.optional),
+    clientSecret: Options.String("client-secret").pipe(Options.withDescription("OAuth client secret"), Options.optional)
   },
   ({ clientId, clientSecret }) =>
     Effect.gen(function*() {
@@ -83,11 +83,11 @@ const jiraConfigure = Command.make(
 
       const id = Option.isSome(clientId)
         ? clientId.value
-        : yield* Prompt.text({ message: "Enter OAuth client ID:" })
+        : yield* Prompt.String({ message: "Enter OAuth client ID:" })
 
       const secret = Option.isSome(clientSecret)
         ? clientSecret.value
-        : yield* Prompt.text({ message: "Enter OAuth client secret:" })
+        : yield* Prompt.String({ message: "Enter OAuth client secret:" })
 
       yield* auth.configure({ clientId: id, clientSecret: secret })
       yield* Console.log("OAuth configured. Run: jcf auth jira login")
@@ -96,7 +96,7 @@ const jiraConfigure = Command.make(
 
 const jiraLogin = Command.make(
   "login",
-  { site: Options.string("site").pipe(Options.withDescription("Jira site URL"), Options.optional) },
+  { site: Options.String("site").pipe(Options.withDescription("Jira site URL"), Options.optional) },
   ({ site }) =>
     Effect.gen(function*() {
       const auth = yield* JiraAuth
@@ -158,7 +158,7 @@ export const clockifySetup = Command.make(
       yield* Console.log("Get your API key from: https://app.clockify.me/manage-api-keys")
       yield* Console.log("")
 
-      const apiKey = yield* Prompt.text({ message: "Enter API key:" })
+      const apiKey = yield* Prompt.String({ message: "Enter API key:" })
 
       if (!apiKey) {
         yield* Console.log("No API key provided, aborting.")
@@ -200,7 +200,7 @@ export const clockifySetup = Command.make(
 
       let selectedIdx = 0
       if (workspaces.length > 1) {
-        const choice = yield* Prompt.text({ message: `Select workspace (1-${workspaces.length}):` })
+        const choice = yield* Prompt.String({ message: `Select workspace (1-${workspaces.length}):` })
         selectedIdx = Math.max(0, Math.min(workspaces.length - 1, parseInt(choice, 10) - 1))
       }
 

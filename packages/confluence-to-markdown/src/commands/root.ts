@@ -2,8 +2,8 @@
  * Root CLI command composition.
  */
 import { makeInstallCommand } from "@knpkv/agent-skills"
+import { Command } from "effect/cli"
 import * as Console from "effect/Console"
-import { Command } from "effect/unstable/cli"
 import {
   attachmentCommand,
   authCommand,

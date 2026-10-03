@@ -11,8 +11,8 @@
  */
 import { AwsClient, type Domain } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option } from "effect"
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as FileSystem from "effect/FileSystem"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { makeAccount } from "./CliAccount.js"
 import { countComments, type RenderablePullRequest, renderPullRequestMarkdown } from "./PullRequestMarkdown.js"
 
@@ -71,19 +71,19 @@ export const PrExportLive = PrExportService.live
 
 /** @category Command */
 export const prExportCommand = Command.make("export", {
-  prId: Args.string("pr-id").pipe(Args.withDescription("Pull request ID")),
-  repo: Args.string("repository").pipe(Args.withDescription("Repository name")),
-  output: Options.file("output").pipe(
+  prId: Args.String("pr-id").pipe(Args.withDescription("Pull request ID")),
+  repo: Args.String("repository").pipe(Args.withDescription("Repository name")),
+  output: Options.File("output").pipe(
     Options.withAlias("o"),
     Options.withDescription("Output file path"),
     Options.optional
   ),
-  profile: Options.string("profile").pipe(
+  profile: Options.String("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile"),
     Options.withDefault("default")
   ),
-  region: Options.string("region").pipe(
+  region: Options.String("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region"),
     Options.withDefault("us-east-1")

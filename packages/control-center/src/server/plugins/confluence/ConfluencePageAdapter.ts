@@ -11,7 +11,7 @@ import { MarkdownConverter } from "@knpkv/confluence-to-markdown"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -434,14 +434,14 @@ const digestSyncIdentity = Effect.fn("ConfluencePage.digestSyncIdentity")(functi
 ) {
   const serialized = JSON.stringify(value)
   const bytes = yield* Effect.fromResult(
-    Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+    Base64.decode(Base64.encode(serialized))
   ).pipe(
     Effect.mapError(() => new PluginOutageFailure({ operation: "confluence-sync-identity" }))
   )
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() => new PluginOutageFailure({ operation: "confluence-sync-identity" }))
   )
-  return Encoding.encodeHex(digest)
+  return Hex.encode(digest)
 })
 
 const readVersions = Effect.fn("ConfluencePage.readVersions")(function*(

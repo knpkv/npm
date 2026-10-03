@@ -3,12 +3,12 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
+import * as SqlSchema from "effect/sql/SqlSchema"
 
 import { RoleAssignment } from "../../../domain/actors.js"
 import { EnvironmentId, ReleaseId, WorkspaceId } from "../../../domain/identifiers.js"
@@ -95,7 +95,7 @@ const makeReleaseRepository = Effect.gen(function*() {
 
   const digestSnapshot = Effect.fn("ReleaseRepository.digestSnapshot")(function*(snapshotJson: string) {
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(snapshotJson))
+      Base64.decode(Base64.encode(snapshotJson))
     ).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "release.encode-utf8" }))
     )

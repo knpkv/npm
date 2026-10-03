@@ -2,8 +2,8 @@ import { Effect, Fiber, Schema, Stream } from "effect"
 import type * as Duration from "effect/Duration"
 import type * as FileSystem from "effect/FileSystem"
 import type * as PlatformError from "effect/PlatformError"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { type NormalizedOptions, PROMPT_ONLY_DISABLED_FEATURES, PROMPT_ONLY_SAFE_FEATURES } from "./configuration.js"
 import {
   CodexFailureCause,

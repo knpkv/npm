@@ -12,7 +12,7 @@
  */
 import { AwsClient, type Domain } from "@knpkv/codecommit-core"
 import { Console, Context, Effect, Layer, Option, Predicate, Schema, Stream } from "effect"
-import { Command, Flag as Options } from "effect/unstable/cli"
+import { Command, Flag as Options } from "effect/cli"
 import { makeAccount } from "./CliAccount.js"
 import { reportFailure } from "./CliFailure.js"
 import { FILTER_PRESETS, type FilterPreset, matchesRepoAuthor } from "./filterPresets.js"
@@ -142,44 +142,44 @@ export const PrListLive = PrListService.live.pipe(
 
 /** @category Command */
 export const prListCommand = Command.make("list", {
-  profile: Options.string("profile").pipe(
+  profile: Options.String("profile").pipe(
     Options.withAlias("p"),
     Options.withDescription("AWS profile (ignored when --filter is set — presets fan out across all enabled accounts)"),
     Options.withDefault("default")
   ),
-  region: Options.string("region").pipe(
+  region: Options.String("region").pipe(
     Options.withAlias("r"),
     Options.withDescription("AWS region (ignored when --filter is set — presets fan out across all enabled accounts)"),
     Options.withDefault("us-east-1")
   ),
-  status: Options.choice("status", ["OPEN", "CLOSED"]).pipe(
+  status: Options.Literals("status", ["OPEN", "CLOSED"]).pipe(
     Options.withAlias("s"),
     Options.withDescription("Filter by PR status (ignored when --filter is set — presets are OPEN-only)"),
     Options.withDefault(DEFAULT_PR_STATUS)
   ),
-  all: Options.boolean("all").pipe(
+  all: Options.Boolean("all").pipe(
     Options.withAlias("a"),
     Options.withDescription(
       "Show all PRs (both OPEN and CLOSED; ignored when --filter is set — presets are OPEN-only)"
     ),
     Options.withDefault(false)
   ),
-  repo: Options.string("repo").pipe(
+  repo: Options.String("repo").pipe(
     Options.withDescription("Filter by repository name"),
     Options.optional
   ),
-  author: Options.string("author").pipe(
+  author: Options.String("author").pipe(
     Options.withDescription("Filter by author"),
     Options.optional
   ),
-  filter: Options.choice("filter", FILTER_PRESETS).pipe(
+  filter: Options.Literals("filter", FILTER_PRESETS).pipe(
     Options.withDescription(
       "Named preset (fans out across all enabled accounts, OPEN PRs only — ignores --status/--all): " +
         "mine | needs-my-review | stale | conflicting"
     ),
     Options.optional
   ),
-  json: Options.boolean("json").pipe(
+  json: Options.Boolean("json").pipe(
     Options.withDescription("Output as JSON"),
     Options.withDefault(false)
   )

@@ -9,15 +9,15 @@
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import { flow } from "effect/Function"
+import * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientError from "effect/http/HttpClientError"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import type { SchemaError } from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import type * as HttpClientError from "effect/unstable/http/HttpClientError"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as Generated from "./generated/JiraApi.js"
 import { JiraApiConfig, type JiraApiConfigContract, type JiraApiCredential } from "./JiraApiConfig.js"
 
@@ -36,7 +36,7 @@ export interface JiraApiClientContract extends Generated.JiraApi {
 
 const authorizationHeader = (auth: JiraApiCredential): string =>
   auth.type === "basic"
-    ? `Basic ${Encoding.encodeBase64(`${auth.email}:${Redacted.value(auth.apiToken)}`)}`
+    ? `Basic ${Base64.encode(`${auth.email}:${Redacted.value(auth.apiToken)}`)}`
     : `Bearer ${Redacted.value(auth.accessToken)}`
 
 const apiBaseUrl = (baseUrl: string, auth: JiraApiCredential): string =>

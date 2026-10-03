@@ -1,6 +1,6 @@
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
 import * as Effect from "effect/Effect"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 
 import type { CodeCommitPullRequestCandidate, CodeCommitPullRequestResolution } from "../../api/deliveryGraph.js"
 import { makeAuthenticatedMutationClient } from "../authenticatedMutationClient.js"

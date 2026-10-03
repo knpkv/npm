@@ -1,4 +1,5 @@
-import { Clock, Crypto, Effect, Encoding, Ref, Result, Schema, Semaphore } from "effect"
+import { Clock, Crypto, Effect, Ref, Result, Schema, Semaphore } from "effect"
+import { Base64Url } from "effect/encoding"
 import {
   FleetApprovalError,
   FleetJobNotFoundError,
@@ -198,7 +199,7 @@ export const makeFleetService = Effect.fn("FleetService.make")(function*(options
     cryptoService.randomUUIDv4.pipe(Effect.mapError(randomError("fleet.job_id")))
   const nonce = options.nonce ??
     cryptoService.randomBytes(24).pipe(
-      Effect.map(Encoding.encodeBase64Url),
+      Effect.map(Base64Url.encode),
       Effect.mapError(randomError("fleet.approval_nonce"))
     )
   const approvalTtlMs = options.approvalTtlMs ?? 15 * 60 * 1000

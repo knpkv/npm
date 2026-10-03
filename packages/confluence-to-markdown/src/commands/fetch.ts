@@ -2,10 +2,10 @@
  * Fetch command for Confluence CLI.
  */
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import { Command, Flag as Options } from "effect/cli"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { PageId } from "../Brand.js"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import { ConfigError } from "../ConfluenceError.js"
@@ -15,29 +15,30 @@ import { MarkdownConverter } from "../MarkdownConverter.js"
 import { resolvePageInputWithWorkspace } from "./pageInput.js"
 import { getAuth } from "./shared.js"
 
-const urlOption = Options.string("url").pipe(
+const urlOption = Options.String("url").pipe(
   Options.withDescription("Confluence page URL"),
   Options.optional
 )
 
-const pageIdOption = Options.string("page-id").pipe(
+const pageIdOption = Options.String("page-id").pipe(
   Options.withDescription("Confluence page ID"),
   Options.optional
 )
 
-const baseUrlOption = Options.string("base-url").pipe(
+const baseUrlOption = Options.String("base-url").pipe(
   Options.withDescription("Confluence Cloud base URL (e.g., https://yoursite.atlassian.net)"),
   Options.optional
 )
 
-const cleanMarkdownOption = Options.boolean("clean-markdown").pipe(
-  Options.withDescription("Print readable markdown without Confluence round-trip metadata")
+const cleanMarkdownOption = Options.Boolean("clean-markdown").pipe(
+  Options.withDescription("Print readable markdown without Confluence round-trip metadata"),
+  Options.withDefault(false)
 )
 
 // `choice` rather than a free-form string plus a runtime `if`: the accepted
 // values then show up in `page get --help` and in completion, and `--format
 // json` is rejected by the parser instead of after argument resolution.
-const formatOption = Options.choice("format", ["md", "adf"]).pipe(
+const formatOption = Options.Literals("format", ["md", "adf"]).pipe(
   Options.withDescription("Output format: md (default) or adf for the raw Atlassian Document Format JSON"),
   Options.withDefault("md")
 )

@@ -6,9 +6,9 @@
  */
 import { NodeRuntime } from "@effect/platform-node"
 import { Effect } from "effect"
+import { Command } from "effect/cli"
 import * as Runtime from "effect/Runtime"
 import * as Stdio from "effect/Stdio"
-import { Command } from "effect/unstable/cli"
 import { HeadlessLayer } from "./cli/layers.js"
 import { root } from "./cli/root.js"
 import { reportUnhandled } from "./cli/runtimeFailure.js"

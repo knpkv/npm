@@ -5,7 +5,7 @@ import {
   CONTROL_CENTER_MANAGED_REVIEW_IDENTITY_PATH
 } from "@knpkv/codecommit-core/ManagedReviewProtocol.js"
 import { Context, Layer, Option } from "effect"
-import { HttpRouter, HttpServer } from "effect/unstable/http"
+import { HttpRouter, HttpServer } from "effect/http"
 
 import { StaticAssetStore, type StaticAssetStoreService } from "../../src/server/http/security/StaticAssetStore.js"
 import { staticApplicationLayer } from "../../src/server/http/StaticApplication.js"

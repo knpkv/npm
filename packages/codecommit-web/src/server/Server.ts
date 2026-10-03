@@ -19,17 +19,10 @@ import {
 } from "@knpkv/codecommit-core/PermissionService/PermissionGateLive.js"
 import { Config, Deferred, Effect, Fiber, Layer, Option, Predicate, Ref, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
+import { Etag, FetchHttpClient, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
 import * as Path from "effect/Path"
 import * as Stdio from "effect/Stdio"
-import {
-  Etag,
-  FetchHttpClient,
-  HttpPlatform,
-  HttpRouter,
-  HttpServerRequest,
-  HttpServerResponse
-} from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
 import { coordinateRouterMaxParamLength } from "../pull-request-coordinates.js"
 import { CodeCommitApi } from "./Api.js"
 import {
@@ -322,7 +315,7 @@ const ApiLive = Layer.mergeAll(
 // Static file router - catches all non-API routes
 const StaticRouter = HttpRouter.use((router) => router.add("GET", "/*", serveStatic))
 
-const AllowedOrigins = Config.string("ALLOWED_ORIGINS").pipe(
+const AllowedOrigins = Config.String("ALLOWED_ORIGINS").pipe(
   Config.map((s) => s.split(",")),
   Config.withDefault(["http://localhost:3000", "http://127.0.0.1:3000"])
 )
@@ -388,8 +381,8 @@ export const makeServer = (options: CodeCommitServerOptions) => {
 export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsContract) =>
   makeServer({ port, security })
 
-export const Port = Config.int("PORT").pipe(Config.withDefault(3000))
-const PublicOrigin = Config.option(Config.string("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
+export const Port = Config.Int("PORT").pipe(Config.withDefault(3000))
+const PublicOrigin = Config.option(Config.String("CODECOMMIT_WEB_PUBLIC_ORIGIN"))
 
 const updatePortOnConflict = (
   portRef: Ref.Ref<number>,

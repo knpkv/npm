@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -306,7 +306,7 @@ describe("plugin domain contract", () => {
       unavailableReason: null
     })
     const oversizedBase64 = Schema.decodeUnknownResult(DiffContentRangeV1)({
-      bytesBase64: Encoding.encodeBase64(new Uint8Array(1_048_577)),
+      bytesBase64: Base64.encode(new Uint8Array(1_048_577)),
       totalBytes: 1_048_577,
       unavailableReason: null
     })

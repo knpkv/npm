@@ -1,7 +1,7 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import * as DateUtils from "@knpkv/codecommit-core/DateUtils.js"
 import type { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import {
   ArrowLeftIcon,
   ArrowRightIcon,

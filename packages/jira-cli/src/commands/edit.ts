@@ -7,44 +7,44 @@
  *
  * @internal
  */
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { IssueService } from "../IssueService.js"
 
-const keyArg = Args.string("key").pipe(
+const keyArg = Args.String("key").pipe(
   Args.withDescription("Issue key (e.g., PROJ-123)")
 )
 
-const addFixVersionOption = Options.string("add-fix-version").pipe(
+const addFixVersionOption = Options.String("add-fix-version").pipe(
   Options.withDescription("Add a fix version by name, keeping existing ones (repeatable)"),
   Options.atLeast(0)
 )
-const removeFixVersionOption = Options.string("remove-fix-version").pipe(
+const removeFixVersionOption = Options.String("remove-fix-version").pipe(
   Options.withDescription("Remove a fix version by name (repeatable)"),
   Options.atLeast(0)
 )
-const fixVersionOption = Options.string("fix-version").pipe(
+const fixVersionOption = Options.String("fix-version").pipe(
   Options.withDescription(
     "Replace the fix versions with exactly these names (repeatable). Drops any not listed — prefer --add-fix-version"
   ),
   Options.atLeast(0)
 )
-const addLabelOption = Options.string("add-label").pipe(
+const addLabelOption = Options.String("add-label").pipe(
   Options.withDescription("Add a label, keeping existing ones (repeatable)"),
   Options.atLeast(0)
 )
-const removeLabelOption = Options.string("remove-label").pipe(
+const removeLabelOption = Options.String("remove-label").pipe(
   Options.withDescription("Remove a label (repeatable)"),
   Options.atLeast(0)
 )
-const labelOption = Options.string("label").pipe(
+const labelOption = Options.String("label").pipe(
   Options.withDescription(
     "Replace the labels with exactly these (repeatable). Drops any not listed — prefer --add-label"
   ),
   Options.atLeast(0)
 )
-const jsonOption = Options.boolean("json").pipe(
+const jsonOption = Options.Boolean("json").pipe(
   Options.withDescription("Output as JSON"),
   Options.withDefault(false)
 )

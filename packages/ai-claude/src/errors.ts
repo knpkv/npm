@@ -1,5 +1,5 @@
 import { Data, Predicate, Schema } from "effect"
-import { AiError } from "effect/unstable/ai"
+import { AiError } from "effect/ai"
 
 const MODULE = "ClaudeCliLanguageModel"
 

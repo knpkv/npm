@@ -3,9 +3,9 @@ import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
 import * as String from "effect/String"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { arch, availableParallelism, platform, totalmem } from "node:os"
 
 import { UtcTimestamp } from "../src/domain/utcTimestamp.js"
@@ -178,7 +178,7 @@ export interface MakeControlCenterRuntimeBenchmarkReportInput {
 /** Collect supported machine facts without inferring a storage class. */
 export const collectControlCenterBenchmarkMachine = Effect.fn("ControlCenterBenchmark.collectMachine")(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const storageClass = yield* Config.literals(
+  const storageClass = yield* Config.Literals(
     ["local-ssd", "unverified"],
     CONTROL_CENTER_BENCHMARK_STORAGE_CLASS_ENV
   ).pipe(Config.withDefault("unverified"))
@@ -306,6 +306,6 @@ export const readControlCenterRuntimeBenchmarkReport = Effect.fn("ControlCenterB
 })
 
 /** Resolve the benchmark output location from configuration with a deterministic default. */
-export const controlCenterRuntimeBenchmarkOutputPath = Config.string(CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT_ENV).pipe(
+export const controlCenterRuntimeBenchmarkOutputPath = Config.String(CONTROL_CENTER_RUNTIME_BENCHMARK_OUTPUT_ENV).pipe(
   Config.withDefault(CONTROL_CENTER_RUNTIME_BENCHMARK_DEFAULT_OUTPUT)
 )

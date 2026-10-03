@@ -5,8 +5,8 @@ import { defaultReviewConfig, type ReviewProfileConfig } from "@knpkv/codecommit
 import { reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import * as Cause from "effect/Cause"
 import * as Exit from "effect/Exit"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import * as Schema from "effect/Schema"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 import {

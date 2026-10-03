@@ -1,6 +1,6 @@
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { Cause, Context, Effect, FileSystem, Layer, Option, Path, Schema, Semaphore } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 import { SchemaWriteBarrierError } from "./backup/errors.js"
 import { DatabaseInitializationError, type PersistenceConfigError } from "./errors.js"
@@ -12,7 +12,7 @@ import { BusyTimeoutPragmaRow, ForeignKeysPragmaRow, IntegrityCheckPragmaRow, Jo
 export const BUSY_TIMEOUT_MILLISECONDS = 5_000
 
 // The pinned libSQL client applies this option to every local connection, while
-// the current Effect RC has not yet surfaced it in LibsqlClientConfig.Full.
+// Effect 4.0.0 has not yet surfaced it in LibsqlClientConfig.Full.
 interface LocalLibsqlConfig extends LibsqlClient.LibsqlClientConfig.Full {
   readonly timeout: number
 }

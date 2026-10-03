@@ -1,6 +1,6 @@
 import * as Effect from "effect/Effect"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 import { useCallback, useEffect, useRef, useState } from "react"
 
 import { makeControlCenterApiClient } from "../../api/client.js"

@@ -8,7 +8,7 @@
  * Everything a *second* surface needs to derive Proposed Worklogs and write a confirmed one: the
  * pure agent-session core, the services, the live layer composition, the write path, and the
  * calendar. Deliberately absent are the command definitions and the TUI — a consumer builds its own
- * surface, and importing `effect/unstable/cli` or `@opentui/react` to reach a service would be a
+ * surface, and importing `effect/cli` or `@opentui/react` to reach a service would be a
  * cost paid for nothing. The test seam lives at `@knpkv/jira-clockify/testing.js`, out of this
  * barrel so nothing production imports it by accident.
  *

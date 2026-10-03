@@ -2,7 +2,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { agentConnectTarget, AgentWorkerIdentity } from "@knpkv/herdr-fleet/model"
 import { WorkGoal, WorkSnapshots } from "@knpkv/herdr-work/model"
 import { Cause, Option, Schema } from "effect"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { ConnectAgent } from "../src/model.js"
 import { resolveConnectWorkGoal, workSnapshotForAssociation } from "../src/work-goal-link.js"
 

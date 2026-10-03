@@ -1,6 +1,6 @@
 import { Domain, PRService } from "@knpkv/codecommit-core"
 import { Chunk, Effect, SubscriptionRef } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { CodeCommitApi } from "../Api.js"
 
 export const AccountsLive = HttpApiBuilder.group(CodeCommitApi, "accounts", (handlers) =>

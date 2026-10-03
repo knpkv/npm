@@ -10,10 +10,10 @@
 import type { ClockifyApiClientContract, UpdateTimeEntryParams } from "@knpkv/clockify-api-client"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
 
 import {
   PluginAuthenticationFailure,

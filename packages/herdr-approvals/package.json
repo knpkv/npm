@@ -60,21 +60,21 @@
     "test:pack": "tsx scripts/test-packed-packages.ts"
   },
   "dependencies": {
-    "@effect/atom-react": "4.0.0-rc.109",
-    "@effect/platform-browser": "4.0.0-rc.109",
-    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/atom-react": "4.0.0",
+    "@effect/platform-browser": "4.0.0",
+    "@effect/platform-node": "4.0.0",
     "@knpkv/herdr-connect": "workspace:^",
     "@knpkv/herdr-coordinator": "workspace:^",
     "@knpkv/herdr-fleet": "workspace:^",
     "@knpkv/herdr-tailscale": "workspace:^",
     "@knpkv/herdr-work": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    "effect": "4.0.0-rc.109",
+    "effect": "4.0.0",
     "web-push": "3.6.7",
     "ws": "8.21.3"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0",
     "@types/node": "^26.2.0",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

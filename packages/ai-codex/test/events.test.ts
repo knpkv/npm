@@ -15,9 +15,9 @@ import {
   Sink,
   Stream
 } from "effect"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as TestClock from "effect/testing/TestClock"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { streamEvents } from "../src/index.js"
 import { makeStreamOutputSchemaFile } from "../src/internal/outputSchema.js"
 

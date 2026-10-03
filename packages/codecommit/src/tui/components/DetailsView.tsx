@@ -2,8 +2,8 @@ import { useAtomSet, useAtomValue } from "@effect/atom-react"
 import type { Domain, ReadClient, ReviewClient } from "@knpkv/codecommit-core"
 import { type DiffRenderable, parseColor, type ScrollBoxRenderable, SyntaxStyle } from "@opentui/core"
 import { useKeyboard } from "@opentui/react"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
+import * as Atom from "effect/reactivity/Atom"
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import {
   type RelayFindingPublicationTarget,

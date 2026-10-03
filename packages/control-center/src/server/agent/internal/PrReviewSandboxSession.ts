@@ -1,4 +1,6 @@
 /** Writable sbx session without raw credentials for one exact pull-request revision. @module */
+import * as Tool from "effect/ai/Tool"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Cause from "effect/Cause"
 import * as Config from "effect/Config"
 import * as Context from "effect/Context"
@@ -8,13 +10,11 @@ import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Tool from "effect/unstable/ai/Tool"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import { AgentThreadId, JobId, ReviewCommandArtifactId, WorkspaceId } from "../../../domain/identifiers.js"
 import { AgentAttemptSequence } from "../../persistence/repositories/agentJobModels.js"
@@ -547,10 +547,10 @@ const makeSessions = Effect.fn("PrReviewSandboxSessions.make")(function*(
   const sourceWorkspace = yield* PrReviewSourceWorkspace
   const artifacts = yield* ReviewCommandArtifactRepository
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const home = yield* Config.string("HOME").pipe(
+  const home = yield* Config.String("HOME").pipe(
     Effect.mapError(() => sessionError("invalid-configuration"))
   )
-  const path = yield* Config.string("PATH").pipe(
+  const path = yield* Config.String("PATH").pipe(
     Effect.mapError(() => sessionError("invalid-configuration"))
   )
   const executable = options.executable ?? DEFAULT_SBX_EXECUTABLE

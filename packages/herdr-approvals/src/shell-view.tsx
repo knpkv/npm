@@ -1,6 +1,6 @@
 import { StateLabel, StatePanel, Tabs, Text, type RlyTabItem } from "@knpkv/rly/primitives"
 import { Cause, Option, Predicate } from "effect"
-import type * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import type * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useLayoutEffect, useRef, useState, type ReactElement, type ReactNode } from "react"
 
 export type FleetShellTab = "approvals" | "connect" | "work"

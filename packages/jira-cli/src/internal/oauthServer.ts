@@ -14,11 +14,12 @@ import { OAuthError } from "@knpkv/atlassian-common/auth"
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import { HttpRouter, HttpServer, HttpServerResponse } from "effect/http"
+import type * as HttpServerError from "effect/http/HttpServerError"
 import * as Layer from "effect/Layer"
+import { NetAddress } from "effect/net"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import { HttpRouter, HttpServer, HttpServerResponse } from "effect/unstable/http"
-import type * as HttpServerError from "effect/unstable/http/HttpServerError"
 
 const DEFAULT_PORT = 8585
 const MAX_PORT = 8594
@@ -122,7 +123,7 @@ export const startCallbackServer = (
       )
     const { context: serverContext } = yield* buildServerContext(DEFAULT_PORT)
     const server: HttpServerInstance = Context.get(serverContext, HttpServer.HttpServer)
-    const port = yield* (server.address._tag === "TcpAddress"
+    const port = yield* (NetAddress.isInetAddress(server.address)
       ? Effect.succeed(server.address.port)
       : Effect.fail(new OAuthError({ step: "authorize", cause: "OAuth callback server must listen on a TCP port" })))
 

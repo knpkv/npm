@@ -15,7 +15,7 @@ import {
 const program = Effect.gen(function*() {
   const outputPath = yield* controlCenterRuntimeBenchmarkOutputPath
   const report = yield* readControlCenterRuntimeBenchmarkReport(outputPath)
-  const isCi = yield* Config.boolean("CI").pipe(Config.withDefault(false))
+  const isCi = yield* Config.Boolean("CI").pipe(Config.withDefault(false))
   yield* validateControlCenterRuntimeBenchmarkCiAcceptance(report, isCi)
   const encoded = yield* Schema.encodeEffect(ControlCenterRuntimeBenchmarkReport)(report)
   yield* Console.log(JSON.stringify(encoded, undefined, 2))

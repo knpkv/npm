@@ -4,11 +4,11 @@
  * Interactive mode: select page from tree, delete local file only.
  * Push to actually delete from Confluence.
  */
+import { Command, Prompt } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import { Command, Prompt } from "effect/unstable/cli"
 import { ConfluenceConfig } from "../ConfluenceConfig.js"
 import { LocalFileSystem } from "../LocalFileSystem.js"
 import { flattenPageTree } from "./pageTree.js"
@@ -36,7 +36,7 @@ export const deleteCommand = Command.make("delete", {}, () =>
       return
     }
 
-    const selected = yield* Prompt.select({
+    const selected = yield* Prompt.Select({
       message: "Select page to delete:",
       choices
     })

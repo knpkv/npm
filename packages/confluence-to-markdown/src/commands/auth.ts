@@ -1,12 +1,12 @@
 /**
  * Authentication commands for Confluence CLI.
  */
+import { Command, Flag as Options, Prompt } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
-import { ChildProcessSpawner } from "effect/unstable/process"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
+import { ChildProcessSpawner } from "effect/process"
+import * as ChildProcess from "effect/process/ChildProcess"
 import { CLI_LOGIN_SCOPES, ConfluenceAuth } from "../ConfluenceAuth.js"
 
 const CONSOLE_APPS_URL = "https://developer.atlassian.com/console/myapps/"
@@ -98,11 +98,11 @@ After adding scopes, run: confluence auth login
   )
 
 // === Auth configure command ===
-const clientIdOption = Options.string("client-id").pipe(
+const clientIdOption = Options.String("client-id").pipe(
   Options.withDescription("OAuth client ID from Atlassian Developer Console"),
   Options.optional
 )
-const clientSecretOption = Options.string("client-secret").pipe(
+const clientSecretOption = Options.String("client-secret").pipe(
   Options.withDescription("OAuth client secret"),
   Options.optional
 )
@@ -116,10 +116,10 @@ const configureCommand = Command.make(
 
       const rawClientId = Option.isSome(clientId)
         ? clientId.value
-        : yield* Prompt.text({ message: "Enter OAuth client ID:" })
+        : yield* Prompt.String({ message: "Enter OAuth client ID:" })
       const rawClientSecret = Option.isSome(clientSecret)
         ? clientSecret.value
-        : yield* Prompt.text({ message: "Enter OAuth client secret:" })
+        : yield* Prompt.String({ message: "Enter OAuth client secret:" })
 
       yield* auth.configure({ clientId: rawClientId, clientSecret: rawClientSecret })
       yield* Console.log("OAuth configured. Run 'confluence auth login' to authenticate.")
@@ -127,7 +127,7 @@ const configureCommand = Command.make(
 ).pipe(Command.withDescription("Configure OAuth client credentials"))
 
 // === Auth login command ===
-const siteOption = Options.string("site").pipe(
+const siteOption = Options.String("site").pipe(
   Options.withDescription("Confluence site URL to use (for accounts with multiple sites)"),
   Options.optional
 )

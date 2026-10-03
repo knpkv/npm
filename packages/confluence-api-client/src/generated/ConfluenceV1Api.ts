@@ -2,283 +2,286 @@ import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import type { SchemaError } from "effect/Schema"
 import * as Schema from "effect/Schema"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import * as Stream from "effect/Stream"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientError from "effect/http/HttpClientError"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 // recursive declarations
-export type Space = { readonly "id"?: number, readonly "key": string, readonly "alias"?: string, readonly "name": string, readonly "icon"?: Icon, readonly "description"?: { readonly "plain"?: SpaceDescription, readonly "view"?: SpaceDescription, readonly "_expandable"?: { readonly "view"?: string, readonly "plain"?: string } }, readonly "homepage"?: Content, readonly "type": string, readonly "metadata"?: { readonly "labels"?: LabelArray, readonly "_expandable"?: {  } }, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "permissions"?: ReadonlyArray<Schema.Json>, readonly "status": string, readonly "settings"?: SpaceSettings, readonly "theme"?: Theme, readonly "lookAndFeel"?: LookAndFeel, readonly "history"?: { readonly "createdDate": string, readonly "createdBy"?: User }, readonly "_expandable": { readonly "settings"?: string, readonly "metadata"?: string, readonly "operations"?: string, readonly "lookAndFeel"?: string, readonly "permissions"?: string, readonly "icon"?: string, readonly "description"?: string, readonly "theme"?: string, readonly "history"?: string, readonly "homepage"?: string, readonly "identifiers"?: string }, readonly "_links": GenericLinks, readonly [x: string]: Schema.Json } | null
+export type Space = { readonly "id"?: number, readonly "key": string, readonly "alias"?: string, readonly "name": string, readonly "icon"?: Icon, readonly "description"?: { readonly "plain"?: SpaceDescription, readonly "view"?: SpaceDescription, readonly "_expandable"?: { readonly "view"?: string, readonly "plain"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "homepage"?: Content, readonly "type": string, readonly "metadata"?: { readonly "labels"?: LabelArray, readonly "_expandable"?: { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "permissions"?: ReadonlyArray<Schema.Json>, readonly "status": string, readonly "settings"?: SpaceSettings, readonly "theme"?: Theme, readonly "lookAndFeel"?: LookAndFeel, readonly "history"?: { readonly "createdDate": string, readonly "createdBy"?: User } & { readonly [x: string]: Schema.Json }, readonly "_expandable": { readonly "settings"?: string, readonly "metadata"?: string, readonly "operations"?: string, readonly "lookAndFeel"?: string, readonly "permissions"?: string, readonly "icon"?: string, readonly "description"?: string, readonly "theme"?: string, readonly "history"?: string, readonly "homepage"?: string, readonly "identifiers"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json } | null
 export const Space = Schema.suspend((): Schema.Codec<Space> => __recursive_Space)
-export type User = { readonly "type": "known" | "unknown" | "anonymous" | "user", readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId"?: GenericAccountId, readonly "accountType"?: "atlassian" | "app" | "", readonly "email"?: string | null, readonly "publicName"?: string, readonly "profilePicture"?: Icon, readonly "displayName"?: string | null, readonly "timeZone"?: string | null, readonly "externalCollaborator"?: boolean, readonly "isExternalCollaborator"?: boolean, readonly "isGuest"?: boolean, readonly "operations"?: ReadonlyArray<OperationCheckResult> | null, readonly "details"?: UserDetails, readonly "personalSpace"?: Space, readonly "_expandable"?: { readonly "operations"?: string, readonly "details"?: string, readonly "personalSpace"?: string }, readonly "_links"?: GenericLinks, readonly [x: string]: Schema.Json } | null
+export type User = { readonly "type": "known" | "unknown" | "anonymous" | "user", readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId"?: GenericAccountId, readonly "accountType"?: "atlassian" | "app" | "", readonly "email"?: string | null, readonly "publicName"?: string, readonly "profilePicture"?: Icon, readonly "displayName"?: string | null, readonly "timeZone"?: string | null, readonly "externalCollaborator"?: boolean, readonly "isExternalCollaborator"?: boolean, readonly "isGuest"?: boolean, readonly "operations"?: ReadonlyArray<OperationCheckResult> | null, readonly "details"?: UserDetails, readonly "personalSpace"?: Space, readonly "_expandable"?: { readonly "operations"?: string, readonly "details"?: string, readonly "personalSpace"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json } | null
 export const User = Schema.suspend((): Schema.Codec<User> => __recursive_User)
 // non-recursive definitions
-export type OperationCheckResult = { readonly "operation": "administer" | "archive" | "clear_permissions" | "copy" | "create" | "create_space" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "restrict_content" | "update" | "use", readonly "targetType": string }
-export const OperationCheckResult = Schema.Struct({ "operation": Schema.Literals(["administer", "archive", "clear_permissions", "copy", "create", "create_space", "delete", "export", "move", "purge", "purge_version", "read", "restore", "restrict_content", "update", "use"]).annotate({ "description": "The operation itself." }), "targetType": Schema.String.annotate({ "description": "The space or content type that the operation applies to. Could be one of- - application - page - blogpost - comment - attachment - space" }) }).annotate({ "description": "An operation and the target entity that it applies to, e.g. create page.", "identifier": "OperationCheckResult" })
+export type OperationCheckResult = { readonly "operation": "administer" | "archive" | "clear_permissions" | "copy" | "create" | "create_space" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "restrict_content" | "update" | "use", readonly "targetType": string } & { readonly [x: string]: Schema.Json }
+export const OperationCheckResult = Schema.StructWithRest(Schema.Struct({ "operation": Schema.Literals(["administer", "archive", "clear_permissions", "copy", "create", "create_space", "delete", "export", "move", "purge", "purge_version", "read", "restore", "restrict_content", "update", "use"]).annotate({ "description": "The operation itself." }), "targetType": Schema.String.annotate({ "description": "The space or content type that the operation applies to. Could be one of- - application - page - blogpost - comment - attachment - space" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "An operation and the target entity that it applies to, e.g. create page.", "identifier": "OperationCheckResult" })
 export type GenericUserName = string | null
 export const GenericUserName = Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "This property is no longer available and will be removed from the documentation soon.\nUse `accountId` instead.\nSee the [deprecation notice](/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/) for details.", "identifier": "GenericUserName" })
 export type GenericUserKey = string | null
 export const GenericUserKey = Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "This property is no longer available and will be removed from the documentation soon.\nUse `accountId` instead.\nSee the [deprecation notice](/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/) for details.", "identifier": "GenericUserKey" })
 export type GenericAccountId = string | null
 export const GenericAccountId = Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The account ID of the user, which uniquely identifies the user across all Atlassian products.\nFor example, `384093:32b4d9w0-f6a5-3535-11a3-9c8c88d10192`.", "identifier": "GenericAccountId" })
-export type AffectedObject = { readonly "name": string, readonly "objectType": string }
-export const AffectedObject = Schema.Struct({ "name": Schema.String, "objectType": Schema.String }).annotate({ "identifier": "AffectedObject" })
-export type ChangedValue = { readonly "name": string, readonly "oldValue": string, readonly "hiddenOldValue"?: string, readonly "newValue": string, readonly "hiddenNewValue"?: string }
-export const ChangedValue = Schema.Struct({ "name": Schema.String, "oldValue": Schema.String, "hiddenOldValue": Schema.optionalKey(Schema.String), "newValue": Schema.String, "hiddenNewValue": Schema.optionalKey(Schema.String) }).annotate({ "identifier": "ChangedValue" })
+export type AffectedObject = { readonly "name": string, readonly "objectType": string } & { readonly [x: string]: Schema.Json }
+export const AffectedObject = Schema.StructWithRest(Schema.Struct({ "name": Schema.String, "objectType": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AffectedObject" })
+export type ChangedValue = { readonly "name": string, readonly "oldValue": string, readonly "hiddenOldValue"?: string, readonly "newValue": string, readonly "hiddenNewValue"?: string } & { readonly [x: string]: Schema.Json }
+export const ChangedValue = Schema.StructWithRest(Schema.Struct({ "name": Schema.String, "oldValue": Schema.String, "hiddenOldValue": Schema.optionalKey(Schema.String), "newValue": Schema.String, "hiddenNewValue": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ChangedValue" })
 export type GenericLinks = { readonly [x: string]: { readonly [x: string]: Schema.Json } | string }
 export const GenericLinks = Schema.Record(Schema.String, Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.String], { mode: "oneOf" })).annotate({ "identifier": "GenericLinks" })
-export type RetentionPeriod = { readonly "number": number, readonly "units": "NANOS" | "MICROS" | "MILLIS" | "SECONDS" | "MINUTES" | "HOURS" | "HALF_DAYS" | "DAYS" | "WEEKS" | "MONTHS" | "YEARS" | "DECADES" | "CENTURIES" | "MILLENNIA" | "ERAS" | "FOREVER" }
-export const RetentionPeriod = Schema.Struct({ "number": Schema.Number.annotate({ "description": "The number of units for the retention period.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "units": Schema.Literals(["NANOS", "MICROS", "MILLIS", "SECONDS", "MINUTES", "HOURS", "HALF_DAYS", "DAYS", "WEEKS", "MONTHS", "YEARS", "DECADES", "CENTURIES", "MILLENNIA", "ERAS", "FOREVER"]).annotate({ "description": "The unit of time that the retention period is measured in." }) }).annotate({ "identifier": "RetentionPeriod" })
-export type LongTask = { readonly "ari"?: string, readonly "id": string, readonly "links": { readonly "status"?: string, readonly [x: string]: Schema.Json } }
-export const LongTask = Schema.Struct({ "ari": Schema.optionalKey(Schema.String.annotate({ "description": "the ARI for the long task, based on its ID" })), "id": Schema.String.annotate({ "description": "a unique identifier for the long task" }), "links": Schema.StructWithRest(Schema.Struct({ "status": Schema.optionalKey(Schema.String.annotate({ "description": "The URL to retrive status of long task." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]) }).annotate({ "identifier": "LongTask" })
-export type ContentBlueprintDraft = { readonly "version": { readonly "number": number, readonly [x: string]: Schema.Json }, readonly "title": string, readonly "type": "page", readonly "status"?: "current", readonly "space"?: { readonly "key": string, readonly [x: string]: Schema.Json }, readonly "ancestors"?: ReadonlyArray<{ readonly "id": string }> | null, readonly [x: string]: Schema.Json }
-export const ContentBlueprintDraft = Schema.StructWithRest(Schema.Struct({ "version": Schema.StructWithRest(Schema.Struct({ "number": Schema.Number.annotate({ "description": "The version number. Set this to `1`.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The version for the new content." }), "title": Schema.String.annotate({ "description": "The title of the content. If you don't want to change the title,\nset this to the current title of the draft." }).check(Schema.isMaxLength(255).annotate({ "expected": "a value with a length of at most 255" })), "type": Schema.Literal("page").annotate({ "description": "The type of content. Set this to `page`." }), "status": Schema.optionalKey(Schema.Literal("current").annotate({ "description": "The status of the content. Set this to `current` or omit it altogether." })), "space": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "key": Schema.String.annotate({ "description": "The key of the space", "format": "int32" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The space for the content." })), "ancestors": Schema.optionalKey(Schema.Union([Schema.Array(Schema.Struct({ "id": Schema.String.annotate({ "description": "The content ID of the ancestor." }) })), Schema.Null]).annotate({ "description": "The new ancestor (i.e. parent page) for the content. If you have\nspecified an ancestor, you must also specify a `space` property\nin the request body for the space that the ancestor is in.\n\nNote, if you specify more than one ancestor, the last ID in the array\nwill be selected as the parent page for the content." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentBlueprintDraft" })
+export type RetentionPeriod = { readonly "number": number, readonly "units": "NANOS" | "MICROS" | "MILLIS" | "SECONDS" | "MINUTES" | "HOURS" | "HALF_DAYS" | "DAYS" | "WEEKS" | "MONTHS" | "YEARS" | "DECADES" | "CENTURIES" | "MILLENNIA" | "ERAS" | "FOREVER" } & { readonly [x: string]: Schema.Json }
+export const RetentionPeriod = Schema.StructWithRest(Schema.Struct({ "number": Schema.Number.annotate({ "description": "The number of units for the retention period.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "units": Schema.Literals(["NANOS", "MICROS", "MILLIS", "SECONDS", "MINUTES", "HOURS", "HALF_DAYS", "DAYS", "WEEKS", "MONTHS", "YEARS", "DECADES", "CENTURIES", "MILLENNIA", "ERAS", "FOREVER"]).annotate({ "description": "The unit of time that the retention period is measured in." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "RetentionPeriod" })
+export type LongTask = { readonly "ari"?: string, readonly "id": string, readonly "links": { readonly "status"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const LongTask = Schema.StructWithRest(Schema.Struct({ "ari": Schema.optionalKey(Schema.String.annotate({ "description": "the ARI for the long task, based on its ID" })), "id": Schema.String.annotate({ "description": "a unique identifier for the long task" }), "links": Schema.StructWithRest(Schema.Struct({ "status": Schema.optionalKey(Schema.String.annotate({ "description": "The URL to retrive status of long task." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LongTask" })
+export type ContentBlueprintDraft = { readonly "version": { readonly "number": number } & { readonly [x: string]: Schema.Json }, readonly "title": string, readonly "type": "page", readonly "status"?: "current", readonly "space"?: { readonly "key": string } & { readonly [x: string]: Schema.Json }, readonly "ancestors"?: ReadonlyArray<{ readonly "id": string } & { readonly [x: string]: Schema.Json }> | null } & { readonly [x: string]: Schema.Json }
+export const ContentBlueprintDraft = Schema.StructWithRest(Schema.Struct({ "version": Schema.StructWithRest(Schema.Struct({ "number": Schema.Number.annotate({ "description": "The version number. Set this to `1`.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The version for the new content." }), "title": Schema.String.annotate({ "description": "The title of the content. If you don't want to change the title,\nset this to the current title of the draft." }).check(Schema.isMaxCodePoints(255).annotate({ "expected": "a string with at most 255 code points" })), "type": Schema.Literal("page").annotate({ "description": "The type of content. Set this to `page`." }), "status": Schema.optionalKey(Schema.Literal("current").annotate({ "description": "The status of the content. Set this to `current` or omit it altogether." })), "space": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "key": Schema.String.annotate({ "description": "The key of the space", "format": "int32" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The space for the content." })), "ancestors": Schema.optionalKey(Schema.Union([Schema.Array(Schema.StructWithRest(Schema.Struct({ "id": Schema.String.annotate({ "description": "The content ID of the ancestor." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), Schema.Null]).annotate({ "description": "The new ancestor (i.e. parent page) for the content. If you have\nspecified an ancestor, you must also specify a `space` property\nin the request body for the space that the ancestor is in.\n\nNote, if you specify more than one ancestor, the last ID in the array\nwill be selected as the parent page for the content." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentBlueprintDraft" })
 export type Content = Schema.Json
 export const Content = Schema.Json.annotate({ "expected": "JSON value", "identifier": "Content" })
 export type ContentId = string
 export const ContentId = Schema.String.annotate({ "identifier": "ContentId" })
+export type __ClientMultipartFile = globalThis.File | globalThis.Blob
+export const __ClientMultipartFile = Schema.instanceOf(globalThis.Blob, { expected: "File | Blob" })
 export type Container = { readonly [x: string]: Schema.Json } | null
 export const Container = Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null]).annotate({ "description": "Container for content. This can be either a space (containing a page or blogpost)\nor a page/blog post (containing an attachment or comment)", "identifier": "Container" })
-export type Icon = { readonly "path": string, readonly "width": number, readonly "height": number, readonly "isDefault": boolean, readonly [x: string]: Schema.Json } | null
+export type Icon = { readonly "path": string, readonly "width": number, readonly "height": number, readonly "isDefault": boolean } & { readonly [x: string]: Schema.Json } | null
 export const Icon = Schema.Union([Schema.StructWithRest(Schema.Struct({ "path": Schema.String, "width": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "height": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "isDefault": Schema.Boolean }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "description": "This object represents an icon. If used as a profilePicture, this may be returned as null, depending on the user's privacy setting.", "identifier": "Icon" })
-export type UserDetails = { readonly "business"?: { readonly "position"?: string, readonly "department"?: string, readonly "location"?: string }, readonly "personal"?: { readonly "phone"?: string, readonly "im"?: string, readonly "website"?: string, readonly "email"?: string } }
-export const UserDetails = Schema.Struct({ "business": Schema.optionalKey(Schema.Struct({ "position": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "department": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "location": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })) })), "personal": Schema.optionalKey(Schema.Struct({ "phone": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "im": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "website": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "email": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. Use the `User.email` property instead. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })) })) }).annotate({ "identifier": "UserDetails" })
-export type SpaceDescription = { readonly "value": string, readonly "representation": "plain" | "view", readonly "embeddedContent": ReadonlyArray<{  }>, readonly [x: string]: Schema.Json }
-export const SpaceDescription = Schema.StructWithRest(Schema.Struct({ "value": Schema.String, "representation": Schema.Literals(["plain", "view"]), "embeddedContent": Schema.Array(Schema.Struct({  })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SpaceDescription" })
-export type Label = { readonly "prefix": string, readonly "name": string, readonly "id": string, readonly "label": string }
-export const Label = Schema.Struct({ "prefix": Schema.String, "name": Schema.String, "id": Schema.String, "label": Schema.String }).annotate({ "identifier": "Label" })
-export type MenusLookAndFeel = { readonly "hoverOrFocus": { readonly "backgroundColor": string }, readonly "color": string }
-export const MenusLookAndFeel = Schema.Struct({ "hoverOrFocus": Schema.Struct({ "backgroundColor": Schema.String }), "color": Schema.String }).annotate({ "identifier": "MenusLookAndFeel" })
-export type ButtonLookAndFeel = { readonly "backgroundColor": string, readonly "color": string, readonly [x: string]: Schema.Json } | null
+export type UserDetails = { readonly "business"?: { readonly "position"?: string, readonly "department"?: string, readonly "location"?: string } & { readonly [x: string]: Schema.Json }, readonly "personal"?: { readonly "phone"?: string, readonly "im"?: string, readonly "website"?: string, readonly "email"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const UserDetails = Schema.StructWithRest(Schema.Struct({ "business": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "position": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "department": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "location": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "personal": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "phone": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "im": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "website": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. There is no replacement. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })), "email": Schema.optionalKey(Schema.String.annotate({ "description": "This property has been deprecated due to privacy changes. Use the `User.email` property instead. See the\n[migration guide](https://developer.atlassian.com/cloud/confluence/deprecation-notice-user-privacy-api-migration-guide/)\nfor details." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "UserDetails" })
+export type SpaceDescription = { readonly "value": string, readonly "representation": "plain" | "view", readonly "embeddedContent": ReadonlyArray<{ readonly [x: string]: Schema.Json }> } & { readonly [x: string]: Schema.Json }
+export const SpaceDescription = Schema.StructWithRest(Schema.Struct({ "value": Schema.String, "representation": Schema.Literals(["plain", "view"]), "embeddedContent": Schema.Array(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SpaceDescription" })
+export type Label = { readonly "prefix": string, readonly "name": string, readonly "id": string, readonly "label": string } & { readonly [x: string]: Schema.Json }
+export const Label = Schema.StructWithRest(Schema.Struct({ "prefix": Schema.String, "name": Schema.String, "id": Schema.String, "label": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Label" })
+export type MenusLookAndFeel = { readonly "hoverOrFocus": { readonly "backgroundColor": string } & { readonly [x: string]: Schema.Json }, readonly "color": string } & { readonly [x: string]: Schema.Json }
+export const MenusLookAndFeel = Schema.StructWithRest(Schema.Struct({ "hoverOrFocus": Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "MenusLookAndFeel" })
+export type ButtonLookAndFeel = { readonly "backgroundColor": string, readonly "color": string } & { readonly [x: string]: Schema.Json } | null
 export const ButtonLookAndFeel = Schema.Union([Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.String, "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "ButtonLookAndFeel" })
-export type NavigationLookAndFeel = { readonly "color": string, readonly "highlightColor"?: string | null, readonly "hoverOrFocus": { readonly "backgroundColor": string, readonly "color": string }, readonly [x: string]: Schema.Json } | null
-export const NavigationLookAndFeel = Schema.Union([Schema.StructWithRest(Schema.Struct({ "color": Schema.String, "highlightColor": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "hoverOrFocus": Schema.Struct({ "backgroundColor": Schema.String, "color": Schema.String }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "NavigationLookAndFeel" })
-export type SearchFieldLookAndFeel = { readonly "backgroundColor": string, readonly "color": string, readonly [x: string]: Schema.Json } | null
+export type NavigationLookAndFeel = { readonly "color": string, readonly "highlightColor"?: string | null, readonly "hoverOrFocus": { readonly "backgroundColor": string, readonly "color": string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json } | null
+export const NavigationLookAndFeel = Schema.Union([Schema.StructWithRest(Schema.Struct({ "color": Schema.String, "highlightColor": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "hoverOrFocus": Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.String, "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "NavigationLookAndFeel" })
+export type SearchFieldLookAndFeel = { readonly "backgroundColor": string, readonly "color": string } & { readonly [x: string]: Schema.Json } | null
 export const SearchFieldLookAndFeel = Schema.Union([Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.String, "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "SearchFieldLookAndFeel" })
-export type TopNavigationLookAndFeel = { readonly "color"?: string | null, readonly "highlightColor": string, readonly "hoverOrFocus"?: { readonly "backgroundColor"?: string, readonly "color"?: string } }
-export const TopNavigationLookAndFeel = Schema.Struct({ "color": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "highlightColor": Schema.String, "hoverOrFocus": Schema.optionalKey(Schema.Struct({ "backgroundColor": Schema.optionalKey(Schema.String), "color": Schema.optionalKey(Schema.String) })) }).annotate({ "identifier": "TopNavigationLookAndFeel" })
-export type ScreenLookAndFeel = { readonly "background": string, readonly "backgroundAttachment"?: string | null, readonly "backgroundBlendMode"?: string | null, readonly "backgroundClip"?: string | null, readonly "backgroundColor"?: string | null, readonly "backgroundImage"?: string | null, readonly "backgroundOrigin"?: string | null, readonly "backgroundPosition"?: string | null, readonly "backgroundRepeat"?: string | null, readonly "backgroundSize"?: string | null, readonly "layer"?: { readonly "width"?: string, readonly "height"?: string, readonly [x: string]: Schema.Json } | null, readonly "gutterTop"?: string | null, readonly "gutterRight"?: string | null, readonly "gutterBottom"?: string | null, readonly "gutterLeft"?: string | null }
-export const ScreenLookAndFeel = Schema.Struct({ "background": Schema.String, "backgroundAttachment": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundBlendMode": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundClip": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundColor": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundImage": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundOrigin": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundPosition": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundRepeat": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundSize": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "layer": Schema.optionalKey(Schema.Union([Schema.StructWithRest(Schema.Struct({ "width": Schema.optionalKey(Schema.String), "height": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null])), "gutterTop": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "gutterRight": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "gutterBottom": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "gutterLeft": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])) }).annotate({ "identifier": "ScreenLookAndFeel" })
-export type ContainerLookAndFeel = { readonly "background": string, readonly "backgroundAttachment"?: string | null, readonly "backgroundBlendMode"?: string | null, readonly "backgroundClip"?: string | null, readonly "backgroundColor": string | null, readonly "backgroundImage": string | null, readonly "backgroundOrigin"?: string | null, readonly "backgroundPosition"?: string | null, readonly "backgroundRepeat"?: string | null, readonly "backgroundSize": string | null, readonly "padding": string, readonly "borderRadius": string, readonly [x: string]: Schema.Json } | null
+export type TopNavigationLookAndFeel = { readonly "color"?: string | null, readonly "highlightColor": string, readonly "hoverOrFocus"?: { readonly "backgroundColor"?: string, readonly "color"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const TopNavigationLookAndFeel = Schema.StructWithRest(Schema.Struct({ "color": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "highlightColor": Schema.String, "hoverOrFocus": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.optionalKey(Schema.String), "color": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "TopNavigationLookAndFeel" })
+export type ScreenLookAndFeel = { readonly "background": string, readonly "backgroundAttachment"?: string | null, readonly "backgroundBlendMode"?: string | null, readonly "backgroundClip"?: string | null, readonly "backgroundColor"?: string | null, readonly "backgroundImage"?: string | null, readonly "backgroundOrigin"?: string | null, readonly "backgroundPosition"?: string | null, readonly "backgroundRepeat"?: string | null, readonly "backgroundSize"?: string | null, readonly "layer"?: { readonly "width"?: string, readonly "height"?: string } & { readonly [x: string]: Schema.Json } | null, readonly "gutterTop"?: string | null, readonly "gutterRight"?: string | null, readonly "gutterBottom"?: string | null, readonly "gutterLeft"?: string | null } & { readonly [x: string]: Schema.Json }
+export const ScreenLookAndFeel = Schema.StructWithRest(Schema.Struct({ "background": Schema.String, "backgroundAttachment": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundBlendMode": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundClip": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundColor": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundImage": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundOrigin": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundPosition": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundRepeat": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundSize": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "layer": Schema.optionalKey(Schema.Union([Schema.StructWithRest(Schema.Struct({ "width": Schema.optionalKey(Schema.String), "height": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null])), "gutterTop": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "gutterRight": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "gutterBottom": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "gutterLeft": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ScreenLookAndFeel" })
+export type ContainerLookAndFeel = { readonly "background": string, readonly "backgroundAttachment"?: string | null, readonly "backgroundBlendMode"?: string | null, readonly "backgroundClip"?: string | null, readonly "backgroundColor": string | null, readonly "backgroundImage": string | null, readonly "backgroundOrigin"?: string | null, readonly "backgroundPosition"?: string | null, readonly "backgroundRepeat"?: string | null, readonly "backgroundSize": string | null, readonly "padding": string, readonly "borderRadius": string } & { readonly [x: string]: Schema.Json } | null
 export const ContainerLookAndFeel = Schema.Union([Schema.StructWithRest(Schema.Struct({ "background": Schema.String, "backgroundAttachment": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundBlendMode": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundClip": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundColor": Schema.Union([Schema.String, Schema.Null]), "backgroundImage": Schema.Union([Schema.String, Schema.Null]), "backgroundOrigin": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundPosition": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundRepeat": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "backgroundSize": Schema.Union([Schema.String, Schema.Null]), "padding": Schema.String, "borderRadius": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "ContainerLookAndFeel" })
 export type Embeddable = { readonly [x: string]: Schema.Json }
 export const Embeddable = Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })).annotate({ "identifier": "Embeddable" })
-export type SuperBatchWebResources = { readonly "uris"?: { readonly "all"?: ReadonlyArray<string> | string, readonly "css"?: ReadonlyArray<string> | string, readonly "js"?: ReadonlyArray<string> | string }, readonly "tags"?: { readonly "all"?: string, readonly "css"?: string, readonly "data"?: string, readonly "js"?: string }, readonly "metatags"?: string, readonly "_expandable"?: { readonly [x: string]: Schema.Json } }
-export const SuperBatchWebResources = Schema.Struct({ "uris": Schema.optionalKey(Schema.Struct({ "all": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "css": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "js": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })) })), "tags": Schema.optionalKey(Schema.Struct({ "all": Schema.optionalKey(Schema.String), "css": Schema.optionalKey(Schema.String), "data": Schema.optionalKey(Schema.String), "js": Schema.optionalKey(Schema.String) })), "metatags": Schema.optionalKey(Schema.String), "_expandable": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }).annotate({ "identifier": "SuperBatchWebResources" })
-export type AsyncId = { readonly "asyncId": string }
-export const AsyncId = Schema.Struct({ "asyncId": Schema.String }).annotate({ "identifier": "AsyncId" })
-export type LabelCreate = { readonly "prefix": string, readonly "name": string, readonly [x: string]: Schema.Json }
+export type SuperBatchWebResources = { readonly "uris"?: { readonly "all"?: ReadonlyArray<string> | string, readonly "css"?: ReadonlyArray<string> | string, readonly "js"?: ReadonlyArray<string> | string } & { readonly [x: string]: Schema.Json }, readonly "tags"?: { readonly "all"?: string, readonly "css"?: string, readonly "data"?: string, readonly "js"?: string } & { readonly [x: string]: Schema.Json }, readonly "metatags"?: string, readonly "_expandable"?: { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const SuperBatchWebResources = Schema.StructWithRest(Schema.Struct({ "uris": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "all": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "css": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "js": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "tags": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "all": Schema.optionalKey(Schema.String), "css": Schema.optionalKey(Schema.String), "data": Schema.optionalKey(Schema.String), "js": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "metatags": Schema.optionalKey(Schema.String), "_expandable": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SuperBatchWebResources" })
+export type AsyncId = { readonly "asyncId": string } & { readonly [x: string]: Schema.Json }
+export const AsyncId = Schema.StructWithRest(Schema.Struct({ "asyncId": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AsyncId" })
+export type LabelCreate = { readonly "prefix": string, readonly "name": string } & { readonly [x: string]: Schema.Json }
 export const LabelCreate = Schema.StructWithRest(Schema.Struct({ "prefix": Schema.String.annotate({ "description": "The prefix for the label. `global`, `my` `team`, etc." }), "name": Schema.String.annotate({ "description": "The name of the label, which will be shown in the UI." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LabelCreate" })
-export type CopyPageHierarchyTitleOptions = { readonly "prefix"?: string, readonly "replace"?: string, readonly "search"?: string }
-export const CopyPageHierarchyTitleOptions = Schema.Struct({ "prefix": Schema.optionalKey(Schema.String), "replace": Schema.optionalKey(Schema.String), "search": Schema.optionalKey(Schema.String) }).annotate({ "description": "Required for copying page in the same space.", "identifier": "CopyPageHierarchyTitleOptions" })
-export type CopyPageRequestDestination = { readonly "type": "space" | "existing_page" | "parent_page" | "parent_content", readonly "value": string }
-export const CopyPageRequestDestination = Schema.Struct({ "type": Schema.Literals(["space", "existing_page", "parent_page", "parent_content"]), "value": Schema.String.annotate({ "description": "The space key for `space` type, and content id for `parent_page`, `parent_content`, and `existing_page`" }) }).annotate({ "description": "Defines where the page will be copied to, and can be one of the following types.\n\n  - `parent_page`: page will be copied as a child of the specified parent page\n  - `parent_content`: page will be copied as a child of the specified parent content\n  - `space`: page will be copied to the specified space as a root page on the space\n  - `existing_page`: page will be copied and replace the specified page", "identifier": "CopyPageRequestDestination" })
-export type ContentBodyCreate = { readonly "value": string, readonly "representation": "view" | "export_view" | "styled_view" | "storage" | "editor" | "editor2" | "anonymous_export_view" | "wiki" | "atlas_doc_format" | "plain" | "raw", readonly [x: string]: Schema.Json }
+export type CopyPageHierarchyTitleOptions = { readonly "prefix"?: string, readonly "replace"?: string, readonly "search"?: string } & { readonly [x: string]: Schema.Json }
+export const CopyPageHierarchyTitleOptions = Schema.StructWithRest(Schema.Struct({ "prefix": Schema.optionalKey(Schema.String), "replace": Schema.optionalKey(Schema.String), "search": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Required for copying page in the same space.", "identifier": "CopyPageHierarchyTitleOptions" })
+export type CopyPageRequestDestination = { readonly "type": "space" | "existing_page" | "parent_page" | "parent_content", readonly "value": string } & { readonly [x: string]: Schema.Json }
+export const CopyPageRequestDestination = Schema.StructWithRest(Schema.Struct({ "type": Schema.Literals(["space", "existing_page", "parent_page", "parent_content"]), "value": Schema.String.annotate({ "description": "The space key for `space` type, and content id for `parent_page`, `parent_content`, and `existing_page`" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Defines where the page will be copied to, and can be one of the following types.\n\n  - `parent_page`: page will be copied as a child of the specified parent page\n  - `parent_content`: page will be copied as a child of the specified parent content\n  - `space`: page will be copied to the specified space as a root page on the space\n  - `existing_page`: page will be copied and replace the specified page", "identifier": "CopyPageRequestDestination" })
+export type ContentBodyCreate = { readonly "value": string, readonly "representation": "view" | "export_view" | "styled_view" | "storage" | "editor" | "editor2" | "anonymous_export_view" | "wiki" | "atlas_doc_format" | "plain" | "raw" } & { readonly [x: string]: Schema.Json }
 export const ContentBodyCreate = Schema.StructWithRest(Schema.Struct({ "value": Schema.String.annotate({ "description": "The body of the content in the relevant format." }), "representation": Schema.Literals(["view", "export_view", "styled_view", "storage", "editor", "editor2", "anonymous_export_view", "wiki", "atlas_doc_format", "plain", "raw"]).annotate({ "description": "The content format type. Set the value of this property to\nthe name of the format being used, e.g. 'storage'." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object is used when creating or updating content.", "identifier": "ContentBodyCreate" })
-export type PermissionSubjectWithGroupId = { readonly "type": "user" | "group", readonly "identifier": string }
-export const PermissionSubjectWithGroupId = Schema.Struct({ "type": Schema.Literals(["user", "group"]), "identifier": Schema.String.annotate({ "description": "for `type=user`, identifier should be user's accountId or `anonymous` for anonymous users\n\nfor `type=group`, identifier should be ID of the group" }) }).annotate({ "description": "The user or group that the permission applies to.", "identifier": "PermissionSubjectWithGroupId" })
-export type Message = { readonly "translation"?: string, readonly "args": ReadonlyArray<string | { readonly [x: string]: Schema.Json }>, readonly [x: string]: Schema.Json }
+export type PermissionSubjectWithGroupId = { readonly "type": "user" | "group", readonly "identifier": string } & { readonly [x: string]: Schema.Json }
+export const PermissionSubjectWithGroupId = Schema.StructWithRest(Schema.Struct({ "type": Schema.Literals(["user", "group"]), "identifier": Schema.String.annotate({ "description": "for `type=user`, identifier should be user's accountId or `anonymous` for anonymous users\n\nfor `type=group`, identifier should be ID of the group" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The user or group that the permission applies to.", "identifier": "PermissionSubjectWithGroupId" })
+export type Message = { readonly "translation"?: string, readonly "args": ReadonlyArray<string | { readonly [x: string]: Schema.Json }> } & { readonly [x: string]: Schema.Json }
 export const Message = Schema.StructWithRest(Schema.Struct({ "translation": Schema.optionalKey(Schema.String), "args": Schema.Array(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Message" })
-export type ContentState = { readonly "id": number, readonly "name": string, readonly "color": string }
-export const ContentState = Schema.Struct({ "id": Schema.Number.annotate({ "description": "identifier of content state. If 0, 1, or 2, this is a default space state", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "name": Schema.String.annotate({ "description": "name of content state." }), "color": Schema.String.annotate({ "description": "hex string representing color of state" }) }).annotate({ "identifier": "ContentState" })
-export type ContentStateRestInput = { readonly "name"?: string, readonly "color"?: string, readonly "id"?: number }
-export const ContentStateRestInput = Schema.Struct({ "name": Schema.optionalKey(Schema.String.annotate({ "description": "Name of content state. Maximum 20 characters." })), "color": Schema.optionalKey(Schema.String.annotate({ "description": "Color of state. Must be in 6 digit hex form (#FFFFFF). The default colors offered in the UI are:\n #ff7452 (red),\n #2684ff (blue),\n #ffc400 (yellow),\n #57d9a3 (green), and\n #8777d9 (purple)" })), "id": Schema.optionalKey(Schema.Number.annotate({ "description": "id of state. This can be 0,1, or 2 if you wish to specify a default space state.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))) }).annotate({ "identifier": "ContentStateRestInput" })
-export type AvailableContentStates = { readonly "spaceContentStates": ReadonlyArray<{ readonly "id": number, readonly "name": string, readonly "color": string }>, readonly "customContentStates": ReadonlyArray<{ readonly "id": number, readonly "name": string, readonly "color": string }> }
-export const AvailableContentStates = Schema.Struct({ "spaceContentStates": Schema.Array(Schema.Struct({ "id": Schema.Number.annotate({ "description": "identifier of content state. If 0, 1, or 2, this is a default space state", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "name": Schema.String.annotate({ "description": "name of content state." }), "color": Schema.String.annotate({ "description": "hex string representing color of state" }) })).annotate({ "description": "Space suggested content states that can be used in the space.\nThis list can be empty if there are no space content states defined in the space or if space content states are disabled in the space.\nAll spaces start with 4 default space content states, and this can be modified in the UI under space settings." }), "customContentStates": Schema.Array(Schema.Struct({ "id": Schema.Number.annotate({ "description": "identifier of content state. If 0, 1, or 2, this is a default space state", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "name": Schema.String.annotate({ "description": "name of content state." }), "color": Schema.String.annotate({ "description": "hex string representing color of state" }) })).annotate({ "description": "Custom content states that can be used by the user on the content of this call.\nThis list can be empty if there are no custom content states defined by the user or if custom content states are disabled in the space of the content.\nThis will at most have 3 of the most recently published content states. \nOnly the calling user has access to place these states on content, but all users can see these states once they are placed." }) }).annotate({ "identifier": "AvailableContentStates" })
-export type VersionRestore = { readonly "operationKey": "restore", readonly "params": { readonly "versionNumber": number, readonly "message": string, readonly "restoreTitle"?: boolean } }
-export const VersionRestore = Schema.Struct({ "operationKey": Schema.Literal("restore").annotate({ "description": "Set to 'restore'." }), "params": Schema.Struct({ "versionNumber": Schema.Number.annotate({ "description": "The version number to be restored.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "message": Schema.String.annotate({ "description": "Description for the version." }), "restoreTitle": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If true, the content title will be the same as the title from the version restored. Defaults to `false`." })) }) }).annotate({ "identifier": "VersionRestore" })
+export type ContentState = { readonly "id": number, readonly "name": string, readonly "color": string } & { readonly [x: string]: Schema.Json }
+export const ContentState = Schema.StructWithRest(Schema.Struct({ "id": Schema.Number.annotate({ "description": "identifier of content state. If 0, 1, or 2, this is a default space state", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "name": Schema.String.annotate({ "description": "name of content state." }), "color": Schema.String.annotate({ "description": "hex string representing color of state" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentState" })
+export type ContentStateRestInput = { readonly "name"?: string, readonly "color"?: string, readonly "id"?: number } & { readonly [x: string]: Schema.Json }
+export const ContentStateRestInput = Schema.StructWithRest(Schema.Struct({ "name": Schema.optionalKey(Schema.String.annotate({ "description": "Name of content state. Maximum 20 characters." })), "color": Schema.optionalKey(Schema.String.annotate({ "description": "Color of state. Must be in 6 digit hex form (#FFFFFF). The default colors offered in the UI are:\n #ff7452 (red),\n #2684ff (blue),\n #ffc400 (yellow),\n #57d9a3 (green), and\n #8777d9 (purple)" })), "id": Schema.optionalKey(Schema.Number.annotate({ "description": "id of state. This can be 0,1, or 2 if you wish to specify a default space state.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentStateRestInput" })
+export type VersionRestore = { readonly "operationKey": "restore", readonly "params": { readonly "versionNumber": number, readonly "message": string, readonly "restoreTitle"?: boolean } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const VersionRestore = Schema.StructWithRest(Schema.Struct({ "operationKey": Schema.Literal("restore").annotate({ "description": "Set to 'restore'." }), "params": Schema.StructWithRest(Schema.Struct({ "versionNumber": Schema.Number.annotate({ "description": "The version number to be restored.", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "message": Schema.String.annotate({ "description": "Description for the version." }), "restoreTitle": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If true, the content title will be the same as the title from the version restored. Defaults to `false`." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "VersionRestore" })
 export type LabeledContentType = "page" | "blogpost" | "attachment" | "page_template"
 export const LabeledContentType = Schema.Literals(["page", "blogpost", "attachment", "page_template"]).annotate({ "identifier": "LabeledContentType" })
-export type GroupName = { readonly "name": string }
-export const GroupName = Schema.Struct({ "name": Schema.String }).annotate({ "identifier": "GroupName" })
-export type AccountId = { readonly "accountId": string }
-export const AccountId = Schema.Struct({ "accountId": Schema.String }).annotate({ "identifier": "AccountId" })
-export type RelationData = { readonly "createdBy"?: User, readonly "createdDate"?: string, readonly "friendlyCreatedDate"?: string }
-export const RelationData = Schema.Struct({ "createdBy": Schema.optionalKey(User), "createdDate": Schema.optionalKey(Schema.String.annotate({ "format": "date-time" })), "friendlyCreatedDate": Schema.optionalKey(Schema.String) }).annotate({ "identifier": "RelationData" })
-export type ContainerSummary = { readonly "title": string, readonly "displayUrl": string }
-export const ContainerSummary = Schema.Struct({ "title": Schema.String, "displayUrl": Schema.String }).annotate({ "identifier": "ContainerSummary" })
-export type Breadcrumb = { readonly "label": string, readonly "url": string, readonly "separator": string }
-export const Breadcrumb = Schema.Struct({ "label": Schema.String, "url": Schema.String, "separator": Schema.String }).annotate({ "identifier": "Breadcrumb" })
-export type LookAndFeelSelection = { readonly "spaceKey": string, readonly "lookAndFeelType": "global" | "custom" | "theme" }
-export const LookAndFeelSelection = Schema.Struct({ "spaceKey": Schema.String.annotate({ "description": "The key of the space for which the look and feel settings will be\nset." }), "lookAndFeelType": Schema.Literals(["global", "custom", "theme"]) }).annotate({ "description": "Look and feel selection", "identifier": "LookAndFeelSelection" })
-export type SystemInfoEntity = { readonly "cloudId": string, readonly "commitHash": string, readonly "baseUrl"?: string, readonly "fallbackBaseUrl"?: string, readonly "edition"?: string, readonly "siteTitle"?: string, readonly "defaultLocale"?: string, readonly "defaultTimeZone"?: string, readonly "microsPerimeter"?: string, readonly [x: string]: Schema.Json } | null
+export type GroupName = { readonly "name": string } & { readonly [x: string]: Schema.Json }
+export const GroupName = Schema.StructWithRest(Schema.Struct({ "name": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "GroupName" })
+export type AccountId = { readonly "accountId": string } & { readonly [x: string]: Schema.Json }
+export const AccountId = Schema.StructWithRest(Schema.Struct({ "accountId": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AccountId" })
+export type RelationData = { readonly "createdBy"?: User, readonly "createdDate"?: string, readonly "friendlyCreatedDate"?: string } & { readonly [x: string]: Schema.Json }
+export const RelationData = Schema.StructWithRest(Schema.Struct({ "createdBy": Schema.optionalKey(User), "createdDate": Schema.optionalKey(Schema.String.annotate({ "format": "date-time" })), "friendlyCreatedDate": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "RelationData" })
+export type ContainerSummary = { readonly "title": string, readonly "displayUrl": string } & { readonly [x: string]: Schema.Json }
+export const ContainerSummary = Schema.StructWithRest(Schema.Struct({ "title": Schema.String, "displayUrl": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContainerSummary" })
+export type Breadcrumb = { readonly "label": string, readonly "url": string, readonly "separator": string } & { readonly [x: string]: Schema.Json }
+export const Breadcrumb = Schema.StructWithRest(Schema.Struct({ "label": Schema.String, "url": Schema.String, "separator": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Breadcrumb" })
+export type LookAndFeelSelection = { readonly "spaceKey": string, readonly "lookAndFeelType": "global" | "custom" | "theme" } & { readonly [x: string]: Schema.Json }
+export const LookAndFeelSelection = Schema.StructWithRest(Schema.Struct({ "spaceKey": Schema.String.annotate({ "description": "The key of the space for which the look and feel settings will be\nset." }), "lookAndFeelType": Schema.Literals(["global", "custom", "theme"]) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Look and feel selection", "identifier": "LookAndFeelSelection" })
+export type SystemInfoEntity = { readonly "cloudId": string, readonly "commitHash": string, readonly "baseUrl"?: string, readonly "fallbackBaseUrl"?: string, readonly "edition"?: string, readonly "siteTitle"?: string, readonly "defaultLocale"?: string, readonly "defaultTimeZone"?: string, readonly "microsPerimeter"?: string } & { readonly [x: string]: Schema.Json } | null
 export const SystemInfoEntity = Schema.Union([Schema.StructWithRest(Schema.Struct({ "cloudId": Schema.String, "commitHash": Schema.String, "baseUrl": Schema.optionalKey(Schema.String), "fallbackBaseUrl": Schema.optionalKey(Schema.String), "edition": Schema.optionalKey(Schema.String), "siteTitle": Schema.optionalKey(Schema.String), "defaultLocale": Schema.optionalKey(Schema.String), "defaultTimeZone": Schema.optionalKey(Schema.String), "microsPerimeter": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "SystemInfoEntity" })
-export type SpaceDescriptionCreate = { readonly "plain": { readonly "value"?: string, readonly "representation"?: string, readonly [x: string]: Schema.Json }, readonly [x: string]: Schema.Json } | null
+export type SpaceDescriptionCreate = { readonly "plain": { readonly "value"?: string, readonly "representation"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json } | null
 export const SpaceDescriptionCreate = Schema.Union([Schema.StructWithRest(Schema.Struct({ "plain": Schema.StructWithRest(Schema.Struct({ "value": Schema.optionalKey(Schema.String.annotate({ "description": "The space description." })), "representation": Schema.optionalKey(Schema.String.annotate({ "description": "Set to 'plain'." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "description": "The description of the new/updated space. Note, only the 'plain' representation\ncan be used for the description when creating or updating a space.", "identifier": "SpaceDescriptionCreate" })
-export type GroupCreate = { readonly "type": "group", readonly "id"?: string, readonly [x: string]: Schema.Json }
+export type GroupCreate = { readonly "type": "group", readonly "id"?: string } & { readonly [x: string]: Schema.Json }
 export const GroupCreate = Schema.StructWithRest(Schema.Struct({ "type": Schema.Literal("group"), "id": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "GroupCreate" })
-export type PermissionSubject = { readonly "type": "user" | "group", readonly "identifier": string }
-export const PermissionSubject = Schema.Struct({ "type": Schema.Literals(["user", "group"]), "identifier": Schema.String.annotate({ "description": "for `type=user`, identifier should be user's accountId or `anonymous` for anonymous users\n\nfor `type=group`, identifier should be the groupId." }) }).annotate({ "description": "The user or group that the permission applies to.", "identifier": "PermissionSubject" })
-export type SpaceSettingsUpdate = { readonly "routeOverrideEnabled"?: boolean, readonly "contentMode"?: "standard" | "compact" | null }
-export const SpaceSettingsUpdate = Schema.Struct({ "routeOverrideEnabled": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Defines whether an override for the space home should be used. This is\nused in conjunction with a space theme provided by an app. For\nexample, if this property is set to true, a theme can display a page\nother than the space homepage when users visit the root URL for a\nspace. This property allows apps to provide content-only theming\nwithout overriding the space home." })), "contentMode": Schema.optionalKey(Schema.Union([Schema.Literal("standard"), Schema.Literal("compact"), Schema.Null]).annotate({ "description": "The content rendering mode for the space. Controls spacing and typography\nin the editor and renderer. Valid values are \"standard\" and \"compact\".\nWhen set to \"compact\", content is rendered more densely with smaller\nspacing and typography." })) }).annotate({ "identifier": "SpaceSettingsUpdate" })
-export type ThemeUpdate = { readonly "themeKey": string }
-export const ThemeUpdate = Schema.Struct({ "themeKey": Schema.String.annotate({ "description": "The key of the theme to be set as the space theme." }) }).annotate({ "identifier": "ThemeUpdate" })
-export type UserWatch = { readonly "watching": boolean }
-export const UserWatch = Schema.Struct({ "watching": Schema.Boolean }).annotate({ "identifier": "UserWatch" })
-export type AccountIdEmailRecord = { readonly "accountId": string, readonly "email": string }
-export const AccountIdEmailRecord = Schema.Struct({ "accountId": Schema.String, "email": Schema.String }).annotate({ "identifier": "AccountIdEmailRecord" })
+export type PermissionSubject = { readonly "type": "user" | "group", readonly "identifier": string } & { readonly [x: string]: Schema.Json }
+export const PermissionSubject = Schema.StructWithRest(Schema.Struct({ "type": Schema.Literals(["user", "group"]), "identifier": Schema.String.annotate({ "description": "for `type=user`, identifier should be user's accountId or `anonymous` for anonymous users\n\nfor `type=group`, identifier should be the groupId." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The user or group that the permission applies to.", "identifier": "PermissionSubject" })
+export type SpaceSettingsUpdate = { readonly "routeOverrideEnabled"?: boolean, readonly "contentMode"?: "standard" | "compact" } & { readonly [x: string]: Schema.Json }
+export const SpaceSettingsUpdate = Schema.StructWithRest(Schema.Struct({ "routeOverrideEnabled": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Defines whether an override for the space home should be used. This is\nused in conjunction with a space theme provided by an app. For\nexample, if this property is set to true, a theme can display a page\nother than the space homepage when users visit the root URL for a\nspace. This property allows apps to provide content-only theming\nwithout overriding the space home." })), "contentMode": Schema.optionalKey(Schema.Literals(["standard", "compact"]).annotate({ "description": "The content rendering mode for the space. Controls spacing and typography\nin the editor and renderer. Valid values are \"standard\" and \"compact\".\nWhen set to \"compact\", content is rendered more densely with smaller\nspacing and typography." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SpaceSettingsUpdate" })
+export type ThemeUpdate = { readonly "themeKey": string } & { readonly [x: string]: Schema.Json }
+export const ThemeUpdate = Schema.StructWithRest(Schema.Struct({ "themeKey": Schema.String.annotate({ "description": "The key of the theme to be set as the space theme." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ThemeUpdate" })
+export type UserWatch = { readonly "watching": boolean } & { readonly [x: string]: Schema.Json }
+export const UserWatch = Schema.StructWithRest(Schema.Struct({ "watching": Schema.Boolean }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "UserWatch" })
+export type AccountIdEmailRecord = { readonly "accountId": string, readonly "email": string } & { readonly [x: string]: Schema.Json }
+export const AccountIdEmailRecord = Schema.StructWithRest(Schema.Struct({ "accountId": Schema.String, "email": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AccountIdEmailRecord" })
 export type UserPropertyUpdate = { readonly "value": { readonly [x: string]: Schema.Json } }
 export const UserPropertyUpdate = Schema.Struct({ "value": Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })).annotate({ "description": "The value of the user property." }) }).annotate({ "identifier": "UserPropertyUpdate" })
 export type UserPropertyCreate = { readonly "value": { readonly [x: string]: Schema.Json } }
 export const UserPropertyCreate = Schema.Struct({ "value": Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })).annotate({ "description": "The value of the user property." }) }).annotate({ "identifier": "UserPropertyCreate" })
-export type AuditRecord = { readonly "author": { readonly "type": "user", readonly "displayName": string, readonly "operations"?: ReadonlyArray<OperationCheckResult> | null, readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId"?: GenericAccountId, readonly "accountType"?: string, readonly "externalCollaborator"?: boolean, readonly "isExternalCollaborator"?: boolean, readonly "isGuest"?: boolean, readonly "publicName"?: string }, readonly "remoteAddress": string, readonly "creationDate": number, readonly "summary": string, readonly "description": string, readonly "category": string, readonly "sysAdmin": boolean, readonly "superAdmin"?: boolean, readonly "affectedObject": AffectedObject, readonly "changedValues": ReadonlyArray<ChangedValue>, readonly "associatedObjects": ReadonlyArray<AffectedObject> }
-export const AuditRecord = Schema.Struct({ "author": Schema.Struct({ "type": Schema.Literal("user"), "displayName": Schema.String, "operations": Schema.optionalKey(Schema.Union([Schema.Array(OperationCheckResult), Schema.Null])), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": Schema.optionalKey(GenericAccountId), "accountType": Schema.optionalKey(Schema.String), "externalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead." })), "isExternalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead. Whether the user is an external collaborator user" })), "isGuest": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether the user is a guest user" })), "publicName": Schema.optionalKey(Schema.String.annotate({ "description": "The public name or nickname of the user. Will always contain a value." })) }), "remoteAddress": Schema.String, "creationDate": Schema.Number.annotate({ "description": "The creation date-time of the audit record, as a timestamp.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "summary": Schema.String, "description": Schema.String, "category": Schema.String, "sysAdmin": Schema.Boolean, "superAdmin": Schema.optionalKey(Schema.Boolean), "affectedObject": AffectedObject, "changedValues": Schema.Array(ChangedValue), "associatedObjects": Schema.Array(AffectedObject) }).annotate({ "identifier": "AuditRecord" })
-export type AuditRecordCreate = { readonly "author"?: { readonly "type": "user", readonly "displayName"?: string, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey }, readonly "remoteAddress": string, readonly "creationDate"?: number, readonly "summary"?: string, readonly "description"?: string, readonly "category"?: string, readonly "sysAdmin"?: boolean, readonly "affectedObject"?: AffectedObject, readonly "changedValues"?: ReadonlyArray<ChangedValue>, readonly "associatedObjects"?: ReadonlyArray<AffectedObject> }
-export const AuditRecordCreate = Schema.Struct({ "author": Schema.optionalKey(Schema.Struct({ "type": Schema.Literal("user").annotate({ "description": "Set to 'user'." }), "displayName": Schema.optionalKey(Schema.String.annotate({ "description": "The name that is displayed on the audit log in the Confluence UI." })), "operations": Schema.optionalKey(Schema.Array(OperationCheckResult).annotate({ "description": "Always defaults to null." })), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey) }).annotate({ "description": "The user that actioned the event. If `author` is not specified, then all\n`author` properties will be set to null/empty, except for `type` which\nwill be set to 'user'." })), "remoteAddress": Schema.String.annotate({ "description": "The IP address of the computer where the event was initiated from." }), "creationDate": Schema.optionalKey(Schema.Number.annotate({ "description": "The creation date-time of the audit record, as a timestamp. This is converted\nto a date-time display in the Confluence UI. If the `creationDate` is not\nspecified, then it will be set to the timestamp for the current date-time.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "summary": Schema.optionalKey(Schema.String.annotate({ "description": "The summary of the event, which is displayed in the 'Change' column on\nthe audit log in the Confluence UI." })), "description": Schema.optionalKey(Schema.String.annotate({ "description": "A long description of the event, which is displayed in the 'Description'\nfield on the audit log in the Confluence UI." })), "category": Schema.optionalKey(Schema.String.annotate({ "description": "The category of the event, which is displayed in the 'Event type' column\non the audit log in the Confluence UI." })), "sysAdmin": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Indicates whether the event was actioned by a system administrator." })), "affectedObject": Schema.optionalKey(AffectedObject), "changedValues": Schema.optionalKey(Schema.Array(ChangedValue).annotate({ "description": "The values that were changed in the event." })), "associatedObjects": Schema.optionalKey(Schema.Array(AffectedObject).annotate({ "description": "Objects that were associated with the event. For example, if the event\nwas a space permission change then the associated object would be the\nspace." })) }).annotate({ "identifier": "AuditRecordCreate" })
-export type SpaceSettings = { readonly "routeOverrideEnabled": boolean, readonly "editor"?: { readonly "page": string, readonly "blogpost": string, readonly "default": string }, readonly "contentMode"?: "standard" | "compact" | null, readonly "spaceKey"?: string, readonly "_links": GenericLinks, readonly [x: string]: Schema.Json } | null
-export const SpaceSettings = Schema.Union([Schema.StructWithRest(Schema.Struct({ "routeOverrideEnabled": Schema.Boolean.annotate({ "description": "Defines whether an override for the space home should be used. This is\nused in conjunction with a space theme provided by an app. For\nexample, if this property is set to true, a theme can display a page\nother than the space homepage when users visit the root URL for a\nspace. This property allows apps to provide content-only theming\nwithout overriding the space home." }), "editor": Schema.optionalKey(Schema.Struct({ "page": Schema.String, "blogpost": Schema.String, "default": Schema.String })), "contentMode": Schema.optionalKey(Schema.Union([Schema.Literal("standard"), Schema.Literal("compact"), Schema.Null]).annotate({ "description": "The content rendering mode for the space. Controls spacing and typography\nin the editor and renderer. Valid values are \"standard\" and \"compact\".\nWhen set to \"compact\", content is rendered more densely with smaller\nspacing and typography." })), "spaceKey": Schema.optionalKey(Schema.String), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "SpaceSettings" })
-export type UsersUserKeys = { readonly "users"?: ReadonlyArray<User>, readonly "userKeys"?: ReadonlyArray<string>, readonly "_links"?: GenericLinks, readonly "userAccountIds": Schema.Json, readonly [x: string]: Schema.Json } | null
+export type AuditRecord = { readonly "author": { readonly "type": "user", readonly "displayName": string, readonly "operations"?: ReadonlyArray<OperationCheckResult> | null, readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId"?: GenericAccountId, readonly "accountType"?: string, readonly "externalCollaborator"?: boolean, readonly "isExternalCollaborator"?: boolean, readonly "isGuest"?: boolean, readonly "publicName"?: string } & { readonly [x: string]: Schema.Json }, readonly "remoteAddress": string, readonly "creationDate": number, readonly "summary": string, readonly "description": string, readonly "category": string, readonly "sysAdmin": boolean, readonly "superAdmin"?: boolean, readonly "affectedObject": AffectedObject, readonly "changedValues": ReadonlyArray<ChangedValue>, readonly "associatedObjects": ReadonlyArray<AffectedObject> } & { readonly [x: string]: Schema.Json }
+export const AuditRecord = Schema.StructWithRest(Schema.Struct({ "author": Schema.StructWithRest(Schema.Struct({ "type": Schema.Literal("user"), "displayName": Schema.String, "operations": Schema.optionalKey(Schema.Union([Schema.Array(OperationCheckResult), Schema.Null])), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": Schema.optionalKey(GenericAccountId), "accountType": Schema.optionalKey(Schema.String), "externalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead." })), "isExternalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead. Whether the user is an external collaborator user" })), "isGuest": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether the user is a guest user" })), "publicName": Schema.optionalKey(Schema.String.annotate({ "description": "The public name or nickname of the user. Will always contain a value." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "remoteAddress": Schema.String, "creationDate": Schema.Number.annotate({ "description": "The creation date-time of the audit record, as a timestamp.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "summary": Schema.String, "description": Schema.String, "category": Schema.String, "sysAdmin": Schema.Boolean, "superAdmin": Schema.optionalKey(Schema.Boolean), "affectedObject": AffectedObject, "changedValues": Schema.Array(ChangedValue), "associatedObjects": Schema.Array(AffectedObject) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AuditRecord" })
+export type AuditRecordCreate = { readonly "author"?: { readonly "type": "user", readonly "displayName"?: string, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey } & { readonly [x: string]: Schema.Json }, readonly "remoteAddress": string, readonly "creationDate"?: number, readonly "summary"?: string, readonly "description"?: string, readonly "category"?: string, readonly "sysAdmin"?: boolean, readonly "affectedObject"?: AffectedObject, readonly "changedValues"?: ReadonlyArray<ChangedValue>, readonly "associatedObjects"?: ReadonlyArray<AffectedObject> } & { readonly [x: string]: Schema.Json }
+export const AuditRecordCreate = Schema.StructWithRest(Schema.Struct({ "author": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "type": Schema.Literal("user").annotate({ "description": "Set to 'user'." }), "displayName": Schema.optionalKey(Schema.String.annotate({ "description": "The name that is displayed on the audit log in the Confluence UI." })), "operations": Schema.optionalKey(Schema.Array(OperationCheckResult).annotate({ "description": "Always defaults to null." })), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The user that actioned the event. If `author` is not specified, then all\n`author` properties will be set to null/empty, except for `type` which\nwill be set to 'user'." })), "remoteAddress": Schema.String.annotate({ "description": "The IP address of the computer where the event was initiated from." }), "creationDate": Schema.optionalKey(Schema.Number.annotate({ "description": "The creation date-time of the audit record, as a timestamp. This is converted\nto a date-time display in the Confluence UI. If the `creationDate` is not\nspecified, then it will be set to the timestamp for the current date-time.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "summary": Schema.optionalKey(Schema.String.annotate({ "description": "The summary of the event, which is displayed in the 'Change' column on\nthe audit log in the Confluence UI." })), "description": Schema.optionalKey(Schema.String.annotate({ "description": "A long description of the event, which is displayed in the 'Description'\nfield on the audit log in the Confluence UI." })), "category": Schema.optionalKey(Schema.String.annotate({ "description": "The category of the event, which is displayed in the 'Event type' column\non the audit log in the Confluence UI." })), "sysAdmin": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Indicates whether the event was actioned by a system administrator." })), "affectedObject": Schema.optionalKey(AffectedObject), "changedValues": Schema.optionalKey(Schema.Array(ChangedValue).annotate({ "description": "The values that were changed in the event." })), "associatedObjects": Schema.optionalKey(Schema.Array(AffectedObject).annotate({ "description": "Objects that were associated with the event. For example, if the event\nwas a space permission change then the associated object would be the\nspace." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AuditRecordCreate" })
+export type SpaceSettings = { readonly "routeOverrideEnabled": boolean, readonly "editor"?: { readonly "page": string, readonly "blogpost": string, readonly "default": string } & { readonly [x: string]: Schema.Json }, readonly "contentMode"?: "standard" | "compact", readonly "spaceKey"?: string, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json } | null
+export const SpaceSettings = Schema.Union([Schema.StructWithRest(Schema.Struct({ "routeOverrideEnabled": Schema.Boolean.annotate({ "description": "Defines whether an override for the space home should be used. This is\nused in conjunction with a space theme provided by an app. For\nexample, if this property is set to true, a theme can display a page\nother than the space homepage when users visit the root URL for a\nspace. This property allows apps to provide content-only theming\nwithout overriding the space home." }), "editor": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "page": Schema.String, "blogpost": Schema.String, "default": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "contentMode": Schema.optionalKey(Schema.Literals(["standard", "compact"]).annotate({ "description": "The content rendering mode for the space. Controls spacing and typography\nin the editor and renderer. Valid values are \"standard\" and \"compact\".\nWhen set to \"compact\", content is rendered more densely with smaller\nspacing and typography." })), "spaceKey": Schema.optionalKey(Schema.String), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "SpaceSettings" })
+export type UsersUserKeys = { readonly "users"?: ReadonlyArray<User>, readonly "userKeys"?: ReadonlyArray<string>, readonly "_links"?: GenericLinks, readonly "userAccountIds": Schema.Json } & { readonly [x: string]: Schema.Json } | null
 export const UsersUserKeys = Schema.Union([Schema.StructWithRest(Schema.Struct({ "users": Schema.optionalKey(Schema.Array(User)), "userKeys": Schema.optionalKey(Schema.Array(Schema.String)), "_links": Schema.optionalKey(GenericLinks), "userAccountIds": Schema.Json.annotate({ "expected": "JSON value" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "UsersUserKeys" })
-export type MacroInstance = { readonly "name"?: string, readonly "body"?: string, readonly "parameters"?: {  }, readonly "_links"?: GenericLinks }
-export const MacroInstance = Schema.Struct({ "name": Schema.optionalKey(Schema.String), "body": Schema.optionalKey(Schema.String), "parameters": Schema.optionalKey(Schema.Struct({  })), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "MacroInstance" })
-export type UserArray = { readonly "results": ReadonlyArray<User>, readonly "start"?: number, readonly "limit"?: number, readonly "size"?: number, readonly "totalSize"?: number, readonly "_links"?: GenericLinks }
-export const UserArray = Schema.Struct({ "results": Schema.Array(User), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "totalSize": Schema.optionalKey(Schema.Number.annotate({ "description": "This property will return total count of the objects before pagination is applied.\nThis value is returned if `shouldReturnTotalSize` is set to `true`.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "UserArray" })
-export type Group = { readonly "type": "group", readonly "name": string, readonly "id": string, readonly "usageType"?: "USERBASE_GROUP" | "TEAM_COLLABORATION", readonly "managedBy"?: "ADMINS" | "EXTERNAL" | "TEAM_MEMBERS" | "OPEN", readonly "_links"?: GenericLinks }
-export const Group = Schema.Struct({ "type": Schema.Literal("group"), "name": Schema.String, "id": Schema.String, "usageType": Schema.optionalKey(Schema.Literals(["USERBASE_GROUP", "TEAM_COLLABORATION"]).annotate({ "description": "This property represents how this collection of users is used:\n  - `USERBASE_GROUP`: This value indicates that the collection of users is used as a group.\n  - `TEAM_COLLABORATION`: This value indicates that the collection of users is used as a team." })), "managedBy": Schema.optionalKey(Schema.Literals(["ADMINS", "EXTERNAL", "TEAM_MEMBERS", "OPEN"]).annotate({ "description": "This property represents how this collection of users is managed:\n  - `ADMINS`: This value indicates that the collection of users is managed by org, site or product admins.\n  - `EXTERNAL`: This value indicates that the collection of users is managed externally (through SCIM, HRIS, etc.).\n  - `TEAM_MEMBERS`: This value indicates that the collection of users is managed by its members.\n  - `OPEN`: This value indicates that the collection of users is not actively managed by any users." })), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "Group" })
-export type UserPropertyKeyArray = { readonly "results": ReadonlyArray<{ readonly "key"?: string }>, readonly "start"?: number, readonly "limit"?: number, readonly "size"?: number, readonly "_links"?: GenericLinks }
-export const UserPropertyKeyArray = Schema.Struct({ "results": Schema.Array(Schema.Struct({ "key": Schema.optionalKey(Schema.String) })), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "UserPropertyKeyArray" })
-export type UserProperty = { readonly "key": string, readonly "value": { readonly [x: string]: Schema.Json }, readonly "id": string, readonly "lastModifiedDate": string, readonly "createdDate": string, readonly "_links"?: GenericLinks }
-export const UserProperty = Schema.Struct({ "key": Schema.String, "value": Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })).annotate({ "description": "The value of the content property." }), "id": Schema.String.annotate({ "description": "a unique identifier for the user property" }), "lastModifiedDate": Schema.String.annotate({ "description": "datetime when the property was last modified such as `2022-02-01T12:00:00.111Z`", "format": "date-time" }), "createdDate": Schema.String.annotate({ "description": "datetime when the property was created such as `2022-01-01T12:00:00.111Z`", "format": "date-time" }), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "UserProperty" })
-export type ContentArray = { readonly "results": ReadonlyArray<Content>, readonly "start"?: number, readonly "limit"?: number, readonly "size": number, readonly "_links": GenericLinks }
-export const ContentArray = Schema.Struct({ "results": Schema.Array(Content), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "ContentArray" })
-export type Theme = { readonly "themeKey": string, readonly "name"?: string, readonly "description"?: string, readonly "icon"?: Icon, readonly "_links"?: GenericLinks }
-export const Theme = Schema.Struct({ "themeKey": Schema.String, "name": Schema.optionalKey(Schema.String), "description": Schema.optionalKey(Schema.String), "icon": Schema.optionalKey(Icon), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "Theme" })
-export type ThemeNoLinks = { readonly "themeKey": string, readonly "name"?: string, readonly "description"?: string, readonly "icon"?: Icon }
-export const ThemeNoLinks = Schema.Struct({ "themeKey": Schema.String, "name": Schema.optionalKey(Schema.String), "description": Schema.optionalKey(Schema.String), "icon": Schema.optionalKey(Icon) }).annotate({ "description": "Theme object without links. Used in ThemeArray.", "identifier": "ThemeNoLinks" })
-export type UserAnonymous = { readonly "type": string, readonly "profilePicture": Icon, readonly "displayName": string, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "_expandable"?: { readonly "operations"?: string }, readonly "_links": GenericLinks }
-export const UserAnonymous = Schema.Struct({ "type": Schema.String, "profilePicture": Icon, "displayName": Schema.String, "operations": Schema.optionalKey(Schema.Array(OperationCheckResult)), "_expandable": Schema.optionalKey(Schema.Struct({ "operations": Schema.optionalKey(Schema.String) })), "_links": GenericLinks }).annotate({ "identifier": "UserAnonymous" })
-export type WatchUser = { readonly "type": string, readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId": GenericAccountId, readonly "profilePicture": Icon, readonly "displayName": string, readonly "timeZone"?: string | null, readonly "operations": ReadonlyArray<OperationCheckResult> | null, readonly "externalCollaborator": boolean, readonly "isGuest": boolean | null, readonly "isExternalCollaborator": boolean, readonly "details"?: UserDetails, readonly "accountType": string, readonly "email": string, readonly "publicName": string, readonly "personalSpace": { readonly [x: string]: Schema.Json } | null }
-export const WatchUser = Schema.Struct({ "type": Schema.String, "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": GenericAccountId, "profilePicture": Icon, "displayName": Schema.String, "timeZone": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "operations": Schema.Union([Schema.Array(OperationCheckResult), Schema.Null]), "externalCollaborator": Schema.Boolean, "isGuest": Schema.Union([Schema.Boolean, Schema.Null]), "isExternalCollaborator": Schema.Boolean, "details": Schema.optionalKey(UserDetails), "accountType": Schema.String, "email": Schema.String, "publicName": Schema.String, "personalSpace": Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null]) }).annotate({ "description": "This essentially the same as the `User` object, but no `_links` property and\nno `_expandable` property (therefore, different required fields).", "identifier": "WatchUser" })
-export type BulkUserLookup = { readonly "type": "known" | "unknown" | "anonymous" | "user", readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId": GenericAccountId, readonly "accountType": string, readonly "email": string, readonly "publicName": string, readonly "profilePicture": Icon, readonly "displayName": string, readonly "timeZone"?: string | null, readonly "isExternalCollaborator"?: boolean, readonly "isGuest"?: boolean, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "details"?: UserDetails, readonly "personalSpace"?: Space, readonly "_expandable": { readonly "operations"?: string, readonly "details"?: string, readonly "personalSpace"?: string }, readonly "_links": GenericLinks }
-export const BulkUserLookup = Schema.Struct({ "type": Schema.Literals(["known", "unknown", "anonymous", "user"]), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": GenericAccountId, "accountType": Schema.String.annotate({ "description": "The account type of the user, may return empty string if unavailable." }), "email": Schema.String.annotate({ "description": "The email address of the user. Depending on the user's privacy setting, this may return an empty string." }), "publicName": Schema.String.annotate({ "description": "The public name or nickname of the user. Will always contain a value." }), "profilePicture": Icon, "displayName": Schema.String.annotate({ "description": "The displays name of the user. Depending on the user's privacy setting, this may be the same as publicName." }), "timeZone": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "This displays user time zone. Depending on the user's privacy setting, this may return null." })), "isExternalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead to find out whether the user is a guest user." })), "isGuest": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether the user is a guest user" })), "operations": Schema.optionalKey(Schema.Array(OperationCheckResult)), "details": Schema.optionalKey(UserDetails), "personalSpace": Schema.optionalKey(Space), "_expandable": Schema.Struct({ "operations": Schema.optionalKey(Schema.String), "details": Schema.optionalKey(Schema.String), "personalSpace": Schema.optionalKey(Schema.String) }), "_links": GenericLinks }).annotate({ "identifier": "BulkUserLookup" })
-export type LabelArray = { readonly "results": ReadonlyArray<Label>, readonly "start"?: number, readonly "limit"?: number, readonly "size": number, readonly "_links"?: GenericLinks }
-export const LabelArray = Schema.Struct({ "results": Schema.Array(Label), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "LabelArray" })
-export type HeaderLookAndFeel = { readonly "backgroundColor": string, readonly "button": ButtonLookAndFeel, readonly "primaryNavigation": NavigationLookAndFeel, readonly "secondaryNavigation": NavigationLookAndFeel, readonly "search": SearchFieldLookAndFeel }
-export const HeaderLookAndFeel = Schema.Struct({ "backgroundColor": Schema.String, "button": ButtonLookAndFeel, "primaryNavigation": NavigationLookAndFeel, "secondaryNavigation": NavigationLookAndFeel, "search": SearchFieldLookAndFeel }).annotate({ "identifier": "HeaderLookAndFeel" })
-export type HorizontalHeaderLookAndFeel = { readonly "backgroundColor": string, readonly "button"?: ButtonLookAndFeel, readonly "primaryNavigation": TopNavigationLookAndFeel, readonly "secondaryNavigation"?: NavigationLookAndFeel, readonly "search"?: SearchFieldLookAndFeel }
-export const HorizontalHeaderLookAndFeel = Schema.Struct({ "backgroundColor": Schema.String, "button": Schema.optionalKey(ButtonLookAndFeel), "primaryNavigation": TopNavigationLookAndFeel, "secondaryNavigation": Schema.optionalKey(NavigationLookAndFeel), "search": Schema.optionalKey(SearchFieldLookAndFeel) }).annotate({ "identifier": "HorizontalHeaderLookAndFeel" })
-export type ContentLookAndFeel = { readonly "screen"?: ScreenLookAndFeel, readonly "container"?: ContainerLookAndFeel, readonly "header"?: ContainerLookAndFeel, readonly "body"?: ContainerLookAndFeel }
-export const ContentLookAndFeel = Schema.Struct({ "screen": Schema.optionalKey(ScreenLookAndFeel), "container": Schema.optionalKey(ContainerLookAndFeel), "header": Schema.optionalKey(ContainerLookAndFeel), "body": Schema.optionalKey(ContainerLookAndFeel) }).annotate({ "identifier": "ContentLookAndFeel" })
-export type EmbeddedContent = { readonly "entityId"?: number, readonly "entityType"?: string, readonly "entity"?: Embeddable, readonly [x: string]: Schema.Json }
+export type MacroInstance = { readonly "name"?: string, readonly "body"?: string, readonly "parameters"?: { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const MacroInstance = Schema.StructWithRest(Schema.Struct({ "name": Schema.optionalKey(Schema.String), "body": Schema.optionalKey(Schema.String), "parameters": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "MacroInstance" })
+export type UserArray = { readonly "results": ReadonlyArray<User>, readonly "start"?: number, readonly "limit"?: number, readonly "size"?: number, readonly "totalSize"?: number, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const UserArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(User), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "totalSize": Schema.optionalKey(Schema.Number.annotate({ "description": "This property will return total count of the objects before pagination is applied.\nThis value is returned if `shouldReturnTotalSize` is set to `true`.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "UserArray" })
+export type Group = { readonly "type": "group", readonly "name": string, readonly "id": string, readonly "usageType"?: "USERBASE_GROUP" | "TEAM_COLLABORATION", readonly "managedBy"?: "ADMINS" | "EXTERNAL" | "TEAM_MEMBERS" | "OPEN", readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const Group = Schema.StructWithRest(Schema.Struct({ "type": Schema.Literal("group"), "name": Schema.String, "id": Schema.String, "usageType": Schema.optionalKey(Schema.Literals(["USERBASE_GROUP", "TEAM_COLLABORATION"]).annotate({ "description": "This property represents how this collection of users is used:\n  - `USERBASE_GROUP`: This value indicates that the collection of users is used as a group.\n  - `TEAM_COLLABORATION`: This value indicates that the collection of users is used as a team." })), "managedBy": Schema.optionalKey(Schema.Literals(["ADMINS", "EXTERNAL", "TEAM_MEMBERS", "OPEN"]).annotate({ "description": "This property represents how this collection of users is managed:\n  - `ADMINS`: This value indicates that the collection of users is managed by org, site or product admins.\n  - `EXTERNAL`: This value indicates that the collection of users is managed externally (through SCIM, HRIS, etc.).\n  - `TEAM_MEMBERS`: This value indicates that the collection of users is managed by its members.\n  - `OPEN`: This value indicates that the collection of users is not actively managed by any users." })), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Group" })
+export type UserPropertyKeyArray = { readonly "results": ReadonlyArray<{ readonly "key"?: string } & { readonly [x: string]: Schema.Json }>, readonly "start"?: number, readonly "limit"?: number, readonly "size"?: number, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const UserPropertyKeyArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Schema.StructWithRest(Schema.Struct({ "key": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "UserPropertyKeyArray" })
+export type UserProperty = { readonly "key": string, readonly "value": { readonly [x: string]: Schema.Json }, readonly "id": string, readonly "lastModifiedDate": string, readonly "createdDate": string, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const UserProperty = Schema.StructWithRest(Schema.Struct({ "key": Schema.String, "value": Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })).annotate({ "description": "The value of the content property." }), "id": Schema.String.annotate({ "description": "a unique identifier for the user property" }), "lastModifiedDate": Schema.String.annotate({ "description": "datetime when the property was last modified such as `2022-02-01T12:00:00.111Z`", "format": "date-time" }), "createdDate": Schema.String.annotate({ "description": "datetime when the property was created such as `2022-01-01T12:00:00.111Z`", "format": "date-time" }), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "UserProperty" })
+export type ContentArray = { readonly "results": ReadonlyArray<Content>, readonly "start"?: number, readonly "limit"?: number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ContentArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Content), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentArray" })
+export type Theme = { readonly "themeKey": string, readonly "name"?: string, readonly "description"?: string, readonly "icon"?: Icon, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const Theme = Schema.StructWithRest(Schema.Struct({ "themeKey": Schema.String, "name": Schema.optionalKey(Schema.String), "description": Schema.optionalKey(Schema.String), "icon": Schema.optionalKey(Icon), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Theme" })
+export type ThemeNoLinks = { readonly "themeKey": string, readonly "name"?: string, readonly "description"?: string, readonly "icon"?: Icon } & { readonly [x: string]: Schema.Json }
+export const ThemeNoLinks = Schema.StructWithRest(Schema.Struct({ "themeKey": Schema.String, "name": Schema.optionalKey(Schema.String), "description": Schema.optionalKey(Schema.String), "icon": Schema.optionalKey(Icon) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Theme object without links. Used in ThemeArray.", "identifier": "ThemeNoLinks" })
+export type UserAnonymous = { readonly "type": string, readonly "profilePicture": Icon, readonly "displayName": string, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "_expandable"?: { readonly "operations"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const UserAnonymous = Schema.StructWithRest(Schema.Struct({ "type": Schema.String, "profilePicture": Icon, "displayName": Schema.String, "operations": Schema.optionalKey(Schema.Array(OperationCheckResult)), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "operations": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "UserAnonymous" })
+export type WatchUser = { readonly "type": string, readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId": GenericAccountId, readonly "profilePicture": Icon, readonly "displayName": string, readonly "timeZone"?: string | null, readonly "operations": ReadonlyArray<OperationCheckResult> | null, readonly "externalCollaborator": boolean, readonly "isGuest": boolean | null, readonly "isExternalCollaborator": boolean, readonly "details"?: UserDetails, readonly "accountType": string, readonly "email": string, readonly "publicName": string, readonly "personalSpace": { readonly [x: string]: Schema.Json } | null } & { readonly [x: string]: Schema.Json }
+export const WatchUser = Schema.StructWithRest(Schema.Struct({ "type": Schema.String, "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": GenericAccountId, "profilePicture": Icon, "displayName": Schema.String, "timeZone": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "operations": Schema.Union([Schema.Array(OperationCheckResult), Schema.Null]), "externalCollaborator": Schema.Boolean, "isGuest": Schema.Union([Schema.Boolean, Schema.Null]), "isExternalCollaborator": Schema.Boolean, "details": Schema.optionalKey(UserDetails), "accountType": Schema.String, "email": Schema.String, "publicName": Schema.String, "personalSpace": Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null]) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This essentially the same as the `User` object, but no `_links` property and\nno `_expandable` property (therefore, different required fields).", "identifier": "WatchUser" })
+export type BulkUserLookup = { readonly "type": "known" | "unknown" | "anonymous" | "user", readonly "username"?: GenericUserName, readonly "userKey"?: GenericUserKey, readonly "accountId": GenericAccountId, readonly "accountType": string, readonly "email": string, readonly "publicName": string, readonly "profilePicture": Icon, readonly "displayName": string, readonly "timeZone"?: string | null, readonly "isExternalCollaborator"?: boolean, readonly "isGuest"?: boolean, readonly "operations"?: ReadonlyArray<OperationCheckResult>, readonly "details"?: UserDetails, readonly "personalSpace"?: Space, readonly "_expandable": { readonly "operations"?: string, readonly "details"?: string, readonly "personalSpace"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const BulkUserLookup = Schema.StructWithRest(Schema.Struct({ "type": Schema.Literals(["known", "unknown", "anonymous", "user"]), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": GenericAccountId, "accountType": Schema.String.annotate({ "description": "The account type of the user, may return empty string if unavailable." }), "email": Schema.String.annotate({ "description": "The email address of the user. Depending on the user's privacy setting, this may return an empty string." }), "publicName": Schema.String.annotate({ "description": "The public name or nickname of the user. Will always contain a value." }), "profilePicture": Icon, "displayName": Schema.String.annotate({ "description": "The displays name of the user. Depending on the user's privacy setting, this may be the same as publicName." }), "timeZone": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "This displays user time zone. Depending on the user's privacy setting, this may return null." })), "isExternalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead to find out whether the user is a guest user." })), "isGuest": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether the user is a guest user" })), "operations": Schema.optionalKey(Schema.Array(OperationCheckResult)), "details": Schema.optionalKey(UserDetails), "personalSpace": Schema.optionalKey(Space), "_expandable": Schema.StructWithRest(Schema.Struct({ "operations": Schema.optionalKey(Schema.String), "details": Schema.optionalKey(Schema.String), "personalSpace": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "BulkUserLookup" })
+export type LabelArray = { readonly "results": ReadonlyArray<Label>, readonly "start"?: number, readonly "limit"?: number, readonly "size": number, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const LabelArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Label), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LabelArray" })
+export type HeaderLookAndFeel = { readonly "backgroundColor": string, readonly "button": ButtonLookAndFeel, readonly "primaryNavigation": NavigationLookAndFeel, readonly "secondaryNavigation": NavigationLookAndFeel, readonly "search": SearchFieldLookAndFeel } & { readonly [x: string]: Schema.Json }
+export const HeaderLookAndFeel = Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.String, "button": ButtonLookAndFeel, "primaryNavigation": NavigationLookAndFeel, "secondaryNavigation": NavigationLookAndFeel, "search": SearchFieldLookAndFeel }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "HeaderLookAndFeel" })
+export type HorizontalHeaderLookAndFeel = { readonly "backgroundColor": string, readonly "button"?: ButtonLookAndFeel, readonly "primaryNavigation": TopNavigationLookAndFeel, readonly "secondaryNavigation"?: NavigationLookAndFeel, readonly "search"?: SearchFieldLookAndFeel } & { readonly [x: string]: Schema.Json }
+export const HorizontalHeaderLookAndFeel = Schema.StructWithRest(Schema.Struct({ "backgroundColor": Schema.String, "button": Schema.optionalKey(ButtonLookAndFeel), "primaryNavigation": TopNavigationLookAndFeel, "secondaryNavigation": Schema.optionalKey(NavigationLookAndFeel), "search": Schema.optionalKey(SearchFieldLookAndFeel) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "HorizontalHeaderLookAndFeel" })
+export type ContentLookAndFeel = { readonly "screen"?: ScreenLookAndFeel, readonly "container"?: ContainerLookAndFeel, readonly "header"?: ContainerLookAndFeel, readonly "body"?: ContainerLookAndFeel } & { readonly [x: string]: Schema.Json }
+export const ContentLookAndFeel = Schema.StructWithRest(Schema.Struct({ "screen": Schema.optionalKey(ScreenLookAndFeel), "container": Schema.optionalKey(ContainerLookAndFeel), "header": Schema.optionalKey(ContainerLookAndFeel), "body": Schema.optionalKey(ContainerLookAndFeel) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentLookAndFeel" })
+export type EmbeddedContent = { readonly "entityId"?: number, readonly "entityType"?: string, readonly "entity"?: Embeddable } & { readonly [x: string]: Schema.Json }
 export const EmbeddedContent = Schema.StructWithRest(Schema.Struct({ "entityId": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "entityType": Schema.optionalKey(Schema.String), "entity": Schema.optionalKey(Embeddable) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "EmbeddedContent" })
-export type WebResourceDependencies = { readonly "_expandable"?: { readonly "uris"?: string | { readonly [x: string]: Schema.Json }, readonly [x: string]: Schema.Json }, readonly "keys"?: ReadonlyArray<string>, readonly "contexts"?: ReadonlyArray<string>, readonly "uris"?: { readonly "all"?: ReadonlyArray<string> | string, readonly "css"?: ReadonlyArray<string> | string, readonly "js"?: ReadonlyArray<string> | string, readonly "_expandable"?: { readonly "css"?: ReadonlyArray<string> | string, readonly "js"?: ReadonlyArray<string> | string, readonly [x: string]: Schema.Json } }, readonly "tags"?: { readonly "all"?: string, readonly "css"?: string, readonly "data"?: string, readonly "js"?: string, readonly "_expandable"?: { readonly [x: string]: Schema.Json } }, readonly "superbatch"?: SuperBatchWebResources }
-export const WebResourceDependencies = Schema.Struct({ "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "uris": Schema.optionalKey(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "keys": Schema.optionalKey(Schema.Array(Schema.String)), "contexts": Schema.optionalKey(Schema.Array(Schema.String)), "uris": Schema.optionalKey(Schema.Struct({ "all": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "css": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "js": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "css": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "js": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) })), "tags": Schema.optionalKey(Schema.Struct({ "all": Schema.optionalKey(Schema.String), "css": Schema.optionalKey(Schema.String), "data": Schema.optionalKey(Schema.String), "js": Schema.optionalKey(Schema.String), "_expandable": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) })), "superbatch": Schema.optionalKey(SuperBatchWebResources) }).annotate({ "identifier": "WebResourceDependencies" })
+export type WebResourceDependencies = { readonly "_expandable"?: { readonly "uris"?: string | { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "keys"?: ReadonlyArray<string>, readonly "contexts"?: ReadonlyArray<string>, readonly "uris"?: { readonly "all"?: ReadonlyArray<string> | string, readonly "css"?: ReadonlyArray<string> | string, readonly "js"?: ReadonlyArray<string> | string, readonly "_expandable"?: { readonly "css"?: ReadonlyArray<string> | string, readonly "js"?: ReadonlyArray<string> | string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "tags"?: { readonly "all"?: string, readonly "css"?: string, readonly "data"?: string, readonly "js"?: string, readonly "_expandable"?: { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "superbatch"?: SuperBatchWebResources } & { readonly [x: string]: Schema.Json }
+export const WebResourceDependencies = Schema.StructWithRest(Schema.Struct({ "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "uris": Schema.optionalKey(Schema.Union([Schema.String, Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "keys": Schema.optionalKey(Schema.Array(Schema.String)), "contexts": Schema.optionalKey(Schema.Array(Schema.String)), "uris": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "all": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "css": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "js": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "css": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })), "js": Schema.optionalKey(Schema.Union([Schema.Array(Schema.String), Schema.String], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "tags": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "all": Schema.optionalKey(Schema.String), "css": Schema.optionalKey(Schema.String), "data": Schema.optionalKey(Schema.String), "js": Schema.optionalKey(Schema.String), "_expandable": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "superbatch": Schema.optionalKey(SuperBatchWebResources) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "WebResourceDependencies" })
 export type AsyncIdArray = ReadonlyArray<AsyncId>
 export const AsyncIdArray = Schema.Array(AsyncId).annotate({ "identifier": "AsyncIdArray" })
 export type LabelCreateArray = ReadonlyArray<LabelCreate>
 export const LabelCreateArray = Schema.Array(LabelCreate).annotate({ "identifier": "LabelCreateArray" })
-export type CopyPageHierarchyRequest = { readonly "copyAttachments"?: boolean, readonly "copyPermissions"?: boolean, readonly "copyProperties"?: boolean, readonly "copyLabels"?: boolean, readonly "copyCustomContents"?: boolean, readonly "copyDescendants"?: boolean, readonly "destinationPageId": ContentId, readonly "titleOptions"?: CopyPageHierarchyTitleOptions }
-export const CopyPageHierarchyRequest = Schema.Struct({ "copyAttachments": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, attachments are copied to the destination page." })), "copyPermissions": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, page permissions are copied to the destination page." })), "copyProperties": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, content properties are copied to the destination page." })), "copyLabels": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, labels are copied to the destination page." })), "copyCustomContents": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, custom contents are copied to the destination page." })), "copyDescendants": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, descendants are copied to the destination page." })), "destinationPageId": ContentId, "titleOptions": Schema.optionalKey(CopyPageHierarchyTitleOptions) }).annotate({ "identifier": "CopyPageHierarchyRequest" })
-export type CopyPageRequest = { readonly "copyAttachments"?: boolean, readonly "copyPermissions"?: boolean, readonly "copyProperties"?: boolean, readonly "copyLabels"?: boolean, readonly "copyCustomContents"?: boolean, readonly "destination": CopyPageRequestDestination, readonly "pageTitle"?: string, readonly "body"?: { readonly "storage"?: ContentBodyCreate, readonly "editor2"?: ContentBodyCreate } }
-export const CopyPageRequest = Schema.Struct({ "copyAttachments": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, attachments are copied to the destination page." })), "copyPermissions": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, page permissions are copied to the destination page." })), "copyProperties": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, content properties are copied to the destination page." })), "copyLabels": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, labels are copied to the destination page." })), "copyCustomContents": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, custom contents are copied to the destination page." })), "destination": CopyPageRequestDestination, "pageTitle": Schema.optionalKey(Schema.String.annotate({ "description": "If defined, this will replace the title of the destination page." })), "body": Schema.optionalKey(Schema.Struct({ "storage": Schema.optionalKey(ContentBodyCreate), "editor2": Schema.optionalKey(ContentBodyCreate) }).annotate({ "description": "If defined, this will replace the body of the destination page." })) }).annotate({ "identifier": "CopyPageRequest" })
-export type ContentBodyConversionInput = { readonly "to": string, readonly "allowCache"?: boolean, readonly "spaceKeyContext"?: string, readonly "contentIdContext"?: string, readonly "embeddedContentRender"?: "current" | "version-at-save", readonly "expand"?: ReadonlyArray<string>, readonly "body": ContentBodyCreate }
-export const ContentBodyConversionInput = Schema.Struct({ "to": Schema.String.annotate({ "description": "The name of the target format for the content body conversion." }), "allowCache": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Controls whether conversion results are cached and reused for identical requests.\n\n- `false`: Each request creates a new conversion task, even if an identical request was made previously.\n- `true`: Enables caching behavior for identical requests from the same user.\n  - If no cached result exists, a new conversion task is created\n  - If a cached result exists, the existing task is marked as RERUNNING and will complete with status COMPLETED\n  - Returns the same task ID for identical requests, allowing you to retrieve the cached result" })), "spaceKeyContext": Schema.optionalKey(Schema.String.annotate({ "description": "The space key used for resolving embedded content (page includes, files, and links) in the content body. For example, if the source content contains the link `<ac:link><ri:page ri:content-title=\"Example page\" /><ac:link>` and the `spaceKeyContext=TEST` parameter is provided, then the link will be converted into a link to the \"Example page\" page in the \"TEST\" space." })), "contentIdContext": Schema.optionalKey(Schema.String.annotate({ "description": "The content ID used to find the space for resolving embedded content (page includes, files, and links) in the content body. For example, if the source content contains the link `<ac:link><ri:page ri:content-title=\"Example page\" /><ac:link>` and the `contentIdContext=123` parameter is provided, then the link will be converted into a link to the \"Example page\" page in the same space that has the content with ID=123. Note that `spaceKeyContext` will be ignored if this parameter is provided." })), "embeddedContentRender": Schema.optionalKey(Schema.Literals(["current", "version-at-save"]).annotate({ "description": "Mode used for rendering embedded content, such as attachments. - `current` renders the embedded content using the latest version. - `version-at-save` renders the embedded content using the version at the time of save." })), "expand": Schema.optionalKey(Schema.Array(Schema.String).annotate({ "description": "A multi-value, comma-separated parameter indicating which properties of the content to expand and populate. Expands are dependent\non the `to` conversion format and may be irrelevant for certain conversions (e.g. `macroRenderedOutput` is redundant when\nconverting to `view` format). \n\nIf rendering to `view` format, and the body content being converted includes arbitrary nested content (such as macros); then it is \nnecessary to include webresource expands in the request. Webresources for content body are the batched JS and CSS dependencies for\nany nested dynamic content (i.e. macros).\n\n- `embeddedContent` returns metadata for nested content (e.g. page included using page include macro)\n- `mediaToken` returns JWT token for retrieving attachment data from Media API\n- `macroRenderedOutput` additionally converts body to view format\n- `webresource.superbatch.uris.js` returns all common JS dependencies as static URLs\n- `webresource.superbatch.uris.css` returns all common CSS dependencies as static URLs\n- `webresource.superbatch.uris.all` returns all common dependencies as static URLs\n- `webresource.superbatch.tags.all` returns all common JS dependencies as html `<script>` tags\n- `webresource.superbatch.tags.css` returns all common CSS dependencies as html `<style>` tags\n- `webresource.superbatch.tags.js` returns all common dependencies as html `<script>` and `<style>` tags\n- `webresource.uris.js` returns JS dependencies specific to conversion\n- `webresource.uris.css` returns CSS dependencies specific to conversion\n- `webresource.uris.all` returns all dependencies specific to conversion     \n- `webresource.tags.all` returns common JS dependencies as html `<script>` tags\n- `webresource.tags.css` returns common CSS dependencies as html `<style>` tags\n- `webresource.tags.js` returns common dependencies as html `<script>` and `<style>` tags" })), "body": ContentBodyCreate }).annotate({ "identifier": "ContentBodyConversionInput" })
-export type ContentTemplateBodyCreate = { readonly "view"?: ContentBodyCreate, readonly "export_view"?: ContentBodyCreate, readonly "styled_view"?: ContentBodyCreate, readonly "storage"?: ContentBodyCreate, readonly "editor"?: ContentBodyCreate, readonly "editor2"?: ContentBodyCreate, readonly "wiki"?: ContentBodyCreate, readonly "atlas_doc_format"?: ContentBodyCreate, readonly "anonymous_export_view"?: ContentBodyCreate }
-export const ContentTemplateBodyCreate = Schema.Struct({ "view": Schema.optionalKey(ContentBodyCreate), "export_view": Schema.optionalKey(ContentBodyCreate), "styled_view": Schema.optionalKey(ContentBodyCreate), "storage": Schema.optionalKey(ContentBodyCreate), "editor": Schema.optionalKey(ContentBodyCreate), "editor2": Schema.optionalKey(ContentBodyCreate), "wiki": Schema.optionalKey(ContentBodyCreate), "atlas_doc_format": Schema.optionalKey(ContentBodyCreate), "anonymous_export_view": Schema.optionalKey(ContentBodyCreate) }).annotate({ "description": "The body of the new content. Does not apply to attachments.\nOnly one body format should be specified as the property for\nthis object, e.g. `storage`.\n\nNote, `editor2` format is used by Atlassian only. `anonymous_export_view` is\nthe same as `export_view` format but only content viewable by an anonymous\nuser is included.", "identifier": "ContentTemplateBodyCreate" })
-export type ContentPermissionRequest = { readonly "subject": PermissionSubjectWithGroupId, readonly "operation": "read" | "update" | "delete" }
-export const ContentPermissionRequest = Schema.Struct({ "subject": PermissionSubjectWithGroupId, "operation": Schema.Literals(["read", "update", "delete"]).annotate({ "description": "The content permission operation to check." }) }).annotate({ "description": "This object represents the request for the content permission check API.", "identifier": "ContentPermissionRequest" })
-export type PermissionCheckResponse = { readonly "hasPermission": boolean, readonly "errors"?: ReadonlyArray<Message>, readonly "_links"?: GenericLinks }
-export const PermissionCheckResponse = Schema.Struct({ "hasPermission": Schema.Boolean, "errors": Schema.optionalKey(Schema.Array(Message)), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "description": "This object represents the response for the content permission check API. If the user or group does not have\npermissions, the following errors may be returned:\n\n- Group does not have permission to the space\n- Group does not have permission to the content\n- User is not allowed to use Confluence\n- User does not have permission to the space\n- User does not have permission to the content\n- Anonymous users are not allowed to use Confluence\n- Anonymous user does not have permission to the space\n- Anonymous user does not have permission to the content", "identifier": "PermissionCheckResponse" })
-export type LongTaskStatus = { readonly "ari"?: string, readonly "id": string, readonly "name": { readonly "key": string, readonly "args": ReadonlyArray<{  }> }, readonly "elapsedTime": number, readonly "percentageComplete": number, readonly "successful": boolean, readonly "finished": boolean, readonly "messages": ReadonlyArray<Message>, readonly "status"?: string, readonly "errors"?: ReadonlyArray<Message>, readonly "additionalDetails"?: { readonly "destinationId"?: string, readonly "destinationUrl"?: string, readonly "totalPageNeedToCopy"?: number, readonly "additionalProperties"?: string } }
-export const LongTaskStatus = Schema.Struct({ "ari": Schema.optionalKey(Schema.String.annotate({ "description": "the ARI for the long task, based on its ID" })), "id": Schema.String, "name": Schema.Struct({ "key": Schema.String, "args": Schema.Array(Schema.Struct({  })) }), "elapsedTime": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "percentageComplete": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "successful": Schema.Boolean, "finished": Schema.Boolean, "messages": Schema.Array(Message), "status": Schema.optionalKey(Schema.String), "errors": Schema.optionalKey(Schema.Array(Message)), "additionalDetails": Schema.optionalKey(Schema.Struct({ "destinationId": Schema.optionalKey(Schema.String), "destinationUrl": Schema.optionalKey(Schema.String), "totalPageNeedToCopy": Schema.optionalKey(Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))), "additionalProperties": Schema.optionalKey(Schema.String) })) }).annotate({ "description": "Current status of a long running task\n\nStatus keys:\n\n- `ERROR_UNKNOWN` - Generic error\n- `ERROR_LOCK_FAILED` - Could not get the lock on destination space\n- `ERROR_RELINK` - Error when relink pages/attachments\n- `ERROR_COPY_PAGE` - Error while copying 1 page\n- `WARN_RENAME_PAGE` - Warning page is rename during copy\n- `WARN_IGNORE_COPY_PERMISSION` - Warning could not copy permission\n- `WARN_IGNORE_COPY_ATTACHMENT` - Warning could not copy attachment\n- `WARN_IGNORE_DELETE_PAGE` - Warning ignoring delete of a non agreed on page\n- `STATUS_COPIED_PAGES` - Message total pages are copied\n- `STATUS_COPYING_PAGES` - Message copy pages\n- `STATUS_RELINK_PAGES` - Message relink pages/attachments\n- `STATUS_DELETING_PAGES` - Message delete pages\n- `STATUS_DELETED_PAGES` - Message total pages are deleted\n- `STATUS_MOVING_PAGES` - Message move pages\n- `WARN_IGNORE_VIEW_RESTRICTED` - Permission changed - view restricted\n- `WARN_IGNORE_EDIT_RESTRICTED` - Permission changed - edit restricted\n- `INITIALIZING_TASK` - Message when initializing task\n- `UNKNOWN_STATUS` - Message when status is unknown", "identifier": "LongTaskStatus" })
-export type LongTaskStatusWithLinks = { readonly "ari"?: string, readonly "id": string, readonly "name": { readonly "key": string, readonly "args": ReadonlyArray<{  }> }, readonly "elapsedTime": number, readonly "percentageComplete": number, readonly "successful": boolean, readonly "finished": boolean, readonly "messages": ReadonlyArray<Message>, readonly "_links": GenericLinks, readonly "status"?: string, readonly "errors"?: ReadonlyArray<Message>, readonly "additionalDetails"?: { readonly "destinationId"?: string | null, readonly "destinationUrl"?: string, readonly "totalPageNeedToCopy"?: number, readonly "additionalProperties"?: string } }
-export const LongTaskStatusWithLinks = Schema.Struct({ "ari": Schema.optionalKey(Schema.String.annotate({ "description": "the ARI for the long task, based on its ID" })), "id": Schema.String, "name": Schema.Struct({ "key": Schema.String, "args": Schema.Array(Schema.Struct({  })) }), "elapsedTime": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "percentageComplete": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "successful": Schema.Boolean, "finished": Schema.Boolean, "messages": Schema.Array(Message), "_links": GenericLinks, "status": Schema.optionalKey(Schema.String), "errors": Schema.optionalKey(Schema.Array(Message)), "additionalDetails": Schema.optionalKey(Schema.Struct({ "destinationId": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "destinationUrl": Schema.optionalKey(Schema.String), "totalPageNeedToCopy": Schema.optionalKey(Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))), "additionalProperties": Schema.optionalKey(Schema.String) })) }).annotate({ "description": "Same as LongTaskStatus but with `_links` property.\n\nStatus keys:\n\n- `ERROR_UNKNOWN` - Generic error\n- `ERROR_LOCK_FAILED` - Could not get the lock on destination space\n- `ERROR_RELINK` - Error when relink pages/attachments\n- `ERROR_COPY_PAGE` - Error while copying 1 page\n- `WARN_RENAME_PAGE` - Warning page is rename during copy\n- `WARN_IGNORE_COPY_PERMISSION` - Warning could not copy permission\n- `WARN_IGNORE_COPY_ATTACHMENT` - Warning could not copy attachment\n- `WARN_IGNORE_DELETE_PAGE` - Warning ignoring delete of a non agreed on page\n- `STATUS_COPIED_PAGES` - Message total pages are copied\n- `STATUS_COPYING_PAGES` - Message copy pages\n- `STATUS_RELINK_PAGES` - Message relink pages/attachments\n- `STATUS_DELETING_PAGES` - Message delete pages\n- `STATUS_DELETED_PAGES` - Message total pages are deleted\n- `STATUS_MOVING_PAGES` - Message move pages\n- `WARN_IGNORE_VIEW_RESTRICTED` - Permission changed - view restricted\n- `WARN_IGNORE_EDIT_RESTRICTED` - Permission changed - edit restricted\n- `INITIALIZING_TASK` - Message when initializing task\n- `UNKNOWN_STATUS` - Message when status is unknown", "identifier": "LongTaskStatusWithLinks" })
-export type ContentStateResponse = { readonly "contentState"?: ContentState, readonly "lastUpdated"?: string }
-export const ContentStateResponse = Schema.Struct({ "contentState": Schema.optionalKey(Schema.suspend((): Schema.Codec<ContentState> => ContentState).annotate({ "description": "Null or content state" })), "lastUpdated": Schema.optionalKey(Schema.String.annotate({ "description": "Timestamp of last publish event where content state changed" })) }).annotate({ "identifier": "ContentStateResponse" })
-export type ContentStateSettings = { readonly "contentStatesAllowed": boolean, readonly "customContentStatesAllowed": boolean, readonly "spaceContentStatesAllowed": boolean, readonly "spaceContentStates"?: ReadonlyArray<ContentState> }
-export const ContentStateSettings = Schema.Struct({ "contentStatesAllowed": Schema.Boolean.annotate({ "description": "Whether users can place any content states on content" }), "customContentStatesAllowed": Schema.Boolean.annotate({ "description": "Whether users can place their custom states on content" }), "spaceContentStatesAllowed": Schema.Boolean.annotate({ "description": "Whether users can place space suggested states on content" }), "spaceContentStates": Schema.optionalKey(Schema.Array(ContentState).annotate({ "description": "space suggested content states that users can choose from" })) }).annotate({ "identifier": "ContentStateSettings" })
-export type LabeledContent = { readonly "contentType": LabeledContentType, readonly "contentId": number, readonly "title": string }
-export const LabeledContent = Schema.Struct({ "contentType": LabeledContentType, "contentId": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "title": Schema.String.annotate({ "description": "Title of the content." }) }).annotate({ "identifier": "LabeledContent" })
-export type Relation = { readonly "name": string, readonly "relationData"?: RelationData, readonly "source"?: Content | User | Space, readonly "target"?: Content | User | Space, readonly "_expandable"?: { readonly "relationData"?: string, readonly "source"?: string, readonly "target"?: string }, readonly "_links": GenericLinks }
-export const Relation = Schema.Struct({ "name": Schema.String, "relationData": Schema.optionalKey(RelationData), "source": Schema.optionalKey(Schema.Union([Content, User, Space], { mode: "oneOf" })), "target": Schema.optionalKey(Schema.Union([Content, User, Space], { mode: "oneOf" })), "_expandable": Schema.optionalKey(Schema.Struct({ "relationData": Schema.optionalKey(Schema.String), "source": Schema.optionalKey(Schema.String), "target": Schema.optionalKey(Schema.String) })), "_links": GenericLinks }).annotate({ "identifier": "Relation" })
-export type SearchResult = { readonly "content"?: Content, readonly "user"?: User, readonly "space"?: Space, readonly "title": string, readonly "excerpt": string, readonly "url": string, readonly "resultParentContainer"?: ContainerSummary, readonly "resultGlobalContainer"?: ContainerSummary, readonly "breadcrumbs": ReadonlyArray<Breadcrumb>, readonly "entityType": string, readonly "iconCssClass": string, readonly "lastModified": string, readonly "friendlyLastModified"?: string, readonly "score"?: number }
-export const SearchResult = Schema.Struct({ "content": Schema.optionalKey(Content), "user": Schema.optionalKey(User), "space": Schema.optionalKey(Space), "title": Schema.String, "excerpt": Schema.String, "url": Schema.String, "resultParentContainer": Schema.optionalKey(ContainerSummary), "resultGlobalContainer": Schema.optionalKey(ContainerSummary), "breadcrumbs": Schema.Array(Breadcrumb), "entityType": Schema.String, "iconCssClass": Schema.String, "lastModified": Schema.String.annotate({ "format": "date-time" }), "friendlyLastModified": Schema.optionalKey(Schema.String), "score": Schema.optionalKey(Schema.Number.check(Schema.isFinite().annotate({ "expected": "a finite number" }))) }).annotate({ "identifier": "SearchResult" })
-export type SpaceUpdate = { readonly "name"?: string | null, readonly "description"?: SpaceDescriptionCreate, readonly "homepage"?: { readonly [x: string]: Schema.Json } | null, readonly "type"?: string, readonly "status"?: string | null, readonly [x: string]: Schema.Json }
-export const SpaceUpdate = Schema.StructWithRest(Schema.Struct({ "name": Schema.optionalKey(Schema.Union([Schema.String.check(Schema.isMaxLength(200).annotate({ "expected": "a value with a length of at most 200" })), Schema.Null]).annotate({ "description": "The updated name of the space." })), "description": Schema.optionalKey(SpaceDescriptionCreate), "homepage": Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null]).annotate({ "description": "The updated homepage for this space" })), "type": Schema.optionalKey(Schema.String.annotate({ "description": "The updated type for this space." })), "status": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The updated status for this space." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The properties of a space that can be updated.", "identifier": "SpaceUpdate" })
-export type SpacePermissionCreate = { readonly "subjects"?: { readonly "user"?: { readonly "results": ReadonlyArray<User>, readonly "size": number }, readonly "group"?: { readonly "results": ReadonlyArray<GroupCreate>, readonly "size": number } }, readonly "operation": OperationCheckResult, readonly "anonymousAccess": boolean, readonly "unlicensedAccess": boolean, readonly [x: string]: Schema.Json }
-export const SpacePermissionCreate = Schema.StructWithRest(Schema.Struct({ "subjects": Schema.optionalKey(Schema.Struct({ "user": Schema.optionalKey(Schema.Struct({ "results": Schema.Array(User), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) })), "group": Schema.optionalKey(Schema.Struct({ "results": Schema.Array(GroupCreate), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) })) }).annotate({ "description": "The users and/or groups that the permission applies to." })), "operation": OperationCheckResult, "anonymousAccess": Schema.Boolean.annotate({ "description": "Grant anonymous users permission to use the operation." }), "unlicensedAccess": Schema.Boolean.annotate({ "description": "Grants access to unlicensed users from JIRA Service Desk when used\nwith the 'read space' operation." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents a permission for given space. Permissions consist of\nat least one operation object with an accompanying subjects object.\n\nThe following combinations of `operation` and `targetType` values are\nvalid for the `operation` object:\n\n  - 'create': 'page', 'blogpost', 'comment', 'attachment'\n  - 'read': 'space'\n  - 'delete': 'page', 'blogpost', 'comment', 'attachment'\n  - 'export': 'space'\n  - 'administer': 'space'", "identifier": "SpacePermissionCreate" })
-export type SpacePermissionRequest = { readonly "subject": PermissionSubject, readonly "operation": { readonly "key": "administer" | "archive" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "restrict_content" | "update" | "use", readonly "target": "page" | "blogpost" | "comment" | "attachment" | "space" }, readonly "_links"?: GenericLinks, readonly [x: string]: Schema.Json }
-export const SpacePermissionRequest = Schema.StructWithRest(Schema.Struct({ "subject": PermissionSubject, "operation": Schema.Struct({ "key": Schema.Literals(["administer", "archive", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "restrict_content", "update", "use"]), "target": Schema.Literals(["page", "blogpost", "comment", "attachment", "space"]).annotate({ "description": "The space or content type that the operation applies to." }) }), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents the request for the single space permission. Permissions consist of\none operation object with an accompanying subjects object.\n\nThe following combinations of `operation.key` and `operation.target` values are\nvalid for the `operation` object:\n``` bash\n'create': 'page', 'blogpost', 'comment', 'attachment'\n'read': 'space'\n'delete': 'page', 'blogpost', 'comment', 'attachment', 'space'\n'export': 'space'\n'administer': 'space'\n'archive': 'page'\n'restrict_content': 'space'\n```\n\nFor example, to enable Delete Own permission, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"delete\",\n    \"target\": \"space\"\n}\n```\nTo enable Add/Delete Restrictions permissions, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"restrict_content\",\n    \"target\": \"space\"\n}\n```", "identifier": "SpacePermissionRequest" })
-export type SpacePermissionV2 = { readonly "id": number, readonly "subject": PermissionSubject, readonly "operation": { readonly "key": "administer" | "archive" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "restrict_content" | "update" | "use", readonly "target": "page" | "blogpost" | "comment" | "attachment" | "space" }, readonly "_links"?: GenericLinks }
-export const SpacePermissionV2 = Schema.Struct({ "id": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "subject": PermissionSubject, "operation": Schema.Struct({ "key": Schema.Literals(["administer", "archive", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "restrict_content", "update", "use"]), "target": Schema.Literals(["page", "blogpost", "comment", "attachment", "space"]).annotate({ "description": "The space or content type that the operation applies to." }) }), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "description": "This object represents a single space permission. Permissions consist of\nat least one operation object with an accompanying subjects object.\n\nThe following combinations of `operation.key` and `operation.target` values are\nvalid for the `operation` object:\n``` bash\n'create': 'page', 'blogpost', 'comment', 'attachment'\n'read': 'space'\n'delete': 'page', 'blogpost', 'comment', 'attachment', 'space'\n'export': 'space'\n'administer': 'space'\n'archive': 'page'\n'restrict_content': 'space'\n```\n\nFor example, to enable Delete Own permission, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"delete\",\n    \"target\": \"space\"\n}\n```\nTo enable Add/Delete Restrictions permissions, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"restrict_content\",\n    \"target\": \"space\"\n}\n```", "identifier": "SpacePermissionV2" })
-export type SpacePermissionCustomContent = { readonly "subject": PermissionSubject, readonly "operations": ReadonlyArray<{ readonly "key": "read" | "create" | "delete", readonly "target": string, readonly "access": boolean }> }
-export const SpacePermissionCustomContent = Schema.Struct({ "subject": PermissionSubject, "operations": Schema.Array(Schema.Struct({ "key": Schema.Literals(["read", "create", "delete"]).annotate({ "description": "The operation type" }), "target": Schema.String.annotate({ "description": "The custom content type" }), "access": Schema.Boolean.annotate({ "description": "Grant or restrict access" }) })) }).annotate({ "description": "This object represents a list of space permissions for custom content type for an individual user. Permissions consist of\na subjects object and a list with at least one operation object.", "identifier": "SpacePermissionCustomContent" })
+export type CopyPageHierarchyRequest = { readonly "copyAttachments"?: boolean, readonly "copyPermissions"?: boolean, readonly "copyProperties"?: boolean, readonly "copyLabels"?: boolean, readonly "copyCustomContents"?: boolean, readonly "copyDescendants"?: boolean, readonly "destinationPageId": ContentId, readonly "titleOptions"?: CopyPageHierarchyTitleOptions } & { readonly [x: string]: Schema.Json }
+export const CopyPageHierarchyRequest = Schema.StructWithRest(Schema.Struct({ "copyAttachments": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, attachments are copied to the destination page." })), "copyPermissions": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, page permissions are copied to the destination page." })), "copyProperties": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, content properties are copied to the destination page." })), "copyLabels": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, labels are copied to the destination page." })), "copyCustomContents": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, custom contents are copied to the destination page." })), "copyDescendants": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, descendants are copied to the destination page." })), "destinationPageId": ContentId, "titleOptions": Schema.optionalKey(CopyPageHierarchyTitleOptions) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "CopyPageHierarchyRequest" })
+export type CopyPageRequest = { readonly "copyAttachments"?: boolean, readonly "copyPermissions"?: boolean, readonly "copyProperties"?: boolean, readonly "copyLabels"?: boolean, readonly "copyCustomContents"?: boolean, readonly "destination": CopyPageRequestDestination, readonly "pageTitle"?: string, readonly "body"?: { readonly "storage"?: ContentBodyCreate, readonly "editor2"?: ContentBodyCreate } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const CopyPageRequest = Schema.StructWithRest(Schema.Struct({ "copyAttachments": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, attachments are copied to the destination page." })), "copyPermissions": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, page permissions are copied to the destination page." })), "copyProperties": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, content properties are copied to the destination page." })), "copyLabels": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, labels are copied to the destination page." })), "copyCustomContents": Schema.optionalKey(Schema.Boolean.annotate({ "description": "If set to `true`, custom contents are copied to the destination page." })), "destination": CopyPageRequestDestination, "pageTitle": Schema.optionalKey(Schema.String.annotate({ "description": "If defined, this will replace the title of the destination page." })), "body": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "storage": Schema.optionalKey(ContentBodyCreate), "editor2": Schema.optionalKey(ContentBodyCreate) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "If defined, this will replace the body of the destination page." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "CopyPageRequest" })
+export type ContentBodyConversionInput = { readonly "to": string, readonly "allowCache"?: boolean, readonly "spaceKeyContext"?: string, readonly "contentIdContext"?: string, readonly "embeddedContentRender"?: "current" | "version-at-save", readonly "expand"?: ReadonlyArray<string>, readonly "body": ContentBodyCreate } & { readonly [x: string]: Schema.Json }
+export const ContentBodyConversionInput = Schema.StructWithRest(Schema.Struct({ "to": Schema.String.annotate({ "description": "The name of the target format for the content body conversion." }), "allowCache": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Controls whether conversion results are cached and reused for identical requests.\n\n- `false`: Each request creates a new conversion task, even if an identical request was made previously.\n- `true`: Enables caching behavior for identical requests from the same user.\n  - If no cached result exists, a new conversion task is created\n  - If a cached result exists, the existing task is marked as RERUNNING and will complete with status COMPLETED\n  - Returns the same task ID for identical requests, allowing you to retrieve the cached result" })), "spaceKeyContext": Schema.optionalKey(Schema.String.annotate({ "description": "The space key used for resolving embedded content (page includes, files, and links) in the content body. For example, if the source content contains the link `<ac:link><ri:page ri:content-title=\"Example page\" /><ac:link>` and the `spaceKeyContext=TEST` parameter is provided, then the link will be converted into a link to the \"Example page\" page in the \"TEST\" space." })), "contentIdContext": Schema.optionalKey(Schema.String.annotate({ "description": "The content ID used to find the space for resolving embedded content (page includes, files, and links) in the content body. For example, if the source content contains the link `<ac:link><ri:page ri:content-title=\"Example page\" /><ac:link>` and the `contentIdContext=123` parameter is provided, then the link will be converted into a link to the \"Example page\" page in the same space that has the content with ID=123. Note that `spaceKeyContext` will be ignored if this parameter is provided." })), "embeddedContentRender": Schema.optionalKey(Schema.Literals(["current", "version-at-save"]).annotate({ "description": "Mode used for rendering embedded content, such as attachments. - `current` renders the embedded content using the latest version. - `version-at-save` renders the embedded content using the version at the time of save." })), "expand": Schema.optionalKey(Schema.Array(Schema.String).annotate({ "description": "A multi-value, comma-separated parameter indicating which properties of the content to expand and populate. Expands are dependent\non the `to` conversion format and may be irrelevant for certain conversions (e.g. `macroRenderedOutput` is redundant when\nconverting to `view` format). \n\nIf rendering to `view` format, and the body content being converted includes arbitrary nested content (such as macros); then it is \nnecessary to include webresource expands in the request. Webresources for content body are the batched JS and CSS dependencies for\nany nested dynamic content (i.e. macros).\n\n- `embeddedContent` returns metadata for nested content (e.g. page included using page include macro)\n- `mediaToken` returns JWT token for retrieving attachment data from Media API\n- `macroRenderedOutput` additionally converts body to view format\n- `webresource.superbatch.uris.js` returns all common JS dependencies as static URLs\n- `webresource.superbatch.uris.css` returns all common CSS dependencies as static URLs\n- `webresource.superbatch.uris.all` returns all common dependencies as static URLs\n- `webresource.superbatch.tags.all` returns all common JS dependencies as html `<script>` tags\n- `webresource.superbatch.tags.css` returns all common CSS dependencies as html `<style>` tags\n- `webresource.superbatch.tags.js` returns all common dependencies as html `<script>` and `<style>` tags\n- `webresource.uris.js` returns JS dependencies specific to conversion\n- `webresource.uris.css` returns CSS dependencies specific to conversion\n- `webresource.uris.all` returns all dependencies specific to conversion     \n- `webresource.tags.all` returns common JS dependencies as html `<script>` tags\n- `webresource.tags.css` returns common CSS dependencies as html `<style>` tags\n- `webresource.tags.js` returns common dependencies as html `<script>` and `<style>` tags" })), "body": ContentBodyCreate }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentBodyConversionInput" })
+export type ContentTemplateBodyCreate = { readonly "view"?: ContentBodyCreate, readonly "export_view"?: ContentBodyCreate, readonly "styled_view"?: ContentBodyCreate, readonly "storage"?: ContentBodyCreate, readonly "editor"?: ContentBodyCreate, readonly "editor2"?: ContentBodyCreate, readonly "wiki"?: ContentBodyCreate, readonly "atlas_doc_format"?: ContentBodyCreate, readonly "anonymous_export_view"?: ContentBodyCreate } & { readonly [x: string]: Schema.Json }
+export const ContentTemplateBodyCreate = Schema.StructWithRest(Schema.Struct({ "view": Schema.optionalKey(ContentBodyCreate), "export_view": Schema.optionalKey(ContentBodyCreate), "styled_view": Schema.optionalKey(ContentBodyCreate), "storage": Schema.optionalKey(ContentBodyCreate), "editor": Schema.optionalKey(ContentBodyCreate), "editor2": Schema.optionalKey(ContentBodyCreate), "wiki": Schema.optionalKey(ContentBodyCreate), "atlas_doc_format": Schema.optionalKey(ContentBodyCreate), "anonymous_export_view": Schema.optionalKey(ContentBodyCreate) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The body of the new content. Does not apply to attachments.\nOnly one body format should be specified as the property for\nthis object, e.g. `storage`.\n\nNote, `editor2` format is used by Atlassian only. `anonymous_export_view` is\nthe same as `export_view` format but only content viewable by an anonymous\nuser is included.", "identifier": "ContentTemplateBodyCreate" })
+export type ContentPermissionRequest = { readonly "subject": PermissionSubjectWithGroupId, readonly "operation": "read" | "update" | "delete" } & { readonly [x: string]: Schema.Json }
+export const ContentPermissionRequest = Schema.StructWithRest(Schema.Struct({ "subject": PermissionSubjectWithGroupId, "operation": Schema.Literals(["read", "update", "delete"]).annotate({ "description": "The content permission operation to check." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents the request for the content permission check API.", "identifier": "ContentPermissionRequest" })
+export type PermissionCheckResponse = { readonly "hasPermission": boolean, readonly "errors"?: ReadonlyArray<Message>, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const PermissionCheckResponse = Schema.StructWithRest(Schema.Struct({ "hasPermission": Schema.Boolean, "errors": Schema.optionalKey(Schema.Array(Message)), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents the response for the content permission check API. If the user or group does not have\npermissions, the following errors may be returned:\n\n- Group does not have permission to the space\n- Group does not have permission to the content\n- User is not allowed to use Confluence\n- User does not have permission to the space\n- User does not have permission to the content\n- Anonymous users are not allowed to use Confluence\n- Anonymous user does not have permission to the space\n- Anonymous user does not have permission to the content", "identifier": "PermissionCheckResponse" })
+export type LongTaskStatus = { readonly "ari"?: string, readonly "id": string, readonly "name": { readonly "key": string, readonly "args": ReadonlyArray<{ readonly [x: string]: Schema.Json }> } & { readonly [x: string]: Schema.Json }, readonly "elapsedTime": number, readonly "percentageComplete": number, readonly "successful": boolean, readonly "finished": boolean, readonly "messages": ReadonlyArray<Message>, readonly "status"?: string, readonly "errors"?: ReadonlyArray<Message>, readonly "additionalDetails"?: { readonly "destinationId"?: string, readonly "destinationUrl"?: string, readonly "totalPageNeedToCopy"?: number, readonly "additionalProperties"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const LongTaskStatus = Schema.StructWithRest(Schema.Struct({ "ari": Schema.optionalKey(Schema.String.annotate({ "description": "the ARI for the long task, based on its ID" })), "id": Schema.String, "name": Schema.StructWithRest(Schema.Struct({ "key": Schema.String, "args": Schema.Array(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "elapsedTime": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "percentageComplete": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "successful": Schema.Boolean, "finished": Schema.Boolean, "messages": Schema.Array(Message), "status": Schema.optionalKey(Schema.String), "errors": Schema.optionalKey(Schema.Array(Message)), "additionalDetails": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "destinationId": Schema.optionalKey(Schema.String), "destinationUrl": Schema.optionalKey(Schema.String), "totalPageNeedToCopy": Schema.optionalKey(Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))), "additionalProperties": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Current status of a long running task\n\nStatus keys:\n\n- `ERROR_UNKNOWN` - Generic error\n- `ERROR_LOCK_FAILED` - Could not get the lock on destination space\n- `ERROR_RELINK` - Error when relink pages/attachments\n- `ERROR_COPY_PAGE` - Error while copying 1 page\n- `WARN_RENAME_PAGE` - Warning page is rename during copy\n- `WARN_IGNORE_COPY_PERMISSION` - Warning could not copy permission\n- `WARN_IGNORE_COPY_ATTACHMENT` - Warning could not copy attachment\n- `WARN_IGNORE_DELETE_PAGE` - Warning ignoring delete of a non agreed on page\n- `STATUS_COPIED_PAGES` - Message total pages are copied\n- `STATUS_COPYING_PAGES` - Message copy pages\n- `STATUS_RELINK_PAGES` - Message relink pages/attachments\n- `STATUS_DELETING_PAGES` - Message delete pages\n- `STATUS_DELETED_PAGES` - Message total pages are deleted\n- `STATUS_MOVING_PAGES` - Message move pages\n- `WARN_IGNORE_VIEW_RESTRICTED` - Permission changed - view restricted\n- `WARN_IGNORE_EDIT_RESTRICTED` - Permission changed - edit restricted\n- `INITIALIZING_TASK` - Message when initializing task\n- `UNKNOWN_STATUS` - Message when status is unknown", "identifier": "LongTaskStatus" })
+export type LongTaskStatusWithLinks = { readonly "ari"?: string, readonly "id": string, readonly "name": { readonly "key": string, readonly "args": ReadonlyArray<{ readonly [x: string]: Schema.Json }> } & { readonly [x: string]: Schema.Json }, readonly "elapsedTime": number, readonly "percentageComplete": number, readonly "successful": boolean, readonly "finished": boolean, readonly "messages": ReadonlyArray<Message>, readonly "_links": GenericLinks, readonly "status"?: string, readonly "errors"?: ReadonlyArray<Message>, readonly "additionalDetails"?: { readonly "destinationId"?: string | null, readonly "destinationUrl"?: string, readonly "totalPageNeedToCopy"?: number, readonly "additionalProperties"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }
+export const LongTaskStatusWithLinks = Schema.StructWithRest(Schema.Struct({ "ari": Schema.optionalKey(Schema.String.annotate({ "description": "the ARI for the long task, based on its ID" })), "id": Schema.String, "name": Schema.StructWithRest(Schema.Struct({ "key": Schema.String, "args": Schema.Array(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "elapsedTime": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "percentageComplete": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "successful": Schema.Boolean, "finished": Schema.Boolean, "messages": Schema.Array(Message), "_links": GenericLinks, "status": Schema.optionalKey(Schema.String), "errors": Schema.optionalKey(Schema.Array(Message)), "additionalDetails": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "destinationId": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "destinationUrl": Schema.optionalKey(Schema.String), "totalPageNeedToCopy": Schema.optionalKey(Schema.Number.check(Schema.isInt().annotate({ "expected": "an integer" }))), "additionalProperties": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Same as LongTaskStatus but with `_links` property.\n\nStatus keys:\n\n- `ERROR_UNKNOWN` - Generic error\n- `ERROR_LOCK_FAILED` - Could not get the lock on destination space\n- `ERROR_RELINK` - Error when relink pages/attachments\n- `ERROR_COPY_PAGE` - Error while copying 1 page\n- `WARN_RENAME_PAGE` - Warning page is rename during copy\n- `WARN_IGNORE_COPY_PERMISSION` - Warning could not copy permission\n- `WARN_IGNORE_COPY_ATTACHMENT` - Warning could not copy attachment\n- `WARN_IGNORE_DELETE_PAGE` - Warning ignoring delete of a non agreed on page\n- `STATUS_COPIED_PAGES` - Message total pages are copied\n- `STATUS_COPYING_PAGES` - Message copy pages\n- `STATUS_RELINK_PAGES` - Message relink pages/attachments\n- `STATUS_DELETING_PAGES` - Message delete pages\n- `STATUS_DELETED_PAGES` - Message total pages are deleted\n- `STATUS_MOVING_PAGES` - Message move pages\n- `WARN_IGNORE_VIEW_RESTRICTED` - Permission changed - view restricted\n- `WARN_IGNORE_EDIT_RESTRICTED` - Permission changed - edit restricted\n- `INITIALIZING_TASK` - Message when initializing task\n- `UNKNOWN_STATUS` - Message when status is unknown", "identifier": "LongTaskStatusWithLinks" })
+export type ContentStateResponse = { readonly "contentState"?: ContentState, readonly "lastUpdated"?: string } & { readonly [x: string]: Schema.Json }
+export const ContentStateResponse = Schema.StructWithRest(Schema.Struct({ "contentState": Schema.optionalKey(ContentState), "lastUpdated": Schema.optionalKey(Schema.String.annotate({ "description": "Timestamp of last publish event where content state changed" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentStateResponse" })
+export type AvailableContentStates = { readonly "spaceContentStates": ReadonlyArray<ContentState>, readonly "customContentStates": ReadonlyArray<ContentState> } & { readonly [x: string]: Schema.Json }
+export const AvailableContentStates = Schema.StructWithRest(Schema.Struct({ "spaceContentStates": Schema.Array(ContentState).annotate({ "description": "Space suggested content states that can be used in the space.\nThis list can be empty if there are no space content states defined in the space or if space content states are disabled in the space.\nAll spaces start with 4 default space content states, and this can be modified in the UI under space settings." }), "customContentStates": Schema.Array(ContentState).annotate({ "description": "Custom content states that can be used by the user on the content of this call.\nThis list can be empty if there are no custom content states defined by the user or if custom content states are disabled in the space of the content.\nThis will at most have 3 of the most recently published content states. \nOnly the calling user has access to place these states on content, but all users can see these states once they are placed." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AvailableContentStates" })
+export type ContentStateSettings = { readonly "contentStatesAllowed": boolean, readonly "customContentStatesAllowed": boolean, readonly "spaceContentStatesAllowed": boolean, readonly "spaceContentStates"?: ReadonlyArray<ContentState> } & { readonly [x: string]: Schema.Json }
+export const ContentStateSettings = Schema.StructWithRest(Schema.Struct({ "contentStatesAllowed": Schema.Boolean.annotate({ "description": "Whether users can place any content states on content" }), "customContentStatesAllowed": Schema.Boolean.annotate({ "description": "Whether users can place their custom states on content" }), "spaceContentStatesAllowed": Schema.Boolean.annotate({ "description": "Whether users can place space suggested states on content" }), "spaceContentStates": Schema.optionalKey(Schema.Array(ContentState).annotate({ "description": "space suggested content states that users can choose from" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentStateSettings" })
+export type LabeledContent = { readonly "contentType": LabeledContentType, readonly "contentId": number, readonly "title": string } & { readonly [x: string]: Schema.Json }
+export const LabeledContent = Schema.StructWithRest(Schema.Struct({ "contentType": LabeledContentType, "contentId": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "title": Schema.String.annotate({ "description": "Title of the content." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LabeledContent" })
+export type Relation = { readonly "name": string, readonly "relationData"?: RelationData, readonly "source"?: Content | User | Space, readonly "target"?: Content | User | Space, readonly "_expandable"?: { readonly "relationData"?: string, readonly "source"?: string, readonly "target"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const Relation = Schema.StructWithRest(Schema.Struct({ "name": Schema.String, "relationData": Schema.optionalKey(RelationData), "source": Schema.optionalKey(Schema.Union([Content, User, Space], { mode: "oneOf" })), "target": Schema.optionalKey(Schema.Union([Content, User, Space], { mode: "oneOf" })), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "relationData": Schema.optionalKey(Schema.String), "source": Schema.optionalKey(Schema.String), "target": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Relation" })
+export type SearchResult = { readonly "content"?: Content, readonly "user"?: User, readonly "space"?: Space, readonly "title": string, readonly "excerpt": string, readonly "url": string, readonly "resultParentContainer"?: ContainerSummary, readonly "resultGlobalContainer"?: ContainerSummary, readonly "breadcrumbs": ReadonlyArray<Breadcrumb>, readonly "entityType": string, readonly "iconCssClass": string, readonly "lastModified": string, readonly "friendlyLastModified"?: string, readonly "score"?: number } & { readonly [x: string]: Schema.Json }
+export const SearchResult = Schema.StructWithRest(Schema.Struct({ "content": Schema.optionalKey(Content), "user": Schema.optionalKey(User), "space": Schema.optionalKey(Space), "title": Schema.String, "excerpt": Schema.String, "url": Schema.String, "resultParentContainer": Schema.optionalKey(ContainerSummary), "resultGlobalContainer": Schema.optionalKey(ContainerSummary), "breadcrumbs": Schema.Array(Breadcrumb), "entityType": Schema.String, "iconCssClass": Schema.String, "lastModified": Schema.String.annotate({ "format": "date-time" }), "friendlyLastModified": Schema.optionalKey(Schema.String), "score": Schema.optionalKey(Schema.Number.check(Schema.isFinite().annotate({ "expected": "a finite number" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SearchResult" })
+export type SpaceUpdate = { readonly "name"?: string | null, readonly "description"?: SpaceDescriptionCreate, readonly "homepage"?: { readonly [x: string]: Schema.Json } | null, readonly "type"?: string, readonly "status"?: string | null } & { readonly [x: string]: Schema.Json }
+export const SpaceUpdate = Schema.StructWithRest(Schema.Struct({ "name": Schema.optionalKey(Schema.Union([Schema.String.check(Schema.isMaxCodePoints(200).annotate({ "expected": "a string with at most 200 code points" })), Schema.Null]).annotate({ "description": "The updated name of the space." })), "description": Schema.optionalKey(SpaceDescriptionCreate), "homepage": Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null]).annotate({ "description": "The updated homepage for this space" })), "type": Schema.optionalKey(Schema.String.annotate({ "description": "The updated type for this space." })), "status": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The updated status for this space." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The properties of a space that can be updated.", "identifier": "SpaceUpdate" })
+export type SpacePermissionCreate = { readonly "subjects"?: { readonly "user"?: { readonly "results": ReadonlyArray<User>, readonly "size": number } & { readonly [x: string]: Schema.Json }, readonly "group"?: { readonly "results": ReadonlyArray<GroupCreate>, readonly "size": number } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "operation": OperationCheckResult, readonly "anonymousAccess": boolean, readonly "unlicensedAccess": boolean } & { readonly [x: string]: Schema.Json }
+export const SpacePermissionCreate = Schema.StructWithRest(Schema.Struct({ "subjects": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "user": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(User), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "group": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(GroupCreate), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The users and/or groups that the permission applies to." })), "operation": OperationCheckResult, "anonymousAccess": Schema.Boolean.annotate({ "description": "Grant anonymous users permission to use the operation." }), "unlicensedAccess": Schema.Boolean.annotate({ "description": "Grants access to unlicensed users from JIRA Service Desk when used\nwith the 'read space' operation." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents a permission for given space. Permissions consist of\nat least one operation object with an accompanying subjects object.\n\nThe following combinations of `operation` and `targetType` values are\nvalid for the `operation` object:\n\n  - 'create': 'page', 'blogpost', 'comment', 'attachment'\n  - 'read': 'space'\n  - 'delete': 'page', 'blogpost', 'comment', 'attachment'\n  - 'export': 'space'\n  - 'administer': 'space'", "identifier": "SpacePermissionCreate" })
+export type SpacePermissionRequest = { readonly "subject": PermissionSubject, readonly "operation": { readonly "key": "administer" | "archive" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "restrict_content" | "update" | "use", readonly "target": "page" | "blogpost" | "comment" | "attachment" | "space" } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const SpacePermissionRequest = Schema.StructWithRest(Schema.Struct({ "subject": PermissionSubject, "operation": Schema.StructWithRest(Schema.Struct({ "key": Schema.Literals(["administer", "archive", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "restrict_content", "update", "use"]), "target": Schema.Literals(["page", "blogpost", "comment", "attachment", "space"]).annotate({ "description": "The space or content type that the operation applies to." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents the request for the single space permission. Permissions consist of\none operation object with an accompanying subjects object.\n\nThe following combinations of `operation.key` and `operation.target` values are\nvalid for the `operation` object:\n``` bash\n'create': 'page', 'blogpost', 'comment', 'attachment'\n'read': 'space'\n'delete': 'page', 'blogpost', 'comment', 'attachment', 'space'\n'export': 'space'\n'administer': 'space'\n'archive': 'page'\n'restrict_content': 'space'\n```\n\nFor example, to enable Delete Own permission, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"delete\",\n    \"target\": \"space\"\n}\n```\nTo enable Add/Delete Restrictions permissions, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"restrict_content\",\n    \"target\": \"space\"\n}\n```", "identifier": "SpacePermissionRequest" })
+export type SpacePermissionV2 = { readonly "id": number, readonly "subject": PermissionSubject, readonly "operation": { readonly "key": "administer" | "archive" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "restrict_content" | "update" | "use", readonly "target": "page" | "blogpost" | "comment" | "attachment" | "space" } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const SpacePermissionV2 = Schema.StructWithRest(Schema.Struct({ "id": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "subject": PermissionSubject, "operation": Schema.StructWithRest(Schema.Struct({ "key": Schema.Literals(["administer", "archive", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "restrict_content", "update", "use"]), "target": Schema.Literals(["page", "blogpost", "comment", "attachment", "space"]).annotate({ "description": "The space or content type that the operation applies to." }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents a single space permission. Permissions consist of\nat least one operation object with an accompanying subjects object.\n\nThe following combinations of `operation.key` and `operation.target` values are\nvalid for the `operation` object:\n``` bash\n'create': 'page', 'blogpost', 'comment', 'attachment'\n'read': 'space'\n'delete': 'page', 'blogpost', 'comment', 'attachment', 'space'\n'export': 'space'\n'administer': 'space'\n'archive': 'page'\n'restrict_content': 'space'\n```\n\nFor example, to enable Delete Own permission, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"delete\",\n    \"target\": \"space\"\n}\n```\nTo enable Add/Delete Restrictions permissions, set the `operation` object to the following:\n```\n\"operation\": {\n    \"key\": \"restrict_content\",\n    \"target\": \"space\"\n}\n```", "identifier": "SpacePermissionV2" })
+export type SpacePermissionCustomContent = { readonly "subject": PermissionSubject, readonly "operations": ReadonlyArray<{ readonly "key": "read" | "create" | "delete", readonly "target": string, readonly "access": boolean } & { readonly [x: string]: Schema.Json }> } & { readonly [x: string]: Schema.Json }
+export const SpacePermissionCustomContent = Schema.StructWithRest(Schema.Struct({ "subject": PermissionSubject, "operations": Schema.Array(Schema.StructWithRest(Schema.Struct({ "key": Schema.Literals(["read", "create", "delete"]).annotate({ "description": "The operation type" }), "target": Schema.String.annotate({ "description": "The custom content type" }), "access": Schema.Boolean.annotate({ "description": "Grant or restrict access" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object represents a list of space permissions for custom content type for an individual user. Permissions consist of\na subjects object and a list with at least one operation object.", "identifier": "SpacePermissionCustomContent" })
 export type AccountIdEmailRecordArray = ReadonlyArray<AccountIdEmailRecord>
 export const AccountIdEmailRecordArray = Schema.Array(AccountIdEmailRecord).annotate({ "identifier": "AccountIdEmailRecordArray" })
-export type AuditRecordArray = { readonly "results": ReadonlyArray<AuditRecord>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const AuditRecordArray = Schema.Struct({ "results": Schema.Array(AuditRecord), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "AuditRecordArray" })
-export type Version = { readonly "by"?: User, readonly "when": string | null, readonly "friendlyWhen"?: string | null, readonly "message"?: string | null, readonly "number": number, readonly "minorEdit": boolean, readonly "content"?: Content, readonly "collaborators"?: UsersUserKeys, readonly "_expandable"?: { readonly "content"?: string, readonly "collaborators"?: string }, readonly "_links"?: GenericLinks, readonly "contentTypeModified"?: boolean, readonly "confRev"?: string | null, readonly "syncRev"?: string | null, readonly "syncRevSource"?: string | null, readonly [x: string]: Schema.Json } | null
-export const Version = Schema.Union([Schema.StructWithRest(Schema.Struct({ "by": Schema.optionalKey(User), "when": Schema.Union([Schema.String, Schema.Null]).annotate({ "format": "date-time" }), "friendlyWhen": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "message": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "number": Schema.Number.annotate({ "description": "Set this to the current version number incremented by one", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "minorEdit": Schema.Boolean.annotate({ "description": "If `minorEdit` is set to 'true', no notification email or activity\nstream will be generated for the change." }), "content": Schema.optionalKey(Content), "collaborators": Schema.optionalKey(UsersUserKeys), "_expandable": Schema.optionalKey(Schema.Struct({ "content": Schema.optionalKey(Schema.String), "collaborators": Schema.optionalKey(Schema.String) })), "_links": Schema.optionalKey(GenericLinks), "contentTypeModified": Schema.optionalKey(Schema.Boolean.annotate({ "description": "True if content type is modifed in this version (e.g. page to blog)" })), "confRev": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The revision id provided by confluence to be used as a revision in Synchrony" })), "syncRev": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The revision id provided by Synchrony" })), "syncRevSource": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "Source of the synchrony revision" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "Version" })
-export type ContentRestrictionUpdate = { readonly "operation": "administer" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "update" | "use", readonly "restrictions": { readonly "group"?: ReadonlyArray<{ readonly "type": "group", readonly "id"?: string }>, readonly "user"?: ReadonlyArray<User> | UserArray }, readonly "content"?: Content }
-export const ContentRestrictionUpdate = Schema.Struct({ "operation": Schema.Literals(["administer", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "update", "use"]).annotate({ "description": "The restriction operation applied to content." }), "restrictions": Schema.Struct({ "group": Schema.optionalKey(Schema.Array(Schema.Struct({ "type": Schema.Literal("group").annotate({ "description": "Set to 'group'." }), "id": Schema.optionalKey(Schema.String.annotate({ "description": "The id of the group." })) }).annotate({ "description": "A group that the restriction will be applied to." })).annotate({ "description": "The groups that the restrictions will be applied to. This array must\nhave at least one item, otherwise it should be omitted." })), "user": Schema.optionalKey(Schema.Union([Schema.Array(User), UserArray], { mode: "oneOf" })) }).annotate({ "description": "The users/groups that the restrictions will be applied to. At least one of\n`user` or `group` must be specified for this object." }), "content": Schema.optionalKey(Content) }).annotate({ "identifier": "ContentRestrictionUpdate" })
-export type GroupArray = { readonly "results": ReadonlyArray<Group>, readonly "start": number, readonly "limit": number, readonly "size": number }
-export const GroupArray = Schema.Struct({ "results": Schema.Array(Group), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }).annotate({ "identifier": "GroupArray" })
-export type GroupArrayWithLinks = { readonly "results": ReadonlyArray<Group>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "totalSize"?: number, readonly "_links": GenericLinks }
-export const GroupArrayWithLinks = Schema.Struct({ "results": Schema.Array(Group), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "totalSize": Schema.optionalKey(Schema.Number.annotate({ "description": "This property will return total count of the objects before pagination is applied.\nThis value is returned if `shouldReturnTotalSize` is set to `true`.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": GenericLinks }).annotate({ "description": "Same as GroupArray but with `_links` property.", "identifier": "GroupArrayWithLinks" })
-export type ContentChildren = { readonly "attachment"?: ContentArray, readonly "comment"?: ContentArray, readonly "page"?: ContentArray, readonly "whiteboard"?: ContentArray, readonly "database"?: ContentArray, readonly "embed"?: ContentArray, readonly "folder"?: ContentArray, readonly "_expandable"?: { readonly "attachment"?: string, readonly "comment"?: string, readonly "page"?: string, readonly "whiteboard"?: string, readonly "database"?: string, readonly "embed"?: string, readonly "folder"?: string, readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks, readonly [x: string]: Schema.Json }
+export type AuditRecordArray = { readonly "results": ReadonlyArray<AuditRecord>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const AuditRecordArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(AuditRecord), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AuditRecordArray" })
+export type Version = { readonly "by"?: User, readonly "when": string | null, readonly "friendlyWhen"?: string | null, readonly "message"?: string | null, readonly "number": number, readonly "minorEdit": boolean, readonly "content"?: Content, readonly "collaborators"?: UsersUserKeys, readonly "_expandable"?: { readonly "content"?: string, readonly "collaborators"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks, readonly "contentTypeModified"?: boolean, readonly "confRev"?: string | null, readonly "syncRev"?: string | null, readonly "syncRevSource"?: string | null } & { readonly [x: string]: Schema.Json } | null
+export const Version = Schema.Union([Schema.StructWithRest(Schema.Struct({ "by": Schema.optionalKey(User), "when": Schema.Union([Schema.String, Schema.Null]).annotate({ "format": "date-time" }), "friendlyWhen": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "message": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null])), "number": Schema.Number.annotate({ "description": "Set this to the current version number incremented by one", "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "minorEdit": Schema.Boolean.annotate({ "description": "If `minorEdit` is set to 'true', no notification email or activity\nstream will be generated for the change." }), "content": Schema.optionalKey(Content), "collaborators": Schema.optionalKey(UsersUserKeys), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "content": Schema.optionalKey(Schema.String), "collaborators": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": Schema.optionalKey(GenericLinks), "contentTypeModified": Schema.optionalKey(Schema.Boolean.annotate({ "description": "True if content type is modifed in this version (e.g. page to blog)" })), "confRev": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The revision id provided by confluence to be used as a revision in Synchrony" })), "syncRev": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The revision id provided by Synchrony" })), "syncRevSource": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "Source of the synchrony revision" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "Version" })
+export type ContentRestrictionUpdate = { readonly "operation": "administer" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "update" | "use", readonly "restrictions": { readonly "group"?: ReadonlyArray<{ readonly "type": "group", readonly "id"?: string } & { readonly [x: string]: Schema.Json }>, readonly "user"?: ReadonlyArray<User> | UserArray } & { readonly [x: string]: Schema.Json }, readonly "content"?: Content } & { readonly [x: string]: Schema.Json }
+export const ContentRestrictionUpdate = Schema.StructWithRest(Schema.Struct({ "operation": Schema.Literals(["administer", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "update", "use"]).annotate({ "description": "The restriction operation applied to content." }), "restrictions": Schema.StructWithRest(Schema.Struct({ "group": Schema.optionalKey(Schema.Array(Schema.StructWithRest(Schema.Struct({ "type": Schema.Literal("group").annotate({ "description": "Set to 'group'." }), "id": Schema.optionalKey(Schema.String.annotate({ "description": "The id of the group." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "A group that the restriction will be applied to." })).annotate({ "description": "The groups that the restrictions will be applied to. This array must\nhave at least one item, otherwise it should be omitted." })), "user": Schema.optionalKey(Schema.Union([Schema.Array(User), UserArray], { mode: "oneOf" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The users/groups that the restrictions will be applied to. At least one of\n`user` or `group` must be specified for this object." }), "content": Schema.optionalKey(Content) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentRestrictionUpdate" })
+export type GroupArray = { readonly "results": ReadonlyArray<Group>, readonly "start": number, readonly "limit": number, readonly "size": number } & { readonly [x: string]: Schema.Json }
+export const GroupArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Group), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "GroupArray" })
+export type GroupArrayWithLinks = { readonly "results": ReadonlyArray<Group>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "totalSize"?: number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const GroupArrayWithLinks = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Group), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "totalSize": Schema.optionalKey(Schema.Number.annotate({ "description": "This property will return total count of the objects before pagination is applied.\nThis value is returned if `shouldReturnTotalSize` is set to `true`.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Same as GroupArray but with `_links` property.", "identifier": "GroupArrayWithLinks" })
+export type ContentChildren = { readonly "attachment"?: ContentArray, readonly "comment"?: ContentArray, readonly "page"?: ContentArray, readonly "whiteboard"?: ContentArray, readonly "database"?: ContentArray, readonly "embed"?: ContentArray, readonly "folder"?: ContentArray, readonly "_expandable"?: { readonly "attachment"?: string, readonly "comment"?: string, readonly "page"?: string, readonly "whiteboard"?: string, readonly "database"?: string, readonly "embed"?: string, readonly "folder"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
 export const ContentChildren = Schema.StructWithRest(Schema.Struct({ "attachment": Schema.optionalKey(ContentArray), "comment": Schema.optionalKey(ContentArray), "page": Schema.optionalKey(ContentArray), "whiteboard": Schema.optionalKey(ContentArray), "database": Schema.optionalKey(ContentArray), "embed": Schema.optionalKey(ContentArray), "folder": Schema.optionalKey(ContentArray), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "attachment": Schema.optionalKey(Schema.String), "comment": Schema.optionalKey(Schema.String), "page": Schema.optionalKey(Schema.String), "whiteboard": Schema.optionalKey(Schema.String), "database": Schema.optionalKey(Schema.String), "embed": Schema.optionalKey(Schema.String), "folder": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentChildren" })
-export type ThemeArray = { readonly "results": ReadonlyArray<ThemeNoLinks>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const ThemeArray = Schema.Struct({ "results": Schema.Array(ThemeNoLinks), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "ThemeArray" })
-export type Watch = { readonly "type": string, readonly "watcher": WatchUser, readonly "contentId": number }
-export const Watch = Schema.Struct({ "type": Schema.String, "watcher": WatchUser, "contentId": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }).annotate({ "identifier": "Watch" })
-export type SpaceWatch = { readonly "type": string, readonly "watcher": WatchUser, readonly "spaceKey"?: string, readonly "labelName"?: string, readonly "prefix"?: string }
-export const SpaceWatch = Schema.Struct({ "type": Schema.String, "watcher": WatchUser, "spaceKey": Schema.optionalKey(Schema.String), "labelName": Schema.optionalKey(Schema.String), "prefix": Schema.optionalKey(Schema.String) }).annotate({ "identifier": "SpaceWatch" })
-export type BulkUserLookupArray = { readonly "results": ReadonlyArray<BulkUserLookup>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const BulkUserLookupArray = Schema.Struct({ "results": Schema.Array(BulkUserLookup), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "BulkUserLookupArray" })
-export type LookAndFeel = { readonly "headings": { readonly "color": string }, readonly "links": { readonly "color": string }, readonly "menus": MenusLookAndFeel, readonly "header": HeaderLookAndFeel, readonly "horizontalHeader"?: HorizontalHeaderLookAndFeel, readonly "content": ContentLookAndFeel, readonly "bordersAndDividers": { readonly "color": string }, readonly "spaceReference"?: { readonly [x: string]: Schema.Json } | null }
-export const LookAndFeel = Schema.Struct({ "headings": Schema.Struct({ "color": Schema.String }), "links": Schema.Struct({ "color": Schema.String }), "menus": MenusLookAndFeel, "header": HeaderLookAndFeel, "horizontalHeader": Schema.optionalKey(HorizontalHeaderLookAndFeel), "content": ContentLookAndFeel, "bordersAndDividers": Schema.Struct({ "color": Schema.String }), "spaceReference": Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null])) }).annotate({ "identifier": "LookAndFeel" })
-export type LookAndFeelWithLinks = { readonly "headings": { readonly "color": string }, readonly "links": { readonly "color": string }, readonly "menus": MenusLookAndFeel, readonly "header": HeaderLookAndFeel, readonly "horizontalHeader"?: HorizontalHeaderLookAndFeel, readonly "content": ContentLookAndFeel, readonly "bordersAndDividers": { readonly "color": string }, readonly "spaceReference"?: { readonly [x: string]: Schema.Json } | null, readonly "_links"?: GenericLinks }
-export const LookAndFeelWithLinks = Schema.Struct({ "headings": Schema.Struct({ "color": Schema.String }), "links": Schema.Struct({ "color": Schema.String }), "menus": MenusLookAndFeel, "header": HeaderLookAndFeel, "horizontalHeader": Schema.optionalKey(HorizontalHeaderLookAndFeel), "content": ContentLookAndFeel, "bordersAndDividers": Schema.Struct({ "color": Schema.String }), "spaceReference": Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null])), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "description": "Look and feel settings returned after an update.", "identifier": "LookAndFeelWithLinks" })
-export type ContentBody = { readonly "value": string, readonly "representation": "view" | "export_view" | "styled_view" | "storage" | "editor" | "editor2" | "anonymous_export_view" | "wiki" | "atlas_doc_format" | "raw", readonly "embeddedContent"?: ReadonlyArray<EmbeddedContent>, readonly "webresource"?: WebResourceDependencies, readonly "mediaToken"?: { readonly "collectionIds"?: ReadonlyArray<string>, readonly "contentId"?: string, readonly "expiryDateTime"?: string, readonly "fileIds"?: ReadonlyArray<string>, readonly "token"?: string }, readonly "_expandable"?: { readonly "content"?: string, readonly "embeddedContent"?: string, readonly "webresource"?: string, readonly "mediaToken"?: string }, readonly "_links"?: GenericLinks }
-export const ContentBody = Schema.Struct({ "value": Schema.String, "representation": Schema.Literals(["view", "export_view", "styled_view", "storage", "editor", "editor2", "anonymous_export_view", "wiki", "atlas_doc_format", "raw"]), "embeddedContent": Schema.optionalKey(Schema.Array(EmbeddedContent)), "webresource": Schema.optionalKey(WebResourceDependencies), "mediaToken": Schema.optionalKey(Schema.Struct({ "collectionIds": Schema.optionalKey(Schema.Array(Schema.String)), "contentId": Schema.optionalKey(Schema.String), "expiryDateTime": Schema.optionalKey(Schema.String), "fileIds": Schema.optionalKey(Schema.Array(Schema.String)), "token": Schema.optionalKey(Schema.String) })), "_expandable": Schema.optionalKey(Schema.Struct({ "content": Schema.optionalKey(Schema.String), "embeddedContent": Schema.optionalKey(Schema.String), "webresource": Schema.optionalKey(Schema.String), "mediaToken": Schema.optionalKey(Schema.String) })), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "ContentBody" })
-export type AsyncContentBody = { readonly "value"?: string, readonly "representation"?: "view" | "export_view" | "styled_view" | "storage" | "editor" | "editor2" | "anonymous_export_view" | "wiki" | "atlas_doc_format", readonly "renderTaskId"?: string, readonly "error"?: string, readonly "status"?: "WORKING" | "QUEUED" | "FAILED" | "COMPLETED" | "RERUNNING", readonly "embeddedContent"?: ReadonlyArray<EmbeddedContent>, readonly "webresource"?: WebResourceDependencies, readonly "mediaToken"?: { readonly "collectionIds"?: ReadonlyArray<string>, readonly "contentId"?: string, readonly "expiryDateTime"?: string, readonly "fileIds"?: ReadonlyArray<string>, readonly "token"?: string }, readonly "_expandable"?: { readonly "content"?: string, readonly "embeddedContent"?: string, readonly "webresource"?: string, readonly "mediaToken"?: string }, readonly "_links"?: GenericLinks }
-export const AsyncContentBody = Schema.Struct({ "value": Schema.optionalKey(Schema.String), "representation": Schema.optionalKey(Schema.Literals(["view", "export_view", "styled_view", "storage", "editor", "editor2", "anonymous_export_view", "wiki", "atlas_doc_format"])), "renderTaskId": Schema.optionalKey(Schema.String), "error": Schema.optionalKey(Schema.String), "status": Schema.optionalKey(Schema.Literals(["WORKING", "QUEUED", "FAILED", "COMPLETED", "RERUNNING"]).annotate({ "description": "Rerunning is reserved for when the job is working, but there is a previous run's value in the cache. You may choose to continue polling, or use the cached value." })), "embeddedContent": Schema.optionalKey(Schema.Array(EmbeddedContent)), "webresource": Schema.optionalKey(WebResourceDependencies), "mediaToken": Schema.optionalKey(Schema.Struct({ "collectionIds": Schema.optionalKey(Schema.Array(Schema.String)), "contentId": Schema.optionalKey(Schema.String), "expiryDateTime": Schema.optionalKey(Schema.String), "fileIds": Schema.optionalKey(Schema.Array(Schema.String)), "token": Schema.optionalKey(Schema.String) })), "_expandable": Schema.optionalKey(Schema.Struct({ "content": Schema.optionalKey(Schema.String), "embeddedContent": Schema.optionalKey(Schema.String), "webresource": Schema.optionalKey(Schema.String), "mediaToken": Schema.optionalKey(Schema.String) })), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "AsyncContentBody" })
-export type BulkContentBodyConversionInput = { readonly "conversionInputs"?: ReadonlyArray<ContentBodyConversionInput> }
-export const BulkContentBodyConversionInput = Schema.Struct({ "conversionInputs": Schema.optionalKey(Schema.Array(ContentBodyConversionInput)) }).annotate({ "identifier": "BulkContentBodyConversionInput" })
-export type ContentTemplateUpdate = { readonly "templateId": string, readonly "name": string, readonly "templateType": "page", readonly "body": ContentTemplateBodyCreate, readonly "description"?: string, readonly "labels"?: ReadonlyArray<Label>, readonly "space"?: { readonly "key": string, readonly [x: string]: Schema.Json } | null, readonly [x: string]: Schema.Json }
-export const ContentTemplateUpdate = Schema.StructWithRest(Schema.Struct({ "templateId": Schema.String.annotate({ "description": "The ID of the template being updated." }), "name": Schema.String.annotate({ "description": "The name of the template. Set to the current `name` if this field is\nnot being updated." }), "templateType": Schema.Literal("page").annotate({ "description": "The type of the template. Set to `page`." }), "body": ContentTemplateBodyCreate, "description": Schema.optionalKey(Schema.String.annotate({ "description": "A description of the template." }).check(Schema.isMaxLength(100).annotate({ "expected": "a value with a length of at most 100" }))), "labels": Schema.optionalKey(Schema.Array(Label).annotate({ "description": "Labels for the template." })), "space": Schema.optionalKey(Schema.Union([Schema.StructWithRest(Schema.Struct({ "key": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "description": "The key for the space of the template. Required if the template is a\nspace template. Set this to the current `space.key`." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object is used to update content templates.", "identifier": "ContentTemplateUpdate" })
-export type ContentTemplateCreate = { readonly "name": string, readonly "templateType": string, readonly "body": ContentTemplateBodyCreate, readonly "description"?: string, readonly "labels"?: ReadonlyArray<Label>, readonly "space"?: { readonly "key": string, readonly [x: string]: Schema.Json } | null, readonly [x: string]: Schema.Json }
-export const ContentTemplateCreate = Schema.StructWithRest(Schema.Struct({ "name": Schema.String.annotate({ "description": "The name of the new template." }), "templateType": Schema.String.annotate({ "description": "The type of the new template. Set to `page`." }), "body": ContentTemplateBodyCreate, "description": Schema.optionalKey(Schema.String.annotate({ "description": "A description of the new template." }).check(Schema.isMaxLength(255).annotate({ "expected": "a value with a length of at most 255" }))), "labels": Schema.optionalKey(Schema.Array(Label).annotate({ "description": "Labels for the new template." })), "space": Schema.optionalKey(Schema.Union([Schema.StructWithRest(Schema.Struct({ "key": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "description": "The key for the space of the new template. Only applies to space templates.\nIf the spaceKey is not specified, the template will be created as a global\ntemplate." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object is used to create content templates.", "identifier": "ContentTemplateCreate" })
-export type LongTaskStatusArray = { readonly "results": ReadonlyArray<LongTaskStatus>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const LongTaskStatusArray = Schema.Struct({ "results": Schema.Array(LongTaskStatus), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "LongTaskStatusArray" })
-export type LabeledContentPageResponse = { readonly "results": ReadonlyArray<LabeledContent>, readonly "start"?: number, readonly "limit"?: number, readonly "size": number }
-export const LabeledContentPageResponse = Schema.Struct({ "results": Schema.Array(LabeledContent), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }).annotate({ "identifier": "LabeledContentPageResponse" })
-export type RelationArray = { readonly "results": ReadonlyArray<Relation>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const RelationArray = Schema.Struct({ "results": Schema.Array(Relation), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "RelationArray" })
-export type SearchPageResponseSearchResult = { readonly "results": ReadonlyArray<SearchResult>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "totalSize": number, readonly "cqlQuery": string, readonly "searchDuration": number, readonly "archivedResultCount"?: number, readonly "_links": GenericLinks }
-export const SearchPageResponseSearchResult = Schema.Struct({ "results": Schema.Array(SearchResult), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "totalSize": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "cqlQuery": Schema.String, "searchDuration": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "archivedResultCount": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": GenericLinks }).annotate({ "identifier": "SearchPageResponseSearchResult" })
-export type SpaceCreate = { readonly "name": string, readonly "key"?: string, readonly "alias"?: string, readonly "description"?: SpaceDescriptionCreate, readonly "permissions"?: ReadonlyArray<SpacePermissionCreate> | null, readonly [x: string]: Schema.Json }
-export const SpaceCreate = Schema.StructWithRest(Schema.Struct({ "name": Schema.String.annotate({ "description": "The name of the new space." }).check(Schema.isMaxLength(200).annotate({ "expected": "a value with a length of at most 200" })), "key": Schema.optionalKey(Schema.String.annotate({ "description": "The key for the new space. Format: See [Space\nkeys](https://confluence.atlassian.com/x/lqNMMQ). If `alias` is not provided, this is required." })), "alias": Schema.optionalKey(Schema.String.annotate({ "description": "This field will be used as the new identifier for the space in confluence page URLs.\nIf the property is not provided the alias will be the provided key.\nThis property is experimental and may be changed or removed in the future." })), "description": Schema.optionalKey(SpaceDescriptionCreate), "permissions": Schema.optionalKey(Schema.Union([Schema.Array(SpacePermissionCreate), Schema.Null]).annotate({ "description": "The permissions for the new space. If no permissions are provided, the\n[Confluence default space permissions](https://confluence.atlassian.com/x/UAgzKw#CreateaSpace-Spacepermissions)\nare applied. Note that if permissions are provided, the space is\ncreated with only the provided set of permissions, not\nincluding the default space permissions. Space permissions\ncan be modified after creation using the space permissions\nendpoints, and a private space can be created using the\ncreate private space endpoint." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This is the request object used when creating a new space.", "identifier": "SpaceCreate" })
-export type AttachmentPropertiesUpdateBody = { readonly "id": string, readonly "type": string, readonly "status"?: string, readonly "title"?: string, readonly "container"?: Container, readonly "metadata"?: { readonly "mediaType"?: string }, readonly "extensions"?: {  }, readonly "version": Version, readonly [x: string]: Schema.Json }
-export const AttachmentPropertiesUpdateBody = Schema.StructWithRest(Schema.Struct({ "id": Schema.String, "type": Schema.String.annotate({ "description": "Set this to \"attachment\"" }), "status": Schema.optionalKey(Schema.String), "title": Schema.optionalKey(Schema.String), "container": Schema.optionalKey(Container), "metadata": Schema.optionalKey(Schema.Struct({ "mediaType": Schema.optionalKey(Schema.String) })), "extensions": Schema.optionalKey(Schema.Struct({  })), "version": Version }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AttachmentPropertiesUpdateBody" })
-export type ContentRestrictionAddOrUpdateArray = { readonly "results": ReadonlyArray<ContentRestrictionUpdate>, readonly "start"?: number, readonly "limit"?: number, readonly "size"?: number, readonly "restrictionsHash"?: string, readonly "_links"?: GenericLinks } | ReadonlyArray<ContentRestrictionUpdate>
-export const ContentRestrictionAddOrUpdateArray = Schema.Union([Schema.Struct({ "results": Schema.Array(ContentRestrictionUpdate), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "restrictionsHash": Schema.optionalKey(Schema.String.annotate({ "description": "This property is used by the UI to figure out whether a set of restrictions\nhas changed." })), "_links": Schema.optionalKey(GenericLinks) }), Schema.Array(ContentRestrictionUpdate)], { mode: "oneOf" }).annotate({ "identifier": "ContentRestrictionAddOrUpdateArray" })
-export type ContentRestriction = { readonly "operation": "administer" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "update" | "use", readonly "restrictions"?: { readonly "user"?: UserArray, readonly "group"?: GroupArray, readonly "_expandable"?: { readonly "user"?: string, readonly "group"?: string } }, readonly "content"?: Content, readonly "_expandable": { readonly "restrictions"?: string, readonly "content"?: string }, readonly "_links": GenericLinks }
-export const ContentRestriction = Schema.Struct({ "operation": Schema.Literals(["administer", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "update", "use"]), "restrictions": Schema.optionalKey(Schema.Struct({ "user": Schema.optionalKey(UserArray), "group": Schema.optionalKey(GroupArray), "_expandable": Schema.optionalKey(Schema.Struct({ "user": Schema.optionalKey(Schema.String), "group": Schema.optionalKey(Schema.String) })) })), "content": Schema.optionalKey(Content), "_expandable": Schema.Struct({ "restrictions": Schema.optionalKey(Schema.String), "content": Schema.optionalKey(Schema.String) }), "_links": GenericLinks }).annotate({ "identifier": "ContentRestriction" })
-export type WatchArray = { readonly "results": ReadonlyArray<Watch>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const WatchArray = Schema.Struct({ "results": Schema.Array(Watch), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "WatchArray" })
-export type SpaceWatchArray = { readonly "results": ReadonlyArray<SpaceWatch>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links"?: GenericLinks }
-export const SpaceWatchArray = Schema.Struct({ "results": Schema.Array(SpaceWatch), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": Schema.optionalKey(GenericLinks) }).annotate({ "identifier": "SpaceWatchArray" })
-export type LookAndFeelSettings = { readonly "selected": "global" | "custom", readonly "global": LookAndFeel, readonly "theme"?: LookAndFeel, readonly "custom": LookAndFeel }
-export const LookAndFeelSettings = Schema.Struct({ "selected": Schema.Literals(["global", "custom"]), "global": LookAndFeel, "theme": Schema.optionalKey(LookAndFeel), "custom": LookAndFeel }).annotate({ "identifier": "LookAndFeelSettings" })
-export type ContentTemplateBody = { readonly "view"?: ContentBody, readonly "export_view"?: ContentBody, readonly "styled_view"?: ContentBody, readonly "storage"?: ContentBody, readonly "editor"?: ContentBody, readonly "editor2"?: ContentBody, readonly "wiki"?: ContentBody, readonly "atlas_doc_format"?: ContentBody, readonly "anonymous_export_view"?: ContentBody }
-export const ContentTemplateBody = Schema.Struct({ "view": Schema.optionalKey(ContentBody), "export_view": Schema.optionalKey(ContentBody), "styled_view": Schema.optionalKey(ContentBody), "storage": Schema.optionalKey(ContentBody), "editor": Schema.optionalKey(ContentBody), "editor2": Schema.optionalKey(ContentBody), "wiki": Schema.optionalKey(ContentBody), "atlas_doc_format": Schema.optionalKey(ContentBody), "anonymous_export_view": Schema.optionalKey(ContentBody) }).annotate({ "description": "The body of the new content. Does not apply to attachments.\nOnly one body format should be specified as the property for\nthis object, e.g. `storage`.\n\nNote, `editor2` format is used by Atlassian only. `anonymous_export_view` is\nthe same as `export_view` format but only content viewable by an anonymous\nuser is included.", "identifier": "ContentTemplateBody" })
+export type ThemeArray = { readonly "results": ReadonlyArray<ThemeNoLinks>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ThemeArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(ThemeNoLinks), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ThemeArray" })
+export type Watch = { readonly "type": string, readonly "watcher": WatchUser, readonly "contentId": number } & { readonly [x: string]: Schema.Json }
+export const Watch = Schema.StructWithRest(Schema.Struct({ "type": Schema.String, "watcher": WatchUser, "contentId": Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "Watch" })
+export type SpaceWatch = { readonly "type": string, readonly "watcher": WatchUser, readonly "spaceKey"?: string, readonly "labelName"?: string, readonly "prefix"?: string } & { readonly [x: string]: Schema.Json }
+export const SpaceWatch = Schema.StructWithRest(Schema.Struct({ "type": Schema.String, "watcher": WatchUser, "spaceKey": Schema.optionalKey(Schema.String), "labelName": Schema.optionalKey(Schema.String), "prefix": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SpaceWatch" })
+export type BulkUserLookupArray = { readonly "results": ReadonlyArray<BulkUserLookup>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const BulkUserLookupArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(BulkUserLookup), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "BulkUserLookupArray" })
+export type LookAndFeel = { readonly "headings": { readonly "color": string } & { readonly [x: string]: Schema.Json }, readonly "links": { readonly "color": string } & { readonly [x: string]: Schema.Json }, readonly "menus": MenusLookAndFeel, readonly "header": HeaderLookAndFeel, readonly "horizontalHeader"?: HorizontalHeaderLookAndFeel, readonly "content": ContentLookAndFeel, readonly "bordersAndDividers": { readonly "color": string } & { readonly [x: string]: Schema.Json }, readonly "spaceReference"?: { readonly [x: string]: Schema.Json } | null } & { readonly [x: string]: Schema.Json }
+export const LookAndFeel = Schema.StructWithRest(Schema.Struct({ "headings": Schema.StructWithRest(Schema.Struct({ "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "links": Schema.StructWithRest(Schema.Struct({ "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "menus": MenusLookAndFeel, "header": HeaderLookAndFeel, "horizontalHeader": Schema.optionalKey(HorizontalHeaderLookAndFeel), "content": ContentLookAndFeel, "bordersAndDividers": Schema.StructWithRest(Schema.Struct({ "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "spaceReference": Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LookAndFeel" })
+export type LookAndFeelWithLinks = { readonly "headings": { readonly "color": string } & { readonly [x: string]: Schema.Json }, readonly "links": { readonly "color": string } & { readonly [x: string]: Schema.Json }, readonly "menus": MenusLookAndFeel, readonly "header": HeaderLookAndFeel, readonly "horizontalHeader"?: HorizontalHeaderLookAndFeel, readonly "content": ContentLookAndFeel, readonly "bordersAndDividers": { readonly "color": string } & { readonly [x: string]: Schema.Json }, readonly "spaceReference"?: { readonly [x: string]: Schema.Json } | null, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const LookAndFeelWithLinks = Schema.StructWithRest(Schema.Struct({ "headings": Schema.StructWithRest(Schema.Struct({ "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "links": Schema.StructWithRest(Schema.Struct({ "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "menus": MenusLookAndFeel, "header": HeaderLookAndFeel, "horizontalHeader": Schema.optionalKey(HorizontalHeaderLookAndFeel), "content": ContentLookAndFeel, "bordersAndDividers": Schema.StructWithRest(Schema.Struct({ "color": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "spaceReference": Schema.optionalKey(Schema.Union([Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" })), Schema.Null])), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "Look and feel settings returned after an update.", "identifier": "LookAndFeelWithLinks" })
+export type ContentBody = { readonly "value": string, readonly "representation": "view" | "export_view" | "styled_view" | "storage" | "editor" | "editor2" | "anonymous_export_view" | "wiki" | "atlas_doc_format" | "raw", readonly "embeddedContent"?: ReadonlyArray<EmbeddedContent>, readonly "webresource"?: WebResourceDependencies, readonly "mediaToken"?: { readonly "collectionIds"?: ReadonlyArray<string>, readonly "contentId"?: string, readonly "expiryDateTime"?: string, readonly "fileIds"?: ReadonlyArray<string>, readonly "token"?: string } & { readonly [x: string]: Schema.Json }, readonly "_expandable"?: { readonly "content"?: string, readonly "embeddedContent"?: string, readonly "webresource"?: string, readonly "mediaToken"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ContentBody = Schema.StructWithRest(Schema.Struct({ "value": Schema.String, "representation": Schema.Literals(["view", "export_view", "styled_view", "storage", "editor", "editor2", "anonymous_export_view", "wiki", "atlas_doc_format", "raw"]), "embeddedContent": Schema.optionalKey(Schema.Array(EmbeddedContent)), "webresource": Schema.optionalKey(WebResourceDependencies), "mediaToken": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "collectionIds": Schema.optionalKey(Schema.Array(Schema.String)), "contentId": Schema.optionalKey(Schema.String), "expiryDateTime": Schema.optionalKey(Schema.String), "fileIds": Schema.optionalKey(Schema.Array(Schema.String)), "token": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "content": Schema.optionalKey(Schema.String), "embeddedContent": Schema.optionalKey(Schema.String), "webresource": Schema.optionalKey(Schema.String), "mediaToken": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentBody" })
+export type AsyncContentBody = { readonly "value"?: string, readonly "representation"?: "view" | "export_view" | "styled_view" | "storage" | "editor" | "editor2" | "anonymous_export_view" | "wiki" | "atlas_doc_format", readonly "renderTaskId"?: string, readonly "error"?: string, readonly "status"?: "WORKING" | "QUEUED" | "FAILED" | "COMPLETED" | "RERUNNING", readonly "embeddedContent"?: ReadonlyArray<EmbeddedContent>, readonly "webresource"?: WebResourceDependencies, readonly "mediaToken"?: { readonly "collectionIds"?: ReadonlyArray<string>, readonly "contentId"?: string, readonly "expiryDateTime"?: string, readonly "fileIds"?: ReadonlyArray<string>, readonly "token"?: string } & { readonly [x: string]: Schema.Json }, readonly "_expandable"?: { readonly "content"?: string, readonly "embeddedContent"?: string, readonly "webresource"?: string, readonly "mediaToken"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const AsyncContentBody = Schema.StructWithRest(Schema.Struct({ "value": Schema.optionalKey(Schema.String), "representation": Schema.optionalKey(Schema.Literals(["view", "export_view", "styled_view", "storage", "editor", "editor2", "anonymous_export_view", "wiki", "atlas_doc_format"])), "renderTaskId": Schema.optionalKey(Schema.String), "error": Schema.optionalKey(Schema.String), "status": Schema.optionalKey(Schema.Literals(["WORKING", "QUEUED", "FAILED", "COMPLETED", "RERUNNING"]).annotate({ "description": "Rerunning is reserved for when the job is working, but there is a previous run's value in the cache. You may choose to continue polling, or use the cached value." })), "embeddedContent": Schema.optionalKey(Schema.Array(EmbeddedContent)), "webresource": Schema.optionalKey(WebResourceDependencies), "mediaToken": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "collectionIds": Schema.optionalKey(Schema.Array(Schema.String)), "contentId": Schema.optionalKey(Schema.String), "expiryDateTime": Schema.optionalKey(Schema.String), "fileIds": Schema.optionalKey(Schema.Array(Schema.String)), "token": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "content": Schema.optionalKey(Schema.String), "embeddedContent": Schema.optionalKey(Schema.String), "webresource": Schema.optionalKey(Schema.String), "mediaToken": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AsyncContentBody" })
+export type BulkContentBodyConversionInput = { readonly "conversionInputs"?: ReadonlyArray<ContentBodyConversionInput> } & { readonly [x: string]: Schema.Json }
+export const BulkContentBodyConversionInput = Schema.StructWithRest(Schema.Struct({ "conversionInputs": Schema.optionalKey(Schema.Array(ContentBodyConversionInput)) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "BulkContentBodyConversionInput" })
+export type ContentTemplateUpdate = { readonly "templateId": string, readonly "name": string, readonly "templateType": "page", readonly "body": ContentTemplateBodyCreate, readonly "description"?: string, readonly "labels"?: ReadonlyArray<Label>, readonly "space"?: { readonly "key": string } & { readonly [x: string]: Schema.Json } | null } & { readonly [x: string]: Schema.Json }
+export const ContentTemplateUpdate = Schema.StructWithRest(Schema.Struct({ "templateId": Schema.String.annotate({ "description": "The ID of the template being updated." }), "name": Schema.String.annotate({ "description": "The name of the template. Set to the current `name` if this field is\nnot being updated." }), "templateType": Schema.Literal("page").annotate({ "description": "The type of the template. Set to `page`." }), "body": ContentTemplateBodyCreate, "description": Schema.optionalKey(Schema.String.annotate({ "description": "A description of the template." }).check(Schema.isMaxCodePoints(100).annotate({ "expected": "a string with at most 100 code points" }))), "labels": Schema.optionalKey(Schema.Array(Label).annotate({ "description": "Labels for the template." })), "space": Schema.optionalKey(Schema.Union([Schema.StructWithRest(Schema.Struct({ "key": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "description": "The key for the space of the template. Required if the template is a\nspace template. Set this to the current `space.key`." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object is used to update content templates.", "identifier": "ContentTemplateUpdate" })
+export type ContentTemplateCreate = { readonly "name": string, readonly "templateType": string, readonly "body": ContentTemplateBodyCreate, readonly "description"?: string, readonly "labels"?: ReadonlyArray<Label>, readonly "space"?: { readonly "key": string } & { readonly [x: string]: Schema.Json } | null } & { readonly [x: string]: Schema.Json }
+export const ContentTemplateCreate = Schema.StructWithRest(Schema.Struct({ "name": Schema.String.annotate({ "description": "The name of the new template." }), "templateType": Schema.String.annotate({ "description": "The type of the new template. Set to `page`." }), "body": ContentTemplateBodyCreate, "description": Schema.optionalKey(Schema.String.annotate({ "description": "A description of the new template." }).check(Schema.isMaxCodePoints(255).annotate({ "expected": "a string with at most 255 code points" }))), "labels": Schema.optionalKey(Schema.Array(Label).annotate({ "description": "Labels for the new template." })), "space": Schema.optionalKey(Schema.Union([Schema.StructWithRest(Schema.Struct({ "key": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "description": "The key for the space of the new template. Only applies to space templates.\nIf the spaceKey is not specified, the template will be created as a global\ntemplate." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This object is used to create content templates.", "identifier": "ContentTemplateCreate" })
+export type LongTaskStatusArray = { readonly "results": ReadonlyArray<LongTaskStatus>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const LongTaskStatusArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(LongTaskStatus), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LongTaskStatusArray" })
+export type LabeledContentPageResponse = { readonly "results": ReadonlyArray<LabeledContent>, readonly "start"?: number, readonly "limit"?: number, readonly "size": number } & { readonly [x: string]: Schema.Json }
+export const LabeledContentPageResponse = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(LabeledContent), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LabeledContentPageResponse" })
+export type RelationArray = { readonly "results": ReadonlyArray<Relation>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const RelationArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Relation), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "RelationArray" })
+export type SearchPageResponseSearchResult = { readonly "results": ReadonlyArray<SearchResult>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "totalSize": number, readonly "cqlQuery": string, readonly "searchDuration": number, readonly "archivedResultCount"?: number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const SearchPageResponseSearchResult = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(SearchResult), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "totalSize": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "cqlQuery": Schema.String, "searchDuration": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "archivedResultCount": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SearchPageResponseSearchResult" })
+export type SpaceCreate = { readonly "name": string, readonly "key"?: string, readonly "alias"?: string, readonly "description"?: SpaceDescriptionCreate, readonly "permissions"?: ReadonlyArray<SpacePermissionCreate> | null } & { readonly [x: string]: Schema.Json }
+export const SpaceCreate = Schema.StructWithRest(Schema.Struct({ "name": Schema.String.annotate({ "description": "The name of the new space." }).check(Schema.isMaxCodePoints(200).annotate({ "expected": "a string with at most 200 code points" })), "key": Schema.optionalKey(Schema.String.annotate({ "description": "The key for the new space. Format: See [Space\nkeys](https://confluence.atlassian.com/x/lqNMMQ). If `alias` is not provided, this is required." })), "alias": Schema.optionalKey(Schema.String.annotate({ "description": "This field will be used as the new identifier for the space in confluence page URLs.\nIf the property is not provided the alias will be the provided key.\nThis property is experimental and may be changed or removed in the future." })), "description": Schema.optionalKey(SpaceDescriptionCreate), "permissions": Schema.optionalKey(Schema.Union([Schema.Array(SpacePermissionCreate), Schema.Null]).annotate({ "description": "The permissions for the new space. If no permissions are provided, the\n[Confluence default space permissions](https://confluence.atlassian.com/x/UAgzKw#CreateaSpace-Spacepermissions)\nare applied. Note that if permissions are provided, the space is\ncreated with only the provided set of permissions, not\nincluding the default space permissions. Space permissions\ncan be modified after creation using the space permissions\nendpoints, and a private space can be created using the\ncreate private space endpoint." })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "This is the request object used when creating a new space.", "identifier": "SpaceCreate" })
+export type AttachmentPropertiesUpdateBody = { readonly "id": string, readonly "type": string, readonly "status"?: string, readonly "title"?: string, readonly "container"?: Container, readonly "metadata"?: { readonly "mediaType"?: string } & { readonly [x: string]: Schema.Json }, readonly "extensions"?: { readonly [x: string]: Schema.Json }, readonly "version": Version } & { readonly [x: string]: Schema.Json }
+export const AttachmentPropertiesUpdateBody = Schema.StructWithRest(Schema.Struct({ "id": Schema.String, "type": Schema.String.annotate({ "description": "Set this to \"attachment\"" }), "status": Schema.optionalKey(Schema.String), "title": Schema.optionalKey(Schema.String), "container": Schema.optionalKey(Container), "metadata": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "mediaType": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "extensions": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))), "version": Version }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "AttachmentPropertiesUpdateBody" })
+export type ContentRestrictionAddOrUpdateArray = { readonly "results": ReadonlyArray<ContentRestrictionUpdate>, readonly "start"?: number, readonly "limit"?: number, readonly "size"?: number, readonly "restrictionsHash"?: string, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json } | ReadonlyArray<ContentRestrictionUpdate>
+export const ContentRestrictionAddOrUpdateArray = Schema.Union([Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(ContentRestrictionUpdate), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "size": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "restrictionsHash": Schema.optionalKey(Schema.String.annotate({ "description": "This property is used by the UI to figure out whether a set of restrictions\nhas changed." })), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Array(ContentRestrictionUpdate)], { mode: "oneOf" }).annotate({ "identifier": "ContentRestrictionAddOrUpdateArray" })
+export type ContentRestriction = { readonly "operation": "administer" | "copy" | "create" | "delete" | "export" | "move" | "purge" | "purge_version" | "read" | "restore" | "update" | "use", readonly "restrictions"?: { readonly "user"?: UserArray, readonly "group"?: GroupArray, readonly "_expandable"?: { readonly "user"?: string, readonly "group"?: string } & { readonly [x: string]: Schema.Json } } & { readonly [x: string]: Schema.Json }, readonly "content"?: Content, readonly "_expandable": { readonly "restrictions"?: string, readonly "content"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ContentRestriction = Schema.StructWithRest(Schema.Struct({ "operation": Schema.Literals(["administer", "copy", "create", "delete", "export", "move", "purge", "purge_version", "read", "restore", "update", "use"]), "restrictions": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "user": Schema.optionalKey(UserArray), "group": Schema.optionalKey(GroupArray), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "user": Schema.optionalKey(Schema.String), "group": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "content": Schema.optionalKey(Content), "_expandable": Schema.StructWithRest(Schema.Struct({ "restrictions": Schema.optionalKey(Schema.String), "content": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentRestriction" })
+export type WatchArray = { readonly "results": ReadonlyArray<Watch>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const WatchArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(Watch), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "WatchArray" })
+export type SpaceWatchArray = { readonly "results": ReadonlyArray<SpaceWatch>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json }
+export const SpaceWatchArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(SpaceWatch), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "SpaceWatchArray" })
+export type LookAndFeelSettings = { readonly "selected": "global" | "custom", readonly "global": LookAndFeel, readonly "theme"?: LookAndFeel, readonly "custom": LookAndFeel } & { readonly [x: string]: Schema.Json }
+export const LookAndFeelSettings = Schema.StructWithRest(Schema.Struct({ "selected": Schema.Literals(["global", "custom"]), "global": LookAndFeel, "theme": Schema.optionalKey(LookAndFeel), "custom": LookAndFeel }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LookAndFeelSettings" })
+export type ContentTemplateBody = { readonly "view"?: ContentBody, readonly "export_view"?: ContentBody, readonly "styled_view"?: ContentBody, readonly "storage"?: ContentBody, readonly "editor"?: ContentBody, readonly "editor2"?: ContentBody, readonly "wiki"?: ContentBody, readonly "atlas_doc_format"?: ContentBody, readonly "anonymous_export_view"?: ContentBody } & { readonly [x: string]: Schema.Json }
+export const ContentTemplateBody = Schema.StructWithRest(Schema.Struct({ "view": Schema.optionalKey(ContentBody), "export_view": Schema.optionalKey(ContentBody), "styled_view": Schema.optionalKey(ContentBody), "storage": Schema.optionalKey(ContentBody), "editor": Schema.optionalKey(ContentBody), "editor2": Schema.optionalKey(ContentBody), "wiki": Schema.optionalKey(ContentBody), "atlas_doc_format": Schema.optionalKey(ContentBody), "anonymous_export_view": Schema.optionalKey(ContentBody) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "description": "The body of the new content. Does not apply to attachments.\nOnly one body format should be specified as the property for\nthis object, e.g. `storage`.\n\nNote, `editor2` format is used by Atlassian only. `anonymous_export_view` is\nthe same as `export_view` format but only content viewable by an anonymous\nuser is included.", "identifier": "ContentTemplateBody" })
 export type AsyncContentBodyArray = ReadonlyArray<AsyncContentBody>
 export const AsyncContentBodyArray = Schema.Array(AsyncContentBody).annotate({ "identifier": "AsyncContentBodyArray" })
-export type LabelDetails = { readonly "label": Label, readonly "associatedContents"?: LabeledContentPageResponse }
-export const LabelDetails = Schema.Struct({ "label": Label, "associatedContents": Schema.optionalKey(LabeledContentPageResponse) }).annotate({ "identifier": "LabelDetails" })
-export type ContentRestrictionArray = { readonly "results": ReadonlyArray<ContentRestriction>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "restrictionsHash": string, readonly "_links": GenericLinks }
-export const ContentRestrictionArray = Schema.Struct({ "results": Schema.Array(ContentRestriction), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "restrictionsHash": Schema.String.annotate({ "description": "This property is used by the UI to figure out whether a set of restrictions\nhas changed." }), "_links": GenericLinks }).annotate({ "identifier": "ContentRestrictionArray" })
-export type ContentTemplate = { readonly "templateId": string, readonly "originalTemplate"?: { readonly "pluginKey"?: string, readonly "moduleKey"?: string }, readonly "referencingBlueprint"?: string, readonly "name": string, readonly "description": string, readonly "space"?: { readonly [x: string]: Schema.Json }, readonly "labels": ReadonlyArray<Label>, readonly "templateType": string, readonly "editorVersion"?: string, readonly "body"?: ContentTemplateBody, readonly "_expandable"?: { readonly "body"?: string }, readonly "_links": GenericLinks }
-export const ContentTemplate = Schema.Struct({ "templateId": Schema.String, "originalTemplate": Schema.optionalKey(Schema.Struct({ "pluginKey": Schema.optionalKey(Schema.String), "moduleKey": Schema.optionalKey(Schema.String) })), "referencingBlueprint": Schema.optionalKey(Schema.String), "name": Schema.String, "description": Schema.String, "space": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))), "labels": Schema.Array(Label), "templateType": Schema.String, "editorVersion": Schema.optionalKey(Schema.String), "body": Schema.optionalKey(ContentTemplateBody), "_expandable": Schema.optionalKey(Schema.Struct({ "body": Schema.optionalKey(Schema.String) })), "_links": GenericLinks }).annotate({ "identifier": "ContentTemplate" })
-export type BlueprintTemplate = { readonly "templateId": string, readonly "originalTemplate": { readonly "pluginKey": string, readonly "moduleKey": string }, readonly "referencingBlueprint": string, readonly "name": string, readonly "description": string, readonly "space"?: { readonly [x: string]: Schema.Json }, readonly "labels": ReadonlyArray<Label>, readonly "templateType": string, readonly "editorVersion"?: string, readonly "body"?: ContentTemplateBody, readonly "_expandable"?: { readonly "body"?: string }, readonly "_links": GenericLinks }
-export const BlueprintTemplate = Schema.Struct({ "templateId": Schema.String, "originalTemplate": Schema.Struct({ "pluginKey": Schema.String, "moduleKey": Schema.String }), "referencingBlueprint": Schema.String, "name": Schema.String, "description": Schema.String, "space": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))), "labels": Schema.Array(Label), "templateType": Schema.String, "editorVersion": Schema.optionalKey(Schema.String), "body": Schema.optionalKey(ContentTemplateBody), "_expandable": Schema.optionalKey(Schema.Struct({ "body": Schema.optionalKey(Schema.String) })), "_links": GenericLinks }).annotate({ "identifier": "BlueprintTemplate" })
-export type ContentTemplateArray = { readonly "results": ReadonlyArray<ContentTemplate>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const ContentTemplateArray = Schema.Struct({ "results": Schema.Array(ContentTemplate), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "ContentTemplateArray" })
-export type BlueprintTemplateArray = { readonly "results": ReadonlyArray<BlueprintTemplate>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks }
-export const BlueprintTemplateArray = Schema.Struct({ "results": Schema.Array(BlueprintTemplate), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }).annotate({ "identifier": "BlueprintTemplateArray" })
+export type LabelDetails = { readonly "label": Label, readonly "associatedContents"?: LabeledContentPageResponse } & { readonly [x: string]: Schema.Json }
+export const LabelDetails = Schema.StructWithRest(Schema.Struct({ "label": Label, "associatedContents": Schema.optionalKey(LabeledContentPageResponse) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "LabelDetails" })
+export type ContentRestrictionArray = { readonly "results": ReadonlyArray<ContentRestriction>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "restrictionsHash": string, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ContentRestrictionArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(ContentRestriction), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "restrictionsHash": Schema.String.annotate({ "description": "This property is used by the UI to figure out whether a set of restrictions\nhas changed." }), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentRestrictionArray" })
+export type ContentTemplate = { readonly "templateId": string, readonly "originalTemplate"?: { readonly "pluginKey"?: string, readonly "moduleKey"?: string } & { readonly [x: string]: Schema.Json }, readonly "referencingBlueprint"?: string, readonly "name": string, readonly "description": string, readonly "space"?: { readonly [x: string]: Schema.Json }, readonly "labels": ReadonlyArray<Label>, readonly "templateType": string, readonly "editorVersion"?: string, readonly "body"?: ContentTemplateBody, readonly "_expandable"?: { readonly "body"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ContentTemplate = Schema.StructWithRest(Schema.Struct({ "templateId": Schema.String, "originalTemplate": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "pluginKey": Schema.optionalKey(Schema.String), "moduleKey": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "referencingBlueprint": Schema.optionalKey(Schema.String), "name": Schema.String, "description": Schema.String, "space": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))), "labels": Schema.Array(Label), "templateType": Schema.String, "editorVersion": Schema.optionalKey(Schema.String), "body": Schema.optionalKey(ContentTemplateBody), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "body": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentTemplate" })
+export type BlueprintTemplate = { readonly "templateId": string, readonly "originalTemplate": { readonly "pluginKey": string, readonly "moduleKey": string } & { readonly [x: string]: Schema.Json }, readonly "referencingBlueprint": string, readonly "name": string, readonly "description": string, readonly "space"?: { readonly [x: string]: Schema.Json }, readonly "labels": ReadonlyArray<Label>, readonly "templateType": string, readonly "editorVersion"?: string, readonly "body"?: ContentTemplateBody, readonly "_expandable"?: { readonly "body"?: string } & { readonly [x: string]: Schema.Json }, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const BlueprintTemplate = Schema.StructWithRest(Schema.Struct({ "templateId": Schema.String, "originalTemplate": Schema.StructWithRest(Schema.Struct({ "pluginKey": Schema.String, "moduleKey": Schema.String }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "referencingBlueprint": Schema.String, "name": Schema.String, "description": Schema.String, "space": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))), "labels": Schema.Array(Label), "templateType": Schema.String, "editorVersion": Schema.optionalKey(Schema.String), "body": Schema.optionalKey(ContentTemplateBody), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "body": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "BlueprintTemplate" })
+export type ContentTemplateArray = { readonly "results": ReadonlyArray<ContentTemplate>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const ContentTemplateArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(ContentTemplate), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "ContentTemplateArray" })
+export type BlueprintTemplateArray = { readonly "results": ReadonlyArray<BlueprintTemplate>, readonly "start": number, readonly "limit": number, readonly "size": number, readonly "_links": GenericLinks } & { readonly [x: string]: Schema.Json }
+export const BlueprintTemplateArray = Schema.StructWithRest(Schema.Struct({ "results": Schema.Array(BlueprintTemplate), "start": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "limit": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "size": Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]).annotate({ "identifier": "BlueprintTemplateArray" })
 // recursive definitions
-const __recursive_Space = Schema.Union([Schema.StructWithRest(Schema.Struct({ "id": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "key": Schema.String, "alias": Schema.optionalKey(Schema.String), "name": Schema.String, "icon": Schema.optionalKey(Icon), "description": Schema.optionalKey(Schema.Struct({ "plain": Schema.optionalKey(SpaceDescription), "view": Schema.optionalKey(SpaceDescription), "_expandable": Schema.optionalKey(Schema.Struct({ "view": Schema.optionalKey(Schema.String), "plain": Schema.optionalKey(Schema.String) })) })), "homepage": Schema.optionalKey(Content), "type": Schema.String, "metadata": Schema.optionalKey(Schema.Struct({ "labels": Schema.optionalKey(LabelArray), "_expandable": Schema.optionalKey(Schema.Struct({  })) })), "operations": Schema.optionalKey(Schema.Array(OperationCheckResult)), "permissions": Schema.optionalKey(Schema.Array(Schema.Json.annotate({ "expected": "JSON value" }))), "status": Schema.String, "settings": Schema.optionalKey(SpaceSettings), "theme": Schema.optionalKey(Theme), "lookAndFeel": Schema.optionalKey(LookAndFeel), "history": Schema.optionalKey(Schema.Struct({ "createdDate": Schema.String.annotate({ "format": "date-time" }), "createdBy": Schema.optionalKey(Schema.suspend((): Schema.Codec<User> => User)) })), "_expandable": Schema.Struct({ "settings": Schema.optionalKey(Schema.String), "metadata": Schema.optionalKey(Schema.String), "operations": Schema.optionalKey(Schema.String), "lookAndFeel": Schema.optionalKey(Schema.String), "permissions": Schema.optionalKey(Schema.String), "icon": Schema.optionalKey(Schema.String), "description": Schema.optionalKey(Schema.String), "theme": Schema.optionalKey(Schema.String), "history": Schema.optionalKey(Schema.String), "homepage": Schema.optionalKey(Schema.String), "identifiers": Schema.optionalKey(Schema.String) }), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "Space" })
-const __recursive_User = Schema.Union([Schema.StructWithRest(Schema.Struct({ "type": Schema.Literals(["known", "unknown", "anonymous", "user"]), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": Schema.optionalKey(GenericAccountId), "accountType": Schema.optionalKey(Schema.Literals(["atlassian", "app", ""]).annotate({ "description": "The account type of the user, may return empty string if unavailable. App is if the user is a bot user created on behalf of an Atlassian app." })), "email": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The email address of the user. Depending on the user's privacy setting, this may return an empty string." })), "publicName": Schema.optionalKey(Schema.String.annotate({ "description": "The public name or nickname of the user. Will always contain a value." })), "profilePicture": Schema.optionalKey(Icon), "displayName": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The displays name of the user. Depending on the user's privacy setting, this may be the same as publicName." })), "timeZone": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "This displays user time zone. Depending on the user's privacy setting, this may return null." })), "externalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead to find out whether the user is a guest user." })), "isExternalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead to find out whether the user is a guest user." })), "isGuest": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether the user is a guest user" })), "operations": Schema.optionalKey(Schema.Union([Schema.Array(OperationCheckResult), Schema.Null])), "details": Schema.optionalKey(UserDetails), "personalSpace": Schema.optionalKey(Schema.suspend((): Schema.Codec<Space> => Space)), "_expandable": Schema.optionalKey(Schema.Struct({ "operations": Schema.optionalKey(Schema.String), "details": Schema.optionalKey(Schema.String), "personalSpace": Schema.optionalKey(Schema.String) })), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "User" })
+const __recursive_Space = Schema.Union([Schema.StructWithRest(Schema.Struct({ "id": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "key": Schema.String, "alias": Schema.optionalKey(Schema.String), "name": Schema.String, "icon": Schema.optionalKey(Icon), "description": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "plain": Schema.optionalKey(SpaceDescription), "view": Schema.optionalKey(SpaceDescription), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "view": Schema.optionalKey(Schema.String), "plain": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "homepage": Schema.optionalKey(Content), "type": Schema.String, "metadata": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "labels": Schema.optionalKey(LabelArray), "_expandable": Schema.optionalKey(Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "operations": Schema.optionalKey(Schema.Array(OperationCheckResult)), "permissions": Schema.optionalKey(Schema.Array(Schema.Json.annotate({ "expected": "JSON value" }))), "status": Schema.String, "settings": Schema.optionalKey(SpaceSettings), "theme": Schema.optionalKey(Theme), "lookAndFeel": Schema.optionalKey(LookAndFeel), "history": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "createdDate": Schema.String.annotate({ "format": "date-time" }), "createdBy": Schema.optionalKey(Schema.suspend((): Schema.Codec<User> => User)) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_expandable": Schema.StructWithRest(Schema.Struct({ "settings": Schema.optionalKey(Schema.String), "metadata": Schema.optionalKey(Schema.String), "operations": Schema.optionalKey(Schema.String), "lookAndFeel": Schema.optionalKey(Schema.String), "permissions": Schema.optionalKey(Schema.String), "icon": Schema.optionalKey(Schema.String), "description": Schema.optionalKey(Schema.String), "theme": Schema.optionalKey(Schema.String), "history": Schema.optionalKey(Schema.String), "homepage": Schema.optionalKey(Schema.String), "identifiers": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), "_links": GenericLinks }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "Space" })
+const __recursive_User = Schema.Union([Schema.StructWithRest(Schema.Struct({ "type": Schema.Literals(["known", "unknown", "anonymous", "user"]), "username": Schema.optionalKey(GenericUserName), "userKey": Schema.optionalKey(GenericUserKey), "accountId": Schema.optionalKey(GenericAccountId), "accountType": Schema.optionalKey(Schema.Literals(["atlassian", "app", ""]).annotate({ "description": "The account type of the user, may return empty string if unavailable. App is if the user is a bot user created on behalf of an Atlassian app." })), "email": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The email address of the user. Depending on the user's privacy setting, this may return an empty string." })), "publicName": Schema.optionalKey(Schema.String.annotate({ "description": "The public name or nickname of the user. Will always contain a value." })), "profilePicture": Schema.optionalKey(Icon), "displayName": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "The displays name of the user. Depending on the user's privacy setting, this may be the same as publicName." })), "timeZone": Schema.optionalKey(Schema.Union([Schema.String, Schema.Null]).annotate({ "description": "This displays user time zone. Depending on the user's privacy setting, this may return null." })), "externalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead to find out whether the user is a guest user." })), "isExternalCollaborator": Schema.optionalKey(Schema.Boolean.annotate({ "description": "This is deprecated. Use `isGuest` instead to find out whether the user is a guest user." })), "isGuest": Schema.optionalKey(Schema.Boolean.annotate({ "description": "Whether the user is a guest user" })), "operations": Schema.optionalKey(Schema.Union([Schema.Array(OperationCheckResult), Schema.Null])), "details": Schema.optionalKey(UserDetails), "personalSpace": Schema.optionalKey(Schema.suspend((): Schema.Codec<Space> => Space)), "_expandable": Schema.optionalKey(Schema.StructWithRest(Schema.Struct({ "operations": Schema.optionalKey(Schema.String), "details": Schema.optionalKey(Schema.String), "personalSpace": Schema.optionalKey(Schema.String) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Null]).annotate({ "identifier": "User" })
 // schemas
 export type GetAuditRecordsParams = { readonly "startDate"?: string, readonly "endDate"?: string, readonly "searchString"?: string, readonly "start"?: number, readonly "limit"?: number }
 export const GetAuditRecordsParams = Schema.Struct({ "startDate": Schema.optionalKey(Schema.String), "endDate": Schema.optionalKey(Schema.String), "searchString": Schema.optionalKey(Schema.String), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))) })
@@ -300,8 +303,8 @@ export type GetAuditRecordsForTimePeriodParams = { readonly "number"?: number, r
 export const GetAuditRecordsForTimePeriodParams = Schema.Struct({ "number": Schema.optionalKey(Schema.Number.annotate({ "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "units": Schema.optionalKey(Schema.Literals(["NANOS", "MICROS", "MILLIS", "SECONDS", "MINUTES", "HOURS", "HALF_DAYS", "DAYS", "WEEKS", "MONTHS", "YEARS", "DECADES", "CENTURIES"])), "searchString": Schema.optionalKey(Schema.String), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))) })
 export type GetAuditRecordsForTimePeriod200 = AuditRecordArray
 export const GetAuditRecordsForTimePeriod200 = AuditRecordArray
-export type ArchivePagesRequestJson = { readonly "pages"?: ReadonlyArray<{ readonly "id": number }> }
-export const ArchivePagesRequestJson = Schema.Struct({ "pages": Schema.optionalKey(Schema.Array(Schema.Struct({ "id": Schema.Number.annotate({ "description": "The `id` of the page to be archived.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }))) })
+export type ArchivePagesRequestJson = { readonly "pages"?: ReadonlyArray<{ readonly "id": number } & { readonly [x: string]: Schema.Json }> } & { readonly [x: string]: Schema.Json }
+export const ArchivePagesRequestJson = Schema.StructWithRest(Schema.Struct({ "pages": Schema.optionalKey(Schema.Array(Schema.StructWithRest(Schema.Struct({ "id": Schema.Number.annotate({ "description": "The `id` of the page to be archived.", "format": "int64" }).check(Schema.isInt().annotate({ "expected": "an integer" })) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])
 export type ArchivePages202 = LongTask
 export const ArchivePages202 = LongTask
 export type PublishSharedDraftParams = { readonly "status"?: string, readonly "expand"?: ReadonlyArray<string> }
@@ -322,8 +325,8 @@ export type SearchContentByCQL200 = ContentArray
 export const SearchContentByCQL200 = ContentArray
 export type DeletePageTree202 = LongTask
 export const DeletePageTree202 = LongTask
-export type MovePage200 = { readonly "pageId"?: ContentId }
-export const MovePage200 = Schema.Struct({ "pageId": Schema.optionalKey(ContentId) })
+export type MovePage200 = { readonly "pageId"?: ContentId } & { readonly [x: string]: Schema.Json }
+export const MovePage200 = Schema.StructWithRest(Schema.Struct({ "pageId": Schema.optionalKey(ContentId) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])
 export type CreateOrUpdateAttachmentsParams = { readonly "status"?: "current" | "draft", readonly "X-Atlassian-Token": "nocheck" }
 export const CreateOrUpdateAttachmentsParams = Schema.Struct({ "status": Schema.optionalKey(Schema.Literals(["current", "draft"])), "X-Atlassian-Token": Schema.Literal("nocheck") })
 export type CreateOrUpdateAttachmentsRequestFormData = Schema.Json
@@ -332,16 +335,16 @@ export type CreateOrUpdateAttachments200 = ContentArray
 export const CreateOrUpdateAttachments200 = ContentArray
 export type CreateAttachmentParams = { readonly "status"?: "current" | "draft" }
 export const CreateAttachmentParams = Schema.Struct({ "status": Schema.optionalKey(Schema.Literals(["current", "draft"])) })
-export type CreateAttachmentRequestFormData = { readonly "file": string, readonly "comment"?: string, readonly "minorEdit": string, readonly [x: string]: Schema.Json }
-export const CreateAttachmentRequestFormData = Schema.StructWithRest(Schema.Struct({ "file": Schema.String.annotate({ "description": "The relative location and name of the attachment to be added to\nthe content.", "format": "binary" }), "comment": Schema.optionalKey(Schema.String.annotate({ "description": "The comment for the attachment that is being added.\nIf you specify a comment, then every file must have a comment and\nthe comments must be in the same order as the files. Alternatively,\ndon't specify any comments.", "format": "binary" })), "minorEdit": Schema.String.annotate({ "description": "If `minorEdits` is set to 'true', no notification email or activity stream\nwill be generated when the attachment is added to the content.", "format": "binary" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])
+export type CreateAttachmentRequestFormData = null | string | number | boolean | { readonly "file": __ClientMultipartFile, readonly "comment"?: __ClientMultipartFile, readonly "minorEdit": __ClientMultipartFile } & { readonly [x: string]: Schema.Json } | ReadonlyArray<Schema.Json>
+export const CreateAttachmentRequestFormData = Schema.Union([Schema.Null, Schema.String, Schema.Number.check(Schema.isFinite().annotate({ "expected": "a finite number" })), Schema.Boolean, Schema.StructWithRest(Schema.Struct({ "file": __ClientMultipartFile, "comment": Schema.optionalKey(__ClientMultipartFile), "minorEdit": __ClientMultipartFile }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Array(Schema.Json.annotate({ "expected": "JSON value" }))])
 export type CreateAttachment200 = ContentArray
 export const CreateAttachment200 = ContentArray
 export type UpdateAttachmentPropertiesRequestJson = AttachmentPropertiesUpdateBody
 export const UpdateAttachmentPropertiesRequestJson = AttachmentPropertiesUpdateBody
 export type UpdateAttachmentProperties200 = Content
 export const UpdateAttachmentProperties200 = Content
-export type UpdateAttachmentDataRequestFormData = { readonly "file": string, readonly "comment"?: string, readonly "minorEdit": string, readonly [x: string]: Schema.Json }
-export const UpdateAttachmentDataRequestFormData = Schema.StructWithRest(Schema.Struct({ "file": Schema.String.annotate({ "description": "The relative location and name of the attachment to be added to\nthe content.", "format": "binary" }), "comment": Schema.optionalKey(Schema.String.annotate({ "description": "The comment for the attachment that is being added.\nIf you specify a comment, then every file must have a comment and\nthe comments must be in the same order as the files. Alternatively,\ndon't specify any comments.", "format": "binary" })), "minorEdit": Schema.String.annotate({ "description": "If `minorEdits` is set to 'true', no notification email or activity stream\nwill be generated when the attachment is added to the content.", "format": "binary" }) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])
+export type UpdateAttachmentDataRequestFormData = null | string | number | boolean | { readonly "file": __ClientMultipartFile, readonly "comment"?: __ClientMultipartFile, readonly "minorEdit": __ClientMultipartFile } & { readonly [x: string]: Schema.Json } | ReadonlyArray<Schema.Json>
+export const UpdateAttachmentDataRequestFormData = Schema.Union([Schema.Null, Schema.String, Schema.Number.check(Schema.isFinite().annotate({ "expected": "a finite number" })), Schema.Boolean, Schema.StructWithRest(Schema.Struct({ "file": __ClientMultipartFile, "comment": Schema.optionalKey(__ClientMultipartFile), "minorEdit": __ClientMultipartFile }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Array(Schema.Json.annotate({ "expected": "JSON value" }))])
 export type UpdateAttachmentData200 = Content
 export const UpdateAttachmentData200 = Content
 export type DownloadAttatchmentParams = { readonly "version"?: number, readonly "status"?: ReadonlyArray<string> }
@@ -386,6 +389,8 @@ export type CopyPageParams = { readonly "expand"?: ReadonlyArray<string> }
 export const CopyPageParams = Schema.Struct({ "expand": Schema.optionalKey(Schema.Array(Schema.String)) })
 export type CopyPageRequestJson = CopyPageRequest
 export const CopyPageRequestJson = CopyPageRequest
+export type CopyPage200 = Content
+export const CopyPage200 = Content
 export type CheckContentPermissionRequestJson = ContentPermissionRequest
 export const CheckContentPermissionRequestJson = ContentPermissionRequest
 export type CheckContentPermission200 = PermissionCheckResponse
@@ -412,8 +417,8 @@ export type DeleteRestrictions200 = ContentRestrictionArray
 export const DeleteRestrictions200 = ContentRestrictionArray
 export type GetRestrictionsByOperationParams = { readonly "expand"?: ReadonlyArray<"restrictions.user" | "restrictions.group" | "content"> }
 export const GetRestrictionsByOperationParams = Schema.Struct({ "expand": Schema.optionalKey(Schema.Array(Schema.Literals(["restrictions.user", "restrictions.group", "content"]))) })
-export type GetRestrictionsByOperation200 = { readonly [x: string]: { readonly "operationType"?: ContentRestriction, readonly "_links"?: GenericLinks, readonly [x: string]: Schema.Json } }
-export const GetRestrictionsByOperation200 = Schema.Record(Schema.String, Schema.StructWithRest(Schema.Struct({ "operationType": Schema.optionalKey(ContentRestriction), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]))
+export type GetRestrictionsByOperation200 = { readonly [x: string]: null | string | number | boolean | { readonly "operationType"?: ContentRestriction, readonly "_links"?: GenericLinks } & { readonly [x: string]: Schema.Json } | ReadonlyArray<Schema.Json> }
+export const GetRestrictionsByOperation200 = Schema.Record(Schema.String, Schema.Union([Schema.Null, Schema.String, Schema.Number.check(Schema.isFinite().annotate({ "expected": "a finite number" })), Schema.Boolean, Schema.StructWithRest(Schema.Struct({ "operationType": Schema.optionalKey(ContentRestriction), "_links": Schema.optionalKey(GenericLinks) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))]), Schema.Array(Schema.Json.annotate({ "expected": "JSON value" }))]))
 export type GetRestrictionsForOperationParams = { readonly "expand"?: ReadonlyArray<"restrictions.user" | "restrictions.group" | "content">, readonly "start"?: number, readonly "limit"?: number }
 export const GetRestrictionsForOperationParams = Schema.Struct({ "expand": Schema.optionalKey(Schema.Array(Schema.Literals(["restrictions.user", "restrictions.group", "content"]))), "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))) })
 export type GetRestrictionsForOperation200 = ContentRestriction
@@ -684,12 +689,12 @@ export type RemoveModulesParams = { readonly "moduleKey": ReadonlyArray<string> 
 export const RemoveModulesParams = Schema.Struct({ "moduleKey": Schema.Array(Schema.String) })
 export type GetViewsParams = { readonly "fromDate"?: string }
 export const GetViewsParams = Schema.Struct({ "fromDate": Schema.optionalKey(Schema.String) })
-export type GetViews200 = { readonly "id"?: number, readonly "count"?: number }
-export const GetViews200 = Schema.Struct({ "id": Schema.optionalKey(Schema.Number.annotate({ "description": "The content ID." }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "count": Schema.optionalKey(Schema.Number.annotate({ "description": "The total number of views for the content." }).check(Schema.isInt().annotate({ "expected": "an integer" }))) })
+export type GetViews200 = { readonly "id"?: number, readonly "count"?: number } & { readonly [x: string]: Schema.Json }
+export const GetViews200 = Schema.StructWithRest(Schema.Struct({ "id": Schema.optionalKey(Schema.Number.annotate({ "description": "The content ID." }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "count": Schema.optionalKey(Schema.Number.annotate({ "description": "The total number of views for the content." }).check(Schema.isInt().annotate({ "expected": "an integer" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])
 export type GetViewersParams = { readonly "fromDate"?: string }
 export const GetViewersParams = Schema.Struct({ "fromDate": Schema.optionalKey(Schema.String) })
-export type GetViewers200 = { readonly "id"?: number, readonly "count"?: number }
-export const GetViewers200 = Schema.Struct({ "id": Schema.optionalKey(Schema.Number.annotate({ "description": "The content ID." }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "count": Schema.optionalKey(Schema.Number.annotate({ "description": "The total number of distinct viewers for the content." }).check(Schema.isInt().annotate({ "expected": "an integer" }))) })
+export type GetViewers200 = { readonly "id"?: number, readonly "count"?: number } & { readonly [x: string]: Schema.Json }
+export const GetViewers200 = Schema.StructWithRest(Schema.Struct({ "id": Schema.optionalKey(Schema.Number.annotate({ "description": "The content ID." }).check(Schema.isInt().annotate({ "expected": "an integer" }))), "count": Schema.optionalKey(Schema.Number.annotate({ "description": "The total number of distinct viewers for the content." }).check(Schema.isInt().annotate({ "expected": "an integer" }))) }), [Schema.Record(Schema.String, Schema.Json.annotate({ "expected": "JSON value" }))])
 export type GetUserPropertiesParams = { readonly "start"?: number, readonly "limit"?: number }
 export const GetUserPropertiesParams = Schema.Struct({ "start": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" }))), "limit": Schema.optionalKey(Schema.Number.annotate({ "format": "int32" }).check(Schema.isInt().annotate({ "expected": "an integer" })).check(Schema.isGreaterThanOrEqualTo(0).annotate({ "expected": "a value greater than or equal to 0" })).check(Schema.isLessThanOrEqualTo(25).annotate({ "expected": "a value less than or equal to 25" }))) })
 export type GetUserProperties200 = UserPropertyKeyArray
@@ -759,6 +764,48 @@ export const make = (
           )
       : (request) => Effect.flatMap(httpClient.execute(request), withOptionalResponse)
   }
+  const __encodePathParam = encodeURIComponent
+  const __makePathRequest = (
+    method: (url: string) => HttpClientRequest.HttpClientRequest,
+    parameters: ReadonlyArray<string>,
+    getPath: () => string,
+  ) => Effect.suspend(() => {
+    const fail = (description: string, cause?: unknown) => Effect.fail(
+      new HttpClientError.HttpClientError({
+        reason: new HttpClientError.InvalidUrlError({
+          request: method(""),
+          cause,
+          description,
+        }),
+      }),
+    )
+    if (parameters.some((value) => value === "" || /^(?:\.|%2e){1,2}$/i.test(value))) {
+      return fail("Path parameters must be non-empty and cannot be dot segments")
+    }
+    let path: string
+    try {
+      path = getPath()
+    } catch (cause) {
+      return fail("Failed to encode path parameter", cause)
+    }
+    if (path.split("/").some((segment) => /^(?:\.|%2e){1,2}$/i.test(segment))) {
+      return fail("Request paths cannot contain dot segments")
+    }
+    return Effect.succeed(method(path))
+  })
+  const executeStreamRequest = (request: HttpClientRequest.HttpClientRequest) =>
+    Effect.suspend(() =>
+      options.transformClient
+        ? Effect.flatMap(options.transformClient(httpClient), (client) => HttpClient.filterStatusOk(client).execute(request))
+        : HttpClient.filterStatusOk(httpClient).execute(request)
+    )
+  const decodeBinary = (response: HttpClientResponse.HttpClientResponse) =>
+    Effect.map(response.arrayBuffer, (buffer) => new Uint8Array(buffer))
+  const binaryRequest = (request: HttpClientRequest.HttpClientRequest): Stream.Stream<Uint8Array, HttpClientError.HttpClientError> =>
+    executeStreamRequest(request).pipe(
+      Effect.map((response) => response.stream),
+      Stream.unwrap
+    )
   const decodeSuccess =
     <Schema extends Schema.Constraint>(schema: Schema) =>
     (response: HttpClientResponse.HttpClientResponse) =>
@@ -772,900 +819,1076 @@ export const make = (
       )
   return {
     httpClient,
-    "getAuditRecords": (options) => HttpClientRequest.get(`/wiki/rest/api/audit`).pipe(
-    HttpClientRequest.setUrlParams({ "startDate": options?.params?.["startDate"] as any, "endDate": options?.params?.["endDate"] as any, "searchString": options?.params?.["searchString"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getAuditRecords": (options) => HttpClientRequest.get("/wiki/rest/api/audit").pipe(
+      HttpClientRequest.setUrlParams({ "startDate": options?.params?.["startDate"] as any, "endDate": options?.params?.["endDate"] as any, "searchString": options?.params?.["searchString"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAuditRecords200),
       orElse: unexpectedStatus
     }))
-  ),
-    "createAuditRecord": (options) => HttpClientRequest.post(`/wiki/rest/api/audit`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "createAuditRecord": (options) => HttpClientRequest.post("/wiki/rest/api/audit").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateAuditRecord200),
       orElse: unexpectedStatus
     }))
-  ),
-    "exportAuditRecords": (options) => HttpClientRequest.get(`/wiki/rest/api/audit/export`).pipe(
-    HttpClientRequest.setUrlParams({ "startDate": options?.params?.["startDate"] as any, "endDate": options?.params?.["endDate"] as any, "searchString": options?.params?.["searchString"] as any, "format": options?.params?.["format"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "exportAuditRecords": (options) => HttpClientRequest.get("/wiki/rest/api/audit/export").pipe(
+      HttpClientRequest.setUrlParams({ "startDate": options?.params?.["startDate"] as any, "endDate": options?.params?.["endDate"] as any, "searchString": options?.params?.["searchString"] as any, "format": options?.params?.["format"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
+      "2xx": decodeBinary,
       orElse: unexpectedStatus
     }))
-  ),
-    "getRetentionPeriod": (options) => HttpClientRequest.get(`/wiki/rest/api/audit/retention`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "exportAuditRecordsStream": (options) => HttpClientRequest.get("/wiki/rest/api/audit/export").pipe(
+      HttpClientRequest.setUrlParams({ "startDate": options?.params?.["startDate"] as any, "endDate": options?.params?.["endDate"] as any, "searchString": options?.params?.["searchString"] as any, "format": options?.params?.["format"] as any }),
+      binaryRequest
+    ),
+    "getRetentionPeriod": (options) => HttpClientRequest.get("/wiki/rest/api/audit/retention").pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetRetentionPeriod200),
       orElse: unexpectedStatus
     }))
-  ),
-    "setRetentionPeriod": (options) => HttpClientRequest.put(`/wiki/rest/api/audit/retention`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "setRetentionPeriod": (options) => HttpClientRequest.put("/wiki/rest/api/audit/retention").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SetRetentionPeriod200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getAuditRecordsForTimePeriod": (options) => HttpClientRequest.get(`/wiki/rest/api/audit/since`).pipe(
-    HttpClientRequest.setUrlParams({ "number": options?.params?.["number"] as any, "units": options?.params?.["units"] as any, "searchString": options?.params?.["searchString"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getAuditRecordsForTimePeriod": (options) => HttpClientRequest.get("/wiki/rest/api/audit/since").pipe(
+      HttpClientRequest.setUrlParams({ "number": options?.params?.["number"] as any, "units": options?.params?.["units"] as any, "searchString": options?.params?.["searchString"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAuditRecordsForTimePeriod200),
       orElse: unexpectedStatus
     }))
-  ),
-    "archivePages": (options) => HttpClientRequest.post(`/wiki/rest/api/content/archive`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "archivePages": (options) => HttpClientRequest.post("/wiki/rest/api/content/archive").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(ArchivePages202),
       orElse: unexpectedStatus
     }))
-  ),
-    "publishSharedDraft": (draftId, options) => HttpClientRequest.put(`/wiki/rest/api/content/blueprint/instance/${draftId}`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options.params?.["status"] as any, "expand": options.params?.["expand"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "publishSharedDraft": (draftId, options) => __makePathRequest(HttpClientRequest.put, [draftId], () => "/wiki/rest/api/content/blueprint/instance/" + __encodePathParam(draftId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options.params?.["status"] as any, "expand": options.params?.["expand"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(PublishSharedDraft200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "publishLegacyDraft": (draftId, options) => HttpClientRequest.post(`/wiki/rest/api/content/blueprint/instance/${draftId}`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options.params?.["status"] as any, "expand": options.params?.["expand"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "publishLegacyDraft": (draftId, options) => __makePathRequest(HttpClientRequest.post, [draftId], () => "/wiki/rest/api/content/blueprint/instance/" + __encodePathParam(draftId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options.params?.["status"] as any, "expand": options.params?.["expand"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(PublishLegacyDraft200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "searchContentByCQL": (options) => HttpClientRequest.get(`/wiki/rest/api/content/search`).pipe(
-    HttpClientRequest.setUrlParams({ "cql": options.params["cql"] as any, "cqlcontext": options.params["cqlcontext"] as any, "expand": options.params["expand"] as any, "cursor": options.params["cursor"] as any, "limit": options.params["limit"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "searchContentByCQL": (options) => HttpClientRequest.get("/wiki/rest/api/content/search").pipe(
+      HttpClientRequest.setUrlParams({ "cql": options.params["cql"] as any, "cqlcontext": options.params["cqlcontext"] as any, "expand": options.params["expand"] as any, "cursor": options.params["cursor"] as any, "limit": options.params["limit"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SearchContentByCQL200),
       orElse: unexpectedStatus
     }))
-  ),
-    "deletePageTree": (id, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/pageTree`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "deletePageTree": (id, options) => __makePathRequest(HttpClientRequest.delete, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/pageTree").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(DeletePageTree202),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "movePage": (pageId, position, targetId, options) => HttpClientRequest.put(`/wiki/rest/api/content/${pageId}/move/${position}/${targetId}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "movePage": (pageId, position, targetId, options) => __makePathRequest(HttpClientRequest.put, [pageId, position, targetId], () => "/wiki/rest/api/content/" + __encodePathParam(pageId) + "/move/" + __encodePathParam(position) + "/" + __encodePathParam(targetId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(MovePage200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "createOrUpdateAttachments": (id, options) => HttpClientRequest.put(`/wiki/rest/api/content/${id}/child/attachment`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options.params["status"] as any }),
-    HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
-    HttpClientRequest.bodyFormData(options.payload as any),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "createOrUpdateAttachments": (id, options) => __makePathRequest(HttpClientRequest.put, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/child/attachment").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options.params["status"] as any }),
+      HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
+      HttpClientRequest.bodyFormDataRecord(options.payload as any),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateOrUpdateAttachments200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "createAttachment": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/child/attachment`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options.params?.["status"] as any }),
-    HttpClientRequest.bodyFormData(options.payload as any),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "createAttachment": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/child/attachment").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options.params?.["status"] as any }),
+      HttpClientRequest.bodyFormDataRecord(options.payload as any),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateAttachment200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "updateAttachmentProperties": (id, attachmentId, options) => HttpClientRequest.put(`/wiki/rest/api/content/${id}/child/attachment/${attachmentId}`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "updateAttachmentProperties": (id, attachmentId, options) => __makePathRequest(HttpClientRequest.put, [id, attachmentId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/child/attachment/" + __encodePathParam(attachmentId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateAttachmentProperties200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "updateAttachmentData": (id, attachmentId, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/child/attachment/${attachmentId}/data`).pipe(
-    HttpClientRequest.bodyFormData(options.payload as any),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "updateAttachmentData": (id, attachmentId, options) => __makePathRequest(HttpClientRequest.post, [id, attachmentId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/child/attachment/" + __encodePathParam(attachmentId) + "/data").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyFormDataRecord(options.payload as any),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateAttachmentData200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "downloadAttatchment": (id, attachmentId, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/child/attachment/${attachmentId}/download`).pipe(
-    HttpClientRequest.setUrlParams({ "version": options?.params?.["version"] as any, "status": options?.params?.["status"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "downloadAttatchment": (id, attachmentId, options) => __makePathRequest(HttpClientRequest.get, [id, attachmentId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/child/attachment/" + __encodePathParam(attachmentId) + "/download").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "version": options?.params?.["version"] as any, "status": options?.params?.["status"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "302": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getContentDescendants": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/descendant`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getContentDescendants": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/descendant").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentDescendants200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getDescendantsOfType": (id, type, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/descendant/${type}`).pipe(
-    HttpClientRequest.setUrlParams({ "depth": options?.params?.["depth"] as any, "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getDescendantsOfType": (id, type, options) => __makePathRequest(HttpClientRequest.get, [id, type], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/descendant/" + __encodePathParam(type) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "depth": options?.params?.["depth"] as any, "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetDescendantsOfType200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getMacroBodyByMacroId": (id, version, macroId, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/history/${version}/macro/id/${macroId}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getMacroBodyByMacroId": (id, version, macroId, options) => __makePathRequest(HttpClientRequest.get, [id, version, macroId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/history/" + __encodePathParam(version) + "/macro/id/" + __encodePathParam(macroId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetMacroBodyByMacroId200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getAndConvertMacroBodyByMacroId": (id, version, macroId, to, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/history/${version}/macro/id/${macroId}/convert/${to}`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "spaceKeyContext": options?.params?.["spaceKeyContext"] as any, "embeddedContentRender": options?.params?.["embeddedContentRender"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getAndConvertMacroBodyByMacroId": (id, version, macroId, to, options) => __makePathRequest(HttpClientRequest.get, [id, version, macroId, to], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/history/" + __encodePathParam(version) + "/macro/id/" + __encodePathParam(macroId) + "/convert/" + __encodePathParam(to) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "spaceKeyContext": options?.params?.["spaceKeyContext"] as any, "embeddedContentRender": options?.params?.["embeddedContentRender"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAndConvertMacroBodyByMacroId200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getAndAsyncConvertMacroBodyByMacroId": (id, version, macroId, to, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/history/${version}/macro/id/${macroId}/convert/async/${to}`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "allowCache": options?.params?.["allowCache"] as any, "spaceKeyContext": options?.params?.["spaceKeyContext"] as any, "embeddedContentRender": options?.params?.["embeddedContentRender"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getAndAsyncConvertMacroBodyByMacroId": (id, version, macroId, to, options) => __makePathRequest(HttpClientRequest.get, [id, version, macroId, to], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/history/" + __encodePathParam(version) + "/macro/id/" + __encodePathParam(macroId) + "/convert/async/" + __encodePathParam(to) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "allowCache": options?.params?.["allowCache"] as any, "spaceKeyContext": options?.params?.["spaceKeyContext"] as any, "embeddedContentRender": options?.params?.["embeddedContentRender"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAndAsyncConvertMacroBodyByMacroId200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addLabelsToContent": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/label`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addLabelsToContent": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/label").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(AddLabelsToContent200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeLabelFromContentUsingQueryParameter": (id, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/label`).pipe(
-    HttpClientRequest.setUrlParams({ "name": options.params["name"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "removeLabelFromContentUsingQueryParameter": (id, options) => __makePathRequest(HttpClientRequest.delete, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/label").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "name": options.params["name"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeLabelFromContent": (id, label, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/label/${label}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeLabelFromContent": (id, label, options) => __makePathRequest(HttpClientRequest.delete, [id, label], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/label/" + __encodePathParam(label) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getWatchesForPage": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/notification/child-created`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getWatchesForPage": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/notification/child-created").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetWatchesForPage200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getWatchesForSpace": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/notification/created`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getWatchesForSpace": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/notification/created").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetWatchesForSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "copyPageHierarchy": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/pagehierarchy/copy`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "copyPageHierarchy": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/pagehierarchy/copy").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CopyPageHierarchy202),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "copyPage": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/copy`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "copyPage": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/copy").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
+      "2xx": decodeSuccess(CopyPage200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "checkContentPermission": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/permission/check`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "checkContentPermission": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/permission/check").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CheckContentPermission200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getRestrictions": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/restriction`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getRestrictions": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetRestrictions200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "updateRestrictions": (id, options) => HttpClientRequest.put(`/wiki/rest/api/content/${id}/restriction`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "updateRestrictions": (id, options) => __makePathRequest(HttpClientRequest.put, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateRestrictions200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addRestrictions": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/restriction`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addRestrictions": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(AddRestrictions200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "deleteRestrictions": (id, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/restriction`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "deleteRestrictions": (id, options) => __makePathRequest(HttpClientRequest.delete, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(DeleteRestrictions200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getRestrictionsByOperation": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/restriction/byOperation`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getRestrictionsByOperation": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetRestrictionsByOperation200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getRestrictionsForOperation": (id, operationKey, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getRestrictionsForOperation": (id, operationKey, options) => __makePathRequest(HttpClientRequest.get, [id, operationKey], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetRestrictionsForOperation200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getIndividualGroupRestrictionStatusByGroupId": (id, operationKey, groupId, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}/byGroupId/${groupId}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getIndividualGroupRestrictionStatusByGroupId": (id, operationKey, groupId, options) => __makePathRequest(HttpClientRequest.get, [id, operationKey, groupId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "/byGroupId/" + __encodePathParam(groupId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addGroupToContentRestrictionByGroupId": (id, operationKey, groupId, options) => HttpClientRequest.put(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}/byGroupId/${groupId}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "addGroupToContentRestrictionByGroupId": (id, operationKey, groupId, options) => __makePathRequest(HttpClientRequest.put, [id, operationKey, groupId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "/byGroupId/" + __encodePathParam(groupId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeGroupFromContentRestriction": (id, operationKey, groupId, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}/byGroupId/${groupId}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeGroupFromContentRestriction": (id, operationKey, groupId, options) => __makePathRequest(HttpClientRequest.delete, [id, operationKey, groupId], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "/byGroupId/" + __encodePathParam(groupId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getContentRestrictionStatusForUser": (id, operationKey, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}/user`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getContentRestrictionStatusForUser": (id, operationKey, options) => __makePathRequest(HttpClientRequest.get, [id, operationKey], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "/user").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addUserToContentRestriction": (id, operationKey, options) => HttpClientRequest.put(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}/user`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "addUserToContentRestriction": (id, operationKey, options) => __makePathRequest(HttpClientRequest.put, [id, operationKey], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "/user").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeUserFromContentRestriction": (id, operationKey, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/restriction/byOperation/${operationKey}/user`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeUserFromContentRestriction": (id, operationKey, options) => __makePathRequest(HttpClientRequest.delete, [id, operationKey], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/restriction/byOperation/" + __encodePathParam(operationKey) + "/user").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getContentState": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/state`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options?.params?.["status"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getContentState": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/state").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options?.params?.["status"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentState200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "setContentState": (id, options) => HttpClientRequest.put(`/wiki/rest/api/content/${id}/state`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options.params["status"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "setContentState": (id, options) => __makePathRequest(HttpClientRequest.put, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/state").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options.params["status"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SetContentState200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeContentState": (id, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/state`).pipe(
-    HttpClientRequest.setUrlParams({ "status": options?.params?.["status"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeContentState": (id, options) => __makePathRequest(HttpClientRequest.delete, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/state").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "status": options?.params?.["status"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(RemoveContentState200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getAvailableContentStates": (id, options) => HttpClientRequest.get(`/wiki/rest/api/content/${id}/state/available`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getAvailableContentStates": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/state/available").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAvailableContentStates200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "restoreContentVersion": (id, options) => HttpClientRequest.post(`/wiki/rest/api/content/${id}/version`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "restoreContentVersion": (id, options) => __makePathRequest(HttpClientRequest.post, [id], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/version").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(RestoreContentVersion200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "deleteContentVersion": (id, versionNumber, options) => HttpClientRequest.delete(`/wiki/rest/api/content/${id}/version/${versionNumber}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "deleteContentVersion": (id, versionNumber, options) => __makePathRequest(HttpClientRequest.delete, [id, versionNumber], () => "/wiki/rest/api/content/" + __encodePathParam(id) + "/version/" + __encodePathParam(versionNumber) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getCustomContentStates": (options) => HttpClientRequest.get(`/wiki/rest/api/content-states`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getCustomContentStates": (options) => HttpClientRequest.get("/wiki/rest/api/content-states").pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetCustomContentStates200),
       orElse: unexpectedStatus
     }))
-  ),
-    "asyncConvertContentBodyRequest": (to, options) => HttpClientRequest.post(`/wiki/rest/api/contentbody/convert/async/${to}`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any, "spaceKeyContext": options.params?.["spaceKeyContext"] as any, "contentIdContext": options.params?.["contentIdContext"] as any, "allowCache": options.params?.["allowCache"] as any, "embeddedContentRender": options.params?.["embeddedContentRender"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "asyncConvertContentBodyRequest": (to, options) => __makePathRequest(HttpClientRequest.post, [to], () => "/wiki/rest/api/contentbody/convert/async/" + __encodePathParam(to) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options.params?.["expand"] as any, "spaceKeyContext": options.params?.["spaceKeyContext"] as any, "contentIdContext": options.params?.["contentIdContext"] as any, "allowCache": options.params?.["allowCache"] as any, "embeddedContentRender": options.params?.["embeddedContentRender"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(AsyncConvertContentBodyRequest200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "asyncConvertContentBodyResponse": (id, options) => HttpClientRequest.get(`/wiki/rest/api/contentbody/convert/async/${id}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "asyncConvertContentBodyResponse": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/contentbody/convert/async/" + __encodePathParam(id) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(AsyncConvertContentBodyResponse200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "bulkAsyncConvertContentBodyResponse": (options) => HttpClientRequest.get(`/wiki/rest/api/contentbody/convert/async/bulk/tasks`).pipe(
-    HttpClientRequest.setUrlParams({ "ids": options.params["ids"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "bulkAsyncConvertContentBodyResponse": (options) => HttpClientRequest.get("/wiki/rest/api/contentbody/convert/async/bulk/tasks").pipe(
+      HttpClientRequest.setUrlParams({ "ids": options.params["ids"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(BulkAsyncConvertContentBodyResponse200),
       orElse: unexpectedStatus
     }))
-  ),
-    "bulkAsyncConvertContentBodyRequest": (options) => HttpClientRequest.post(`/wiki/rest/api/contentbody/convert/async/bulk/tasks`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "bulkAsyncConvertContentBodyRequest": (options) => HttpClientRequest.post("/wiki/rest/api/contentbody/convert/async/bulk/tasks").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(BulkAsyncConvertContentBodyRequest200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getAllLabelContent": (options) => HttpClientRequest.get(`/wiki/rest/api/label`).pipe(
-    HttpClientRequest.setUrlParams({ "name": options.params["name"] as any, "type": options.params["type"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "getAllLabelContent": (options) => HttpClientRequest.get("/wiki/rest/api/label").pipe(
+      HttpClientRequest.setUrlParams({ "name": options.params["name"] as any, "type": options.params["type"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAllLabelContent200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getGroups": (options) => HttpClientRequest.get(`/wiki/rest/api/group`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "accessType": options?.params?.["accessType"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getGroups": (options) => HttpClientRequest.get("/wiki/rest/api/group").pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "accessType": options?.params?.["accessType"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetGroups200),
       orElse: unexpectedStatus
     }))
-  ),
-    "createGroup": (options) => HttpClientRequest.post(`/wiki/rest/api/group`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "createGroup": (options) => HttpClientRequest.post("/wiki/rest/api/group").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateGroup201),
       orElse: unexpectedStatus
     }))
-  ),
-    "getGroupByGroupId": (options) => HttpClientRequest.get(`/wiki/rest/api/group/by-id`).pipe(
-    HttpClientRequest.setUrlParams({ "id": options.params["id"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "getGroupByGroupId": (options) => HttpClientRequest.get("/wiki/rest/api/group/by-id").pipe(
+      HttpClientRequest.setUrlParams({ "id": options.params["id"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetGroupByGroupId200),
       orElse: unexpectedStatus
     }))
-  ),
-    "removeGroupById": (options) => HttpClientRequest.delete(`/wiki/rest/api/group/by-id`).pipe(
-    HttpClientRequest.setUrlParams({ "id": options.params["id"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "removeGroupById": (options) => HttpClientRequest.delete("/wiki/rest/api/group/by-id").pipe(
+      HttpClientRequest.setUrlParams({ "id": options.params["id"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
-  ),
-    "searchGroups": (options) => HttpClientRequest.get(`/wiki/rest/api/group/picker`).pipe(
-    HttpClientRequest.setUrlParams({ "query": options.params["query"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any, "shouldReturnTotalSize": options.params["shouldReturnTotalSize"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "searchGroups": (options) => HttpClientRequest.get("/wiki/rest/api/group/picker").pipe(
+      HttpClientRequest.setUrlParams({ "query": options.params["query"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any, "shouldReturnTotalSize": options.params["shouldReturnTotalSize"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SearchGroups200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getGroupMembersByGroupId": (groupId, options) => HttpClientRequest.get(`/wiki/rest/api/group/${groupId}/membersByGroupId`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "shouldReturnTotalSize": options?.params?.["shouldReturnTotalSize"] as any, "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getGroupMembersByGroupId": (groupId, options) => __makePathRequest(HttpClientRequest.get, [groupId], () => "/wiki/rest/api/group/" + __encodePathParam(groupId) + "/membersByGroupId").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "shouldReturnTotalSize": options?.params?.["shouldReturnTotalSize"] as any, "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetGroupMembersByGroupId200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addUserToGroupByGroupId": (options) => HttpClientRequest.post(`/wiki/rest/api/group/userByGroupId`).pipe(
-    HttpClientRequest.setUrlParams({ "groupId": options.params["groupId"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addUserToGroupByGroupId": (options) => HttpClientRequest.post("/wiki/rest/api/group/userByGroupId").pipe(
+      HttpClientRequest.setUrlParams({ "groupId": options.params["groupId"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "201": () => Effect.void,
       orElse: unexpectedStatus
     }))
-  ),
-    "removeMemberFromGroupByGroupId": (options) => HttpClientRequest.delete(`/wiki/rest/api/group/userByGroupId`).pipe(
-    HttpClientRequest.setUrlParams({ "groupId": options.params["groupId"] as any, "accountId": options.params["accountId"] as any, "key": options.params["key"] as any, "username": options.params["username"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "removeMemberFromGroupByGroupId": (options) => HttpClientRequest.delete("/wiki/rest/api/group/userByGroupId").pipe(
+      HttpClientRequest.setUrlParams({ "groupId": options.params["groupId"] as any, "accountId": options.params["accountId"] as any, "key": options.params["key"] as any, "username": options.params["username"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
-  ),
-    "getTasks": (options) => HttpClientRequest.get(`/wiki/rest/api/longtask`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getTasks": (options) => HttpClientRequest.get("/wiki/rest/api/longtask").pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetTasks200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getTask": (id, options) => HttpClientRequest.get(`/wiki/rest/api/longtask/${id}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getTask": (id, options) => __makePathRequest(HttpClientRequest.get, [id], () => "/wiki/rest/api/longtask/" + __encodePathParam(id) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetTask200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "findTargetFromSource": (relationName, sourceType, sourceKey, targetType, options) => HttpClientRequest.get(`/wiki/rest/api/relation/${relationName}/from/${sourceType}/${sourceKey}/to/${targetType}`).pipe(
-    HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any, "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "findTargetFromSource": (relationName, sourceType, sourceKey, targetType, options) => __makePathRequest(HttpClientRequest.get, [relationName, sourceType, sourceKey, targetType], () => "/wiki/rest/api/relation/" + __encodePathParam(relationName) + "/from/" + __encodePathParam(sourceType) + "/" + __encodePathParam(sourceKey) + "/to/" + __encodePathParam(targetType) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any, "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(FindTargetFromSource200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getRelationship": (relationName, sourceType, sourceKey, targetType, targetKey, options) => HttpClientRequest.get(`/wiki/rest/api/relation/${relationName}/from/${sourceType}/${sourceKey}/to/${targetType}/${targetKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any, "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getRelationship": (relationName, sourceType, sourceKey, targetType, targetKey, options) => __makePathRequest(HttpClientRequest.get, [relationName, sourceType, sourceKey, targetType, targetKey], () => "/wiki/rest/api/relation/" + __encodePathParam(relationName) + "/from/" + __encodePathParam(sourceType) + "/" + __encodePathParam(sourceKey) + "/to/" + __encodePathParam(targetType) + "/" + __encodePathParam(targetKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any, "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetRelationship200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "createRelationship": (relationName, sourceType, sourceKey, targetType, targetKey, options) => HttpClientRequest.put(`/wiki/rest/api/relation/${relationName}/from/${sourceType}/${sourceKey}/to/${targetType}/${targetKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "createRelationship": (relationName, sourceType, sourceKey, targetType, targetKey, options) => __makePathRequest(HttpClientRequest.put, [relationName, sourceType, sourceKey, targetType, targetKey], () => "/wiki/rest/api/relation/" + __encodePathParam(relationName) + "/from/" + __encodePathParam(sourceType) + "/" + __encodePathParam(sourceKey) + "/to/" + __encodePathParam(targetType) + "/" + __encodePathParam(targetKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateRelationship200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "deleteRelationship": (relationName, sourceType, sourceKey, targetType, targetKey, options) => HttpClientRequest.delete(`/wiki/rest/api/relation/${relationName}/from/${sourceType}/${sourceKey}/to/${targetType}/${targetKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "deleteRelationship": (relationName, sourceType, sourceKey, targetType, targetKey, options) => __makePathRequest(HttpClientRequest.delete, [relationName, sourceType, sourceKey, targetType, targetKey], () => "/wiki/rest/api/relation/" + __encodePathParam(relationName) + "/from/" + __encodePathParam(sourceType) + "/" + __encodePathParam(sourceKey) + "/to/" + __encodePathParam(targetType) + "/" + __encodePathParam(targetKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "findSourcesForTarget": (relationName, targetType, targetKey, sourceType, options) => HttpClientRequest.get(`/wiki/rest/api/relation/${relationName}/to/${targetType}/${targetKey}/from/${sourceType}`).pipe(
-    HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any, "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "findSourcesForTarget": (relationName, targetType, targetKey, sourceType, options) => __makePathRequest(HttpClientRequest.get, [relationName, targetType, targetKey, sourceType], () => "/wiki/rest/api/relation/" + __encodePathParam(relationName) + "/to/" + __encodePathParam(targetType) + "/" + __encodePathParam(targetKey) + "/from/" + __encodePathParam(sourceType) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "sourceStatus": options?.params?.["sourceStatus"] as any, "targetStatus": options?.params?.["targetStatus"] as any, "sourceVersion": options?.params?.["sourceVersion"] as any, "targetVersion": options?.params?.["targetVersion"] as any, "expand": options?.params?.["expand"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(FindSourcesForTarget200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "searchByCQL": (options) => HttpClientRequest.get(`/wiki/rest/api/search`).pipe(
-    HttpClientRequest.setUrlParams({ "cql": options.params["cql"] as any, "cqlcontext": options.params["cqlcontext"] as any, "cursor": options.params["cursor"] as any, "next": options.params["next"] as any, "prev": options.params["prev"] as any, "limit": options.params["limit"] as any, "start": options.params["start"] as any, "includeArchivedSpaces": options.params["includeArchivedSpaces"] as any, "excludeCurrentSpaces": options.params["excludeCurrentSpaces"] as any, "excerpt": options.params["excerpt"] as any, "sitePermissionTypeFilter": options.params["sitePermissionTypeFilter"] as any, "_": options.params["_"] as any, "expand": options.params["expand"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "searchByCQL": (options) => HttpClientRequest.get("/wiki/rest/api/search").pipe(
+      HttpClientRequest.setUrlParams({ "cql": options.params["cql"] as any, "cqlcontext": options.params["cqlcontext"] as any, "cursor": options.params["cursor"] as any, "next": options.params["next"] as any, "prev": options.params["prev"] as any, "limit": options.params["limit"] as any, "start": options.params["start"] as any, "includeArchivedSpaces": options.params["includeArchivedSpaces"] as any, "excludeCurrentSpaces": options.params["excludeCurrentSpaces"] as any, "excerpt": options.params["excerpt"] as any, "sitePermissionTypeFilter": options.params["sitePermissionTypeFilter"] as any, "_": options.params["_"] as any, "expand": options.params["expand"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SearchByCQL200),
       orElse: unexpectedStatus
     }))
-  ),
-    "searchUser": (options) => HttpClientRequest.get(`/wiki/rest/api/search/user`).pipe(
-    HttpClientRequest.setUrlParams({ "cql": options.params["cql"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any, "expand": options.params["expand"] as any, "sitePermissionTypeFilter": options.params["sitePermissionTypeFilter"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "searchUser": (options) => HttpClientRequest.get("/wiki/rest/api/search/user").pipe(
+      HttpClientRequest.setUrlParams({ "cql": options.params["cql"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any, "expand": options.params["expand"] as any, "sitePermissionTypeFilter": options.params["sitePermissionTypeFilter"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SearchUser200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getLookAndFeelSettings": (options) => HttpClientRequest.get(`/wiki/rest/api/settings/lookandfeel`).pipe(
-    HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getLookAndFeelSettings": (options) => HttpClientRequest.get("/wiki/rest/api/settings/lookandfeel").pipe(
+      HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetLookAndFeelSettings200),
       orElse: unexpectedStatus
     }))
-  ),
-    "updateLookAndFeel": (options) => HttpClientRequest.put(`/wiki/rest/api/settings/lookandfeel`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "updateLookAndFeel": (options) => HttpClientRequest.put("/wiki/rest/api/settings/lookandfeel").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateLookAndFeel200),
       orElse: unexpectedStatus
     }))
-  ),
-    "updateLookAndFeelSettings": (options) => HttpClientRequest.post(`/wiki/rest/api/settings/lookandfeel/custom`).pipe(
-    HttpClientRequest.setUrlParams({ "spaceKey": options.params?.["spaceKey"] as any }),
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "updateLookAndFeelSettings": (options) => HttpClientRequest.post("/wiki/rest/api/settings/lookandfeel/custom").pipe(
+      HttpClientRequest.setUrlParams({ "spaceKey": options.params?.["spaceKey"] as any }),
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateLookAndFeelSettings200),
       orElse: unexpectedStatus
     }))
-  ),
-    "resetLookAndFeelSettings": (options) => HttpClientRequest.delete(`/wiki/rest/api/settings/lookandfeel/custom`).pipe(
-    HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "resetLookAndFeelSettings": (options) => HttpClientRequest.delete("/wiki/rest/api/settings/lookandfeel/custom").pipe(
+      HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
-  ),
-    "getSystemInfo": (options) => HttpClientRequest.get(`/wiki/rest/api/settings/systemInfo`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getSystemInfo": (options) => HttpClientRequest.get("/wiki/rest/api/settings/systemInfo").pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetSystemInfo200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getThemes": (options) => HttpClientRequest.get(`/wiki/rest/api/settings/theme`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getThemes": (options) => HttpClientRequest.get("/wiki/rest/api/settings/theme").pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetThemes200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getGlobalTheme": (options) => HttpClientRequest.get(`/wiki/rest/api/settings/theme/selected`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getGlobalTheme": (options) => HttpClientRequest.get("/wiki/rest/api/settings/theme/selected").pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetGlobalTheme200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getTheme": (themeKey, options) => HttpClientRequest.get(`/wiki/rest/api/settings/theme/${themeKey}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getTheme": (themeKey, options) => __makePathRequest(HttpClientRequest.get, [themeKey], () => "/wiki/rest/api/settings/theme/" + __encodePathParam(themeKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetTheme200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "createSpace": (options) => HttpClientRequest.post(`/wiki/rest/api/space`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "createSpace": (options) => HttpClientRequest.post("/wiki/rest/api/space").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateSpace200),
       orElse: unexpectedStatus
     }))
-  ),
-    "createPrivateSpace": (options) => HttpClientRequest.post(`/wiki/rest/api/space/_private`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "createPrivateSpace": (options) => HttpClientRequest.post("/wiki/rest/api/space/_private").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreatePrivateSpace200),
       orElse: unexpectedStatus
     }))
-  ),
-    "updateSpace": (spaceKey, options) => HttpClientRequest.put(`/wiki/rest/api/space/${spaceKey}`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "updateSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.put, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "deleteSpace": (spaceKey, options) => HttpClientRequest.delete(`/wiki/rest/api/space/${spaceKey}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "deleteSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.delete, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(DeleteSpace202),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addPermissionToSpace": (spaceKey, options) => HttpClientRequest.post(`/wiki/rest/api/space/${spaceKey}/permission`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addPermissionToSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.post, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/permission").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(AddPermissionToSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addCustomContentPermissions": (spaceKey, options) => HttpClientRequest.post(`/wiki/rest/api/space/${spaceKey}/permission/custom-content`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addCustomContentPermissions": (spaceKey, options) => __makePathRequest(HttpClientRequest.post, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/permission/custom-content").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removePermission": (spaceKey, id, options) => HttpClientRequest.delete(`/wiki/rest/api/space/${spaceKey}/permission/${id}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removePermission": (spaceKey, id, options) => __makePathRequest(HttpClientRequest.delete, [spaceKey, id], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/permission/" + __encodePathParam(id) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getSpaceSettings": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/settings`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getSpaceSettings": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/settings").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetSpaceSettings200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "updateSpaceSettings": (spaceKey, options) => HttpClientRequest.put(`/wiki/rest/api/space/${spaceKey}/settings`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "updateSpaceSettings": (spaceKey, options) => __makePathRequest(HttpClientRequest.put, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/settings").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateSpaceSettings200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getSpaceContentStates": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/state`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getSpaceContentStates": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/state").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetSpaceContentStates200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getContentStateSettings": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/state/settings`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getContentStateSettings": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/state/settings").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentStateSettings200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getContentsWithState": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/state/content`).pipe(
-    HttpClientRequest.setUrlParams({ "state-id": options.params["state-id"] as any, "expand": options.params["expand"] as any, "limit": options.params["limit"] as any, "start": options.params["start"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "getContentsWithState": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/state/content").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "state-id": options.params["state-id"] as any, "expand": options.params["expand"] as any, "limit": options.params["limit"] as any, "start": options.params["start"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentsWithState200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getSpaceTheme": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/theme`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getSpaceTheme": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/theme").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetSpaceTheme200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "setSpaceTheme": (spaceKey, options) => HttpClientRequest.put(`/wiki/rest/api/space/${spaceKey}/theme`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "setSpaceTheme": (spaceKey, options) => __makePathRequest(HttpClientRequest.put, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/theme").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(SetSpaceTheme200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "resetSpaceTheme": (spaceKey, options) => HttpClientRequest.delete(`/wiki/rest/api/space/${spaceKey}/theme`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "resetSpaceTheme": (spaceKey, options) => __makePathRequest(HttpClientRequest.delete, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/theme").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getWatchersForSpace": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/watch`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getWatchersForSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/watch").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetWatchersForSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getLabelsForSpace": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/space/${spaceKey}/label`).pipe(
-    HttpClientRequest.setUrlParams({ "prefix": options?.params?.["prefix"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getLabelsForSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/label").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "prefix": options?.params?.["prefix"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetLabelsForSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addLabelsToSpace": (spaceKey, options) => HttpClientRequest.post(`/wiki/rest/api/space/${spaceKey}/label`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addLabelsToSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.post, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/label").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(AddLabelsToSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "deleteLabelFromSpace": (spaceKey, options) => HttpClientRequest.delete(`/wiki/rest/api/space/${spaceKey}/label`).pipe(
-    HttpClientRequest.setUrlParams({ "name": options.params["name"] as any, "prefix": options.params["prefix"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "deleteLabelFromSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.delete, [spaceKey], () => "/wiki/rest/api/space/" + __encodePathParam(spaceKey) + "/label").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "name": options.params["name"] as any, "prefix": options.params["prefix"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "updateContentTemplate": (options) => HttpClientRequest.put(`/wiki/rest/api/template`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "updateContentTemplate": (options) => HttpClientRequest.put("/wiki/rest/api/template").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(UpdateContentTemplate200),
       orElse: unexpectedStatus
     }))
-  ),
-    "createContentTemplate": (options) => HttpClientRequest.post(`/wiki/rest/api/template`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "createContentTemplate": (options) => HttpClientRequest.post("/wiki/rest/api/template").pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(CreateContentTemplate200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getBlueprintTemplates": (options) => HttpClientRequest.get(`/wiki/rest/api/template/blueprint`).pipe(
-    HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getBlueprintTemplates": (options) => HttpClientRequest.get("/wiki/rest/api/template/blueprint").pipe(
+      HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetBlueprintTemplates200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getContentTemplates": (options) => HttpClientRequest.get(`/wiki/rest/api/template/page`).pipe(
-    HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getContentTemplates": (options) => HttpClientRequest.get("/wiki/rest/api/template/page").pipe(
+      HttpClientRequest.setUrlParams({ "spaceKey": options?.params?.["spaceKey"] as any, "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any, "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentTemplates200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getContentTemplate": (contentTemplateId, options) => HttpClientRequest.get(`/wiki/rest/api/template/${contentTemplateId}`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getContentTemplate": (contentTemplateId, options) => __makePathRequest(HttpClientRequest.get, [contentTemplateId], () => "/wiki/rest/api/template/" + __encodePathParam(contentTemplateId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentTemplate200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeTemplate": (contentTemplateId, options) => HttpClientRequest.delete(`/wiki/rest/api/template/${contentTemplateId}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeTemplate": (contentTemplateId, options) => __makePathRequest(HttpClientRequest.delete, [contentTemplateId], () => "/wiki/rest/api/template/" + __encodePathParam(contentTemplateId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getUser": (options) => HttpClientRequest.get(`/wiki/rest/api/user`).pipe(
-    HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any, "expand": options.params["expand"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "getUser": (options) => HttpClientRequest.get("/wiki/rest/api/user").pipe(
+      HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any, "expand": options.params["expand"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetUser200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getAnonymousUser": (options) => HttpClientRequest.get(`/wiki/rest/api/user/anonymous`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getAnonymousUser": (options) => HttpClientRequest.get("/wiki/rest/api/user/anonymous").pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetAnonymousUser200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getCurrentUser": (options) => HttpClientRequest.get(`/wiki/rest/api/user/current`).pipe(
-    HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getCurrentUser": (options) => HttpClientRequest.get("/wiki/rest/api/user/current").pipe(
+      HttpClientRequest.setUrlParams({ "expand": options?.params?.["expand"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetCurrentUser200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getGroupMembershipsForUser": (options) => HttpClientRequest.get(`/wiki/rest/api/user/memberof`).pipe(
-    HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "getGroupMembershipsForUser": (options) => HttpClientRequest.get("/wiki/rest/api/user/memberof").pipe(
+      HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any, "start": options.params["start"] as any, "limit": options.params["limit"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetGroupMembershipsForUser200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getBulkUserLookup": (options) => HttpClientRequest.get(`/wiki/rest/api/user/bulk`).pipe(
-    HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any, "expand": options.params["expand"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "getBulkUserLookup": (options) => HttpClientRequest.get("/wiki/rest/api/user/bulk").pipe(
+      HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any, "expand": options.params["expand"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetBulkUserLookup200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getContentWatchStatus": (contentId, options) => HttpClientRequest.get(`/wiki/rest/api/user/watch/content/${contentId}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getContentWatchStatus": (contentId, options) => __makePathRequest(HttpClientRequest.get, [contentId], () => "/wiki/rest/api/user/watch/content/" + __encodePathParam(contentId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetContentWatchStatus200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addContentWatcher": (contentId, options) => HttpClientRequest.post(`/wiki/rest/api/user/watch/content/${contentId}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "addContentWatcher": (contentId, options) => __makePathRequest(HttpClientRequest.post, [contentId], () => "/wiki/rest/api/user/watch/content/" + __encodePathParam(contentId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeContentWatcher": (contentId, options) => HttpClientRequest.delete(`/wiki/rest/api/user/watch/content/${contentId}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options.params["key"] as any, "username": options.params["username"] as any, "accountId": options.params["accountId"] as any }),
-    HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "removeContentWatcher": (contentId, options) => __makePathRequest(HttpClientRequest.delete, [contentId], () => "/wiki/rest/api/user/watch/content/" + __encodePathParam(contentId) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options.params["key"] as any, "username": options.params["username"] as any, "accountId": options.params["accountId"] as any }),
+      HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "isWatchingLabel": (labelName, options) => HttpClientRequest.get(`/wiki/rest/api/user/watch/label/${labelName}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "isWatchingLabel": (labelName, options) => __makePathRequest(HttpClientRequest.get, [labelName], () => "/wiki/rest/api/user/watch/label/" + __encodePathParam(labelName) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(IsWatchingLabel200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addLabelWatcher": (labelName, options) => HttpClientRequest.post(`/wiki/rest/api/user/watch/label/${labelName}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options.params["key"] as any, "username": options.params["username"] as any, "accountId": options.params["accountId"] as any }),
-    HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addLabelWatcher": (labelName, options) => __makePathRequest(HttpClientRequest.post, [labelName], () => "/wiki/rest/api/user/watch/label/" + __encodePathParam(labelName) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options.params["key"] as any, "username": options.params["username"] as any, "accountId": options.params["accountId"] as any }),
+      HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeLabelWatcher": (labelName, options) => HttpClientRequest.delete(`/wiki/rest/api/user/watch/label/${labelName}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeLabelWatcher": (labelName, options) => __makePathRequest(HttpClientRequest.delete, [labelName], () => "/wiki/rest/api/user/watch/label/" + __encodePathParam(labelName) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "isWatchingSpace": (spaceKey, options) => HttpClientRequest.get(`/wiki/rest/api/user/watch/space/${spaceKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "isWatchingSpace": (spaceKey, options) => __makePathRequest(HttpClientRequest.get, [spaceKey], () => "/wiki/rest/api/user/watch/space/" + __encodePathParam(spaceKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(IsWatchingSpace200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "addSpaceWatcher": (spaceKey, options) => HttpClientRequest.post(`/wiki/rest/api/user/watch/space/${spaceKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options.params["key"] as any, "username": options.params["username"] as any, "accountId": options.params["accountId"] as any }),
-    HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "addSpaceWatcher": (spaceKey, options) => __makePathRequest(HttpClientRequest.post, [spaceKey], () => "/wiki/rest/api/user/watch/space/" + __encodePathParam(spaceKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options.params["key"] as any, "username": options.params["username"] as any, "accountId": options.params["accountId"] as any }),
+      HttpClientRequest.setHeaders({ "X-Atlassian-Token": options.params["X-Atlassian-Token"] ?? undefined }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "removeSpaceWatch": (spaceKey, options) => HttpClientRequest.delete(`/wiki/rest/api/user/watch/space/${spaceKey}`).pipe(
-    HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "removeSpaceWatch": (spaceKey, options) => __makePathRequest(HttpClientRequest.delete, [spaceKey], () => "/wiki/rest/api/user/watch/space/" + __encodePathParam(spaceKey) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "key": options?.params?.["key"] as any, "username": options?.params?.["username"] as any, "accountId": options?.params?.["accountId"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getPrivacyUnsafeUserEmail": (options) => HttpClientRequest.get(`/wiki/rest/api/user/email`).pipe(
-    HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "getPrivacyUnsafeUserEmail": (options) => HttpClientRequest.get("/wiki/rest/api/user/email").pipe(
+      HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetPrivacyUnsafeUserEmail200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getPrivacyUnsafeUserEmailBulk": (options) => HttpClientRequest.get(`/wiki/rest/api/user/email/bulk`).pipe(
-    HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "getPrivacyUnsafeUserEmailBulk": (options) => HttpClientRequest.get("/wiki/rest/api/user/email/bulk").pipe(
+      HttpClientRequest.setUrlParams({ "accountId": options.params["accountId"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetPrivacyUnsafeUserEmailBulk200),
       orElse: unexpectedStatus
     }))
-  ),
-    "getModules": (options) => HttpClientRequest.get(`/wiki/rest/atlassian-connect/1/app/module/dynamic`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getModules": (options) => HttpClientRequest.get("/wiki/rest/atlassian-connect/1/app/module/dynamic").pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       orElse: unexpectedStatus
     }))
-  ),
-    "registerModules": (options) => HttpClientRequest.post(`/wiki/rest/atlassian-connect/1/app/module/dynamic`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "registerModules": (options) => HttpClientRequest.post("/wiki/rest/atlassian-connect/1/app/module/dynamic").pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "200": () => Effect.void,
       orElse: unexpectedStatus
     }))
-  ),
-    "removeModules": (options) => HttpClientRequest.delete(`/wiki/rest/atlassian-connect/1/app/module/dynamic`).pipe(
-    HttpClientRequest.setUrlParams({ "moduleKey": options.params["moduleKey"] as any }),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    ),
+    "removeModules": (options) => HttpClientRequest.delete("/wiki/rest/atlassian-connect/1/app/module/dynamic").pipe(
+      HttpClientRequest.setUrlParams({ "moduleKey": options.params["moduleKey"] as any }),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
-  ),
-    "getViews": (contentId, options) => HttpClientRequest.get(`/wiki/rest/api/analytics/content/${contentId}/views`).pipe(
-    HttpClientRequest.setUrlParams({ "fromDate": options?.params?.["fromDate"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    ),
+    "getViews": (contentId, options) => __makePathRequest(HttpClientRequest.get, [contentId], () => "/wiki/rest/api/analytics/content/" + __encodePathParam(contentId) + "/views").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "fromDate": options?.params?.["fromDate"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetViews200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getViewers": (contentId, options) => HttpClientRequest.get(`/wiki/rest/api/analytics/content/${contentId}/viewers`).pipe(
-    HttpClientRequest.setUrlParams({ "fromDate": options?.params?.["fromDate"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getViewers": (contentId, options) => __makePathRequest(HttpClientRequest.get, [contentId], () => "/wiki/rest/api/analytics/content/" + __encodePathParam(contentId) + "/viewers").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "fromDate": options?.params?.["fromDate"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetViewers200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getUserProperties": (userId, options) => HttpClientRequest.get(`/wiki/rest/api/user/${userId}/property`).pipe(
-    HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getUserProperties": (userId, options) => __makePathRequest(HttpClientRequest.get, [userId], () => "/wiki/rest/api/user/" + __encodePathParam(userId) + "/property").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.setUrlParams({ "start": options?.params?.["start"] as any, "limit": options?.params?.["limit"] as any }),
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetUserProperties200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "getUserProperty": (userId, key, options) => HttpClientRequest.get(`/wiki/rest/api/user/${userId}/property/${key}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "getUserProperty": (userId, key, options) => __makePathRequest(HttpClientRequest.get, [userId, key], () => "/wiki/rest/api/user/" + __encodePathParam(userId) + "/property/" + __encodePathParam(key) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "2xx": decodeSuccess(GetUserProperty200),
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "updateUserProperty": (userId, key, options) => HttpClientRequest.put(`/wiki/rest/api/user/${userId}/property/${key}`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "updateUserProperty": (userId, key, options) => __makePathRequest(HttpClientRequest.put, [userId, key], () => "/wiki/rest/api/user/" + __encodePathParam(userId) + "/property/" + __encodePathParam(key) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "createUserProperty": (userId, key, options) => HttpClientRequest.post(`/wiki/rest/api/user/${userId}/property/${key}`).pipe(
-    HttpClientRequest.bodyJsonUnsafe(options.payload),
-    withResponse(options.config)(HttpClientResponse.matchStatus({
+    "createUserProperty": (userId, key, options) => __makePathRequest(HttpClientRequest.post, [userId, key], () => "/wiki/rest/api/user/" + __encodePathParam(userId) + "/property/" + __encodePathParam(key) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      HttpClientRequest.bodyJsonUnsafe(options.payload),
+      withResponse(options.config)(HttpClientResponse.matchStatus({
       "201": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   ),
-    "deleteUserProperty": (userId, key, options) => HttpClientRequest.delete(`/wiki/rest/api/user/${userId}/property/${key}`).pipe(
-    withResponse(options?.config)(HttpClientResponse.matchStatus({
+    "deleteUserProperty": (userId, key, options) => __makePathRequest(HttpClientRequest.delete, [userId, key], () => "/wiki/rest/api/user/" + __encodePathParam(userId) + "/property/" + __encodePathParam(key) + "").pipe(
+    Effect.flatMap((request) => request.pipe(
+      withResponse(options?.config)(HttpClientResponse.matchStatus({
       "204": () => Effect.void,
       orElse: unexpectedStatus
     }))
+    ))
   )
   }
 }
@@ -1696,7 +1919,14 @@ readonly "createAuditRecord": <Config extends OperationConfig>(options: { readon
 * **[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:
 * 'Confluence Administrator' global permission.
 */
-readonly "exportAuditRecords": <Config extends OperationConfig>(options: { readonly params?: typeof ExportAuditRecordsParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError>
+readonly "exportAuditRecords": <Config extends OperationConfig>(options: { readonly params?: typeof ExportAuditRecordsParams.Encoded | undefined; readonly config?: Config | undefined } | undefined) => Effect.Effect<WithOptionalResponse<Uint8Array, Config>, HttpClientError.HttpClientError | SchemaError>
+  /**
+* Exports audit records as a CSV file or ZIP file.
+*
+* **[Permissions](https://confluence.atlassian.com/x/_AozKw) required**:
+* 'Confluence Administrator' global permission.
+*/
+readonly "exportAuditRecordsStream": (options: { readonly params?: typeof ExportAuditRecordsParams.Encoded | undefined } | undefined) => Stream.Stream<Uint8Array, HttpClientError.HttpClientError>
   /**
 * Returns the retention period for records in the audit log. The retention
 * period is how long an audit record is kept for, from creation date until
@@ -2236,7 +2466,7 @@ readonly "copyPageHierarchy": <Config extends OperationConfig>(id: string, optio
 *
 * **[Permissions](https://confluence.atlassian.com/x/_AozKw) required**: 'Add' permission for the space that the content will be copied in and permission to update the content if copying to an `existing_page`.
 */
-readonly "copyPage": <Config extends OperationConfig>(id: string, options: { readonly params?: typeof CopyPageParams.Encoded | undefined; readonly payload: typeof CopyPageRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<void, Config>, HttpClientError.HttpClientError | SchemaError>
+readonly "copyPage": <Config extends OperationConfig>(id: string, options: { readonly params?: typeof CopyPageParams.Encoded | undefined; readonly payload: typeof CopyPageRequestJson.Encoded; readonly config?: Config | undefined }) => Effect.Effect<WithOptionalResponse<typeof CopyPage200.Type, Config>, HttpClientError.HttpClientError | SchemaError>
   /**
 * Check if a user or a group can perform an operation to the specified content. The `operation` to check
 * must be provided. The user’s account ID or the ID of the group can be provided in the `subject` to check

@@ -4,7 +4,7 @@
  * @module
  */
 import { Console, Effect, SubscriptionRef } from "effect"
-import { Command, Prompt } from "effect/unstable/cli"
+import { Command, Prompt } from "effect/cli"
 import { TimerService } from "../../services/TimerService.js"
 
 export const discard = Command.make(
@@ -24,7 +24,7 @@ export const discard = Command.make(
       yield* Console.log(`Discard timer: ${current.ticketKey} — ${current.summary ?? ""}?`)
       yield* Console.log("This will delete the Clockify entry. No Jira worklog will be created.")
 
-      const confirm = yield* Prompt.select({
+      const confirm = yield* Prompt.Select({
         message: "Are you sure?",
         choices: [
           { title: "Yes, discard", value: true },

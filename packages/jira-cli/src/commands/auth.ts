@@ -8,10 +8,10 @@
  *
  * @internal
  */
+import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { openBrowser } from "../internal/openBrowser.js"
 import { JiraAuth } from "../JiraAuth.js"
 
@@ -42,11 +42,11 @@ Creating OAuth app in Atlassian Developer Console...
   })).pipe(Command.withDescription("Create OAuth app in Atlassian Developer Console"))
 
 // === Auth configure command ===
-const clientIdOption = Options.string("client-id").pipe(
+const clientIdOption = Options.String("client-id").pipe(
   Options.withDescription("OAuth client ID from Atlassian Developer Console"),
   Options.optional
 )
-const clientSecretOption = Options.string("client-secret").pipe(
+const clientSecretOption = Options.String("client-secret").pipe(
   Options.withDescription("OAuth client secret"),
   Options.optional
 )
@@ -60,10 +60,10 @@ const configureCommand = Command.make(
 
       const rawClientId = Option.isSome(clientId)
         ? clientId.value
-        : yield* Prompt.text({ message: "Enter OAuth client ID:" })
+        : yield* Prompt.String({ message: "Enter OAuth client ID:" })
       const rawClientSecret = Option.isSome(clientSecret)
         ? clientSecret.value
-        : yield* Prompt.text({ message: "Enter OAuth client secret:" })
+        : yield* Prompt.String({ message: "Enter OAuth client secret:" })
 
       yield* auth.configure({ clientId: rawClientId, clientSecret: rawClientSecret })
       yield* Console.log("OAuth configured. Run 'jira auth login' to authenticate.")
@@ -71,7 +71,7 @@ const configureCommand = Command.make(
 ).pipe(Command.withDescription("Configure OAuth client credentials"))
 
 // === Auth login command ===
-const siteOption = Options.string("site").pipe(
+const siteOption = Options.String("site").pipe(
   Options.withDescription("Jira site URL to use (for accounts with multiple sites)"),
   Options.optional
 )
@@ -128,7 +128,7 @@ const profilesCommand = Command.make("profiles", {}, () =>
     }
   })).pipe(Command.withDescription("List stored auth profiles"))
 
-const profileArg = Args.string("profile").pipe(
+const profileArg = Args.String("profile").pipe(
   Args.withDescription("Profile ID, name, site URL, cloud ID, or account ID")
 )
 

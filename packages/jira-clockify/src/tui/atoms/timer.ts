@@ -4,7 +4,7 @@
  * @internal
  */
 import { Effect } from "effect"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as Atom from "effect/reactivity/Atom"
 import type { JiraTicket } from "../../services/TicketService.js"
 import { type StopOptions, TimerService, type WorklogParams } from "../../services/TimerService.js"
 import { runtimeAtom } from "./runtime.js"

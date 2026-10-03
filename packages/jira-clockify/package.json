@@ -47,8 +47,8 @@
     "lint": "eslint \"{src,test}/**/*.{ts,tsx}\""
   },
   "dependencies": {
-    "@effect/atom-react": "4.0.0-rc.109",
-    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/atom-react": "4.0.0",
+    "@effect/platform-node": "4.0.0",
     "@knpkv/agent-skills": "workspace:^",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
@@ -58,11 +58,11 @@
     "@knpkv/jira-cli": "workspace:^",
     "@opentui/core": "0.5.1",
     "@opentui/react": "0.5.1",
-    "effect": "4.0.0-rc.109",
+    "effect": "4.0.0",
     "react": "^19.2.8"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0",
     "@types/node": "latest",
     "@types/react": "^19.2.18",
     "tsx": "^4.23.12",

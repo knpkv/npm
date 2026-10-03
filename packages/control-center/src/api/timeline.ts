@@ -1,5 +1,5 @@
+import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/http-api"
 import * as Schema from "effect/Schema"
-import { HttpApiEndpoint, HttpApiGroup, HttpApiSchema } from "effect/unstable/httpapi"
 
 import { TimelineActorKind, TimelineCursor, TimelineEventDetail, TimelinePage } from "../domain/timeline.js"
 import { UtcTimestamp } from "../domain/utcTimestamp.js"

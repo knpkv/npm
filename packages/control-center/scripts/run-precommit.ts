@@ -4,7 +4,7 @@ import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as Path from "effect/Path"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { parseStagedNameStatus, planPrecommit, type PrecommitCommand } from "./precommit-plan.js"
 
 class PrecommitError extends Data.TaggedError("PrecommitError")<{

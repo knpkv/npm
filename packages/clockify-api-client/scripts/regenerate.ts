@@ -8,19 +8,19 @@
 import * as OpenApiGenerator from "@effect/openapi-generator/OpenApiGenerator"
 import * as OpenApiPatch from "@effect/openapi-generator/OpenApiPatch"
 import { NodeHttpClient, NodeRuntime, NodeServices } from "@effect/platform-node"
+import * as Command from "effect/cli/Command"
+import * as Flag from "effect/cli/Flag"
 import * as Console from "effect/Console"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import type { OpenAPISpec } from "effect/http-api/OpenApi"
+import * as HttpClient from "effect/http/HttpClient"
 import type * as JsonSchema from "effect/JsonSchema"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as Command from "effect/unstable/cli/Command"
-import * as Flag from "effect/unstable/cli/Flag"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import type { OpenAPISpec } from "effect/unstable/httpapi/OpenApi"
 import { format as formatSource } from "prettier"
 
 const SPEC_URL = "https://docs.clockify.me/openapi.json"
@@ -169,12 +169,14 @@ const generate = Effect.fn("Clockify.regenerate.generate")(function*(
   )
 })
 
-const check = Flag.boolean("check").pipe(
-  Flag.withDescription("Exit non-zero when the committed upstream spec differs from Clockify")
+const check = Flag.Boolean("check").pipe(
+  Flag.withDescription("Exit non-zero when the committed upstream spec differs from Clockify"),
+  Flag.withDefault(false)
 )
 
-const local = Flag.boolean("local").pipe(
-  Flag.withDescription("Regenerate from the committed spec without contacting Clockify")
+const local = Flag.Boolean("local").pipe(
+  Flag.withDescription("Regenerate from the committed spec without contacting Clockify"),
+  Flag.withDefault(false)
 )
 
 const root = Command.make("clockify-api-regenerate", { check, local }).pipe(

@@ -1,8 +1,8 @@
 import * as Effect from "effect/Effect"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as SchemaGetter from "effect/SchemaGetter"
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { PluginFailureClass, PluginHealth } from "../domain/freshness.js"
 import { FollowedResourceId, PluginConnectionId, ProviderAccountId } from "../domain/identifiers.js"

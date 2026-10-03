@@ -1,6 +1,6 @@
 import { NodeHttpClient } from "@effect/platform-node"
 import { Effect, Redacted, Schema } from "effect"
-import { HttpBody, HttpClient } from "effect/unstable/http"
+import { HttpBody, HttpClient } from "effect/http"
 import { decodeSnapshot, MAX_BYTES, Snapshot } from "./model.js"
 
 export class PublishRejected

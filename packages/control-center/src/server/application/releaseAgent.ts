@@ -1,12 +1,12 @@
 import { model as claudeModel } from "@knpkv/ai-claude"
 import { model as codexModel } from "@knpkv/ai-codex"
+import * as LanguageModel from "effect/ai/LanguageModel"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import type * as Redacted from "effect/Redacted"
 import * as Semaphore from "effect/Semaphore"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import type {
   AgentHistoryMessage,

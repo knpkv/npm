@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 /** Re-key cached PR rows so repository and region are part of durable identity. */
 export default Effect.flatMap(SqlClient.SqlClient, (sql) =>

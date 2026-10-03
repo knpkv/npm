@@ -2,10 +2,10 @@ import * as AwsClientConfig from "@knpkv/codecommit-core/AwsClientConfig.js"
 import * as CodeCommit from "@knpkv/codecommit-core/ReadClient.js"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import type {
   AwsResourceDiscoveryRequest,

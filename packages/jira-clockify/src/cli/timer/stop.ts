@@ -5,8 +5,8 @@
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Clock, Console, Duration, Effect, Option, SubscriptionRef } from "effect"
+import { Command, Flag as Options, Prompt } from "effect/cli"
 import type { QuitError } from "effect/Terminal"
-import { Command, Flag as Options, Prompt } from "effect/unstable/cli"
 import { ClockifyAuth } from "../../services/ClockifyAuth.js"
 import { ConfigService } from "../../services/ConfigService.js"
 import type { JiraWorklogOutcome, TimerError } from "../../services/TimerService.js"
@@ -58,7 +58,7 @@ export const resolveStopProject = (params: {
     )
     if (projects.length === 0) return undefined
 
-    const selected = yield* Prompt.select({
+    const selected = yield* Prompt.Select({
       message: "No project set. Select Clockify project:",
       choices: [
         ...projects.map((p) => ({ title: p.name, value: p.id })),
@@ -68,7 +68,7 @@ export const resolveStopProject = (params: {
     if (!selected) return undefined
 
     const selectedName = projects.find((p) => p.id === selected)?.name ?? selected
-    const saveDefault = yield* Prompt.select({
+    const saveDefault = yield* Prompt.Select({
       message: `Save "${selectedName}" as default project?`,
       choices: [
         { title: "Yes", value: true },
@@ -101,7 +101,7 @@ export const resolveStopBillable = (params: {
   Effect.gen(function*() {
     if (params.currentBillable !== null || params.flagBillable !== undefined) return params.flagBillable
 
-    const stopBillable = yield* Prompt.select({
+    const stopBillable = yield* Prompt.Select({
       message: "Billable?",
       choices: [
         { title: "Yes", value: true },
@@ -109,7 +109,7 @@ export const resolveStopBillable = (params: {
       ]
     })
 
-    const saveDefault = yield* Prompt.select({
+    const saveDefault = yield* Prompt.Select({
       message: `Save billable=${stopBillable ? "yes" : "no"} as default?`,
       choices: [
         { title: "Yes", value: true },
@@ -127,17 +127,17 @@ export const resolveStopBillable = (params: {
 export const stop = Command.make(
   "stop",
   {
-    project: Options.string("project").pipe(
+    project: Options.String("project").pipe(
       Options.withAlias("p"),
       Options.withDescription("Clockify project ID"),
       Options.optional
     ),
-    billable: Options.boolean("billable").pipe(
+    billable: Options.Boolean("billable").pipe(
       Options.withAlias("b"),
       Options.withDescription("Mark as billable"),
       Options.optional
     ),
-    at: Options.string("at").pipe(
+    at: Options.String("at").pipe(
       Options.withDescription(
         "Correct the end time (HH:MM today or ISO); a future HH:MM rolls back to yesterday. Skips the confirm."
       ),
@@ -155,7 +155,7 @@ export const stop = Command.make(
       // Correction flow: log a completed interval when no timer was ever started.
       // Reuses the same project/billable prompts as the normal stop path below.
       const runCorrection = Effect.gen(function*() {
-        const proceed = yield* Prompt.select({
+        const proceed = yield* Prompt.Select({
           message: "No active timer. Add a correction interval instead?",
           choices: [
             { title: "Yes", value: true },
@@ -167,7 +167,7 @@ export const stop = Command.make(
           return
         }
 
-        const key = (yield* Prompt.text({ message: "Ticket key (e.g. PROJ-123):" })).trim()
+        const key = (yield* Prompt.String({ message: "Ticket key (e.g. PROJ-123):" })).trim()
         if (!key) {
           yield* Console.log("No ticket key given.")
           return
@@ -187,14 +187,14 @@ export const stop = Command.make(
         }
         const ticket = fetched.ticket
 
-        const durationStr = yield* Prompt.text({ message: "Duration (e.g. 45m, 1h30m):" })
+        const durationStr = yield* Prompt.String({ message: "Duration (e.g. 45m, 1h30m):" })
         const durationSeconds = parseDuration(durationStr)
         if (durationSeconds === null || durationSeconds < 60) {
           yield* Console.log("Invalid duration. Use format: 45m, 1h30m (minimum 1m).")
           return
         }
 
-        const whenStr = (yield* Prompt.text({
+        const whenStr = (yield* Prompt.String({
           message: "Started at (HH:MM today or ISO, empty = ends now):"
         })).trim()
         let start: Date
@@ -215,7 +215,7 @@ export const stop = Command.make(
         const correctionProjectId = yield* resolveStopProject({ currentProjectId: null, flagProjectId })
         const correctionBillable = yield* resolveStopBillable({ currentBillable: null, flagBillable })
 
-        const correctionComment = (yield* Prompt.text({ message: "Comment (empty to skip):" })).trim()
+        const correctionComment = (yield* Prompt.String({ message: "Comment (empty to skip):" })).trim()
 
         yield* Console.log(`Correction: ${ticket.key} — ${ticket.summary}`)
         yield* Console.log(`  Duration: ${formatDuration(durationSeconds)}`)
@@ -265,15 +265,15 @@ export const stop = Command.make(
         endedAt = resolved.end
       } else if (startedAt) {
         const elapsedSec = Math.max(0, Math.floor((nowMs - startedAt.getTime()) / 1000))
-        const correct = yield* Prompt.confirm({
+        const correct = yield* Prompt.Confirm({
           message: `Started ${formatClock(startedAt)} · ends now ${formatClock(now)} (${
             formatDuration(elapsedSec)
           }) — end time correct?`,
           initial: true
         })
         if (!correct) {
-          // Prompt.text re-runs `validate` until it succeeds, so this is the re-prompt loop.
-          const entered = yield* Prompt.text({
+          // Prompt.String re-runs `validate` until it succeeds, so this is the re-prompt loop.
+          const entered = yield* Prompt.String({
             message: "Real end time (HH:MM today or ISO):",
             default: formatClock(now),
             validate: (value) => {
@@ -293,7 +293,7 @@ export const stop = Command.make(
       const stopBillable = yield* resolveStopBillable({ currentBillable: currentTimer.billable, flagBillable })
 
       // Optional comment for Jira worklog
-      const comment = yield* Prompt.text({ message: "Comment (empty to skip):" })
+      const comment = yield* Prompt.String({ message: "Comment (empty to skip):" })
 
       const result = yield* timer.stop({
         projectId: stopProjectId,
@@ -324,13 +324,13 @@ export const stop = Command.make(
         const worklog = result.worklog
         if (outcome?._tag === "Failed" && worklog) {
           yield* Console.log(`  Jira worklog: ✗ — ${outcome.message}`)
-          let retry = yield* Prompt.confirm({ message: "  Retry Jira worklog?", initial: true })
+          let retry = yield* Prompt.Confirm({ message: "  Retry Jira worklog?", initial: true })
           while (retry) {
             outcome = yield* timer.logWorklog(worklog)
             if (outcome._tag === "Posted" || outcome._tag === "NotLoggedIn") break
             yield* Console.log(`  Jira worklog: ✗ — ${outcome.message}`)
             // Default the re-prompt to No: if a retry just failed, don't keep nudging Yes.
-            retry = yield* Prompt.confirm({ message: "  Retry again?", initial: false })
+            retry = yield* Prompt.Confirm({ message: "  Retry again?", initial: false })
           }
         }
         yield* Console.log(`  Jira worklog: ${worklogStatusLine(outcome)}`)

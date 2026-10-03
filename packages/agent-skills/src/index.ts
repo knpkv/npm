@@ -1,3 +1,4 @@
+import { Command, Flag as Options } from "effect/cli"
 import * as Config from "effect/Config"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
@@ -5,7 +6,6 @@ import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import type * as PlatformError from "effect/PlatformError"
-import { Command, Flag as Options } from "effect/unstable/cli"
 
 export type SkillName = "codecommit" | "confluence" | "jira" | "jcf"
 export type Agent = "codex" | "claude"
@@ -33,11 +33,11 @@ type InstallError = Config.ConfigError | PlatformError.BadArgument | PlatformErr
 
 type InstallContext = FileSystem.FileSystem | Path.Path
 
-const homeDirectory = Config.string("HOME").pipe(
-  Config.orElse(() => Config.string("USERPROFILE"))
+const homeDirectory = Config.String("HOME").pipe(
+  Config.orElse(() => Config.String("USERPROFILE"))
 )
 
-const optionalEnv = (name: string) => Config.option(Config.string(name))
+const optionalEnv = (name: string) => Config.option(Config.String(name))
 
 const defaultCodexDir = Effect.gen(function*() {
   const path = yield* Path.Path
@@ -151,27 +151,27 @@ export const renderInstallResult = (result: InstallResult): string => {
   return `${prefix}: ${result.agent}/${result.skill} -> ${result.destination}`
 }
 
-export const agentOption = Options.choice("agent", ["codex", "claude", "all"]).pipe(
+export const agentOption = Options.Literals("agent", ["codex", "claude", "all"]).pipe(
   Options.withDescription("Agent skill home to install into"),
   Options.withDefault("all")
 )
 
-export const codexDirOption = Options.directory("codex-dir").pipe(
+export const codexDirOption = Options.Directory("codex-dir").pipe(
   Options.withDescription("Override Codex skills directory"),
   Options.optional
 )
 
-export const claudeDirOption = Options.directory("claude-dir").pipe(
+export const claudeDirOption = Options.Directory("claude-dir").pipe(
   Options.withDescription("Override Claude skills directory"),
   Options.optional
 )
 
-export const dryRunOption = Options.boolean("dry-run").pipe(
+export const dryRunOption = Options.Boolean("dry-run").pipe(
   Options.withDescription("Print planned installs without writing files"),
   Options.withDefault(false)
 )
 
-export const forceOption = Options.boolean("force").pipe(
+export const forceOption = Options.Boolean("force").pipe(
   Options.withDescription("Replace existing skill directories"),
   Options.withDefault(false)
 )

@@ -2,8 +2,8 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, it } from "@effect/vitest"
 import { Config, Effect, FileSystem, Layer, Path, Schema, Stream } from "effect"
 import type * as PlatformError from "effect/PlatformError"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { createServer, type Server } from "node:net"
 
 import * as Predicate from "effect/Predicate"
@@ -109,7 +109,6 @@ const acquireNetworkProbe = (
         new NetworkProbeFixtureError({
           message: "Network probe did not expose an internet port"
         })
-      )
     }
     return { port: address.port, server }
   })
@@ -146,7 +145,7 @@ it.effect("registers network-probe cleanup before validating its listening addre
 
 it.effect("drains high-volume child output while awaiting exit", () =>
   Effect.gen(function*() {
-    const executablePath = yield* Config.string("PATH")
+    const executablePath = yield* Config.String("PATH")
     const result = yield* runProcess(
       "sh",
       [
@@ -166,8 +165,8 @@ it.effect("runs the review session through the installed sbx runtime", () =>
     Effect.gen(function*() {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
-      const executablePath = yield* Config.string("PATH")
-      const home = yield* Config.string("HOME")
+      const executablePath = yield* Config.String("PATH")
+      const home = yield* Config.String("HOME")
       const sbxEnvironment = {
         HOME: home,
         LANG: "C",

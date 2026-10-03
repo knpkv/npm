@@ -55,7 +55,7 @@ provider configuration names it with `env_key`.
 import { NodeServices } from "@effect/platform-node"
 import { model } from "@knpkv/ai-codex"
 import { Effect } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel } from "effect/ai"
 
 const program = LanguageModel.generateText({
   prompt: "Review the current change and summarize the highest-risk issue."
@@ -70,7 +70,7 @@ The returned model can also provide `LanguageModel` to `Chat` and other Effect A
 
 ```typescript
 import { Schema } from "effect"
-import { LanguageModel } from "effect/unstable/ai"
+import { LanguageModel } from "effect/ai"
 
 const Review = Schema.Struct({
   summary: Schema.String,

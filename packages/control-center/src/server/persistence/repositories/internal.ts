@@ -2,9 +2,9 @@ import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
 import type * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
-import * as SqlError from "effect/unstable/sql/SqlError"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
+import type * as SqlClient from "effect/sql/SqlClient"
+import * as SqlError from "effect/sql/SqlError"
+import * as SqlSchema from "effect/sql/SqlSchema"
 
 import type { WorkspaceId } from "../../../domain/identifiers.js"
 import {

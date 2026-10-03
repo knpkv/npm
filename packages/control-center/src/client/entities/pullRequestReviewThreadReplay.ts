@@ -1,7 +1,7 @@
 /** Bounded browser replay for a durable pull-request review thread. @module */
 import * as Effect from "effect/Effect"
 import * as Equal from "effect/Equal"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import { ReleaseAgentThreadCursor } from "../../api/agent.js"
 import type {
   AgentProviderCatalog,

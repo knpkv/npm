@@ -1,5 +1,5 @@
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect } from "react"
 import { createPrAtom, openManagedReviewAtom } from "./atoms/actions.js"
 import { appStateAtom, refreshAtom } from "./atoms/app.js"

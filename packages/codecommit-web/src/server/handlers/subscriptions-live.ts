@@ -1,6 +1,6 @@
 import { CacheService, PRService } from "@knpkv/codecommit-core"
 import { Effect, Option, Predicate } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi } from "../Api.js"
 
 export const SubscriptionsLive = HttpApiBuilder.group(

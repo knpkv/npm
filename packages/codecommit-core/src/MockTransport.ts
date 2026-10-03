@@ -1,9 +1,9 @@
 /** Loopback-only transport adapter for the deterministic CodeCommit development mock. */
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import { removeHeader, setUrl } from "effect/unstable/http/HttpClientRequest"
+import * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientRequest from "effect/http/HttpClientRequest"
+import { removeHeader, setUrl } from "effect/http/HttpClientRequest"
 
 import * as AwsClientConfig from "./AwsClientConfig.js"
 

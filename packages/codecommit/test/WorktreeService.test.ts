@@ -4,8 +4,8 @@ import { ChildEnv, Domain, ReadClient } from "@knpkv/codecommit-core"
 import { ConfigProvider, Effect, Exit, Fiber, Layer, Option, Sink, Stream } from "effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as GitEnvironment from "../src/GitEnvironment.js"
 import {
   acquireReadyLockHolder,

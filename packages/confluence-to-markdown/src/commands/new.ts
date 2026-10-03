@@ -1,10 +1,10 @@
 /**
  * New page command for Confluence CLI.
  */
+import { Command, Prompt } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Path from "effect/Path"
-import { Command, Prompt } from "effect/unstable/cli"
 import { ConfluenceConfig } from "../ConfluenceConfig.js"
 import { LocalFileSystem } from "../LocalFileSystem.js"
 import { flattenPageTree } from "./pageTree.js"
@@ -43,13 +43,13 @@ export const newCommand = Command.make("new", {}, () =>
     const choices = flattenPageTree(tree)
 
     // Show parent selector
-    const parent = yield* Prompt.select({
+    const parent = yield* Prompt.Select({
       message: "Select parent page for the new page:",
       choices
     })
 
     // Prompt for title
-    const title = yield* Prompt.text({
+    const title = yield* Prompt.String({
       message: "Enter page title:"
     })
 

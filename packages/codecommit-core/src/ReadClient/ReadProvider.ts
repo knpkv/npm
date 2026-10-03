@@ -14,7 +14,7 @@ import type * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import type * as DistilledRegion from "@distilled.cloud/aws/Region"
 import * as sts from "@distilled.cloud/aws/sts"
 import { Context, Effect, Layer } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { HttpClient } from "effect/http"
 
 import { makeApiError, withAwsContext } from "../AwsClient/internal.js"
 import { AwsClientConfig } from "../AwsClientConfig.js"

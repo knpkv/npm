@@ -25,8 +25,8 @@ import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
 import * as Path from "effect/Path"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import { fileURLToPath } from "node:url"
 import { afterEach, vi } from "vitest"
 import * as ChildEnv from "../src/ChildEnv.js"
@@ -60,7 +60,7 @@ const testRuntimeLayer = Layer.merge(NodeServices.layer, ChildEnv.layerHostEnvir
  * Whether the child can still locate a home directory.
  *
  * Accepts either locator because the production readers pair
- * `Config.string("HOME")` with a `USERPROFILE` fallback; requiring `HOME`
+ * `Config.String("HOME")` with a `USERPROFILE` fallback; requiring `HOME`
  * specifically would fail on a Windows host that is in fact correctly equipped.
  */
 const hasHomeLocator = (env: Record<string, string | undefined>) => "HOME" in env || "USERPROFILE" in env

@@ -11,8 +11,8 @@
  * @module
  */
 import { Context, Effect, Layer, Schema, Stream } from "effect"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as GitEnvironment from "./GitEnvironment.js"
 
 /** Why the working directory could not be read as a checked-out branch. */

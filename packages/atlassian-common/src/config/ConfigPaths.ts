@@ -61,8 +61,8 @@ export class HomeDirectoryTag extends Context.Service<
   HomeDirectory
 >()("@knpkv/atlassian-common/HomeDirectory") {}
 
-const HomeConfig = Config.option(Config.string("HOME")).pipe(
-  Config.orElse(() => Config.option(Config.string("USERPROFILE")))
+const HomeConfig = Config.option(Config.String("HOME")).pipe(
+  Config.orElse(() => Config.option(Config.String("USERPROFILE")))
 )
 
 /**
@@ -84,7 +84,7 @@ export const HomeDirectoryLive: Layer.Layer<HomeDirectoryTag> = Layer.succeed(
   }
 )
 
-const XdgConfigHome = Config.option(Config.string("XDG_CONFIG_HOME"))
+const XdgConfigHome = Config.option(Config.String("XDG_CONFIG_HOME"))
 
 /**
  * XDG config directory for Atlassian tools.

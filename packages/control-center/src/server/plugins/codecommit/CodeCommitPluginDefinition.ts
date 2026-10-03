@@ -20,7 +20,7 @@ import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Base64Url, Hex } from "effect/encoding"
 import * as HashMap from "effect/HashMap"
 import * as Option from "effect/Option"
 import * as Predicate from "effect/Predicate"
@@ -699,10 +699,10 @@ const encodeReconciliationLocator = (
     locator.clientRequestToken
   ]
   if (locator.commentId === null) {
-    return PluginActionReconciliationKey.make(`ccmt:v1:${Encoding.encodeBase64Url(JSON.stringify(values))}`)
+    return PluginActionReconciliationKey.make(`ccmt:v1:${Base64Url.encode(JSON.stringify(values))}`)
   }
   return PluginActionReconciliationKey.make(
-    `ccmt:v2:${Encoding.encodeBase64Url(JSON.stringify([...values, locator.commentId]))}`
+    `ccmt:v2:${Base64Url.encode(JSON.stringify([...values, locator.commentId]))}`
   )
 }
 
@@ -715,7 +715,7 @@ const decodeReconciliationLocator = (
     : key.startsWith("ccmt:v1:")
     ? key.slice("ccmt:v1:".length)
     : ""
-  const decoded = Encoding.decodeBase64UrlString(encoded)
+  const decoded = Base64Url.decodeString(encoded)
   if (Result.isFailure(decoded)) {
     return Effect.fail(
       new PluginConfigurationFailure({
@@ -1019,14 +1019,14 @@ const digestSyncInventory = Effect.fn("CodeCommitPlugin.digestSyncInventory")(fu
 ) {
   const serialized = JSON.stringify({ events, previousInventoryDigest })
   const bytes = yield* Effect.fromResult(
-    Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+    Base64.decode(Base64.encode(serialized))
   ).pipe(
     Effect.mapError(() => new PluginOutageFailure({ operation: "sync" }))
   )
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() => new PluginOutageFailure({ operation: "sync" }))
   )
-  return Encoding.encodeHex(digest)
+  return Hex.encode(digest)
 })
 
 const enforceConfiguredRepository = Effect.fn("CodeCommitPlugin.enforceConfiguredRepository")(function*(
@@ -1387,7 +1387,7 @@ const makeConnection = Effect.fn("CodeCommitPlugin.makeConnection")(function*(
     const end = Math.min(blobResult.success.byteLength, request.offset + request.length)
     const bytes = blobResult.success.bytes.slice(Math.min(request.offset, end), end)
     return yield* output("diff-content", DiffContentRangeV1, {
-      bytesBase64: Encoding.encodeBase64(bytes),
+      bytesBase64: Base64.encode(bytes),
       totalBytes: blobResult.success.byteLength,
       unavailableReason: null
     })

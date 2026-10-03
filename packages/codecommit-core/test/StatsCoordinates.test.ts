@@ -4,7 +4,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as LibsqlClient from "@effect/sql-libsql/LibsqlClient"
 import { describe, expect, it } from "@effect/vitest"
 import { Context, Effect, FileSystem, Layer } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 import { mostActivePRs, stalePRs } from "../src/CacheService/repos/StatsRepo/queries.js"
 import { reviewerData } from "../src/CacheService/repos/StatsRepo/reviewerData.js"
 

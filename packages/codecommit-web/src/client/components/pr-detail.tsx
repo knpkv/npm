@@ -46,7 +46,7 @@ import {
 } from "@knpkv/rly/primitives"
 import { Exit, Option } from "effect"
 import * as Predicate from "effect/Predicate"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import {
   ArrowRightIcon,
   BellIcon,

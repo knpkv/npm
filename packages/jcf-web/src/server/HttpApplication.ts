@@ -1,7 +1,7 @@
 /** The same authenticated routes, bootstrap exchange and static client in production and tests. */
 import { Effect, FileSystem, Layer, Path } from "effect"
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { HttpApiBuilder } from "effect/http-api"
 import { JcfWebApi } from "./Api.js"
 import { ConfigLive, EntriesLive, RowsLive, WeekLive } from "./Handlers.js"
 import { ownerSessionAuthLayer, OwnerSessionBootstrapRouter } from "./OwnerSession.js"

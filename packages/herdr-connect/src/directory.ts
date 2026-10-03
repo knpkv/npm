@@ -7,7 +7,7 @@ import type {
 } from "@knpkv/herdr-fleet"
 import { decodeBoundedResponseJson } from "@knpkv/herdr-fleet"
 import { Effect, Result, Schema } from "effect"
-import * as HttpClient from "effect/unstable/http/HttpClient"
+import * as HttpClient from "effect/http/HttpClient"
 import type { AgentActivityStore } from "./activity-store.js"
 import { ConnectPeerError } from "./errors.js"
 import { buildConnectForest } from "./forest.js"

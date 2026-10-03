@@ -1,6 +1,6 @@
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 
@@ -81,7 +81,7 @@ export const makeCodePipelineReads = (
       input,
       (pipeline) => pipeline.readArtifactRange(input.request)
     )
-    const bytes = yield* Effect.fromResult(Encoding.decodeBase64(range.bytesBase64)).pipe(
+    const bytes = yield* Effect.fromResult(Base64.decode(range.bytesBase64)).pipe(
       Effect.mapError(() => unavailable())
     )
     return {

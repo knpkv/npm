@@ -3,12 +3,13 @@ import { codecommitConsoleUrl } from "@knpkv/codecommit-core/Domain.js"
 import * as Context from "effect/Context"
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"
 import * as Layer from "effect/Layer"
+import { NetAddress } from "effect/net"
 import * as Ref from "effect/Ref"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
 import * as Semaphore from "effect/Semaphore"
-import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
 import { createServer } from "node:http"
 
 import { reviewModelHandler } from "./ReviewModelFixture.js"
@@ -749,7 +750,7 @@ export const startCodeCommitMock = (
       Effect.mapError((cause) => new CodeCommitMockStartupError({ cause }))
     )
     const server = Context.get(context, HttpServer.HttpServer)
-    if (server.address._tag !== "TcpAddress") {
+    if (!NetAddress.isInetAddress(server.address)) {
       return yield* new CodeCommitMockStartupError({ cause: "mock did not bind TCP" })
     }
     const origin = `http://127.0.0.1:${server.address.port}`

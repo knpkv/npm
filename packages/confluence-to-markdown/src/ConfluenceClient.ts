@@ -10,6 +10,8 @@ import { ConfluenceApiClient, ConfluenceApiConfig } from "@knpkv/confluence-api-
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import type * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
@@ -17,8 +19,6 @@ import * as Predicate from "effect/Predicate"
 import * as Redacted from "effect/Redacted"
 import * as Schedule from "effect/Schedule"
 import * as Schema from "effect/Schema"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
 import type { PageId } from "./Brand.js"
 import { ApiError, RateLimitError } from "./ConfluenceError.js"
 import {
@@ -630,7 +630,6 @@ const make = (
                 endpoint: `/pages/${id}/children`,
                 pageId: id
               })
-            )
           }
 
           const response = yield* apiClient.v2.getChildPages(id, {
@@ -714,7 +713,6 @@ const make = (
                 endpoint: `/pages/${id}/versions`,
                 pageId: id
               })
-            )
           }
 
           const response = yield* apiClient.v2.getPageVersions(id, {
@@ -763,7 +761,6 @@ const make = (
                 endpoint: `/pages/${id}/attachments`,
                 pageId: id
               })
-            )
           }
 
           const response = yield* apiClient.v2.getPageAttachments(id, {
@@ -833,7 +830,6 @@ const make = (
               endpoint: `/wiki/rest/api/content/${pageId}/child/attachment`,
               pageId
             })
-          )
         }
         const decodedAttachment = yield* decodeAttachment(
           attachment,
@@ -871,7 +867,6 @@ const make = (
               endpoint: `/pages/${pageId}`,
               pageId
             })
-          )
         }
         return page.spaceId
       })
@@ -934,7 +929,6 @@ const make = (
                 message: `Pagination limit exceeded: more than ${MAX_PAGINATION_ITERATIONS} pages of children`,
                 endpoint
               })
-            )
           }
 
           const response = yield* apiClient.v2.getFolderDirectChildren(id, {

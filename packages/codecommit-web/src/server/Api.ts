@@ -29,7 +29,7 @@ import {
 import { ReviewKind, ReviewProfileConfig, reviewProfileSkillLimit } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { WeeklyStats } from "@knpkv/codecommit-core/StatsService/WeeklyStats.js"
 import { Schema } from "effect"
-import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/unstable/httpapi"
+import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware, HttpApiSecurity } from "effect/http-api"
 import {
   MAXIMUM_RELAY_REVIEW_MESSAGE_BYTES,
   MAXIMUM_RELAY_REVIEW_MESSAGE_JSON_BYTES,

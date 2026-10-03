@@ -1,7 +1,7 @@
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -538,13 +538,13 @@ const stableUuid = Effect.fn("NormalizedPluginPageMaterialization.stableUuid")(f
   identity: string,
   eventId: string
 ) {
-  const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(identity))).pipe(
+  const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(identity))).pipe(
     Effect.mapError(() => malformed("normalized-identity-encoding-failed", eventId))
   )
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() => malformed("normalized-identity-digest-failed", eventId))
   )
-  const hex = Encoding.encodeHex(digest)
+  const hex = Hex.encode(digest)
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-7${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 })
 

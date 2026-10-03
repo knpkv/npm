@@ -1,6 +1,6 @@
 import { useAtomValue } from "@effect/atom-react"
 import type { PaginatedNotifications } from "@knpkv/codecommit-core/CacheService.js"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { notificationsAtom } from "../atoms/app.js"
 import { quickFilterTypeAtom, quickFilterValuesAtom } from "../atoms/ui.js"
 import { useTheme } from "../context/theme.js"

@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding } from "effect"
+import { Crypto, Effect } from "effect"
+import { Base64Url } from "effect/encoding"
 import { ConnectAgentIdError } from "./errors.js"
 
 export const connectAgentId = Effect.fn("HerdrConnect.agentId")(function*(
@@ -12,5 +13,5 @@ export const connectAgentId = Effect.fn("HerdrConnect.agentId")(function*(
       new TextEncoder().encode(`${host.toLowerCase()}\0${paneId}`)
     )
     .pipe(Effect.mapError((cause) => new ConnectAgentIdError({ cause })))
-  return `agent-${Encoding.encodeBase64Url(digest)}`
+  return `agent-${Base64Url.encode(digest)}`
 })

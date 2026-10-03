@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "@effect/vitest"
 import { defaultReviewConfig } from "@knpkv/codecommit-core/ConfigService.js"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { act, createElement } from "react"
 import { createRoot } from "react-dom/client"
 

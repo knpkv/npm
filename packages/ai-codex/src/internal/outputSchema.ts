@@ -1,6 +1,6 @@
 import { Effect, Schema } from "effect"
+import * as OpenAiStructuredOutput from "effect/ai/OpenAiStructuredOutput"
 import type * as FileSystem from "effect/FileSystem"
-import * as OpenAiStructuredOutput from "effect/unstable/ai/OpenAiStructuredOutput"
 
 import { CodexTransportError } from "./errors.js"
 

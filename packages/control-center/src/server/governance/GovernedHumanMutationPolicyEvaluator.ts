@@ -1,7 +1,7 @@
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Hex } from "effect/encoding"
 import * as Schema from "effect/Schema"
 
 import type { SessionSummary } from "../../api/session.js"
@@ -55,7 +55,7 @@ export const digestWorkspaceSettingsGovernanceRequest = Effect.fn(
   const encoded = yield* encodeRequest(request)
   const cryptoService = yield* Crypto.Crypto
   const digest = yield* cryptoService.digest("SHA-256", utf8Encoder.encode(encoded))
-  return ContentBlobDigest.make(Encoding.encodeHex(digest))
+  return ContentBlobDigest.make(Hex.encode(digest))
 })
 
 const issuedAuthorities = new WeakSet<object>()

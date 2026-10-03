@@ -1,7 +1,7 @@
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
-import * as SqlError from "effect/unstable/sql/SqlError"
+import * as SqlClient from "effect/sql/SqlClient"
+import * as SqlError from "effect/sql/SqlError"
 
 /** Only an already-present column is safe to treat as migration idempotence. */
 const isDuplicateColumnError: Predicate.Refinement<unknown, SqlError.SqlError> = (

@@ -8,7 +8,7 @@
  */
 import { ConfigService, FetchTicket, IssueFacts, ReconcileService } from "@knpkv/jira-clockify"
 import { Effect, Semaphore } from "effect"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import type { ReadProgress, WeekScopeName } from "../shared/contracts.js"
 import { ApiError, JcfWebApi, PlanExpiredError, ProposalRejectedError } from "./Api.js"
 import { confirmProposal, logManualEntry, MINIMUM_WRITE_SECONDS } from "./Confirm.js"

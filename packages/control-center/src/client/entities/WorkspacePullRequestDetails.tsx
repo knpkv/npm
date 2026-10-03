@@ -1,7 +1,7 @@
 import { Person, type RlyPerson } from "@knpkv/rly/patterns"
 import { Text } from "@knpkv/rly/primitives"
 import * as Match from "effect/Match"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { type ReactElement, type ReactNode, lazy, Suspense, useCallback, useMemo, useState } from "react"
 
 import type { DurableAgentPrompt, PullRequestReviewState } from "../../api/agent.js"

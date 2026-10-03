@@ -6,15 +6,15 @@
  * what order services were consulted.
  */
 import { describe, expect, it } from "@effect/vitest"
+import { Command } from "effect/cli"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Schema from "effect/Schema"
 import * as TestClock from "effect/testing/TestClock"
-import { Command } from "effect/unstable/cli"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import * as SourceConsumption from "../src/agent/sourceConsumption.js"
 import { root } from "../src/cli/root.js"
 import {

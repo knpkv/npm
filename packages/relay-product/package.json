@@ -50,15 +50,15 @@
     "@knpkv/rly": "workspace:^"
   },
   "peerDependencies": {
-    "effect": "4.0.0-rc.109",
+    "effect": "4.0.0",
     "react": "^19.2.8"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0",
     "@knpkv/rly": "workspace:^",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
-    "effect": "4.0.0-rc.109",
+    "effect": "4.0.0",
     "happy-dom": "20.11.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",

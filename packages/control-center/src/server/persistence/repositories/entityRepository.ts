@@ -4,11 +4,11 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
+import * as SqlSchema from "effect/sql/SqlSchema"
 
 import { EntityId, type PluginConnectionId, WorkspaceId } from "../../../domain/identifiers.js"
 import {
@@ -121,14 +121,14 @@ const makeEntityRepository = Effect.gen(function*() {
         catch: () => new PersistenceOperationError({ operation: "entity.quarantine-encode" })
       })
       const bytes = yield* Effect.fromResult(
-        Encoding.decodeBase64(Encoding.encodeBase64(serialized))
+        Base64.decode(Base64.encode(serialized))
       ).pipe(
         Effect.mapError(() => new PersistenceOperationError({ operation: "entity.quarantine-encode" }))
       )
       const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
         Effect.mapError(() => new PersistenceOperationError({ operation: "entity.quarantine-digest" }))
       )
-      return ContentBlobDigest.make(Encoding.encodeHex(digest))
+      return ContentBlobDigest.make(Hex.encode(digest))
     }
   )
 

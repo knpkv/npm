@@ -8,12 +8,12 @@
  * @module
  */
 import { Duration, Effect, Option, Queue, Result, Schema, Stream } from "effect"
-import type * as AiError from "effect/unstable/ai/AiError"
-import type * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as Prompt from "effect/unstable/ai/Prompt"
-import * as Response from "effect/unstable/ai/Response"
-import type * as Tool from "effect/unstable/ai/Tool"
-import type * as Toolkit from "effect/unstable/ai/Toolkit"
+import type * as AiError from "effect/ai/AiError"
+import type * as LanguageModel from "effect/ai/LanguageModel"
+import * as Prompt from "effect/ai/Prompt"
+import * as Response from "effect/ai/Response"
+import type * as Tool from "effect/ai/Tool"
+import type * as Toolkit from "effect/ai/Toolkit"
 
 /** Maximum UTF-8 bytes from one tool result exposed directly to the model. */
 export const MAXIMUM_MODEL_VISIBLE_TOOL_RESULT_BYTES = 64 * 1024
@@ -175,7 +175,7 @@ export interface ToolAgentRunOptions<
   readonly context: Schema.Json
   readonly instructions: string
   readonly maximumSteps?: number
-  readonly model: LanguageModel.Service
+  readonly model: LanguageModel.LanguageModel
   readonly outputSchema: OutputSchema
   readonly toolkit: Toolkit.WithHandler<Tools>
 }
@@ -427,7 +427,7 @@ const executeToolCall = Effect.fn("ToolAgent.executeToolCall")(function*<
   ArtifactRequirements
 >(
   toolkit: Toolkit.WithHandler<Tools>,
-  call: Response.ToolCallParts<Tools>,
+  call: Response.ToolCallParts<Tools, "encoded">,
   step: number,
   artifactSink: ToolAgentArtifactSink<ArtifactError, ArtifactRequirements> | undefined,
   emit: (event: ToolAgentEvent<Output>) => Effect.Effect<void>

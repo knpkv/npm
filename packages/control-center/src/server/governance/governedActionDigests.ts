@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Predicate from "effect/Predicate"
 import * as Schema from "effect/Schema"
 
@@ -219,13 +219,13 @@ export const digestCanonicalGovernedActionJson = Effect.fn(
 )(function*(value: Schema.Json) {
   const cryptoService = yield* Crypto.Crypto
   const canonicalJson = canonicalizeGovernedActionJson(value)
-  const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(canonicalJson))).pipe(
+  const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(canonicalJson))).pipe(
     Effect.mapError(() => new GovernedActionDigestError({ operation: "encode-utf8" }))
   )
   const digest = yield* cryptoService
     .digest("SHA-256", bytes)
     .pipe(Effect.mapError(() => new GovernedActionDigestError({ operation: "digest" })))
-  return Encoding.encodeHex(digest)
+  return Hex.encode(digest)
 })
 
 const encodeCommand = Schema.encodeEffect(GovernedActionTransitionCommand)

@@ -1,10 +1,10 @@
+import * as LanguageModel from "effect/ai/LanguageModel"
+import * as AiModel from "effect/ai/Model"
 import type * as Duration from "effect/Duration"
 import type * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
 import * as Layer from "effect/Layer"
-import * as LanguageModel from "effect/unstable/ai/LanguageModel"
-import * as AiModel from "effect/unstable/ai/Model"
-import type * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import type * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { makeLanguageModel } from "./internal/languageModel.js"
 
 /** Supplied request, visible agent text, final answer or a fixed milestone; excludes reasoning and tool events. */

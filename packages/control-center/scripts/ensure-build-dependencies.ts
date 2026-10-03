@@ -4,8 +4,8 @@ import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
 import * as Path from "effect/Path"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Schema from "effect/Schema"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 import {
   clearWorkspaceIncrementalBuildState,
   ensureWorkspaceArtifactContracts,

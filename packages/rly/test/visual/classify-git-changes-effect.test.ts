@@ -2,9 +2,9 @@ import { describe, expect, it } from "@effect/vitest"
 import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Sink from "effect/Sink"
 import * as Stream from "effect/Stream"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import {
   collectBoundedGitProcess,

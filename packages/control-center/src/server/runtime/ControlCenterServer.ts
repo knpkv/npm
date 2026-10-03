@@ -3,12 +3,12 @@ import type * as Crypto from "effect/Crypto"
 import type * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
 import type * as FileSystem from "effect/FileSystem"
+import * as HttpClient from "effect/http/HttpClient"
+import * as HttpRouter from "effect/http/HttpRouter"
+import type { ServeError } from "effect/http/HttpServerError"
 import * as Layer from "effect/Layer"
 import type * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as HttpRouter from "effect/unstable/http/HttpRouter"
-import type { ServeError } from "effect/unstable/http/HttpServerError"
 
 import {
   agentJobWorkerLayer,

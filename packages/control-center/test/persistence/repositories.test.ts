@@ -1105,8 +1105,8 @@ describe("workspace-scoped repositories", () => {
               )
           })
         )
-        const trackedFoundation = QuarantineRepository.layer.pipe(Layer.provideMerge(trackedDatabaseLayer))
-        const trackedMetadata = ContentBlobMetadataRepository.layer.pipe(Layer.provide(trackedFoundation))
+        const trackedFoundation = Layer.fresh(QuarantineRepository.layer).pipe(Layer.provideMerge(trackedDatabaseLayer))
+        const trackedMetadata = Layer.fresh(ContentBlobMetadataRepository.layer).pipe(Layer.provide(trackedFoundation))
         const trackedContentContext = yield* Layer.build(
           Layer.fresh(ContentStore.layer).pipe(
             Layer.provide(Layer.mergeAll(trackedMetadata, observingBlobs, trackedDatabaseLayer))
@@ -1178,8 +1178,13 @@ describe("workspace-scoped repositories", () => {
                 )
             })
           )
-          const secondaryFoundation = QuarantineRepository.layer.pipe(Layer.provideMerge(secondaryDatabaseLayer))
-          const secondaryMetadata = ContentBlobMetadataRepository.layer.pipe(Layer.provide(secondaryFoundation))
+          // Fresh: Layer.build reuses services already in the parent memo map, which would bind the primary database.
+          const secondaryFoundation = Layer.fresh(QuarantineRepository.layer).pipe(
+            Layer.provideMerge(secondaryDatabaseLayer)
+          )
+          const secondaryMetadata = Layer.fresh(ContentBlobMetadataRepository.layer).pipe(
+            Layer.provide(secondaryFoundation)
+          )
           const secondaryContentContext = yield* Layer.build(
             Layer.fresh(ContentStore.layer).pipe(
               Layer.provide(Layer.mergeAll(secondaryMetadata, gatedSecondaryBlobs, secondaryDatabaseLayer))
@@ -1250,8 +1255,13 @@ describe("workspace-scoped repositories", () => {
                 )
             })
           )
-          const secondaryFoundation = QuarantineRepository.layer.pipe(Layer.provideMerge(secondaryDatabaseLayer))
-          const secondaryMetadata = ContentBlobMetadataRepository.layer.pipe(Layer.provide(secondaryFoundation))
+          // Fresh: Layer.build reuses services already in the parent memo map, which would bind the primary database.
+          const secondaryFoundation = Layer.fresh(QuarantineRepository.layer).pipe(
+            Layer.provideMerge(secondaryDatabaseLayer)
+          )
+          const secondaryMetadata = Layer.fresh(ContentBlobMetadataRepository.layer).pipe(
+            Layer.provide(secondaryFoundation)
+          )
           const secondaryContentContext = yield* Layer.build(
             Layer.fresh(ContentStore.layer).pipe(
               Layer.provide(Layer.mergeAll(secondaryMetadata, secondaryBlobs, secondaryDatabaseLayer))

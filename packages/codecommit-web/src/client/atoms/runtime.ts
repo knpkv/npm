@@ -1,7 +1,7 @@
 import { Context, Effect, Layer } from "effect"
-import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http"
-import { HttpApiMiddleware } from "effect/unstable/httpapi"
-import { AtomHttpApi } from "effect/unstable/reactivity"
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
+import { HttpApiMiddleware } from "effect/http-api"
+import { AtomHttpApi } from "effect/reactivity"
 import { CodeCommitApi, OwnerSessionAuth } from "../../server/Api.js"
 import { ownerSessionReady, readOwnerCsrfToken } from "../ownerSession.js"
 

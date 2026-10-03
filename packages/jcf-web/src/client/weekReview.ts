@@ -1,5 +1,5 @@
 import { Effect, Exit, Predicate } from "effect"
-import { Atom, AtomRegistry } from "effect/unstable/reactivity"
+import { Atom, AtomRegistry } from "effect/reactivity"
 import type { ReadProgress, WeekPlanResponse, WeekScopeName, WriteResultResponse } from "../shared/contracts.js"
 import * as Api from "./api.js"
 import { type CalendarLayers, defaultCalendarLayers } from "./calendarProjection.js"

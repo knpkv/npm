@@ -3,10 +3,10 @@
  * CLI entry point for confluence-to-markdown.
  */
 import { NodeRuntime, NodeStdio, NodeTerminal } from "@effect/platform-node"
+import { Command } from "effect/cli"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Stdio from "effect/Stdio"
-import { Command } from "effect/unstable/cli"
 import pkg from "../package.json" with { type: "json" }
 import { handleError } from "./commands/errorHandler.js"
 import { AppLayer, AuthOnlyLayer, CloneLayer, FetchLayer, getLayerType, MinimalLayer } from "./commands/layers.js"

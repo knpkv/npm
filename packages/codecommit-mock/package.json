@@ -13,13 +13,13 @@
     "lint": "eslint \"{src,test}/**/*.ts\""
   },
   "dependencies": {
-    "@effect/platform-node": "4.0.0-rc.109",
+    "@effect/platform-node": "4.0.0",
     "@knpkv/codecommit-core": "workspace:^",
-    "effect": "4.0.0-rc.109"
+    "effect": "4.0.0"
   },
   "devDependencies": {
-    "@distilled.cloud/aws": "1.0.0-rc.4",
-    "@effect/vitest": "4.0.0-rc.109",
+    "@distilled.cloud/aws": "1.0.0-rc.13",
+    "@effect/vitest": "4.0.0",
     "@types/node": "^26.2.0",
     "tsx": "^4.23.12",
     "vitest": "catalog:"

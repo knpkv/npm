@@ -17,7 +17,7 @@
  */
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import * as Effect from "effect/Effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as ChildEnv from "../../src/ChildEnv.js"
 
 const program = Effect.gen(function*() {

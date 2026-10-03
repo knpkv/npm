@@ -11,7 +11,7 @@
  * @module
  */
 import type * as Domain from "@knpkv/codecommit-core/Domain.js"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as Atom from "effect/reactivity/Atom"
 import { ApiClient } from "./runtime.js"
 
 /**

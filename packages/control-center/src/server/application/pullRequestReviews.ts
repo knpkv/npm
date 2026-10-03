@@ -4,7 +4,7 @@ import * as Crypto from "effect/Crypto"
 import * as Data from "effect/Data"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
@@ -511,11 +511,11 @@ const makePullRequestReviews = Effect.gen(function*() {
       subject: target.subject
     }).pipe(Effect.mapError(unavailable))
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(json))
+      Base64.decode(Base64.encode(json))
     ).pipe(Effect.mapError(unavailable))
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(Effect.mapError(unavailable))
     return yield* Schema.decodeUnknownEffect(AgentContextFingerprint)(
-      `sha256:${Encoding.encodeHex(digest)}`
+      `sha256:${Hex.encode(digest)}`
     ).pipe(Effect.mapError(unavailable))
   })
 
@@ -739,7 +739,7 @@ const makePullRequestReviews = Effect.gen(function*() {
       Schema.fromJsonString(ReviewSuggestionRevisionPage)
     )(page).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(json))
+      Base64.decode(Base64.encode(json))
     ).pipe(Effect.mapError(() => new ApplicationInvalidRequest()))
     if (bytes.length > MAXIMUM_TARGET_HISTORY_BYTES) {
       return yield* new ApplicationInvalidRequest()
@@ -788,13 +788,13 @@ const makePullRequestReviews = Effect.gen(function*() {
     "PullRequestReviews.publicationContentDigest"
   )(function*(content: string) {
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(content))
+      Base64.decode(Base64.encode(content))
     ).pipe(Effect.mapError(unavailable))
     const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
       Effect.mapError(unavailable)
     )
     return yield* Schema.decodeUnknownEffect(ReviewSuggestionPublicationDigest)(
-      `sha256:${Encoding.encodeHex(digest)}`
+      `sha256:${Hex.encode(digest)}`
     ).pipe(Effect.mapError(unavailable))
   })
 

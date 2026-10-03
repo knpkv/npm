@@ -1,7 +1,7 @@
 import * as CodeCommitDomain from "@knpkv/codecommit-core/Domain.js"
 import * as Effect from "effect/Effect"
+import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import * as Schema from "effect/Schema"
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { PersonSourceIdentity, Role } from "../domain/actors.js"
 import {

@@ -1,5 +1,5 @@
 import { Effect, Predicate, Schema, Stream } from "effect"
-import type * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
+import type * as HttpClientResponse from "effect/http/HttpClientResponse"
 import { FleetResponseBodyError } from "./errors.js"
 import { fleetResponseBodyMaxBytes } from "./limits.js"
 

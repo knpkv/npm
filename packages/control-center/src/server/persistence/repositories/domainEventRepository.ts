@@ -3,7 +3,7 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import type { Success } from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
@@ -53,7 +53,7 @@ const DedupeSemantic = Schema.Struct({
 const semanticJson = Schema.fromJsonString(DedupeSemantic)
 const NO_EVENT_ROWS: ReadonlyArray<unknown> = []
 
-const encodeDigest = (bytes: Uint8Array): string => Encoding.encodeHex(bytes)
+const encodeDigest = (bytes: Uint8Array): string => Hex.encode(bytes)
 
 const metadataColumns = (metadata: AppendDomainEventInputType["metadata"]) => ({
   releaseId: metadata.releaseId ?? null,
@@ -78,7 +78,7 @@ const makeDomainEventRepository = Effect.gen(function*() {
 
   const digestText = Effect.fn("DomainEventRepository.digestText")(function*(value: string) {
     const bytes = yield* Effect.fromResult(
-      Encoding.decodeBase64(Encoding.encodeBase64(value))
+      Base64.decode(Base64.encode(value))
     ).pipe(
       Effect.mapError(() => new PersistenceOperationError({ operation: "domain-event.encode" }))
     )

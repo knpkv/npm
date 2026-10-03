@@ -40,7 +40,7 @@ import * as codecommit from "@distilled.cloud/aws/codecommit"
 import * as DistilledCredentials from "@distilled.cloud/aws/Credentials"
 import * as DistilledRegion from "@distilled.cloud/aws/Region"
 import { Data, Effect, Schema, SchemaGetter, Stream } from "effect"
-import { HttpClient } from "effect/unstable/http"
+import { HttpClient } from "effect/http"
 import { AwsClientConfig } from "../AwsClientConfig.js"
 import {
   Account,

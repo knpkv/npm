@@ -3,7 +3,7 @@
  *
  * @internal
  */
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as Atom from "effect/reactivity/Atom"
 import { HeadlessLayer } from "../../cli/layers.js"
 
 export const runtimeAtom = Atom.runtime(HeadlessLayer)

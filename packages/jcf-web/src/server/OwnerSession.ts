@@ -32,7 +32,7 @@ import {
 } from "@knpkv/browser-pairing"
 import type { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
 import { Clock, Context, Effect, Layer, Redacted, Ref, Schema } from "effect"
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "./Api.js"
 
 /** How long the printed bootstrap URL stays usable. Long enough to click, short enough to forget. */

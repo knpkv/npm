@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Cause, Effect, Sink, Stream } from "effect"
 import * as PlatformError from "effect/PlatformError"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import { HerdrPackContractError, runPackContractCommand } from "../scripts/pack-contract-command.js"
 
 interface FakeCommandResult {

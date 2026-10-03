@@ -98,13 +98,13 @@ const assertRuleDiagnostics = async ({ code, eslintInstance = eslint, expected, 
 
 const childEnvironmentRule = "local-rules/require-explicit-child-process-env-inheritance"
 await assertRuleDiagnostics({
-  code: 'import { ChildProcess } from "effect/unstable/process"; ChildProcess.make("git", args, { env })',
+  code: 'import { ChildProcess } from "effect/process"; ChildProcess.make("git", args, { env })',
   expected: 1,
   filePath: "scripts/child-env-invalid.mjs",
   ruleId: childEnvironmentRule
 })
 await assertRuleDiagnostics({
-  code: 'import { ChildProcess } from "effect/unstable/process"; ChildProcess.make("git", args, { env, extendEnv: false })',
+  code: 'import { ChildProcess } from "effect/process"; ChildProcess.make("git", args, { env, extendEnv: false })',
   expected: 0,
   filePath: "scripts/child-env-valid.mjs",
   ruleId: childEnvironmentRule
@@ -2621,10 +2621,10 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as Process from "effect/unstable/process/ChildProcess"
-    import { ChildProcess as AliasedProcess } from "effect/unstable/process"
-    import { make as makeProcess } from "effect/unstable/process/ChildProcess"
-    import * as BarrelProcess from "effect/unstable/process"
+    import * as Process from "effect/process/ChildProcess"
+    import { ChildProcess as AliasedProcess } from "effect/process"
+    import { make as makeProcess } from "effect/process/ChildProcess"
+    import * as BarrelProcess from "effect/process"
     Process.make("codex", ["exec"], {
       metadata: { env: options.environment, extendEnv: false },
       stdout: "pipe"
@@ -2645,14 +2645,14 @@ await assertRuleDiagnostics({
         extendEnv: false
       })
     }
-    export { ChildProcess } from "effect/unstable/process"
-    const dynamicallyLoaded = import("effect/unstable/process/ChildProcess")
-    const templateLoaded = import(\`effect/unstable/process/ChildProcess\`)
-    const moduleName = "effect/unstable/process/ChildProcess"
+    export { ChildProcess } from "effect/process"
+    const dynamicallyLoaded = import("effect/process/ChildProcess")
+    const templateLoaded = import(\`effect/process/ChildProcess\`)
+    const moduleName = "effect/process/ChildProcess"
     const computedLoaded = import(moduleName)
     import { createRequire as makeRequire } from "node:module"
     const require = makeRequire(import.meta.url)
-    const required = require("effect/unstable/process/ChildProcess")
+    const required = require("effect/process/ChildProcess")
   `,
   expected: 9,
   filePath: "packages/ai-codex/src/eslint-agent-environment-invalid.ts",
@@ -2663,7 +2663,7 @@ await assertRuleDiagnostics({
   code: `
     import { createRequire as makeRequire } from "module"
     const require = makeRequire(import.meta.url)
-    const ChildProcess = require("effect/unstable/process/ChildProcess")
+    const ChildProcess = require("effect/process/ChildProcess")
   `,
   expected: 1,
   filePath: "packages/ai-codex/src/commonjs-import-invalid.ts",
@@ -2711,7 +2711,7 @@ await assertRuleDiagnostics({
     const Process = await import("node:process")
     const Module = Process.getBuiltinModule("module")
     const require = Module.createRequire(import.meta.url)
-    const ChildProcess = require("effect/unstable/process/ChildProcess")
+    const ChildProcess = require("effect/process/ChildProcess")
     const runtime = process
     runtime.getBuiltinModule("module")
   `,
@@ -2736,7 +2736,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) =>
       ChildProcess.make("codex", ["exec"], {
         env: options.environment,
@@ -2757,7 +2757,7 @@ const aiClaudeEslint = new ESLint({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     export type { ChildProcess }
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make("codex", Object.freeze([...arguments_]), Object.freeze({
@@ -2773,7 +2773,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) =>
       Object.freeze(ChildProcess.make(
         (Object.assign(options.args, { 0: "--dangerously-bypass-safety" }), options.executable),
@@ -2791,7 +2791,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options): typeof options.args =>
       Object.freeze(ChildProcess.make("codex", Object.freeze([...options.args]), Object.freeze({
         env: Object.freeze({ ...options.environment }),
@@ -2805,7 +2805,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make("codex", arguments_, Object.freeze({
         env: Object.freeze({ ...options.environment }),
@@ -2820,7 +2820,7 @@ await assertRuleDiagnostics({
 await assertRuleDiagnostics({
   code: `
     import { Stream } from "effect"
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make("codex", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment }),
@@ -2835,7 +2835,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       const command = Object.freeze(ChildProcess.make("codex", ["exec"], Object.freeze({
         env: Object.freeze({ ...options.environment }),
@@ -2853,7 +2853,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       Object.assign(options["environ" + "ment"], unsafeEnvironment)
       return ChildProcess.make("codex", ["exec"], {
@@ -2869,7 +2869,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       Object.assign(options[environmentKey], unsafeEnvironment)
       return ChildProcess.make("codex", ["exec"], {
@@ -2885,7 +2885,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) =>
       ChildProcess.make("codex", ["exec"], {
         env: options.environment,
@@ -2900,7 +2900,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       options.environment.SECRET = "leak"
       return ChildProcess.make("codex", ["exec"], {
@@ -2916,7 +2916,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       Object.assign(options.environment, unsafeEnvironment)
       return ChildProcess.make("codex", ["exec"], {
@@ -2932,7 +2932,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       const environment = options.environment
       Object.assign(environment, unsafeEnvironment)
@@ -2949,7 +2949,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) =>
       ChildProcess.make("codex", ["exec"], {
         env: options.environment,
@@ -2964,7 +2964,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const makeCommand = (options, arguments_): ChildProcess.Command & { readonly args: typeof arguments_ } =>
       Object.freeze(ChildProcess.make("claude", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment }),
@@ -2979,7 +2979,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make(
         (inspect(arguments_), "claude"),
@@ -2997,7 +2997,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       options.environment = unsafeEnvironment
       return ChildProcess.make("codex", ["exec"], {
@@ -3013,7 +3013,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       ChildProcess.make("codex", ["exec"], {
         env: options.environment,
@@ -3034,7 +3034,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const wrapper = () => {
       const makeCommand = (options) =>
         ChildProcess.make("codex", ["exec"], {
@@ -3051,7 +3051,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       options = unsafeOptions
       return ChildProcess.make("codex", ["exec"], {
@@ -3067,7 +3067,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options) => {
       ChildProcess.make("codex", ["exec"], {
         metadata: { env: options.environment, extendEnv: false }
@@ -3090,7 +3090,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make("codex", Object.freeze([...arguments_]), Object.freeze({
         env: Object.freeze({ ...options.environment } as typeof options.environment),
@@ -3106,7 +3106,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+    import { ChildProcess, ChildProcessSpawner } from "effect/process"
     const makeCommand = (options, arguments_) =>
       Object.freeze(ChildProcess.make("claude", Object.freeze([...arguments_]), Object.freeze({
         extendEnv: false,
@@ -3120,9 +3120,9 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    export type { Command } from "effect/unstable/process/ChildProcess"
-    export type * from "effect/unstable/process/ChildProcess"
-    export { ChildProcessSpawner } from "effect/unstable/process"
+    export type { Command } from "effect/process/ChildProcess"
+    export type * from "effect/process/ChildProcess"
+    export { ChildProcessSpawner } from "effect/process"
     import type { Module } from "node:module"
   `,
   expected: 0,
@@ -3414,12 +3414,12 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as Encoding from "effect/Encoding"
+    import { Base64 } from "effect/encoding"
     import * as Result from "effect/Result"
     import * as Schema from "effect/Schema"
     const ArtifactBytes = Schema.String.check(
       Schema.makeFilter((value) => {
-        const decoded = Encoding.decodeBase64(value)
+        const decoded = Base64.decode(value)
         return Result.isSuccess(decoded) && decoded.success.byteLength <= 1_048_576
       })
     )
@@ -3431,14 +3431,14 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as Encoding from "effect/Encoding"
+    import { Base64 } from "effect/encoding"
     import * as Result from "effect/Result"
     import * as Schema from "effect/Schema"
     const ArtifactBytes = Schema.String.check(
       Schema.isMaxLength(1_398_104),
       Schema.isBase64(),
       Schema.makeFilter((value) => {
-        const decoded = Encoding.decodeBase64(value)
+        const decoded = Base64.decode(value)
         return Result.isSuccess(decoded) && decoded.success.byteLength <= 1_048_576
       })
     )
@@ -3450,8 +3450,8 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as Encoding from "effect/Encoding"
-    const decoded = Encoding.decodeBase64(providerValue)
+    import { Base64 } from "effect/encoding"
+    const decoded = Base64.decode(providerValue)
   `,
   expected: 0,
   filePath: "packages/control-center/src/server/eslint-base64-nonschema-valid.ts",
@@ -3587,7 +3587,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const inlineOptions = ChildProcess.make("assume", ["-cd", link, profile], {
       stdout: "inherit",
       env: { GRANTED_ALIAS_CONFIGURED: "true" }
@@ -3804,7 +3804,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as ChildProcess from "effect/unstable/process/ChildProcess"
+    import * as ChildProcess from "effect/process/ChildProcess"
     const namespaced = ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
   `,
   expected: 1,
@@ -3814,7 +3814,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const augmented = ChildProcess.make("assume", ["-cd", link, profile], {
       env: { GRANTED_ALIAS_CONFIGURED: "true" },
       extendEnv: true
@@ -3835,7 +3835,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const base = { env: { AWS_PROFILE: profile } }
     const viaSpread = ChildProcess.make("git", args, { ...base, stderr: "pipe" })
     const frozenBase = Object.freeze({ env: { AWS_PROFILE: profile } })
@@ -3850,7 +3850,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const safeBase = { env: { AWS_PROFILE: profile }, extendEnv: true }
     const viaSpread = ChildProcess.make("git", args, { ...safeBase, stderr: "pipe" })
     const splitBase = { env: { AWS_PROFILE: profile } }
@@ -3865,7 +3865,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { make } from "effect/unstable/process/ChildProcess"
+    import { make } from "effect/process/ChildProcess"
     const direct = make("git", args, { env: { AWS_PROFILE: profile } })
   `,
   expected: 1,
@@ -3875,7 +3875,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { make as spawn } from "effect/unstable/process/ChildProcess"
+    import { make as spawn } from "effect/process/ChildProcess"
     const aliasedBase = { env: { AWS_PROFILE: profile } }
     const aliased = spawn("git", args, { ...aliasedBase, stderr: "pipe" })
   `,
@@ -3886,7 +3886,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { make } from "effect/unstable/process/ChildProcess"
+    import { make } from "effect/process/ChildProcess"
     import { make as unrelatedMake } from "./unrelated.js"
     const augmented = make("git", args, { env: { AWS_PROFILE: profile }, extendEnv: true })
     const isolated = make("git", args, { env: gitEnvironment, extendEnv: false })
@@ -3900,7 +3900,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as Process from "effect/unstable/process"
+    import * as Process from "effect/process"
     const barrel = Process.ChildProcess.make("git", args, { env: { AWS_PROFILE: profile } })
     const barrelTwoArg = Process.ChildProcess.make("pbcopy", { env: { AWS_PROFILE: profile } })
   `,
@@ -3911,7 +3911,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import * as Process from "effect/unstable/process"
+    import * as Process from "effect/process"
     import * as Unrelated from "./unrelated.js"
     const barrel = Process.ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: true })
     const foreign = Unrelated.ChildProcess.make("git", args, { env: gitEnvironment })
@@ -3923,7 +3923,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const completed = { env: gitEnvironment }
     completed.extendEnv = true
     const viaMutation = ChildProcess.make("git", args, completed)
@@ -3938,8 +3938,8 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
-    import * as Process from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
+    import * as Process from "effect/process"
     const { make } = ChildProcess
     const destructured = make("git", args, { env: gitEnvironment })
     const { make: spawn } = ChildProcess
@@ -3956,7 +3956,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const Aliased = ChildProcess
     const explicit = Aliased.make("git", args, { env: gitEnvironment, extendEnv: true })
     let mutableAlias = ChildProcess
@@ -3972,7 +3972,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const literalKey = ChildProcess.make("git", args, { ["env"]: gitEnvironment })
     const templateKey = ChildProcess.make("git", args, { [\`env\`]: gitEnvironment })
     const computedUndefined = ChildProcess.make("git", args, { env: gitEnvironment, ["extendEnv"]: undefined })
@@ -3985,7 +3985,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     import * as Unrelated from "./unrelated-api.js"
     const bothComputed = ChildProcess.make("git", args, { ["env"]: gitEnvironment, ["extendEnv"]: true })
     const computedFalse = ChildProcess.make("git", args, { env: gitEnvironment, ["extendEnv"]: false })
@@ -4000,7 +4000,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const real = ChildProcess.make("git", args, { env: gitEnvironment })
   `,
   expected: 1,
@@ -4020,7 +4020,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const escaping = { env: gitEnvironment }
     configure(escaping)
     const viaHelper = ChildProcess.make("git", args, escaping)
@@ -4038,7 +4038,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const contained = { env: gitEnvironment }
     const viaContained = ChildProcess.make("git", args, contained)
   `,
@@ -4049,7 +4049,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const shared = { env: gitEnvironment }
     const first = ChildProcess.make("a", [], shared)
     const second = ChildProcess.make("b", [], shared)
@@ -4061,7 +4061,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const shared = { env: gitEnvironment, extendEnv: true }
     const first = ChildProcess.make("a", [], shared)
     const second = ChildProcess.make("b", [], shared)
@@ -4073,7 +4073,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const spawn = ChildProcess.make
     const extracted = spawn("git", args, { env: gitEnvironment })
   `,
@@ -4084,7 +4084,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     import * as Foreign from "./foreign-api.js"
     const spawn = ChildProcess.make
     const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })
@@ -4098,7 +4098,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const explicitUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: undefined })
     const voidUndefined = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: void 0 })
   `,
@@ -4109,7 +4109,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const isolated = ChildProcess.make("git", args, { env: gitEnvironment, extendEnv: false })
   `,
   expected: 0,
@@ -4119,7 +4119,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const late = { env: gitEnvironment }
     const afterCall = ChildProcess.make("git", args, late)
     configure(late)
@@ -4131,7 +4131,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const early = { env: gitEnvironment }
     configure(early)
     const beforeCall = ChildProcess.make("git", args, early)
@@ -4143,7 +4143,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const safeBase = { env: gitEnvironment, extendEnv: true }
     const overridden = ChildProcess.make("git", args, { ...safeBase, extendEnv: undefined })
     const bare = { env: gitEnvironment }
@@ -4157,7 +4157,7 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { ChildProcess } from "effect/unstable/process"
+    import { ChildProcess } from "effect/process"
     const safeBase = { env: gitEnvironment, extendEnv: true }
     const overriddenFalse = ChildProcess.make("git", args, { ...safeBase, extendEnv: false })
     const inherited = ChildProcess.make("git", args, { ...safeBase, stderr: "pipe" })
@@ -4172,8 +4172,8 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { make } from "effect/unstable/process/ChildProcess"
-    import { ChildProcess } from "effect/unstable/process"
+    import { make } from "effect/process/ChildProcess"
+    import { ChildProcess } from "effect/process"
     const spawn = make
     const viaImportAlias = spawn("git", args, { env: gitEnvironment })
     const extracted = ChildProcess.make
@@ -4190,8 +4190,8 @@ await assertRuleDiagnostics({
 
 await assertRuleDiagnostics({
   code: `
-    import { make } from "effect/unstable/process/ChildProcess"
-    import { ChildProcess } from "effect/unstable/process"
+    import { make } from "effect/process/ChildProcess"
+    import { ChildProcess } from "effect/process"
     import * as Foreign from "./foreign-api.js"
     const spawn = make
     const augmented = spawn("git", args, { env: gitEnvironment, extendEnv: true })

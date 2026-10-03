@@ -1,5 +1,5 @@
 import { Data, Predicate, Schema } from "effect"
-import * as AiError from "effect/unstable/ai/AiError"
+import * as AiError from "effect/ai/AiError"
 
 const MAX_DIAGNOSTIC_CHARACTERS = 2_048
 

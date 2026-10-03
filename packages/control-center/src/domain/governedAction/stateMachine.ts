@@ -23,13 +23,16 @@ import { GovernedActionEnvelopeDigest } from "./model.js"
 
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
 const SafeReason = Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(1_000))
-const boundedIdentifier = (name: string, maximumLength: number) =>
+const boundedIdentifier = <const Name extends string>(
+  name: Parameters<typeof Schema.brand<Name>>[0],
+  maximumLength: number
+) =>
   Schema.String.check(
     Schema.isTrimmed(),
     Schema.isNonEmpty(),
     Schema.isMaxLength(maximumLength),
     Schema.isPattern(/^[A-Za-z0-9._:/-]+$/u, { expected: "a bounded action identifier" })
-  ).pipe(Schema.brand(name))
+  ).pipe(Schema.brand<Name>(name))
 
 /** Complete persisted lifecycle states for a governed action. */
 export const GovernedActionState = Schema.Literals([

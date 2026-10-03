@@ -92,7 +92,7 @@ const parseRemoteString = (remoteUrl: string): CodeCommitRemote | null => {
 
 const CodeCommitRemoteFromString = Schema.String.pipe(
   Schema.decodeTo(CodeCommitRemoteValue, {
-    decode: SchemaGetter.transformOrFail((input, options) => {
+    decode: SchemaGetter.transformEffect((input, options) => {
       const parsed = parseRemoteString(input)
       return parsed === null
         ? Effect.fail(new SchemaIssue.InvalidValue({ expected: "a CodeCommit Git remote URL" }, input, options))

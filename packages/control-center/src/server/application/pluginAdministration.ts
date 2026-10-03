@@ -7,13 +7,13 @@ import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import type * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import type * as Scope from "effect/Scope"
-import type * as HttpClient from "effect/unstable/http/HttpClient"
 
 import * as Predicate from "effect/Predicate"
 import type {
@@ -1615,8 +1615,8 @@ export const makePluginAdministrationWithConnections = Effect.fn("PluginAdminist
     patchProviderAccount: ({ patch, providerAccountId, workspaceId }) =>
       patchProviderAccount(workspaceId, providerAccountId, patch),
     discoverAwsProfiles: Effect.fn("PluginAdministration.discoverAwsProfiles")(function*() {
-      const home = yield* Config.string("HOME").pipe(
-        Config.orElse(() => Config.string("USERPROFILE")),
+      const home = yield* Config.String("HOME").pipe(
+        Config.orElse(() => Config.String("USERPROFILE")),
         Effect.mapError(() => unavailable())
       )
       const profiles = yield* discoverAwsProfiles(home).pipe(

@@ -18,16 +18,16 @@ import {
   makeToolAgentAdapter,
   runToolAgent
 } from "@knpkv/ai-runtime"
+import * as Toolkit from "effect/ai/Toolkit"
 import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Duration from "effect/Duration"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 import * as Stream from "effect/Stream"
-import * as Toolkit from "effect/unstable/ai/Toolkit"
 
 import * as Predicate from "effect/Predicate"
 import {
@@ -382,7 +382,7 @@ const utf8Bytes = (
   providerId: ClaimedAgentJob["providerId"],
   value: string
 ): Effect.Effect<Uint8Array, AgentProviderError> =>
-  Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+  Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
     Effect.mapError(() => providerFailure(providerId, "protocol", "PR review text could not be encoded.", false))
   )
 
@@ -591,7 +591,7 @@ const stableSuggestionId = Effect.fn("PrReviewTaskExecutor.stableSuggestionId")(
     )
   )
   return yield* Schema.decodeUnknownEffect(PrReviewSuggestionId)(
-    `sha256:${Encoding.encodeHex(digest)}`
+    `sha256:${Hex.encode(digest)}`
   ).pipe(
     Effect.mapError(() => providerFailure(providerId, "protocol", "PR review suggestion identity was invalid.", false))
   )
@@ -773,7 +773,7 @@ const stableNoteId = Effect.fn("PrReviewTaskExecutor.stableNoteId")(function*(
     )
   )
   return yield* Schema.decodeUnknownEffect(PrReviewNoteId)(
-    `sha256:${Encoding.encodeHex(digest)}`
+    `sha256:${Hex.encode(digest)}`
   ).pipe(
     Effect.mapError(() => providerFailure(providerId, "protocol", "PR review note identity was invalid.", false))
   )
@@ -1161,7 +1161,7 @@ const makeExecutor = Effect.gen(function*() {
         )
       )
     )
-    const attemptId = Encoding.encodeHex(
+    const attemptId = Hex.encode(
       yield* cryptoService.digest(
         "SHA-256",
         yield* utf8Bytes(claim.providerId, `${claim.jobId}:${String(claim.attemptSequence)}`)

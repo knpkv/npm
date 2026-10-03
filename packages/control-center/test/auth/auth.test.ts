@@ -1,7 +1,8 @@
 import * as NodeServices from "@effect/platform-node/NodeServices"
 import { assert, describe, it } from "@effect/vitest"
 import { CsrfToken } from "@knpkv/browser-pairing/schema"
-import { Effect, Encoding, FileSystem, Layer, Option, Redacted, Result, Schema, Stdio, Stream } from "effect"
+import { Effect, FileSystem, Layer, Option, Redacted, Result, Schema, Stdio, Stream } from "effect"
+import { Base64 } from "effect/encoding"
 import * as TestClock from "effect/testing/TestClock"
 
 import { Actor } from "../../src/domain/actors.js"
@@ -50,7 +51,7 @@ const recoveryTestLayer = (config: Parameters<typeof authTestLayer>[0]) =>
   Layer.merge(authTestLayer(config), terminalRecoveryLayer(config))
 
 const terminalInputLayer = (input: string) =>
-  Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(input))).pipe(
+  Effect.fromResult(Base64.decode(Base64.encode(input))).pipe(
     Effect.map((bytes) => Stdio.layerTest({ stdin: Stream.make(bytes) }))
   )
 

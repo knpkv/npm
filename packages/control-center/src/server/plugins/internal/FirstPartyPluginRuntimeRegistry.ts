@@ -15,14 +15,14 @@ import * as Clock from "effect/Clock"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as FileSystem from "effect/FileSystem"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Path from "effect/Path"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
 
 import { NegotiatedPluginDescriptorV1 } from "../../../domain/plugins/descriptor.js"
 import type { ProviderId } from "../../../domain/sourceRevision.js"
@@ -753,13 +753,13 @@ const loadRuntime = Effect.fn("FirstPartyPluginRuntime.load")(function*(scope: P
 
 const runtimeDigest = Effect.fn("FirstPartyPluginRuntime.digest")(function*(value: string) {
   const cryptoService = yield* Crypto.Crypto
-  const bytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(value))).pipe(
+  const bytes = yield* Effect.fromResult(Base64.decode(Base64.encode(value))).pipe(
     Effect.mapError(() => configurationFailure("plugin-runtime-authority-encoding-failed"))
   )
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() => configurationFailure("plugin-runtime-authority-digest-failed"))
   )
-  return Encoding.encodeHex(digest)
+  return Hex.encode(digest)
 })
 
 const authorityLayer = Effect.fn("FirstPartyPluginRuntime.authorityLayer")(function*(

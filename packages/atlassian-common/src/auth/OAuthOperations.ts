@@ -20,8 +20,8 @@
  */
 import * as Clock from "effect/Clock"
 import * as Effect from "effect/Effect"
+import { HttpClient, HttpClientRequest } from "effect/http"
 import * as Schema from "effect/Schema"
-import { HttpClient, HttpClientRequest } from "effect/unstable/http"
 import { type OAuthConfig, type OAuthToken } from "../config/OAuthSchemas.js"
 import { unsafeCurrentTimeMillis } from "../internal/legacyWallClock.js"
 import { ME_URL, RESOURCES_URL, REVOKE_URL, TOKEN_URL } from "./OAuthEndpoints.js"
@@ -217,7 +217,6 @@ export const refreshToken = (
           status: response.status,
           ...(!(errorCode === undefined) && { errorCode })
         })
-      )
     }
 
     const body = yield* response.json.pipe(
@@ -271,7 +270,6 @@ export const revokeToken = (
           step: "revoke",
           cause: `Token revocation failed with status ${response.status}`
         })
-      )
     }
   })
 

@@ -16,10 +16,10 @@ const validManifest = {
   dependencies: {
     "@aws-sdk/client-codepipeline": "^3.1108.0",
     "@aws-sdk/credential-providers": "^3.1108.0",
-    "@effect/ai-openai-compat": "4.0.0-rc.109",
-    "@effect/platform-browser": "4.0.0-rc.109",
-    "@effect/platform-node": "4.0.0-rc.109",
-    "@effect/sql-libsql": "4.0.0-rc.109",
+    "@effect/ai-openai-compat": "4.0.0",
+    "@effect/platform-browser": "4.0.0",
+    "@effect/platform-node": "4.0.0",
+    "@effect/sql-libsql": "4.0.0",
     "@knpkv/ai-claude": "workspace:^",
     "@knpkv/ai-codex": "workspace:^",
     "@knpkv/ai-runtime": "workspace:^",
@@ -34,8 +34,8 @@ const validManifest = {
     "@knpkv/review": "workspace:^",
     "@knpkv/relay-product": "workspace:^",
     "@knpkv/rly": "workspace:^",
-    "@distilled.cloud/aws": "1.0.0-rc.4",
-    effect: "4.0.0-rc.109",
+    "@distilled.cloud/aws": "1.0.0-rc.13",
+    effect: "4.0.0",
     react: "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
@@ -57,11 +57,11 @@ const validManifest = {
 }
 
 const effectAlignmentCases: ReadonlyArray<readonly [keyof typeof validManifest.dependencies, string]> = [
-  ["@effect/ai-openai-compat", "@effect/ai-openai-compat must align with the pinned Effect RC"],
-  ["@effect/platform-browser", "@effect/platform-browser must align with the pinned Effect RC"],
-  ["@effect/platform-node", "@effect/platform-node must align with the pinned Effect RC"],
-  ["@effect/sql-libsql", "@effect/sql-libsql must align with the pinned Effect RC"],
-  ["effect", "effect must align with the pinned Effect RC"]
+  ["@effect/ai-openai-compat", "@effect/ai-openai-compat must align with the pinned Effect release"],
+  ["@effect/platform-browser", "@effect/platform-browser must align with the pinned Effect release"],
+  ["@effect/platform-node", "@effect/platform-node must align with the pinned Effect release"],
+  ["@effect/sql-libsql", "@effect/sql-libsql must align with the pinned Effect release"],
+  ["effect", "effect must align with the pinned Effect release"]
 ]
 
 describe("package contract", () => {

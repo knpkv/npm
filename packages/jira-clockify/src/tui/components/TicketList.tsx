@@ -5,7 +5,7 @@
  */
 import { useAtomValue } from "@effect/atom-react"
 import type { JSX } from "@opentui/react/jsx-runtime"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import type { TicketState } from "../../services/TicketService.js"
 import { ticketsAtom } from "../atoms/tickets.js"
 import { filterTextAtom, isFilteringAtom, selectedIndexAtom } from "../atoms/ui.js"

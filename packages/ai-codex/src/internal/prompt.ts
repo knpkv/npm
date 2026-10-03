@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import type * as Prompt from "effect/unstable/ai/Prompt"
+import type * as Prompt from "effect/ai/Prompt"
 import { invalidRequest } from "./errors.js"
 
 const renderParts = (

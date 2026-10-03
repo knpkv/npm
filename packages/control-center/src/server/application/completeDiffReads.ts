@@ -2,7 +2,7 @@ import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import * as Result from "effect/Result"
@@ -122,7 +122,7 @@ const anchorFor = Effect.fn("CompleteDiffReads.anchorFor")(function*(
   const digest = yield* cryptoService.digest("SHA-256", new TextEncoder().encode(material)).pipe(
     Effect.mapError(() => new PluginOutageFailure({ operation: "complete-diff-anchor-digest" }))
   )
-  return DiffFileAnchor.make(`sha256:${Encoding.encodeHex(digest)}`)
+  return DiffFileAnchor.make(`sha256:${Hex.encode(digest)}`)
 })
 
 const withConnection = <A>(
@@ -176,7 +176,7 @@ const sliceContent = (
   const start = Math.min(offset, bytes.byteLength)
   const end = Math.min(bytes.byteLength, start + length)
   return {
-    bytesBase64: Encoding.encodeBase64(bytes.slice(start, end)),
+    bytesBase64: Base64.encode(bytes.slice(start, end)),
     totalBytes: bytes.byteLength,
     unavailableReason: null
   }
@@ -295,7 +295,7 @@ export const makeCompleteDiffReads = (
               .pipe(Effect.map((content) => content satisfies CompleteDiffContentRange))
       }))
     if (content.unavailableReason !== null || content.bytesBase64 === null) return content
-    const bytes = yield* Effect.fromResult(Encoding.decodeBase64(content.bytesBase64)).pipe(
+    const bytes = yield* Effect.fromResult(Base64.decode(content.bytesBase64)).pipe(
       Effect.mapError(() => unavailable())
     )
     if (content.totalBytes !== bytes.byteLength || bytes.byteLength > MaximumContentBytes) {

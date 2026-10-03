@@ -7,11 +7,11 @@
  */
 import { describe, expect, it } from "@effect/vitest"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
+import * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Redacted from "effect/Redacted"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import type * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { type JiraApiCredential, make } from "../src/index.js"
 
 /** An http client that answers every request the same way and records what it was asked. */
@@ -96,7 +96,7 @@ describe("JiraApiClient credentials", () => {
       yield* client.getIssue("PROJ-1", undefined)
 
       // The exact RFC 7617 value for the configured email and token, on every request.
-      const expected = `Basic ${Encoding.encodeBase64("user@example.com:test-token")}`
+      const expected = `Basic ${Base64.encode("user@example.com:test-token")}`
       expect(requests[0]?.url).toBe("https://jira.test/rest/api/3/issue/PROJ-1")
       expect(requests.map((request) => request.headers.authorization)).toEqual([expected, expected])
     }))

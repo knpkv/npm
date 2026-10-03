@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Deferred, Effect, Exit, Fiber, Layer, Schema, Sink, Stream } from "effect"
+import { LanguageModel } from "effect/ai"
 import { PlatformError, SystemError } from "effect/PlatformError"
 import * as Predicate from "effect/Predicate"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as TestClock from "effect/testing/TestClock"
-import { LanguageModel } from "effect/unstable/ai"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { type ClaudeActivity, type ClaudeModelOptions, model } from "../src/index.js"
 
 // A test case is its own entry point: it composes exactly the layers that case needs and

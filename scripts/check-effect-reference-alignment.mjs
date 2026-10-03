@@ -11,7 +11,7 @@ import * as Path from "effect/Path"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const canonicalUpstreamUrl = "https://github.com/Effect-TS/effect.git"
 

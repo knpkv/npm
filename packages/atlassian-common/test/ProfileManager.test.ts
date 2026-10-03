@@ -4,9 +4,9 @@ import * as Clock from "effect/Clock"
 import * as Deferred from "effect/Deferred"
 import * as Fiber from "effect/Fiber"
 import * as FileSystem from "effect/FileSystem"
+import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Path from "effect/Path"
 import { SystemError } from "effect/PlatformError"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 import {
   type AtlassianToolDefinition,
   HomeDirectoryLive,

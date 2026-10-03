@@ -50,11 +50,11 @@
     "test:pack": "node scripts/packed.mjs"
   },
   "dependencies": {
-    "effect": "4.0.0-rc.109",
-    "@effect/platform-node": "4.0.0-rc.109"
+    "effect": "4.0.0",
+    "@effect/platform-node": "4.0.0"
   },
   "devDependencies": {
-    "@effect/vitest": "4.0.0-rc.109",
+    "@effect/vitest": "4.0.0",
     "@knpkv/rly": "workspace:^",
     "@types/node": "^26.2.0",
     "rimraf": "^6.1.3",

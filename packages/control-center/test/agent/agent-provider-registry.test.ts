@@ -8,10 +8,10 @@ import {
   type AgentRuntimeEvent
 } from "@knpkv/ai-runtime"
 import { Deferred, Duration, Effect, Fiber, Layer, Redacted, Result, Schema, Sink, Stream } from "effect"
+import { HttpClient, HttpClientResponse } from "effect/http"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as TestClock from "effect/testing/TestClock"
-import { HttpClient, HttpClientResponse } from "effect/unstable/http"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import { AgentModelId, AgentProviderCatalog, DurableAgentProviderId } from "../../src/api/agent.js"
 import { agentProviderRuntimeRegistryLayer, AgentRuntimeRegistry } from "../../src/server/agent/AgentRuntimeRegistry.js"

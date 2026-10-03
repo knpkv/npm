@@ -2,7 +2,7 @@ import { ConfigService, PRService } from "@knpkv/codecommit-core"
 import { AwsProfileName, AwsRegion } from "@knpkv/codecommit-core/Domain.js"
 import { Cause, Config, Effect, Option, Predicate, Schema, SubscriptionRef } from "effect"
 import * as FileSystem from "effect/FileSystem"
-import { HttpApiBuilder } from "effect/unstable/httpapi"
+import { HttpApiBuilder } from "effect/http-api"
 import { ApiError, CodeCommitApi } from "../Api.js"
 import { discoverReviewSkills } from "../review/ReviewSkillCatalog.js"
 
@@ -107,7 +107,7 @@ export const ConfigLive = HttpApiBuilder.group(CodeCommitApi, "config", (handler
       .handle("database", () =>
         Effect.gen(function*() {
           const fs = yield* FileSystem.FileSystem
-          const home = yield* Config.string("HOME").pipe(Config.orElse(() => Config.string("USERPROFILE")))
+          const home = yield* Config.String("HOME").pipe(Config.orElse(() => Config.String("USERPROFILE")))
           const path = `${home}/.codecommit/cache.db`
           const exists = yield* fs.exists(path).pipe(Effect.catchIf(() => true, () => Effect.succeed(false)))
           const stat = exists

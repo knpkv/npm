@@ -1,6 +1,6 @@
 import { Cause, Effect, Predicate, Stream } from "effect"
 import type { Duration } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { type ClaudeActivity, collectActivity } from "./activity.js"
 import { ClaudeFailureCause, transportFailure, transportToAiError } from "./errors.js"
 import type { ClaudeTransportError } from "./errors.js"

@@ -5,7 +5,7 @@
  */
 import { ClockifyApiClient } from "@knpkv/clockify-api-client"
 import { Console, Effect } from "effect"
-import { Argument as Args, Command, Flag as Options, Prompt } from "effect/unstable/cli"
+import { Argument as Args, Command, Flag as Options, Prompt } from "effect/cli"
 import { isTicketKey } from "../agent/sessions.js"
 import { ClockifyAuth } from "../services/ClockifyAuth.js"
 import { ConfigService, defaultJcfConfig, type JcfConfig } from "../services/ConfigService.js"
@@ -79,7 +79,7 @@ const configSetProject = Command.make(
         yield* Console.log("No projects found in Clockify workspace.")
         return
       }
-      const selected = yield* Prompt.select({
+      const selected = yield* Prompt.Select({
         message: "Default project:",
         choices: [
           ...projects.map((p) => ({ title: p.name, value: p.id })),
@@ -103,7 +103,7 @@ const configSetBillable = Command.make(
   () =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
-      const val = yield* Prompt.select({
+      const val = yield* Prompt.Select({
         message: "Default billable:",
         choices: [
           { title: "Yes", value: true },
@@ -117,7 +117,7 @@ const configSetBillable = Command.make(
 
 const configSetJql = Command.make(
   "jql",
-  { jql: Args.string("jql") },
+  { jql: Args.String("jql") },
   ({ jql }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
@@ -150,14 +150,14 @@ const normalisePrefix = (input: string): { readonly path: string } | { readonly 
   return { path: trimmed }
 }
 
-const removeOption = Options.boolean("remove").pipe(
+const removeOption = Options.Boolean("remove").pipe(
   Options.withDescription("Remove the entry instead of adding it"),
   Options.withDefault(false)
 )
 
 const configSetSessionRoot = Command.make(
   "session-root",
-  { dir: Args.string("dir"), remove: removeOption },
+  { dir: Args.String("dir"), remove: removeOption },
   ({ dir, remove }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
@@ -181,7 +181,7 @@ const configSetSessionRoot = Command.make(
 
 const configSetSessionTicket = Command.make(
   "session-ticket",
-  { dir: Args.string("dir"), ticket: Args.string("ticket").pipe(Args.optional), remove: removeOption },
+  { dir: Args.String("dir"), ticket: Args.String("ticket").pipe(Args.optional), remove: removeOption },
   ({ dir, remove, ticket }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
@@ -213,7 +213,7 @@ const configSetSessionTicket = Command.make(
 
 const configSetIdleCap = Command.make(
   "idle-cap",
-  { seconds: Args.string("seconds") },
+  { seconds: Args.String("seconds") },
   ({ seconds }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
@@ -229,7 +229,7 @@ const configSetIdleCap = Command.make(
 
 const configSetDwell = Command.make(
   "dwell",
-  { seconds: Args.string("seconds") },
+  { seconds: Args.String("seconds") },
   ({ seconds }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
@@ -251,7 +251,7 @@ const configSetDwell = Command.make(
 
 const configSetOwnership = Command.make(
   "ownership",
-  { mode: Args.string("assigned|any") },
+  { mode: Args.String("assigned|any") },
   ({ mode }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService
@@ -270,7 +270,7 @@ const configSetOwnership = Command.make(
 
 const configSetMine = Command.make(
   "mine",
-  { key: Args.string("ISSUE-KEY") },
+  { key: Args.String("ISSUE-KEY") },
   ({ key }) =>
     Effect.gen(function*() {
       const cfg = yield* ConfigService

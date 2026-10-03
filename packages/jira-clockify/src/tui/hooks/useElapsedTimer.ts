@@ -4,7 +4,7 @@
  * @internal
  */
 import { useAtomSet, useAtomValue } from "@effect/atom-react"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { useEffect, useRef } from "react"
 import type { TimerState } from "../../services/TimerService.js"
 import { elapsedAtom, timerStateAtom } from "../atoms/timer.js"

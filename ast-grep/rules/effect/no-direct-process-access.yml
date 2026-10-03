@@ -42,6 +42,6 @@ ignores:
 note: |
   Direct process access is hard to test and bypasses Effect runtime services.
 
-  In Effect code, use `effect/unstable/process` modules such as
+  In Effect code, use `effect/process` modules such as
   ChildProcess, ChildProcessSpawner, or the process-specific service you need.
   Keep process.exit and process argv/env reads at executable boundaries only.

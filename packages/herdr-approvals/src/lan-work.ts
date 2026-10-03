@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding, Redacted, Ref, Result, Schema } from "effect"
+import { Crypto, Effect, Redacted, Ref, Result, Schema } from "effect"
+import { Hex } from "effect/encoding"
 
 const pairingCodePattern = /^[0-9a-f]{64}$/u
 
@@ -147,7 +148,7 @@ const decodeGeneratedSession = Effect.fn("LanWork.decodeGeneratedSession")(funct
 
 const makeDigest = Effect.fn("LanWork.makeDigest")(function*(cryptoService: Crypto.Crypto, value: string) {
   return yield* cryptoService.digest("SHA-256", new TextEncoder().encode(value)).pipe(
-    Effect.map(Encoding.encodeHex),
+    Effect.map(Hex.encode),
     Effect.mapError(
       (cause) =>
         new LanWorkCryptoError({
@@ -168,7 +169,7 @@ const randomPairingCode = Effect.fn("LanWork.randomPairingCode")(function*(crypt
         })
     )
   )
-  return yield* decodeGeneratedCode(Encoding.encodeHex(bytes))
+  return yield* decodeGeneratedCode(Hex.encode(bytes))
 })
 
 const randomSessionToken = Effect.fn("LanWork.randomSessionToken")(function*(cryptoService: Crypto.Crypto) {
@@ -181,7 +182,7 @@ const randomSessionToken = Effect.fn("LanWork.randomSessionToken")(function*(cry
         })
     )
   )
-  return yield* decodeGeneratedSession(Encoding.encodeHex(bytes))
+  return yield* decodeGeneratedSession(Hex.encode(bytes))
 })
 
 export type LanWorkPairing = {

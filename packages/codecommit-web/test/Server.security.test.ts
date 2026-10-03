@@ -21,8 +21,8 @@ import {
   Stream,
   SubscriptionRef
 } from "effect"
+import { HttpServerResponse } from "effect/http"
 import * as TestClock from "effect/testing/TestClock"
-import { HttpServerResponse } from "effect/unstable/http"
 import { CodeCommitApi, OwnerSessionAuth, type PullRequestDiffContentResponse } from "../src/server/Api.js"
 import { commitConfigMutation } from "../src/server/handlers/config-live.js"
 import { encodeClientVisibleCommentLocations, makeDiffContentResponse } from "../src/server/handlers/prs-live.js"

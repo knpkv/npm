@@ -32,14 +32,14 @@ paths, credentials, and provider-native session data are never persisted.
 ## Structured tool loop
 
 `runToolAgent` adds a stateless multi-turn loop around any Effect AI
-`LanguageModel.Service`. The caller selects the model, supplies an already
+`LanguageModel.LanguageModel`. The caller selects the model, supplies an already
 handled Effect AI `Toolkit`, provides structured JSON context and a final
 `Schema`, and owns every executable tool:
 
 ```ts
 import { runToolAgent } from "@knpkv/ai-runtime"
 import { Effect, Schema, Stream } from "effect"
-import { LanguageModel, Tool, Toolkit } from "effect/unstable/ai"
+import { LanguageModel, Tool, Toolkit } from "effect/ai"
 
 const ReadFile = Tool.make("ReadFile", {
   description: "Read one project file",

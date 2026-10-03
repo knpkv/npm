@@ -1,7 +1,7 @@
 import * as Data from "effect/Data"
 import * as Effect from "effect/Effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import * as Stream from "effect/Stream"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
 
 export class HerdrPackContractError extends Data.TaggedError("HerdrPackContractError")<{
   readonly cause?: unknown

@@ -1,4 +1,4 @@
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Result from "effect/Result"
 import * as Schema from "effect/Schema"
 
@@ -6,8 +6,10 @@ import { Revision } from "../sourceRevision.js"
 import { UtcTimestamp } from "../utcTimestamp.js"
 import { PluginEntityReferenceV1 } from "./events.js"
 
-const boundedOpaque = (name: string, maximum: number) =>
-  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximum)).pipe(Schema.brand(name))
+const boundedOpaque = <const Name extends string>(name: Parameters<typeof Schema.brand<Name>>[0], maximum: number) =>
+  Schema.String.check(Schema.isTrimmed(), Schema.isNonEmpty(), Schema.isMaxLength(maximum)).pipe(
+    Schema.brand<Name>(name)
+  )
 
 const NonNegativeInteger = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
@@ -76,7 +78,7 @@ export const PluginPipelineArtifactRangeV1 = Schema.Struct({
     Schema.isMaxLength(MaximumArtifactRangeBase64Characters),
     Schema.isBase64(),
     Schema.makeFilter((value) => {
-      const decoded = Encoding.decodeBase64(value)
+      const decoded = Base64.decode(value)
       return Result.isSuccess(decoded) && decoded.success.byteLength <= MaximumArtifactRangeBytes
     }, { expected: `at most ${MaximumArtifactRangeBytes} base64-decoded bytes` })
   ),

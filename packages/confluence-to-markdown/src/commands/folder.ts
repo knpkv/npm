@@ -9,11 +9,11 @@
  * @internal
  */
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
+import { Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
-import { Command, Flag as Options } from "effect/unstable/cli"
 import { ConfluenceClient, type ConfluenceClientConfig, layer as ConfluenceClientLayer } from "../ConfluenceClient.js"
 import { ConfigError } from "../ConfluenceError.js"
 import { validateBaseUrl } from "./pageInput.js"
@@ -100,7 +100,6 @@ export const resolveParentId = (input: string, baseUrl: string): Effect.Effect<s
           message: `Could not read a parent id from --parent ${JSON.stringify(input)}. ` +
             `Expected a numeric id or a URL containing /pages/<id>/ or /folder/<id>/.`
         })
-      )
     }
     const parentOrigin = yield* originOfContentInput(input, "--parent")
     const targetOrigin = originOf(baseUrl)
@@ -111,7 +110,6 @@ export const resolveParentId = (input: string, baseUrl: string): Effect.Effect<s
             `Content ids are per-site, so this would nest under an unrelated container. ` +
             `Pass a parent from ${targetOrigin}, or its bare id if that is what you meant.`
         })
-      )
     }
     return parentId
   })
@@ -181,49 +179,49 @@ export const resolveFolderTarget = (
           message: `--base-url ${JSON.stringify(flagBaseUrl)} is a different site than the URL (${resolved}). ` +
             `The folder id belongs to the site in the URL.`
         })
-      )
     }
     return { baseUrl: resolved, id }
   })
 
-const folderIdOption = Options.string("folder-id").pipe(
+const folderIdOption = Options.String("folder-id").pipe(
   Options.withDescription("Confluence folder id (or a folder URL)"),
   Options.optional
 )
 
-const urlOption = Options.string("url").pipe(
+const urlOption = Options.String("url").pipe(
   Options.withDescription("Confluence folder URL"),
   Options.optional
 )
 
-const baseUrlOption = Options.string("base-url").pipe(
+const baseUrlOption = Options.String("base-url").pipe(
   Options.withDescription("Confluence Cloud base URL (e.g., https://yoursite.atlassian.net)")
 )
 
 // Optional wherever a folder URL can supply the site itself.
 const optionalBaseUrlOption = baseUrlOption.pipe(Options.optional)
 
-const jsonOption = Options.boolean("json").pipe(
+const jsonOption = Options.Boolean("json").pipe(
   Options.withDescription("Output as JSON"),
   Options.withDefault(false)
 )
 
-const spaceOption = Options.string("space").pipe(
+const spaceOption = Options.String("space").pipe(
   Options.withDescription("Numeric space id — the v2 API takes the id, not the space key")
 )
 
-const parentOption = Options.string("parent").pipe(
+const parentOption = Options.String("parent").pipe(
   Options.withDescription("Parent container id — a page or a folder"),
   Options.optional
 )
 
-const titleOption = Options.string("title").pipe(
+const titleOption = Options.String("title").pipe(
   Options.withDescription("Folder title")
 )
 
-const dryRunOption = Options.boolean("dry-run").pipe(
+const dryRunOption = Options.Boolean("dry-run").pipe(
   Options.withAlias("n"),
-  Options.withDescription("Report what would change without writing to Confluence")
+  Options.withDescription("Report what would change without writing to Confluence"),
+  Options.withDefault(false)
 )
 
 const validateSpaceId = (space: string) =>

@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest"
 import { Effect, Layer, Result, Schema } from "effect"
 import * as Crypto from "effect/Crypto"
 import * as DateTime from "effect/DateTime"
-import * as Encoding from "effect/Encoding"
+import { Hex } from "effect/encoding"
 
 import * as Predicate from "effect/Predicate"
 import { SessionSummary } from "../../src/api/session.js"
@@ -87,7 +87,7 @@ const digestRawRow = Effect.fn(
 )(function*<UnparsedInput>(row: UnparsedInput) {
   const serialized = yield* Effect.sync(() => JSON.stringify(row))
   const cryptoService = yield* Crypto.Crypto
-  return Encoding.encodeHex(
+  return Hex.encode(
     yield* cryptoService.digest("SHA-256", utf8Encoder.encode(serialized))
   )
 })

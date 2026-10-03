@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import * as Fiber from "effect/Fiber"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
@@ -431,7 +431,7 @@ describe("FakePlugin", () => {
                 readInventoryPage: () => Effect.succeed({ entries: [], nextCursor: null }),
                 readContentRange: () =>
                   Effect.succeed({
-                    bytesBase64: Encoding.encodeBase64("too large"),
+                    bytesBase64: Base64.encode("too large"),
                     totalBytes: 9,
                     unavailableReason: null
                   })

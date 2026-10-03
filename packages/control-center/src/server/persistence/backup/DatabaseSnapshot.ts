@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect"
-import type * as SqlClient from "effect/unstable/sql/SqlClient"
+import type * as SqlClient from "effect/sql/SqlClient"
 
 import { CURRENT_SCHEMA_VERSION, validateCurrentSchema } from "../schema.js"
 import { BackupBlobEntryV1, BackupBoundaryV1, type BackupManifestV1 } from "./BackupManifest.js"

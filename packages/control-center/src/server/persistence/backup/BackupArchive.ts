@@ -3,7 +3,7 @@ import type { Crypto } from "effect"
 import { Context, Effect, FileSystem, Layer, Option, Path, Predicate, Result } from "effect"
 import * as Cause from "effect/Cause"
 import type * as Scope from "effect/Scope"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 import {
   canonicalProspectiveDataRoot,

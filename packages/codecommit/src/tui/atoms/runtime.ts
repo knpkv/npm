@@ -14,9 +14,9 @@ import {
   withCodeCommitMock
 } from "@knpkv/codecommit-core/MockTransport.js"
 import { Effect, Layer } from "effect"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import * as Atom from "effect/unstable/reactivity/Atom"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
+import * as HttpClient from "effect/http/HttpClient"
+import * as Atom from "effect/reactivity/Atom"
 import { WorktreeService } from "../../WorktreeService.js"
 import {
   tuiApplicationScopeLayer,

@@ -16,9 +16,9 @@
  * @module
  */
 import { Context, Effect, Layer, Schema } from "effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
-import * as SqlSchema from "effect/unstable/sql/SqlSchema"
-import * as Statement from "effect/unstable/sql/Statement"
+import * as SqlClient from "effect/sql/SqlClient"
+import * as SqlSchema from "effect/sql/SqlSchema"
+import * as Statement from "effect/sql/Statement"
 import { CacheError } from "../CacheService/CacheError.js"
 import { DatabaseLive } from "../CacheService/Database.js"
 

@@ -1,5 +1,5 @@
 import * as Effect from "effect/Effect"
-import * as SqlClient from "effect/unstable/sql/SqlClient"
+import * as SqlClient from "effect/sql/SqlClient"
 
 /** Persist the retirement boundary so a recreated service cannot restart a migrated legacy row. */
 export default Effect.flatMap(

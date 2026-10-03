@@ -5,7 +5,7 @@ import type { Credentials, Region } from "@distilled.cloud/aws"
 import type { GetCommentsForPullRequestError } from "@distilled.cloud/aws/codecommit"
 import * as codecommit from "@distilled.cloud/aws/codecommit"
 import { Effect, Option, Schema, SchemaGetter, Stream } from "effect"
-import type { HttpClient } from "effect/unstable/http"
+import type { HttpClient } from "effect/http"
 import { type CommentThread, PRComment, type PRCommentLocation, RelativeFileVersion } from "../Domain.js"
 import { type GetCommentsForPullRequestParams, makeApiError, normalizeAuthor, withAwsContext } from "./internal.js"
 

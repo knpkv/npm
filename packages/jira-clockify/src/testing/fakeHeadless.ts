@@ -46,21 +46,22 @@ import {
   type JiraApiCredential
 } from "@knpkv/jira-api-client"
 import { JiraAuth } from "@knpkv/jira-cli/JiraAuth"
+import * as ByteSize from "effect/ByteSize"
 import type * as Cause from "effect/Cause"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as FileSystem from "effect/FileSystem"
+import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/http"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import { systemError } from "effect/PlatformError"
 import * as Predicate from "effect/Predicate"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as Queue from "effect/Queue"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
 import * as Terminal from "effect/Terminal"
-import { HttpClient, HttpClientError, HttpClientRequest, HttpClientResponse } from "effect/unstable/http"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 import { defaultSessionAgentSettings } from "../agent/agentSettings.js"
 import { LogToStderrLive } from "../cli/layers.js"
 import { layer as agentSessionReaderLayer } from "../services/AgentSessionReader.js"
@@ -459,7 +460,7 @@ const fileInfo = (type: FileSystem.File.Info["type"]): FileSystem.File.Info => (
   uid: Option.none(),
   gid: Option.none(),
   rdev: Option.none(),
-  size: FileSystem.Size(0),
+  size: ByteSize.bytes(0),
   blksize: Option.none(),
   blocks: Option.none()
 })
@@ -535,12 +536,12 @@ const fakeFileSystemLayer = (
   const syncedHandle = (type: FileSystem.File.Info["type"]): FileSystem.File => ({
     [FileSystem.FileTypeId]: FileSystem.FileTypeId,
     stat: Effect.succeed(fileInfo(type)),
-    seek: () => Effect.succeed(FileSystem.Size(0)),
+    seek: () => Effect.succeed(ByteSize.bytes(0)),
     sync: Effect.void,
-    read: () => Effect.succeed(FileSystem.Size(0)),
+    read: () => Effect.succeed(0),
     readAlloc: () => Effect.succeed(Option.none()),
     truncate: () => Effect.void,
-    write: (buffer) => Effect.succeed(FileSystem.Size(buffer.length)),
+    write: (buffer) => Effect.succeed(buffer.length),
     writeAll: () => Effect.void
   })
 
@@ -679,7 +680,7 @@ const fakeTerminalLayer = (
     Terminal.make({
       columns: Effect.succeed(options.columns),
       rows: Effect.succeed(24),
-      // Scoped in rc.109, and the queue ends with `Cause.Done` rather than a terminal-specific
+      // Scoped in Effect 4, and the queue ends with `Cause.Done` rather than a terminal-specific
       // error. An exhausted script is still what a missing TTY looks like to `Prompt`.
       readInput: Effect.gen(function*() {
         yield* Effect.sync(() => options.beforePromptInput?.(world))

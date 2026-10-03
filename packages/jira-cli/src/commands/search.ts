@@ -3,45 +3,45 @@
  *
  * @internal
  */
+import { Argument as Args, Command, Flag as Options } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
-import { Argument as Args, Command, Flag as Options } from "effect/unstable/cli"
 import { buildByVersionJql } from "../internal/jqlBuilder.js"
 import { IssueService } from "../IssueService.js"
 import { MarkdownWriter } from "../MarkdownWriter.js"
 
 // === Options ===
-const jqlArg = Args.string("jql").pipe(
+const jqlArg = Args.String("jql").pipe(
   Args.withDescription("JQL query to search for issues"),
   Args.optional
 )
 
-const byVersionOption = Options.string("by-version").pipe(
+const byVersionOption = Options.String("by-version").pipe(
   Options.withAlias("v"),
   Options.withDescription("Search by fix version (pre-defined query)"),
   Options.optional
 )
 
-const projectOption = Options.string("project").pipe(
+const projectOption = Options.String("project").pipe(
   Options.withAlias("p"),
   Options.withDescription("Filter by project key"),
   Options.optional
 )
 
-const outputDirOption = Options.directory("output-dir").pipe(
+const outputDirOption = Options.Directory("output-dir").pipe(
   Options.withAlias("o"),
   Options.withDescription("Output directory for markdown files"),
   Options.withDefault("./jira-tickets")
 )
 
-const formatOption = Options.choice("format", ["multi", "single"]).pipe(
+const formatOption = Options.Literals("format", ["multi", "single"]).pipe(
   Options.withAlias("f"),
   Options.withDescription("Output format: multi (one file per issue) or single (combined file)"),
   Options.withDefault("multi")
 )
 
-const maxResultsOption = Options.integer("max-results").pipe(
+const maxResultsOption = Options.Int("max-results").pipe(
   Options.withAlias("m"),
   Options.withDescription("Maximum number of results to fetch"),
   Options.withDefault(100)

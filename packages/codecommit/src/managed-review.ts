@@ -16,19 +16,19 @@ export interface ControlCenterOriginSettings {
 
 /** Load only settings needed by the winning origin-precedence branch. @internal */
 export const controlCenterOriginConfiguration = Effect.gen(function*() {
-  const override = yield* Config.option(Config.string("CODECOMMIT_CONTROL_CENTER_ORIGIN"))
+  const override = yield* Config.option(Config.String("CODECOMMIT_CONTROL_CENTER_ORIGIN"))
   if (Option.isSome(override) && override.value.trim().length > 0) {
     return { override: override.value, publicOrigin: "", host: "127.0.0.1", port: 4173 }
   }
-  const publicOrigin = yield* Config.option(Config.string("CONTROL_CENTER_PUBLIC_ORIGIN"))
+  const publicOrigin = yield* Config.option(Config.String("CONTROL_CENTER_PUBLIC_ORIGIN"))
   if (Option.isSome(publicOrigin) && publicOrigin.value.trim().length > 0) {
     return { override: "", publicOrigin: publicOrigin.value, host: "127.0.0.1", port: 4173 }
   }
   return {
     override: "",
     publicOrigin: "",
-    host: yield* Config.string("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
-    port: yield* Config.int("CONTROL_CENTER_PORT").pipe(Config.withDefault(4173))
+    host: yield* Config.String("CONTROL_CENTER_HOST").pipe(Config.withDefault("127.0.0.1")),
+    port: yield* Config.Int("CONTROL_CENTER_PORT").pipe(Config.withDefault(4173))
   }
 })
 

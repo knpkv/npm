@@ -1,5 +1,5 @@
+import { HttpApiEndpoint, HttpApiGroup } from "effect/http-api"
 import * as Schema from "effect/Schema"
-import { HttpApiEndpoint, HttpApiGroup } from "effect/unstable/httpapi"
 
 import { PluginConnectionId } from "../domain/identifiers.js"
 import { PluginDiffInventoryEntryV1 } from "../domain/plugins/events.js"

@@ -17,7 +17,7 @@
  */
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Hex } from "effect/encoding"
 import type * as PlatformError from "effect/PlatformError"
 import { ContentHash } from "./Brand.js"
 
@@ -29,7 +29,7 @@ const digestSha256 = (
   Effect.gen(function*() {
     const cryptoService = yield* Crypto.Crypto
     const digest = yield* cryptoService.digest("SHA-256", bytes)
-    return ContentHash(Encoding.encodeHex(digest))
+    return ContentHash(Hex.encode(digest))
   })
 
 /**

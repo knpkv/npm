@@ -1,8 +1,8 @@
 import * as BrowserCrypto from "@effect/platform-browser/BrowserCrypto"
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Schema from "effect/Schema"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
 
 import { makeControlCenterApiClient } from "../../api/client.js"
 import type { RelationshipRepairCandidates, RelationshipRepairProposalDraft } from "../../api/deliveryGraph.js"

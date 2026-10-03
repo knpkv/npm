@@ -16,8 +16,8 @@ import type {
   RlyDiffCodeViewProps
 } from "@knpkv/rly/diff"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
-import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient"
+import { Base64 } from "effect/encoding"
+import * as FetchHttpClient from "effect/http/FetchHttpClient"
 import * as Predicate from "effect/Predicate"
 import { forwardRef, lazy, type ReactElement, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react"
 
@@ -177,7 +177,7 @@ const entryForSuggestionAnchor = (
 
 const textFrom = (content: CompleteDiffContentRange): string | null => {
   if (content.unavailableReason !== null || content.bytesBase64 === null) return null
-  const decoded = Encoding.decodeBase64(content.bytesBase64)
+  const decoded = Base64.decode(content.bytesBase64)
   return decoded._tag === "Failure" ? null : new TextDecoder().decode(decoded.success)
 }
 

@@ -20,7 +20,7 @@ pnpm add @knpkv/atlassian-common
 
 ## OAuth2 + PKCE
 
-Uses Effect's platform `Crypto` service. PKCE code verifier/challenge use `effect/Encoding` for base64url.
+Uses Effect's platform `Crypto` service. PKCE code verifier/challenge use `effect/encoding/Base64Url` for base64url.
 
 ```typescript
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto"

@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64, Hex } from "effect/encoding"
 import * as Redacted from "effect/Redacted"
 import * as Schema from "effect/Schema"
 
@@ -9,18 +9,18 @@ const PREPARATION_DOMAIN = "governed-action/preparation/v1"
 const PERMIT_DOMAIN = "governed-action/permit/v1"
 const RECOVERY_DOMAIN = "governed-action/recovery/v1"
 
-const encodedToken = <const Brand extends string>(brand: Brand) =>
+const encodedToken = <const Brand extends string>(brand: Parameters<typeof Schema.brand<Brand>>[0]) =>
   Schema.String.check(
     Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase 256-bit secret" })
-  ).pipe(Schema.brand(brand))
+  ).pipe(Schema.brand<Brand>(brand))
 
-const redactedToken = <const Brand extends string>(brand: Brand, label: string) =>
-  Schema.RedactedFromValue(encodedToken(brand), { label, disallowEncode: true })
+const redactedToken = <const Brand extends string>(brand: Parameters<typeof Schema.brand<Brand>>[0], label: string) =>
+  Schema.RedactedFromValue(encodedToken<Brand>(brand), { label, disallowEncode: true })
 
-const encodedDigest = <const Brand extends string>(brand: Brand) =>
+const encodedDigest = <const Brand extends string>(brand: Parameters<typeof Schema.brand<Brand>>[0]) =>
   Schema.String.check(
     Schema.isPattern(/^[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
-  ).pipe(Schema.brand(brand))
+  ).pipe(Schema.brand<Brand>(brand))
 
 /** One-use capability that binds final preflight to an authorized action head. */
 export const GovernedActionPreparationToken = redactedToken(
@@ -83,7 +83,7 @@ const digestBytes = Effect.fn("GovernedActionExecutionToken.digestBytes")(functi
   bytes: Uint8Array
 ) {
   const cryptoService = yield* Crypto.Crypto
-  const domainBytes = yield* Effect.fromResult(Encoding.decodeBase64(Encoding.encodeBase64(domain))).pipe(
+  const domainBytes = yield* Effect.fromResult(Base64.decode(Base64.encode(domain))).pipe(
     Effect.mapError(() => new GovernedActionExecutionTokenError({ operation: "digest" }))
   )
   const input = new Uint8Array(domainBytes.byteLength + 1 + bytes.byteLength)
@@ -92,7 +92,7 @@ const digestBytes = Effect.fn("GovernedActionExecutionToken.digestBytes")(functi
   const digest = yield* cryptoService.digest("SHA-256", input).pipe(
     Effect.mapError(() => new GovernedActionExecutionTokenError({ operation: "digest" }))
   )
-  return Encoding.encodeHex(digest)
+  return Hex.encode(digest)
 })
 
 const issueBytes = Effect.fn("GovernedActionExecutionToken.issueBytes")(function*() {
@@ -100,14 +100,14 @@ const issueBytes = Effect.fn("GovernedActionExecutionToken.issueBytes")(function
   const bytes = yield* cryptoService.randomBytes(TOKEN_BYTES).pipe(
     Effect.mapError(() => new GovernedActionExecutionTokenError({ operation: "issue" }))
   )
-  return { bytes, encoded: Encoding.encodeHex(bytes) }
+  return { bytes, encoded: Hex.encode(bytes) }
 })
 
 const digestEncoded = Effect.fn("GovernedActionExecutionToken.digestEncoded")(function*(
   domain: string,
   encoded: string
 ) {
-  const bytes = yield* Effect.fromResult(Encoding.decodeHex(encoded)).pipe(
+  const bytes = yield* Effect.fromResult(Hex.decode(encoded)).pipe(
     Effect.mapError(() => new GovernedActionExecutionTokenError({ operation: "digest" }))
   )
   if (bytes.byteLength !== TOKEN_BYTES) {

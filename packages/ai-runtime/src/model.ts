@@ -7,12 +7,12 @@
 import * as Schema from "effect/Schema"
 import { AgentRuntimeMetadata } from "./cliMetadata.js"
 
-const boundedIdentifier = <const Brand extends string>(brand: Brand) =>
+const boundedIdentifier = <const Brand extends string>(brand: Parameters<typeof Schema.brand<Brand>>[0]) =>
   Schema.String.check(
     Schema.isTrimmed(),
     Schema.isNonEmpty(),
     Schema.isMaxLength(200)
-  ).pipe(Schema.brand(brand))
+  ).pipe(Schema.brand<Brand>(brand))
 
 /** Stable identifier for one configured agent provider. */
 export const AgentProviderId = boundedIdentifier("AgentProviderId")

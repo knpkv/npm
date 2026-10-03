@@ -9,7 +9,8 @@ import {
   issueSessionToken
 } from "@knpkv/browser-pairing"
 import type { FileSystem, Path } from "effect"
-import { Clock, Context, Crypto, DateTime, Effect, Encoding, Layer, Redacted, Schema } from "effect"
+import { Clock, Context, Crypto, DateTime, Effect, Layer, Redacted, Schema } from "effect"
+import { Hex } from "effect/encoding"
 
 import type { Actor, Role } from "../../domain/actors.js"
 import type { WorkspaceId } from "../../domain/identifiers.js"
@@ -103,7 +104,7 @@ const makeAuth = Effect.gen(function*() {
   const deriveRecoveredCsrfToken = Effect.fn("Auth.deriveRecoveredCsrfToken")(function*(
     sessionToken: Redacted.Redacted<SessionToken>
   ) {
-    const tokenBytes = yield* Effect.fromResult(Encoding.decodeHex(Redacted.value(sessionToken))).pipe(
+    const tokenBytes = yield* Effect.fromResult(Hex.decode(Redacted.value(sessionToken))).pipe(
       Effect.mapError(() => new CredentialRejectedError())
     )
     if (tokenBytes.byteLength !== TOKEN_BYTES) return yield* new CredentialRejectedError()
@@ -113,7 +114,7 @@ const makeAuth = Effect.gen(function*() {
     const digest = yield* cryptoService.digest("SHA-256", input).pipe(
       Effect.mapError(() => new AuthCryptoError())
     )
-    return yield* Schema.decodeUnknownEffect(CsrfToken)(Encoding.encodeHex(digest)).pipe(
+    return yield* Schema.decodeUnknownEffect(CsrfToken)(Hex.encode(digest)).pipe(
       Effect.mapError(() => new AuthCryptoError())
     )
   })

@@ -1,6 +1,6 @@
 import * as Crypto from "effect/Crypto"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64Url, Hex } from "effect/encoding"
 import * as Exit from "effect/Exit"
 import * as FileSystem from "effect/FileSystem"
 import * as Option from "effect/Option"
@@ -70,8 +70,8 @@ export const mapDataRootConfigurationError = Effect.fn("DataRootProtocol.mapData
 })
 
 export const boundDataRootMarkerContent = (claimBasename: string, targetBasename: string): string =>
-  `${DATA_ROOT_MARKER_V2_PREFIX}${Encoding.encodeBase64Url(claimBasename)}\ntarget-basename:${
-    Encoding.encodeBase64Url(targetBasename)
+  `${DATA_ROOT_MARKER_V2_PREFIX}${Base64Url.encode(claimBasename)}\ntarget-basename:${
+    Base64Url.encode(targetBasename)
   }\n`
 
 export class FreshDataRootClaimConflict extends Schema.TaggedError<FreshDataRootClaimConflict>()(
@@ -498,7 +498,7 @@ export const publishDataRootMarker = Effect.fn("DataRootProtocol.publishMarker")
   const markerContent = boundDataRootMarkerContent(claimBasename, targetBasename)
   yield* Effect.scoped(Effect.uninterruptible(Effect.gen(function*() {
     const random = yield* mapDataRootConfigurationError(cryptoService.randomBytes(16))
-    const pendingMarker = `${markerPath}.pending-${Encoding.encodeHex(random)}`
+    const pendingMarker = `${markerPath}.pending-${Hex.encode(random)}`
     yield* Effect.addFinalizer(() =>
       fileSystem.remove(pendingMarker, { force: true }).pipe(
         Effect.andThen(syncDataRootPath(dataRoot)),

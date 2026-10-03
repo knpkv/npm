@@ -9,15 +9,15 @@
  */
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
-import * as Encoding from "effect/Encoding"
+import { Base64 } from "effect/encoding"
 import { flow } from "effect/Function"
+import * as HttpClient from "effect/http/HttpClient"
+import type * as HttpClientError from "effect/http/HttpClientError"
+import * as HttpClientRequest from "effect/http/HttpClientRequest"
+import * as HttpClientResponse from "effect/http/HttpClientResponse"
 import * as Layer from "effect/Layer"
 import * as Redacted from "effect/Redacted"
 import type { SchemaError } from "effect/Schema"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import type * as HttpClientError from "effect/unstable/http/HttpClientError"
-import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest"
-import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse"
 import { ConfluenceApiConfig, type ConfluenceApiConfigContract } from "./ConfluenceApiConfig.js"
 import * as ConfluenceV1Api from "./generated/ConfluenceV1Api.js"
 import * as ConfluenceV2Api from "./generated/ConfluenceV2Api.js"
@@ -42,7 +42,7 @@ export interface ConfluenceApiClientContract {
 
 const authorizationHeader = (config: ConfluenceApiConfigContract): string =>
   config.auth.type === "basic"
-    ? `Basic ${Encoding.encodeBase64(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
+    ? `Basic ${Base64.encode(`${config.auth.email}:${Redacted.value(config.auth.apiToken)}`)}`
     : `Bearer ${Redacted.value(config.auth.accessToken)}`
 
 const apiBaseUrl = (config: ConfluenceApiConfigContract, version: "v1" | "v2"): string => {

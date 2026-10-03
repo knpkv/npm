@@ -57,7 +57,7 @@ application-owned typed tools and return a schema-validated result. The caller
 supplies:
 
 - Explicit instructions and JSON context.
-- One `LanguageModel.Service`; the loop performs no provider fallback.
+- One `LanguageModel.LanguageModel`; the loop performs no provider fallback.
 - An Effect AI `Toolkit.WithHandler`, which owns schema decoding and typed
   handler failures.
 - A final output `Schema`.

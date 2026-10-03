@@ -42,15 +42,15 @@ import * as Schema from "effect/Schema"
  *
  * @category Brand
  */
-export const makeBrandedString = <B extends string>(
-  name: B,
+export const makeBrandedString = <const B extends string>(
+  name: Parameters<typeof Schema.brand<B>>[0],
   pattern: RegExp
 ) => {
   type BrandedType = string & Brand.Brand<B>
 
   const brand = Brand.make<BrandedType>((s) => pattern.test(s) || `Invalid ${name}: ${s} does not match ${pattern}`)
 
-  const schema = Schema.String.check(Schema.isPattern(pattern)).pipe(Schema.brand(name))
+  const schema = Schema.String.check(Schema.isPattern(pattern)).pipe(Schema.brand<B>(name))
   const Type: BrandedType = undefined!
 
   return Object.assign(brand, {
@@ -75,12 +75,12 @@ export const makeBrandedString = <B extends string>(
  *
  * @category Brand
  */
-export const makeBrandedNonEmptyString = <B extends string>(name: B) => {
+export const makeBrandedNonEmptyString = <const B extends string>(name: Parameters<typeof Schema.brand<B>>[0]) => {
   type BrandedType = string & Brand.Brand<B>
 
   const brand = Brand.make<BrandedType>((s) => s.length > 0 || `${name} cannot be empty`)
 
-  const schema = Schema.NonEmptyString.pipe(Schema.brand(name))
+  const schema = Schema.NonEmptyString.pipe(Schema.brand<B>(name))
   const Type: BrandedType = undefined!
 
   return Object.assign(brand, {

@@ -59,13 +59,13 @@ import * as Context from "effect/Context"
 import * as Crypto from "effect/Crypto"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
+import * as HttpClient from "effect/http/HttpClient"
 import * as Layer from "effect/Layer"
 import * as Option from "effect/Option"
 import type * as PlatformError from "effect/PlatformError"
+import { ChildProcessSpawner } from "effect/process"
 import * as Redacted from "effect/Redacted"
 import * as Ref from "effect/Ref"
-import * as HttpClient from "effect/unstable/http/HttpClient"
-import { ChildProcessSpawner } from "effect/unstable/process"
 import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
 import { callbackUrl, startCallbackServer } from "./internal/oauthServer.js"
 import { openBrowser } from "./internal/openBrowser.js"
@@ -259,7 +259,6 @@ const make = Effect.gen(function*() {
             step: "authorize",
             cause: "OAuth not configured. Run 'jira auth configure' first."
           })
-        )
       }
       return config
     })
@@ -392,7 +391,6 @@ const make = Effect.gen(function*() {
             step: "authorize",
             cause: "No Jira sites found for this account"
           })
-        )
       }
 
       let site: (typeof sites)[number]
@@ -407,7 +405,6 @@ const make = Effect.gen(function*() {
                 step: "authorize",
                 cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
               })
-            )
           }
           site = matched
         } else {
@@ -532,7 +529,6 @@ const make = Effect.gen(function*() {
                   status,
                   errorCode
                 })
-              )
             })
           }
           return Effect.fail(error)

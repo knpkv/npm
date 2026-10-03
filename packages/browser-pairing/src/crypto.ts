@@ -1,4 +1,5 @@
-import { Crypto, Effect, Encoding, Redacted, Result, Schema } from "effect"
+import { Crypto, Effect, Redacted, Result, Schema } from "effect"
+import { Hex } from "effect/encoding"
 import { BrowserCredential, CredentialDigest, CsrfToken, PairingCode, SessionToken } from "./schema.js"
 
 const CREDENTIAL_BYTES = 32
@@ -16,7 +17,7 @@ const issueCredentialFor = <Credential>(
     const bytes = yield* cryptoService.randomBytes(CREDENTIAL_BYTES).pipe(
       Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
     )
-    const decoded = yield* decode(Encoding.encodeHex(bytes)).pipe(
+    const decoded = yield* decode(Hex.encode(bytes)).pipe(
       Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
     )
     return Redacted.make(decoded)
@@ -49,14 +50,14 @@ export const hashCredential = Effect.fn("BrowserPairing.hashCredential")(functio
   const decoded = yield* Schema.decodeUnknownEffect(BrowserCredential)(Redacted.value(credential)).pipe(
     Effect.mapError(() => new BrowserPairingError({ reason: "credential-rejected" }))
   )
-  const bytes = yield* Effect.fromResult(Encoding.decodeHex(decoded)).pipe(
+  const bytes = yield* Effect.fromResult(Hex.decode(decoded)).pipe(
     Effect.mapError(() => new BrowserPairingError({ reason: "credential-rejected" }))
   )
   const cryptoService = yield* Crypto.Crypto
   const digest = yield* cryptoService.digest("SHA-256", bytes).pipe(
     Effect.mapError(() => new BrowserPairingError({ reason: "crypto-failed" }))
   )
-  return CredentialDigest.make(Encoding.encodeHex(digest))
+  return CredentialDigest.make(Hex.encode(digest))
 })
 
 const fixedTimeEqual = (left: Uint8Array, right: Uint8Array): boolean => {
@@ -77,10 +78,10 @@ export const verifyCredentialDigest = Effect.fn("BrowserPairing.verifyCredential
     Effect.mapError(() => new BrowserPairingError({ reason: "credential-rejected" }))
   )
   const actual = yield* hashCredential(credential)
-  const actualBytes = yield* Effect.fromResult(Encoding.decodeHex(actual)).pipe(
+  const actualBytes = yield* Effect.fromResult(Hex.decode(actual)).pipe(
     Effect.mapError(() => new BrowserPairingError({ reason: "credential-rejected" }))
   )
-  const expectedBytes = yield* Effect.fromResult(Encoding.decodeHex(expected)).pipe(
+  const expectedBytes = yield* Effect.fromResult(Hex.decode(expected)).pipe(
     Effect.mapError(() => new BrowserPairingError({ reason: "credential-rejected" }))
   )
   if (!fixedTimeEqual(actualBytes, expectedBytes)) {
@@ -90,8 +91,8 @@ export const verifyCredentialDigest = Effect.fn("BrowserPairing.verifyCredential
 
 /** Compare validated digests without an early-exit string comparison. */
 export const credentialDigestsEqual = (left: CredentialDigest, right: CredentialDigest): boolean => {
-  const leftBytes = Encoding.decodeHex(left)
-  const rightBytes = Encoding.decodeHex(right)
+  const leftBytes = Hex.decode(left)
+  const rightBytes = Hex.decode(right)
   return Result.isSuccess(leftBytes) && Result.isSuccess(rightBytes) &&
     fixedTimeEqual(leftBytes.success, rightBytes.success)
 }
@@ -101,8 +102,8 @@ export const credentialValuesEqual = (left: string, right: string): boolean => {
   const decodedLeft = Schema.decodeUnknownResult(BrowserCredential)(left)
   const decodedRight = Schema.decodeUnknownResult(BrowserCredential)(right)
   if (Result.isFailure(decodedLeft) || Result.isFailure(decodedRight)) return false
-  const leftBytes = Encoding.decodeHex(decodedLeft.success)
-  const rightBytes = Encoding.decodeHex(decodedRight.success)
+  const leftBytes = Hex.decode(decodedLeft.success)
+  const rightBytes = Hex.decode(decodedRight.success)
   return Result.isSuccess(leftBytes) && Result.isSuccess(rightBytes) &&
     fixedTimeEqual(leftBytes.success, rightBytes.success)
 }

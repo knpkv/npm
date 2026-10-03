@@ -11,8 +11,8 @@ import {
   reviewProfileSkillLimit
 } from "@knpkv/codecommit-core/ReviewProfile.js"
 import { Exit, Option } from "effect"
-import type * as Atom from "effect/unstable/reactivity/Atom"
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult"
+import type * as Atom from "effect/reactivity/Atom"
+import * as AsyncResult from "effect/reactivity/AsyncResult"
 import { CheckIcon } from "lucide-react"
 import { type ReactElement, useCallback, useEffect, useRef, useState } from "react"
 import { useNavigate } from "react-router"

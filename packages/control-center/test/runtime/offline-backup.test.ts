@@ -2,7 +2,7 @@ import { NodeServices } from "@effect/platform-node"
 import { assert, describe, it } from "@effect/vitest"
 import type { FileSystem as FileSystemType } from "effect"
 import { Deferred, Effect, Fiber, FileSystem, Path, Ref, Result, Schema, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { createServer } from "node:net"
 
 import * as Predicate from "effect/Predicate"

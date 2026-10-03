@@ -24,17 +24,20 @@ import { ProviderId, Revision, SourceRevision } from "../sourceRevision.js"
 import { UtcTimestamp } from "../utcTimestamp.js"
 
 const PositiveInteger = Schema.Int.check(Schema.isGreaterThan(0))
-const boundedIdentifier = (name: string, maximumLength: number) =>
+const boundedIdentifier = <const Name extends string>(
+  name: Parameters<typeof Schema.brand<Name>>[0],
+  maximumLength: number
+) =>
   Schema.String.check(
     Schema.isTrimmed(),
     Schema.isNonEmpty(),
     Schema.isMaxLength(maximumLength),
     Schema.isPattern(/^[A-Za-z0-9._:/-]+$/u, { expected: "a bounded action identifier" })
-  ).pipe(Schema.brand(name))
-const sha256Digest = (name: string) =>
+  ).pipe(Schema.brand<Name>(name))
+const sha256Digest = <const Name extends string>(name: Parameters<typeof Schema.brand<Name>>[0]) =>
   Schema.String.check(
     Schema.isPattern(/^sha256:[0-9a-f]{64}$/u, { expected: "a lowercase SHA-256 digest" })
-  ).pipe(Schema.brand(name))
+  ).pipe(Schema.brand<Name>(name))
 const compareText = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0
 const isCanonicalText = (values: ReadonlyArray<string>): boolean =>
   values.every((value, index) => index === 0 || compareText(values[index - 1] ?? "", value) < 0)

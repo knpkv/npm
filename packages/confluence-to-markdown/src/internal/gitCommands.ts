@@ -6,9 +6,9 @@
  */
 import * as Effect from "effect/Effect"
 import * as Predicate from "effect/Predicate"
+import { ChildProcessSpawner } from "effect/process"
+import * as ChildProcess from "effect/process/ChildProcess"
 import * as EffectString from "effect/String"
-import { ChildProcessSpawner } from "effect/unstable/process"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
 import { GitError, GitNotInstalledError } from "../GitError.js"
 
 /**

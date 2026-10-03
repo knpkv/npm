@@ -2,9 +2,9 @@
 import { assert, describe, it } from "@effect/vitest"
 import { DateTime, Effect, Layer, Logger, Result, Schema, Sink, Stream, Tracer } from "effect"
 import * as ConfigProvider from "effect/ConfigProvider"
+import * as ChildProcess from "effect/process/ChildProcess"
+import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner"
 import * as TestClock from "effect/testing/TestClock"
-import * as ChildProcess from "effect/unstable/process/ChildProcess"
-import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner"
 
 import * as Predicate from "effect/Predicate"
 import { AgentThreadId, JobId, WorkspaceId } from "../../src/domain/identifiers.js"

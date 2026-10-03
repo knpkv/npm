@@ -3,7 +3,7 @@ import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node
 import { ReconcileService } from "@knpkv/jira-clockify"
 import { FAKE_HOME, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
 import { Effect, Layer, Queue, Ref, Schema } from "effect"
-import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http"
+import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import { application } from "../../src/server/HttpApplication.js"
 import {

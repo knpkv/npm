@@ -1,17 +1,17 @@
 # Effect Idiomaticity Refactor
 
 This refactor aligns the workspace with the Effect v4 APIs and lifecycle
-semantics used by the pinned `4.0.0-rc.109` release.
+semantics used by the pinned `4.0.0` release.
 
 ## Source of truth
 
-- The workspace dependencies are `4.0.0-rc.109`.
-- `repos/effect` is pinned to the exact canonical `effect@4.0.0-rc.109` release
+- The workspace dependencies are `4.0.0`.
+- `repos/effect` is pinned to the exact canonical `effect@4.0.0` release
   tag and must not follow `main`.
 - API availability was verified against the exact
-  `effect@4.0.0-rc.109` upstream tag, not only a moving checkout.
+  `effect@4.0.0` upstream tag, not only a moving checkout.
 - A moving upstream checkout may inform forward-looking style, but this
-  workspace must not depend on APIs absent from rc.109.
+  workspace must not depend on APIs absent from 4.0.0.
 
 ## Refactor guidance
 

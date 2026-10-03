@@ -1,5 +1,5 @@
+import * as HttpClientError from "effect/http/HttpClientError"
 import * as Predicate from "effect/Predicate"
-import * as HttpClientError from "effect/unstable/http/HttpClientError"
 
 /** Whether a review snapshot read can be retried without operator intervention. */
 export const isRecoverablePullRequestReviewFailure = <UnparsedInput>(failure: UnparsedInput): boolean =>
