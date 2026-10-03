@@ -5,6 +5,7 @@ import {
   limitLabel,
   type Measure,
   OTHER,
+  readingAt,
   stackUsage,
   stepPath
 } from "../src/client/chartModel.js"
@@ -131,5 +132,16 @@ describe("tileSnapshots", () => {
       reading: { _tag: "Unknown", reason: "AuthExpired" }
     }
     expect(tileSnapshots([snapshot("primary", 10, 500), failure], 100).map((tile) => tile.label)).toEqual(["*"])
+  })
+})
+
+describe("readingAt", () => {
+  const points: ReadonlyArray<{ readonly at: number; readonly reading: LimitSnapshot["reading"] }> = [
+    { at: 100, reading: { _tag: "Known", usedPercent: 65, resetsAt: 150 } }
+  ]
+
+  it("reports a reading until its window resets, and nothing after", () => {
+    expect(readingAt(points, 140)).toEqual(points[0]?.reading)
+    expect(readingAt(points, 170)).toBeUndefined()
   })
 })

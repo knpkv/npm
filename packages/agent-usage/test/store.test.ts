@@ -3,6 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer, Option, Schema } from "effect"
 import { SqlClient } from "effect/sql"
 import type { BalanceReading, LimitSnapshot, UsageEvent } from "../src/core/Model.js"
+import { buildLimitsReport } from "../src/core/Report.js"
 import { type Chunk, UsageStore } from "../src/core/Store.js"
 
 const TestStore = UsageStore.layer.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
@@ -123,6 +124,37 @@ describe("UsageStore", () => {
           [100_000, 100_000],
           [300_000, 400_000]
         ])
+      }))
+
+    it.effect("keeps two outages apart when a recovery came between them", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const claude = (label: string, observedAt: number, reading: LimitSnapshot["reading"]): LimitSnapshot => ({
+          agent: "claude",
+          machine: "outages",
+          source: "claude-oauth-usage",
+          label,
+          windowMinutes: label === "five_hour" ? 300 : null,
+          observedAt,
+          reading
+        })
+        const known: LimitSnapshot["reading"] = { _tag: "Known", usedPercent: 40, resetsAt: null }
+        const failed: LimitSnapshot["reading"] = { _tag: "Unknown", reason: "Fetch" }
+        yield* store.recordObservations([
+          claude("five_hour", 10, known),
+          claude("*", 20, failed),
+          claude("five_hour", 30, known),
+          claude("*", 40, failed),
+          claude("*", 45, failed),
+          claude("five_hour", 50, known)
+        ], [])
+        const stored = (yield* store.limitSnapshots({ from: 0, to: 100 })).filter((row) => row.machine === "outages")
+        const report = buildLimitsReport(stored, { from: 0, to: 100 })
+        expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
+          .toEqual(["Known", "Unknown", "Known", "Unknown", "Known"])
+        // Fetch, Fetch with no recovery between them is still one row.
+        expect(stored.filter((row) => row.label === "*").map((row) => [row.observedAt, row.confirmedAt]))
+          .toEqual([[20, 20], [40, 45]])
       }))
 
     it.effect("stores Unknown limit readings so a gap stays visible", () =>

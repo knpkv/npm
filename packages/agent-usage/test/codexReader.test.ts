@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@effect/vitest"
+import { attribute } from "../src/core/Attribution.js"
 import { initialCodexState, readCodex } from "../src/core/CodexReader.js"
 import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines, withOrdinal } from "./fixtures.js"
 
@@ -236,6 +237,23 @@ describe("readCodex", () => {
       initialCodexState
     )
     expect(result.events).toHaveLength(1)
+  })
+
+  it("drops the old branch when a turn moves to another worktree, so the new path books the work", () => {
+    const source = lines(
+      codexMeta("/w/worktrees/repo-old/RPS-12", "feat/RPS-12"),
+      codexTurn("gpt-6-sol", "/w/worktrees/repo-old/RPS-12"),
+      codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 }),
+      codexTurn("gpt-6-sol", "/w/worktrees/repo-new/RPS-82"),
+      codexTokenCount({ at: "2026-09-01T10:00:09.000Z", last: [1, 0, 1, 0], total: 4 })
+    )
+    const onePass = readCodex(file, source, initialCodexState)
+    expect(onePass.events.map((event) => attribute(event.attribution, new Set()).booking)).toEqual([
+      { _tag: "Ticket", key: "RPS-12" },
+      { _tag: "Ticket", key: "RPS-82" }
+    ])
+    const first = readCodex(file, source.slice(0, 3), initialCodexState)
+    expect(readCodex(file, source.slice(3), first.state).events).toEqual(onePass.events.slice(1))
   })
 
   it("follows each turn's working directory, keeping the last one when a turn names none", () => {

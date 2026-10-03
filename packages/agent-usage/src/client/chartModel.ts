@@ -141,3 +141,20 @@ export const stepPath = (
     if (until <= point.at) return ""
     return `M${x(point.at)},${y(point.reading.usedPercent)}H${x(until)}`
   }).join("")
+
+/**
+ * The reading in force at an instant: the last point at or before it, unless that reading's window
+ * has reset since, after which the level is not known.
+ */
+export const readingAt = (
+  points: ReadonlyArray<{ readonly at: number; readonly reading: LimitReading }>,
+  instant: number
+): LimitReading | undefined => {
+  let found: LimitReading | undefined
+  for (const point of points) {
+    if (point.at > instant) break
+    found = point.reading
+  }
+  if (found?._tag === "Known" && found.resetsAt !== null && found.resetsAt <= instant) return undefined
+  return found
+}

@@ -281,16 +281,19 @@ export class UsageStore extends Context.Service<UsageStore, {
             ORDER BY observed_at DESC LIMIT 1
           `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Existing)))))[0]
           if (previous !== undefined && previous.value === current) {
-            // An unchanged window still starts a new row when the whole source failed in between:
-            // that row is the recovery, and without it the failure would look permanent.
-            const failedSince = snapshot.label !== "*" && (yield* sql`
+            // An unchanged reading still starts a new row when the other kind of reading happened
+            // in between: a window after a source-wide failure is the recovery, and a failure after
+            // a successful window is a new outage. Merging either would hide the interval between.
+            const interrupted = (yield* sql`
               SELECT 1 AS found FROM limit_snapshots
               WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}
-                AND source = ${snapshot.source} AND label = '*'
-                AND observed_at > ${previous.observed_at} AND observed_at <= ${snapshot.observedAt}
+                AND source = ${snapshot.source}
+                AND ${snapshot.label === "*" ? sql`label <> '*'` : sql`label = '*'`}
+                AND (observed_at > ${previous.observed_at} OR confirmed_at > ${previous.observed_at})
+                AND observed_at <= ${snapshot.observedAt}
               LIMIT 1
             `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Found))))).length > 0
-            if (!failedSince) {
+            if (!interrupted) {
               yield* sql`
                 UPDATE limit_snapshots SET confirmed_at = max(confirmed_at, ${snapshot.observedAt})
                 WHERE agent = ${snapshot.agent} AND machine = ${snapshot.machine}

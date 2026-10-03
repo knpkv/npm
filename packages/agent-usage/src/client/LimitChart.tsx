@@ -7,23 +7,13 @@
 import { useRef, useState } from "react"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis } from "./axis.js"
-import { limitLabel, stepPath } from "./chartModel.js"
+import { limitLabel, readingAt, stepPath } from "./chartModel.js"
 import { describeReason, formatInstant, formatPercent } from "./format.js"
 import type { ViewRange } from "./range.js"
 import { useWidth } from "./useWidth.js"
 
 const HEIGHT = 180
 const PERCENT_TICKS = [0, 25, 50, 75, 100]
-
-/** The reading in force at an instant: the last point at or before it. */
-const readingAt = (series: LimitSeries, instant: number) => {
-  let found: LimitSeries["points"][number] | undefined
-  for (const point of series.points) {
-    if (point.at > instant) break
-    found = point
-  }
-  return found?.reading
-}
 
 export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>; readonly range: ViewRange }) => {
   const container = useRef<HTMLDivElement>(null)
@@ -85,7 +75,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
         <div className="usage-tooltip" role="status" style={{ left: cursor + 12, top: PLOT.top }}>
           <div className="usage-tooltip-title">{formatInstant(instant)}</div>
           {drawn.map((series) => {
-            const reading = readingAt(series, instant)
+            const reading = readingAt(series.points, instant)
             return (
               <div key={`${series.agent}:${series.label}`}>
                 {limitLabel(series.agent, series.label, series.windowMinutes)}:{" "}

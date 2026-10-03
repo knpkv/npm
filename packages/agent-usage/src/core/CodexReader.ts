@@ -247,8 +247,16 @@ export const readCodex = (
         break
       }
       case "turn_context": {
-        // Each turn says where it ran; a resumed session may have moved to another worktree.
-        state = { ...state, model: record.payload.model ?? state.model, cwd: record.payload.cwd ?? state.cwd }
+        // Each turn says where it ran; a resumed session may have moved to another worktree. The
+        // branch was read for the old directory, so a move drops it rather than book the new work to
+        // the old branch's ticket.
+        const cwd = record.payload.cwd ?? state.cwd
+        state = {
+          ...state,
+          model: record.payload.model ?? state.model,
+          cwd,
+          branch: cwd === state.cwd || state.cwd === "" ? state.branch : ""
+        }
         break
       }
       case "response_item": {
