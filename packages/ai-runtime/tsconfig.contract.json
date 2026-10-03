@@ -8,6 +8,7 @@
         "namespaceImportPackages": ["effect", "@effect/*"],
         "diagnosticSeverity": {
           "overriddenSchemaConstructor": "off",
+          "unstableApiUsage": "off",
           "strictBooleanExpressions": "suggestion",
           "strictEffectProvide": "suggestion"
         },
