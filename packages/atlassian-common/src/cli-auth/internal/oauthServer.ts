@@ -94,7 +94,6 @@ export const startCallbackServer = (
   Effect.gen(function*() {
     const factory = yield* HttpServerFactoryTag
     const deferred = yield* Deferred.make<string, OAuthError>()
-    const readyDeferred = yield* Deferred.make<void, OAuthError>()
     const scope = yield* Effect.scope
 
     // Map to OAuthError once, outside the retry, so a run of occupied ports
@@ -156,13 +155,11 @@ export const startCallbackServer = (
       })
     )
 
+    // Installs the handler in this scope and returns; a failure to install
+    // surfaces here rather than leaving the caller waiting on a dead server.
     yield* HttpServer.serveEffect(router.asHttpEffect()).pipe(
-      Effect.provideService(HttpServer.HttpServer, server),
-      Effect.tap(() => Deferred.succeed(readyDeferred, undefined)),
-      Effect.tapError((cause) => Deferred.fail(readyDeferred, new OAuthError({ step: "authorize", cause }))),
-      Effect.forkScoped
+      Effect.provideService(HttpServer.HttpServer, server)
     )
-    yield* Deferred.await(readyDeferred)
 
     return {
       codePromise: Deferred.await(deferred),

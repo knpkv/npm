@@ -2,6 +2,7 @@
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
 import { HttpClient, HttpClientRequest, HttpServer, HttpServerError } from "effect/http"
@@ -251,6 +252,25 @@ describe("oauthServer", () => {
           const error = yield* Fiber.join(codeReceiver).pipe(Effect.flip)
           expect(error.cause).toBe("access_denied")
         }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
+    it.effect("fails promptly when the handler cannot be installed", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const exit = yield* startCallbackServer("state").pipe(
+            Effect.provide(makeHttpServerFactory(() =>
+              Layer.succeed(
+                HttpServer.HttpServer,
+                HttpServer.make({
+                  address: NetAddress.inetAddressFromIpStringUnsafe("127.0.0.1", 8585),
+                  serve: () => Effect.die("handler-install-failed")
+                })
+              )
+            )),
+            Effect.exit
+          )
+          expect(exit._tag).toBe("Failure")
+          expect(String(exit._tag === "Failure" ? Cause.squash(exit.cause) : "")).toContain("handler-install-failed")
+        })
       ))
   })
 })
