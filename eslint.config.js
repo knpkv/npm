@@ -209,6 +209,13 @@ export default tseslint.config(
     }
   },
   {
+    // Shared OAuth flow used by every Atlassian CLI: narrow indexed values instead of asserting them.
+    files: ["packages/atlassian-common/src/cli-auth/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "error"
+    }
+  },
+  {
     files: ["packages/ai-claude/src/**/*.{ts,tsx}", "packages/ai-codex/src/**/*.{ts,tsx}"],
     rules: {
       "local-rules/require-isolated-agent-child-environment": "error"

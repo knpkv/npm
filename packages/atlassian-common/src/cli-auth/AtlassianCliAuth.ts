@@ -341,28 +341,18 @@ export const makeAtlassianCliAuth = Effect.fn("AtlassianCliAuth.make")(<MissingE
         yield* Console.log("Fetching accessible sites...")
         const sites = yield* getAccessibleResources(tokens.access_token).pipe(withHttp)
 
-        if (sites.length === 0) {
+        const [first, ...others] = sites
+        if (first === undefined) {
           return yield* new OAuthError({
             step: "authorize",
             cause: `No ${productName} sites found for this account`
           })
         }
 
-        let site: (typeof sites)[number]
-
-        if (sites.length > 1) {
+        let site = first
+        if (others.length > 0) {
           const siteUrl = loginOptions?.siteUrl
-          if (siteUrl !== undefined && siteUrl !== "") {
-            const matched = sites.find((s) => s.url === siteUrl)
-            if (matched === undefined) {
-              const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
-              return yield* new OAuthError({
-                step: "authorize",
-                cause: `Site '${siteUrl}' not found. Available sites:\n${available}`
-              })
-            }
-            site = matched
-          } else {
+          if (siteUrl === undefined || siteUrl === "") {
             yield* Console.log(`Multiple ${productName} sites found. Please select one:`)
             for (const s of sites) {
               yield* Console.log(`  - ${s.name}: ${s.url}`)
@@ -370,8 +360,15 @@ export const makeAtlassianCliAuth = Effect.fn("AtlassianCliAuth.make")(<MissingE
             yield* Console.log(`\nRun '${commandName} auth login --site <url>' to select a site`)
             return sites.map((s) => ({ id: s.id, name: s.name, url: s.url }))
           }
-        } else {
-          site = sites[0]!
+          const matched = sites.find((s) => s.url === siteUrl)
+          if (matched === undefined) {
+            const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
+            return yield* new OAuthError({
+              step: "authorize",
+              cause: `Site '${siteUrl}' not found. Available sites:\n${available}`
+            })
+          }
+          site = matched
         }
 
         yield* Console.log("Fetching user info...")
