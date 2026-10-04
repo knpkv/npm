@@ -247,7 +247,14 @@ describe("control socket", () => {
       Effect.gen(function*() {
         const path = yield* Path.Path
         for (
-          const url of ["file:///tmp/x", "--help", "http://example.com/#bootstrap_token=abc", "http://127.0.0.1:3112/"]
+          const url of [
+            "file:///tmp/x",
+            "--help",
+            "http://example.com/#bootstrap_token=abc",
+            "http://127.0.0.1:3112/",
+            // Loopback, but not a code the page could spend.
+            "http://127.0.0.1:3112/#bootstrap_token=abc"
+          ]
         ) {
           const directory = yield* store
           yield* fakeServer(path.join(directory, "serve.sock"), `${JSON.stringify({ url })}\n`)

@@ -57,12 +57,12 @@ the next start after a crash replaces the socket the dead server left. A Unix so
 about a hundred bytes (103 here): a store directory deeper than that still runs, one server at a
 time, but logs that `login` is unavailable, and `login` says to choose a shorter `AGENT_USAGE_HOME`.
 
-| `login` says                                 | Meaning                                                     |
-| -------------------------------------------- | ----------------------------------------------------------- |
-| `agent-usage is not running on this store`   | Nothing listens on the socket: start `serve` or its service |
-| `refused its control socket … : <reason>`    | Something other than the server's own socket is at the path |
-| `control socket … could not be used (<why>)` | The socket exists but this process may not connect to it    |
-| `did not answer with a link`                 | The server is an older version without `login`; restart it  |
+| `login` says                                 | Meaning                                                                                                                  |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `agent-usage is not running on this store`   | Nothing listens on the socket: start `serve` or its service, or restart a server older than `login`, which has no socket |
+| `refused its control socket … : <reason>`    | Something other than the server's own socket is at the path                                                              |
+| `control socket … could not be used (<why>)` | The socket exists but this process may not connect to it                                                                 |
+| `did not answer with a link`                 | Something answered on the socket with a reply that is not a sign-in link                                                 |
 
 Every failure exits nonzero and prints nothing on stdout, so `agent-usage login | xargs …` is safe.
 

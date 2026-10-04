@@ -30,7 +30,7 @@ export class LoginFailed extends Schema.TaggedError<LoginFailed>()("LoginFailed"
 export const describeLoginFailure = (failure: LoginFailure): string => {
   switch (failure._tag) {
     case "ServerNotRunning":
-      return "agent-usage is not running on this store. Start it with `agent-usage serve` (or its service), then run login again."
+      return "agent-usage is not running on this store. Start it with `agent-usage serve` (or its service), then run login again. If it is running, it is an older version without login: restart it."
     case "SocketPathUnsafe":
       return `agent-usage refused its control socket at ${failure.path}: ${failure.reason}. Remove it and restart the server.`
     case "SocketRefused":
@@ -57,7 +57,16 @@ const openInBrowser = Effect.fnUntraced(function*(url: string, platform: string)
     return yield* Console.error(`agent-usage: cannot open a browser on ${platform}; open the link above.`)
   }
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const code = yield* spawner.exitCode(ChildProcess.make(opener, [url])).pipe(Effect.result)
+  // In this process's group, not one of its own: the opener's group is killed when it is reaped,
+  // which would take the browser it just started with it. Its output is not ours to hold open
+  // either: the browser inherits it and would keep login waiting for as long as it runs.
+  const opening = ChildProcess.make(opener, [url], {
+    detached: false,
+    stdin: "ignore",
+    stdout: "ignore",
+    stderr: "ignore"
+  })
+  const code = yield* spawner.exitCode(opening).pipe(Effect.result)
   if (code._tag === "Failure" || code.success !== 0) {
     yield* Console.error(`agent-usage: ${opener} could not open the link; open it yourself.`)
   }

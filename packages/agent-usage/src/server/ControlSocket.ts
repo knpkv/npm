@@ -23,9 +23,11 @@
  */
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
+import { PairingCode } from "@knpkv/browser-pairing/schema"
 import { Duration, Effect, FileSystem, Option, Path, Predicate, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import type { Socket, SocketServer } from "effect/socket"
+import { prepareStoreDirectory } from "../core/Database.js"
 import { isLoopbackHostname, mintBootstrapUrl, type OwnerSessionSecretsContract } from "./OwnerSession.js"
 
 export const SOCKET_FILE = "serve.sock"
@@ -93,12 +95,18 @@ export class LoginReplyInvalid extends Schema.TaggedError<LoginReplyInvalid>()("
   reply: Schema.String
 }) {}
 
-/** A sign-in link as this server mints them: plain HTTP, a loopback host, the code in the fragment. */
+const isPairingCode = Schema.is(PairingCode)
+
+/**
+ * A sign-in link as this server mints them: plain HTTP, a loopback host, and in the fragment a code
+ * of the shape the page will accept.
+ */
 const isLoginUrl = (value: string): boolean => {
   if (!URL.canParse(value)) return false
   const url = new URL(value)
+  const prefix = "#bootstrap_token="
   return url.protocol === "http:" && isLoopbackHostname(url.hostname) && url.pathname === "/" &&
-    url.search === "" && /^#bootstrap_token=[^&=#]+$/u.test(url.hash)
+    url.search === "" && url.hash.startsWith(prefix) && isPairingCode(url.hash.slice(prefix.length))
 }
 
 const LoginUrl = Schema.String.check(
@@ -232,6 +240,8 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   listening: Effect.Effect<void>
 ) {
   const fs = yield* FileSystem.FileSystem
+  // The directory must be the store's, checked, before its lock is taken inside it.
+  yield* prepareStoreDirectory(directory)
   const self = yield* holdStoreLock(directory)
   const located = yield* Effect.result(socketPathFor(directory))
   if (located._tag === "Failure") {

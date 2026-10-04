@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Option, Schema } from "effect"
 import { spawn, spawnSync } from "node:child_process"
-import { chmodSync, mkdtempSync, rmSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { createServer } from "node:net"
 import { join } from "node:path"
 import { LoginReplyInvalid, ServerNotRunning, SocketPathUnsafe, SocketRefused } from "../src/server/ControlSocket.js"
@@ -9,7 +9,10 @@ import { describeLoginFailure, openerFor } from "../src/server/Login.js"
 
 describe("login messages", () => {
   it("tells the owner what to do about each failure", () => {
-    expect(describeLoginFailure(new ServerNotRunning({ path: "/s" }))).toContain("agent-usage serve")
+    const notRunning = describeLoginFailure(new ServerNotRunning({ path: "/s" }))
+    expect(notRunning).toContain("agent-usage serve")
+    // A server from before login has no socket: say so rather than invite a second one.
+    expect(notRunning).toContain("older version")
     expect(describeLoginFailure(new SocketPathUnsafe({ path: "/s", reason: "it is a symbolic link" })))
       .toContain("it is a symbolic link")
     expect(describeLoginFailure(new SocketRefused({ path: "/s", reason: "EACCES" }))).toContain("EACCES")
@@ -45,8 +48,15 @@ describe("agent-usage login against a running server", () => {
     const empty = mkdtempSync("/tmp/au-roots-")
     try {
       // Only what the process needs: an empty home, so no real transcripts or credentials are read.
+      // A stand-in browser opener that, like xdg-open, starts the browser and returns at once.
+      const bin = join(empty, "bin")
+      mkdirSync(bin)
+      const browserPid = join(empty, "browser.pid")
+      for (const opener of ["xdg-open", "open"]) {
+        writeFileSync(join(bin, opener), `#!/bin/sh\nsleep 30 &\necho $! > ${browserPid}\n`, { mode: 0o755 })
+      }
       const env = {
-        PATH: process.env["PATH"] ?? "",
+        PATH: `${bin}:${process.env["PATH"] ?? ""}`,
         HOME: empty,
         USER: "agent-usage-test",
         AGENT_USAGE_HOME: join(home, "store"),
@@ -73,6 +83,12 @@ describe("agent-usage login against a running server", () => {
         expect(second.status).toBe(0)
         expect(first.stdout.trim()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap_token=/u)
         expect(second.stdout.trim()).not.toBe(first.stdout.trim())
+        // --open hands the link to the opener, and the browser it started outlives login.
+        const opened = spawnSync(process.execPath, [...tsx, "login", "--open"], { env, encoding: "utf8" })
+        expect(opened.status).toBe(0)
+        const browser = Number(readFileSync(browserPid, "utf8").trim())
+        expect(() => process.kill(browser, 0)).not.toThrow()
+        process.kill(browser, "SIGTERM")
         // A second server on the same store refuses to start, on another port or on the same one.
         for (const port of [String(await freePort()), env.PORT]) {
           const rival = spawnSync(process.execPath, [...tsx, "serve"], {

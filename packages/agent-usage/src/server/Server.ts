@@ -49,17 +49,15 @@ export const makeServer = (options: AgentUsageServerOptions) =>
       const hostname = yield* Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1")
       // Opened once the HTTP listener is up: the control socket mints nothing before then.
       const listening = yield* Deferred.make<void>()
-      const store = databaseLayer(options.config.storeDirectory)
-      // The login socket, in the store directory the store layer has just checked is owner-only.
-      // It holds the store's lock and comes up before the HTTP listener, so a second server on
-      // this store stops before binding a port or reading anything.
+      // The store's lock and login socket. Everything that touches the store or binds a port waits
+      // for it, so a second server on this store stops before reading anything or binding.
       const control = Layer.effectDiscard(
         controlSocket(options.config.storeDirectory, options.security, Deferred.await(listening))
       ).pipe(
-        Layer.provide(store),
         Layer.provide(Reactivity.layer),
         Layer.provide(NodeServices.layer)
       )
+      const store = databaseLayer(options.config.storeDirectory).pipe(Layer.provide(control))
       const services = Layer.mergeAll(
         store,
         RuntimeState.layer(options.config.roots.machine, options.config.projects)

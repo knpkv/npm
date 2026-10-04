@@ -35,7 +35,11 @@ const refuseSymlink = (fs: FileSystem.FileSystem, path: string) =>
     })
   )
 
-const prepareDirectory = Effect.fnUntraced(function*(directory: string) {
+/**
+ * Checks the store directory the way the store needs it: no symlink, `0700`, created so when
+ * missing. Runs before the store's lock is taken, and again when the store opens.
+ */
+export const prepareStoreDirectory = Effect.fnUntraced(function*(directory: string) {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   if (path.sep !== "/") return yield* fail("secure.platform", { sep: path.sep })
@@ -82,7 +86,7 @@ export const databaseLayer = (
   directory: string
 ): Layer.Layer<UsageStore, StoreError, FileSystem.FileSystem | Path.Path> =>
   Layer.unwrap(Effect.gen(function*() {
-    const { filename, files } = yield* prepareDirectory(directory)
+    const { filename, files } = yield* prepareStoreDirectory(directory)
     return UsageStore.layer.pipe(
       Layer.provide(SqliteClient.layer({ filename })),
       Layer.tap(() => restrictFiles(files))
