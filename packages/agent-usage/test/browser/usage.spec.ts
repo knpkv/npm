@@ -56,6 +56,19 @@ test("changing the agent filter drops a picked booking, so the chart is never le
   await expect(page.getByRole("heading", { name: "Usage by booking", exact: true })).toBeVisible()
 })
 
+test("a reload without a working session says how to get back in instead of showing empty charts", async ({ page }) => {
+  await page.goto("/")
+  await expect(page.getByText("Could not sign in")).toBeVisible()
+})
+
+test("every limit reading is also available as a table, without hovering", async ({ page }) => {
+  await signIn(page)
+  await page.getByText("Limit readings as a table").click()
+  const table = page.locator(".usage-readings table")
+  await expect(table.getByRole("rowheader", { name: "Claude 5h" })).toBeVisible()
+  await expect(table).toContainText("42%")
+})
+
 test("the page fits a phone without horizontal page scroll", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await signIn(page)

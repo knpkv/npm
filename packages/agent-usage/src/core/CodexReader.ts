@@ -22,7 +22,7 @@
  *
  * @module
  */
-import { Option, Schema } from "effect"
+import { Option, Predicate, Schema } from "effect"
 import { codexHumanText, singleTicket } from "./Attribution.js"
 import { classifyCodexCredits, CodexCredits } from "./Balances.js"
 import { type BalanceReading, BalanceValue, Count, LimitReading, type LimitSnapshot, type UsageEvent } from "./Model.js"
@@ -86,6 +86,8 @@ export const CodexReaderState = Schema.Struct({
   historyStart: Schema.NullOr(Schema.Int),
   /** A subagent's rollout: its user items are the parent agent delegating, not the human typing. */
   delegated: Schema.Boolean,
+  /** The rollout writes the human's prompts as user_message events; its response items are copies. */
+  userEvents: Schema.Boolean,
   keptPrimary: Kept,
   keptSecondary: Kept,
   keptCredits: Kept
@@ -101,6 +103,7 @@ export const initialCodexState: CodexReaderState = {
   ownSession: null,
   historyStart: null,
   delegated: false,
+  userEvents: false,
   keptPrimary: null,
   keptSecondary: null,
   keptCredits: null
@@ -145,6 +148,9 @@ const RolloutLine = Schema.Union([
       id: Schema.optionalKey(Schema.String),
       subagent_history_start_ordinal: Schema.optionalKey(Schema.NullOr(Schema.Int)),
       thread_source: Schema.optionalKey(Schema.NullOr(Schema.String)),
+      source: Schema.optionalKey(
+        Schema.NullOr(Schema.Union([Schema.String, Schema.Struct({ subagent: Schema.optionalKey(Schema.Unknown) })]))
+      ),
       parent_thread_id: Schema.optionalKey(Schema.NullOr(Schema.String)),
       cwd: Schema.optionalKey(Schema.NullOr(Schema.String)),
       git: Schema.optionalKey(
@@ -173,6 +179,12 @@ const RolloutLine = Schema.Union([
     type: Schema.Literal("event_msg"),
     ordinal: Schema.optionalKey(Schema.Int),
     timestamp: Schema.String,
+    payload: Schema.Struct({ type: Schema.Literal("user_message"), message: Schema.String })
+  }),
+  Schema.Struct({
+    type: Schema.Literal("event_msg"),
+    ordinal: Schema.optionalKey(Schema.Int),
+    timestamp: Schema.String,
     payload: Schema.Struct({
       type: Schema.Literal("token_count"),
       info: Schema.optionalKey(Schema.NullOr(Schema.Struct({
@@ -192,7 +204,7 @@ const encodeBalance = Schema.encodeSync(Schema.fromJsonString(BalanceValue))
 const decodeLine = Schema.decodeUnknownOption(Schema.fromJsonString(RolloutLine))
 
 /** Lines a decode is spent on; everything else in a rollout is conversation or tool traffic. */
-const RELEVANT = ["\"session_meta\"", "\"turn_context\"", "\"token_count\"", "\"role\":\"user\""]
+const RELEVANT = ["\"session_meta\"", "\"turn_context\"", "\"token_count\"", "\"role\":\"user\"", "\"user_message\""]
 const mayMatter = (text: string): boolean => RELEVANT.some((marker) => text.includes(marker))
 
 /** User-role response items that fail to decode are other item kinds; only these count as damage. */
@@ -273,6 +285,7 @@ export const readCodex = (
           ownSession: own,
           historyStart: state.historyStart ?? record.payload.subagent_history_start_ordinal ?? null,
           delegated: state.delegated || record.payload.thread_source === "subagent" ||
+            (Predicate.isObject(record.payload.source) && record.payload.source.subagent !== undefined) ||
             (record.payload.parent_thread_id !== undefined && record.payload.parent_thread_id !== null),
           cwd: record.payload.cwd ?? state.cwd,
           branch: record.payload.git?.branch ?? state.branch
@@ -300,8 +313,9 @@ export const readCodex = (
       }
       case "response_item": {
         // A subagent's own user items are its delegated task; the parent history it copied holds the
-        // human's turns, which still set the Active Ticket.
-        if (state.delegated && !copied) break
+        // human's turns, which still set the Active Ticket. A rollout that writes user_message events
+        // has its response items as copies (replayed history included), so those are not read.
+        if ((state.delegated && !copied) || state.userEvents) break
         const typed = record.payload.content
           .filter((item) => item.type === "input_text")
           .map((item) => codexHumanText(item.text ?? ""))
@@ -311,6 +325,12 @@ export const readCodex = (
         break
       }
       case "event_msg": {
+        if (record.payload.type === "user_message") {
+          if (state.delegated && !copied) break
+          const typed = codexHumanText(record.payload.message)
+          state = { ...state, userEvents: true, activeTicket: typed === "" ? state.activeTicket : singleTicket(typed) }
+          break
+        }
         const observedAt = parseInstant(record.timestamp)
         if (observedAt === null) {
           skipped = countSkip(skipped, "missingTimestamp")

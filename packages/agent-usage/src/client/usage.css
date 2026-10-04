@@ -340,3 +340,12 @@
     overflow-x: auto;
   }
 }
+
+.usage-readings summary {
+  color: var(--rly-color-text-2);
+  cursor: pointer;
+}
+
+.usage-readings table {
+  margin-top: var(--rly-space-8);
+}

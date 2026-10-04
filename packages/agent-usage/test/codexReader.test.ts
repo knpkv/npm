@@ -232,6 +232,38 @@ describe("readCodex", () => {
     expect(result.events.map((event) => event.attribution.activeTicket)).toEqual(["RPS-7"])
   })
 
+  it("prefers the human's user_message events over response-item copies once a rollout writes them", () => {
+    const userMessage = (message: string) => ({
+      timestamp: "2026-06-01T10:00:00.000Z",
+      type: "event_msg",
+      payload: { type: "user_message", message }
+    })
+    const result = readCodex(
+      file,
+      lines(
+        userMessage("work on RPS-2"),
+        codexUserItem("replayed: back to RPS-1"),
+        codexTokenCount({ at: "2026-06-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })
+      ),
+      initialCodexState
+    )
+    expect(result.events[0]?.attribution.activeTicket).toBe("RPS-2")
+  })
+
+  it("recognizes a subagent rollout from an object-valued source alone", () => {
+    const meta = codexMeta("/w/app", "main")
+    const result = readCodex(
+      file,
+      lines(
+        { ...meta, payload: { ...meta.payload, source: { subagent: { thread_spawn: { parent_thread_id: "p" } } } } },
+        codexUserItem("Check the RPS-7071 example"),
+        codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })
+      ),
+      initialCodexState
+    )
+    expect(result.events[0]?.attribution.activeTicket).toBeNull()
+  })
+
   it("records a request whose model was never announced under an unpriced placeholder model", () => {
     const result = readCodex(
       file,

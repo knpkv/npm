@@ -81,12 +81,16 @@ export const fetchLimits = (range: { readonly from: number; readonly to: number 
 export const fetchStatus = getJson("/api/status", ServerStatus)
 
 /**
- * Spends the bootstrap code if this load carries one. The fragment is cleared first, so the code
- * never outlives this function's memory even if the exchange fails.
+ * Spends the bootstrap code if this load carries one, or checks the session cookie when it does not.
+ * The fragment is cleared first, so the code never outlives this function's memory even if the
+ * exchange fails.
  */
 export const bootstrapSession = Effect.gen(function*() {
   const token = new URLSearchParams(window.location.hash.slice(1)).get("bootstrap_token")
-  if (token === null) return
+  // Without a code this load relies on the cookie; check it still opens the API before showing data.
+  if (token === null) {
+    return yield* Effect.asVoid(send(HttpClientRequest.get(new URL("/api/status", window.location.href))))
+  }
   window.history.replaceState(null, "", window.location.pathname)
   yield* send(
     HttpClientRequest.post(new URL("/auth/bootstrap", window.location.href)).pipe(

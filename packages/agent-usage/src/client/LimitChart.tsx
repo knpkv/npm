@@ -18,6 +18,7 @@ const PERCENT_TICKS = [0, 25, 50, 75, 100]
 export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>; readonly range: ViewRange }) => {
   const [width, container] = useWidth(960)
   const [cursor, setCursor] = useState<number | null>(null)
+  const [tableOpen, setTableOpen] = useState(false)
   const axis = timeAxis(props.range, width)
   const plotHeight = HEIGHT - PLOT.top - PLOT.bottom
   const y = (percent: number) => PLOT.top + plotHeight - (Math.min(100, Math.max(0, percent)) / 100) * plotHeight
@@ -32,7 +33,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
   return (
     <div className="usage-chart" ref={container}>
       <svg
-        aria-label="Subscription limits used, percent"
+        aria-labelledby="limits-chart-title"
         height={HEIGHT}
         onMouseLeave={() => setCursor(null)}
         onMouseMove={(event) => {
@@ -42,6 +43,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
         role="img"
         width={width}
       >
+        <title id="limits-chart-title">Subscription limits used, percent; the table below lists every reading</title>
         {PERCENT_TICKS.map((tick) => (
           <g key={tick}>
             <line className="usage-grid" x1={PLOT.left} x2={width - PLOT.right} y1={y(tick)} y2={y(tick)} />
@@ -70,6 +72,35 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
           </li>
         ))}
       </ul>
+      <details className="usage-readings" onToggle={(event) => setTableOpen(event.currentTarget.open)}>
+        <summary>Limit readings as a table</summary>
+        {tableOpen ? (
+          <table className="usage-table">
+            <thead>
+              <tr>
+                <th scope="col">Limit</th>
+                <th scope="col">From</th>
+                <th scope="col">Reading</th>
+              </tr>
+            </thead>
+            <tbody>
+              {drawn.flatMap((series) =>
+                series.points.map((point) => (
+                  <tr key={`${series.agent}:${series.label}:${point.at}`}>
+                    <th scope="row">{limitLabel(series.agent, series.label, series.windowMinutes)}</th>
+                    <td>{formatInstant(point.at)}</td>
+                    <td>
+                      {point.reading._tag === "Known"
+                        ? formatPercent(point.reading.usedPercent)
+                        : describeReason(point.reading.reason)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        ) : null}
+      </details>
       {instant === null || cursor === null ? null : (
         <div className="usage-tooltip" role="status" style={{ left: cursor + 12, top: PLOT.top }}>
           <div className="usage-tooltip-title">{formatInstant(instant)}</div>
