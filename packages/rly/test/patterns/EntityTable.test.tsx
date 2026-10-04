@@ -66,7 +66,12 @@ describe("EntityTable", () => {
     expect(RLY_ENTITY_TABLE_DEFAULT_VARIANTS).toEqual({ density: "default" })
     expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.density)).toEqual(["default", "compact"])
     const ordinary = render(
-      <EntityTable columns={columns} data={{ rows: twenty.slice(0, 1), state: "ready" }} heading="Items" onSortChange={() => undefined} />
+      <EntityTable
+        columns={columns}
+        data={{ rows: twenty.slice(0, 1), state: "ready" }}
+        heading="Items"
+        onSortChange={() => undefined}
+      />
     )
     expect(ordinary?.getAttribute("data-rly-entity-table-density")).toBe("default")
     const compact = render(

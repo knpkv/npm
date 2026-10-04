@@ -51,8 +51,8 @@ describe("ToggleGroup", () => {
     render(<ToggleGroup aria-label="Range" items={items} onValueChange={() => undefined} value="7d" />)
     const group = document.querySelector('[role="radiogroup"]')
     expect(group?.getAttribute("aria-label")).toBe("Range")
-    const checked = [...document.querySelectorAll<HTMLButtonElement>('[role="radio"]')].filter((button) =>
-      button.getAttribute("aria-checked") === "true"
+    const checked = [...document.querySelectorAll<HTMLButtonElement>('[role="radio"]')].filter(
+      (button) => button.getAttribute("aria-checked") === "true"
     )
     expect(checked.map((button) => button.textContent)).toEqual(["7d"])
   })
@@ -85,10 +85,18 @@ describe("ToggleGroup", () => {
 
   it("rejects inaccessible or ambiguous configurations", () => {
     const noop = () => undefined
-    expect(() => renderToStaticMarkup(<ToggleGroup aria-label=" " items={items} onValueChange={noop} value="7d" />))
-      .toThrow("must contain visible text")
     expect(() =>
-      renderToStaticMarkup(<ToggleGroup aria-label="Range" items={[...items, { label: "24h again", value: "24h" }]} onValueChange={noop} value="7d" />)
+      renderToStaticMarkup(<ToggleGroup aria-label=" " items={items} onValueChange={noop} value="7d" />)
+    ).toThrow("must contain visible text")
+    expect(() =>
+      renderToStaticMarkup(
+        <ToggleGroup
+          aria-label="Range"
+          items={[...items, { label: "24h again", value: "24h" }]}
+          onValueChange={noop}
+          value="7d"
+        />
+      )
     ).toThrow("must be unique")
     expect(() =>
       renderToStaticMarkup(<ToggleGroup aria-label="Range" items={items} onValueChange={noop} value="1y" />)

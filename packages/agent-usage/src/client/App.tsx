@@ -109,7 +109,9 @@ const Dashboard = () => {
     <>
       <main className="usage-app">
         <header className="usage-heading">
-          <Text as="h1" variant="section-title">Agent usage</Text>
+          <Text as="h1" variant="section-title">
+            Agent usage
+          </Text>
           <Text tone="secondary" variant="meta">
             {timeZone}
           </Text>
@@ -118,9 +120,11 @@ const Dashboard = () => {
         {limits.failure === null ? null : (
           <StatePanel description={limits.failure} title="Limits could not be read" tone="critical" />
         )}
-        {limits.value === null
-          ? <Skeleton decorative={false} height="9rem" label="Loading limits" variant="block" />
-          : <LimitsSummary balances={limits.value.limits.balances} latest={limits.value.limits.latest} now={now} />}
+        {limits.value === null ? (
+          <Skeleton decorative={false} height="9rem" label="Loading limits" variant="block" />
+        ) : (
+          <LimitsSummary balances={limits.value.limits.balances} latest={limits.value.limits.latest} now={now} />
+        )}
 
         <div className="usage-bar">
           <ToggleGroup
@@ -182,7 +186,9 @@ const Dashboard = () => {
           {usage.failure === null ? null : (
             <StatePanel description={usage.failure} title="Usage could not be read" tone="critical" />
           )}
-          {usage.value === null || stacked === null ? PANEL_LOADING : stacked.series.length === 0 ? (
+          {usage.value === null || stacked === null ? (
+            PANEL_LOADING
+          ) : stacked.series.length === 0 ? (
             <StatePanel
               description="No Claude or Codex request was made in this range."
               title="No usage"
@@ -236,11 +242,17 @@ const Dashboard = () => {
           <Text as="h2" id="limits-title" variant="card-title">
             Limits over time
           </Text>
-          {limits.value === null ? PANEL_LOADING : <LimitChart now={now} range={limits.value.range} series={limits.value.limits.series} />}
+          {limits.value === null ? (
+            PANEL_LOADING
+          ) : (
+            <LimitChart now={now} range={limits.value.range} series={limits.value.limits.series} />
+          )}
         </section>
 
         <div className="usage-panel">
-          {usage.value === null ? PANEL_LOADING : (
+          {usage.value === null ? (
+            PANEL_LOADING
+          ) : (
             <BookingTable
               bookings={usage.value.report.bookings}
               named={named}

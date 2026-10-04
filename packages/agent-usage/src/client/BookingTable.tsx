@@ -9,7 +9,14 @@ import { type RlyEntityTableColumn, type RlyEntityTableRow, EntityTable } from "
 import { useState } from "react"
 import { totalTokens } from "../core/Model.js"
 import type { BookingSummary } from "../shared/contracts.js"
-import { type BookingColumn, type BookingSort, bookingColumns, DEFAULT_SORT, nextSort, sortBookings } from "./bookingModel.js"
+import {
+  type BookingColumn,
+  type BookingSort,
+  bookingColumns,
+  DEFAULT_SORT,
+  nextSort,
+  sortBookings
+} from "./bookingModel.js"
 import { bookingLabel, OTHER } from "./chartModel.js"
 import { formatTokens, formatUsd } from "./format.js"
 import { seriesColor } from "./UsageChart.js"
@@ -31,20 +38,20 @@ const titleOf = (summary: BookingSummary): string =>
   summary.booking._tag === "Repo"
     ? ""
     : summary.title === null
-    ? "title not looked up yet"
-    : summary.title._tag === "Known"
-    ? summary.title.summary
-    : summary.title.reason === "NotFound"
-    ? "not found in Jira"
-    : "title not looked up yet"
+      ? "title not looked up yet"
+      : summary.title._tag === "Known"
+        ? summary.title.summary
+        : summary.title.reason === "NotFound"
+          ? "not found in Jira"
+          : "title not looked up yet"
 
 /** The cost cell: the priced part, and "?" when some of the tokens have no price. */
 const costOf = (summary: BookingSummary): string =>
   summary.unpricedTokens === 0
     ? formatUsd(summary.costUsd)
     : summary.costUsd === 0
-    ? "?"
-    : `${formatUsd(summary.costUsd)} + ?`
+      ? "?"
+      : `${formatUsd(summary.costUsd)} + ?`
 
 const NumberCell = (props: { readonly value: string; readonly title?: string | undefined }) => (
   <span className="usage-number" title={props.title}>
@@ -106,7 +113,9 @@ export const BookingTable = (props: {
       case "cost":
         return (
           <NumberCell
-            title={summary.unpricedModels.length === 0 ? undefined : `No price for ${summary.unpricedModels.join(", ")}`}
+            title={
+              summary.unpricedModels.length === 0 ? undefined : `No price for ${summary.unpricedModels.join(", ")}`
+            }
             value={costOf(summary)}
           />
         )
@@ -123,9 +132,11 @@ export const BookingTable = (props: {
       <EntityTable
         columns={[first, ...rest]}
         density="compact"
-        data={rows.length === 0
-          ? { state: "empty", title: "No bookings", description: "Nothing was used in this range." }
-          : { state: "ready", rows }}
+        data={
+          rows.length === 0
+            ? { state: "empty", title: "No bookings", description: "Nothing was used in this range." }
+            : { state: "ready", rows }
+        }
         heading="Bookings"
         onSortChange={(id) => {
           const column = shown.find((candidate) => candidate === id)

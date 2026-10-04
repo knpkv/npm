@@ -54,8 +54,8 @@ export const StatusStrip = (props: {
           <summary>Ignored ticket-like keys ({props.ignoredKeys.length})</summary>
           <p>
             Typed in sessions but not a known project, so booked to their repo:{" "}
-            {props.ignoredKeys.map((key) => `${key.prefix} (${key.requests.toLocaleString()} requests)`).join(", ")}.
-            A project counts once a branch names it or it is listed in AGENT_USAGE_PROJECTS.
+            {props.ignoredKeys.map((key) => `${key.prefix} (${key.requests.toLocaleString()} requests)`).join(", ")}. A
+            project counts once a branch names it or it is listed in AGENT_USAGE_PROJECTS.
           </p>
         </details>
       )}

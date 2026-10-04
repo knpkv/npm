@@ -24,13 +24,9 @@ export const formatMeasure = (measure: Measure, value: number): string =>
   measure === "cost" ? formatUsd(value) : formatTokens(value)
 
 /** What a column says aloud: its period, total, and every Booking in it, largest first. */
-const describeColumn = (
-  column: Column,
-  label: string,
-  measure: Measure,
-  labelOf: (id: string) => string
-): string => {
-  const parts = [...column.segments].sort((left, right) => right.value - left.value)
+const describeColumn = (column: Column, label: string, measure: Measure, labelOf: (id: string) => string): string => {
+  const parts = [...column.segments]
+    .sort((left, right) => right.value - left.value)
     .map((segment) => `${labelOf(segment.id)} ${formatMeasure(measure, segment.value)}`)
   return `${label}: ${formatMeasure(measure, column.total)} total${parts.length === 0 ? "" : `; ${parts.join(", ")}`}`
 }
@@ -56,22 +52,23 @@ export const UsageChart = (props: {
   const { columns } = props.stacked
   // Space labels by how wide they are, so "Mon, Sep 28" never runs into its neighbour on a phone.
   const columnWidth = Math.max(1, (width - PLOT.left - PLOT.right) / Math.max(1, periods.length))
-  const labelWidth = Math.max(0, ...periods.map((period) => formatPeriod(period.start, props.range.bucket).length)) *
-      7 + 16
+  const labelWidth =
+    Math.max(0, ...periods.map((period) => formatPeriod(period.start, props.range.bucket).length)) * 7 + 16
   const labelEvery = Math.max(1, Math.ceil(labelWidth / columnWidth))
   // The tab stop: the column last focused, else the latest one.
   const tabStop = focusable !== null && focusable < columns.length ? focusable : columns.length - 1
 
   const move = (event: KeyboardEvent<SVGRectElement>, from: number) => {
-    const next = event.key === "ArrowRight"
-      ? Math.min(columns.length - 1, from + 1)
-      : event.key === "ArrowLeft"
-      ? Math.max(0, from - 1)
-      : event.key === "Home"
-      ? 0
-      : event.key === "End"
-      ? columns.length - 1
-      : null
+    const next =
+      event.key === "ArrowRight"
+        ? Math.min(columns.length - 1, from + 1)
+        : event.key === "ArrowLeft"
+          ? Math.max(0, from - 1)
+          : event.key === "Home"
+            ? 0
+            : event.key === "End"
+              ? columns.length - 1
+              : null
     if (next === null) return
     event.preventDefault()
     setFocusable(next)
@@ -80,9 +77,10 @@ export const UsageChart = (props: {
 
   const activeColumn = active === null ? undefined : columns[active]
   const activePeriod = active === null ? undefined : periods[active]
-  const activeCentre = activePeriod === undefined
-    ? 0
-    : (axis.x(activePeriod.start) + axis.x(periods[(active ?? 0) + 1]?.start ?? props.range.to)) / 2
+  const activeCentre =
+    activePeriod === undefined
+      ? 0
+      : (axis.x(activePeriod.start) + axis.x(periods[(active ?? 0) + 1]?.start ?? props.range.to)) / 2
 
   return (
     <div className="usage-chart" ref={container}>
@@ -128,18 +126,16 @@ export const UsageChart = (props: {
                     />
                   )
                 })}
-                {column.period % labelEvery === 0
-                  ? (
-                    <text
-                      className="usage-axis-label"
-                      textAnchor="middle"
-                      x={left + barWidth / 2}
-                      y={HEIGHT - PLOT.bottom + 18}
-                    >
-                      {label}
-                    </text>
-                  )
-                  : null}
+                {column.period % labelEvery === 0 ? (
+                  <text
+                    className="usage-axis-label"
+                    textAnchor="middle"
+                    x={left + barWidth / 2}
+                    y={HEIGHT - PLOT.bottom + 18}
+                  >
+                    {label}
+                  </text>
+                ) : null}
               </g>
               <rect
                 aria-label={describeColumn(column, label, props.measure, props.labelOf)}
@@ -179,9 +175,11 @@ export const UsageChart = (props: {
         <div
           className="usage-tooltip"
           role="status"
-          style={activeCentre > width / 2
-            ? { right: width - activeCentre + 12, top: PLOT.top }
-            : { left: activeCentre + 12, top: PLOT.top }}
+          style={
+            activeCentre > width / 2
+              ? { right: width - activeCentre + 12, top: PLOT.top }
+              : { left: activeCentre + 12, top: PLOT.top }
+          }
         >
           <div className="usage-tooltip-title">{formatPeriod(activePeriod.start, props.range.bucket)}</div>
           {[...activeColumn.segments].reverse().map((segment) => (
