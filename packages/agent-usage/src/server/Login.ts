@@ -75,12 +75,13 @@ const reported = (sentence: string, reason: string) =>
 export const login = Effect.fn("Login.login")(function*<E extends { readonly message: string }, R>(
   config: Effect.Effect<{ readonly storeDirectory: string }, E, R>,
   open: boolean,
-  platform: string
+  platform: string,
+  self: number
 ) {
   const settings = yield* config.pipe(
     Effect.catch((error: E) => reported(`its configuration could not be read: ${error.message}`, "ConfigError"))
   )
-  const url = yield* requestLoginUrl(settings.storeDirectory).pipe(
+  const url = yield* requestLoginUrl(settings.storeDirectory, self).pipe(
     Effect.catch((failure: LoginFailure) => reported(describeLoginFailure(failure), failure._tag))
   )
   yield* Console.log(url)

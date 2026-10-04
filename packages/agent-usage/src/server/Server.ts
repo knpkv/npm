@@ -62,12 +62,15 @@ export const makeServer = (options: AgentUsageServerOptions) =>
       )
       const services = Layer.mergeAll(
         store,
-        control,
         RuntimeState.layer(options.config.roots.machine, options.config.projects)
+      )
+      // Bound only once the control layer holds the store's lock.
+      const listener = NodeHttpServer.layerServer(createServer, { host: hostname, port: options.port }).pipe(
+        Layer.provide(control)
       )
       return Layer.mergeAll(HttpRouter.serve(application), background(options.config)).pipe(
         Layer.provide(services),
-        Layer.provide(NodeHttpServer.layerServer(createServer, { host: hostname, port: options.port })),
+        Layer.provide(listener),
         Layer.provide(Etag.layer),
         Layer.provide(HttpPlatformLive),
         Layer.provide(FetchHttpClient.layer),

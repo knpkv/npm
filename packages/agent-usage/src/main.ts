@@ -86,7 +86,8 @@ const login = Command.make(
   {
     open: Flag.Boolean("open").pipe(Flag.withDescription("Open the link in the browser too"), Flag.withDefault(false))
   },
-  ({ open }) => requestLogin(config, open, platform())
+  // The user id `login` trusts the socket to belong to; -1 (no POSIX ids) matches no owner.
+  ({ open }) => requestLogin(config, open, platform(), process.geteuid?.() ?? -1)
 ).pipe(Command.withDescription("Print a fresh one-time link to the running server"))
 
 const cli = Command.make("agent-usage").pipe(

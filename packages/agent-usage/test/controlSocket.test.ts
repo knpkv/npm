@@ -19,6 +19,9 @@ import { authorizeBootstrapRequest, makeOwnerSessionSecrets } from "../src/serve
 
 const origin = "http://127.0.0.1:3112"
 
+/** The user id this test runs as, which owns everything it creates. */
+const self = process.geteuid?.() ?? -1
+
 /** A private store directory, as the database layer would leave it. */
 const store = Effect.gen(function*() {
   const fs = yield* FileSystem.FileSystem
@@ -48,15 +51,29 @@ const codeOf = (url: string): string => decodeURIComponent(url.split("#bootstrap
 
 describe("control socket", () => {
   it.layer(Layer.merge(NodeServices.layer, Reactivity.layer))((it) => {
+    it.effect("login trusts only a socket owned by the user it runs as", () =>
+      Effect.gen(function*() {
+        const directory = yield* store
+        const secrets = yield* makeOwnerSessionSecrets(origin)
+        yield* controlSocket(directory, secrets, Effect.void)
+        expect(yield* Effect.flip(requestLoginUrl(directory, self + 1))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
+      }))
+
     it.effect("mints nothing until the server is listening", () =>
       Effect.gen(function*() {
         const directory = yield* store
         const secrets = yield* makeOwnerSessionSecrets(origin)
         const listening = yield* Deferred.make<void>()
-        yield* controlSocket(directory, secrets, Deferred.await(listening))
-        const request = yield* Effect.forkChild(requestLoginUrl(directory))
-        // Real time, so the request has reached the server and is waiting there.
-        yield* TestClock.withLive(Effect.sleep("300 millis"))
+        const arrived = yield* Deferred.make<void>()
+        // The gate reports when a request reaches it, then waits for the listener.
+        yield* controlSocket(
+          directory,
+          secrets,
+          Deferred.succeed(arrived, undefined).pipe(Effect.andThen(Deferred.await(listening)))
+        )
+        const request = yield* Effect.forkChild(requestLoginUrl(directory, self))
+        yield* Deferred.await(arrived)
         expect(request.pollUnsafe()).toBeUndefined()
         expect(yield* Ref.get(secrets.bootstrap)).toBeUndefined()
         yield* Deferred.succeed(listening, undefined)
@@ -77,7 +94,7 @@ describe("control socket", () => {
         const info = yield* fs.stat(path.join(directory, "serve.sock"))
         expect(info.type).toBe("Socket")
         expect(info.mode & 0o777).toBe(0o600)
-        const url = yield* requestLoginUrl(directory)
+        const url = yield* requestLoginUrl(directory, self)
         const spend = Effect.result(
           authorizeBootstrapRequest({ authorization: `Bearer ${codeOf(url)}`, origin }, secrets)
         )
@@ -89,7 +106,7 @@ describe("control socket", () => {
       Effect.gen(function*() {
         const path = yield* Path.Path
         const directory = yield* store
-        expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(ServerNotRunning)
+        expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(ServerNotRunning)
         // A socket left behind by a server that died: present, but nothing answers.
         const socketPath = path.join(directory, "serve.sock")
         // A process that binds it and is then killed outright, so it never unlinks the file.
@@ -105,11 +122,11 @@ describe("control socket", () => {
             })
           })
         )
-        expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(ServerNotRunning)
+        expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(ServerNotRunning)
         // A new server replaces the stale socket.
         const secrets = yield* makeOwnerSessionSecrets(origin)
         yield* controlSocket(directory, secrets, Effect.void)
-        expect(yield* requestLoginUrl(directory)).toContain("#bootstrap_token=")
+        expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
       }))
 
     it.effect("refuses a symlink or a non-socket at the socket path", () =>
@@ -123,13 +140,13 @@ describe("control socket", () => {
         expect(yield* Effect.flip(Effect.scoped(controlSocket(directory, secrets, Effect.void)))).toBeInstanceOf(
           SocketPathUnsafe
         )
-        expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(SocketPathUnsafe)
         yield* fs.remove(socketPath)
         yield* fs.writeFileString(socketPath, "not a socket")
         expect(yield* Effect.flip(Effect.scoped(controlSocket(directory, secrets, Effect.void)))).toBeInstanceOf(
           SocketPathUnsafe
         )
-        expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(SocketPathUnsafe)
       }))
 
     it.effect("will not start a second server on a store whose server is alive, and cleans up on stop", () =>
@@ -159,7 +176,7 @@ describe("control socket", () => {
         const info = yield* fs.stat(path.join(directory, "serve.sock"))
         expect(info.type).toBe("Socket")
         yield* fs.chmod(socketPath, 0o600)
-        expect(yield* requestLoginUrl(directory)).toContain("#bootstrap_token=")
+        expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
       }))
 
     it.effect(
@@ -192,7 +209,7 @@ describe("control socket", () => {
             const loser = Exit.isSuccess(outcomes[0]) ? second : first
             const winner = loser === first ? second : first
             yield* Scope.close(loser, Exit.void)
-            expect(yield* requestLoginUrl(directory)).toContain("#bootstrap_token=")
+            expect(yield* requestLoginUrl(directory, self)).toContain("#bootstrap_token=")
             yield* Scope.close(winner, Exit.void)
           }
         }),
@@ -208,7 +225,7 @@ describe("control socket", () => {
         yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
         const secrets = yield* makeOwnerSessionSecrets(origin)
         expect(yield* controlSocket(directory, secrets, Effect.void)).toBeUndefined()
-        expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(SocketPathTooLong)
+        expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(SocketPathTooLong)
         // Still one server per store.
         expect(yield* Effect.flip(controlSocket(directory, secrets, Effect.void))).toBeInstanceOf(ServerAlreadyRunning)
       }))
@@ -219,7 +236,7 @@ describe("control socket", () => {
         const directory = yield* store
         const accepted = yield* Deferred.make<void>()
         yield* fakeServer(path.join(directory, "serve.sock"), undefined, accepted)
-        const request = yield* Effect.forkChild(Effect.flip(requestLoginUrl(directory)))
+        const request = yield* Effect.forkChild(Effect.flip(requestLoginUrl(directory, self)))
         yield* Deferred.await(accepted)
         yield* TestClock.adjust("6 seconds")
         const failure = yield* Fiber.join(request)
@@ -234,7 +251,7 @@ describe("control socket", () => {
         ) {
           const directory = yield* store
           yield* fakeServer(path.join(directory, "serve.sock"), `${JSON.stringify({ url })}\n`)
-          expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(LoginReplyInvalid)
+          expect(yield* Effect.flip(requestLoginUrl(directory, self))).toBeInstanceOf(LoginReplyInvalid)
         }
       }))
   })

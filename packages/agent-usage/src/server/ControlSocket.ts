@@ -133,22 +133,22 @@ const socketPathFor = Effect.fnUntraced(function*(directory: string) {
 })
 
 /**
- * What is at `socketPath`: nothing, or this user's socket and its inode. Anything else is refused;
- * the owner must match the store directory's, which only its owner can write into.
+ * What is at `socketPath`: nothing, or a socket owned by `self` (this process's user id) in a store
+ * directory `self` also owns. Anything else is refused: another account could have bound it.
  */
-const inspect = Effect.fnUntraced(function*(directory: string, socketPath: string) {
+const inspect = Effect.fnUntraced(function*(directory: string, socketPath: string, self: number) {
   const fs = yield* FileSystem.FileSystem
   const unsafe = (reason: string) => new SocketPathUnsafe({ path: socketPath, reason })
   const link = yield* Effect.result(fs.readLink(socketPath))
   if (link._tag === "Success") return yield* unsafe("it is a symbolic link")
   if (link.failure.reason._tag === "NotFound") return undefined
   if (!isNotALink(link.failure)) return yield* unsafe(`it could not be inspected (${link.failure.reason._tag})`)
-  const [info, owner] = yield* Effect.all([fs.stat(socketPath), fs.stat(directory)]).pipe(
+  const [info, store] = yield* Effect.all([fs.stat(socketPath), fs.stat(directory)]).pipe(
     Effect.mapError((error) => unsafe(`it could not be inspected (${error.reason._tag})`))
   )
+  if (Option.getOrUndefined(store.uid) !== self) return yield* unsafe("another user owns the store directory")
   if (info.type !== "Socket") return yield* unsafe(`it is a ${info.type}, not a socket`)
-  const uid = Option.getOrUndefined(info.uid)
-  if (uid === undefined || uid !== Option.getOrUndefined(owner.uid)) return yield* unsafe("another user owns it")
+  if (Option.getOrUndefined(info.uid) !== self) return yield* unsafe("another user owns it")
   return { inode: Option.getOrUndefined(info.ino) }
 })
 
@@ -210,6 +210,13 @@ const holdStoreLock = Effect.fnUntraced(function*(directory: string) {
   yield* fs.chmod(lockPath, 0o600).pipe(
     Effect.mapError((error) => new SocketPathUnsafe({ path: lockPath, reason: error.reason._tag }))
   )
+  // This process just created or opened it for writing: its owner is who this process runs as.
+  const info = yield* fs.stat(lockPath).pipe(
+    Effect.mapError((error) => new SocketPathUnsafe({ path: lockPath, reason: error.reason._tag }))
+  )
+  const self = Option.getOrUndefined(info.uid)
+  if (self === undefined) return yield* new SocketPathUnsafe({ path: lockPath, reason: "it has no owner to compare" })
+  return self
 })
 
 /**
@@ -225,7 +232,7 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   listening: Effect.Effect<void>
 ) {
   const fs = yield* FileSystem.FileSystem
-  yield* holdStoreLock(directory)
+  const self = yield* holdStoreLock(directory)
   const located = yield* Effect.result(socketPathFor(directory))
   if (located._tag === "Failure") {
     yield* Effect.logWarning(`agent-usage login is unavailable: ${located.failure.message}`)
@@ -233,7 +240,7 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   }
   const socketPath = located.success
   // With the lock held, a socket here is one a server that died left behind.
-  const found = yield* inspect(directory, socketPath)
+  const found = yield* inspect(directory, socketPath, self)
   if (found !== undefined) {
     yield* fs.remove(socketPath).pipe(
       Effect.mapError((error) => new SocketPathUnsafe({ path: socketPath, reason: error.reason._tag }))
@@ -246,7 +253,7 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   yield* fs.chmod(socketPath, 0o600).pipe(
     Effect.mapError((error) => new SocketPathUnsafe({ path: socketPath, reason: error.reason._tag }))
   )
-  if ((yield* inspect(directory, socketPath)) === undefined) {
+  if ((yield* inspect(directory, socketPath, self)) === undefined) {
     return yield* new SocketPathUnsafe({ path: socketPath, reason: "it vanished after binding" })
   }
   yield* Effect.forkScoped(server.run(answer(secrets, listening)))
@@ -254,15 +261,16 @@ export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
 })
 
 /**
- * Asks the server running on this store for a fresh one-time link. Fails with
+ * Asks the server running on this store for a fresh one-time link, trusting only a socket owned by
+ * `self`, the user id this process runs as. Fails with
  * {@link ServerNotRunning} when nothing listens, {@link SocketPathTooLong} when the store has no
  * control socket, {@link SocketPathUnsafe} when the path is not this user's socket,
  * {@link SocketRefused} when the socket may not be used or does not answer within
  * {@link EXCHANGE_DEADLINE}, and {@link LoginReplyInvalid} when the answer is not a link.
  */
-export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(function*(directory: string) {
+export const requestLoginUrl = Effect.fn("ControlSocket.requestLoginUrl")(function*(directory: string, self: number) {
   const socketPath = yield* socketPathFor(directory)
-  const found = yield* inspect(directory, socketPath)
+  const found = yield* inspect(directory, socketPath, self)
   if (found === undefined) return yield* new ServerNotRunning({ path: socketPath })
   const reply = yield* Effect.scoped(Effect.gen(function*() {
     const socket = yield* NodeSocket.makeNet({ path: socketPath })
