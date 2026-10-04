@@ -73,14 +73,16 @@ describe("agent-usage login against a running server", () => {
         expect(second.status).toBe(0)
         expect(first.stdout.trim()).toMatch(/^http:\/\/127\.0\.0\.1:\d+\/#bootstrap_token=/u)
         expect(second.stdout.trim()).not.toBe(first.stdout.trim())
-        // A second server on the same store refuses to start.
-        const rival = spawnSync(process.execPath, [...tsx, "serve"], {
-          env: { ...env, PORT: String(await freePort()) },
-          encoding: "utf8",
-          timeout: 20_000
-        })
-        expect(rival.status).not.toBe(0)
-        expect(`${rival.stdout}${rival.stderr}`).toContain("already running")
+        // A second server on the same store refuses to start, on another port or on the same one.
+        for (const port of [String(await freePort()), env.PORT]) {
+          const rival = spawnSync(process.execPath, [...tsx, "serve"], {
+            env: { ...env, PORT: port },
+            encoding: "utf8",
+            timeout: 20_000
+          })
+          expect(rival.status).not.toBe(0)
+          expect(`${rival.stdout}${rival.stderr}`).toContain("already running")
+        }
       } finally {
         // It may have exited already, failing to start: then there is no exit event left to wait for.
         if (server.exitCode === null && server.signalCode === null) {
