@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Deferred, Effect, Exit, Fiber, FileSystem, Path, Scope } from "effect"
+import { Deferred, Effect, Exit, Fiber, FileSystem, Layer, Path, Ref, Scope } from "effect"
+import * as Reactivity from "effect/reactivity/Reactivity"
 import { TestClock } from "effect/testing"
 import { spawn } from "node:child_process"
 import { createServer, type Server } from "node:net"
@@ -46,14 +47,33 @@ const fakeServer = (socketPath: string, reply: string | undefined, accepted?: De
 const codeOf = (url: string): string => decodeURIComponent(url.split("#bootstrap_token=")[1] ?? "")
 
 describe("control socket", () => {
-  it.layer(NodeServices.layer)((it) => {
+  it.layer(Layer.merge(NodeServices.layer, Reactivity.layer))((it) => {
+    it.effect("mints nothing until the server is listening", () =>
+      Effect.gen(function*() {
+        const directory = yield* store
+        const secrets = yield* makeOwnerSessionSecrets(origin)
+        const listening = yield* Deferred.make<void>()
+        yield* controlSocket(directory, secrets, Deferred.await(listening))
+        const request = yield* Effect.forkChild(requestLoginUrl(directory))
+        // Real time, so the request has reached the server and is waiting there.
+        yield* TestClock.withLive(Effect.sleep("300 millis"))
+        expect(request.pollUnsafe()).toBeUndefined()
+        expect(yield* Ref.get(secrets.bootstrap)).toBeUndefined()
+        yield* Deferred.succeed(listening, undefined)
+        const url = yield* Fiber.join(request)
+        const spent = yield* Effect.result(
+          authorizeBootstrapRequest({ authorization: `Bearer ${codeOf(url)}`, origin }, secrets)
+        )
+        expect(spent._tag).toBe("Success")
+      }))
+
     it.effect("is owner-only, and hands out a link that signs in once", () =>
       Effect.gen(function*() {
         const fs = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const directory = yield* store
         const secrets = yield* makeOwnerSessionSecrets(origin)
-        yield* controlSocket(directory, secrets)
+        yield* controlSocket(directory, secrets, Effect.void)
         const info = yield* fs.stat(path.join(directory, "serve.sock"))
         expect(info.type).toBe("Socket")
         expect(info.mode & 0o777).toBe(0o600)
@@ -88,7 +108,7 @@ describe("control socket", () => {
         expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(ServerNotRunning)
         // A new server replaces the stale socket.
         const secrets = yield* makeOwnerSessionSecrets(origin)
-        yield* controlSocket(directory, secrets)
+        yield* controlSocket(directory, secrets, Effect.void)
         expect(yield* requestLoginUrl(directory)).toContain("#bootstrap_token=")
       }))
 
@@ -100,11 +120,15 @@ describe("control socket", () => {
         const secrets = yield* makeOwnerSessionSecrets(origin)
         const socketPath = path.join(directory, "serve.sock")
         yield* fs.symlink(path.join(directory, "elsewhere"), socketPath)
-        expect(yield* Effect.flip(controlSocket(directory, secrets))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* Effect.flip(Effect.scoped(controlSocket(directory, secrets, Effect.void)))).toBeInstanceOf(
+          SocketPathUnsafe
+        )
         expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(SocketPathUnsafe)
         yield* fs.remove(socketPath)
         yield* fs.writeFileString(socketPath, "not a socket")
-        expect(yield* Effect.flip(controlSocket(directory, secrets))).toBeInstanceOf(SocketPathUnsafe)
+        expect(yield* Effect.flip(Effect.scoped(controlSocket(directory, secrets, Effect.void)))).toBeInstanceOf(
+          SocketPathUnsafe
+        )
         expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(SocketPathUnsafe)
       }))
 
@@ -115,8 +139,8 @@ describe("control socket", () => {
         const directory = yield* store
         const secrets = yield* makeOwnerSessionSecrets(origin)
         const scope = yield* Scope.make()
-        yield* controlSocket(directory, secrets).pipe(Scope.provide(scope))
-        expect(yield* Effect.flip(controlSocket(directory, secrets))).toBeInstanceOf(ServerAlreadyRunning)
+        yield* controlSocket(directory, secrets, Effect.void).pipe(Scope.provide(scope))
+        expect(yield* Effect.flip(controlSocket(directory, secrets, Effect.void))).toBeInstanceOf(ServerAlreadyRunning)
         yield* Scope.close(scope, Exit.void)
         expect(yield* fs.exists(path.join(directory, "serve.sock"))).toBe(false)
       }))
@@ -128,9 +152,10 @@ describe("control socket", () => {
         const directory = yield* store
         const secrets = yield* makeOwnerSessionSecrets(origin)
         const socketPath = path.join(directory, "serve.sock")
-        yield* controlSocket(directory, secrets)
+        yield* controlSocket(directory, secrets, Effect.void)
         yield* fs.chmod(socketPath, 0o000)
-        expect(yield* Effect.flip(controlSocket(directory, secrets))).toBeInstanceOf(SocketRefused)
+        // The store's lock says a server is running, whatever its socket allows.
+        expect(yield* Effect.flip(controlSocket(directory, secrets, Effect.void))).toBeInstanceOf(ServerAlreadyRunning)
         const info = yield* fs.stat(path.join(directory, "serve.sock"))
         expect(info.type).toBe("Socket")
         yield* fs.chmod(socketPath, 0o600)
@@ -160,8 +185,8 @@ describe("control socket", () => {
             const secrets = yield* makeOwnerSessionSecrets(origin)
             const [first, second] = [yield* Scope.make(), yield* Scope.make()]
             const outcomes = yield* Effect.all([
-              Effect.exit(controlSocket(directory, secrets).pipe(Scope.provide(first))),
-              Effect.exit(controlSocket(directory, secrets).pipe(Scope.provide(second)))
+              Effect.exit(controlSocket(directory, secrets, Effect.void).pipe(Scope.provide(first))),
+              Effect.exit(controlSocket(directory, secrets, Effect.void).pipe(Scope.provide(second)))
             ], { concurrency: "unbounded" })
             expect(outcomes.filter(Exit.isSuccess)).toHaveLength(1)
             const loser = Exit.isSuccess(outcomes[0]) ? second : first
@@ -182,8 +207,10 @@ describe("control socket", () => {
         const directory = path.join(base, "d".repeat(60), "e".repeat(60))
         yield* fs.makeDirectory(directory, { recursive: true, mode: 0o700 })
         const secrets = yield* makeOwnerSessionSecrets(origin)
-        expect(yield* controlSocket(directory, secrets)).toBeUndefined()
+        expect(yield* controlSocket(directory, secrets, Effect.void)).toBeUndefined()
         expect(yield* Effect.flip(requestLoginUrl(directory))).toBeInstanceOf(SocketPathTooLong)
+        // Still one server per store.
+        expect(yield* Effect.flip(controlSocket(directory, secrets, Effect.void))).toBeInstanceOf(ServerAlreadyRunning)
       }))
 
     it.effect("login gives up on a listener that never answers", () =>

@@ -47,12 +47,15 @@ output you do not watch.
 
 `login` reaches the server over a Unix socket, `serve.sock` in the store directory. The directory
 is owner-only and the socket `0600`, so only the store's owner can ask; the server refuses to bind,
-and `login` to connect, when the path is a symlink, not a socket, or owned by another user. A
-socket left by a server that died is replaced on the next start; a second `serve` on a store whose
-server is still running, or whose socket it cannot probe, exits with an error rather than taking
-over. Either side gives up on the other after five seconds. A Unix socket path holds about a
-hundred bytes (103 here): a store directory deeper than that still runs, logs that `login` is
-unavailable, and `login` says to choose a shorter `AGENT_USAGE_HOME`.
+and `login` to connect, when the path is a symlink, not a socket, or owned by another user. Either
+side gives up on the other after five seconds, and no link is minted before the server is listening.
+
+One server runs per store. `serve` first takes an exclusive lock on `serve.lock` in the store
+directory and holds it while it runs; the operating system releases it when the process ends,
+however it ends. A second `serve` on the same store exits with an error before binding a port, and
+the next start after a crash replaces the socket the dead server left. A Unix socket path holds
+about a hundred bytes (103 here): a store directory deeper than that still runs, one server at a
+time, but logs that `login` is unavailable, and `login` says to choose a shorter `AGENT_USAGE_HOME`.
 
 | `login` says                                 | Meaning                                                     |
 | -------------------------------------------- | ----------------------------------------------------------- |

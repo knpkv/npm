@@ -8,27 +8,28 @@
  *   proves the caller is the owner, so the request needs no credential of its own.
  * - **Nothing at the path is trusted.** A symlink, a file that is not a socket, or a socket another
  *   user owns is refused, by the server before binding and by `login` before connecting.
- * - **One server per store, claimed atomically.** The server binds a private name first and then
- *   hard-links it to `serve.sock`, which fails if anything is already there, so two servers cannot
- *   both hold the path. A socket that refuses connections is a server that died: it is moved aside
- *   and removed only if it is still that same socket, so a racing server's fresh socket is never
- *   deleted. A socket that answers, or that cannot be probed, is left alone and the second server
- *   refuses to start. On shutdown the path is removed only while it is still this server's.
+ * - **One server per store, held by a lock the kernel keeps.** Before anything else the server
+ *   takes an exclusive SQLite lock on `serve.lock` in the store directory and keeps it for its life;
+ *   the operating system drops it when the process ends, however it ends. A second server finds it
+ *   taken and refuses to start. Holding the lock, the server knows any socket at the path is one a
+ *   dead server left behind, so it removes it and binds; no probing, no race between servers.
  * - **Short paths only.** A Unix socket path is limited to about a hundred bytes. A store directory
- *   too deep for one still runs, without `login`, and says so.
- * - **One question, one answer.** The client sends `mint`; the server mints a link through the same
- *   path as the startup link (one use, one minute) and replies with it as one JSON line. Both sides
- *   give up after {@link EXCHANGE_DEADLINE}.
+ *   too deep for one still runs and still holds the lock, without `login`, and says so.
+ * - **One question, one answer.** The client sends `mint`; once the HTTP listener is up, the server
+ *   mints a link through the same path as the startup link (one use, one minute) and replies with it
+ *   as one JSON line. Both sides give up after {@link EXCHANGE_DEADLINE}.
  *
  * @module
  */
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
-import { Duration, Effect, FileSystem, Option, Path, Predicate, Random, Schema } from "effect"
+import { SqliteClient } from "@effect/sql-sqlite-node"
+import { Duration, Effect, FileSystem, Option, Path, Predicate, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import type { Socket, SocketServer } from "effect/socket"
 import { isLoopbackHostname, mintBootstrapUrl, type OwnerSessionSecretsContract } from "./OwnerSession.js"
 
 export const SOCKET_FILE = "serve.sock"
+export const LOCK_FILE = "serve.lock"
 
 /**
  * The longest socket path, in bytes, that binds everywhere this runs: macOS holds 104 bytes
@@ -48,7 +49,7 @@ export class ServerNotRunning extends Schema.TaggedError<ServerNotRunning>()("Se
   }
 }
 
-/** A server already answers on this store's socket; a second one would fight it for the store. */
+/** A server already runs on this store; a second one would fight it for the store. */
 export class ServerAlreadyRunning extends Schema.TaggedError<ServerAlreadyRunning>()("ServerAlreadyRunning", {
   path: Schema.String
 }) {
@@ -67,7 +68,7 @@ export class SocketPathUnsafe extends Schema.TaggedError<SocketPathUnsafe>()("So
   }
 }
 
-/** The socket is there but could not be used: no permission, no answer in time, or another failure. */
+/** The socket or lock is there but could not be used: no permission, no answer in time, or another failure. */
 export class SocketRefused extends Schema.TaggedError<SocketRefused>()("SocketRefused", {
   path: Schema.String,
   reason: Schema.String
@@ -151,13 +152,6 @@ const inspect = Effect.fnUntraced(function*(directory: string, socketPath: strin
   return { inode: Option.getOrUndefined(info.ino) }
 })
 
-/** The inode at `path`, or nothing there. */
-const inodeAt = (fs: FileSystem.FileSystem, path: string): Effect.Effect<Option.Option<number>> =>
-  fs.stat(path).pipe(
-    Effect.map((info) => info.ino),
-    Effect.catch(() => Effect.succeedNone)
-  )
-
 /**
  * Reads from an open connection until a full line arrives or the peer closes it. The reader must be
  * acquired before anything is written: acquiring it is what opens the connection.
@@ -178,128 +172,84 @@ const readLine = (reader: Socket.Reader) =>
   })
 
 /** One connection: a `mint` request answered with a fresh link, anything else with an error. */
-const answer = (secrets: OwnerSessionSecretsContract) => (socket: Socket.Socket) =>
+const answer = (secrets: OwnerSessionSecretsContract, listening: Effect.Effect<void>) => (socket: Socket.Socket) =>
   Effect.scoped(Effect.gen(function*() {
     const reader = yield* socket.reader
     const write = yield* socket.writer
     const request = yield* readLine(reader)
     if (request.trim() !== "mint") return yield* write.write("{\"error\":\"unknown request\"}\n")
+    // Never before the HTTP listener is up: a code minted earlier would be one nobody could spend.
+    yield* listening
     const url = yield* mintBootstrapUrl(secrets)
     yield* write.write(`${encodeReply({ url })}\n`)
   })).pipe(Effect.timeout(EXCHANGE_DEADLINE), Effect.ignore)
 
-/** Whether a server answers at a socket path: it does, it refuses (died), or the socket is gone. */
-type Liveness = "alive" | "dead" | "gone"
-
-const probe = (socketPath: string): Effect.Effect<Liveness, SocketRefused> =>
-  Effect.scoped(
-    NodeSocket.makeNet({ path: socketPath }).pipe(Effect.flatMap((socket) => Effect.scoped(socket.reader)))
-  ).pipe(
-    Effect.as<Liveness>("alive"),
-    Effect.timeoutOrElse({
-      duration: EXCHANGE_DEADLINE,
-      orElse: () => Effect.fail(new SocketRefused({ path: socketPath, reason: "it did not answer in time" }))
-    }),
-    Effect.catchTag("SocketError", (error) => {
-      const code = errnoOf(error)
-      return code === "ECONNREFUSED"
-        ? Effect.succeed<Liveness>("dead")
-        : code === "ENOENT"
-        ? Effect.succeed<Liveness>("gone")
-        : Effect.fail(new SocketRefused({ path: socketPath, reason: code ?? error.reason._tag }))
-    })
+/**
+ * Takes the store's exclusive lock for the life of the scope: an SQLite database opened in exclusive
+ * locking mode and written once, so its lock is held until the connection closes or the process
+ * ends. Fails with {@link ServerAlreadyRunning} when another server holds it.
+ */
+const holdStoreLock = Effect.fnUntraced(function*(directory: string) {
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const lockPath = path.join(directory, LOCK_FILE)
+  const link = yield* Effect.result(fs.readLink(lockPath))
+  if (link._tag === "Success") return yield* new SocketPathUnsafe({ path: lockPath, reason: "it is a symbolic link" })
+  const client = yield* SqliteClient.make({ filename: lockPath, disableWAL: true, busyTimeout: 0 })
+  yield* Effect.all([
+    client.unsafe("PRAGMA locking_mode = EXCLUSIVE"),
+    client.unsafe("BEGIN EXCLUSIVE"),
+    client.unsafe("COMMIT")
+  ], { discard: true }).pipe(
+    Effect.mapError((error) =>
+      error.reason._tag === "LockTimeoutError"
+        ? new ServerAlreadyRunning({ path: lockPath })
+        : new SocketRefused({ path: lockPath, reason: error.reason._tag })
+    )
   )
-
-/**
- * Removes the socket at `socketPath` only if it is still the dead one with `inode`: it is moved aside
- * first, which is atomic, and put back when it turns out to be a racing server's fresh socket.
- */
-const reclaim = Effect.fnUntraced(function*(socketPath: string, aside: string, inode: number | undefined) {
-  const fs = yield* FileSystem.FileSystem
-  const moved = yield* Effect.result(fs.rename(socketPath, aside))
-  if (moved._tag === "Failure") {
-    if (moved.failure.reason._tag === "NotFound") return
-    return yield* new SocketPathUnsafe({
-      path: socketPath,
-      reason: `it could not be moved (${moved.failure.reason._tag})`
-    })
-  }
-  const movedInode = Option.getOrUndefined(yield* inodeAt(fs, aside))
-  if (inode !== undefined && movedInode === inode) return yield* fs.remove(aside).pipe(Effect.ignore)
-  yield* fs.link(aside, socketPath).pipe(Effect.ignore)
-  yield* fs.remove(aside).pipe(Effect.ignore)
-  return yield* new ServerAlreadyRunning({ path: socketPath })
+  yield* fs.chmod(lockPath, 0o600).pipe(
+    Effect.mapError((error) => new SocketPathUnsafe({ path: lockPath, reason: error.reason._tag }))
+  )
 })
 
 /**
- * Hard-links the bound socket at `bound` to `socketPath`, reclaiming a dead socket there first.
- * Fails with {@link ServerAlreadyRunning} when another server holds the path.
- */
-const claim = Effect.fnUntraced(function*(directory: string, socketPath: string, bound: string, aside: string) {
-  const fs = yield* FileSystem.FileSystem
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const linked = yield* Effect.result(fs.link(bound, socketPath))
-    if (linked._tag === "Success") return
-    if (errnoOf(linked.failure) !== "EEXIST") {
-      return yield* new SocketRefused({
-        path: socketPath,
-        reason: errnoOf(linked.failure) ?? linked.failure.reason._tag
-      })
-    }
-    const found = yield* inspect(directory, socketPath)
-    if (found === undefined) continue
-    const state = yield* probe(socketPath)
-    if (state === "alive") return yield* new ServerAlreadyRunning({ path: socketPath })
-    if (state === "dead") yield* reclaim(socketPath, aside, found.inode)
-  }
-  return yield* new ServerAlreadyRunning({ path: socketPath })
-})
-
-/**
- * Listens on `<directory>/serve.sock` for the life of the scope and returns its path, or returns
- * nothing (and logs why) when the path is too long for a Unix socket. Fails with
- * {@link ServerAlreadyRunning} when another server holds the path, {@link SocketPathUnsafe} when
- * it holds anything but this user's socket, and {@link SocketRefused} when a socket there cannot
- * be probed.
+ * Holds the store's lock and listens on `<directory>/serve.sock` for the life of the scope; returns
+ * the socket path, or nothing (and logs why) when the path is too long for a Unix socket. Requests
+ * wait for `listening` before a link is minted. Fails with {@link ServerAlreadyRunning} when another
+ * server runs on this store and {@link SocketPathUnsafe} when the path holds anything but this
+ * user's socket.
  */
 export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   directory: string,
-  secrets: OwnerSessionSecretsContract
+  secrets: OwnerSessionSecretsContract,
+  listening: Effect.Effect<void>
 ) {
   const fs = yield* FileSystem.FileSystem
-  const path = yield* Path.Path
+  yield* holdStoreLock(directory)
   const located = yield* Effect.result(socketPathFor(directory))
   if (located._tag === "Failure") {
     yield* Effect.logWarning(`agent-usage login is unavailable: ${located.failure.message}`)
     return undefined
   }
   const socketPath = located.success
-  // Refuse an unsafe path before binding anything next to it.
-  yield* inspect(directory, socketPath)
-  const suffix = (yield* Random.nextIntBetween(0, 0x7fffffff)).toString(36)
-  // Shorter than `serve.sock`, so they fit wherever it does.
-  const bound = path.join(directory, `.s${suffix}`)
-  const aside = path.join(directory, `.r${suffix}`)
-  const server = yield* NodeSocketServer.make({ path: bound }).pipe(
-    Effect.mapError((error) => new SocketRefused({ path: bound, reason: errnoOf(error) ?? error.reason._tag }))
-  )
-  yield* Effect.addFinalizer(() => fs.remove(bound).pipe(Effect.ignore))
-  yield* fs.chmod(bound, 0o600).pipe(
-    Effect.mapError((error) => new SocketPathUnsafe({ path: bound, reason: error.reason._tag }))
-  )
-  const ours = yield* inspect(directory, bound)
-  if (ours === undefined) return yield* new SocketPathUnsafe({ path: bound, reason: "it vanished after binding" })
-  yield* claim(directory, socketPath, bound, aside)
-  // Removed on shutdown only while the path is still this server's socket.
-  yield* Effect.addFinalizer(() =>
-    inodeAt(fs, socketPath).pipe(
-      Effect.flatMap((inode) =>
-        Option.isSome(inode) && inode.value === ours.inode ? fs.remove(socketPath).pipe(Effect.ignore) : Effect.void
-      )
+  // With the lock held, a socket here is one a server that died left behind.
+  const found = yield* inspect(directory, socketPath)
+  if (found !== undefined) {
+    yield* fs.remove(socketPath).pipe(
+      Effect.mapError((error) => new SocketPathUnsafe({ path: socketPath, reason: error.reason._tag }))
     )
+  }
+  const server = yield* NodeSocketServer.make({ path: socketPath }).pipe(
+    Effect.mapError((error) => new SocketRefused({ path: socketPath, reason: errnoOf(error) ?? error.reason._tag }))
   )
-  yield* fs.remove(bound).pipe(Effect.ignore)
-  yield* Effect.forkScoped(server.run(answer(secrets)))
+  yield* Effect.addFinalizer(() => fs.remove(socketPath).pipe(Effect.ignore))
+  yield* fs.chmod(socketPath, 0o600).pipe(
+    Effect.mapError((error) => new SocketPathUnsafe({ path: socketPath, reason: error.reason._tag }))
+  )
+  if ((yield* inspect(directory, socketPath)) === undefined) {
+    return yield* new SocketPathUnsafe({ path: socketPath, reason: "it vanished after binding" })
+  }
+  yield* Effect.forkScoped(server.run(answer(secrets, listening)))
   return socketPath
 })
 

@@ -13,6 +13,7 @@
 import { NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { Config, Deferred, Effect, Layer, Schema } from "effect"
 import { Etag, FetchHttpClient, HttpPlatform, HttpRouter } from "effect/http"
+import * as Reactivity from "effect/reactivity/Reactivity"
 import { createServer } from "node:http"
 import { liveClaudeUsageDeps } from "../core/ClaudeLimitsLive.js"
 import { databaseLayer } from "../core/Database.js"
@@ -44,12 +45,19 @@ const background = (config: AgentUsageConfig) =>
 
 export const makeServer = (options: AgentUsageServerOptions) =>
   Layer.unwrap(
-    Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1").pipe(Effect.map((hostname) => {
+    Effect.gen(function*() {
+      const hostname = yield* Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1")
+      // Opened once the HTTP listener is up: the control socket mints nothing before then.
+      const listening = yield* Deferred.make<void>()
       const store = databaseLayer(options.config.storeDirectory)
       // The login socket, in the store directory the store layer has just checked is owner-only.
-      // It comes up before the HTTP listener, so a second server on this store stops early.
-      const control = Layer.effectDiscard(controlSocket(options.config.storeDirectory, options.security)).pipe(
+      // It holds the store's lock and comes up before the HTTP listener, so a second server on
+      // this store stops before binding a port or reading anything.
+      const control = Layer.effectDiscard(
+        controlSocket(options.config.storeDirectory, options.security, Deferred.await(listening))
+      ).pipe(
         Layer.provide(store),
+        Layer.provide(Reactivity.layer),
         Layer.provide(NodeServices.layer)
       )
       const services = Layer.mergeAll(
@@ -68,11 +76,12 @@ export const makeServer = (options: AgentUsageServerOptions) =>
         Layer.tap(() =>
           // The startup link: minted only once the server is listening, handed to whoever prints it.
           mintBootstrapUrl(options.security).pipe(
+            Effect.tap(() => Deferred.succeed(listening, undefined)),
             Effect.flatMap((url) => options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, url))
           )
         )
       )
-    }))
+    })
   )
 
 /** The port to bind: next to jcf-web's 3111. */
