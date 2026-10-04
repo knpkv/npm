@@ -191,6 +191,8 @@ export interface LimitRow {
   readonly name: string
   /** The window's readings with its agent's failed polls merged in, oldest first. */
   readonly points: ReadonlyArray<Point>
+  /** The first reading of the window itself in the range; null when it has none. */
+  readonly firstAt: number | null
 }
 
 /**
@@ -206,6 +208,7 @@ export const limitRows = (series: ReadonlyArray<LimitSeries>): ReadonlyArray<Lim
     return [{
       id: `${window.agent}:${window.agent === "codex" ? window.windowMinutes : window.label}`,
       name: `${agentName(window.agent)} ${name}`,
-      points: [...window.points, ...failures].sort((left, right) => left.at - right.at)
+      points: [...window.points, ...failures].sort((left, right) => left.at - right.at),
+      firstAt: window.points[0]?.at ?? null
     }]
   })

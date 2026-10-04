@@ -142,3 +142,29 @@ describe("timeTicks", () => {
     expect(narrow.pixels).toBeGreaterThanOrEqual(64)
   })
 })
+
+describe("timeTicks on day ranges", () => {
+  it("labels whole days only, never times of day", () => {
+    const range = { from: Date.UTC(2026, 8, 28), to: Date.UTC(2026, 9, 5) }
+    const ticks = timeTicks(range, 1440, 64, 24)
+    expect(ticks.length).toBeGreaterThan(0)
+    for (const tick of ticks) {
+      expect(new Date(tick.at).getHours()).toBe(0)
+      expect(tick.label).not.toMatch(/:/)
+    }
+  })
+})
+
+describe("limitRows first reading", () => {
+  it("says when a window was first read, so an empty start is not mistaken for zero", () => {
+    const rows = limitRows([
+      {
+        agent: "claude",
+        label: "five_hour",
+        windowMinutes: 300,
+        points: [{ at: 500, reading: { _tag: "Known", usedPercent: 5, resetsAt: null } }]
+      }
+    ])
+    expect(rows[0]?.firstAt).toBe(500)
+  })
+})

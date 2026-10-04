@@ -38,7 +38,9 @@ test("limits now groups each agent's windows with a meter, a tone word and the b
   await signIn(page)
   const claude = page.getByRole("region", { name: "Claude limits" })
   await expect(claude.getByRole("meter", { name: "Claude 5-hour used" })).toHaveAttribute("aria-valuenow", "42")
-  await expect(claude).toContainText("OK")
+  // A healthy window shows its level and reading age, not a badge.
+  await expect(claude.getByText("OK", { exact: true })).toHaveCount(0)
+  await expect(claude).toContainText("read")
   await expect(page.getByRole("region", { name: "Limits now" })).toContainText("5K credits")
 })
 

@@ -31,7 +31,8 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
         <Text as="span" variant="label">
           {window.name}
         </Text>
-        <StateLabel label={tone.label} size="compact" tone={tone.tone} />
+        {/* A healthy window needs no badge; only a state worth acting on gets one. */}
+        {window.tone === "ok" ? null : <StateLabel label={tone.label} size="compact" tone={tone.tone} />}
       </div>
       {window.usedPercent === null ? (
         <Text as="p" tone="secondary" variant="meta">
@@ -61,12 +62,20 @@ const WindowRow = (props: { readonly agent: string; readonly window: WindowSumma
             </time>
           </Text>
         )}
-        <FreshnessStamp
-          dateTime={new Date(window.observedAt).toISOString()}
-          size="compact"
-          state={window.freshness}
-          time={`read ${formatAge(window.observedAt, props.now)}`}
-        />
+        {window.freshness === "stale" ? (
+          <FreshnessStamp
+            dateTime={new Date(window.observedAt).toISOString()}
+            size="compact"
+            state="stale"
+            time={`read ${formatAge(window.observedAt, props.now)}`}
+          />
+        ) : (
+          <Text as="span" tone="tertiary" variant="meta">
+            <time dateTime={new Date(window.observedAt).toISOString()}>
+              read {formatAge(window.observedAt, props.now)}
+            </time>
+          </Text>
+        )}
       </div>
     </li>
   )

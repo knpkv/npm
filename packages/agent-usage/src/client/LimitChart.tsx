@@ -10,14 +10,14 @@ import { useId, useState } from "react"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis, timeTicks } from "./axis.js"
 import { readingAt } from "./chartModel.js"
-import { describeReason, formatInstant, formatPercent } from "./format.js"
+import { describeReason, formatInstant, formatPercent, formatShortInstant } from "./format.js"
 import { fullWindowName, type LimitRow, limitRows, limitSegments, NEAR_PERCENT } from "./limitsModel.js"
 import type { ViewRange } from "./range.js"
 import { useWidth } from "./useWidth.js"
 
 const ROW = 56
 const ROW_GAP = 12
-const AXIS = 24
+const AXIS = 34
 const LABEL = 16
 
 const Row = (props: {
@@ -25,6 +25,7 @@ const Row = (props: {
   readonly top: number
   readonly width: number
   readonly end: number
+  readonly from: number
   readonly x: (at: number) => number
   readonly hatch: string
 }) => {
@@ -33,32 +34,20 @@ const Row = (props: {
   const y = (percent: number) => plotTop + plotHeight - (Math.min(100, Math.max(0, percent)) / 100) * plotHeight
   const segments = limitSegments(props.row.points, props.end)
   const right = props.width - PLOT.right
-  // One stroke and one fill per unbroken run of levels, so adjacent steps leave no seams.
+  // One stroke per unbroken run of levels, joined by its vertical steps.
   let line = ""
-  let area = ""
-  let run: { readonly from: number; readonly to: number } | null = null
-  const closeRun = () => {
-    if (run !== null) area += `V${y(0)}H${props.x(run.from)}Z`
-    run = null
-  }
+  let runEnd: number | null = null
   for (const segment of segments) {
     if (segment.kind !== "level") {
-      closeRun()
+      runEnd = null
       continue
     }
-    if (run !== null && run.to === segment.from) {
-      line += `V${y(segment.usedPercent)}H${props.x(segment.to)}`
-      area += `V${y(segment.usedPercent)}H${props.x(segment.to)}`
-      run = { from: run.from, to: segment.to }
-    } else {
-      closeRun()
-      const start = `M${props.x(segment.from)},${y(segment.usedPercent)}H${props.x(segment.to)}`
-      line += start
-      area += start
-      run = { from: segment.from, to: segment.to }
-    }
+    line +=
+      runEnd === segment.from
+        ? `V${y(segment.usedPercent)}H${props.x(segment.to)}`
+        : `M${props.x(segment.from)},${y(segment.usedPercent)}H${props.x(segment.to)}`
+    runEnd = segment.to
   }
-  closeRun()
   const finalReading = readingAt(props.row.points, props.end)
   return (
     <g>
@@ -74,7 +63,6 @@ const Row = (props: {
       </text>
       <line className="usage-grid" x1={PLOT.left} x2={right} y1={y(100)} y2={y(100)} />
       <line className="usage-limit-near" x1={PLOT.left} x2={right} y1={y(NEAR_PERCENT)} y2={y(NEAR_PERCENT)} />
-      <path className="usage-limit-area" d={area} />
       {segments.map((segment) =>
         segment.kind === "level" ? null : segment.kind === "unknown" ? (
           <rect
@@ -98,6 +86,22 @@ const Row = (props: {
         )
       )}
       <line className="usage-baseline" x1={PLOT.left} x2={right} y1={y(0)} y2={y(0)} />
+      <text className="usage-axis-label" textAnchor="end" x={PLOT.left - 6} y={y(100) + 4}>
+        100%
+      </text>
+      <text className="usage-axis-label" textAnchor="end" x={PLOT.left - 6} y={y(0)}>
+        0
+      </text>
+      {props.row.firstAt === null || props.row.firstAt <= props.from + 60 * 60 * 1000 ? null : (
+        <text
+          className="usage-row-note"
+          textAnchor={props.x(props.row.firstAt) - PLOT.left > 160 ? "end" : "start"}
+          x={props.x(props.row.firstAt) - PLOT.left > 160 ? props.x(props.row.firstAt) - 8 : PLOT.left + 8}
+          y={plotTop + plotHeight / 2 + 4}
+        >
+          {`first read ${formatShortInstant(props.row.firstAt)}`}
+        </text>
+      )}
       <path className="usage-limit-line" d={line} />
     </g>
   )
@@ -150,10 +154,27 @@ export const LimitChart = (props: {
           </pattern>
         </defs>
         {rows.map((row, index) => (
-          <Row end={end} hatch={hatch} key={row.id} row={row} top={index * (ROW + ROW_GAP)} width={width} x={axis.x} />
+          <Row
+            end={end}
+            from={props.range.from}
+            hatch={hatch}
+            key={row.id}
+            row={row}
+            top={index * (ROW + ROW_GAP)}
+            width={width}
+            x={axis.x}
+          />
         ))}
-        {timeTicks(props.range, width, 72).map((tick) => (
-          <text className="usage-axis-label" key={tick.at} textAnchor="middle" x={axis.x(tick.at)} y={height - 6}>
+        {end < props.range.to ? (
+          <g aria-hidden="true">
+            <line className="usage-now" x1={axis.x(end)} x2={axis.x(end)} y1={0} y2={height - AXIS} />
+            <text className="usage-now-label" textAnchor="middle" x={axis.x(end)} y={height - AXIS + 12}>
+              now
+            </text>
+          </g>
+        ) : null}
+        {timeTicks(props.range, width, 72, props.range.bucket === "hour" ? 1 : 24).map((tick) => (
+          <text className="usage-axis-label" key={tick.at} textAnchor="middle" x={axis.x(tick.at)} y={height - 4}>
             {tick.label}
           </text>
         ))}

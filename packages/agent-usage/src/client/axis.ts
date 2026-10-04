@@ -43,18 +43,21 @@ export interface TimeTick {
 }
 
 /**
- * Time-axis ticks on local hour or midnight boundaries, at the finest step that leaves `minSpacing`
- * pixels between labels. Midnight in an hourly axis is labelled with its date.
+ * Time-axis ticks on local hour or midnight boundaries, at the finest step of at least
+ * `minStepHours` that leaves `minSpacing` pixels between labels. Midnight in an hourly axis is
+ * labelled with its date; day ranges pass 24 so they show whole days only.
  */
 export const timeTicks = (
   range: { readonly from: number; readonly to: number },
   width: number,
-  minSpacing: number
+  minSpacing: number,
+  minStepHours = 1
 ): ReadonlyArray<TimeTick> => {
   const plotWidth = Math.max(1, width - PLOT.left - PLOT.right)
   const span = Math.max(1, range.to - range.from)
-  const stepHours = STEP_HOURS.find((hours) => (hours * HOUR_MILLIS * plotWidth) / span >= minSpacing) ??
-    STEP_HOURS[STEP_HOURS.length - 1] ?? 720
+  const stepHours =
+    STEP_HOURS.find((hours) => hours >= minStepHours && (hours * HOUR_MILLIS * plotWidth) / span >= minSpacing) ??
+      STEP_HOURS[STEP_HOURS.length - 1] ?? 720
   const cursor = new Date(range.from)
   cursor.setMinutes(0, 0, 0)
   if (stepHours >= 24) cursor.setHours(0)

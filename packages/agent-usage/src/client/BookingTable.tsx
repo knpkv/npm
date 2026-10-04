@@ -138,6 +138,7 @@ export const BookingTable = (props: {
             : { state: "ready", rows }
         }
         heading="Bookings"
+        headingSize="card"
         onSortChange={(id) => {
           const column = shown.find((candidate) => candidate === id)
           if (column !== undefined) setSort(nextSort(sort, column))

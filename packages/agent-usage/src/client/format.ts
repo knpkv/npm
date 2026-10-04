@@ -25,6 +25,12 @@ export const formatAge = (observedAt: number, now: number): string => {
 export const formatInstant = (instant: number): string =>
   new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(instant)
 
+/** "Oct 4, 16:01": a day and time without the year, for notes inside a chart. */
+export const formatShortInstant = (instant: number): string =>
+  new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(
+    instant
+  )
+
 /** A period label: weekday and date for days and weeks, time for hours. */
 export const formatPeriod = (start: number, bucket: "hour" | "day" | "week"): string =>
   bucket === "hour"

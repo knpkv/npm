@@ -84,6 +84,7 @@
 }
 
 .usage-agent-groups {
+  align-items: start;
   display: grid;
   gap: var(--rly-space-12);
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr));
@@ -284,12 +285,8 @@ g[data-active="true"] .usage-segment {
   stroke-width: 2;
 }
 
-.usage-limit-area {
-  fill: var(--rly-color-surface-3);
-}
-
 .usage-limit-near {
-  stroke: var(--rly-color-held-ink);
+  stroke: var(--rly-color-border-2);
   stroke-dasharray: 4 4;
   stroke-width: 1;
 }
@@ -334,7 +331,18 @@ g[data-active="true"] .usage-segment {
 }
 
 .usage-key-near {
-  border-top: 1px dashed var(--rly-color-held-ink);
+  border-top: 1px dashed var(--rly-color-border-2);
+}
+
+.usage-now {
+  stroke: var(--rly-color-text-3);
+  stroke-dasharray: 2 3;
+}
+
+.usage-now-label,
+.usage-row-note {
+  fill: var(--rly-color-text-3);
+  font-size: 11px;
 }
 
 .usage-key-reset {

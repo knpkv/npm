@@ -5,7 +5,7 @@
  * @module
  */
 import { useAtom, useAtomRefresh, useAtomValue } from "@effect/atom-react"
-import { ThemeProvider } from "@knpkv/rly/foundations"
+import { PortalProvider, ThemeProvider } from "@knpkv/rly/foundations"
 import { Button, Skeleton, StatePanel, Text, ToggleGroup } from "@knpkv/rly/primitives"
 import { Effect } from "effect"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -288,7 +288,9 @@ export const App = () => {
   return (
     <ThemeProvider className="usage-shell" theme="system">
       {boot._tag === "Ready" ? (
-        <Dashboard />
+        <PortalProvider>
+          <Dashboard />
+        </PortalProvider>
       ) : boot._tag === "Booting" ? (
         <StatePanel title="Signing in" tone="neutral" description="Exchanging the one-time code." />
       ) : (
