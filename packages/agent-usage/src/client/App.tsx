@@ -6,7 +6,7 @@
  */
 import { useAtom, useAtomRefresh, useAtomValue } from "@effect/atom-react"
 import { ThemeProvider } from "@knpkv/rly/foundations"
-import { Button, Skeleton, StatePanel, Text } from "@knpkv/rly/primitives"
+import { Button, Skeleton, StatePanel, Text, ToggleGroup } from "@knpkv/rly/primitives"
 import { Effect } from "effect"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { bootstrapSession } from "./api.js"
@@ -41,27 +41,6 @@ const MEASURES: ReadonlyArray<{ readonly value: Measure; readonly label: string 
   { value: "cost", label: "API-eq. $" },
   { value: "tokens", label: "Tokens" }
 ]
-
-/** A row of mutually exclusive buttons. */
-const Choice = <A extends string>(props: {
-  readonly label: string
-  readonly options: ReadonlyArray<{ readonly value: A; readonly label: string }>
-  readonly value: A
-  readonly onChange: (value: A) => void
-}) => (
-  <div aria-label={props.label} className="usage-choice" role="group">
-    {props.options.map((option) => (
-      <Button
-        aria-pressed={option.value === props.value}
-        key={option.value}
-        onClick={() => props.onChange(option.value)}
-        variant={option.value === props.value ? "primary" : "secondary"}
-      >
-        {option.label}
-      </Button>
-    ))}
-  </div>
-)
 
 /** Re-renders once a minute so ages like "read 3m ago" stay true between refreshes. */
 const useNow = (): number => {
@@ -144,25 +123,40 @@ const Dashboard = () => {
           : <LimitsSummary balances={limits.value.limits.balances} latest={limits.value.limits.latest} now={now} />}
 
         <div className="usage-bar">
-          <Choice
-            label="Range"
-            onChange={(value) => {
-              setPreset(value)
+          <ToggleGroup
+            aria-label="Range"
+            items={PRESETS.map((value) => ({ value, label: value }))}
+            onValueChange={(value) => {
+              const next = PRESETS.find((candidate) => candidate === value)
+              if (next === undefined) return
+              setPreset(next)
               setSelected(null)
             }}
-            options={PRESETS.map((value) => ({ value, label: value }))}
+            size="compact"
             value={preset}
           />
-          <Choice
-            label="Agent"
-            onChange={(value) => {
-              setAgent(value)
+          <ToggleGroup
+            aria-label="Agent"
+            items={AGENTS}
+            onValueChange={(value) => {
+              const next = AGENTS.find((candidate) => candidate.value === value)
+              if (next === undefined) return
+              setAgent(next.value)
               setSelected(null)
             }}
-            options={AGENTS}
+            size="compact"
             value={agent}
           />
-          <Choice label="Measure" onChange={setMeasure} options={MEASURES} value={measure} />
+          <ToggleGroup
+            aria-label="Measure"
+            items={MEASURES}
+            onValueChange={(value) => {
+              const next = MEASURES.find((candidate) => candidate.value === value)
+              if (next !== undefined) setMeasure(next.value)
+            }}
+            size="compact"
+            value={measure}
+          />
         </div>
 
         <section aria-labelledby="usage-title" className="usage-panel">
@@ -245,7 +239,7 @@ const Dashboard = () => {
           {limits.value === null ? PANEL_LOADING : <LimitChart now={now} range={limits.value.range} series={limits.value.limits.series} />}
         </section>
 
-        <section className="usage-panel">
+        <div className="usage-panel">
           {usage.value === null ? PANEL_LOADING : (
             <BookingTable
               bookings={usage.value.report.bookings}
@@ -255,7 +249,7 @@ const Dashboard = () => {
               slots={slots}
             />
           )}
-        </section>
+        </div>
       </main>
       {status.value === null ? null : (
         <StatusStrip ignoredKeys={usage.value?.report.ignoredKeys ?? []} now={now} status={status.value} />

@@ -73,11 +73,6 @@
   padding-block: var(--rly-space-12);
 }
 
-.usage-choice {
-  display: flex;
-  gap: var(--rly-space-4);
-}
-
 .usage-limits-now {
   display: flex;
   flex-direction: column;
@@ -433,7 +428,28 @@
 }
 
 .usage-number {
-  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-bookings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--rly-space-12);
+}
+
+/* EntityTable's root is the size container; numbers align right only while it is a table. */
+@container (min-width: 40.0625rem) {
+  .usage-bookings[data-numeric-from="3"] :is(th, td):nth-child(n + 3),
+  .usage-bookings[data-numeric-from="4"] :is(th, td):nth-child(n + 4) {
+    text-align: end;
+  }
+}
+
+.usage-breakdown-toggle {
+  align-items: center;
+  color: var(--rly-color-text-2);
+  display: inline-flex;
+  gap: var(--rly-space-6);
 }
 
 .usage-title {

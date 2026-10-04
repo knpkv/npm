@@ -17,7 +17,7 @@ const toneLabel: Record<LimitTone, { readonly label: string; readonly tone: "pos
   unknown: { label: "Unknown", tone: "neutral" }
 }
 
-const WindowRow = (props: { readonly window: WindowSummary; readonly now: number }) => {
+const WindowRow = (props: { readonly agent: string; readonly window: WindowSummary; readonly now: number }) => {
   const { window } = props
   const tone = toneLabel[window.tone]
   return (
@@ -31,7 +31,7 @@ const WindowRow = (props: { readonly window: WindowSummary; readonly now: number
         : (
           <div className="usage-window-meter">
             <div
-              aria-label={`${window.name} used`}
+              aria-label={`${props.agent} ${window.name} used`}
               aria-valuemax={100}
               aria-valuemin={0}
               aria-valuenow={Math.min(100, Math.round(window.usedPercent))}
@@ -91,7 +91,7 @@ export const LimitsSummary = (props: {
                   />
                 )}
                 <ul className="usage-windows">
-                  {group.windows.map((window) => <WindowRow key={window.id} now={props.now} window={window} />)}
+                  {group.windows.map((window) => <WindowRow agent={agentName(group.agent)} key={window.id} now={props.now} window={window} />)}
                 </ul>
                 {group.unnamed.length === 0 ? null : (
                   <details className="usage-unnamed">
@@ -101,7 +101,7 @@ export const LimitsSummary = (props: {
                       </Text>
                     </summary>
                     <ul className="usage-windows">
-                      {group.unnamed.map((window) => <WindowRow key={window.id} now={props.now} window={window} />)}
+                      {group.unnamed.map((window) => <WindowRow agent={agentName(group.agent)} key={window.id} now={props.now} window={window} />)}
                     </ul>
                   </details>
                 )}

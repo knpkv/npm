@@ -17,7 +17,7 @@ test("the printed URL signs in once and leaves no code in the address bar", asyn
 
 test("usage is stacked by booking, with typed non-project keys listed rather than booked", async ({ page }) => {
   await signIn(page)
-  const table = page.getByRole("table", { name: "Bookings in this range" })
+  const table = page.getByRole("table", { name: "Bookings" })
   await expect(table.getByRole("button", { name: "RPS-12" })).toBeVisible()
   await expect(table.getByRole("button", { name: "tools (repo)" })).toBeVisible()
   await expect(table.getByRole("button", { name: "GPT-6" })).toHaveCount(0)
@@ -37,7 +37,7 @@ test("unpriced tokens are called out, and the booking shows ? instead of a numbe
 test("limits now groups each agent's windows with a meter, a tone word and the balances", async ({ page }) => {
   await signIn(page)
   const claude = page.getByRole("region", { name: "Claude limits" })
-  await expect(claude.getByRole("meter", { name: "5-hour used" })).toHaveAttribute("aria-valuenow", "42")
+  await expect(claude.getByRole("meter", { name: "Claude 5-hour used" })).toHaveAttribute("aria-valuenow", "42")
   await expect(claude).toContainText("OK")
   await expect(page.getByRole("region", { name: "Limits now" })).toContainText("5K credits")
 })
@@ -63,7 +63,7 @@ test("changing the agent filter drops a picked booking, so the chart is never le
   await signIn(page)
   await page.getByRole("button", { name: "tools (repo)" }).click()
   await expect(page.getByRole("heading", { name: "Usage by booking — tools (repo) only" })).toBeVisible()
-  await page.getByRole("button", { name: "Codex", exact: true }).click()
+  await page.getByRole("radiogroup", { name: "Agent" }).getByRole("radio", { name: "Codex" }).click()
   await expect(page.getByRole("heading", { name: "Usage by booking", exact: true })).toBeVisible()
 })
 
@@ -87,4 +87,13 @@ test("the page fits a phone without horizontal page scroll", async ({ page }) =>
   await expect(page.getByRole("region", { name: "Claude limits" }).getByRole("meter")).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
+})
+
+test("the filters are named radio groups that arrow keys move through", async ({ page }) => {
+  await signIn(page)
+  const range = page.getByRole("radiogroup", { name: "Range" })
+  await expect(range.getByRole("radio", { name: "7d" })).toHaveAttribute("aria-checked", "true")
+  await range.getByRole("radio", { name: "7d" }).focus()
+  await page.keyboard.press("ArrowRight")
+  await expect(range.getByRole("radio", { name: "30d" })).toBeFocused()
 })
