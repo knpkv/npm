@@ -12,6 +12,18 @@ import { validateComponentsRegistry } from "../../scripts/registry/registry-vali
 const parseJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json))
 
 describe("agent registry contract", () => {
+  it("keeps EntityTable's title separate from its generated presentation defaults", () => {
+    const registry = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Struct({
+      components: Schema.Array(Schema.Struct({
+        name: Schema.String,
+        props: Schema.Struct({ defaults: Schema.Record(Schema.String, Schema.String) })
+      }))
+    })))(renderComponentsRegistry(componentManifest))
+    expect(registry.components.find((component) => component.name === "EntityTable")?.props.defaults).toEqual({
+      density: "default",
+      headingSize: "section"
+    })
+  })
   it("renders every opted-in component deterministically with explicit tooling metadata", () => {
     const reordered: ComponentManifest = {
       ...componentManifest,

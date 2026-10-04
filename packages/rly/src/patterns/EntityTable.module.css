@@ -32,6 +32,10 @@
   }
 
   /* While it is a table, the column headers sort; the separate controls serve the card layout. */
+  .headerLabel {
+    display: none;
+  }
+
   .headerSort {
     align-items: center;
     background: transparent;
@@ -67,13 +71,6 @@
   .sortSelect > :first-child {
     flex: 1;
     min-inline-size: var(--rly-space-0);
-  }
-
-  @container (min-width: 40.0625rem) {
-    .sortControls,
-    .sortSelect {
-      display: none;
-    }
   }
 
   .loading {
@@ -180,6 +177,10 @@
       visibility: hidden;
     }
 
+    .headerLabel {
+      display: inline;
+    }
+
     .head {
       block-size: 1px;
       clip: rect(0 0 0 0);
@@ -264,6 +265,14 @@
     .compact .cell::before {
       font-weight: var(--rly-type-meta-weight);
       text-transform: none;
+    }
+  }
+
+  /* Last, so it outranks the base display of both control rows: wide tables sort from the headers. */
+  @container (min-width: 40.0625rem) {
+    .sortControls,
+    .sortSelect {
+      display: none;
     }
   }
 }

@@ -64,6 +64,12 @@ const buttonRegistryMetadata = componentManifest.registryMetadata.Button
 if (buttonRegistryMetadata === undefined) throw new Error("Button registry metadata is missing")
 
 describe("component manifest contract", () => {
+  it("names EntityTable presentation axes after their public props", () => {
+    expect(componentManifest.components.find((component) => component.name === "EntityTable")?.variants).toEqual([
+      { defaultValue: "default", name: "density", values: ["default", "compact"] },
+      { defaultValue: "section", name: "headingSize", values: ["section", "card"] }
+    ])
+  })
   it("keeps the approved design export inventory aligned with generated package exports", () => {
     expect(exportInventoryDrift(designExportInventory(approvedDesignSource), generatedPackageExports())).toEqual({
       missing: [],

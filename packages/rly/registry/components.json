@@ -1684,7 +1684,7 @@
       "props": {
         "defaults": {
           "density": "default",
-          "heading": "section"
+          "headingSize": "section"
         },
         "types": [
           "EntityTableProps"
@@ -1721,15 +1721,15 @@
         },
         {
           "defaultValue": "section",
-          "description": "Controls the heading presentation axis of EntityTable.",
-          "name": "heading",
+          "description": "Controls the headingSize presentation axis of EntityTable.",
+          "name": "headingSize",
           "values": [
             {
-              "description": "Use card for the heading presentation.",
+              "description": "Use card for the headingSize presentation.",
               "name": "card"
             },
             {
-              "description": "Use section for the heading presentation.",
+              "description": "Use section for the headingSize presentation.",
               "name": "section"
             }
           ]

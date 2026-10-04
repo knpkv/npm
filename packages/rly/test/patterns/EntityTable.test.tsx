@@ -69,7 +69,7 @@ describe("EntityTable", () => {
   })
 
   it("publishes a compact density that callers opt into, defaulting to comfortable cards", () => {
-    expect(RLY_ENTITY_TABLE_DEFAULT_VARIANTS).toEqual({ density: "default", heading: "section" })
+    expect(RLY_ENTITY_TABLE_DEFAULT_VARIANTS).toEqual({ density: "default", headingSize: "section" })
     expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.density)).toEqual(["default", "compact"])
     const ordinary = render(
       <EntityTable
@@ -123,7 +123,7 @@ describe("EntityTable", () => {
   })
 
   it("sizes the heading to its place on the page", () => {
-    expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.heading)).toEqual(["section", "card"])
+    expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.headingSize)).toEqual(["section", "card"])
     const card = render(
       <EntityTable
         columns={columns}
@@ -133,7 +133,7 @@ describe("EntityTable", () => {
         onSortChange={() => undefined}
       />
     )
-    expect(card?.className).toContain(RLY_ENTITY_TABLE_VARIANTS.heading.card.className)
+    expect(card?.className).toContain(RLY_ENTITY_TABLE_VARIANTS.headingSize.card.className)
     expect(card?.querySelector("h2")?.textContent).toBe("Items")
   })
 

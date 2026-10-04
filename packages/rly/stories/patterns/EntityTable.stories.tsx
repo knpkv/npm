@@ -189,6 +189,10 @@ export const CompactForcedColors: Story = {
     await expect(canvas.getAllByRole("columnheader")).toHaveLength(8)
     const dense = canvas.getByRole("region", { name: "Dense delivery items" })
     const comfortable = canvas.getByRole("region", { name: "Compact delivery items" })
+    for (const region of [dense, comfortable]) {
+      await expect(within(region).getByRole("columnheader", { name: "Item" })).toHaveAttribute("aria-sort", "ascending")
+      await expect(within(region).getByRole("columnheader", { name: "Service" })).toBeInTheDocument()
+    }
     await expect(dense.getBoundingClientRect().height).toBeLessThan(comfortable.getBoundingClientRect().height)
     const sort = within(comfortable).getByRole("button", { name: "Sort by Item, currently ascending" })
     await expect(sort).toBeVisible()

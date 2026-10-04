@@ -1132,7 +1132,7 @@ export const componentManifest = {
       styles: ["src/patterns/EntityTable.module.css"],
       variants: [
         { defaultValue: "default", name: "density", values: ["default", "compact"] },
-        { defaultValue: "section", name: "heading", values: ["section", "card"] }
+        { defaultValue: "section", name: "headingSize", values: ["section", "card"] }
       ],
       visual: {
         story: "stories/patterns/EntityTable.stories.tsx",

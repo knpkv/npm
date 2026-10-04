@@ -22,7 +22,7 @@ export const RLY_ENTITY_TABLE_VARIANTS = defineVariants({
       tokens: ["space-8", "space-2"]
     }
   },
-  heading: {
+  headingSize: {
     section: {
       className: style("sectionHeading"),
       purpose: "The table is a page section of its own",
@@ -36,9 +36,9 @@ export const RLY_ENTITY_TABLE_VARIANTS = defineVariants({
   }
 })
 
-export const RLY_ENTITY_TABLE_DEFAULT_VARIANTS = defineVariants({ density: "default", heading: "section" })
+export const RLY_ENTITY_TABLE_DEFAULT_VARIANTS = defineVariants({ density: "default", headingSize: "section" })
 export type RlyEntityTableDensity = keyof typeof RLY_ENTITY_TABLE_VARIANTS.density
-export type RlyEntityTableHeadingSize = keyof typeof RLY_ENTITY_TABLE_VARIANTS.heading
+export type RlyEntityTableHeadingSize = keyof typeof RLY_ENTITY_TABLE_VARIANTS.headingSize
 
 /** Caller-owned table sort state. */
 export type RlyEntityTableSortDirection = "none" | "ascending" | "descending"
@@ -202,7 +202,7 @@ export const EntityTable = ({
       className={classNames(
         style("root"),
         RLY_ENTITY_TABLE_VARIANTS.density[density].className,
-        RLY_ENTITY_TABLE_VARIANTS.heading[headingSize].className,
+        RLY_ENTITY_TABLE_VARIANTS.headingSize[headingSize].className,
         className
       )}
       data-rly-entity-table-density={density}
@@ -274,17 +274,25 @@ export const EntityTable = ({
             <thead className={style("head")}>
               <tr>
                 {columns.map((column) => (
-                  <th aria-sort={column.sortable ? column.sortDirection : undefined} key={column.id} scope="col">
-                    {column.sortable ? (
-                      <button
-                        aria-label={`Sort by ${column.label}, currently ${column.sortDirection}`}
-                        className={style("headerSort")}
-                        onClick={() => onSortChange(column.id)}
-                        type="button"
-                      >
-                        <span>{column.label}</span>
-                        <SortGlyph direction={column.sortDirection} />
-                      </button>
+                  <th
+                    aria-label={column.label}
+                    aria-sort={column.sortable === true ? column.sortDirection : undefined}
+                    key={column.id}
+                    scope="col"
+                  >
+                    {column.sortable === true ? (
+                      <>
+                        <span className={style("headerLabel")}>{column.label}</span>
+                        <button
+                          aria-label={`Sort by ${column.label}, currently ${column.sortDirection}`}
+                          className={style("headerSort")}
+                          onClick={() => onSortChange(column.id)}
+                          type="button"
+                        >
+                          <span>{column.label}</span>
+                          <SortGlyph direction={column.sortDirection} />
+                        </button>
+                      </>
                     ) : (
                       column.label
                     )}
