@@ -1,11 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Fiber } from "effect"
+import { Effect, Fiber, PlatformError } from "effect"
 import { TestClock } from "effect/testing"
 import {
   type ClaudeUsageDeps,
   CredentialsMissing,
   CredentialsUnreadable,
   KeychainDenied,
+  KeychainFailed,
   pollClaudeLimits,
   TokenExpired,
   tokenFromCredentials,
@@ -16,6 +17,7 @@ import {
   KEYCHAIN_DEADLINE,
   keychainArgs,
   keychainOutcome,
+  readKeychainItem,
   withKeychainDeadline
 } from "../src/core/ClaudeLimitsLive.js"
 
@@ -147,6 +149,11 @@ describe("pollClaudeLimits", () => {
           detail: "the credentials file could not be read (PermissionDenied)"
         }
       )
+      expect(yield* readingOf(failing(Effect.fail(new KeychainFailed({ stage: "output" }))))).toEqual({
+        _tag: "Unknown",
+        reason: "KeychainDenied",
+        detail: "the Keychain lookup broke off while its answer was being read"
+      })
       expect(yield* readingOf(failing(Effect.fail(new TokenExpired())))).toEqual({
         _tag: "Unknown",
         reason: "AuthExpired",
@@ -221,5 +228,21 @@ describe("credential lookups that go wrong", () => {
       const fiber = yield* Effect.forkChild(Effect.flip(withKeychainDeadline(Effect.never)))
       yield* TestClock.adjust(KEYCHAIN_DEADLINE)
       expect(yield* Fiber.join(fiber)).toEqual(new KeychainDenied({ exitCode: null }))
+    }))
+})
+
+describe("a Keychain lookup that started but broke off", () => {
+  const broken = PlatformError.systemError({ _tag: "Unknown", module: "ChildProcess", method: "exitCode" })
+
+  it.effect("is not reported as a missing credentials file", () =>
+    Effect.gen(function*() {
+      const service = "Claude Code-credentials"
+      expect(yield* Effect.flip(readKeychainItem(Effect.fail(broken), Effect.succeed(0), service))).toEqual(
+        new KeychainFailed({ stage: "output" })
+      )
+      expect(yield* Effect.flip(readKeychainItem(Effect.succeed("{}"), Effect.fail(broken), service))).toEqual(
+        new KeychainFailed({ stage: "exit" })
+      )
+      expect(yield* readKeychainItem(Effect.succeed("{}"), Effect.succeed(0), service)).toBe("{}")
     }))
 })

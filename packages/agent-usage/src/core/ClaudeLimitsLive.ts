@@ -23,6 +23,7 @@ import {
   CredentialsMissing,
   CredentialsUnreadable,
   KeychainDenied,
+  KeychainFailed,
   tokenFromCredentials,
   USAGE_URL,
   UsageFetchFailed
@@ -80,6 +81,21 @@ export const keychainOutcome = (
     ? Effect.fail(new CredentialsMissing({ where: `keychain:${service}` }))
     : Effect.fail(new KeychainDenied({ exitCode }))
 
+/**
+ * The item a started `security` lookup returns, from its output and exit code. Once it has started,
+ * a failure is the Keychain's, never a missing credentials file.
+ */
+export const readKeychainItem = <E1, E2>(
+  stdout: Effect.Effect<string, E1>,
+  exitCode: Effect.Effect<number, E2>,
+  service: string
+): Effect.Effect<string, CredentialsMissing | KeychainDenied | KeychainFailed> =>
+  Effect.gen(function*() {
+    const output = yield* stdout.pipe(Effect.mapError(() => new KeychainFailed({ stage: "output" })))
+    const code = yield* exitCode.pipe(Effect.mapError(() => new KeychainFailed({ stage: "exit" })))
+    return yield* keychainOutcome(code, output, service)
+  })
+
 /** Builds the live dependencies for where Claude Code keeps its credentials. */
 export const liveClaudeUsageDeps = (places: ClaudeCredentialsPlaces) =>
   Effect.gen(function*() {
@@ -92,15 +108,17 @@ export const liveClaudeUsageDeps = (places: ClaudeCredentialsPlaces) =>
     )
     const fromKeychain = withKeychainDeadline(Effect.scoped(
       Effect.gen(function*() {
-        const handle = yield* spawner.spawn(ChildProcess.make("security", keychainArgs(places)))
-        const stdout = yield* Stream.mkString(Stream.decodeText(handle.stdout))
-        const exitCode = yield* handle.exitCode
-        return yield* keychainOutcome(exitCode, stdout, places.keychainService)
+        const handle = yield* spawner.spawn(ChildProcess.make("security", keychainArgs(places))).pipe(
+          // No `security` binary (Linux) or no way to start it: the file was the only place to look.
+          Effect.mapError(() => new CredentialsMissing({ where: "file" }))
+        )
+        return yield* readKeychainItem(
+          Stream.mkString(Stream.decodeText(handle.stdout)),
+          handle.exitCode,
+          places.keychainService
+        )
       })
-    )).pipe(
-      // No `security` binary (Linux) or no way to run it: the file was the only place to look.
-      Effect.catchTag("PlatformError", () => Effect.fail(new CredentialsMissing({ where: "file" })))
-    )
+    ))
 
     const deps: ClaudeUsageDeps = {
       readToken: fromFile.pipe(

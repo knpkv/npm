@@ -34,6 +34,8 @@ export class CredentialsUnreadable extends Data.TaggedError("CredentialsUnreadab
  * GUI session, access denied), or, when `exitCode` is null, did not answer before the deadline.
  */
 export class KeychainDenied extends Data.TaggedError("KeychainDenied")<{ readonly exitCode: number | null }> {}
+/** `security` started but the lookup broke off: reading its answer failed, or it did not exit normally. */
+export class KeychainFailed extends Data.TaggedError("KeychainFailed")<{ readonly stage: "output" | "exit" }> {}
 export class TokenExpired extends Data.TaggedError("TokenExpired")<{}> {}
 /** The request itself failed; `cause` is the failure's kind only, never the request carrying the token. */
 export class UsageFetchFailed extends Data.TaggedError("UsageFetchFailed")<{ readonly cause: string }> {}
@@ -45,7 +47,10 @@ export interface UsageReply {
 
 /** How a poll reaches the token and the endpoint; the live pair lives at the executable boundary. */
 export interface ClaudeUsageDeps {
-  readonly readToken: Effect.Effect<string, CredentialsMissing | CredentialsUnreadable | KeychainDenied | TokenExpired>
+  readonly readToken: Effect.Effect<
+    string,
+    CredentialsMissing | CredentialsUnreadable | KeychainDenied | KeychainFailed | TokenExpired
+  >
   readonly get: (token: string) => Effect.Effect<UsageReply, UsageFetchFailed>
 }
 
@@ -204,6 +209,17 @@ export const pollClaudeLimits = (deps: ClaudeUsageDeps, machine: string): Effect
               error.exitCode === null
                 ? "the Keychain did not answer in time (locked, or waiting on a password prompt)"
                 : `the Keychain refused access (security exited ${error.exitCode})`
+            )
+          ),
+        KeychainFailed: (error) =>
+          Effect.succeed(
+            unknownObservations(
+              machine,
+              observedAt,
+              "KeychainDenied",
+              error.stage === "output"
+                ? "the Keychain lookup broke off while its answer was being read"
+                : "the Keychain process did not exit normally"
             )
           ),
         TokenExpired: () =>
