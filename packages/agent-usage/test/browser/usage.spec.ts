@@ -1,7 +1,7 @@
 import { expect, type Page, test } from "@playwright/test"
 import { Deferred, Effect, Schema } from "effect"
 import { totalTokens } from "../../src/core/Model.js"
-import { LimitsReport, UsageReport } from "../../src/shared/contracts.js"
+import { type BookingSummary, LimitsReport, UsageReport } from "../../src/shared/contracts.js"
 
 /** Replaces a decoded fixture report while retaining the real server's periods and identities. */
 const replaceUsage = (page: Page, change: (report: UsageReport) => UsageReport) =>
@@ -274,11 +274,16 @@ test("a long ticket title stays inside its cell at desktop width", async ({ page
 test("on a phone, a tall breakdown keeps every booking and the total readable", async ({ page }) => {
   await replaceUsage(page, (report) => {
     const period = report.periods.length - 1
-    const bookings = Array.from({ length: 9 }, (_, index) => ({
-      ...report.bookings[0]!,
+    const bookings = Array.from({ length: 9 }, (_, index): BookingSummary => ({
       id: `long-${index}`,
-      booking: { _tag: "Repo" as const, name: `a-really-quite-long-repository-name-${index}` },
-      costUsd: 10 - index
+      booking: { _tag: "Repo", name: `a-really-quite-long-repository-name-${index}` },
+      title: null,
+      agents: ["claude"],
+      requests: 1,
+      tokens: { input: 1_000, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 },
+      costUsd: 10 - index,
+      unpricedTokens: 0,
+      unpricedModels: []
     }))
     return {
       ...report,
