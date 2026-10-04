@@ -21,7 +21,7 @@ import { bookingLabel, OTHER } from "./chartModel.js"
 import { formatTokens, formatUsd } from "./format.js"
 import { seriesColor } from "./UsageChart.js"
 
-const LABELS: Record<BookingColumn, string> = {
+const LABELS = {
   booking: "Booking",
   title: "Title",
   agents: "Agents",
@@ -32,7 +32,7 @@ const LABELS: Record<BookingColumn, string> = {
   cacheWrite: "Cache write",
   tokens: "Tokens",
   cost: "API-eq. cost"
-}
+} satisfies Record<BookingColumn, string>
 
 const titleOf = (summary: BookingSummary): string =>
   summary.booking._tag === "Repo"

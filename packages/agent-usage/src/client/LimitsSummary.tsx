@@ -10,15 +10,17 @@ import type { BalanceReading, LimitSnapshot } from "../core/Model.js"
 import { describeReason, formatAge, formatBalance, formatInstant, formatPercent } from "./format.js"
 import { agentName, type LimitTone, summarizeLimits, type WindowSummary } from "./limitsModel.js"
 
-const toneLabel: Record<
-  LimitTone,
-  { readonly label: string; readonly tone: "positive" | "caution" | "critical" | "neutral" }
-> = {
+interface ToneLabel {
+  readonly label: string
+  readonly tone: "positive" | "caution" | "critical" | "neutral"
+}
+
+const toneLabel = {
   ok: { label: "OK", tone: "positive" },
   near: { label: "Near limit", tone: "caution" },
   "at-limit": { label: "At limit", tone: "critical" },
   unknown: { label: "Unknown", tone: "neutral" }
-}
+} satisfies Record<LimitTone, ToneLabel>
 
 const WindowRow = (props: { readonly agent: string; readonly window: WindowSummary; readonly now: number }) => {
   const { window } = props

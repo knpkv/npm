@@ -38,7 +38,7 @@ export const limitTone = (reading: LimitReading): LimitTone =>
     ? "near"
     : "ok"
 
-const toneRank: Record<LimitTone, number> = { "at-limit": 3, near: 2, unknown: 1, ok: 0 }
+const toneRank = { "at-limit": 3, near: 2, unknown: 1, ok: 0 } satisfies Record<LimitTone, number>
 
 /** "resets in 4h 12m": how long until a window resets, or "reset" once it has. */
 export const relativeReset = (resetsAt: number, now: number): string => {
