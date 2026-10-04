@@ -15,6 +15,9 @@ The package exports:
 - `JobStore`, the local SQLite persistence boundary
 - `makeFleetService`, the approval and execution state machine
 - typed validation, storage, approval, authorization, and operation errors
+- `@knpkv/herdr-fleet/sqlite`, the private on-disk database opener every Herdr store uses
+
+Every Herdr store opens its database through `@knpkv/herdr-fleet/sqlite`. The state directory and the database, `-wal` and `-shm` files are refused, unchanged, when they are symbolic links, the wrong type, or group/other writable; otherwise the directory is restricted to `0700` (created if missing) and the files to `0600`, and `openPrivateSqlite` enables WAL after the store's schema step. Symlinked ancestors such as macOS `/var` are allowed. `preparePrivateDatabasePath` and `securePrivateDatabaseFiles` do the same file-system work for clients other than `node:sqlite`.
 
 `HostConfiguration.pushAllowedOrigins` is the explicit exact-origin allowlist used by the approval runtime for browser push delivery. It has no implicit defaults; deployment configuration owns the accepted push services.
 

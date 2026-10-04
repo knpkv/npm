@@ -1,10 +1,14 @@
-import { Effect, FileSystem, Path, Schema } from "effect"
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
+import { Effect, Schema } from "effect"
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { FleetJobConflictError, FleetStoreError, FleetTransitionConflictError } from "./errors.js"
 import { JobRecord, type PendingApprovalCursor } from "./model.js"
+import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "./sqlite.js"
 
 const storeError = (operation: string) => (cause: unknown) =>
   new FleetStoreError({ operation, detail: String(cause), cause })
+
+const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
+  new FleetStoreError({ operation: error.operation, detail: String(error.cause), cause: error.cause })
 
 const decodeRecord = (text: string) =>
   Effect.try({
@@ -26,50 +30,33 @@ const decodeRows = (
 
 export class JobStore {
   readonly #database: DatabaseSync
-  readonly #fileSystem: FileSystem.FileSystem
+  readonly #secureFiles: Effect.Effect<void, FleetStoreError>
   readonly path: string
 
-  private constructor(path: string, fileSystem: FileSystem.FileSystem) {
+  private constructor(path: string, opened: PrivateSqlite) {
     this.path = path
-    this.#fileSystem = fileSystem
-    this.#database = new DatabaseSync(path)
-    try {
-      this.#database.exec(`
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS jobs (
-          id TEXT PRIMARY KEY,
-          created_at INTEGER NOT NULL,
-          record TEXT NOT NULL
-        );
-        CREATE INDEX IF NOT EXISTS jobs_record_status_idx ON jobs (
-          CASE
-            WHEN json_valid(record)
-            THEN json_extract(record, '$.status')
-          END
-        );
-      `)
-    } catch (error) {
-      this.#database.close()
-      throw error
-    }
+    this.#database = opened.database
+    this.#secureFiles = opened.secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
   }
 
   static readonly open = Effect.fn("JobStore.open")(function*(path: string) {
-    const fileSystem = yield* FileSystem.FileSystem
-    const paths = yield* Path.Path
-    const directory = paths.dirname(path)
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-      Effect.mapError(storeError("open.makeDirectory"))
-    )
-    yield* fileSystem.chmod(directory, 0o700).pipe(
-      Effect.mapError(storeError("open.secureDirectory"))
-    )
-    const store = yield* Effect.try({
-      try: () => new JobStore(path, fileSystem),
-      catch: storeError("open.database")
-    })
-    yield* store.secureFiles()
-    return store
+    const opened = yield* openPrivateSqlite(path, {
+      initialize: (database) =>
+        database.exec(`
+          CREATE TABLE IF NOT EXISTS jobs (
+            id TEXT PRIMARY KEY,
+            created_at INTEGER NOT NULL,
+            record TEXT NOT NULL
+          );
+          CREATE INDEX IF NOT EXISTS jobs_record_status_idx ON jobs (
+            CASE
+              WHEN json_valid(record)
+              THEN json_extract(record, '$.status')
+            END
+          );
+        `)
+    }).pipe(Effect.mapError(fromPrivateDatabaseError))
+    return new JobStore(path, opened)
   })
 
   readonly put = Effect.fn("JobStore.put")(function*(
@@ -283,23 +270,7 @@ export class JobStore {
   })
 
   private secureFiles() {
-    const fileSystem = this.#fileSystem
-    const files = [this.path, `${this.path}-wal`, `${this.path}-shm`]
-    return Effect.forEach(
-      files,
-      (path) =>
-        fileSystem.exists(path).pipe(
-          Effect.mapError(storeError("secure.exists")),
-          Effect.flatMap((exists) =>
-            exists
-              ? fileSystem.chmod(path, 0o600).pipe(
-                Effect.mapError(storeError("secure.chmod"))
-              )
-              : Effect.void
-          )
-        ),
-      { discard: true }
-    )
+    return this.#secureFiles
   }
 
   close(): void {

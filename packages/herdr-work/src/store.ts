@@ -1,7 +1,8 @@
 import { agentConnectTarget, fleetResponseBodyMaxBytes, workReassignActivitySummary } from "@knpkv/herdr-fleet"
-import { Clock, Crypto, Effect, Equal, FileSystem, Option, Path, Schema } from "effect"
+import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
+import { Clock, Crypto, Effect, Equal, Option, Schema } from "effect"
 import { Hex } from "effect/encoding"
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { makeWorkAgentBinding } from "./agent-binding.js"
 import {
   WorkAdmissionConflictError,
@@ -234,6 +235,9 @@ const TransactionId = Schema.String.check(
   Schema.isPattern(/^(?:[^\uD800-\uDFFF]|[\uD800-\uDBFF][\uDC00-\uDFFF])*$/)
 )
 const storeError = (operation: string) => (cause: unknown) => new WorkStoreError({ cause, operation })
+
+const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
+  new WorkStoreError({ cause: error.cause, operation: error.operation })
 
 const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
   let transaction = false
@@ -1137,38 +1141,6 @@ const migrateLegacyAuthorityTables = (database: DatabaseSync): void => {
   }
 }
 
-const verifyPathIdentity = (
-  path: string,
-  fileSystem: FileSystem.FileSystem,
-  paths: Path.Path,
-  operation: string
-): Effect.Effect<void, WorkStoreError> =>
-  fileSystem.readLink(path).pipe(
-    Effect.matchEffect({
-      onFailure: (cause) =>
-        cause.reason._tag === "NotFound" || cause.reason._tag === "Unknown"
-          ? Effect.void
-          : Effect.fail(new WorkStoreError({ cause, operation: `${operation}.readlink` })),
-      onSuccess: (target) => Effect.fail(new WorkStoreError({ cause: { path, target }, operation }))
-    }),
-    Effect.andThen(fileSystem.exists(path).pipe(Effect.mapError(storeError(`${operation}.exists`)))),
-    Effect.flatMap((exists) => {
-      if (!exists) {
-        const parent = paths.dirname(path)
-        return parent === path ? Effect.void : verifyPathIdentity(parent, fileSystem, paths, operation)
-      }
-      const parent = paths.dirname(path)
-      return Effect.all({
-        realPath: fileSystem.realPath(path).pipe(Effect.mapError(storeError(`${operation}.realpath`))),
-        realParentPath: fileSystem.realPath(parent).pipe(Effect.mapError(storeError(`${operation}.parent-realpath`)))
-      }).pipe(Effect.flatMap(({ realParentPath, realPath }) => {
-        const expectedPath = paths.join(realParentPath, paths.basename(path))
-        return realPath === expectedPath
-          ? Effect.void
-          : Effect.fail(new WorkStoreError({ cause: { expectedPath, path, realPath }, operation }))
-      }))
-    })
-  )
 const readTransactionLedgerTotals = (database: DatabaseSync) =>
   Schema.decodeUnknownSync(TransactionLedgerTotalsRow)(
     database.prepare(
@@ -1861,29 +1833,26 @@ export interface WorkStoreService {
 export class WorkStore implements WorkStoreService {
   readonly #database: DatabaseSync
   readonly #cryptoService: Crypto.Crypto
-  readonly #fileSystem: FileSystem.FileSystem
-  readonly #paths: Path.Path
+  readonly #secureFiles: Effect.Effect<void, WorkStoreError>
   readonly path: string
 
-  private constructor(
-    path: string,
-    fileSystem: FileSystem.FileSystem,
-    paths: Path.Path,
-    cryptoService: Crypto.Crypto
-  ) {
+  private constructor(path: string, opened: PrivateSqlite, cryptoService: Crypto.Crypto) {
     this.path = path
-    this.#fileSystem = fileSystem
-    this.#paths = paths
+    this.#database = opened.database
+    this.#secureFiles = opened.secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
     this.#cryptoService = cryptoService
-    this.#database = new DatabaseSync(path)
-    try {
-      this.#database.exec(`PRAGMA busy_timeout = ${workStoreBusyTimeoutMillis}`)
-      migrateLegacyAuthorityTables(this.#database)
-      const hadLaneOperationLedger = this.#database.prepare(
-        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
-      ).get() !== undefined
-      this.#database.exec(`
-        PRAGMA journal_mode = WAL;
+  }
+
+  static readonly open = Effect.fn("WorkStore.open")(function*(path: string) {
+    const cryptoService = yield* Crypto.Crypto
+    const opened = yield* openPrivateSqlite(path, {
+      busyTimeoutMillis: workStoreBusyTimeoutMillis,
+      initialize: (database) => {
+        migrateLegacyAuthorityTables(database)
+        const hadLaneOperationLedger = database.prepare(
+          "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'work_lane_operations'"
+        ).get() !== undefined
+        database.exec(`
         CREATE TABLE IF NOT EXISTS work_goal_events (
           event_id TEXT PRIMARY KEY,
           goal_id TEXT NOT NULL,
@@ -1989,21 +1958,21 @@ export class WorkStore implements WorkStoreService {
         CREATE INDEX IF NOT EXISTS work_decision_handoffs_session
           ON work_decision_handoffs (session_id);
       `)
-      const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
-        this.#database.prepare("PRAGMA table_info(work_goal_events)").all()
-      )
-      if (!columns.some(({ name }) => name === "transaction_id")) {
-        this.#database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
-      }
-      if (!hadLaneOperationLedger) {
-        this.#database.exec(`
+        const columns = Schema.decodeUnknownSync(Schema.Array(Schema.Struct({ name: Schema.String })))(
+          database.prepare("PRAGMA table_info(work_goal_events)").all()
+        )
+        if (!columns.some(({ name }) => name === "transaction_id")) {
+          database.exec("ALTER TABLE work_goal_events ADD COLUMN transaction_id TEXT")
+        }
+        if (!hadLaneOperationLedger) {
+          database.exec(`
           INSERT OR IGNORE INTO work_lane_operations
             (operation_id, lane_id, goal_id, phase, revision, record)
           SELECT operation_id, lane_id, goal_id, phase, revision, record
           FROM work_lane_claims
         `)
-      }
-      this.#database.exec(`
+        }
+        database.exec(`
         INSERT OR IGNORE INTO work_lane_operation_totals
           (singleton, operation_count, operation_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -2011,7 +1980,7 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_lane_operations
       `)
-      this.#database.exec(`
+        database.exec(`
         INSERT OR IGNORE INTO work_goal_transaction_totals
           (singleton, transaction_count, transaction_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -2019,7 +1988,7 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_goal_transactions
       `)
-      this.#database.exec(`
+        database.exec(`
         INSERT OR REPLACE INTO work_decision_totals
           (singleton, decision_count, decision_bytes)
         SELECT 1, COUNT(*), COALESCE(SUM(
@@ -2027,66 +1996,9 @@ export class WorkStore implements WorkStoreService {
         ), 0)
         FROM work_decision_handoffs
       `)
-    } catch (error) {
-      this.#database.close()
-      throw error
-    }
-  }
-
-  static readonly open = Effect.fn("WorkStore.open")(function*(path: string) {
-    const cryptoService = yield* Crypto.Crypto
-    const fileSystem = yield* FileSystem.FileSystem
-    const paths = yield* Path.Path
-    const directory = paths.dirname(path)
-    const directoryExists = yield* fileSystem.exists(directory).pipe(
-      Effect.mapError(storeError("open.directory.exists"))
-    )
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-      Effect.mapError(storeError("open.directory"))
-    )
-    if (!directoryExists) {
-      yield* fileSystem.chmod(directory, 0o700).pipe(
-        Effect.mapError(storeError("open.secureDirectory"))
-      )
-    }
-    const directoryInfo = yield* fileSystem.stat(directory).pipe(Effect.mapError(storeError("open.directory.stat")))
-    if (directoryInfo.type !== "Directory" || (paths.sep === "/" && (directoryInfo.mode & 0o022) !== 0)) {
-      return yield* new WorkStoreError({
-        cause: { directory, mode: directoryInfo.mode, type: directoryInfo.type },
-        operation: "open.directory.unsafe"
-      })
-    }
-    yield* verifyPathIdentity(directory, fileSystem, paths, "open.directory.path-identity")
-    yield* Effect.forEach(
-      [path, `${path}-wal`, `${path}-shm`],
-      (file) =>
-        verifyPathIdentity(file, fileSystem, paths, "open.path-identity").pipe(
-          Effect.andThen(fileSystem.exists(file).pipe(Effect.mapError(storeError("open.file.exists")))),
-          Effect.flatMap((exists) => {
-            if (!exists) return Effect.void
-            return fileSystem.stat(file).pipe(
-              Effect.mapError(storeError("open.file.stat")),
-              Effect.flatMap((info) =>
-                info.type !== "File" || (paths.sep === "/" && (info.mode & 0o022) !== 0)
-                  ? Effect.fail(
-                    new WorkStoreError({
-                      cause: { file, mode: info.mode, type: info.type },
-                      operation: "open.file.unsafe"
-                    })
-                  )
-                  : fileSystem.chmod(file, 0o600).pipe(Effect.mapError(storeError("open.file.secure")))
-              )
-            )
-          })
-        ),
-      { discard: true }
-    )
-    const store = yield* Effect.try({
-      try: () => new WorkStore(path, fileSystem, paths, cryptoService),
-      catch: storeError("open.database")
-    })
-    yield* store.secureFiles()
-    return store
+      }
+    }).pipe(Effect.mapError(fromPrivateDatabaseError))
+    return new WorkStore(path, opened, cryptoService)
   })
 
   readonly recoveryPreflight = Effect.fn("WorkStore.recoveryPreflight")(function*(
@@ -4612,20 +4524,7 @@ export class WorkStore implements WorkStoreService {
   })
 
   private secureFiles() {
-    const files = [this.path, `${this.path}-wal`, `${this.path}-shm`]
-    return Effect.forEach(
-      files,
-      (path) =>
-        verifyPathIdentity(path, this.#fileSystem, this.#paths, "secure.path-identity").pipe(
-          Effect.andThen(this.#fileSystem.exists(path).pipe(Effect.mapError(storeError("secure.exists")))),
-          Effect.flatMap((exists) =>
-            exists
-              ? this.#fileSystem.chmod(path, 0o600).pipe(Effect.mapError(storeError("secure.chmod")))
-              : Effect.void
-          )
-        ),
-      { discard: true }
-    )
+    return this.#secureFiles
   }
 
   close(): void {

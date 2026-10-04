@@ -1,0 +1,16 @@
+id: no-unvetted-herdr-sqlite-open
+snapshots:
+  ? |
+    const verifyPathIdentity = (path: string) => fileSystem.readLink(path)
+  : labels:
+      - source: fileSystem.readLink(path)
+        style: primary
+        start: 45
+        end: 70
+  ? |
+    this.#database = new DatabaseSync(path)
+  : labels:
+      - source: new DatabaseSync(path)
+        style: primary
+        start: 17
+        end: 39

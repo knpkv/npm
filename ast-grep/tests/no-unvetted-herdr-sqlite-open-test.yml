@@ -1,0 +1,11 @@
+id: no-unvetted-herdr-sqlite-open
+valid:
+  - |
+    const opened = yield* openPrivateSqlite(path, { initialize })
+  - |
+    import type { DatabaseSync } from "node:sqlite"
+invalid:
+  - |
+    this.#database = new DatabaseSync(path)
+  - |
+    const verifyPathIdentity = (path: string) => fileSystem.readLink(path)

@@ -1,5 +1,6 @@
-import { Effect, FileSystem, Path, Schema, Semaphore } from "effect"
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
+import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
+import { Effect, Schema, Semaphore } from "effect"
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ConnectRelationshipError, ConnectRelationshipStoreError } from "./errors.js"
 import { connectRelationshipViolation } from "./forest.js"
 import { ConnectAgent, ConnectAgentRelationship } from "./model.js"
@@ -35,6 +36,9 @@ const RelationshipRow = Schema.Struct({
   relation: Schema.NullOr(Schema.String),
   source: Schema.Literals(["durable_worker", "trusted_live_inventory"])
 })
+
+const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
+  new ConnectRelationshipStoreError({ cause: error.cause, operation: error.operation })
 
 const storeError = (operation: string) => (cause: unknown) => new ConnectRelationshipStoreError({ cause, operation })
 const isRelationshipPersistenceFailure = Schema.is(
@@ -90,12 +94,17 @@ export class AgentRelationshipStore {
   readonly #transactions: Semaphore.Semaphore
   readonly path: string
 
-  private constructor(path: string, transactions: Semaphore.Semaphore) {
+  private constructor(path: string, transactions: Semaphore.Semaphore, opened: PrivateSqlite) {
     this.path = path
     this.#transactions = transactions
-    this.#database = new DatabaseSync(path)
-    try {
-      this.#database.exec(`
+    this.#database = opened.database
+  }
+
+  static readonly open = Effect.fn("AgentRelationshipStore.open")(
+    function*(path: string) {
+      const opened = yield* openPrivateSqlite(path, {
+        initialize: (database) => {
+          database.exec(`
         CREATE TABLE IF NOT EXISTS connect_store_metadata (
           key TEXT PRIMARY KEY,
           value TEXT NOT NULL
@@ -111,17 +120,17 @@ export class AgentRelationshipStore {
           CHECK ((parent_agent_id IS NULL) = (relation IS NULL))
         );
       `)
-      const version = this.#database.prepare(
-        "SELECT value FROM connect_store_metadata WHERE key = 'relationship_schema'"
-      ).get()
-      const decodedVersion = Schema.decodeUnknownResult(
-        Schema.Struct({ value: Schema.String })
-      )(version)
-      if (
-        decodedVersion._tag === "Failure" ||
-        (decodedVersion.success.value !== "3" && decodedVersion.success.value !== "4")
-      ) {
-        this.#database.exec(`
+          const version = database.prepare(
+            "SELECT value FROM connect_store_metadata WHERE key = 'relationship_schema'"
+          ).get()
+          const decodedVersion = Schema.decodeUnknownResult(
+            Schema.Struct({ value: Schema.String })
+          )(version)
+          if (
+            decodedVersion._tag === "Failure" ||
+            (decodedVersion.success.value !== "3" && decodedVersion.success.value !== "4")
+          ) {
+            database.exec(`
           BEGIN IMMEDIATE;
           CREATE TABLE connect_agent_relationships_v2 (
             host TEXT NOT NULL COLLATE NOCASE,
@@ -144,15 +153,15 @@ export class AgentRelationshipStore {
           ON CONFLICT(key) DO UPDATE SET value = excluded.value;
           COMMIT;
         `)
-      }
-      const migratedVersion = this.#database.prepare(
-        "SELECT value FROM connect_store_metadata WHERE key = 'relationship_schema'"
-      ).get()
-      const decodedMigratedVersion = Schema.decodeUnknownResult(
-        Schema.Struct({ value: Schema.String })
-      )(migratedVersion)
-      if (decodedMigratedVersion._tag === "Failure" || decodedMigratedVersion.success.value !== "4") {
-        this.#database.exec(`
+          }
+          const migratedVersion = database.prepare(
+            "SELECT value FROM connect_store_metadata WHERE key = 'relationship_schema'"
+          ).get()
+          const decodedMigratedVersion = Schema.decodeUnknownResult(
+            Schema.Struct({ value: Schema.String })
+          )(migratedVersion)
+          if (decodedMigratedVersion._tag === "Failure" || decodedMigratedVersion.success.value !== "4") {
+            database.exec(`
           BEGIN IMMEDIATE;
           ALTER TABLE connect_agent_relationships
           ADD COLUMN source TEXT NOT NULL DEFAULT 'durable_worker'
@@ -164,29 +173,11 @@ export class AgentRelationshipStore {
           ON CONFLICT(key) DO UPDATE SET value = excluded.value;
           COMMIT;
         `)
-      }
-    } catch (error) {
-      this.#database.close()
-      throw error
-    }
-  }
-
-  static readonly open = Effect.fn("AgentRelationshipStore.open")(
-    function*(path: string) {
-      const fileSystem = yield* FileSystem.FileSystem
-      const paths = yield* Path.Path
-      const directory = paths.dirname(path)
-      yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-        Effect.mapError(storeError("open.directory"))
-      )
-      yield* fileSystem.chmod(directory, 0o700).pipe(
-        Effect.mapError(storeError("open.secureDirectory"))
-      )
+          }
+        }
+      }).pipe(Effect.mapError(fromPrivateDatabaseError))
       const transactions = yield* Semaphore.make(1)
-      return yield* Effect.try({
-        try: () => new AgentRelationshipStore(path, transactions),
-        catch: storeError("open")
-      })
+      return new AgentRelationshipStore(path, transactions, opened)
     }
   )
 

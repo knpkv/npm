@@ -1,9 +1,17 @@
-import { Effect, FileSystem, Path, Schema } from "effect"
-import { DatabaseSync } from "node:sqlite"
+import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
+import { Effect, Schema } from "effect"
+import type { DatabaseSync } from "node:sqlite"
 import { TerminalTransportError } from "./errors.js"
 
 const ActivityRow = Schema.Struct({ last_activity_at: Schema.Number })
 const TableColumn = Schema.Struct({ name: Schema.String })
+
+const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
+  new TerminalTransportError({
+    cause: error.cause,
+    detail: String(error.cause),
+    operation: `activity.${error.operation}`
+  })
 
 const storeError = (operation: string) => (cause: unknown) =>
   new TerminalTransportError({ cause, detail: String(cause), operation })
@@ -12,12 +20,15 @@ export class AgentActivityStore {
   readonly #database: DatabaseSync
   readonly path: string
 
-  private constructor(path: string) {
+  private constructor(path: string, opened: PrivateSqlite) {
     this.path = path
-    this.#database = new DatabaseSync(path)
-    try {
-      this.#database.exec(`
-        PRAGMA journal_mode = WAL;
+    this.#database = opened.database
+  }
+
+  static readonly open = Effect.fn("AgentActivityStore.open")(function*(path: string) {
+    const opened = yield* openPrivateSqlite(path, {
+      initialize: (database) => {
+        database.exec(`
         CREATE TABLE IF NOT EXISTS agent_activity (
           host TEXT COLLATE NOCASE NOT NULL,
           agent_id TEXT NOT NULL,
@@ -27,34 +38,17 @@ export class AgentActivityStore {
           PRIMARY KEY (host, agent_id)
         );
       `)
-      const columns = Schema.decodeUnknownSync(Schema.Array(TableColumn))(
-        this.#database.prepare("PRAGMA table_info(agent_activity)").all()
-      )
-      if (!columns.some(({ name }) => name === "observed_at")) {
-        this.#database.exec(
-          "ALTER TABLE agent_activity ADD COLUMN observed_at INTEGER NOT NULL DEFAULT 0"
+        const columns = Schema.decodeUnknownSync(Schema.Array(TableColumn))(
+          database.prepare("PRAGMA table_info(agent_activity)").all()
         )
+        if (!columns.some(({ name }) => name === "observed_at")) {
+          database.exec(
+            "ALTER TABLE agent_activity ADD COLUMN observed_at INTEGER NOT NULL DEFAULT 0"
+          )
+        }
       }
-    } catch (error) {
-      this.#database.close()
-      throw error
-    }
-  }
-
-  static readonly open = Effect.fn("AgentActivityStore.open")(function*(path: string) {
-    const fileSystem = yield* FileSystem.FileSystem
-    const paths = yield* Path.Path
-    const directory = paths.dirname(path)
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-      Effect.mapError(storeError("activity.openDirectory"))
-    )
-    yield* fileSystem.chmod(directory, 0o700).pipe(
-      Effect.mapError(storeError("activity.secureDirectory"))
-    )
-    return yield* Effect.try({
-      try: () => new AgentActivityStore(path),
-      catch: storeError("activity.openDatabase")
-    })
+    }).pipe(Effect.mapError(fromPrivateDatabaseError))
+    return new AgentActivityStore(path, opened)
   })
 
   readonly observe = Effect.fn("AgentActivityStore.observe")(function*(

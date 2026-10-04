@@ -1,10 +1,14 @@
-import { Effect, FileSystem, Path, Schema } from "effect"
-import { DatabaseSync, type SQLOutputValue } from "node:sqlite"
+import { openPrivateSqlite, type PrivateDatabaseError, type PrivateSqlite } from "@knpkv/herdr-fleet/sqlite"
+import { Effect, Schema } from "effect"
+import type { DatabaseSync, SQLOutputValue } from "node:sqlite"
 import { ChatHistoryError } from "./errors.js"
 import { chatHistoryMaxEntries, StoredChatTurn, type StoredChatTurn as StoredChatTurnType } from "./model.js"
 
 const storeError = (operation: string) => (cause: unknown) =>
   new ChatHistoryError({ cause, detail: String(cause), operation })
+
+const fromPrivateDatabaseError = (error: PrivateDatabaseError) =>
+  new ChatHistoryError({ cause: error.cause, detail: String(error.cause), operation: `chat.${error.operation}` })
 
 const StoredTurnRow = Schema.Struct({ record: Schema.String })
 
@@ -32,45 +36,28 @@ export interface ChatStoreService {
 
 export class ChatStore {
   readonly #database: DatabaseSync
-  readonly #fileSystem: FileSystem.FileSystem
+  readonly #secureFiles: Effect.Effect<void, ChatHistoryError>
   readonly path: string
 
-  private constructor(path: string, fileSystem: FileSystem.FileSystem) {
+  private constructor(path: string, opened: PrivateSqlite) {
     this.path = path
-    this.#fileSystem = fileSystem
-    this.#database = new DatabaseSync(path)
-    try {
-      this.#database.exec(`
-        PRAGMA journal_mode = WAL;
-        CREATE TABLE IF NOT EXISTS chat_turns (
-          id TEXT PRIMARY KEY,
-          job_id TEXT NOT NULL UNIQUE,
-          created_at INTEGER NOT NULL,
-          record TEXT NOT NULL
-        );
-      `)
-    } catch (error) {
-      this.#database.close()
-      throw error
-    }
+    this.#database = opened.database
+    this.#secureFiles = opened.secureFiles.pipe(Effect.mapError(fromPrivateDatabaseError))
   }
 
   static readonly open = Effect.fn("ChatStore.open")(function*(path: string) {
-    const fileSystem = yield* FileSystem.FileSystem
-    const paths = yield* Path.Path
-    const directory = paths.dirname(path)
-    yield* fileSystem.makeDirectory(directory, { recursive: true, mode: 0o700 }).pipe(
-      Effect.mapError(storeError("chat.openDirectory"))
-    )
-    yield* fileSystem.chmod(directory, 0o700).pipe(
-      Effect.mapError(storeError("chat.secureDirectory"))
-    )
-    const store = yield* Effect.try({
-      try: () => new ChatStore(path, fileSystem),
-      catch: storeError("chat.openDatabase")
-    })
-    yield* store.secureFiles()
-    return store
+    const opened = yield* openPrivateSqlite(path, {
+      initialize: (database) =>
+        database.exec(`
+          CREATE TABLE IF NOT EXISTS chat_turns (
+            id TEXT PRIMARY KEY,
+            job_id TEXT NOT NULL UNIQUE,
+            created_at INTEGER NOT NULL,
+            record TEXT NOT NULL
+          );
+        `)
+    }).pipe(Effect.mapError(fromPrivateDatabaseError))
+    return new ChatStore(path, opened)
   })
 
   readonly put = Effect.fn("ChatStore.put")(function*(
@@ -119,23 +106,7 @@ export class ChatStore {
   })
 
   private secureFiles() {
-    const fileSystem = this.#fileSystem
-    const files = [this.path, `${this.path}-wal`, `${this.path}-shm`]
-    return Effect.forEach(
-      files,
-      (path) =>
-        fileSystem.exists(path).pipe(
-          Effect.mapError(storeError("chat.secureExists")),
-          Effect.flatMap((exists) =>
-            exists
-              ? fileSystem.chmod(path, 0o600).pipe(
-                Effect.mapError(storeError("chat.secureChmod"))
-              )
-              : Effect.void
-          )
-        ),
-      { discard: true }
-    )
+    return this.#secureFiles
   }
 
   close(): void {
