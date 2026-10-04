@@ -163,7 +163,10 @@ export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: numbe
     }
     const problem = failure !== undefined &&
         failure.reading._tag === "Unknown" &&
-        own.every((snapshot) => snapshot.label === "*" || snapshot.observedAt < failure.observedAt)
+        // Only a reading the poll itself covers shows it recovered; a newer Spend sample does not.
+        own.every((snapshot) =>
+          snapshot.label === "*" || !failureCovers(agent, snapshot.label) || snapshot.observedAt < failure.observedAt
+        )
       ? { reason: describeUnknown(failure.reading), observedAt: failure.observedAt }
       : null
     return [{ agent, windows: named.sort(byCloseness), unnamed: unnamed.sort(byCloseness), problem }]

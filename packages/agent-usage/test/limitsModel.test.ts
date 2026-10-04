@@ -108,6 +108,30 @@ describe("Spend and failed polls", () => {
     )
     expect(summary[0]?.windows.map((window) => window.name)).toEqual(["Spend"])
   })
+
+  it("still says the poll failed after a newer Spend sample, which cannot vouch for the other windows", () => {
+    const summary = summarizeLimits(
+      [
+        snapshot({ observedAt: now - 3 * HOUR }),
+        snapshot({
+          label: "*",
+          windowMinutes: null,
+          observedAt: now - 2 * HOUR,
+          reading: { _tag: "Unknown", reason: "NoAuth" }
+        }),
+        snapshot({
+          source: "claude-statusline",
+          label: "spend",
+          windowMinutes: null,
+          observedAt: now - HOUR,
+          reading: { _tag: "Known", usedPercent: 12, resetsAt: null }
+        })
+      ],
+      now
+    )
+    expect(summary[0]?.problem?.reason).toBe("not signed in")
+    expect(summary[0]?.windows.map((window) => window.name)).toEqual(["Spend"])
+  })
 })
 
 describe("limitSegments", () => {

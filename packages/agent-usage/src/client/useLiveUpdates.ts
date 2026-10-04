@@ -117,7 +117,9 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
         connected.current = true
         for (const read of readsToRefresh(previous, versions.value)) request(read)
         previous = versions.value
-        setState({ _tag: "Live", updatedAt: updatedAt.current, refetchFailing: false })
+        // An unrelated announcement does not clear a read that is still being retried.
+        const failing = [...pending.current.values()].some((entry) => entry.failed)
+        setState({ _tag: "Live", updatedAt: updatedAt.current, refetchFailing: failing })
       })
       opened.addEventListener("close", () => {
         if (stopped) return

@@ -472,21 +472,30 @@ test("a failure's explanation stays open while the pointer moves onto it", async
 })
 
 test("reads already loading when the first live message arrives still settle", async ({ page }) => {
-  // Hold the page's first usage read until the socket has announced it, then let it finish.
+  // Hold the page's first usage read until the socket's first message has arrived, then let it finish.
   let release: () => void = () => undefined
   const held = new Promise<void>((resolve) => {
     release = resolve
+  })
+  let arrived: () => void = () => undefined
+  const requestArrived = new Promise<void>((resolve) => {
+    arrived = resolve
+  })
+  const firstFrame = new Promise<void>((resolve) => {
+    page.on("websocket", (socket) => socket.on("framereceived", () => resolve()))
   })
   let first = true
   await page.route("**/api/usage?*", async (route) => {
     if (first) {
       first = false
+      arrived()
       await held
     }
     await route.continue()
   })
   await signIn(page)
-  await page.waitForTimeout(500)
+  await requestArrived
+  await firstFrame
   release()
   await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
 })

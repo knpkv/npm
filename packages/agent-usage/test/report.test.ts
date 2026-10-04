@@ -290,13 +290,13 @@ describe("buildLimitsReport", () => {
       .toEqual(["Known", "Unknown", "Known"])
   })
 
-  it("adds no gap when the failed poll came before every window reading", () => {
+  it("shows a failed poll that came before every window reading as a gap before the first one", () => {
     const report = buildLimitsReport([
       claude("*", 1_050, { _tag: "Unknown", reason: "Fetch" }),
       claude("five_hour", 1_100, { _tag: "Known", usedPercent: 40, resetsAt: null })
     ], { from: 1_000, to: 2_000 })
     expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
-      .toEqual(["Known"])
+      .toEqual(["Unknown", "Known"])
   })
 })
 
@@ -344,6 +344,20 @@ describe("buildLimitsReport across Claude sources", () => {
     )
     expect(report.series.find((series) => series.label === "spend")?.points.map((point) => point.reading._tag))
       .toEqual(["Known"])
+  })
+
+  it("keeps a failed poll that came before a window's first reading in that window's history", () => {
+    const report = buildLimitsReport(
+      [
+        reading("claude-oauth-usage", "*", 1_100, failed("HTTP 401")),
+        reading("claude-statusline", "five_hour", 1_200, known(5))
+      ],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series[0]?.points.map((point) => [point.at, point.reading._tag])).toEqual([
+      [1_100, "Unknown"],
+      [1_200, "Known"]
+    ])
   })
 
   it("keeps a failure whose detail changed as its own point", () => {
