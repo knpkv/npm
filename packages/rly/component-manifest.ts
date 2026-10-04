@@ -210,9 +210,7 @@ export const componentManifest = {
       source: "src/diff/bounded/BoundedDiffCodeView.tsx",
       status: "experimental",
       styles: ["src/diff/bounded/BoundedDiffCodeView.module.css"],
-      variants: [
-        { defaultValue: "split", name: "mode", values: ["split", "stacked"] }
-      ],
+      variants: [{ defaultValue: "split", name: "mode", values: ["split", "stacked"] }],
       visual: {
         story: "stories/diff/BoundedDiffCodeView.stories.tsx",
         storyId: "diff-boundeddiffcodeview--split",
@@ -260,10 +258,7 @@ export const componentManifest = {
         { defaultValue: "buffered", name: "virtualization", values: ["buffered", "strict"] }
       ],
       visual: {
-        coverageStoryIds: [
-          "diff-diffcodeview--rich-annotations",
-          "diff-diffcodeview--stacked-wrapped"
-        ],
+        coverageStoryIds: ["diff-diffcodeview--rich-annotations", "diff-diffcodeview--stacked-wrapped"],
         story: "stories/diff/DiffCodeView.stories.tsx",
         storyId: "diff-diffcodeview--workbench",
         tests: ["test/diff/DiffCodeView.test.tsx"]
@@ -805,11 +800,13 @@ export const componentManifest = {
       source: "src/primitives/StatePanel.tsx",
       status: "stable",
       styles: ["src/primitives/StatePanel.module.css"],
-      variants: [{
-        defaultValue: "neutral",
-        name: "tone",
-        values: ["neutral", "positive", "critical", "caution", "progress"]
-      }],
+      variants: [
+        {
+          defaultValue: "neutral",
+          name: "tone",
+          values: ["neutral", "positive", "critical", "caution", "progress"]
+        }
+      ],
       visual: {
         story: "stories/primitives/StatePanel.stories.tsx",
         storyId: "primitives-statepanel--gallery",
@@ -911,6 +908,29 @@ export const componentManifest = {
       }
     },
     {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "RLY_TOGGLE_GROUP_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_TOGGLE_GROUP_VARIANTS" },
+        { kind: "value", name: "ToggleGroup" },
+        { kind: "type", name: "RlyToggleGroupSize" },
+        { kind: "type", name: "RlyToggleItem" },
+        { kind: "type", name: "ToggleGroupProps" }
+      ],
+      name: "ToggleGroup",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/ToggleGroup.tsx",
+      status: "experimental",
+      styles: ["src/primitives/ToggleGroup.module.css"],
+      variants: [{ defaultValue: "default", name: "size", values: ["compact", "default"] }],
+      visual: {
+        story: "stories/primitives/ToggleGroup.stories.tsx",
+        storyId: "primitives-togglegroup--interaction",
+        tests: ["test/primitives/ToggleGroup.test.tsx"]
+      }
+    },
+    {
       category: "pattern",
       exports: [
         { kind: "value", name: "AgentContextButton" },
@@ -966,9 +986,7 @@ export const componentManifest = {
       source: "src/patterns/RelayDock.tsx",
       status: "experimental",
       styles: ["src/patterns/RelayDock.module.css"],
-      variants: [
-        { defaultValue: "overlay", name: "desktopPresentation", values: ["overlay", "rail"] }
-      ],
+      variants: [{ defaultValue: "overlay", name: "desktopPresentation", values: ["overlay", "rail"] }],
       visual: {
         coverageStoryIds: [
           "patterns-relaydock--desktop-rail",
@@ -1095,10 +1113,14 @@ export const componentManifest = {
       category: "pattern",
       exports: [
         { kind: "value", name: "EntityTable" },
+        { kind: "value", name: "RLY_ENTITY_TABLE_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_ENTITY_TABLE_VARIANTS" },
         { kind: "type", name: "EntityTableProps" },
         { kind: "type", name: "RlyEntityTableCell" },
         { kind: "type", name: "RlyEntityTableColumn" },
         { kind: "type", name: "RlyEntityTableData" },
+        { kind: "type", name: "RlyEntityTableDensity" },
+        { kind: "type", name: "RlyEntityTableHeadingSize" },
         { kind: "type", name: "RlyEntityTableRow" },
         { kind: "type", name: "RlyEntityTableSortDirection" }
       ],
@@ -1108,10 +1130,14 @@ export const componentManifest = {
       source: "src/patterns/EntityTable.tsx",
       status: "stable",
       styles: ["src/patterns/EntityTable.module.css"],
-      variants: [],
+      variants: [
+        { defaultValue: "default", name: "density", values: ["default", "compact"] },
+        { defaultValue: "section", name: "headingSize", values: ["section", "card"] }
+      ],
       visual: {
         story: "stories/patterns/EntityTable.stories.tsx",
         storyId: "patterns-entitytable--states",
+        coverageStoryIds: ["patterns-entitytable--compact-forced-colors"],
         tests: ["test/patterns/EntityTable.test.tsx"]
       }
     },

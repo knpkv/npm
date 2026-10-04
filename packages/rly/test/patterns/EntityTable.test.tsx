@@ -6,10 +6,13 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import {
   EntityTable,
+  RLY_ENTITY_TABLE_DEFAULT_VARIANTS,
+  RLY_ENTITY_TABLE_VARIANTS,
   type RlyEntityTableColumn,
   type RlyEntityTableData,
   type RlyEntityTableRow
 } from "../../src/patterns/EntityTable.js"
+import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import { render } from "../primitives/render.js"
 
 const columns = [
@@ -49,13 +52,116 @@ describe("EntityTable", () => {
     const section = host.querySelector("section")
     const table = host.querySelector("table")
     const sort = host.querySelector<HTMLButtonElement>("[role='group'] button")
+    const headerSort = host.querySelector<HTMLButtonElement>("th button")
     expect(section?.getAttribute("aria-labelledby")).toBe(host.querySelector("h2")?.id)
     expect(table?.getAttribute("aria-labelledby")).toBe(host.querySelector("h2")?.id)
     expect(host.querySelector("th")?.getAttribute("aria-sort")).toBe("ascending")
-    expect(host.querySelector("th button")).toBeNull()
+    // The header sorts while it is a table; the separate row serves the card layout.
+    expect(headerSort?.getAttribute("aria-label")).toBe("Sort by Item, currently ascending")
+    expect(headerSort?.getAttribute("type")).toBe("button")
+    expect(host.querySelectorAll("th button")).toHaveLength(1)
     expect(sort?.getAttribute("aria-label")).toBe("Sort by Item, currently ascending")
     expect(sort?.getAttribute("type")).toBe("button")
     await act(async () => sort?.click())
+    await act(async () => headerSort?.click())
+    expect(onSortChange.mock.calls).toEqual([["item"], ["item"]])
+    await act(async () => root.unmount())
+  })
+
+  it("publishes a compact density that callers opt into, defaulting to comfortable cards", () => {
+    expect(RLY_ENTITY_TABLE_DEFAULT_VARIANTS).toEqual({ density: "default", headingSize: "section" })
+    expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.density)).toEqual(["default", "compact"])
+    const ordinary = render(
+      <EntityTable
+        columns={columns}
+        data={{ rows: twenty.slice(0, 1), state: "ready" }}
+        heading="Items"
+        onSortChange={() => undefined}
+      />
+    )
+    expect(ordinary?.getAttribute("data-rly-entity-table-density")).toBe("default")
+    const compact = render(
+      <EntityTable
+        columns={columns}
+        data={{ rows: twenty.slice(0, 1), state: "ready" }}
+        density="compact"
+        heading="Items"
+        onSortChange={() => undefined}
+      />
+    )
+    expect(compact?.getAttribute("data-rly-entity-table-density")).toBe("compact")
+    expect(compact?.className).toContain(RLY_ENTITY_TABLE_VARIANTS.density.compact.className)
+  })
+
+  it("marks only the sorted column with an arrow; an unsorted column shows no glyph", () => {
+    const mixed = [
+      { id: "item", label: "Item", sortable: true, sortDirection: "descending" },
+      { id: "service", label: "Service", sortable: true, sortDirection: "none" }
+    ] satisfies readonly [RlyEntityTableColumn, ...ReadonlyArray<RlyEntityTableColumn>]
+    render(
+      <EntityTable
+        columns={mixed}
+        data={{
+          rows: [
+            {
+              id: "a",
+              cells: [
+                { columnId: "item", content: "A" },
+                { columnId: "service", content: "Jira" }
+              ]
+            }
+          ],
+          state: "ready"
+        }}
+        heading="Items"
+        onSortChange={() => undefined}
+      />
+    )
+    const headers = document.querySelectorAll("th button")
+    expect(headers[0]?.querySelector("svg")).not.toBeNull()
+    expect(headers[1]?.querySelector("svg")).toBeNull()
+  })
+
+  it("sizes the heading to its place on the page", () => {
+    expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.headingSize)).toEqual(["section", "card"])
+    const card = render(
+      <EntityTable
+        columns={columns}
+        data={{ rows: twenty.slice(0, 1), state: "ready" }}
+        heading="Items"
+        headingSize="card"
+        onSortChange={() => undefined}
+      />
+    )
+    expect(card?.className).toContain(RLY_ENTITY_TABLE_VARIANTS.headingSize.card.className)
+    expect(card?.querySelector("h2")?.textContent).toBe("Items")
+  })
+
+  it("sorts compact cards with one labelled select and a reverse button instead of a row of buttons", async () => {
+    const host = document.createElement("div")
+    const portal = document.createElement("div")
+    document.body.append(host, portal)
+    const root = createRoot(host)
+    const onSortChange = vi.fn()
+    await act(async () =>
+      root.render(
+        <PortalProvider container={portal}>
+          <EntityTable
+            columns={columns}
+            data={{ rows: twenty.slice(0, 1), state: "ready" }}
+            density="compact"
+            heading="Items"
+            onSortChange={onSortChange}
+          />
+        </PortalProvider>
+      )
+    )
+    expect(host.querySelector("[role='group'][aria-label='Items sorting']")).toBeNull()
+    const select = host.querySelector<HTMLButtonElement>("[role='combobox']")
+    expect(select?.getAttribute("aria-label")).toBe("Sort by")
+    expect(select?.textContent).toContain("Item ↑")
+    const reverse = host.querySelector<HTMLButtonElement>("button[aria-label='Reverse order, currently ascending']")
+    await act(async () => reverse?.click())
     expect(onSortChange).toHaveBeenCalledWith("item")
     await act(async () => root.unmount())
   })

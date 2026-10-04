@@ -48,7 +48,14 @@ const seed = Effect.gen(function*() {
       event(now, "b", { occurredAt: now - 30 * HOUR }),
       event(now, "c", { attribution: { cwd: "/home/dev/code/tools", branch: "main", activeTicket: "GPT-6" } }),
       event(now, "d", { agent: "codex", model: "gpt-6-sol", sessionId: "session-2" }),
-      event(now, "e", { model: "claude-unreleased-9" })
+      event(now, "e", { model: "claude-unreleased-9" }),
+      // A middle column holding several long-named bookings, so tooltip placement is exercised away from the edges.
+      ...["a-rather-long-repository-name", "another-long-repository-name"].map((repo, index) =>
+        event(now, `m${index}`, {
+          occurredAt: now - 84 * HOUR,
+          attribution: { cwd: `/home/dev/code/${repo}`, branch: "main", activeTicket: null }
+        })
+      )
     ],
     snapshots: [],
     balances: []

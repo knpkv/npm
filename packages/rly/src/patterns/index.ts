@@ -31,12 +31,14 @@ export {
 export type { CollaboratorGroupProps, RlyCollaboratorCategory, RlyCollaboratorGroupSize } from "./CollaboratorGroup.js"
 export { EntityShell } from "./EntityShell.js"
 export type { EntityShellProps } from "./EntityShell.js"
-export { EntityTable } from "./EntityTable.js"
+export { EntityTable, RLY_ENTITY_TABLE_DEFAULT_VARIANTS, RLY_ENTITY_TABLE_VARIANTS } from "./EntityTable.js"
 export type {
   EntityTableProps,
   RlyEntityTableCell,
   RlyEntityTableColumn,
   RlyEntityTableData,
+  RlyEntityTableDensity,
+  RlyEntityTableHeadingSize,
   RlyEntityTableRow,
   RlyEntityTableSortDirection
 } from "./EntityTable.js"

@@ -7,13 +7,70 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  /* The comfortable cards below are the default; the class marks which density a root uses. */
+  .defaultDensity,
+  .compact {
+    --rly-entity-table-density: initial;
+  }
+
   .heading {
     color: var(--rly-color-text-1);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .sectionHeading .heading {
     font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
       var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
     letter-spacing: var(--rly-type-section-title-tracking);
-    margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+  }
+
+  .cardHeading .heading {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+  }
+
+  /* While it is a table, the column headers sort; the separate controls serve the card layout. */
+  .headerLabel {
+    display: none;
+  }
+
+  .headerSort {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: var(--rly-radius-tag);
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    gap: var(--rly-space-6);
+    margin-inline: calc(-1 * var(--rly-space-4));
+    min-block-size: var(--rly-space-32);
+    padding: var(--rly-space-0) var(--rly-space-4);
+    text-align: inherit;
+  }
+
+  .headerSort:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
+
+  .headerSort:focus-visible {
+    outline: 3px solid var(--rly-color-focus);
+    outline-offset: var(--rly-space-2);
+  }
+
+  .sortSelect {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+  }
+
+  .sortSelect > :first-child {
+    flex: 1;
+    min-inline-size: var(--rly-space-0);
   }
 
   .loading {
@@ -115,6 +172,15 @@
       display: block;
     }
 
+    /* The card layout has its own sort controls; the clipped header keeps only its labels. */
+    .headerSort {
+      visibility: hidden;
+    }
+
+    .headerLabel {
+      display: inline;
+    }
+
     .head {
       block-size: 1px;
       clip: rect(0 0 0 0);
@@ -160,6 +226,53 @@
         var(--rly-type-meta-font);
       font-weight: 650;
       text-transform: uppercase;
+    }
+  }
+
+  @container (max-width: 40rem) {
+    .compact .sortControls {
+      display: flex;
+      flex-wrap: wrap;
+    }
+
+    .compact .sortButton {
+      justify-content: flex-start;
+    }
+
+    .compact .body {
+      gap: var(--rly-space-8);
+    }
+
+    .compact .row {
+      grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
+    }
+
+    .compact .cell {
+      border-block-end: 0;
+      gap: var(--rly-space-2);
+      padding: var(--rly-space-8) var(--rly-space-12);
+    }
+
+    .compact .cell:first-child {
+      border-block-end: 1px solid var(--rly-color-border-1);
+      grid-column: 1 / -1;
+    }
+
+    .compact .cell:first-child::before {
+      content: none;
+    }
+
+    .compact .cell::before {
+      font-weight: var(--rly-type-meta-weight);
+      text-transform: none;
+    }
+  }
+
+  /* Last, so it outranks the base display of both control rows: wide tables sort from the headers. */
+  @container (min-width: 40.0625rem) {
+    .sortControls,
+    .sortSelect {
+      display: none;
     }
   }
 }

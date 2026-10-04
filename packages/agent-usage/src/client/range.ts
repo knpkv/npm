@@ -31,7 +31,9 @@ const offsetAt = (instant: number, timeZone: string): number => {
       hour: "numeric",
       minute: "numeric",
       second: "numeric"
-    }).formatToParts(instant).map((part) => [part.type, Number(part.value)])
+    })
+      .formatToParts(instant)
+      .map((part) => [part.type, Number(part.value)])
   )
   const asUtc = Date.UTC(
     parts.get("year") ?? 0,

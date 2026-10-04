@@ -2,15 +2,17 @@ import { describe, expect, it } from "@effect/vitest"
 import {
   assignSlots,
   bookingLabel,
+  formatAxis,
   limitLabel,
   type Measure,
   OTHER,
+  rangeTotal,
   readingAt,
   seriesIdentity,
   stackUsage,
   stepPath
 } from "../src/client/chartModel.js"
-import { tileSnapshots } from "../src/client/Tiles.js"
+import { tooltipLeft } from "../src/client/useTooltipPlacement.js"
 import type { LimitSnapshot } from "../src/core/Model.js"
 import type { BookingSummary, UsageReport } from "../src/shared/contracts.js"
 
@@ -114,31 +116,6 @@ describe("stepPath", () => {
   })
 })
 
-describe("tileSnapshots", () => {
-  const snapshot = (label: string, observedAt: number, resetsAt: number | null): LimitSnapshot => ({
-    agent: "codex",
-    machine: "host-a",
-    source: "codex-rollout",
-    label,
-    windowMinutes: 300,
-    observedAt,
-    reading: { _tag: "Known", usedPercent: 10, resetsAt }
-  })
-
-  it("leaves out a window that reset after its last reading", () => {
-    expect(tileSnapshots([snapshot("primary", 0, 50), snapshot("secondary", 0, 500)], 100).map((tile) => tile.label))
-      .toEqual(["secondary"])
-  })
-
-  it("lets a newer failed poll stand in for the windows read before it", () => {
-    const failure: LimitSnapshot = {
-      ...snapshot("*", 20, null),
-      reading: { _tag: "Unknown", reason: "AuthExpired" }
-    }
-    expect(tileSnapshots([snapshot("primary", 10, 500), failure], 100).map((tile) => tile.label)).toEqual(["*"])
-  })
-})
-
 describe("readingAt", () => {
   const points: ReadonlyArray<{ readonly at: number; readonly reading: LimitSnapshot["reading"] }> = [
     { at: 100, reading: { _tag: "Known", usedPercent: 65, resetsAt: 150 } }
@@ -158,5 +135,24 @@ describe("seriesIdentity", () => {
     expect(seriesIdentity({ agent: "claude", label: "seven_day", windowMinutes: 10_080 })).not.toBe(
       seriesIdentity({ agent: "claude", label: "seven_day_opus", windowMinutes: 10_080 })
     )
+  })
+})
+
+describe("headline and axis", () => {
+  it("totals the range by the measure and labels axis ticks without cents", () => {
+    expect(rangeTotal(report(3), "cost")).toBe(6)
+    expect(rangeTotal(report(3), "tokens")).toBe(300)
+    expect(formatAxis("cost", 400)).toBe("$400")
+    expect(formatAxis("cost", 2.5)).toBe("$2.50")
+    expect(formatAxis("tokens", 1_500_000)).toBe("1.5M")
+  })
+})
+
+describe("tooltipLeft", () => {
+  it("opens towards the roomier side and never leaves the chart", () => {
+    expect(tooltipLeft(50, 100, 400)).toBe(62)
+    expect(tooltipLeft(350, 100, 400)).toBe(238)
+    expect(tooltipLeft(180, 160, 200)).toBe(8)
+    expect(tooltipLeft(20, 300, 200)).toBe(0)
   })
 })

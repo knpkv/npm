@@ -1,3 +1,4 @@
+import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 import { expect, userEvent, within } from "storybook/test"
@@ -125,14 +126,24 @@ const StateCatalog = () => {
 }
 
 const CompactCanary = () => (
-  <main data-entity-table-compact="" style={pageStyle}>
-    <EntityTable
-      columns={columnsFor("ascending")}
-      data={cached("partial")}
-      heading="Compact delivery items"
-      onSortChange={() => undefined}
-    />
-  </main>
+  <PortalProvider>
+    <main data-entity-table-compact="" style={pageStyle}>
+      <EntityTable
+        columns={columnsFor("ascending")}
+        data={cached("partial")}
+        heading="Compact delivery items"
+        onSortChange={() => undefined}
+      />
+      <EntityTable
+        columns={columnsFor("ascending")}
+        data={cached("partial")}
+        density="compact"
+        heading="Dense delivery items"
+        headingSize="card"
+        onSortChange={() => undefined}
+      />
+    </main>
+  </PortalProvider>
 )
 
 const meta = {
@@ -174,9 +185,16 @@ export const CompactForcedColors: Story = {
     const compact = canvasElement.querySelector<HTMLElement>("[data-entity-table-compact]")
     if (compact === null) throw new Error("EntityTable compact canary did not render")
     await expect(compact.scrollWidth).toBeLessThanOrEqual(compact.clientWidth)
-    await expect(compact.querySelectorAll("[data-rly-entity-row-id]")).toHaveLength(6)
-    await expect(canvas.getAllByRole("columnheader")).toHaveLength(4)
-    const sort = canvas.getByRole("button", { name: "Sort by Item, currently ascending" })
+    await expect(compact.querySelectorAll("[data-rly-entity-row-id]")).toHaveLength(12)
+    await expect(canvas.getAllByRole("columnheader")).toHaveLength(8)
+    const dense = canvas.getByRole("region", { name: "Dense delivery items" })
+    const comfortable = canvas.getByRole("region", { name: "Compact delivery items" })
+    for (const region of [dense, comfortable]) {
+      await expect(within(region).getByRole("columnheader", { name: "Item" })).toHaveAttribute("aria-sort", "ascending")
+      await expect(within(region).getByRole("columnheader", { name: "Service" })).toBeInTheDocument()
+    }
+    await expect(dense.getBoundingClientRect().height).toBeLessThan(comfortable.getBoundingClientRect().height)
+    const sort = within(comfortable).getByRole("button", { name: "Sort by Item, currently ascending" })
     await expect(sort).toBeVisible()
     sort.focus()
     await expect(sort).toHaveFocus()

@@ -471,12 +471,18 @@
         "ready"
       ],
       "terms": [
+        "card",
+        "compact",
+        "default",
+        "density",
         "empty",
         "entitytable",
         "error",
+        "headingSize",
         "loading",
         "pattern",
         "ready",
+        "section",
         "sort",
         "table"
       ]
@@ -1268,6 +1274,28 @@
         "system",
         "timeline",
         "timelinerow"
+      ]
+    },
+    {
+      "capabilities": [
+        "select"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "ToggleGroup",
+      "states": [
+        "checked",
+        "compact",
+        "default"
+      ],
+      "terms": [
+        "checked",
+        "compact",
+        "default",
+        "primitive",
+        "select",
+        "size",
+        "togglegroup"
       ]
     },
     {
