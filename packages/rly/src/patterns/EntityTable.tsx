@@ -137,13 +137,11 @@ const rowsFor = (data: RlyEntityTableData): ReadonlyArray<RlyEntityTableRow> =>
     ? data.rows
     : []
 
-const SortGlyph = ({ direction }: { readonly direction: RlyEntityTableSortDirection }): ReactElement => (
-  <Icon
-    decorative
-    name={direction === "ascending" ? "arrow-up" : direction === "descending" ? "arrow-down" : "minus"}
-    size="small"
-  />
-)
+/** The active column's direction; an unsorted column shows no glyph, which would read as a value. */
+const SortGlyph = ({ direction }: { readonly direction: RlyEntityTableSortDirection }): ReactElement | null =>
+  direction === "none" ? null : (
+    <Icon decorative name={direction === "ascending" ? "arrow-up" : "arrow-down"} size="small" />
+  )
 
 /** Render complete entity rows while leaving selection, sorting, and pagination to the application. */
 export const EntityTable = ({

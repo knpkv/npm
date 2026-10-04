@@ -93,6 +93,35 @@ describe("EntityTable", () => {
     expect(compact?.className).toContain(RLY_ENTITY_TABLE_VARIANTS.density.compact.className)
   })
 
+  it("marks only the sorted column with an arrow; an unsorted column shows no glyph", () => {
+    const mixed = [
+      { id: "item", label: "Item", sortable: true, sortDirection: "descending" },
+      { id: "service", label: "Service", sortable: true, sortDirection: "none" }
+    ] satisfies readonly [RlyEntityTableColumn, ...ReadonlyArray<RlyEntityTableColumn>]
+    render(
+      <EntityTable
+        columns={mixed}
+        data={{
+          rows: [
+            {
+              id: "a",
+              cells: [
+                { columnId: "item", content: "A" },
+                { columnId: "service", content: "Jira" }
+              ]
+            }
+          ],
+          state: "ready"
+        }}
+        heading="Items"
+        onSortChange={() => undefined}
+      />
+    )
+    const headers = document.querySelectorAll("th button")
+    expect(headers[0]?.querySelector("svg")).not.toBeNull()
+    expect(headers[1]?.querySelector("svg")).toBeNull()
+  })
+
   it("sizes the heading to its place on the page", () => {
     expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.heading)).toEqual(["section", "card"])
     const card = render(
