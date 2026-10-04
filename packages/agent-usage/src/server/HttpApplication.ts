@@ -30,7 +30,15 @@ const serveStatic = Effect.gen(function*() {
   const fileSystem = yield* FileSystem.FileSystem
   const path = yield* Path.Path
 
-  const requested = decodeURIComponent(new URL(request.url, "http://localhost").pathname).replace(/^\/+/u, "")
+  const decoded = yield* Effect.result(
+    Effect.try({
+      try: () => decodeURIComponent(new URL(request.url, "http://localhost").pathname),
+      catch: () => "malformed"
+    })
+  )
+  // A path whose percent-encoding does not decode is a bad request, not a server failure.
+  if (decoded._tag === "Failure") return HttpServerResponse.text("Bad Request", { status: 400 })
+  const requested = decoded.success.replace(/^\/+/u, "")
   const here = yield* path.fromFileUrl(new URL(".", import.meta.url))
   const staticDirectory = path.resolve(here, "../../dist/client")
   const resolved = path.resolve(staticDirectory, requested === "" ? "index.html" : requested)

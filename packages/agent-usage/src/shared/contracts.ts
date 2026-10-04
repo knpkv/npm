@@ -141,6 +141,8 @@ export const ServerStatus = Schema.Struct({
   ingest: Schema.NullOr(IngestStatus),
   /** Why the latest pass failed outright, if it did. */
   ingestFailure: Schema.NullOr(Schema.String),
+  /** Why the latest Claude limit poll could not be stored, if it could not. */
+  limitsFailure: Schema.NullOr(Schema.String),
   ticketLookupFailures: Schema.Array(Schema.String)
 })
 export type ServerStatus = typeof ServerStatus.Type

@@ -77,6 +77,15 @@ describe("HTTP boundary", () => {
         expect(served.headers["cache-control"]).toBe("private, no-store")
       }))
 
+    it.effect("answers a path whose percent-encoding does not decode without a server error", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpClient.HttpClient
+        for (const path of ["/%E0%A4%A", "/assets/%ZZ.js", "/%"]) {
+          const response = yield* client.get(path)
+          expect([400, 404]).toContain(response.status)
+        }
+      }))
+
     it.effect("refuses a browser read started by another site", () =>
       Effect.gen(function*() {
         const client = yield* HttpClient.HttpClient

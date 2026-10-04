@@ -39,6 +39,7 @@ export const StatusStrip = (props: { readonly status: ServerStatus; readonly now
         </>
       )}
       {props.status.ingestFailure === null ? null : <span data-tone="failure">{props.status.ingestFailure}</span>}
+      {props.status.limitsFailure === null ? null : <span data-tone="failure">{props.status.limitsFailure}</span>}
       {props.status.ticketLookupFailures.map((failure) => (
         <span data-tone="warning" key={failure}>
           {failure}

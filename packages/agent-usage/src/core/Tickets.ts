@@ -45,12 +45,22 @@ export const refreshTicketTitles = (
     for (let start = 0; start < stale.length; start += KEYS_PER_SEARCH) {
       const batch = stale.slice(start, start + KEYS_PER_SEARCH)
       const found = yield* Effect.result(search(batch))
-      if (found._tag === "Failure") {
+      if (found._tag === "Success") {
+        for (const key of batch) {
+          yield* store.saveTicket({ key, summary: found.success.get(key) ?? null, fetchedAt: now })
+        }
+        continue
+      }
+      // Jira refuses a whole search when one key in it does not exist. Asking key by key keeps one
+      // bad key from leaving the rest untitled; a key that still fails stays uncached and reported.
+      if (batch.length === 1) {
         failures.push(found.failure)
         continue
       }
       for (const key of batch) {
-        yield* store.saveTicket({ key, summary: found.success.get(key) ?? null, fetchedAt: now })
+        const single = yield* Effect.result(search([key]))
+        if (single._tag === "Failure") failures.push(single.failure)
+        else yield* store.saveTicket({ key, summary: single.success.get(key) ?? null, fetchedAt: now })
       }
     }
     return failures

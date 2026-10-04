@@ -32,6 +32,21 @@ describe("ticket titles", () => {
         expect(searched).toHaveLength(2)
       }))
 
+    it.effect("asks key by key when a batch fails, so one bad key cannot keep the rest untitled", () =>
+      Effect.gen(function*() {
+        const search = (keys: ReadonlyArray<string>) =>
+          keys.includes("BAD-1")
+            ? Effect.fail(new TicketLookupFailed({ reason: "acli exited with status 1" }))
+            : Effect.succeed(new Map(keys.map((key) => [key, `title ${key}`])))
+        const failures = yield* refreshTicketTitles(["GOOD-1", "BAD-1", "GOOD-2"], search)
+        expect(failures).toEqual([new TicketLookupFailed({ reason: "acli exited with status 1" })])
+        expect(yield* ticketTitles(["GOOD-1", "GOOD-2", "BAD-1"])).toEqual({
+          "GOOD-1": { _tag: "Known", summary: "title GOOD-1" },
+          "GOOD-2": { _tag: "Known", summary: "title GOOD-2" },
+          "BAD-1": { _tag: "Unknown", reason: "NotLookedUp" }
+        })
+      }))
+
     it.effect("reports a failed lookup and caches nothing for it", () =>
       Effect.gen(function*() {
         const failures = yield* refreshTicketTitles(

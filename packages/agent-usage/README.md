@@ -17,10 +17,13 @@ every model request in a private SQLite store, polls Claude's limits, and serves
 
 ## Running it
 
+Installed from npm, the binary is `agent-usage` (`agent-usage serve`, `agent-usage ingest`). From this
+repository:
+
 ```bash
-pnpm --filter @knpkv/agent-usage build
-agent-usage serve      # prints the URL that gets you in
-agent-usage ingest     # one pass, then a summary; --json prints the status as one JSON value
+pnpm build                                       # builds the workspace, this package included
+pnpm --filter @knpkv/agent-usage start serve     # prints the URL that gets you in
+pnpm --filter @knpkv/agent-usage start ingest    # one pass, then a summary; --json for one JSON value
 ```
 
 `serve` ingests every minute and polls Claude's limits every five. The printed URL carries a

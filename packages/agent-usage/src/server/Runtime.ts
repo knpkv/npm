@@ -39,7 +39,13 @@ export class RuntimeState extends Context.Service<RuntimeState, {
     Layer.effect(
       RuntimeState,
       Effect.map(
-        SubscriptionRef.make<ServerStatus>({ machine, ingest: null, ingestFailure: null, ticketLookupFailures: [] }),
+        SubscriptionRef.make<ServerStatus>({
+          machine,
+          ingest: null,
+          ingestFailure: null,
+          limitsFailure: null,
+          ticketLookupFailures: []
+        }),
         (status) => RuntimeState.of({ machine, projects, status })
       )
     )
@@ -109,19 +115,22 @@ export const titleCycle = (options: BackgroundOptions) =>
     )
   })
 
-/** One Claude limit poll, recorded. A store failure lands in the status like an ingest failure. */
+/**
+ * One Claude limit poll, recorded. Failing to store it is reported apart from ingest, so a good
+ * ingest pass cannot clear it; the next stored poll does.
+ */
 export const claudePollCycle = (options: BackgroundOptions) =>
   Effect.gen(function*() {
     const state = yield* RuntimeState
     const store = yield* UsageStore
     const observations = yield* pollClaudeLimits(options.claude, state.machine)
-    yield* store.recordObservations(observations.snapshots, observations.balances).pipe(
-      Effect.catchTag("StoreError", (error) =>
-        SubscriptionRef.update(state.status, (status) => ({
-          ...status,
-          ingestFailure: `${error.operation}: Claude limits could not be stored`
-        })))
-    )
+    const stored = yield* Effect.result(store.recordObservations(observations.snapshots, observations.balances))
+    yield* SubscriptionRef.update(state.status, (status) => ({
+      ...status,
+      limitsFailure: stored._tag === "Failure"
+        ? `${stored.failure.operation}: Claude limits could not be stored`
+        : null
+    }))
   })
 
 /** Runs both cycles on their intervals for the life of the layer's scope. */

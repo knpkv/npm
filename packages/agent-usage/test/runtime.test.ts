@@ -3,8 +3,9 @@ import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
 import { Effect, FileSystem, Layer, Path, Queue, Stream, SubscriptionRef } from "effect"
 import { TestClock } from "effect/testing"
-import { UsageStore } from "../src/core/Store.js"
-import { backgroundLayer, RuntimeState } from "../src/server/Runtime.js"
+import { CredentialsMissing } from "../src/core/ClaudeLimits.js"
+import { StoreError, UsageStore } from "../src/core/Store.js"
+import { backgroundLayer, claudePollCycle, ingestCycle, RuntimeState } from "../src/server/Runtime.js"
 
 const Services = Layer.mergeAll(
   UsageStore.layer.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" }))),
@@ -62,6 +63,31 @@ describe("background work", () => {
         yield* TestClock.adjust("61 seconds")
         const second = yield* Queue.take(passes)
         expect(second).toBeGreaterThan(first)
+      }))
+  })
+
+  it.layer(Services)((it) => {
+    it.effect("reports a Claude poll that could not be stored apart from ingest, until one is stored", () =>
+      Effect.gen(function*() {
+        const state = yield* RuntimeState
+        const store = yield* UsageStore
+        const failing = UsageStore.of({
+          ...store,
+          recordObservations: () =>
+            Effect.fail(new StoreError({ operation: "record-observations", cause: "disk full" }))
+        })
+        const options = {
+          roots: { claudeProjects: "/nonexistent/projects", codexHome: "/nonexistent/codex", machine: "host-a" },
+          claude: { readToken: Effect.fail(new CredentialsMissing()), get: () => Effect.never },
+          ticketSearch: () => Effect.never
+        }
+        yield* claudePollCycle(options).pipe(Effect.provideService(UsageStore, failing))
+        yield* ingestCycle(options)
+        expect((yield* SubscriptionRef.get(state.status)).limitsFailure).toBe(
+          "record-observations: Claude limits could not be stored"
+        )
+        yield* claudePollCycle(options)
+        expect((yield* SubscriptionRef.get(state.status)).limitsFailure).toBeNull()
       }))
   })
 })
