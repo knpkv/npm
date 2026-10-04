@@ -29,7 +29,7 @@ export const Interaction: Story = {
   play: async ({ canvasElement }) => {
     const canvas = within(canvasElement)
     await userEvent.click(canvas.getAllByRole("radio", { name: "30d" })[0] ?? canvasElement)
-    await expect(canvas.getAllByRole("radio", { name: "30d" })[0]).toHaveAttribute("data-state", "on")
+    await expect(canvas.getAllByRole("radio", { name: "30d" })[0]).toHaveAttribute("aria-checked", "true")
   },
   render: (args) => (
     <div style={{ display: "grid", gap: "var(--rly-space-16)" }}>

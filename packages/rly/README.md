@@ -116,8 +116,8 @@ without cloning a framework-specific control.
 
 `ToggleGroup` chooses one of a few peer options, such as a range or a measure,
 and is always controlled: exactly one option is on, pressing it again changes
-nothing, and arrow keys rove between options. It renders a named `radiogroup`;
-use `size="compact"` beside other filters.
+nothing, and arrow keys move to the next option and choose it. It renders a
+named `radiogroup`; use `size="compact"` beside other filters.
 
 `Tabs` items may set `forceMount: true` to retain inactive content, for example
 when printing both panels. It defaults to unmounting inactive content. Callers

@@ -66,8 +66,9 @@ describe("ToggleGroup", () => {
     await act(async () => root.unmount())
   })
 
-  it("moves focus between options with arrow keys and wraps", async () => {
-    const root = await mount(() => undefined)
+  it("arrow keys move to the next option and choose it, as a radio group does, wrapping at the ends", async () => {
+    const onValueChange = vi.fn()
+    const root = await mount(onValueChange)
     await act(async () => {
       const chosen = option("7d")
       chosen?.focus()
@@ -75,10 +76,27 @@ describe("ToggleGroup", () => {
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
     })
     expect(document.activeElement?.textContent).toBe("30d")
+    expect(onValueChange).toHaveBeenLastCalledWith("30d")
     await act(async () => {
       document.activeElement?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }))
       await new Promise<void>((resolve) => setTimeout(resolve, 0))
     })
+    expect(document.activeElement?.textContent).toBe("24h")
+    expect(onValueChange).toHaveBeenLastCalledWith("24h")
+    await act(async () => root.unmount())
+  })
+
+  it("chooses on a quick tap, where the key is released before focus would move", async () => {
+    const onValueChange = vi.fn()
+    const root = await mount(onValueChange)
+    await act(async () => {
+      const chosen = option("7d")
+      chosen?.focus()
+      chosen?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowLeft" }))
+      chosen?.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "ArrowLeft" }))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    })
+    expect(onValueChange).toHaveBeenLastCalledWith("24h")
     expect(document.activeElement?.textContent).toBe("24h")
     await act(async () => root.unmount())
   })

@@ -1284,14 +1284,14 @@
       "importPath": "@knpkv/rly/primitives",
       "name": "ToggleGroup",
       "states": [
+        "checked",
         "compact",
-        "default",
-        "on"
+        "default"
       ],
       "terms": [
+        "checked",
         "compact",
         "default",
-        "on",
         "primitive",
         "select",
         "size",

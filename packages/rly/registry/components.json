@@ -4839,12 +4839,12 @@
           "ToggleGroupProps"
         ]
       },
-      "purpose": "Choose one of a few peer options with roving keyboard focus",
+      "purpose": "Choose one of a few peer options; arrow keys move and choose",
       "slots": [],
       "states": [
+        "checked",
         "compact",
-        "default",
-        "on"
+        "default"
       ],
       "status": "experimental",
       "variants": [

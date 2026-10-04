@@ -1,5 +1,5 @@
-import type { ComponentPropsWithRef, ReactElement } from "react"
-import { ToggleGroup as RadixToggleGroup } from "radix-ui"
+import { type ComponentPropsWithRef, type KeyboardEvent, type ReactElement, useRef } from "react"
+import { RadioGroup as RadixRadioGroup } from "radix-ui"
 import { classNames, cssClass, defineVariants, requireText } from "../internal/component.js"
 import styles from "./ToggleGroup.module.css"
 
@@ -42,6 +42,10 @@ export type ToggleGroupProps = Omit<
   readonly value: string
 }
 
+/** How far an arrow key moves the choice; null for any other key. */
+const stepOf = (key: string): -1 | 1 | null =>
+  key === "ArrowLeft" || key === "ArrowUp" ? -1 : key === "ArrowRight" || key === "ArrowDown" ? 1 : null
+
 const validateItems = (items: ReadonlyArray<RlyToggleItem>, value: string): void => {
   const values = new Set<string>()
   for (const item of items) {
@@ -54,8 +58,9 @@ const validateItems = (items: ReadonlyArray<RlyToggleItem>, value: string): void
 }
 
 /**
- * Choose one of a few peer options, such as a range or a measure. Always exactly one option is on:
- * pressing the chosen option again changes nothing. Arrow keys move between options.
+ * Choose one of a few peer options, such as a range or a measure, as a radio group: exactly one
+ * option is always on, pressing it again changes nothing, and arrow keys move to the next option
+ * and choose it.
  */
 export const ToggleGroup = ({
   "aria-label": ariaLabel,
@@ -69,26 +74,44 @@ export const ToggleGroup = ({
 }: ToggleGroupProps): ReactElement => {
   const accessibleLabel = requireText(ariaLabel, "ToggleGroup aria-label")
   validateItems(items, value)
+  const options = useRef(new Map<string, HTMLButtonElement>())
+  // Radix moves focus a tick after the key and only chooses while the key is still down, so a quick
+  // tap would move focus without choosing. Arrows are handled here: the next option is chosen and
+  // focused in the same keystroke, wrapping at the ends.
+  const choose = (event: KeyboardEvent<HTMLButtonElement>, from: number) => {
+    const step = stepOf(event.key)
+    if (step === null) return
+    event.preventDefault()
+    const next = items[(from + step + items.length) % items.length]
+    if (next === undefined) return
+    onValueChange(next.value)
+    options.current.get(next.value)?.focus()
+  }
   return (
-    <RadixToggleGroup.Root
+    <RadixRadioGroup.Root
       {...props}
       aria-label={accessibleLabel}
       className={classNames(style("root"), RLY_TOGGLE_GROUP_VARIANTS.size[size].className, className)}
       loop
-      onValueChange={(next) => {
-        if (next !== "") onValueChange(next)
-      }}
+      onValueChange={onValueChange}
       orientation="horizontal"
       ref={ref}
-      rovingFocus
-      type="single"
       value={value}
     >
-      {items.map((item) => (
-        <RadixToggleGroup.Item className={style("item")} key={item.value} value={item.value}>
+      {items.map((item, index) => (
+        <RadixRadioGroup.Item
+          className={style("item")}
+          key={item.value}
+          onKeyDown={(event) => choose(event, index)}
+          ref={(element) => {
+            if (element === null) options.current.delete(item.value)
+            else options.current.set(item.value, element)
+          }}
+          value={item.value}
+        >
           {item.label}
-        </RadixToggleGroup.Item>
+        </RadixRadioGroup.Item>
       ))}
-    </RadixToggleGroup.Root>
+    </RadixRadioGroup.Root>
   )
 }
