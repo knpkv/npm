@@ -1,11 +1,29 @@
 import { type ComponentPropsWithRef, type ReactElement, type ReactNode, useId } from "react"
 import { Icon } from "../foundations/Icon.js"
-import { classNames, cssClass, requireText } from "../internal/component.js"
+import { classNames, cssClass, defineVariants, requireText } from "../internal/component.js"
 import { Skeleton } from "../primitives/Skeleton.js"
 import { StatePanel, type RlyStatePanelTone } from "../primitives/StatePanel.js"
 import styles from "./EntityTable.module.css"
 
 const style = (name: string): string => cssClass(styles, name)
+
+export const RLY_ENTITY_TABLE_VARIANTS = defineVariants({
+  density: {
+    default: {
+      className: style("defaultDensity"),
+      purpose: "One labelled line per field when the table narrows to cards",
+      tokens: ["space-12"]
+    },
+    compact: {
+      className: style("compact"),
+      purpose: "Narrow cards led by the first column, the rest as a two-column label and value grid",
+      tokens: ["space-8", "space-2"]
+    }
+  }
+})
+
+export const RLY_ENTITY_TABLE_DEFAULT_VARIANTS = defineVariants({ density: "default" })
+export type RlyEntityTableDensity = keyof typeof RLY_ENTITY_TABLE_VARIANTS.density
 
 /** Caller-owned table sort state. */
 export type RlyEntityTableSortDirection = "none" | "ascending" | "descending"
@@ -52,6 +70,8 @@ export type RlyEntityTableData =
 export type EntityTableProps = Omit<ComponentPropsWithRef<"section">, "aria-label" | "children"> & {
   readonly columns: readonly [RlyEntityTableColumn, ...ReadonlyArray<RlyEntityTableColumn>]
   readonly data: RlyEntityTableData
+  /** How rows read once the table narrows to cards; wide tables look the same at both. */
+  readonly density?: RlyEntityTableDensity
   readonly heading: string
   readonly onSortChange: (columnId: string) => void
 }
@@ -111,6 +131,7 @@ export const EntityTable = ({
   className,
   columns,
   data,
+  density = "default",
   heading,
   onSortChange,
   ...props
@@ -151,7 +172,8 @@ export const EntityTable = ({
       {...props}
       aria-busy={data.state === "loading" ? "true" : undefined}
       aria-labelledby={headingId}
-      className={classNames(style("root"), className)}
+      className={classNames(style("root"), RLY_ENTITY_TABLE_VARIANTS.density[density].className, className)}
+      data-rly-entity-table-density={density}
       data-rly-entity-table-state={data.state}
     >
       <h2 className={style("heading")} id={headingId}>

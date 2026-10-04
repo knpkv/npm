@@ -7,6 +7,12 @@
     min-inline-size: var(--rly-space-0);
   }
 
+  /* The comfortable cards below are the default; the class marks which density a root uses. */
+  .defaultDensity,
+  .compact {
+    --rly-entity-table-density: initial;
+  }
+
   .heading {
     color: var(--rly-color-text-1);
     font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
@@ -160,6 +166,40 @@
         var(--rly-type-meta-font);
       font-weight: 650;
       text-transform: uppercase;
+    }
+  }
+
+  @container (max-width: 40rem) {
+    .compact .sortControls {
+      display: flex;
+      flex-wrap: wrap;
+    }
+
+    .compact .sortButton {
+      justify-content: flex-start;
+    }
+
+    .compact .body {
+      gap: var(--rly-space-8);
+    }
+
+    .compact .row {
+      grid-template-columns: repeat(2, minmax(var(--rly-space-0), 1fr));
+    }
+
+    .compact .cell {
+      border-block-end: 0;
+      gap: var(--rly-space-2);
+      padding: var(--rly-space-8) var(--rly-space-12);
+    }
+
+    .compact .cell:first-child {
+      border-block-end: 1px solid var(--rly-color-border-1);
+      grid-column: 1 / -1;
+    }
+
+    .compact .cell:first-child::before {
+      content: none;
     }
   }
 }

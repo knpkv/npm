@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from "react-dom/server"
 import { describe, expect, it, vi } from "vitest"
 import {
   EntityTable,
+  RLY_ENTITY_TABLE_DEFAULT_VARIANTS,
+  RLY_ENTITY_TABLE_VARIANTS,
   type RlyEntityTableColumn,
   type RlyEntityTableData,
   type RlyEntityTableRow
@@ -58,6 +60,26 @@ describe("EntityTable", () => {
     await act(async () => sort?.click())
     expect(onSortChange).toHaveBeenCalledWith("item")
     await act(async () => root.unmount())
+  })
+
+  it("publishes a compact density that callers opt into, defaulting to comfortable cards", () => {
+    expect(RLY_ENTITY_TABLE_DEFAULT_VARIANTS).toEqual({ density: "default" })
+    expect(Object.keys(RLY_ENTITY_TABLE_VARIANTS.density)).toEqual(["default", "compact"])
+    const ordinary = render(
+      <EntityTable columns={columns} data={{ rows: twenty.slice(0, 1), state: "ready" }} heading="Items" onSortChange={() => undefined} />
+    )
+    expect(ordinary?.getAttribute("data-rly-entity-table-density")).toBe("default")
+    const compact = render(
+      <EntityTable
+        columns={columns}
+        data={{ rows: twenty.slice(0, 1), state: "ready" }}
+        density="compact"
+        heading="Items"
+        onSortChange={() => undefined}
+      />
+    )
+    expect(compact?.getAttribute("data-rly-entity-table-density")).toBe("compact")
+    expect(compact?.className).toContain(RLY_ENTITY_TABLE_VARIANTS.density.compact.className)
   })
 
   it("keeps one, six, and twenty arbitrary rows complete", () => {

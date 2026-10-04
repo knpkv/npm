@@ -156,7 +156,8 @@ describe("component manifest contract", () => {
       "src/primitives/StatePanel.module.css",
       "src/primitives/Surface.module.css",
       "src/primitives/Tabs.module.css",
-      "src/primitives/Text.module.css"
+      "src/primitives/Text.module.css",
+      "src/primitives/ToggleGroup.module.css"
     ])
   })
 
@@ -205,7 +206,8 @@ describe("component manifest contract", () => {
       "src/primitives/StatePanel.module.css",
       "src/primitives/Surface.module.css",
       "src/primitives/Tabs.module.css",
-      "src/primitives/Text.module.css"
+      "src/primitives/Text.module.css",
+      "src/primitives/ToggleGroup.module.css"
     ])
   })
 

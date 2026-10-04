@@ -880,6 +880,23 @@
       ]
     },
     {
+      "name": "ToggleGroup",
+      "paths": {
+        "source": "packages/rly/src/primitives/ToggleGroup.tsx",
+        "story": "packages/rly/stories/primitives/ToggleGroup.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/ToggleGroup.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/ToggleGroup.test.tsx"
+        ]
+      },
+      "storyId": "primitives-togglegroup--interaction",
+      "storyIds": [
+        "primitives-togglegroup--interaction"
+      ]
+    },
+    {
       "name": "Verdict",
       "paths": {
         "source": "packages/rly/src/patterns/Verdict.tsx",

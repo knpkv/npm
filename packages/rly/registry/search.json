@@ -471,6 +471,9 @@
         "ready"
       ],
       "terms": [
+        "compact",
+        "default",
+        "density",
         "empty",
         "entitytable",
         "error",
@@ -1268,6 +1271,28 @@
         "system",
         "timeline",
         "timelinerow"
+      ]
+    },
+    {
+      "capabilities": [
+        "select"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "ToggleGroup",
+      "states": [
+        "compact",
+        "default",
+        "on"
+      ],
+      "terms": [
+        "compact",
+        "default",
+        "on",
+        "primitive",
+        "select",
+        "size",
+        "togglegroup"
       ]
     },
     {

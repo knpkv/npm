@@ -264,6 +264,9 @@ export const COMPONENT_REGISTRY_METADATA = {
     "navigate",
     "select"
   ]),
+  ToggleGroup: registryMetadata("Choose one of a few peer options with roving keyboard focus", ["compact", "on"], [
+    "select"
+  ]),
   Text: registryMetadata("Apply the rly type hierarchy and semantic text tones", [
     "body",
     "body-large",
