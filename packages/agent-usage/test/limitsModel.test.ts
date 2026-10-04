@@ -206,5 +206,6 @@ describe("windowName", () => {
     expect(codex(120)).toBe("2-hour")
     expect(codex(90)).toBe("90-minute")
     expect(codex(30)).toBe("30-minute")
+    expect(windowName({ agent: "claude", label: "spend", windowMinutes: null })).toBe("Spend")
   })
 })

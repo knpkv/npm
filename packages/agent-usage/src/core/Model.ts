@@ -80,7 +80,7 @@ export const UnknownReason = Schema.Literals([
 export type UnknownReason = typeof UnknownReason.Type
 
 /** Where a Limit Snapshot or Balance Reading came from. */
-export const ObservationSource = Schema.Literals(["claude-oauth-usage", "codex-rollout"])
+export const ObservationSource = Schema.Literals(["claude-oauth-usage", "claude-statusline", "codex-rollout"])
 export type ObservationSource = typeof ObservationSource.Type
 
 /** A window's length in minutes, or Unknown for a provider key whose window nobody published. */

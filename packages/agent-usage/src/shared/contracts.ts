@@ -132,7 +132,8 @@ export const IngestStatus = Schema.Struct({
   startedAt: Millis,
   finishedAt: Millis,
   claude: SourceStatus,
-  codex: SourceStatus
+  codex: SourceStatus,
+  claudeLimitSamples: SourceStatus
 })
 
 export const ServerStatus = Schema.Struct({

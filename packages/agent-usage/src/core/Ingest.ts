@@ -16,6 +16,7 @@
  */
 import { Clock, Effect, FileSystem, Option, Path, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
+import { initialSamplesState, readClaudeLimitSamples, SamplesState } from "./ClaudeLimitSamples.js"
 import { ClaudeReaderState, initialClaudeState, readClaude } from "./ClaudeReader.js"
 import { CodexReaderState, initialCodexState, readCodex } from "./CodexReader.js"
 import type { Agent } from "./Model.js"
@@ -36,6 +37,8 @@ export interface SourceRoots {
   readonly claudeProjects: string
   /** `<CODEX_HOME>`: rollouts live in `sessions/`, and Codex moves archived ones to `archived_sessions/`. */
   readonly codexHome: string
+  /** The Claude limit samples claude-statusline appends (`AGENT_USAGE_CLAUDE_LIMITS`). */
+  readonly claudeLimitSamples: string
   readonly machine: string
 }
 
@@ -60,6 +63,7 @@ export interface IngestStatus {
   readonly finishedAt: number
   readonly claude: SourceStatus
   readonly codex: SourceStatus
+  readonly claudeLimitSamples: SourceStatus
 }
 
 export interface IngestOptions {
@@ -138,6 +142,23 @@ const codexSource: Source<CodexReaderState> = {
       return [{ fileKey, sessionId: ROLLOUT_ID.exec(name)?.[1] ?? path.basename(name, ".jsonl") }]
     })
 }
+
+const SamplesStateJson = Schema.fromJsonString(SamplesState)
+
+/**
+ * The one samples file, read as a single-file source rooted at its directory. Its cursor key is the
+ * bare file name, which no Claude transcript key can equal (those always sit in a project
+ * directory).
+ */
+const claudeLimitSamplesSource = (fileName: string): Source<SamplesState> => ({
+  agent: "claude",
+  initial: initialSamplesState,
+  decodeState: Schema.decodeUnknownOption(SamplesStateJson),
+  encodeState: Schema.encodeSync(SamplesStateJson),
+  read: readClaudeLimitSamples,
+  descend: () => false,
+  select: (paths) => paths.filter((fileKey) => fileKey === fileName).map((fileKey) => ({ fileKey, sessionId: fileKey }))
+})
 
 const decoder = new TextDecoder()
 
@@ -370,7 +391,10 @@ const ingestSource = <State>(
     return status
   })
 
-/** Reads everything appended since the last pass in both sources. Fails only when the store does. */
+/**
+ * Reads everything appended since the last pass in every source: Claude transcripts, Codex rollouts
+ * and Claude limit samples. Fails only when the store does.
+ */
 export const ingestOnce = (
   roots: SourceRoots,
   options: IngestOptions = {}
@@ -381,6 +405,16 @@ export const ingestOnce = (
     const startedAt = yield* Clock.currentTimeMillis
     const claude = yield* ingestSource(claudeSource, roots.claudeProjects, roots.machine, chunkBytes, maxLineBytes)
     const codex = yield* ingestSource(codexSource, roots.codexHome, roots.machine, chunkBytes, maxLineBytes)
+    const path = yield* Path.Path
+    const samples = yield* ingestSource(
+      claudeLimitSamplesSource(path.basename(roots.claudeLimitSamples)),
+      path.dirname(roots.claudeLimitSamples),
+      roots.machine,
+      chunkBytes,
+      maxLineBytes
+    )
+    // The directory holding the samples may hold other files; only a missing samples file counts.
+    const claudeLimitSamples = samples.filesScanned === 0 ? { ...samples, rootMissing: true } : samples
     const finishedAt = yield* Clock.currentTimeMillis
-    return { startedAt, finishedAt, claude, codex }
+    return { startedAt, finishedAt, claude, codex, claudeLimitSamples }
   })

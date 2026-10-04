@@ -44,6 +44,7 @@ describe("background work", () => {
           roots: {
             claudeProjects: path.join(root, "projects"),
             codexHome: path.join(root, "codex"),
+            claudeLimitSamples: path.join(root, "claude-limits.jsonl"),
             machine: "host-a"
           },
           claude: { readToken: Effect.never, get: () => Effect.never },
@@ -77,7 +78,12 @@ describe("background work", () => {
             Effect.fail(new StoreError({ operation: "record-observations", cause: "disk full" }))
         })
         const options = {
-          roots: { claudeProjects: "/nonexistent/projects", codexHome: "/nonexistent/codex", machine: "host-a" },
+          roots: {
+            claudeProjects: "/nonexistent/projects",
+            codexHome: "/nonexistent/codex",
+            claudeLimitSamples: "/nonexistent/claude-limits.jsonl",
+            machine: "host-a"
+          },
           claude: { readToken: Effect.fail(new CredentialsMissing()), get: () => Effect.never },
           ticketSearch: () => Effect.never
         }

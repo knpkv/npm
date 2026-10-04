@@ -65,6 +65,8 @@ export const windowName = (window: {
   if (window.agent === "claude") {
     if (window.label === "five_hour") return "5-hour"
     if (window.label === "seven_day") return "Weekly"
+    // The spend limit claude-statusline samples from the apps gateway.
+    if (window.label === "spend") return "Spend"
     return CLAUDE_MODEL_WINDOWS.get(window.label) ?? null
   }
   if (window.windowMinutes === 300) return "5-hour"

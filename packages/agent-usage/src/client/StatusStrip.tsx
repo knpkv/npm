@@ -17,6 +17,13 @@ const describeSource = (name: string, source: Source): string => {
   return parts.join(", ")
 }
 
+/** The Claude limit samples file: absent until claude-statusline has written one. */
+const describeSamples = (source: Source): string => {
+  if (source.rootMissing) return "Claude limit samples: none written yet"
+  const skipped = source.skipped.unparseableLine + source.skipped.oversizedLine
+  return skipped === 0 ? "Claude limit samples: read" : `Claude limit samples: ${skipped} lines skipped`
+}
+
 export const StatusStrip = (props: {
   readonly status: ServerStatus
   readonly ignoredKeys: UsageReport["ignoredKeys"]
@@ -28,7 +35,8 @@ export const StatusStrip = (props: {
       ? []
       : [
           ...ingest.claude.unreadable.map((entry) => `claude ${entry.fileKey}: ${entry.reason}`),
-          ...ingest.codex.unreadable.map((entry) => `codex ${entry.fileKey}: ${entry.reason}`)
+          ...ingest.codex.unreadable.map((entry) => `codex ${entry.fileKey}: ${entry.reason}`),
+          ...ingest.claudeLimitSamples.unreadable.map((entry) => `limit samples ${entry.fileKey}: ${entry.reason}`)
         ]
   return (
     <footer className="usage-status" aria-label="Ingest status">
@@ -40,6 +48,7 @@ export const StatusStrip = (props: {
           <span>updated {formatAge(ingest.finishedAt, props.now)}</span>
           <span>{describeSource("Claude", ingest.claude)}</span>
           <span>{describeSource("Codex", ingest.codex)}</span>
+          <span>{describeSamples(ingest.claudeLimitSamples)}</span>
         </>
       )}
       {props.status.ingestFailure === null ? null : <span data-tone="failure">{props.status.ingestFailure}</span>}

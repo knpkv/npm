@@ -164,6 +164,33 @@ describe("buildUsageReport", () => {
 })
 
 describe("buildLimitsReport", () => {
+  it("draws a Claude window as one series whether a poll or a statusline sample observed it", () => {
+    const claude = (
+      source: "claude-oauth-usage" | "claude-statusline",
+      observedAt: number,
+      usedPercent: number
+    ): LimitSnapshot => ({
+      agent: "claude",
+      machine: "host-a",
+      source,
+      label: "five_hour",
+      windowMinutes: 300,
+      observedAt,
+      reading: { _tag: "Known", usedPercent, resetsAt: null }
+    })
+    const report = buildLimitsReport(
+      [
+        claude("claude-oauth-usage", 1_100, 5),
+        claude("claude-statusline", 1_200, 7),
+        claude("claude-oauth-usage", 1_300, 9)
+      ],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series).toHaveLength(1)
+    expect(report.series[0]?.points.map((point) => point.at)).toEqual([1_100, 1_200, 1_300])
+    expect(report.latest.map((snapshot) => snapshot.source)).toEqual(["claude-oauth-usage"])
+  })
+
   it("starts each series at the range's left edge with the reading in force there", () => {
     const report = buildLimitsReport(
       [
