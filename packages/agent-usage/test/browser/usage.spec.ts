@@ -341,3 +341,18 @@ test("the token breakdown keeps every number on one line on a mid-width screen",
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })
+
+test("Escape dismisses a chart breakdown without moving focus", async ({ page }) => {
+  await signIn(page)
+  const column = page.getByRole("group", { name: "Usage per day, stacked by booking" }).getByRole("img", {
+    name: /total; /
+  }).last()
+  await column.focus()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip).toBeVisible()
+  await page.keyboard.press("Escape")
+  await expect(tooltip).toHaveCount(0)
+  await expect(column).toBeFocused()
+  await page.keyboard.press("ArrowLeft")
+  await expect(tooltip).toBeVisible()
+})

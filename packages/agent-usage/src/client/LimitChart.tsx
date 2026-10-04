@@ -13,7 +13,7 @@ import { readingAt } from "./chartModel.js"
 import { describeReason, formatInstant, formatPercent, formatShortInstant } from "./format.js"
 import { fullWindowName, type LimitRow, limitRows, limitSegments, NEAR_PERCENT } from "./limitsModel.js"
 import type { ViewRange } from "./range.js"
-import { useTooltipPlacement } from "./useTooltipPlacement.js"
+import { useDismissOnEscape, useTooltipPlacement } from "./useTooltipPlacement.js"
 import { useWidth } from "./useWidth.js"
 
 const ROW = 56
@@ -126,6 +126,7 @@ export const LimitChart = (props: {
   const end = Math.min(props.range.to, props.now)
   const tabled = props.series.filter((series) => series.label !== "*")
   const tooltip = useTooltipPlacement(cursor, width, 0)
+  useDismissOnEscape(cursor !== null, () => setCursor(null))
 
   if (tabled.length === 0) {
     return <p className="usage-empty">No limit readings in this range yet.</p>

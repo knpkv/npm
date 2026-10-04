@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { type CSSProperties, type RefObject, useLayoutEffect, useRef, useState } from "react"
+import { type CSSProperties, type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react"
 
 const GAP = 12
 
@@ -28,4 +28,19 @@ export const useTooltipPlacement = (anchor: number | null, chartWidth: number, t
     if (measured !== tooltipWidth) setTooltipWidth(measured)
   })
   return { ref, style: { left: anchor === null ? 0 : tooltipLeft(anchor, tooltipWidth, chartWidth), top } }
+}
+
+/**
+ * Escape dismisses a shown tooltip, whether a pointer or focus opened it, without moving focus;
+ * the next focus or pointer move shows it again.
+ */
+export const useDismissOnEscape = (shown: boolean, dismiss: () => void): void => {
+  useEffect(() => {
+    if (!shown) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") dismiss()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [shown, dismiss])
 }
