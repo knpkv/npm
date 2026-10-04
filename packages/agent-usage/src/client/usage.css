@@ -221,9 +221,13 @@
   justify-content: space-between;
 }
 
+/*
+ * Clip sideways only: the first render uses a fallback width until the container is measured, but
+ * a tall tooltip must be free to extend below the plot.
+ */
 .usage-chart {
   min-width: 0;
-  overflow: hidden;
+  overflow: clip visible;
   position: relative;
   width: 100%;
 }
@@ -489,9 +493,12 @@ g[data-active="true"] .usage-segment {
   gap: var(--rly-space-6);
 }
 
+/* A block inside its cell, so a long summary ellipsizes at the cell edge instead of spilling over. */
 .usage-title {
   color: var(--rly-color-text-2);
-  max-width: 28rem;
+  display: block;
+  max-inline-size: 100%;
+  min-inline-size: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

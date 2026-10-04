@@ -208,6 +208,7 @@ test("the filters are named radio groups that arrow keys move through", async ({
   await range.getByRole("radio", { name: "7d" }).focus()
   await page.keyboard.press("ArrowRight")
   await expect(range.getByRole("radio", { name: "30d" })).toBeFocused()
+  await expect(range.getByRole("radio", { name: "30d" })).toHaveAttribute("aria-checked", "true")
 })
 
 test("each usage column can be reached by keyboard and says its total and bookings", async ({ page }) => {
@@ -244,5 +245,72 @@ test("on a phone, every column's breakdown stays inside the chart", async ({ pag
       expect(bounds.x).toBeGreaterThanOrEqual(box.x - 0.5)
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(box.x + box.width + 0.5)
     }
+  }
+})
+
+test("a long ticket title stays inside its cell at desktop width", async ({ page }) => {
+  const summary = "A ticket summary long enough to run across every column of the table if nothing stopped it ".repeat(
+    3
+  )
+  await replaceUsage(page, (report) => ({
+    ...report,
+    bookings: report.bookings.map((booking) =>
+      booking.booking._tag === "Ticket" ? { ...booking, title: { _tag: "Known", summary } } : booking
+    )
+  }))
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await signIn(page)
+  for (const breakdown of [false, true]) {
+    await page.getByRole("checkbox", { name: "Show token breakdown" }).setChecked(breakdown)
+    const title = page.locator(".usage-title").filter({ hasText: "A ticket summary" }).first()
+    const cell = page.locator("td").filter({ has: title })
+    const titleBox = await title.boundingBox()
+    const cellBox = await cell.boundingBox()
+    if (titleBox === null || cellBox === null) throw new Error("title not laid out")
+    expect(titleBox.x + titleBox.width).toBeLessThanOrEqual(cellBox.x + cellBox.width + 0.5)
+  }
+})
+
+test("on a phone, a tall breakdown keeps every booking and the total readable", async ({ page }) => {
+  await replaceUsage(page, (report) => {
+    const period = report.periods.length - 1
+    const bookings = Array.from({ length: 9 }, (_, index) => ({
+      ...report.bookings[0]!,
+      id: `long-${index}`,
+      booking: { _tag: "Repo" as const, name: `a-really-quite-long-repository-name-${index}` },
+      costUsd: 10 - index
+    }))
+    return {
+      ...report,
+      bookings,
+      cells: bookings.map((booking) => ({
+        period,
+        booking: booking.id,
+        tokens: 1_000,
+        costUsd: booking.costUsd,
+        unpricedTokens: 0
+      }))
+    }
+  })
+  await page.setViewportSize({ width: 390, height: 900 })
+  await signIn(page)
+  const chart = page.getByRole("group", { name: "Usage per day, stacked by booking" })
+  await chart.getByRole("img", { name: /total; / }).last().focus()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip.locator(".usage-tooltip-row")).toHaveCount(9)
+  // Hit-testing finds only what is painted and unclipped; the tooltip ignores the pointer in use.
+  await tooltip.evaluate((element) => element.style.setProperty("pointer-events", "auto"))
+  for (
+    const line of [...(await tooltip.locator(".usage-tooltip-row").all()), tooltip.locator(".usage-tooltip-muted")]
+  ) {
+    // Scroll the page only: scrollIntoView would also scroll a clipping chart and hide the defect.
+    await line.evaluate((element) => window.scrollTo(0, element.getBoundingClientRect().top + window.scrollY - 200))
+    const box = await line.boundingBox()
+    if (box === null) throw new Error("tooltip line not laid out")
+    const hit = await page.evaluate(
+      ({ x, y }) => document.elementFromPoint(x, y)?.closest(".usage-tooltip") !== null,
+      { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+    )
+    expect(hit).toBe(true)
   }
 })
