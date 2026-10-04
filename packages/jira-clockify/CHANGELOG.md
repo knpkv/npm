@@ -1,5 +1,423 @@
 # @knpkv/jira-clockify
 
+## 1.4.0
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Add `jcf sync reconcile --agent claude`, which reads local Claude Code Agent Sessions as
+  reconciliation evidence and proposes the Clockify entries and Jira worklogs neither side recorded.
+  Each proposal carries the Attribution Signal that produced it, is sized per side to that side's own
+  gap, and is selected in one checkbox picker. Time is derived from the messages the user typed — a
+  Coding Agent's own output and its tool results are excluded, so an unattended run credits at most the
+  Idle Cap rather than the hour it ran for. Presence between consecutive prompts is bounded by a
+  configurable Idle Cap, and any instant worked in parallel is divided equally between the Issue Keys
+  active in it — so a day's proposals can never exceed its wall clock, and parallel work is
+  not awarded to whichever session happened to log an event first. A day with a Timer still running is
+  reported and excluded. `--calendar` draws the intervals as an hour-by-hour ASCII grid.
+
+  Every entry it writes says what the time went on. A Clockify description and a Jira worklog comment
+  now carry the Jira issue title and one sentence, read off the session's own prompts by a Coding
+  Agent, describing what was actually done — because the question asked of a timesheet line months
+  later is _what_ the time went on, and by then the Issue Key is a lookup and the transcript is gone.
+  The `[KEY]` prefix still leads the Clockify description, so a second run tallies exactly as before.
+  Notes are asked for only about rows the user has confirmed, in one batched call, and the text is
+  printed before it is written. A failed, timed-out or unavailable Coding Agent costs the sentence and
+  never the write: the entry falls back to the title and its provenance, and a session whose prompts do
+  not say what was done gets no sentence rather than an invented one.
+
+  Everything needed to judge a proposal is on its row _in the picker_ — the day, when the work item
+  started and ended, the Issue Key, what each side would gain, the Attribution Signal, the Jira issue
+  summary, its assignee, what the sides already hold, and how many blocks the total spans. Nothing is
+  listed above the picker, where it would already have scrolled past by the time there is a decision to
+  make; only rows the picker cannot offer are reported there. Rows are laid out for the terminal's own
+  width, spending a wider one on the issue title and the block times.
+
+  Also fixes two reporting defects in the existing direction mode. Logger output now goes to stderr,
+  so a single warning can no longer corrupt `--json` output. And a direction that finds nothing to add
+  no longer claims the two sides are "in sync" when the _other_ side is short — it names the shortfall
+  and the reverse command, because a direction only ever asks whether its target is short. Direction
+  rows and their confirmations now carry the Jira issue summary and assignee as well as the key.
+
+  Presence is counted narrowly and scope is enforced before anything is read. Only messages the user
+  typed evidence presence — a Coding Agent's own output, its tool results, and the prompts it sends its
+  own subagents all show it was busy rather than that anyone was working. A transcript outside every
+  Session Root is never opened at all rather than read and then discarded: the Claude CLI names each
+  project directory after the working directory it ran in, so scope is decided from the directory name.
+  On the author's machine that is two directories opened instead of 157.
+
+  Reading the recorded side is allowed to fail. Every proposal is `session − (already recorded)`, so an
+  unread Jira worklog is indistinguishable from an absent one and would re-log hours Jira already
+  holds. A failed worklog read fails the run instead: failing costs a run, guessing costs someone
+  else's timesheet.
+
+  Sessions needing a Coding Agent are attributed in batches rather than one call each, because a
+  call's cost is almost entirely fixed overhead: measured against the real CLI, one session cost $0.080
+  and seven together cost $0.049. Batches are bounded so a single timeout costs one call's sessions
+  rather than the run.
+
+  Adds `sessionRoots`, `sessionTicketMap`, `sessionIdleCapSeconds`, and `sessionConfidenceFloor`
+  config with `jcf config set session-root`, `session-ticket`, and `idle-cap` subcommands.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Two additions, both about what a row is made of.
+
+  **Every block carries its own credit.** `TicketDayCredit` and `SessionProposal` now expose `blocks`
+  — the coalesced stretches behind a row, each with the seconds it contributes — in place of `spans`.
+  They sum to the row's total exactly: the seconds that flooring drops go to the blocks with the
+  largest fractional part, because a row whose parts do not add up to the whole it was offered under
+  is a row nobody can check. Credit, not wall clock, so a block worked in parallel with another
+  ticket is worth less than the interval it spans.
+
+  That is what lets a surface offer one stretch at a time rather than a whole day, which is the shape
+  a person actually reconciles in — the morning went on this ticket, the twenty minutes after lunch
+  did not.
+
+  **A new `IssueFacts` service says who owns a ticket, and what it is called.** One
+  `key in (…)` search answers for a week, returning titles alongside assignees, cached in
+  `~/.jcf/issues.json` for twelve hours.
+
+  Ownership is asked of Jira because a branch cannot tell authoring from reviewing: checking out a
+  colleague's pull request puts their Issue Key on the branch, and branch attribution then offers
+  their ticket as your work. Ownership is decided by account id, never by display name, and the whole
+  cache is discarded when the logged-in account changes — `mine` is a claim about one account, and
+  another account's answer is wrong rather than merely stale.
+
+  Every failure mode leaves a key _unknown_ rather than "not yours": no login, an unreachable site, an
+  issue in a project you cannot see. A caller may act on Jira saying a ticket belongs to somebody
+  else; acting on Jira not having been asked would hide hours that really happened.
+
+  Configured by `jcf config set ownership assigned|any` (default `assigned`) and
+  `jcf config set mine <ISSUE-KEY>` for your work on somebody else's ticket, both shown by
+  `jcf config show`.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Scan Codex session history alongside Claude Code so recent Codex work can produce time suggestions.
+  Include resumed rollouts stored in older date directories, stream away tool payloads, and apply
+  session roots before ticket mining or agent disclosure. Count current and older human prompt
+  events once; exclude injected context, replayed prompt copies and native subagent sessions.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Ownership of the timeline now changes no more often than the Dwell Floor — fifteen minutes by
+  default, `jcf config set dwell <seconds>`, zero to turn it off.
+
+  Three concurrent sessions on three Issue Keys interleave their prompts, and read literally that says
+  the work changed ticket every few minutes. It did not: it is an artefact of reading several
+  transcripts at once. A day of it is two dozen slivers on a calendar and indefensible on a timesheet.
+  `applyDwellFloor` reassigns any stretch shorter than the floor to the neighbour it touches,
+  preferring the incumbent — the ticket that was already holding that time before the interruption.
+
+  It reassigns time and never creates or drops any, so the inequality that makes a proposal safe to
+  accept survives intact. Three rules bound it:
+
+  - A short stretch is **not** absorbed when that would turn hours nothing placed into hours credited
+    to an Issue Key. Demoting an attributed sliver into unplaced time is safe — nothing gets written —
+    but the reverse would bill work no transcript placed there.
+  - A stretch with no neighbour keeps its own time, however brief. Four minutes alone in the evening
+    has no incumbent to belong to, and dropping it would lose work that happened.
+  - Nothing is ever welded across a local midnight, because runs are bucketed by the day they start
+    in.
+
+  The credited spans on a proposal now come from the same coalesced timeline as its seconds, so a
+  row's blocks and its total can no longer tell different stories.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Expose the headless engine so a second surface can derive and write Proposed Worklogs. The package
+  had no `main` and no `exports` at all: it was reachable only as the `jcf` binary. `.` is now a
+  namespace barrel over the agent-session core, the services, the live layers, the write path, and the
+  calendar — deliberately without the command definitions or the TUI — and
+  `@knpkv/jira-clockify/testing.js` exports `makeFakeHeadless`, the seam that fakes every external
+  boundary and captures every write.
+
+  Writing a proposal reports instead of printing. `applyProposal` returned seconds and logged its own
+  `✓`/`✗` lines through `Console`, which only a terminal can consume; it now returns a per-side
+  `SideOutcome` and `writeOutcomeLines` renders it, so one set of words serves every surface. The
+  distinction between a side that refused and a side that owed nothing is now in the type rather than
+  in a zero.
+
+  Adds `startOfIsoWeek` and `isoWeekPeriod`, both built from local calendar fields, so a Monday-to-Sunday
+  week stays a week across a daylight-saving change.
+
+  A written entry now says what it claims about itself. `WriteProvenance` records three independent
+  facts — whether a transcript stands behind the time, whether a person set the amount, whether a
+  person chose the Issue Key — and the provenance text follows. A row where a person overruled the
+  evidence must not keep citing it for the part they chose.
+
+  The proposal report now carries `recorded`: what Clockify and Jira already hold over the period. A
+  run reads both sides anyway to size its proposals, so a surface that shows allocated time beside
+  proposable time no longer has to tally two remote services a second time.
+
+  Unplaced hours now name the directories behind them. `UnattributedDayCredit.cwds` lists the distinct
+  working directories of the sessions whose time no signal could place — the repair for unplaced hours
+  is a Standing Attribution, and a Standing Attribution is a directory prefix, so "3h40m
+  unattributed" on its own told a reader nothing they could act on.
+
+  `ticketSummaryReader` joins `fetchTicketByKey`: it resolves the Jira services once and returns a
+  function that answers with a title or null, so a consumer can name what `[PROJ-1]` was about without
+  importing a Jira client. The `NOT_LOGGED_IN_HINT` moved to a leaf module for the same reason — the
+  write path now runs in a browser bundle, where an HTTP client and a keychain have no business being.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Add persisted session-agent settings for Claude or Codex, with optional model and effort validated by a public pure schema. Read the current settings for every attribution and description operation, so changing them needs no restart.
+
+  Report the recorded-time stage from the reconciliation engine and read timer exclusions concurrently with recorded time. Accept an optional activity observer on `SessionAttributor.attribute` and forward visible agent text and process status tagged with batch number and count.
+
+  Retain attributed credits on the session report, including credits with no current gap or withheld by a running timer, and add `refreshRecordedTime` to recalculate proposals from that evidence without rereading transcripts or calling the agent.
+
+  Retain closed Clockify entries without a ticket key as read-only `unlinkedClockify` records; they never become Jira reconciliation candidates.
+
+  Add `SavedEntries` to `Headless.layer` for whole-entry updates against a server-retained snapshot, rechecking provider ownership and the current snapshot and distinguishing validation, conflict and provider failures. Carry optional whole-entry metadata on recorded intervals, including exact original bounds and description. Optionally retain `sessionEvidence` with each session's ticket and active intervals, and accept a nullable ticket key on `SessionAttributor.describe` for unkeyed time.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Allocate overlapping ticket credit into sequential blocks with the configured dwell floor, selecting the strongest tickets when fewer blocks fit. Keep actual active duration, idle gaps and standalone short work without inventing time. Reserve unplaced shares before scheduling known tickets so changing shares cannot fragment the calendar into sub-minute blocks.
+
+  Share proposed worklog selection, sizing and provider anchoring through one pure module so preview and confirmation cannot disagree.
+
+  Return exact written segments for partial provider outcomes and retain a stable source-block identity
+  when scheduling moves a block. JCF web uses those contracts to settle disjoint optimistic entries,
+  prevent corrected-ticket blocks from reappearing after a restart, reopen time removed by a saved-entry
+  duration edit or verified deletion, and share one machine writer guard with `jcf watch`. Corrected
+  session writes now retain their private provider-entry-ID binding across description edits and source
+  suffix removal; uncertain creates and unlinked earlier entries require manual recovery instead of an
+  automatic repeat.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Add `jcf watch claude`, which logs Agent Session time as it happens instead of being asked for it
+  afterwards. It derives the same Proposed Worklogs `jcf sync reconcile --agent` does, from the same
+  evidence and the same arithmetic, and writes them without a picker — so the common case of a day
+  spent on ticket branches needs no reconciliation at all.
+
+  Unattended writing is bounded by three rules rather than by a person. A block of work is written no
+  sooner than one Idle Cap after its last moment, because until then it can still grow and its share of
+  parallel work can still change — the bound is exact, since a window that could still overlap a block
+  must close within one Idle Cap of it. Only attributions somebody deliberately created are written: a
+  branch name, a worktree path, a Standing Attribution. Time only a Coding Agent could place is named
+  on screen and left for `reconcile`, where it is shown before it is written. And the window starts
+  where the watch does, so the morning it was started in is never backfilled.
+
+  A Coding Agent is woken only to describe a block being written, never to attribute one — a session's
+  Issue Key does not change, so asking every five minutes would spend a call to be told the same thing.
+  Written entries carry the issue title and that sentence exactly as a confirmed `reconcile` row does.
+  Nothing is remembered between looks, because a proposal is always `session − (already recorded)`: a
+  failed write, a closed laptop, or a restart costs a delay rather than an hour, and a block already
+  written produces no proposal at all. Jira rejecting the login stops the watch rather than logging to
+  Clockify alone all afternoon and rebuilding the discrepancy the tool exists to close. `--dry-run`
+  prints what would be written; `--interval` sets how often it looks, defaulting to five minutes.
+
+  The closing summary counts only what each side actually took, so a refused Clockify entry or a
+  rejected Jira worklog is never reported as time written — for a command whose purpose is making sure
+  hours are not lost, overstating what it wrote is the wrong direction to be wrong in. Under
+  `--dry-run` an unchanged row is described once rather than on every look, since a dry run writes
+  nothing and would otherwise re-describe the same settled row until it was stopped.
+
+  Also fixes a running-Timer exclusion that was one day wide. A Timer left running hides its time from
+  the Clockify tally on _every_ local day it spans, but only the day it started on was withheld from
+  proposals, so a longer window could propose hours that would be logged a second time the moment the
+  Timer stopped.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - The week is a calendar. Hours down, days across, every block at the time it happened: logged entries
+  solid, proposable time dashed, overlapping work side by side the way a calendar shows it. Clicking a
+  dashed block confirms it; clicking empty space offers a manual entry at the time clicked. A table of
+  day totals could say how much, but only this can say when — and when is what a person checks a
+  proposal against.
+
+  That needed the engine to stop discarding what it already reads. `compare` walked each Clockify
+  entry's real interval and summed it away into day totals; `ReconcileRow.intervals` now carries those
+  intervals, labelled with the system that reported them, alongside the totals that remain
+  authoritative on how much.
+
+  Reconciliation can now be about one system. `compare` and `proposeFromSessions` take `sides`, and a
+  system that is out is not read, not proposed for, and not written to. That is stronger than skipping
+  its write: a side nobody read holds an unknown amount, and treating unknown as zero would propose the
+  whole day for it. In the browser it is a header choice — both, Jira only, Clockify only — remembered
+  per browser, and a Jira-only week makes no Clockify request at all.
+
+  Writes take `targets` to match, and `SideOutcome` gains `Skipped` so a system nobody asked about is
+  distinguishable from one that owed nothing. The gap on a skipped side is left exactly as it was, so
+  asking for Jira today and both tomorrow writes the Clockify half tomorrow.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Serialize every provider write behind one machine writer guard (`WriterGuard`), shared by `jcf watch`, the CLI and the browser, with a typed refusal reason. Hold, rather than recreate, a bound Jira or Clockify entry whose absence the provider cannot prove, and check source and target again after reserving and before the final write. Bind direction-created entries only when the ledger verifies a single target, record Jira's creation time on new bindings (source ledger v4, migrated in place), and render calendar rows by elapsed minutes so DST days line up.
+
+### Patch Changes
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Replace internal project names, keys and work descriptions in fixtures, examples and documentation
+  with neutral placeholders. Nothing about behaviour changes; these are the strings a reader of a
+  public package would otherwise see.
+
+  `ClockifyApiClient`'s tests now compose their client once through `it.layer`, with each case
+  declaring the response it wants, instead of providing a layer inside every test body.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Draw `--calendar` by the local clock rather than by distance from midnight. The two differ on a
+  daylight-saving day: after a spring-forward, work at 03:00 sat two hours from midnight and was drawn
+  in the `02h` row, and after a fall-back every later block shifted by an hour so the last of them ran
+  off the end of the grid and vanished — precisely when the grid is being used to judge whether a
+  proposal is right.
+
+  Also states what the transcript pre-read filter can actually guarantee. Scope is decided from the
+  project directory's name, and that name is a lossy encoding of the working directory, so a root
+  `/a/b-c` and an out-of-root `/a/b/c` collide. A colliding transcript is opened and then discarded
+  unread; every other out-of-scope transcript — 155 of 157 on the author's machine — is never opened.
+  The module claimed the stronger thing.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - `jcf config reset` now also clears the session settings it displays. `jcf config show` lists the
+  Session Roots, Standing Attributions and Idle Cap, so leaving them untouched was invisible: a user
+  chasing a bad Idle Cap would reset, see it still there, and have nothing to go on.
+
+  A hand-edited `~/.jcf/config.json` is also held to the bounds the `jcf config set` subcommands
+  already enforce. An Idle Cap of `0` made every presence window zero-length, so nothing was ever
+  proposed again; a confidence floor above `1` — `70` for "70%" is the obvious slip — withheld every
+  Coding Agent attribution permanently. Both now fall back to the default instead.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Stop treating an unreadable Jira worklog as an absent one. `jcf sync reconcile` fetches each issue's
+  worklogs to work out what Jira already holds, and turned any per-issue failure into an empty list —
+  so one transient Jira error made a bucket look short and offered to fill it, posting hours that were
+  already there. The read now fails the run and names the issue it failed on.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Read every page of Jira's worklog search. `jcf sync reconcile` asked for the first hundred issues and
+  ignored the continuation token, so in a window with more than that, a ticket that fell off page one
+  tallied as holding no Jira time at all — and since every caller subtracts this from what a session
+  accounts for, that reads as "Jira is short by the whole day". `jcf watch` would then post hours Jira
+  already had. A week with a hundred issues is ordinary. The read now follows the token, and fails the
+  run rather than proceeding on a partial tally.
+
+  Win the watch lease by creating the file, not by reading it. A read-then-write let two watches
+  starting together both conclude the lease was free; acquisition is now an exclusive create, so the
+  filesystem picks the winner. An existing lease is never overwritten based on elapsed time: stale
+  takeover is another read-then-write race. An ungraceful death leaves a lock for explicit cleanup.
+
+  Resume from the earliest _unresolved_ instant rather than from the shutdown time. A watch stopped
+  mid-block was holding prompts that had not settled; recording when it stopped and resuming from there
+  filtered out exactly those prompts, so the block it was protecting was lost anyway. The cursor now
+  records the oldest block still held.
+
+  And a resume no longer authorises back-dating. Taking `max(cursor, now − settleWindow)` meant any old
+  cursor resolved to `now − settleWindow`, so every restart wrote a fresh window of unreviewed work —
+  the forward-only boundary held only for the very first run. The lease decides whether a resume is
+  offered at all, and only when the previous holder stopped recently.
+
+  `jcf watch` also pointed at `jcf auth login` when Jira refused a worklog. That command does not
+  exist; the real one is `jcf auth jira login`, so following the instruction produced another error.
+
+  The `--agent` picker's header is bounded to the terminal width like its detail line already was. A
+  long Issue Key with unequal gaps passed eighty columns, and since the prompt counts only the title
+  lines it was handed, the terminal wrapped the surplus and every later row sat a line out of place
+  while the user was choosing what to write.
+
+  The `no-cli-runmain-default-error-reporting` rule now matches the options argument rather than
+  anything inside the call, so `runMain(makeProgram({ disableErrorReporting: true }), { teardown })` —
+  where reporting is still on — is caught.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - `parseDuration` now reads back everything `formatDuration` writes: spaces between the parts, and a
+  trailing seconds component (`1h 30m`, `56m 36s`, `30s`).
+
+  The two had drifted into disagreement, and the place it showed was a form. A credited amount of
+  3396 seconds renders as `56m 36s`, which the parser rejected — so any row whose credit was not a
+  whole number of minutes arrived pre-filled with text its own validator refused, and could not be
+  accepted at all. Units still have to appear in order, so `1h30` and `30s 5m` stay malformed.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Start a Codex turn's timeout after prompt-only feature discovery, so a slow `codex features list` no longer eats into the turn's budget. JCF now reads Issue Keys from textual tool results as attribution evidence (never as presence), and agent reconcile no longer says both sides hold everything while withheld, unattributed or skipped time is still listed. Session Root and Standing Attribution prefixes now accept `~` only as `~` or `~/…`, `jcf watch` names unplaced time again when a later session or another half hour adds to the same day, and `jcf timer edit` exits non-zero when a guarded edit is refused.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Stop `--agent` mode from writing hours that already exist, and stop `jcf watch` from losing hours it
+  half-wrote. Five defects, all in the same direction: something the recorded side actually held was
+  invisible to the subtraction, so the gap looked bigger than it was.
+
+  - **The Clockify tally read one page.** It asked for no page size, so it got Clockify's default of 50. On any busy week the entries past that read as time Clockify never had. Now paged until a page
+    comes back empty — a short page is not the last one, since the server may serve fewer than asked —
+    and a run that would exceed the page bound fails rather than acting on a partial tally.
+  - **An entry crossing midnight counted entirely against the day it started.** Session credits are
+    split at each local midnight, so a 23:30–00:30 entry left the following day looking untouched.
+    Recorded intervals are now split the same way.
+  - **The watch's resume cursor moved before the write.** It advanced past every settled block, then
+    looked up tickets, generated descriptions and wrote. A Jira refusal after Clockify had succeeded
+    therefore persisted a cursor past a row whose Jira half was missing, so the restart the command
+    asks the user to perform skipped it. `--dry-run` had the same shape without the failure: it wrote
+    nothing and still resolved everything. A block now stays behind the cursor until both sides that
+    were short have taken it.
+  - **The Jira worklog search treated a page with no `issues` as an empty one.** The generated schema
+    makes the field optional, so a truncated or changed response read as "this user logged no work".
+    Both that and an issue with no readable key now fail closed.
+  - **`--day` and `--week` were an hour out on daylight-saving transitions.** The endpoint was a local
+    midnight plus 24 elapsed hours, which on a 23- or 25-hour day is not the next midnight. Both ends
+    are now anchored to a real local midnight.
+
+  Also: `jcf watch` refuses to start when the lease cannot be written at all, rather than treating an
+  unwritable config directory as evidence that another watch holds it and running unprotected; each
+  lease is signed and immutable while held, so no read-then-overwrite stale takeover can admit two
+  writers; an in-scope transcript that cannot be read fails
+  the run instead of being skipped, because omitting it hands its share of an overlapping interval to
+  whichever session happened to be readable; issue keys delimited by underscores — `feature_PROJ-42_work`
+  — are now recognised, where `\b` had matched nothing and left the session unattributed and so
+  unlogged; and entries created by `--agent` carry the configured billable default, which `jcf timer
+start` already sent.
+
+  The daylight-saving tests for the calendar grid were passing on ordinary 24-hour days: the suite ran
+  in whatever zone the machine had, and the dates they pin are US transitions. It now runs in a fixed
+  zone, and both tests fail with the old arithmetic restored.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Credit the Idle Cap after a session's _final_ prompt, not only after prompts that happen to be
+  followed by another. The gap was load-bearing rather than cosmetic: a final prompt contributed
+  nothing until some later prompt arrived, and then a window appeared **retroactively** — one that
+  could overlap a block `jcf watch` had already settled and written, halving that block's share after
+  the fact while the new share was written too. Two Issue Keys then held more time between them than
+  the clock has. Materialising the window as soon as the prompt is seen is what makes "settled" mean
+  settled: every window a prompt will ever produce now exists the moment the prompt does.
+
+  A day therefore credits up to one Idle Cap more per session than before, which is the behaviour
+  ADR-0006 already described — "the most time credited after a final prompt".
+
+  Attribute each stretch of a session to the branch it actually ran under. A transcript is now read as
+  one segment per `(working directory, branch)`: taking the last line's branch for the whole file
+  credited the morning's prompts to the afternoon's ticket, and under `jcf watch` the morning could
+  already have been written under the first ticket and then derived again under the second — the same
+  wall clock on two tickets. Segments that resolve to the same Issue Key are unioned again, so a branch
+  change that does not change the work costs nothing.
+
+  Refuse a Standing Attribution that is not an Issue Key, in the config file and in `jcf config set
+session-ticket`. An empty one wrote a Clockify description of `[] …`, which the tally then declines
+  to read back — so a watch never saw the entry it had just made and wrote the same time again on every
+  settled tick, without end.
+
+  Fail rather than guess when the running-timer check cannot be answered. `detectRunning` turned an
+  unreachable Clockify into "nothing is running", which is the opposite answer: a running entry has no
+  end and is invisible to every tally, so proposing that day logs those hours twice the moment the
+  timer stops. It also now clears a stale running state once Clockify reports the timer gone, so a
+  long-lived watch stops excluding a day forever after the timer was stopped from the web.
+
+  Anchor an incremental write past the blocks the target side already holds, including the exhausted
+  case, so a second write for a `(ticket, day)` cannot overlap the first.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Only one `jcf watch` writes at a time. Subtracting what Clockify and Jira already hold makes a
+  _later_ look safe and says nothing about a _simultaneous_ one: two processes can derive the same gap
+  before either writes it, and an accidental second terminal is enough to double a day. A watch now
+  takes an immutable lease in the config directory; a second one says who has been running since when
+  and stops. The lease is never overwritten based on elapsed time because that takeover is not atomic.
+  An ungraceful death therefore requires manual lock removal after verifying no watch remains.
+
+  Write a settled block when the command says it will. The block already ran one Idle Cap past its
+  last prompt, and the deadline added another — so a block promised after six quiet minutes was
+  withheld for eleven. The bound is still exact: a later prompt can only extend a block by landing
+  within an Idle Cap of the last one, which is before the block's own end.
+
+  A restart no longer drops the block it was holding, and a first run still reaches back for nothing.
+  The lease carries how far its holder got, so a restart _resumes_ from that point — bounded by one
+  settle window, the stretch that cannot have settled and so cannot have been written. A first-ever
+  watch has no such record and therefore no reach at all, which keeps "covers only time since it
+  started" exactly true rather than approximately. Work older than the resume point stays
+  `jcf sync reconcile`'s, which shows the rows before writing them.
+
+  End a stretch's presence where the next one begins. A session that switches branch gave its old
+  stretch a full Idle Cap of tail, which ran into the new branch's work and was shared back onto the
+  old Issue Key — so a switch a minute in put those minutes on both keys at once. The boundary line's
+  text also belonged to the wrong side of the switch, and a stretch with no typed prompt leaked its
+  text into the next one, which could carry evidence out of a directory that was never opted in.
+
+- [#438](https://github.com/knpkv/npm/pull/438) [`acb8b25`](https://github.com/knpkv/npm/commit/acb8b25772cc188a0cc1299a1b591903240cfc7c) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Schema-backed Jira API client.
+
+  Breaking: these exported types now include `null`, so code that reads them must handle it: `ApprovalConfiguration`, `BoardFeaturesPayload`, `BoardsPayload`, `ConditionGroupConfiguration`, `ConditionGroupUpdate`, `CustomFieldPayload`, `FieldCapabilityPayload`, `FieldLayoutPayload`, `FieldLayoutSchemePayload`, `FieldSchemePayload`, `IssueLayoutPayload`, `IssueTypeHierarchyPayload`, `IssueTypePayload`, `IssueTypeProjectCreatePayload`, `IssueTypeScreenSchemePayload`, `NotificationSchemePayload`, `PermissionPayloadDTO`, `PreviewConditionGroupConfiguration`, `PreviewRuleConfiguration`, `ProjectId`, `RolesCapabilityPayload`, `ScopePayload`, `ScreenPayload`, `ScreenSchemePayload`, `SecuritySchemePayload`, `TargetClassification`, `TargetMandatoryFields`, `TargetStatus`, `WorkflowCapabilityPayload`, `WorkflowLayout`, `WorkflowProjectIdScope`, `WorkflowRuleConfiguration`, `WorkflowStatusLayout`, and `WorkflowTransitionLinks`. `ProjectId` and `WorkflowLayout` also appear in responses. No exports are removed; 129 are added.
+
+- Updated dependencies [[`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`e17fbbb`](https://github.com/knpkv/npm/commit/e17fbbb8760f5f8bcf9a73b7d2d11a526c37fadd), [`bd45f8c`](https://github.com/knpkv/npm/commit/bd45f8cdeb1e8301bfcde42254792a488734d7e5), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`acb8b25`](https://github.com/knpkv/npm/commit/acb8b25772cc188a0cc1299a1b591903240cfc7c), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183)]:
+  - @knpkv/ai-claude@0.4.0
+  - @knpkv/jira-cli@1.4.0
+  - @knpkv/clockify-api-client@2.0.0
+  - @knpkv/ai-codex@0.5.0
+  - @knpkv/atlassian-common@1.5.0
+  - @knpkv/jira-api-client@2.0.0
+  - @knpkv/agent-skills@0.3.2
+
 ## 1.3.0
 
 ### Minor Changes

@@ -1,5 +1,13 @@
 # @knpkv/codecommit-core
 
+## 0.17.0
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+- [#434](https://github.com/knpkv/npm/pull/434) [`fa377ce`](https://github.com/knpkv/npm/commit/fa377ce975cccd594da8f7a370eb14f7f48d0039) Thanks [@konopkov](https://github.com/konopkov)! - Hide pull requests of accounts you switched off. Their rows stay cached, so re-enabling an account brings its pull requests back without a provider round trip, and a URL naming one still resolves — the TUI list, the web queue, and its filter sidebar simply stop listing them, and the review badge stops counting them.
+
 ## 0.16.0
 
 ### Minor Changes

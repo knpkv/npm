@@ -1,5 +1,17 @@
 # @knpkv/confluence-api-client
 
+## 2.0.0
+
+### Major Changes
+
+- [#440](https://github.com/knpkv/npm/pull/440) [`ce35f96`](https://github.com/knpkv/npm/commit/ce35f96b35ac0c8e8098da815770a0d46e6ddbad) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Confluence API clients from Atlassian's latest OpenAPI specifications and regenerate them with the current Effect OpenAPI generator.
+
+  Breaking: the generator no longer emits component schemas that no operation reaches. The published V1 client drops `AddContentRestriction`, `ConnectModule`, `ContentBodyCreateStorage`, `ContentMetadata`, `ContentProperty`, `GlobalSpaceIdentifier`, `PropertyValue`, `SpaceProperty`, and `Task`; the V2 client drops `DatabaseLinks`, `FolderLinks`, `SmartLinkLinks`, and `WhiteboardLinks`. The V1 client adds `SpacePermissionCreate`. Consumers importing the removed models must define them locally before upgrading. Several V1 models are now nullable: `ButtonLookAndFeel`, `Container`, `ContainerLookAndFeel`, `Icon`, `NavigationLookAndFeel`, `SearchFieldLookAndFeel`, `Space`, `SpaceDescriptionCreate`, `SpaceSettings`, `SystemInfoEntity`, `User`, `UsersUserKeys`, and `Version`; the V2 `Icon` model is nullable too. Except `SpaceDescriptionCreate`, each of these also accepts unknown keys through an index signature, as do the V1 `LookAndFeel`, `LookAndFeelWithLinks`, `ScreenLookAndFeel`, and `WatchUser` models. `User.operations` and `ContentBlueprintDraft.ancestors` also gain `| null`. Code that reads these models must handle `null`.
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
 ## 1.1.1
 
 ### Patch Changes

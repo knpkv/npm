@@ -1,5 +1,33 @@
 # @knpkv/codecommit
 
+## 0.13.0
+
+### Minor Changes
+
+- [#434](https://github.com/knpkv/npm/pull/434) [`fa377ce`](https://github.com/knpkv/npm/commit/fa377ce975cccd594da8f7a370eb14f7f48d0039) Thanks [@konopkov](https://github.com/konopkov)! - Hide pull requests of accounts you switched off. Their rows stay cached, so re-enabling an account brings its pull requests back without a provider round trip, and a URL naming one still resolves — the TUI list, the web queue, and its filter sidebar simply stop listing them, and the review badge stops counting them.
+
+### Patch Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+- [#432](https://github.com/knpkv/npm/pull/432) [`b2d229d`](https://github.com/knpkv/npm/commit/b2d229d2208fb9e7f2d9dc174ff12d769c5b8225) Thanks [@konopkov](https://github.com/konopkov)! - Replace employer-specific names in fixtures, comments and prototype storage keys with neutral placeholders.
+
+  The Control Center prototype uses a new demo storage namespace. Saved prototype state and theme preferences from the previous namespace are not loaded.
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Replace internal project names, keys and work descriptions in fixtures, examples and documentation
+  with neutral placeholders. Nothing about behaviour changes; these are the strings a reader of a
+  public package would otherwise see.
+
+  `ClockifyApiClient`'s tests now compose their client once through `it.layer`, with each case
+  declaring the response it wants, instead of providing a layer inside every test body.
+
+- [#408](https://github.com/knpkv/npm/pull/408) [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e) Thanks [@konopkov](https://github.com/konopkov)! - Share typed, redacted browser-pairing credentials and transport primitives between Control Center and CodeCommit.
+- Updated dependencies [[`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e), [`b2d229d`](https://github.com/knpkv/npm/commit/b2d229d2208fb9e7f2d9dc174ff12d769c5b8225), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`fa377ce`](https://github.com/knpkv/npm/commit/fa377ce975cccd594da8f7a370eb14f7f48d0039), [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183), [`08a1c42`](https://github.com/knpkv/npm/commit/08a1c42ba3e9c4505919477f8b601262fb07952e)]:
+  - @knpkv/ai-codex@0.5.0
+  - @knpkv/codecommit-core@0.17.0
+  - @knpkv/codecommit-web@0.17.0
+  - @knpkv/agent-skills@0.3.2
+
 ## 0.12.0
 
 ### Minor Changes
