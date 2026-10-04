@@ -1,0 +1,24 @@
+id: no-node-imports-in-bounded-io
+snapshots:
+  ? |
+    const fs = await import("node:fs")
+  : labels:
+      - source: import("node:fs")
+        style: primary
+        start: 17
+        end: 34
+      - source: '"node:fs"'
+        style: secondary
+        start: 24
+        end: 33
+  ? |
+    import { Buffer } from "node:buffer"
+  : labels:
+      - source: import { Buffer } from "node:buffer"
+        style: primary
+        start: 0
+        end: 36
+      - source: '"node:buffer"'
+        style: secondary
+        start: 23
+        end: 36

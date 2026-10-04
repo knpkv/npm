@@ -1,3 +1,4 @@
+import { collectBoundedText, limitBytes } from "@knpkv/bounded-io"
 import { AgentWorkLabel } from "@knpkv/herdr-connect"
 import { makeCoordinatorLifecycle } from "@knpkv/herdr-coordinator"
 import {
@@ -12,7 +13,7 @@ import {
   type LocalJobPayload,
   type WorkerStarted
 } from "@knpkv/herdr-fleet"
-import { Effect, Path, Ref, Schema, Stream } from "effect"
+import { Effect, Path, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const HerdrAgentFields = {
@@ -121,47 +122,27 @@ const decodeLineage = Effect.fn("HostOperations.decodeLineage")(function*(
   })
 })
 
-interface CommandOutput {
-  readonly bytes: number
-  readonly chunks: ReadonlyArray<Uint8Array>
-}
-
 export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
   config: HostConfiguration
 ) {
   const paths = yield* Path.Path
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
+  const outputLimitError = (operation: string, observedBytes: number) =>
+    new FleetOperationError({
+      cause: observedBytes,
+      detail: `command output exceeded ${commandOutputMaxBytes} bytes`,
+      operation
+    })
+
   const collectOutput = (
     operation: string,
     stream: Stream.Stream<Uint8Array, unknown>
   ) =>
-    stream.pipe(
-      Stream.mapError(operationError(operation)),
-      Stream.runFoldEffect(
-        (): CommandOutput => ({ bytes: 0, chunks: [] }),
-        (output, chunk) => {
-          const bytes = output.bytes + chunk.byteLength
-          return bytes > commandOutputMaxBytes
-            ? Effect.fail(
-              new FleetOperationError({
-                cause: bytes,
-                detail: `command output exceeded ${commandOutputMaxBytes} bytes`,
-                operation
-              })
-            )
-            : Effect.succeed({
-              bytes,
-              chunks: [...output.chunks, chunk]
-            })
-        }
-      ),
-      Effect.flatMap((output) =>
-        Stream.fromIterable(output.chunks).pipe(
-          Stream.decodeText(),
-          Stream.mkString,
-          Effect.mapError(operationError(operation))
-        )
+    collectBoundedText(stream.pipe(Stream.mapError(operationError(operation))), commandOutputMaxBytes).pipe(
+      Effect.catchTag(
+        "ByteLimitExceeded",
+        ({ observedBytes }) => Effect.fail(outputLimitError(operation, observedBytes))
       )
     )
 
@@ -310,23 +291,9 @@ export const makeHostOperations = Effect.fn("HostOperations.make")(function*(
           Effect.flatMap((handle) =>
             Effect.gen(function*() {
               const lifecycle = makeCoordinatorLifecycle(jobId, validatedWorkerStarted)
-              const stdoutBytes = yield* Ref.make(0)
-              const stdout = handle.stdout.pipe(
-                Stream.mapEffect((chunk) =>
-                  Ref.updateAndGet(stdoutBytes, (bytes) => bytes + chunk.byteLength).pipe(
-                    Effect.flatMap((bytes) =>
-                      bytes > commandOutputMaxBytes
-                        ? Effect.fail(
-                          new FleetOperationError({
-                            cause: bytes,
-                            detail: `command output exceeded ${commandOutputMaxBytes} bytes`,
-                            operation
-                          })
-                        )
-                        : Effect.succeed(chunk)
-                    )
-                  )
-                ),
+              const stdout = limitBytes(handle.stdout, commandOutputMaxBytes).pipe(
+                Stream.catchTag("ByteLimitExceeded", ({ observedBytes }) =>
+                  Stream.fail(outputLimitError(operation, observedBytes))),
                 Stream.decodeText(),
                 Stream.splitLines,
                 Stream.runForEach(lifecycle.accept),

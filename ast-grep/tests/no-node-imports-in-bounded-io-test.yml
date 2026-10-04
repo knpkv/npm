@@ -1,0 +1,9 @@
+id: no-node-imports-in-bounded-io
+valid:
+  - |
+    import { Effect, Stream } from "effect"
+invalid:
+  - |
+    import { Buffer } from "node:buffer"
+  - |
+    const fs = await import("node:fs")

@@ -1,3 +1,4 @@
+import { collectBoundedText } from "@knpkv/bounded-io"
 import { Context, Effect, Layer, Schema, SchemaGetter, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { isIPv4, isIPv6 } from "node:net"
@@ -90,11 +91,6 @@ export interface TailscaleClient {
   ) => Effect.Effect<TailWhois, TailscaleCommandError | TailscaleDecodeError>
 }
 
-interface CollectedOutput {
-  readonly bytes: number
-  readonly chunks: ReadonlyArray<Uint8Array>
-}
-
 export class Tailscale extends Context.Service<Tailscale, TailscaleClient>()(
   "@knpkv/herdr-tailscale/Tailscale"
 ) {}
@@ -116,30 +112,17 @@ const run = Effect.fn("HerdrTailscale.run")(function*(
   args: ReadonlyArray<string>
 ) {
   const collect = (stream: Stream.Stream<Uint8Array, unknown>) =>
-    stream.pipe(
-      Stream.mapError((cause) => new TailscaleCommandError({ cause, operation })),
-      Stream.runFoldEffect(
-        (): CollectedOutput => ({ bytes: 0, chunks: [] }),
-        (output, chunk) => {
-          const bytes = output.bytes + chunk.byteLength
-          return bytes > 1024 * 1024
-            ? Effect.fail(
-              new TailscaleCommandError({
-                cause: bytes,
-                operation: `${operation}.output_limit`
-              })
-            )
-            : Effect.succeed({ bytes, chunks: [...output.chunks, chunk] })
-        }
-      ),
-      Effect.flatMap((output) =>
-        Stream.fromIterable(output.chunks).pipe(
-          Stream.decodeText(),
-          Stream.mkString,
-          Effect.mapError((cause) => new TailscaleCommandError({ cause, operation }))
+    collectBoundedText(
+      stream.pipe(Stream.mapError((cause) => new TailscaleCommandError({ cause, operation }))),
+      1024 * 1024
+    )
+      .pipe(
+        Effect.catchTag(
+          "ByteLimitExceeded",
+          ({ observedBytes }) =>
+            Effect.fail(new TailscaleCommandError({ cause: observedBytes, operation: `${operation}.output_limit` }))
         )
       )
-    )
   return yield* Effect.scoped(
     spawner.spawn(ChildProcess.make(executable, args)).pipe(
       Effect.mapError((cause) => new TailscaleCommandError({ cause, operation })),

@@ -1,0 +1,25 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-node-imports-in-bounded-io
+language: tsx
+severity: error
+message: "@knpkv/bounded-io runs in browser bundles; it must not import node: modules"
+
+rule:
+  any:
+    - kind: import_statement
+      has:
+        field: source
+        regex: '^["'']node:'
+    - pattern: import($SOURCE)
+      has:
+        stopBy: end
+        kind: string
+        regex: '^["'']node:'
+
+files:
+  - "packages/bounded-io/src/**/*.ts"
+
+note: |
+  herdr-fleet/response, which reads HTTP bodies through bounded-io, is bundled
+  into the herdr-connect and herdr-approvals browser clients.

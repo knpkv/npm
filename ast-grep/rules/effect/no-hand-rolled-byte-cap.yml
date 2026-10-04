@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/ast-grep/ast-grep/main/schemas/typescript_rule.json
+
+id: no-hand-rolled-byte-cap
+language: tsx
+severity: error
+message: "Use limitBytes / collectBounded / collectBoundedText from @knpkv/bounded-io instead of counting byteLength in a stream step"
+
+rule:
+  any:
+    - pattern: Stream.runFoldEffect($$$)
+    - pattern: Stream.mapAccumEffect($$$)
+    - pattern: Stream.mapEffect($$$)
+  has:
+    stopBy: end
+    kind: property_identifier
+    regex: "^byteLength$"
+
+files:
+  - "packages/*/src/**/*.ts"
+  - "packages/*/src/**/*.tsx"
+ignores:
+  - "packages/bounded-io/src/**"
+  # Caps each line, not the running total: a different budget.
+  - "packages/herdr-connect/src/terminal.ts"
+  # Not yet migrated (C2); remove each entry as its caller moves to bounded-io.
+  - "packages/codecommit/src/tui/file-diff.ts"
+  - "packages/codecommit/src/RelayReview.ts"
+  - "packages/control-center/src/server/agent/internal/PrReviewTaskExecutor.ts"
+  - "packages/control-center/src/server/agent/internal/PrReviewSourceWorkspace.ts"
+  - "packages/control-center/src/server/agent/internal/PrReviewSandboxSession.ts"
+  - "packages/control-center/src/server/http/security/RequestPolicy.ts"
+  - "packages/control-center/src/server/plugins/codepipeline/CodePipelineReadProvider.ts"
+
+note: |
+  The same "fold chunks, add byteLength, fail past a cap" step was hand-copied
+  into a dozen readers, each quadratic and each with its own off-by-one risk.
+  @knpkv/bounded-io holds it once: limitBytes passes chunks through,
+  collectBounded / collectBoundedText collect them; map ByteLimitExceeded to the
+  caller's own error with catchTag.

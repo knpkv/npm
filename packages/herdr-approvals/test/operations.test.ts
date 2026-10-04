@@ -378,6 +378,38 @@ printf '%s\n' '{"result":{"agents":[{"agent":"codex","agent_status":"working","c
         failure: { operation: "agent.delegate.chat.lifecycle" }
       })
 
+      // Coordinator stdout is read line by line under the same byte cap as other
+      // commands; the overflow surfaces wrapped as a lifecycle failure.
+      writeFileSync(
+        coordinatorCommand,
+        `#!/bin/sh\ndd if=/dev/zero bs=${commandOutputMaxBytes + 1} count=1 2>/dev/null\n`,
+        { mode: 0o700 }
+      )
+      const overflowFailure = yield* Effect.result(
+        coordinator.runCoordinatorChat(
+          {
+            channel: "coordinator_chat",
+            kind: "agent.delegate",
+            mode: "consult",
+            prompt: "status",
+            repository: root
+          },
+          () => Effect.void,
+          "job-1"
+        )
+      )
+      expect(overflowFailure).toMatchObject({
+        failure: {
+          _tag: "FleetOperationError",
+          operation: "agent.delegate.chat.lifecycle",
+          cause: {
+            _tag: "FleetOperationError",
+            detail: `command output exceeded ${commandOutputMaxBytes} bytes`,
+            operation: "agent.delegate.chat"
+          }
+        }
+      })
+
       writeFileSync(
         coordinatorCommand,
         `#!/bin/sh

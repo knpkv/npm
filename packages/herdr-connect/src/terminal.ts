@@ -1,3 +1,4 @@
+import { limitBytes } from "@knpkv/bounded-io"
 import type { FleetService, HostConfiguration } from "@knpkv/herdr-fleet"
 import type { Scope } from "effect"
 import { Crypto, Effect, Predicate, Schema, Stream } from "effect"
@@ -234,20 +235,19 @@ export const makeHerdrTerminalConnector = Effect.fn("HerdrTerminal.make")(functi
           })
       )
     )
-    const stderrDrain = handle.stderr.pipe(
-      Stream.mapError(transportError("herdr.terminal.stderr")),
-      Stream.runFoldEffect((): number => 0, (bytes, chunk) => {
-        const next = bytes + chunk.byteLength
-        return next > terminalStderrMaxBytes
-          ? Effect.fail(
-            new TerminalTransportError({
-              cause: next,
-              detail: `Herdr terminal stderr exceeded ${terminalStderrMaxBytes} bytes`,
-              operation: "herdr.terminal.stderr"
-            })
-          )
-          : Effect.succeed(next)
-      })
+    const stderrDrain = limitBytes(
+      handle.stderr.pipe(Stream.mapError(transportError("herdr.terminal.stderr"))),
+      terminalStderrMaxBytes
+    ).pipe(
+      Stream.catchTag("ByteLimitExceeded", ({ observedBytes }) =>
+        Stream.fail(
+          new TerminalTransportError({
+            cause: observedBytes,
+            detail: `Herdr terminal stderr exceeded ${terminalStderrMaxBytes} bytes`,
+            operation: "herdr.terminal.stderr"
+          })
+        )),
+      Stream.runDrain
     )
     const events = Stream.merge(
       terminalEvents,
