@@ -91,6 +91,25 @@ describe("summarizeLimits", () => {
   })
 })
 
+describe("Spend and failed polls", () => {
+  it("keeps showing the Spend window after a failed poll, which never reads it", () => {
+    const summary = summarizeLimits(
+      [
+        snapshot({
+          source: "claude-statusline",
+          label: "spend",
+          windowMinutes: null,
+          observedAt: now - 2 * HOUR,
+          reading: { _tag: "Known", usedPercent: 12, resetsAt: null }
+        }),
+        snapshot({ label: "*", windowMinutes: null, reading: { _tag: "Unknown", reason: "NoAuth" } })
+      ],
+      now
+    )
+    expect(summary[0]?.windows.map((window) => window.name)).toEqual(["Spend"])
+  })
+})
+
 describe("limitSegments", () => {
   it("draws levels, a reset nobody read since, and a reading that failed as three kinds", () => {
     const segments = limitSegments(

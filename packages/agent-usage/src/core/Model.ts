@@ -107,6 +107,13 @@ export type LimitReading = typeof LimitReading.Type
  * One observation of a Limit Window. `label` is the provider's own key (`five_hour`, `seven_day`,
  * Codex's `primary`/`secondary`); an Unknown reading for a whole source uses label `*`.
  */
+/**
+ * Whether a source-wide failure (label `*`) leaves a window's level unknown. A failed Claude poll
+ * covers every window the poll reads, which is all of them but the apps gateway's `spend`: only
+ * claude-statusline reports that one, so a failed poll says nothing about it.
+ */
+export const failureCovers = (agent: Agent, label: string): boolean => !(agent === "claude" && label === "spend")
+
 export const LimitSnapshot = Schema.Struct({
   agent: Agent,
   machine: Schema.NonEmptyString,

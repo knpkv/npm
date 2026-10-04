@@ -31,6 +31,12 @@ const AXIS = 34
 const LABEL = 16
 
 /** A failed reading's span on show: which window, when, and why. */
+/** Which failure is open: its row and where it starts. The rest is read from the current series. */
+interface GapId {
+  readonly row: string
+  readonly from: number
+}
+
 interface Gap {
   readonly anchor: number
   /** The top of the gap's row, so its explanation opens beside it. */
@@ -70,8 +76,8 @@ const Row = (props: {
   readonly from: number
   readonly x: (at: number) => number
   readonly hatch: string
-  readonly onGapHover: (gap: Gap | null) => void
-  readonly onGapFocus: (gap: Gap | null) => void
+  readonly onGapHover: (gap: GapId | null) => void
+  readonly onGapFocus: (gap: GapId | null) => void
 }) => {
   const plotTop = props.top + LABEL
   const plotHeight = ROW - LABEL
@@ -121,8 +127,8 @@ const Row = (props: {
             height={plotHeight}
             key={`u${segment.from}`}
             onBlur={() => props.onGapFocus(null)}
-            onFocus={() => props.onGapFocus(gapOf(props.row.name, segment, props.x, props.top))}
-            onMouseEnter={() => props.onGapHover(gapOf(props.row.name, segment, props.x, props.top))}
+            onFocus={() => props.onGapFocus({ row: props.row.id, from: segment.from })}
+            onMouseEnter={() => props.onGapHover({ row: props.row.id, from: segment.from })}
             onMouseLeave={() => props.onGapHover(null)}
             role="img"
             tabIndex={0}
@@ -173,11 +179,10 @@ export const LimitChart = (props: {
   // Hover and keyboard focus open a failure's explanation independently; each ends only its own,
   // so moving the pointer away keeps a focused one. Leaving a hovered gap closes it after a moment,
   // so the pointer can move onto the explanation (WCAG 1.4.13); entering it keeps it open.
-  const [hoveredGap, setHoveredGap] = useState<Gap | null>(null)
-  const [focusedGap, setFocusedGap] = useState<Gap | null>(null)
-  const gap = hoveredGap ?? focusedGap
+  const [hoveredGap, setHoveredGap] = useState<GapId | null>(null)
+  const [focusedGap, setFocusedGap] = useState<GapId | null>(null)
   const closing = useRef<number | undefined>(undefined)
-  const hoverGap = (next: Gap | null) => {
+  const hoverGap = (next: GapId | null) => {
     window.clearTimeout(closing.current)
     if (next !== null) setHoveredGap(next)
     else closing.current = window.setTimeout(() => setHoveredGap(null), 300)
@@ -190,6 +195,21 @@ export const LimitChart = (props: {
   // A range may run on past now (today ends at midnight); nothing after now has been read yet.
   const end = Math.min(props.range.to, props.now)
   const tabled = props.series.filter((series) => series.label !== "*")
+  // An open failure is looked up in the current series on every render, so a live update that
+  // ends or extends it changes what its explanation says; one that is gone closes.
+  const resolveGap = (id: GapId | null): Gap | null => {
+    if (id === null) return null
+    const index = rows.findIndex((row) => row.id === id.row)
+    const row = rows[index]
+    if (row === undefined) return null
+    const segment = limitSegments(row.points, end).find(
+      (candidate) => candidate.kind === "unknown" && candidate.from === id.from
+    )
+    return segment === undefined || segment.kind !== "unknown"
+      ? null
+      : gapOf(row.name, segment, axis.x, index * (ROW + ROW_GAP))
+  }
+  const gap = resolveGap(hoveredGap) ?? resolveGap(focusedGap)
   // A focused or hovered failure explains itself; otherwise the pointer shows every row's reading.
   const tooltip = useTooltipPlacement(gap?.anchor ?? cursor, width, gap?.top ?? 0)
   useDismissOnEscape(cursor !== null || gap !== null, () => {

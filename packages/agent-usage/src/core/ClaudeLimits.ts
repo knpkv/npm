@@ -75,9 +75,8 @@ const Window = Schema.Struct({
   resets_at: Schema.optionalKey(Schema.NullOr(Schema.String))
 })
 const decodeWindow = Schema.decodeUnknownOption(Window)
-const decodeReply = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-)
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+const decodeReply = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeExtraUsage = Schema.decodeUnknownOption(Schema.NullOr(ExtraUsage))
 
 const windowMinutes = (label: string): WindowMinutes =>
@@ -111,8 +110,12 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
     return unknownObservations(machine, observedAt, "AuthExpired", `HTTP ${reply.status}`)
   }
   if (reply.status !== 200) return unknownObservations(machine, observedAt, "Fetch", `HTTP ${reply.status}`)
-  const decoded = decodeReply(reply.body)
-  if (Option.isNone(decoded)) return unknownObservations(machine, observedAt, "Parse", "reply was not JSON")
+  const json = decodeJson(reply.body)
+  if (Option.isNone(json)) return unknownObservations(machine, observedAt, "Parse", "reply was not JSON")
+  const decoded = Array.isArray(json.value) ? Option.none() : decodeReply(json.value)
+  if (Option.isNone(decoded)) {
+    return unknownObservations(machine, observedAt, "Parse", "reply was JSON but not an object")
+  }
   // Extra usage is a balance, not a percentage window, even when it reports a utilization.
   const windows = Object.entries(decoded.value).filter(([label]) => label !== "extra_usage")
   const snapshots = windows.flatMap(([label, value]): ReadonlyArray<LimitSnapshot> => {
@@ -130,7 +133,15 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
       // A window that is there but does not read is a failed reading of it, not silence: its last
       // level must not carry on.
       const claimsWindow = Predicate.hasProperty(value, "utilization") && value.utilization !== null
-      return claimsWindow ? snapshot({ _tag: "Unknown", reason: "Parse" }) : []
+      return claimsWindow
+        ? snapshot({
+          _tag: "Unknown",
+          reason: "Parse",
+          detail: Predicate.isNumber(value.utilization)
+            ? `${label}: resets_at is not a time`
+            : `${label}: utilization is not a number`
+        })
+        : []
     }
     const resets = window.value.resets_at
     if (resets === undefined || resets === null) {
@@ -139,14 +150,16 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
     const resetsAt = Date.parse(resets)
     return Number.isFinite(resetsAt)
       ? snapshot({ _tag: "Known", usedPercent: window.value.utilization, resetsAt })
-      : snapshot({ _tag: "Unknown", reason: "Parse" })
+      : snapshot({ _tag: "Unknown", reason: "Parse", detail: `${label}: resets_at is not a time` })
   })
   const extra = decodeExtraUsage(decoded.value["extra_usage"] ?? null)
   const balance: BalanceReading = {
     kind: "claude-extra-usage",
     machine,
     observedAt,
-    value: Option.isNone(extra) ? { _tag: "Unknown", reason: "Parse" } : classifyExtraUsage(extra.value)
+    value: Option.isNone(extra)
+      ? { _tag: "Unknown", reason: "Parse", detail: "extra_usage not understood" }
+      : classifyExtraUsage(extra.value)
   }
   return {
     snapshots: snapshots.length === 0

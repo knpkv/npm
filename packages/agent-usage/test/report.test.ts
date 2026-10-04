@@ -336,6 +336,16 @@ describe("buildLimitsReport across Claude sources", () => {
     }
   })
 
+  it("leaves the gateway Spend window alone when the OAuth poll fails, since the poll never reads it", () => {
+    const spend: LimitSnapshot = { ...reading("claude-statusline", "spend", 1_100, known(12)), windowMinutes: null }
+    const report = buildLimitsReport(
+      [spend, reading("claude-oauth-usage", "*", 1_200, failed("HTTP 401"))],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series.find((series) => series.label === "spend")?.points.map((point) => point.reading._tag))
+      .toEqual(["Known"])
+  })
+
   it("keeps a failure whose detail changed as its own point", () => {
     const report = buildLimitsReport(
       [

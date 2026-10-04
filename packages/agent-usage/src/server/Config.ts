@@ -105,8 +105,13 @@ const Projects = Schema.String.pipe(
  * Reads the configuration; `hostname` comes from the executable, the only place that may ask.
  * `exactEnvironment` is the environment with empty values kept, which the executable builds; it
  * is read only where an empty value means something (`CLAUDE_SECURESTORAGE_CONFIG_DIR`).
+ * `osUser` is the operating system's name for the user, the Keychain account when `USER` is unset.
  */
-export const loadConfig = (hostname: string, exactEnvironment?: ConfigProvider.ConfigProvider) =>
+export const loadConfig = (
+  hostname: string,
+  exactEnvironment?: ConfigProvider.ConfigProvider,
+  osUser = "claude-code-user"
+) =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     const home = yield* Config.String("HOME")
@@ -122,7 +127,10 @@ export const loadConfig = (hostname: string, exactEnvironment?: ConfigProvider.C
     const secureStorageDir = yield* (exactEnvironment === undefined
       ? secureStorageRead
       : secureStorageRead.pipe(Effect.provideService(ConfigProvider.ConfigProvider, exactEnvironment)))
-    const user = yield* Config.String("USER").pipe(Config.withDefault("claude-code-user"))
+    // The Keychain account, as Claude Code names it: USER, else the OS user, kept only when it is a
+    // plain name.
+    const named = yield* Config.String("USER").pipe(Config.withDefault(osUser))
+    const user = /^[a-zA-Z0-9._-]+$/u.test(named) ? named : "claude-code-user"
     const claudeCredentials = yield* claudeCredentialsLocation({
       home,
       user,

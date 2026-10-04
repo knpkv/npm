@@ -43,6 +43,8 @@ interface Pending {
   baseline: object
   attempt: number
   retry: number | undefined
+  /** Its last fetch failed; stays set through the retry until it loads or is announced again. */
+  failed: boolean
 }
 
 export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): LiveState => {
@@ -56,7 +58,6 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
   // Settle announced reads as their fetches finish: a load clears one, a failure retries it.
   useEffect(() => {
     if (pending.current.size === 0) return
-    let failing = false
     for (const [read, entry] of pending.current) {
       const current = readsRef.current[read]
       if (current.outcome === "loading" || current.result === entry.baseline) continue
@@ -64,7 +65,7 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
         pending.current.delete(read)
         continue
       }
-      failing = true
+      entry.failed = true
       if (entry.retry === undefined) {
         const delay = reconnectDelay(entry.attempt)
         entry.attempt += 1
@@ -76,6 +77,7 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
       }
     }
     if (pending.current.size === 0) updatedAt.current = now()
+    const failing = [...pending.current.values()].some((entry) => entry.failed)
     if (connected.current) setState({ _tag: "Live", updatedAt: updatedAt.current, refetchFailing: failing })
   }, [reads.usage.result, reads.limits.result, reads.status.result])
 
@@ -90,11 +92,13 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
     const request = (read: LiveRead) => {
       const baseline = readsRef.current[read].result
       const entry = pending.current.get(read)
-      if (entry === undefined) pending.current.set(read, { baseline, attempt: 0, retry: undefined })
+      if (entry === undefined) pending.current.set(read, { baseline, attempt: 0, retry: undefined, failed: false })
       else {
+        // A newer announcement supersedes the failed fetch: this one starts clean.
         window.clearTimeout(entry.retry)
         entry.baseline = baseline
         entry.retry = undefined
+        entry.failed = false
       }
       readsRef.current[read].refresh()
     }

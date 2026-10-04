@@ -92,8 +92,8 @@ describe("pollClaudeLimits", () => {
       })
       const result = yield* poll(reply(200, malformed))
       expect(result.snapshots.map((snapshot) => [snapshot.label, snapshot.reading])).toEqual([
-        ["five_hour", { _tag: "Unknown", reason: "Parse" }],
-        ["seven_day", { _tag: "Unknown", reason: "Parse" }]
+        ["five_hour", { _tag: "Unknown", reason: "Parse", detail: "five_hour: utilization is not a number" }],
+        ["seven_day", { _tag: "Unknown", reason: "Parse", detail: "seven_day: resets_at is not a time" }]
       ])
     }))
 
@@ -114,6 +114,11 @@ describe("pollClaudeLimits", () => {
         _tag: "Unknown",
         reason: "Parse",
         detail: "reply was not JSON"
+      })
+      expect(yield* readingOf(reply(200, "[]"))).toEqual({
+        _tag: "Unknown",
+        reason: "Parse",
+        detail: "reply was JSON but not an object"
       })
       expect(yield* readingOf(failing(Effect.fail(new CredentialsMissing({ where: "file" }))))).toEqual({
         _tag: "Unknown",
@@ -188,6 +193,18 @@ describe("keychain lookup", () => {
         new CredentialsMissing({ where: "keychain:Claude Code-credentials" })
       )
       expect(yield* Effect.flip(keychainOutcome(36, "", service))).toEqual(new KeychainDenied({ exitCode: 36 }))
+    }))
+})
+
+describe("extra usage that cannot be read", () => {
+  it.effect("says the balance part of the reply was not understood", () =>
+    Effect.gen(function*() {
+      const result = yield* poll(reply(200, JSON.stringify({ five_hour: { utilization: 1 }, extra_usage: 7 })))
+      expect(result.balances[0]?.value).toEqual({
+        _tag: "Unknown",
+        reason: "Parse",
+        detail: "extra_usage not understood"
+      })
     }))
 })
 

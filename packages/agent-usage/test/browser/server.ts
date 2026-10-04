@@ -5,7 +5,7 @@
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { Clock, Effect, Layer, Redacted, SubscriptionRef } from "effect"
-import { Etag, HttpPlatform, HttpRouter, HttpServerResponse } from "effect/http"
+import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import type { UsageEvent } from "../../src/core/Model.js"
 import { UsageStore } from "../../src/core/Store.js"
@@ -113,6 +113,45 @@ const run = Effect.gen(function*() {
         "GET",
         "/__test/session",
         Effect.succeed(HttpServerResponse.text(Redacted.value(security.ownerToken)))
+      )
+      // Stands in for a Claude poll some minutes ago: failed, or read again, then announced.
+      yield* router.add(
+        "GET",
+        "/__test/limits",
+        Effect.gen(function*() {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const url = new URL(request.url, origin)
+          const usage = yield* UsageStore
+          const state = yield* RuntimeState
+          const now = yield* Clock.currentTimeMillis
+          const observedAt = now - Number(url.searchParams.get("ago") ?? "0")
+          yield* usage.recordObservations(
+            [
+              url.searchParams.get("reading") === "recover"
+                ? {
+                  agent: "claude",
+                  machine: "fixture",
+                  source: "claude-oauth-usage",
+                  label: "five_hour",
+                  windowMinutes: 300,
+                  observedAt,
+                  reading: { _tag: "Known", usedPercent: 50, resetsAt: now + 3 * HOUR }
+                }
+                : {
+                  agent: "claude",
+                  machine: "fixture",
+                  source: "claude-oauth-usage",
+                  label: "*",
+                  windowMinutes: null,
+                  observedAt,
+                  reading: { _tag: "Unknown", reason: "Fetch", detail: "HTTP 500" }
+                }
+            ],
+            []
+          )
+          yield* SubscriptionRef.update(state.versions, (versions) => ({ ...versions, limits: versions.limits + 1 }))
+          return HttpServerResponse.text("recorded")
+        })
       )
       // Stands in for an ingest pass: a new booking committed, then announced on the live socket.
       yield* router.add(

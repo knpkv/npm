@@ -3,10 +3,11 @@ import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider, Effect } from "effect"
 import { loadConfig, machineName } from "../src/server/Config.js"
 
-const load = (env: Record<string, string>) =>
+const load = (env: Record<string, string>, osUser = "a") =>
   loadConfig(
     "Example-MacBook.local",
-    ConfigProvider.fromEnvRecord({ HOME: "/home/a", USER: "a", ...env }, { preserveEmptyStrings: true })
+    ConfigProvider.fromEnvRecord({ HOME: "/home/a", USER: "a", ...env }, { preserveEmptyStrings: true }),
+    osUser
   ).pipe(
     Effect.provideService(
       ConfigProvider.ConfigProvider,
@@ -70,6 +71,15 @@ describe("configuration", () => {
         const moved = yield* load({ CLAUDE_SECURESTORAGE_CONFIG_DIR: "/vault" })
         expect(moved.claudeCredentials.file).toBe("/vault/.credentials.json")
         expect(moved.claudeCredentials.keychainService).toMatch(/^Claude Code-credentials-[0-9a-f]{8}$/u)
+      }))
+
+    it.effect("names the Keychain account as Claude Code does: USER, else the OS user, if it is a plain name", () =>
+      Effect.gen(function*() {
+        const account = (env: Record<string, string>, osUser: string) =>
+          load(env, osUser).pipe(Effect.map((config) => config.claudeCredentials.keychainAccount))
+        expect(yield* account({ USER: "dev" }, "os-user")).toBe("dev")
+        expect(yield* account({ USER: "" }, "os-user")).toBe("os-user")
+        expect(yield* account({ USER: "has space" }, "os-user")).toBe("claude-code-user")
       }))
 
     it.effect("reads extra Known Projects and refuses an entry that is not a project key", () =>

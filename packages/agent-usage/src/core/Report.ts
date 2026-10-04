@@ -19,7 +19,7 @@ import { Data, Effect, Option } from "effect"
 import type { BookingSummary, LimitSeries, LimitsReport, Period, UsageCell, UsageReport } from "../shared/contracts.js"
 import { attribute, bookingId, projectOf } from "./Attribution.js"
 import type { Agent, LimitSnapshot, TicketTitleValue, Tokens } from "./Model.js"
-import { totalTokens } from "./Model.js"
+import { failureCovers, totalTokens } from "./Model.js"
 import { groupCost } from "./Pricing.js"
 import { BUCKET_MILLIS, type Range, type UsageGroup } from "./Store.js"
 
@@ -292,7 +292,7 @@ export const buildLimitsReport = (
     // cannot decide which failures it shows.
     if (snapshot.label === "*") {
       for (const [other, otherEntry] of series) {
-        if (other !== key && otherEntry.agent === snapshot.agent) {
+        if (other !== key && otherEntry.agent === snapshot.agent && failureCovers(otherEntry.agent, otherEntry.label)) {
           append(otherEntry, snapshot.observedAt, snapshot.reading)
         }
       }

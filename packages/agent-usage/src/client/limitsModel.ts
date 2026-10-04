@@ -13,7 +13,7 @@
  *
  * @module
  */
-import type { Agent, LimitReading, LimitSnapshot, UnknownReason } from "../core/Model.js"
+import { type Agent, failureCovers, type LimitReading, type LimitSnapshot, type UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
 import { seriesIdentity } from "./chartModel.js"
 import { describeReason } from "./format.js"
@@ -150,7 +150,8 @@ export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: numbe
     const live = own.filter(
       (snapshot) =>
         snapshot.label !== "*" &&
-        snapshot.observedAt > failedAt &&
+        // A failed poll hides the windows it reads; a window it never reads (Spend) stays.
+        (snapshot.observedAt > failedAt || !failureCovers(agent, snapshot.label)) &&
         !(snapshot.reading._tag === "Known" && snapshot.reading.resetsAt !== null && snapshot.reading.resetsAt <= now)
     )
     const named: Array<WindowSummary> = []

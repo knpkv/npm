@@ -534,3 +534,45 @@ test("a focused failure keeps its explanation when the pointer moves away", asyn
   await expect(gap).toBeFocused()
   await expect(page.locator(".usage-tooltip")).toContainText("security exited 36")
 })
+
+test("while a failed read is being retried, the page keeps saying the update failed", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let request = 0
+  await page.route("**/api/usage?*", async (route) => {
+    request += 1
+    if (request === 1) {
+      await route.fulfill({ status: 500, body: "boom" })
+      return
+    }
+    if (request === 2) await held
+    await route.continue()
+  })
+  await page.request.get("/__test/push")
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  await expect.poll(() => request, { timeout: 5_000 }).toBe(2)
+  await page.waitForTimeout(300)
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  release()
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
+})
+
+test("an open failure explanation follows the chart when the failure ends", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  await page.request.get(`/__test/limits?reading=fail&ago=${30 * 60_000}`)
+  const gaps = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await expect(gaps).toHaveCount(2)
+  const ongoing = gaps.last()
+  await ongoing.focus()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip).toContainText("HTTP 500")
+  const before = await tooltip.textContent()
+  await page.request.get(`/__test/limits?reading=recover&ago=${10 * 60_000}`)
+  await expect(tooltip).not.toHaveText(before ?? "")
+  await expect(tooltip).toContainText("HTTP 500")
+})
