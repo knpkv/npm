@@ -3,7 +3,7 @@ import { readClaude } from "../src/core/ClaudeReader.js"
 import { claudeAssistant, claudeUser, lines } from "./fixtures.js"
 
 const read = (source: ReturnType<typeof lines>, activeTicket: string | null = null) =>
-  readClaude({ fileKey: "proj/s.jsonl", machine: "ser8", sessionId: "s-1" }, source, { activeTicket })
+  readClaude({ fileKey: "proj/s.jsonl", machine: "host-a", sessionId: "s-1" }, source, { activeTicket })
 
 describe("readClaude", () => {
   it("records one Usage Event per message, deduped on message id + request id", () => {
@@ -13,7 +13,7 @@ describe("readClaude", () => {
     expect(result.events[0]).toMatchObject({
       agent: "claude",
       dedupeKey: "msg_1 req_msg_1",
-      machine: "ser8",
+      machine: "host-a",
       sessionId: "s-1",
       occurredAt: Date.parse("2026-09-01T10:00:00.000Z"),
       model: "claude-opus-5",

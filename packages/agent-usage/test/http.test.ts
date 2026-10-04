@@ -14,7 +14,7 @@ const secrets = makeOwnerSessionSecrets("http://127.0.0.1:3112")
 const TestApp = Layer.unwrap(Effect.map(secrets, (security) =>
   HttpRouter.serve(application).pipe(
     Layer.provide(UsageStore.layer.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" })))),
-    Layer.provide(RuntimeState.layer("ser8")),
+    Layer.provide(RuntimeState.layer("host-a")),
     Layer.provide(Etag.layer),
     Layer.provide(HttpPlatform.layer),
     Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, security))

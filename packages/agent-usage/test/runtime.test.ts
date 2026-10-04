@@ -8,7 +8,7 @@ import { backgroundLayer, RuntimeState } from "../src/server/Runtime.js"
 
 const Services = Layer.mergeAll(
   UsageStore.layer.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" }))),
-  RuntimeState.layer("ser8")
+  RuntimeState.layer("host-a")
 ).pipe(Layer.provideMerge(NodeServices.layer))
 
 describe("background work", () => {
@@ -28,7 +28,7 @@ describe("background work", () => {
           events: [{
             agent: "claude",
             dedupeKey: "seed",
-            machine: "ser8",
+            machine: "host-a",
             sessionId: "s",
             occurredAt: 0,
             model: "claude-opus-5",
@@ -40,7 +40,7 @@ describe("background work", () => {
           balances: []
         })
         const build = Layer.build(backgroundLayer({
-          roots: { claudeProjects: path.join(root, "projects"), codexHome: path.join(root, "codex"), machine: "ser8" },
+          roots: { claudeProjects: path.join(root, "projects"), codexHome: path.join(root, "codex"), machine: "host-a" },
           claude: { readToken: Effect.never, get: () => Effect.never },
           ticketSearch: () => Effect.never
         }))

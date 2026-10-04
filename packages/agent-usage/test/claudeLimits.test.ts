@@ -29,7 +29,7 @@ const body = JSON.stringify({
 const poll = (deps: ClaudeUsageDeps) =>
   Effect.gen(function*() {
     yield* TestClock.setTime(now)
-    return yield* pollClaudeLimits(deps, "ser8")
+    return yield* pollClaudeLimits(deps, "host-a")
   })
 
 describe("pollClaudeLimits", () => {
@@ -39,7 +39,7 @@ describe("pollClaudeLimits", () => {
       expect(result.snapshots).toEqual([
         {
           agent: "claude",
-          machine: "ser8",
+          machine: "host-a",
           source: "claude-oauth-usage",
           label: "five_hour",
           windowMinutes: 300,
@@ -48,7 +48,7 @@ describe("pollClaudeLimits", () => {
         },
         {
           agent: "claude",
-          machine: "ser8",
+          machine: "host-a",
           source: "claude-oauth-usage",
           label: "seven_day",
           windowMinutes: 10080,
@@ -57,7 +57,7 @@ describe("pollClaudeLimits", () => {
         },
         {
           agent: "claude",
-          machine: "ser8",
+          machine: "host-a",
           source: "claude-oauth-usage",
           label: "iguana_necktie",
           windowMinutes: null,
@@ -67,7 +67,7 @@ describe("pollClaudeLimits", () => {
       ])
       expect(result.balances).toEqual([{
         kind: "claude-extra-usage",
-        machine: "ser8",
+        machine: "host-a",
         observedAt: now,
         value: { _tag: "Known", balance: { _tag: "Disabled" } }
       }])

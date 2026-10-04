@@ -4,13 +4,13 @@ import { ConfigProvider, Effect } from "effect"
 import { loadConfig, machineName } from "../src/server/Config.js"
 
 const load = (env: Record<string, string>) =>
-  loadConfig("Andreys-MacBook.local").pipe(
+  loadConfig("Example-MacBook.local").pipe(
     Effect.provideService(ConfigProvider.ConfigProvider, ConfigProvider.fromEnvRecord({ HOME: "/home/a", ...env }))
   )
 
 describe("configuration", () => {
   it("names the Machine by its short, lower-cased hostname", () => {
-    expect(machineName("Andreys-MacBook.local")).toBe("andreys-macbook")
+    expect(machineName("Example-MacBook.local")).toBe("example-macbook")
     expect(machineName("")).toBe("localhost")
   })
 
@@ -25,7 +25,7 @@ describe("configuration", () => {
           roots: {
             claudeProjects: "/home/a/.claude/projects",
             codexHome: "/home/a/.codex",
-            machine: "andreys-macbook"
+            machine: "example-macbook"
           }
         })
       }))

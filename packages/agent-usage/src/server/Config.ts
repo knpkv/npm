@@ -22,7 +22,7 @@ export interface AgentUsageConfig {
 
 /**
  * The Machine name a hostname gives: the part before the first dot, lower-cased, so macOS's
- * `Andreys-MacBook.local` and `Andreys-MacBook` name the same Machine.
+ * `Example-MacBook.local` and `Example-MacBook` name the same Machine.
  */
 export const machineName = (hostname: string): string => {
   const short = hostname.split(".")[0]?.trim().toLowerCase() ?? ""

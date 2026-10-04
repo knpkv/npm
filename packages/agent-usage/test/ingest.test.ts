@@ -20,7 +20,7 @@ const setup = Effect.gen(function*() {
   const roots: SourceRoots = {
     claudeProjects: path.join(root, "claude", "projects"),
     codexHome: path.join(root, "codex"),
-    machine: "ser8"
+    machine: "host-a"
   }
   yield* fs.makeDirectory(path.join(roots.claudeProjects, "-w-app", "sess-1", "subagents"), { recursive: true })
   yield* fs.makeDirectory(path.join(roots.codexHome, "sessions", "2026", "09", "01"), { recursive: true })
@@ -29,7 +29,7 @@ const setup = Effect.gen(function*() {
 
 const totalRequests = Effect.gen(function*() {
   const store = yield* UsageStore
-  const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "ser8" })
+  const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "host-a" })
   return groups.reduce((sum, group) => sum + group.requests, 0)
 })
 
@@ -86,7 +86,7 @@ describe("ingestOnce", () => {
         const status = yield* ingestOnce(roots, { chunkBytes: 64 })
         expect(status.codex.eventsAdded).toBe(1)
         const store = yield* UsageStore
-        const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "ser8" })
+        const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "host-a" })
         expect(groups[0]).toMatchObject({
           model: "gpt-6-sol",
           attribution: { cwd: "/w/svc", branch: "feat/RPS-12", activeTicket: null }
@@ -216,7 +216,7 @@ describe("ingestOnce", () => {
         )
         expect((yield* ingestOnce(roots)).claude.eventsAdded).toBe(0)
         const store = yield* UsageStore
-        const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "ser8" })
+        const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "host-a" })
         expect(groups.map((group) => [group.requests, group.tokens.output])).toEqual([[1, 1_093]])
       }))
   })

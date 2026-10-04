@@ -11,7 +11,7 @@ const TestStore = UsageStore.layer.pipe(Layer.provideMerge(SqliteClient.layer({ 
 const event = (dedupeKey: string, overrides: Partial<UsageEvent> = {}): UsageEvent => ({
   agent: "claude",
   dedupeKey,
-  machine: "ser8",
+  machine: "host-a",
   sessionId: "s-1",
   occurredAt: Date.parse("2026-09-01T10:07:00.000Z"),
   model: "claude-opus-5",
@@ -23,7 +23,7 @@ const event = (dedupeKey: string, overrides: Partial<UsageEvent> = {}): UsageEve
 
 const snapshot = (observedAt: number, usedPercent: number): LimitSnapshot => ({
   agent: "codex",
-  machine: "ser8",
+  machine: "host-a",
   source: "codex-rollout",
   label: "secondary",
   windowMinutes: 10080,
@@ -56,7 +56,7 @@ describe("UsageStore", () => {
       Effect.gen(function*() {
         const store = yield* UsageStore
         yield* store.recordObservations([snapshot(1_000, 10), snapshot(2_000, 10), snapshot(3_000, 12)], [])
-        const series = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "ser8" })
+        const series = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "host-a" })
         expect(series.map((row) => row.observedAt)).toEqual([1_000, 3_000])
       }))
 
@@ -219,7 +219,7 @@ describe("UsageStore", () => {
         const store = yield* UsageStore
         const unknown: LimitSnapshot = {
           agent: "claude",
-          machine: "ser8",
+          machine: "host-a",
           source: "claude-oauth-usage",
           label: "*",
           windowMinutes: null,
@@ -227,7 +227,7 @@ describe("UsageStore", () => {
           reading: { _tag: "Unknown", reason: "AuthExpired" }
         }
         yield* store.recordObservations([unknown], [])
-        const series = (yield* store.limitSnapshots({ from: 4_000, to: 6_000, machine: "ser8" })).filter((row) =>
+        const series = (yield* store.limitSnapshots({ from: 4_000, to: 6_000, machine: "host-a" })).filter((row) =>
           row.agent === "claude"
         )
         expect(series).toEqual([unknown])
@@ -238,12 +238,12 @@ describe("UsageStore", () => {
         const store = yield* UsageStore
         const reading = (observedAt: number, credits: number): BalanceReading => ({
           kind: "codex-credits",
-          machine: "ser8",
+          machine: "host-a",
           observedAt,
           value: { _tag: "Known", balance: { _tag: "Credits", credits } }
         })
         yield* store.recordObservations([], [reading(1, 50), reading(2, 50), reading(3, 40)])
-        const ours = store.latestBalances("ser8")
+        const ours = store.latestBalances("host-a")
         expect(yield* ours).toEqual([reading(3, 40)])
         yield* store.recordObservations([], [reading(4, 40)])
         // The newest observation is the latest reading, so "read … ago" stays true.
@@ -266,7 +266,7 @@ describe("UsageStore", () => {
           balances: []
         })
         const groups = yield* store.usageGroups({
-          machine: "ser8",
+          machine: "host-a",
           from: Date.parse("2026-09-01T10:00:00.000Z"),
           to: Date.parse("2026-09-01T11:00:00.000Z")
         })

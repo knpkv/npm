@@ -29,7 +29,7 @@ const TestApp = Layer.unwrap(
   Effect.map(makeOwnerSessionSecrets("http://127.0.0.1:3112"), (security) =>
     HttpRouter.serve(application).pipe(
       Layer.provide(RecordingStore),
-      Layer.provide(RuntimeState.layer("ser8")),
+      Layer.provide(RuntimeState.layer("host-a")),
       Layer.provide(Etag.layer),
       Layer.provide(HttpPlatform.layer),
       Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, security))
@@ -51,7 +51,7 @@ describe("limits handler", () => {
           headers: { cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}` }
         })
         expect(response.status).toBe(200)
-        expect(yield* Ref.get(recorded)).toEqual([{ from: 1_000, to: 2_000, machine: "ser8" }])
+        expect(yield* Ref.get(recorded)).toEqual([{ from: 1_000, to: 2_000, machine: "host-a" }])
       }))
   })
 })

@@ -3,7 +3,7 @@ import { attribute } from "../src/core/Attribution.js"
 import { initialCodexState, readCodex } from "../src/core/CodexReader.js"
 import { codexMeta, codexTokenCount, codexTurn, codexUserItem, lines, withOrdinal } from "./fixtures.js"
 
-const file = { fileKey: "2026/09/01/rollout-x.jsonl", machine: "ser8", sessionId: "sess" }
+const file = { fileKey: "2026/09/01/rollout-x.jsonl", machine: "host-a", sessionId: "sess" }
 
 describe("readCodex", () => {
   it("books each token_count's last usage with the session's cwd, branch and model", () => {
@@ -16,7 +16,7 @@ describe("readCodex", () => {
     expect(result.events).toEqual([{
       agent: "codex",
       dedupeKey: `sess@${source[2]?.offset}`,
-      machine: "ser8",
+      machine: "host-a",
       sessionId: "sess",
       occurredAt: Date.parse("2026-09-01T10:00:05.000Z"),
       model: "gpt-6-sol",
@@ -83,7 +83,7 @@ describe("readCodex", () => {
     expect(result.snapshots).toEqual([
       {
         agent: "codex",
-        machine: "ser8",
+        machine: "host-a",
         source: "codex-rollout",
         label: "primary",
         windowMinutes: 300,
@@ -92,7 +92,7 @@ describe("readCodex", () => {
       },
       {
         agent: "codex",
-        machine: "ser8",
+        machine: "host-a",
         source: "codex-rollout",
         label: "secondary",
         windowMinutes: 10080,
@@ -102,7 +102,7 @@ describe("readCodex", () => {
     ])
     expect(result.balances).toEqual([{
       kind: "codex-credits",
-      machine: "ser8",
+      machine: "host-a",
       observedAt: Date.parse("2026-09-01T10:00:05.000Z"),
       value: { _tag: "Known", balance: { _tag: "Credits", credits: 5000.5 } }
     }])

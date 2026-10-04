@@ -169,7 +169,7 @@ describe("buildLimitsReport", () => {
       [
         {
           agent: "codex",
-          machine: "ser8",
+          machine: "host-a",
           source: "codex-rollout",
           label: "secondary",
           windowMinutes: 10080,
@@ -178,7 +178,7 @@ describe("buildLimitsReport", () => {
         },
         {
           agent: "codex",
-          machine: "ser8",
+          machine: "host-a",
           source: "codex-rollout",
           label: "secondary",
           windowMinutes: 10080,
@@ -208,7 +208,7 @@ describe("buildLimitsReport", () => {
       observedAt: number
     ): LimitSnapshot => ({
       agent,
-      machine: "ser8",
+      machine: "host-a",
       source,
       label,
       windowMinutes: 10_080,
@@ -232,7 +232,7 @@ describe("buildLimitsReport", () => {
   it("drops a series whose last reading before the range had already reset", () => {
     const report = buildLimitsReport([{
       agent: "codex",
-      machine: "ser8",
+      machine: "host-a",
       source: "codex-rollout",
       label: "primary",
       windowMinutes: 300,
@@ -245,7 +245,7 @@ describe("buildLimitsReport", () => {
 
   const claude = (label: string, observedAt: number, reading: LimitSnapshot["reading"]): LimitSnapshot => ({
     agent: "claude",
-    machine: "ser8",
+    machine: "host-a",
     source: "claude-oauth-usage",
     label,
     windowMinutes: label === "five_hour" ? 300 : null,

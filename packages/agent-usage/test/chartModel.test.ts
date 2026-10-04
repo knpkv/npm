@@ -117,7 +117,7 @@ describe("stepPath", () => {
 describe("tileSnapshots", () => {
   const snapshot = (label: string, observedAt: number, resetsAt: number | null): LimitSnapshot => ({
     agent: "codex",
-    machine: "ser8",
+    machine: "host-a",
     source: "codex-rollout",
     label,
     windowMinutes: 300,
