@@ -19,7 +19,7 @@ import { databaseLayer } from "../core/Database.js"
 import { acliTicketSearch } from "../core/Tickets.js"
 import type { AgentUsageConfig } from "./Config.js"
 import { application } from "./HttpApplication.js"
-import { activateOwnerSessionBootstrap, OwnerSessionSecrets, type OwnerSessionSecretsContract } from "./OwnerSession.js"
+import { mintBootstrapUrl, OwnerSessionSecrets, type OwnerSessionSecretsContract } from "./OwnerSession.js"
 import { backgroundLayer, RuntimeState } from "./Runtime.js"
 
 const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))
@@ -29,7 +29,7 @@ export interface AgentUsageServerOptions {
   readonly config: AgentUsageConfig
   readonly hostname?: string
   readonly port: number
-  readonly ready?: Deferred.Deferred<void>
+  readonly ready?: Deferred.Deferred<string>
   readonly security: OwnerSessionSecretsContract
 }
 
@@ -57,8 +57,9 @@ export const makeServer = (options: AgentUsageServerOptions) =>
         Layer.provide(NodeServices.layer),
         Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security)),
         Layer.tap(() =>
-          activateOwnerSessionBootstrap(options.security).pipe(
-            Effect.andThen(options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, undefined))
+          // The startup link: minted only once the server is listening, handed to whoever prints it.
+          mintBootstrapUrl(options.security).pipe(
+            Effect.flatMap((url) => options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, url))
           )
         )
       )

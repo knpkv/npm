@@ -7,8 +7,10 @@
  *   itself at startup. There is no user table and no login: the person who can read the terminal is
  *   the person who gets in, which is the authority a page showing their own agents' usage, ticket
  *   keys and working directories should demand.
- * - **The URL is the handshake.** The bootstrap code is printed once, in a fragment the browser
- *   never sends upstream, and is spent the first time it is exchanged for the session cookie.
+ * - **The URL is the handshake.** A bootstrap code rides in a fragment the browser never sends
+ *   upstream and is spent the first time it is exchanged for the session cookie. One is minted when
+ *   the server starts and another each time `agent-usage login` asks over the control socket; both
+ *   go through {@link mintBootstrapUrl}, and a newer code replaces an unspent one.
  * - **Every route only reads, and a read needs the cookie and must not be a browser cross-origin
  *   request.** Another page in the same browser can make the browser send a cookie, but Fetch
  *   Metadata keeps that page from reading usage without an Origin. With no writes there is no CSRF
@@ -34,11 +36,11 @@ import { Clock, Context, Effect, Layer, Redacted, Ref, Schema } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { ForbiddenApiError, OwnerSessionAuth, UnauthorizedApiError } from "./Api.js"
 
-/** How long the printed bootstrap URL stays usable. Long enough to click, short enough to forget. */
+/** How long a minted bootstrap URL stays usable. Long enough to click, short enough to forget. */
 const BOOTSTRAP_LIFETIME_MILLIS = 60_000
 
 /**
- * Failed bootstrap exchanges before the exchange closes for the life of the process.
+ * Failed bootstrap exchanges before the exchange closes, until the owner mints a new code.
  *
  * The code is high-entropy, so this is not what makes guessing hard — it is what stops a process
  * that is being guessed at from staying open all afternoon.
@@ -54,6 +56,13 @@ const safeMethods = new Set(["GET", "HEAD", "OPTIONS"])
  */
 const devPublicOrigin = "http://localhost:5173"
 
+/** One minted code: what to compare, until when, and whether it has been spent. */
+export interface BootstrapCode {
+  readonly token: Redacted.Redacted<PairingCode>
+  readonly expiresAt: number
+  readonly available: boolean
+}
+
 export interface BootstrapAttemptState {
   readonly failedAttempts: number
   readonly inFlight: number
@@ -67,10 +76,9 @@ export interface OwnerSessionSecretsContract {
    * dev server when it proxies in front of it, because that is the origin the page runs on.
    */
   readonly browserOrigin: string
-  readonly bootstrapAvailable: Ref.Ref<boolean>
+  /** The current one-time code, or none before the first mint. */
+  readonly bootstrap: Ref.Ref<BootstrapCode | undefined>
   readonly bootstrapAttemptState: Ref.Ref<BootstrapAttemptState>
-  readonly bootstrapExpiresAtMillis: Ref.Ref<number | undefined>
-  readonly bootstrapToken: Redacted.Redacted<PairingCode>
   readonly ownerToken: Redacted.Redacted<SessionToken>
 }
 
@@ -126,36 +134,35 @@ export const makeOwnerSessionSecrets = Effect.fn("OwnerSession.makeSecrets")(
   function*(authorityOrigin: string, configuredPublicOrigin?: string) {
     const validated = yield* requireLoopbackOrigin(authorityOrigin)
     const browserOrigin = yield* resolvePublicOrigin(configuredPublicOrigin, validated)
-    const [ownerToken, bootstrapToken] = yield* Effect.all([issueSessionToken(), issuePairingCode()])
+    const ownerToken = yield* issueSessionToken()
     return OwnerSessionSecrets.of({
       authorityOrigin: validated,
+      bootstrap: yield* Ref.make<BootstrapCode | undefined>(undefined),
       bootstrapAttemptState: yield* Ref.make<BootstrapAttemptState>({ failedAttempts: 0, inFlight: 0 }),
-      bootstrapAvailable: yield* Ref.make(true),
-      bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(undefined),
-      bootstrapToken,
       browserOrigin,
       ownerToken
     })
   }
 )
 
-/** Start the bootstrap clock. Called once the server is actually listening, never before. */
-export const activateOwnerSessionBootstrap = Effect.fn("OwnerSession.activateBootstrap")(
+/**
+ * Mints a fresh one-time code and returns the URL that carries it: usable once, for a minute. The
+ * startup link and every `agent-usage login` link come from here; a newer code replaces any unspent
+ * one and reopens an exchange that guesses had closed. Call it only once the server is listening.
+ *
+ * The code rides in the fragment, which browsers do not send to servers and proxies do not log,
+ * and the page strips it from the address bar once it has been spent.
+ */
+export const mintBootstrapUrl = Effect.fn("OwnerSession.mintBootstrapUrl")(
   function*(secrets: OwnerSessionSecretsContract) {
+    const token = yield* issuePairingCode()
     const now = yield* Clock.currentTimeMillis
-    yield* Ref.set(secrets.bootstrapExpiresAtMillis, yield* expiresAt(now, BOOTSTRAP_LIFETIME_MILLIS))
+    const until = yield* expiresAt(now, BOOTSTRAP_LIFETIME_MILLIS)
+    yield* Ref.set(secrets.bootstrap, { token, expiresAt: until, available: true })
+    yield* Ref.set(secrets.bootstrapAttemptState, { failedAttempts: 0, inFlight: 0 })
+    return `${secrets.browserOrigin.replace(/\/+$/u, "")}/#bootstrap_token=${encodeURIComponent(Redacted.value(token))}`
   }
 )
-
-/**
- * The URL to open. The code rides in the fragment, which browsers do not send to servers and
- * proxies do not log, and the page strips it from the address bar once it has been spent.
- */
-export const ownerSessionUrl = (
-  publicOrigin: string,
-  secrets: Pick<OwnerSessionSecretsContract, "bootstrapToken">
-): string =>
-  `${publicOrigin.replace(/\/+$/u, "")}/#bootstrap_token=${encodeURIComponent(Redacted.value(secrets.bootstrapToken))}`
 
 export const ownerSessionCookie = (secrets: Pick<OwnerSessionSecretsContract, "ownerToken">): string =>
   serializeCredentialCookie(secrets.ownerToken, {
@@ -217,14 +224,15 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSession.authorizeBootst
       return yield* new ForbiddenApiError({ message: "Bootstrap origin does not match this agent-usage server" })
     }
     const supplied = bearerToken(request.authorization)
+    const current = yield* Ref.get(secrets.bootstrap)
     // Counted before the code is even compared, so a burst of parallel guesses cannot all pass the
     // check together and then be counted afterwards.
     const admit = Ref.modify(
       secrets.bootstrapAttemptState,
       (state): readonly [BootstrapAdmission, BootstrapAttemptState] => {
         if (state.failedAttempts + state.inFlight >= MAX_BOOTSTRAP_FAILURES) return ["unavailable", state]
-        const matches = supplied !== undefined &&
-          credentialValuesEqual(supplied, Redacted.value(secrets.bootstrapToken)) === true
+        const matches = supplied !== undefined && current !== undefined &&
+          credentialValuesEqual(supplied, Redacted.value(current.token)) === true
         if (!matches) {
           return ["invalid", {
             failedAttempts: Math.min(MAX_BOOTSTRAP_FAILURES, state.failedAttempts + 1),
@@ -246,19 +254,21 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSession.authorizeBootst
       admit,
       () =>
         Effect.gen(function*() {
-          const expiry = yield* Ref.get(secrets.bootstrapExpiresAtMillis)
-          if (expiry === undefined) return yield* new UnauthorizedApiError({ message: "Bootstrap is not active yet" })
           const now = yield* Clock.currentTimeMillis
-          const decision = yield* Ref.modify(secrets.bootstrapAvailable, (available) => {
+          // Spent only if it is still the code that was compared: a newer mint replaced it otherwise.
+          const decision = yield* Ref.modify(secrets.bootstrap, (code) => {
+            if (code === undefined || current === undefined || code.token !== current.token) {
+              return ["consumed", code]
+            }
             const next = decideOneTimeCredential(
-              { consumedAt: available ? null : 0, expiresAt: expiry, revokedAt: null },
+              { consumedAt: code.available ? null : 0, expiresAt: code.expiresAt, revokedAt: null },
               now
             )
-            return [next, next === "accepted" ? false : available]
+            return [next, next === "accepted" ? { ...code, available: false } : code]
           })
           if (decision === "accepted") return
           const message = decision === "expired"
-            ? "Bootstrap token has expired — restart agent-usage for a fresh URL"
+            ? "Bootstrap token has expired — run agent-usage login for a fresh URL"
             : decision === "consumed"
             ? "Bootstrap token has already been used"
             : "Bootstrap token state is invalid"
