@@ -1,28 +1,35 @@
 /**
- * Local HTTP server for OAuth callback.
+ * Local HTTP callback server for OAuth2 authorization code capture.
  *
- * @module
+ * **Mental model**
+ *
+ * - **Scope-owned lifecycle**: {@link startCallbackServer} returns a `codePromise`
+ *   (Deferred). The server validates the CSRF `state` parameter, resolves the
+ *   Deferred with the authorization code, and stops when its enclosing scope closes.
+ * - **Port auto-discovery**: Tries default port 8585, increments on conflict up to 8594.
+ * - **Ready before return**: the handler is installed before the port is handed back,
+ *   so the caller never advertises a callback URL nothing answers.
+ *
+ * @internal
  */
 import * as Context from "effect/Context"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
-import type { HttpServerError } from "effect/http"
 import { HttpRouter, HttpServer, HttpServerRequest, HttpServerResponse } from "effect/http"
+import type * as HttpServerError from "effect/http/HttpServerError"
 import * as Layer from "effect/Layer"
 import { NetAddress } from "effect/net"
 import * as Schema from "effect/Schema"
 import * as Scope from "effect/Scope"
-import { OAuthError } from "../ConfluenceError.js"
+import { OAuthError } from "../../auth/OAuthErrors.js"
 
 const DEFAULT_PORT = 8585
 const MAX_PORT = 8594
 type HttpServerInstance = Effect.Success<typeof HttpServer.HttpServer>
 
 /**
- * Factory service for creating HTTP servers.
- * This allows mocking the server creation in tests.
- *
- * @category Services
+ * Creates the platform HTTP server for one listen attempt. The Node adapter is
+ * {@link HttpServerFactoryLive}; tests substitute ephemeral or failing servers.
  */
 export interface HttpServerFactory {
   readonly createServerLayer: (options: CallbackServerListenOptions) => Layer.Layer<
@@ -44,25 +51,12 @@ export const callbackServerListenOptions = (port: number): CallbackServerListenO
 
 export const callbackUrl = (port: number): string => `http://localhost:${port}/callback`
 
-/**
- * Tag for the HttpServerFactory service.
- *
- * @category Services
- */
 export class HttpServerFactoryTag extends Context.Service<
   HttpServerFactoryTag,
   HttpServerFactory
->()("@knpkv/confluence-to-markdown/HttpServerFactory") {}
+>()("@knpkv/atlassian-common/cli-auth/HttpServerFactory") {}
 
-/**
- * Create a HttpServerFactory layer from a layer factory function.
- * This allows injecting platform-specific implementations.
- *
- * @param createLayerFn - Function that creates HttpServer layer for a given port
- * @returns Layer providing HttpServerFactory
- *
- * @category Layers
- */
+/** Builds a {@link HttpServerFactoryTag} layer from a per-attempt server layer. */
 export const makeHttpServerFactory = (
   createLayerFn: (
     options: CallbackServerListenOptions
@@ -72,11 +66,8 @@ export const makeHttpServerFactory = (
     createServerLayer: createLayerFn
   })
 
-/**
- * Result from the OAuth callback server.
- */
 export interface CallbackServerResult {
-  /** Promise that resolves with the authorization code */
+  /** Resolves with the authorization code, or fails with the provider's error. */
   readonly codePromise: Effect.Effect<string, OAuthError>
   /** The port the server is listening on */
   readonly port: number
@@ -88,13 +79,14 @@ const AddressInUseCause = Schema.Struct({
 
 const isAddressInUse = (error: HttpServerError.ServeError): boolean => Schema.is(AddressInUseCause)(error.cause)
 
+const page = (heading: string, body: string) =>
+  HttpServerResponse.html(`<html><body><h1>${heading}</h1><p>${body}</p></body></html>`)
+
 /**
- * Start a local HTTP server to receive OAuth callback.
+ * Start a local HTTP server to receive the OAuth callback for `expectedState`.
  *
- * @param expectedState - The state parameter to verify against CSRF
- * @returns Server control interface with code promise and port
- *
- * @category OAuth
+ * Fails with one `OAuthError` (step `authorize`) when no port in range can be
+ * bound; the server stops when the enclosing scope closes.
  */
 export const startCallbackServer = (
   expectedState: string
@@ -105,6 +97,8 @@ export const startCallbackServer = (
     const readyDeferred = yield* Deferred.make<void, OAuthError>()
     const scope = yield* Effect.scope
 
+    // Map to OAuthError once, outside the retry, so a run of occupied ports
+    // does not nest one OAuthError inside another.
     const buildServer = (port: number): Effect.Effect<HttpServerInstance, HttpServerError.ServeError> =>
       Layer.build(factory.createServerLayer(callbackServerListenOptions(port))).pipe(
         Scope.provide(scope),
@@ -120,7 +114,7 @@ export const startCallbackServer = (
     )
 
     if (!NetAddress.isInetAddress(server.address)) {
-      return yield* new OAuthError({ step: "authorize", cause: "OAuth callback server did not bind to a TCP address" })
+      return yield* new OAuthError({ step: "authorize", cause: "OAuth callback server must listen on a TCP port" })
     }
     const port = server.address.port
 
@@ -137,48 +131,37 @@ export const startCallbackServer = (
         const errorDescription = url.searchParams.get("error_description")
 
         if (state !== expectedState) {
-          return HttpServerResponse.html(
-            "<html><body><h1>Security Error</h1><p>State verification failed.</p></body></html>"
-          ).pipe(
-            HttpServerResponse.setStatus(403)
-          )
+          return page("Security Error", "State verification failed.").pipe(HttpServerResponse.setStatus(403))
         }
 
-        if (error) {
+        if (error !== null && error !== "") {
+          // An empty description is no description: report the error code instead.
           yield* Deferred.fail(
             deferred,
-            new OAuthError({ step: "authorize", cause: errorDescription || error })
+            new OAuthError({
+              step: "authorize",
+              cause: errorDescription === null || errorDescription === "" ? error : errorDescription
+            })
           )
-          return HttpServerResponse.html(
-            "<html><body><h1>Authorization Failed</h1><p>You can close this window.</p></body></html>"
-          )
+          return page("Authorization Failed", "You can close this window.")
         }
 
-        if (!code) {
-          yield* Deferred.fail(
-            deferred,
-            new OAuthError({ step: "authorize", cause: "No authorization code received" })
-          )
-          return HttpServerResponse.html(
-            "<html><body><h1>Error</h1><p>No authorization code received.</p></body></html>"
-          )
+        if (code === null || code === "") {
+          yield* Deferred.fail(deferred, new OAuthError({ step: "authorize", cause: "No authorization code received" }))
+          return page("Error", "No authorization code received.")
         }
 
         yield* Deferred.succeed(deferred, code)
-        return HttpServerResponse.html(
-          "<html><body><h1>Success!</h1><p>You can close this window and return to the terminal.</p></body></html>"
-        )
+        return page("Success!", "You can close this window and return to the terminal.")
       })
     )
 
     yield* HttpServer.serveEffect(router.asHttpEffect()).pipe(
       Effect.provideService(HttpServer.HttpServer, server),
       Effect.tap(() => Deferred.succeed(readyDeferred, undefined)),
-      Effect.tapError((err) => Deferred.fail(readyDeferred, new OAuthError({ step: "authorize", cause: err }))),
+      Effect.tapError((cause) => Deferred.fail(readyDeferred, new OAuthError({ step: "authorize", cause }))),
       Effect.forkScoped
     )
-
-    // Wait for server to be ready (or fail)
     yield* Deferred.await(readyDeferred)
 
     return {

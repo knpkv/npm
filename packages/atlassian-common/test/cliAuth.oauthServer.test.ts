@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient"
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer"
 import { describe, expect, it } from "@effect/vitest"
@@ -9,14 +10,14 @@ import { NetAddress } from "effect/net"
 import * as Predicate from "effect/Predicate"
 import * as Ref from "effect/Ref"
 import { createServer } from "node:http"
-import { HttpServerFactoryLive } from "../src/internal/NodeLayers.js"
+import { HttpServerFactoryLive } from "../src/cli-auth/internal/NodeLayers.js"
 import {
   callbackServerListenOptions,
   callbackUrl,
   HttpServerFactoryTag,
   makeHttpServerFactory,
   startCallbackServer
-} from "../src/internal/oauthServer.js"
+} from "../src/cli-auth/internal/oauthServer.js"
 
 const HttpClientLive = NodeHttpClient.layerUndici
 const EphemeralHttpServerFactoryLive = makeHttpServerFactory(
@@ -228,6 +229,27 @@ describe("oauthServer", () => {
 
           const error = yield* Fiber.join(codeReceiver).pipe(Effect.flip)
           expect(String(error.cause)).toContain("access_denied")
+          expect(error.message).toBe("OAuth authorize failed: access_denied")
+        }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
+      ))
+    it.effect("reports the provider error code when its description is empty", () =>
+      Effect.scoped(
+        Effect.gen(function*() {
+          const expectedState = "expected-state"
+          const { codePromise, port } = yield* startCallbackServer(expectedState)
+          const codeReceiver = yield* Effect.forkChild(codePromise)
+          const client = yield* HttpClient.HttpClient
+
+          yield* client.execute(
+            HttpClientRequest.get(`http://127.0.0.1:${port}/callback`).pipe(
+              HttpClientRequest.setUrlParam("error", "access_denied"),
+              HttpClientRequest.setUrlParam("error_description", ""),
+              HttpClientRequest.setUrlParam("state", expectedState)
+            )
+          )
+
+          const error = yield* Fiber.join(codeReceiver).pipe(Effect.flip)
+          expect(error.cause).toBe("access_denied")
         }).pipe(Effect.provide(Layer.mergeAll(EphemeralHttpServerFactoryLive, HttpClientLive)))
       ))
   })

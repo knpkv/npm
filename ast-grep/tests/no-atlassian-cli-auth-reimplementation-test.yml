@@ -1,0 +1,17 @@
+id: no-atlassian-cli-auth-reimplementation
+valid:
+  - |
+    import { buildAuthUrl, exchangeCodeForTokens } from "@knpkv/atlassian-common/auth"
+  - |
+    import { makeAtlassianCliAuth } from "@knpkv/atlassian-common/cli-auth"
+  - |
+    import type { OAuthError } from "@knpkv/atlassian-common/auth"
+invalid:
+  - |
+    import { OAuthError, refreshToken } from "@knpkv/atlassian-common/auth"
+  - |
+    import * as Auth from "@knpkv/atlassian-common/auth"
+  - |
+    export const startCallbackServer = (state: string) => state
+  - |
+    function startCallbackServer(state: string) { return state }

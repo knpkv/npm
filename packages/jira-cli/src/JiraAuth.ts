@@ -3,13 +3,10 @@
  *
  * **Mental model**
  *
- * - **Service pattern**: {@link JiraAuth} is a `Context.Tag` whose layer requires `HttpClient`
- *   and `ChildProcessSpawner`. All token storage operations are pre-bound to
- *   `@knpkv/atlassian-common/config` with a `"jira-cli"` tool name.
- * - **Refresh lock**: A `Ref<Option<Deferred>>` prevents concurrent token refreshes — the
- *   first caller refreshes, others await the same Deferred.
- * - **Browser-based login**: {@link JiraAuthService.login} starts a local callback server,
- *   opens the browser, and awaits the OAuth code with a 5-minute timeout.
+ * - **Service pattern**: {@link JiraAuth} is a `Context.Tag` whose layer requires `HttpClient`,
+ *   `ChildProcessSpawner` and `Crypto`. The flow — refresh lock, rotating-token persistence,
+ *   browser login, profiles — is `@knpkv/atlassian-common/cli-auth`'s, bound to the
+ *   `"jira-cli"` storage namespace, Jira's scopes and Jira's names.
  *
  * **Common tasks**
  *
@@ -19,56 +16,20 @@
  *
  * @module
  */
-import * as NodeFileSystem from "@effect/platform-node/NodeFileSystem"
-import * as NodePath from "@effect/platform-node/NodePath"
-import {
-  buildAuthUrl,
-  buildOAuthTokenAt,
-  computeCodeChallenge,
-  exchangeCodeForTokens,
-  generateCodeVerifier,
-  generateUUID,
-  getAccessibleResources,
-  getUserInfo,
-  OAuthError,
-  refreshToken,
-  revokeToken
-} from "@knpkv/atlassian-common/auth"
-import {
-  type AuthProfile,
-  deleteActiveProfile,
-  deleteProfileBySelector,
-  type FileSystemError,
-  type HomeDirectoryError,
-  HomeDirectoryLive,
-  isTokenExpiredAt,
-  loadActiveProfile,
-  loadActiveProfileToken,
-  loadOAuthConfig,
-  loadProfiles,
-  type OAuthConfig,
-  type OAuthToken,
-  type OAuthUser,
-  saveOAuthConfig,
-  saveProfileToken,
-  setActiveProfileBySelector
+import type { OAuthError } from "@knpkv/atlassian-common/auth"
+import { makeAtlassianCliAuth, NodeCliAuthLive } from "@knpkv/atlassian-common/cli-auth"
+import type {
+  AuthProfile,
+  FileSystemError,
+  HomeDirectoryError,
+  OAuthConfig,
+  OAuthUser
 } from "@knpkv/atlassian-common/config"
-import * as Clock from "effect/Clock"
-import * as Console from "effect/Console"
 import * as Context from "effect/Context"
-import * as Crypto from "effect/Crypto"
-import * as Deferred from "effect/Deferred"
-import * as Effect from "effect/Effect"
-import * as HttpClient from "effect/http/HttpClient"
+import type * as Effect from "effect/Effect"
 import * as Layer from "effect/Layer"
-import * as Option from "effect/Option"
 import type * as PlatformError from "effect/PlatformError"
-import { ChildProcessSpawner } from "effect/process"
-import * as Redacted from "effect/Redacted"
-import * as Ref from "effect/Ref"
-import { HttpServerFactoryLive } from "./internal/NodeLayers.js"
-import { callbackUrl, startCallbackServer } from "./internal/oauthServer.js"
-import { openBrowser } from "./internal/openBrowser.js"
+import type * as Redacted from "effect/Redacted"
 import type { AuthMissingError } from "./JiraCliError.js"
 import { authMissing } from "./JiraCliError.js"
 
@@ -89,30 +50,6 @@ const JIRA_CLI_SCOPES = [
   // Issue a refresh token so the CLI stays logged in across runs.
   "offline_access"
 ]
-
-const TOOL_NAME = "jira-cli"
-
-// Layer for token storage operations (FileSystem + Path + HomeDirectory)
-const TokenStorageLive = Layer.mergeAll(
-  NodeFileSystem.layer,
-  NodePath.layer,
-  HomeDirectoryLive
-)
-
-// Wrap token storage operations with their required layers
-const loadTokenOp = () => loadActiveProfileToken(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const saveTokenOp = (token: OAuthToken) => saveProfileToken(TOOL_NAME, token).pipe(Effect.provide(TokenStorageLive))
-const deleteTokenOp = () => deleteActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const listProfilesOp = () =>
-  loadProfiles(TOOL_NAME).pipe(Effect.map((store) => store.profiles), Effect.provide(TokenStorageLive))
-const loadActiveProfileOp = () => loadActiveProfile(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const switchProfileOp = (selector: string) =>
-  setActiveProfileBySelector(TOOL_NAME, selector).pipe(Effect.provide(TokenStorageLive))
-const removeProfileOp = (selector: string) =>
-  deleteProfileBySelector(TOOL_NAME, selector).pipe(Effect.provide(TokenStorageLive))
-const loadOAuthConfigOp = () => loadOAuthConfig(TOOL_NAME).pipe(Effect.provide(TokenStorageLive))
-const saveOAuthConfigOp = (config: OAuthConfig) =>
-  saveOAuthConfig(TOOL_NAME, config).pipe(Effect.provide(TokenStorageLive))
 
 /**
  * Options for the login method.
@@ -228,400 +165,18 @@ export class JiraAuth extends Context.Service<
   JiraAuthService
 >()("@knpkv/jira-cli/JiraAuth") {}
 
-type RefreshError = OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-type RefreshDeferred = Deferred.Deferred<OAuthToken, RefreshError>
-
-const make = Effect.gen(function*() {
-  const httpClient = yield* HttpClient.HttpClient
-  const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const cryptoService = yield* Crypto.Crypto
-
-  // Ref to track ongoing refresh operation to prevent concurrent refreshes
-  const refreshLock = yield* Ref.make<Option.Option<RefreshDeferred>>(
-    Option.none()
-  )
-
-  const openBrowserImpl = (url: string): Effect.Effect<void, OAuthError> =>
-    openBrowser(url).pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
-      Effect.mapError((cause) => new OAuthError({ step: "authorize", cause }))
-    )
-
-  const getConfig = (): Effect.Effect<
-    OAuthConfig,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const config = yield* loadOAuthConfigOp()
-      if (config === null) {
-        return yield* new OAuthError({
-          step: "authorize",
-          cause: "OAuth not configured. Run 'jira auth configure' first."
-        })
-      }
-      return config
-    })
-
-  // Atlassian rotates refresh tokens: the response carries a replacement and
-  // the one we sent is consumed server-side. Interrupting between the
-  // round-trip and `saveTokenOp` therefore destroys the credential — the next
-  // refresh fails and `getAccessToken` below reacts by deleting the token file,
-  // so the user is silently logged out and has to run `jira auth login` again.
-  //
-  // Interruption is routine here, not hypothetical: this runs during layer
-  // construction on every CLI invocation, and jcf's nvim statusline kills the
-  // process on `VimLeave`. So the grant and the persist are atomic.
-  //
-  // The region carries its own deadline rather than relying on a caller's.
-  // `Effect.timeout` is a race, and racing an uninterruptible loser means
-  // waiting for it — an outer bound would go inert and, worse, an
-  // uninterruptible region with no deadline of its own absorbs SIGINT/SIGTERM
-  // entirely (`NodeRuntime.runMain`'s signal handlers only interrupt the main
-  // fiber), leaving a process that ignores Ctrl-C. The deadline forked inside
-  // the region is itself interruptible, so it does bound this.
-  //
-  // Abandoning the round-trip cannot prove the grant did not land: Atlassian
-  // may consume the refresh token and rotate it after we have stopped
-  // listening, and no client-side deadline changes that. So the deadline is
-  // paired with the rule in `getAccessToken` below — a refresh that fails
-  // without a 4xx never deletes the stored token. The credential survives to be
-  // retried, and only a real rejection ends the session.
-  const REFRESH_TIMEOUT = "30 seconds"
-
-  const refreshTokenImpl = (
-    token: OAuthToken,
-    config: OAuthConfig
-  ): Effect.Effect<OAuthToken, OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.uninterruptible(
-      Effect.gen(function*() {
-        const updated = yield* refreshToken(token, config).pipe(
-          Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient)),
-          Effect.timeout(REFRESH_TIMEOUT),
-          Effect.catchTag(
-            "TimeoutError",
-            () => Effect.fail(new OAuthError({ step: "refresh", cause: `no response within ${REFRESH_TIMEOUT}` }))
-          )
-        )
-        yield* saveTokenOp(updated)
-        return updated
-      })
-    )
-
-  const revokeTokenImpl = (
-    token: OAuthToken,
-    config: OAuthConfig
-  ): Effect.Effect<void, OAuthError> =>
-    revokeToken(token, config).pipe(
-      Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-    )
-
-  const configure = (
-    config: OAuthConfig
-  ): Effect.Effect<void, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    saveOAuthConfigOp(config)
-
-  const isConfigured = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.gen(function*() {
-      const config = yield* loadOAuthConfigOp()
-      return config !== null
-    })
-
-  const login = (
-    options?: LoginOptions
-  ): Effect.Effect<
-    ReadonlyArray<AccessibleSite> | void,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const config = yield* getConfig()
-      const state = yield* generateUUID().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
-      const codeVerifier = yield* generateCodeVerifier().pipe(Effect.provideService(Crypto.Crypto, cryptoService))
-      const codeChallenge = yield* computeCodeChallenge(codeVerifier).pipe(
-        Effect.provideService(Crypto.Crypto, cryptoService)
-      )
-
-      const { code, port } = yield* Effect.scoped(
-        Effect.gen(function*() {
-          const { codePromise, port } = yield* startCallbackServer(state).pipe(
-            Effect.provide(HttpServerFactoryLive)
-          )
-          const authUrl = buildAuthUrl({
-            clientId: config.clientId,
-            state,
-            port,
-            redirectUri: callbackUrl(port),
-            scopes: JIRA_CLI_SCOPES,
-            codeChallenge
-          })
-
-          yield* Console.log(`Opening browser for Atlassian login (callback on port ${port})...`)
-          yield* Console.log(`If browser doesn't open, visit: ${authUrl}`)
-          yield* openBrowserImpl(authUrl)
-          yield* Console.log("Waiting for authorization (press Ctrl+C to cancel)...")
-
-          const code = yield* codePromise.pipe(
-            Effect.timeout("5 minutes"),
-            Effect.catchTag(
-              "TimeoutError",
-              () => Effect.fail(new OAuthError({ step: "authorize", cause: "Authorization timed out" }))
-            )
-          )
-          return { code, port }
-        })
-      )
-
-      yield* Console.log("Exchanging code for tokens...")
-      const tokens = yield* exchangeCodeForTokens(code, config, {
-        port,
-        redirectUri: callbackUrl(port),
-        codeVerifier
-      }).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-
-      yield* Console.log("Fetching accessible sites...")
-      const sites = yield* getAccessibleResources(tokens.access_token).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-
-      if (sites.length === 0) {
-        return yield* new OAuthError({
-          step: "authorize",
-          cause: "No Jira sites found for this account"
-        })
-      }
-
-      let site: (typeof sites)[number]
-
-      if (sites.length > 1) {
-        if (options?.siteUrl) {
-          const matched = sites.find((s) => s.url === options.siteUrl)
-          if (!matched) {
-            const available = sites.map((s) => `  - ${s.name}: ${s.url}`).join("\n")
-            return yield* new OAuthError({
-              step: "authorize",
-              cause: `Site '${options.siteUrl}' not found. Available sites:\n${available}`
-            })
-          }
-          site = matched
-        } else {
-          yield* Console.log("Multiple Jira sites found. Please select one:")
-          for (const s of sites) {
-            yield* Console.log(`  - ${s.name}: ${s.url}`)
-          }
-          yield* Console.log("\nRun 'jira auth login --site <url>' to select a site")
-          return sites.map((s) => ({ id: s.id, name: s.name, url: s.url }))
-        }
-      } else {
-        site = sites[0]!
-      }
-
-      yield* Console.log("Fetching user info...")
-      const user = yield* getUserInfo(tokens.access_token).pipe(
-        Effect.provide(Layer.succeed(HttpClient.HttpClient, httpClient))
-      )
-
-      const nowMs = yield* Clock.currentTimeMillis
-      const tokenData = buildOAuthTokenAt(tokens, site, user, nowMs)
-
-      yield* saveTokenOp(tokenData)
-      yield* Console.log(`Logged in as ${user.name} (${user.email})`)
-      return undefined
-    })
-
-  const logout = (): Effect.Effect<
-    void,
-    OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        yield* Console.log("Not logged in")
-        return
-      }
-
-      const config = yield* loadOAuthConfigOp()
-      if (config !== null) {
-        yield* revokeTokenImpl(token, config).pipe(
-          Effect.tap(() => Effect.log("Token revoked with Atlassian")),
-          Effect.catch((error) => Effect.log(`Warning: Failed to revoke token: ${error.message}`))
-        )
-      }
-
-      yield* deleteTokenOp()
-    })
-
-  const getAccessToken = (): Effect.Effect<
-    Redacted.Redacted<string>,
-    AuthMissingError | OAuthError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        return yield* authMissing()
-      }
-
-      const nowMs = yield* Clock.currentTimeMillis
-      if (!isTokenExpiredAt(token, nowMs)) {
-        return Redacted.make(token.access_token)
-      }
-
-      // Atomically check-then-set refresh lock to avoid TOCTOU race
-      const deferred = yield* Deferred.make<OAuthToken, RefreshError>()
-      const existing = yield* Ref.modify(refreshLock, (current) =>
-        Option.isSome(current)
-          ? ([current.value, current] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>])
-          : ([deferred, Option.some(deferred)] satisfies readonly [RefreshDeferred, Option.Option<RefreshDeferred>]))
-
-      // Another fiber is already refreshing — just await its result
-      if (existing !== deferred) {
-        const refreshed = yield* Deferred.await(existing)
-        return Redacted.make(refreshed.access_token)
-      }
-
-      const refresh = Effect.gen(function*() {
-        const config = yield* getConfig()
-        // stderr, not stdout: this fires from inside layer construction, so it
-        // lands ahead of whatever the command prints. On `--json` that used to
-        // put a line of prose in front of the document, and the release
-        // automation parsing it failed *after* the remote writes had happened.
-        yield* Console.error("Token expired, refreshing...")
-        return yield* refreshTokenImpl(token, config)
-      }).pipe(
-        Effect.catchTag("OAuthError", (error) => {
-          // Discard the stored credential only when Atlassian actually rejected
-          // it. A refresh can fail without saying anything about the token —
-          // transport error, timeout, interruption — and in those cases the
-          // grant may even have been consumed server-side, so the one thing we
-          // must not do is delete the replacement's only trail. Deleting on any
-          // `step === "refresh"` failure turned a flaky network into a silent
-          // logout, which is worse than retrying and is unrecoverable. On a 4xx
-          // the token is genuinely dead and re-login is the only way forward.
-          // Not every failure is a verdict on the token, and not even every
-          // 4xx is. `429` is the one this most needs to survive — several
-          // `jira`/`jcf` processes on an expired token hit the endpoint
-          // together, one wins the rotation and the rest are rate-limited —
-          // while `408`/`425` restate the timeout case and `407` and other
-          // middlebox replies never came from Atlassian at all.
-          //
-          // Status alone is still too coarse. `refreshToken` sends the client
-          // credentials in the body, so a wrong or rotated `clientSecret` comes
-          // back as `400 invalid_client`; deleting the token there destroys a
-          // working credential over a config problem, and the re-login it forces
-          // would fail the same way until `jira auth configure` is run. Only
-          // `invalid_grant` means the stored token itself is spent, and that is
-          // the only thing that ends the session — on a `403` too, since a bare
-          // 403 is just as likely to come from a proxy or WAF as from Atlassian
-          // revoking anything. An unparseable body leaves `errorCode` absent and
-          // the token in place.
-          const { errorCode, status } = error
-          const rejected = errorCode === "invalid_grant" && (status === 400 || status === 403)
-          if (error.step === "refresh" && rejected) {
-            return Effect.gen(function*() {
-              yield* deleteTokenOp()
-              return yield* new OAuthError({
-                step: "refresh",
-                cause: "Refresh token expired. Please run 'jira auth login' to re-authenticate.",
-                status,
-                errorCode
-              })
-            })
-          }
-          return Effect.fail(error)
-        })
-      )
-
-      // This fiber owns the refresh. Complete the shared Deferred with the final
-      // transformed exit so waiters observe the same success or failure.
-      const exit = yield* refresh.pipe(
-        Effect.exit,
-        Effect.ensuring(Ref.set(refreshLock, Option.none()))
-      )
-      yield* Deferred.done(deferred, exit)
-      const result = yield* Deferred.await(deferred)
-
-      return Redacted.make(result.access_token)
-    })
-
-  const getCloudId = (): Effect.Effect<
-    string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        return yield* authMissing()
-      }
-      return token.cloud_id
-    })
-
-  const getSiteUrl = (): Effect.Effect<
-    string,
-    AuthMissingError | FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      if (token === null) {
-        return yield* authMissing()
-      }
-      return token.site_url
-    })
-
-  const getCurrentUser = (): Effect.Effect<
-    OAuthUser | null,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      return token?.user ?? null
-    })
-
-  const getActiveProfile = (): Effect.Effect<
-    AuthProfile | null,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > => loadActiveProfileOp()
-
-  const listProfiles = (): Effect.Effect<
-    ReadonlyArray<AuthProfile>,
-    FileSystemError | HomeDirectoryError | PlatformError.PlatformError
-  > => listProfilesOp()
-
-  const switchProfile = (
-    selector: string
-  ): Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    switchProfileOp(selector)
-
-  const removeProfile = (
-    selector: string
-  ): Effect.Effect<AuthProfile | null, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    removeProfileOp(selector)
-
-  const isLoggedIn = (): Effect.Effect<boolean, FileSystemError | HomeDirectoryError | PlatformError.PlatformError> =>
-    Effect.gen(function*() {
-      const token = yield* loadTokenOp()
-      return token !== null
-    })
-
-  return JiraAuth.of({
-    configure,
-    isConfigured,
-    login,
-    logout,
-    getAccessToken,
-    getCloudId,
-    getSiteUrl,
-    getCurrentUser,
-    getActiveProfile,
-    listProfiles,
-    switchProfile,
-    removeProfile,
-    isLoggedIn
-  })
-})
-
 /**
  * Layer for JiraAuth service.
  *
  * @category Layers
  */
-export const layer = Layer.effect(JiraAuth, make)
+export const layer = Layer.effect(
+  JiraAuth,
+  makeAtlassianCliAuth({
+    toolName: "jira-cli",
+    commandName: "jira",
+    productName: "Jira",
+    scopes: JIRA_CLI_SCOPES,
+    authMissing
+  })
+).pipe(Layer.provide(NodeCliAuthLive))

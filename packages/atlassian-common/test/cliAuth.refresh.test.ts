@@ -1,3 +1,4 @@
+/** @effect-diagnostics strictEffectProvide:skip-file */
 /**
  * What a failed token refresh is allowed to do to the stored credential.
  *
@@ -13,13 +14,8 @@
  */
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
-import {
-  HomeDirectoryLive,
-  loadActiveProfileToken,
-  saveOAuthConfig,
-  saveProfileToken
-} from "@knpkv/atlassian-common/config"
 import { ConfigProvider } from "effect"
+import * as Data from "effect/Data"
 import * as Deferred from "effect/Deferred"
 import * as Effect from "effect/Effect"
 import * as Fiber from "effect/Fiber"
@@ -27,9 +23,22 @@ import * as FileSystem from "effect/FileSystem"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import * as Layer from "effect/Layer"
 import { TestClock } from "effect/testing"
-import { JiraAuth, layer as jiraAuthLayer } from "../src/JiraAuth.js"
+import { makeAtlassianCliAuth, NodeCliAuthLive } from "../src/cli-auth/index.js"
+import { loadActiveProfileToken, saveProfileToken } from "../src/config/AuthProfiles.js"
+import { HomeDirectoryLive } from "../src/config/ConfigPaths.js"
+import { saveOAuthConfig } from "../src/config/TokenStorage.js"
 
-const TOOL = "jira-cli"
+const TOOL = "test-cli"
+
+class TestAuthMissing extends Data.TaggedError("TestAuthMissing") {}
+
+const authOptions = {
+  toolName: TOOL,
+  commandName: "test",
+  productName: "Test",
+  scopes: ["offline_access"],
+  authMissing: () => new TestAuthMissing()
+}
 
 const expiredToken = {
   access_token: "expired-access",
@@ -43,11 +52,14 @@ const expiredToken = {
 
 const storage = Layer.mergeAll(NodeFileSystem.layer, NodePath.layer, HomeDirectoryLive)
 
-// JiraAuth also needs a spawner (browser launch during login) and Crypto (PKCE).
-// Without them the layer dies as a defect, which no `catchTag` would see — and
+// The auth also needs a spawner (browser launch during login) and Crypto (PKCE).
+// Without them construction dies as a defect, which no `catchTag` would see — and
 // the assertions below would then pass without the refresh ever running.
-const authLayerWith = (client: Layer.Layer<HttpClient.HttpClient>) =>
-  jiraAuthLayer.pipe(Layer.provide(Layer.mergeAll(client, NodeServices.layer)))
+const getAccessTokenWith = (client: Layer.Layer<HttpClient.HttpClient>) =>
+  makeAtlassianCliAuth(authOptions).pipe(
+    Effect.flatMap((auth) => auth.getAccessToken()),
+    Effect.provide(Layer.mergeAll(client, NodeServices.layer, NodeCliAuthLive))
+  )
 
 // A client that never answers — the stall case, driven by TestClock. It reports
 // when the request has actually been issued so the test can advance the clock at
@@ -101,7 +113,7 @@ const gatedClient = (issued: Deferred.Deferred<void>, release: Deferred.Deferred
 const withHome = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    const home = yield* fs.makeTempDirectoryScoped({ prefix: "jcf-auth-" })
+    const home = yield* fs.makeTempDirectoryScoped({ prefix: "atlassian-cli-auth-" })
     return yield* effect.pipe(
       Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: { HOME: home } })))
     )
@@ -117,15 +129,13 @@ const seedExpiredToken = Effect.gen(function*() {
   yield* saveProfileToken(TOOL, expiredToken)
 }).pipe(Effect.provide(storage))
 
-describe("JiraAuth token refresh", () => {
+describe("Atlassian CLI token refresh", () => {
   it.effect("keeps the stored credential when the refresh never answers", () =>
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
       const issued = yield* Deferred.make<void>()
-      const attempt = JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(stalledClient(issued))),
+      const attempt = getAccessTokenWith(stalledClient(issued)).pipe(
         Effect.exit
       )
       const fiber = yield* attempt.pipe(Effect.forkChild({ startImmediately: true }))
@@ -148,9 +158,7 @@ describe("JiraAuth token refresh", () => {
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
-      const exit = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(respondingClient(429, "Too Many Requests"))),
+      const exit = yield* getAccessTokenWith(respondingClient(429, "Too Many Requests")).pipe(
         Effect.exit
       )
 
@@ -167,9 +175,7 @@ describe("JiraAuth token refresh", () => {
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
-      const exit = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(respondingClient(400, JSON.stringify({ error: "invalid_client" })))),
+      const exit = yield* getAccessTokenWith(respondingClient(400, JSON.stringify({ error: "invalid_client" }))).pipe(
         Effect.exit
       )
 
@@ -184,9 +190,7 @@ describe("JiraAuth token refresh", () => {
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
-      const exit = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(respondingClient(403, "<html>Forbidden</html>"))),
+      const exit = yield* getAccessTokenWith(respondingClient(403, "<html>Forbidden</html>")).pipe(
         Effect.exit
       )
 
@@ -199,9 +203,7 @@ describe("JiraAuth token refresh", () => {
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
-      const exit = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(respondingClient(403, JSON.stringify({ error: "invalid_grant" })))),
+      const exit = yield* getAccessTokenWith(respondingClient(403, JSON.stringify({ error: "invalid_grant" }))).pipe(
         Effect.exit
       )
 
@@ -215,9 +217,7 @@ describe("JiraAuth token refresh", () => {
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
-      const exit = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(respondingClient(400, "not json at all"))),
+      const exit = yield* getAccessTokenWith(respondingClient(400, "not json at all")).pipe(
         Effect.exit
       )
 
@@ -234,9 +234,7 @@ describe("JiraAuth token refresh", () => {
       const issued = yield* Deferred.make<void>()
       const release = yield* Deferred.make<void>()
 
-      const fiber = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(gatedClient(issued, release))),
+      const fiber = yield* getAccessTokenWith(gatedClient(issued, release)).pipe(
         Effect.exit,
         Effect.forkChild({ startImmediately: true })
       )
@@ -256,14 +254,28 @@ describe("JiraAuth token refresh", () => {
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
 
-      const exit = yield* JiraAuth.pipe(
-        Effect.flatMap((auth) => auth.getAccessToken()),
-        Effect.provide(authLayerWith(rejectingClient)),
+      const exit = yield* getAccessTokenWith(rejectingClient).pipe(
         Effect.exit
       )
 
       expect(exit._tag).toBe("Failure")
       const after = yield* storedToken
       expect(after).toBeNull()
+    })))
+
+  it.effect("names the CLI's own login command when the token is spent", () =>
+    withHome(Effect.gen(function*() {
+      yield* seedExpiredToken
+
+      const error = yield* getAccessTokenWith(rejectingClient).pipe(Effect.flip)
+
+      expect(error).toMatchObject({ _tag: "OAuthError", step: "refresh", status: 400, errorCode: "invalid_grant" })
+      expect(error.message).toContain("Please run 'test auth login'")
+    })))
+
+  it.effect("fails with the CLI's own error when nobody is logged in", () =>
+    withHome(Effect.gen(function*() {
+      const error = yield* getAccessTokenWith(rejectingClient).pipe(Effect.flip)
+      expect(error._tag).toBe("TestAuthMissing")
     })))
 })

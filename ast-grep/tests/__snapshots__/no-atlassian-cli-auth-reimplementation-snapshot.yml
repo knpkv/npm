@@ -1,0 +1,58 @@
+id: no-atlassian-cli-auth-reimplementation
+snapshots:
+  ? |
+    export const startCallbackServer = (state: string) => state
+  : labels:
+      - source: "startCallbackServer = (state: string) => state"
+        style: primary
+        start: 13
+        end: 59
+      - source: startCallbackServer
+        style: secondary
+        start: 13
+        end: 32
+  ? |
+    function startCallbackServer(state: string) { return state }
+  : labels:
+      - source: "function startCallbackServer(state: string) { return state }"
+        style: primary
+        start: 0
+        end: 60
+      - source: startCallbackServer
+        style: secondary
+        start: 9
+        end: 28
+  ? |
+    import * as Auth from "@knpkv/atlassian-common/auth"
+  : labels:
+      - source: import * as Auth from "@knpkv/atlassian-common/auth"
+        style: primary
+        start: 0
+        end: 52
+      - source: '"@knpkv/atlassian-common/auth"'
+        style: secondary
+        start: 22
+        end: 52
+      - source: "* as Auth"
+        style: secondary
+        start: 7
+        end: 16
+  ? |
+    import { OAuthError, refreshToken } from "@knpkv/atlassian-common/auth"
+  : labels:
+      - source: import { OAuthError, refreshToken } from "@knpkv/atlassian-common/auth"
+        style: primary
+        start: 0
+        end: 71
+      - source: '"@knpkv/atlassian-common/auth"'
+        style: secondary
+        start: 41
+        end: 71
+      - source: refreshToken
+        style: secondary
+        start: 21
+        end: 33
+      - source: refreshToken
+        style: secondary
+        start: 21
+        end: 33
