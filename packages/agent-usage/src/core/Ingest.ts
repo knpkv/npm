@@ -423,8 +423,11 @@ export const ingestOnce = (
       chunkBytes,
       maxLineBytes
     )
-    // The directory holding the samples may hold other files; only a missing samples file counts.
-    const claudeLimitSamples = samples.filesScanned === 0 ? { ...samples, rootMissing: true } : samples
+    // The directory holding the samples may hold other files; the log is missing only when its
+    // directory listed fine without it. A directory that could not be listed says why instead.
+    const claudeLimitSamples = samples.filesScanned === 0 && samples.unreadable.length === 0
+      ? { ...samples, rootMissing: true }
+      : samples
     const finishedAt = yield* Clock.currentTimeMillis
     return { startedAt, finishedAt, claude, codex, claudeLimitSamples }
   })

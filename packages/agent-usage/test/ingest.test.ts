@@ -287,3 +287,18 @@ describe("ingestOnce with a limit log of any name", () => {
       }))
   })
 })
+
+describe("ingestOnce with an unreadable limit-log directory", () => {
+  it.layer(TestLayer)((it) => {
+    it.effect("says the directory could not be read rather than that nothing was logged", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const directory = path.dirname(roots.claudeLimitSamples)
+        yield* fs.makeDirectory(directory, { recursive: true })
+        yield* fs.chmod(directory, 0o000)
+        const status = yield* ingestOnce(roots).pipe(Effect.ensuring(fs.chmod(directory, 0o700).pipe(Effect.ignore)))
+        expect(status.claudeLimitSamples.rootMissing).toBe(false)
+        expect(status.claudeLimitSamples.unreadable.map((entry) => entry.reason)).toEqual(["PermissionDenied"])
+      }))
+  })
+})

@@ -22,13 +22,19 @@ import { Option, Schema } from "effect"
 import type { LimitSnapshot, WindowMinutes } from "./Model.js"
 import { countSkip, noSkips, type ReadResult, type SkipCounts, type SourceFile, type SourceLine } from "./Readers.js"
 
+/** Epoch milliseconds a `Date` can hold (±8.64e15); anything further out would break the page. */
+const Instant = Schema.Int.check(
+  Schema.isGreaterThanOrEqualTo(-8_640_000_000_000_000),
+  Schema.isLessThanOrEqualTo(8_640_000_000_000_000)
+)
+
 const ClaudeLimitSample = Schema.fromJsonString(Schema.Struct({
   v: Schema.Literal(1),
-  observedAt: Schema.Int,
+  observedAt: Instant,
   machine: Schema.NonEmptyString,
   window: Schema.Literals(["five_hour", "seven_day", "spend"]),
   usedPercentage: Schema.Finite,
-  resetsAt: Schema.NullOr(Schema.Int)
+  resetsAt: Schema.NullOr(Instant)
 }))
 const decodeSample = Schema.decodeUnknownOption(ClaudeLimitSample)
 

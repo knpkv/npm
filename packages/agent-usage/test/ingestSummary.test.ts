@@ -32,5 +32,12 @@ describe("describeIngest", () => {
     expect(describeIngest(status(source({ rootMissing: true, filesScanned: 0, filesRead: 0 })))[2]).toBe(
       "claude-statusline limits: none logged yet"
     )
+    expect(
+      describeIngest(status(source({
+        filesScanned: 0,
+        filesRead: 0,
+        unreadable: [{ fileKey: ".", reason: "PermissionDenied" }]
+      })))[2]
+    ).toBe("claude-statusline limits: unreadable (PermissionDenied)")
   })
 })

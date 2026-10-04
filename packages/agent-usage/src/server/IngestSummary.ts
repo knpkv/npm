@@ -22,6 +22,9 @@ const describeSource = (name: string, status: SourceStatus): string => {
 /** The claude-statusline limit log: absent until claude-statusline has written one. */
 const describeLimitLog = (status: SourceStatus): string => {
   if (status.rootMissing) return "claude-statusline limits: none logged yet"
+  if (status.filesRead === 0 && status.unreadable.length > 0) {
+    return `claude-statusline limits: unreadable (${status.unreadable.map((entry) => entry.reason).join(", ")})`
+  }
   const skipped = skippedLines(status)
   return [
     "claude-statusline limits: read",

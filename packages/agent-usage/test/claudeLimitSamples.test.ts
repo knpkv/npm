@@ -93,10 +93,19 @@ describe("readClaudeLimitSamples", () => {
   it("skips and counts lines it cannot decode, including another format version", () => {
     const result = readClaudeLimitSamples(
       file,
-      lines("not json", sample({ v: 2 }), sample({ window: "monthly" }), sample({ usedPercentage: "6" }), sample()),
+      lines(
+        "not json",
+        sample({ v: 2 }),
+        sample({ window: "monthly" }),
+        sample({ usedPercentage: "6" }),
+        // Past the last instant a Date can hold: it would break the page that draws it.
+        sample({ resetsAt: 9_000_000_000_000_000 }),
+        sample({ observedAt: -9_000_000_000_000_000 }),
+        sample()
+      ),
       initialSamplesState
     )
     expect(result.snapshots).toHaveLength(1)
-    expect(result.skipped.unparseableLine).toBe(4)
+    expect(result.skipped.unparseableLine).toBe(6)
   })
 })
