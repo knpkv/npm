@@ -83,7 +83,8 @@ export const ToggleGroup = ({
     if (step === null) return
     event.preventDefault()
     const next = items[(from + step + items.length) % items.length]
-    if (next === undefined) return
+    // Wrapping can land on the chosen option (a group of one); that is no change to report.
+    if (next === undefined || next.value === value) return
     onValueChange(next.value)
     options.current.get(next.value)?.focus()
   }

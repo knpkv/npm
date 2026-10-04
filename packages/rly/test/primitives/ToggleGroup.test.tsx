@@ -101,6 +101,31 @@ describe("ToggleGroup", () => {
     await act(async () => root.unmount())
   })
 
+  it("reports nothing when an arrow key lands on the option already chosen", async () => {
+    const host = document.createElement("div")
+    document.body.append(host)
+    const root = createRoot(host)
+    const onValueChange = vi.fn()
+    await act(async () =>
+      root.render(
+        <ToggleGroup
+          aria-label="Range"
+          items={[{ label: "7d", value: "7d" }]}
+          onValueChange={onValueChange}
+          value="7d"
+        />
+      )
+    )
+    await act(async () => {
+      const only = option("7d")
+      only?.focus()
+      only?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    })
+    expect(onValueChange).not.toHaveBeenCalled()
+    await act(async () => root.unmount())
+  })
+
   it("rejects inaccessible or ambiguous configurations", () => {
     const noop = () => undefined
     expect(() =>
