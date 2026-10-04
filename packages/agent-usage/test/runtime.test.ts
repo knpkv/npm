@@ -40,7 +40,11 @@ describe("background work", () => {
           balances: []
         })
         const build = Layer.build(backgroundLayer({
-          roots: { claudeProjects: path.join(root, "projects"), codexHome: path.join(root, "codex"), machine: "host-a" },
+          roots: {
+            claudeProjects: path.join(root, "projects"),
+            codexHome: path.join(root, "codex"),
+            machine: "host-a"
+          },
           claude: { readToken: Effect.never, get: () => Effect.never },
           ticketSearch: () => Effect.never
         }))
