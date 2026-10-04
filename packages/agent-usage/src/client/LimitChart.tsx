@@ -4,7 +4,7 @@
  *
  * @module
  */
-import { useRef, useState } from "react"
+import { useState } from "react"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis } from "./axis.js"
 import { limitLabel, readingAt, stepPath } from "./chartModel.js"
@@ -16,8 +16,7 @@ const HEIGHT = 180
 const PERCENT_TICKS = [0, 25, 50, 75, 100]
 
 export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>; readonly range: ViewRange }) => {
-  const container = useRef<HTMLDivElement>(null)
-  const width = useWidth(container, 960)
+  const [width, container] = useWidth(960)
   const [cursor, setCursor] = useState<number | null>(null)
   const axis = timeAxis(props.range, width)
   const plotHeight = HEIGHT - PLOT.top - PLOT.bottom

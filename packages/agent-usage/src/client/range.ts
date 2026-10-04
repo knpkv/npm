@@ -44,12 +44,28 @@ const offsetAt = (instant: number, timeZone: string): number => {
   return asUtc - (instant - (instant % 1000))
 }
 
-/** The instant of local midnight on the calendar day `instant` falls on, shifted by `days`. */
+const QUARTER_HOUR = 15 * 60 * 1000
+
+/** The local calendar day of an instant, as a comparable UTC-midnight number. */
+const localDay = (instant: number, timeZone: string): number => {
+  const local = new Date(instant + offsetAt(instant, timeZone))
+  return Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate())
+}
+
+/**
+ * The first instant of the local calendar day `days` after the one `instant` falls on. Usually local
+ * midnight; where clocks jump forward at midnight (Santiago), the first instant that exists.
+ */
 const localMidnight = (instant: number, timeZone: string, days: number): number => {
   const local = new Date(instant + offsetAt(instant, timeZone))
   const wall = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate() + days)
   // The offset at the target midnight, not today's: a daylight-saving change may sit between.
-  return wall - offsetAt(wall - offsetAt(wall, timeZone), timeZone)
+  let candidate = wall - offsetAt(wall - offsetAt(wall, timeZone), timeZone)
+  // A skipped midnight resolves to the evening before; step forward into the target day.
+  while (localDay(candidate, timeZone) < wall) candidate += QUARTER_HOUR
+  // Never past the day's first instant: step back while the previous quarter hour is still in it.
+  while (localDay(candidate - QUARTER_HOUR, timeZone) === wall) candidate -= QUARTER_HOUR
+  return candidate
 }
 
 export const rangeOf = (preset: Preset, now: number, timeZone: string): ViewRange => {

@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import type { UsageReport } from "../shared/contracts.js"
 import { niceTicks, PLOT, timeAxis } from "./axis.js"
 import { type Measure, OTHER, type StackedUsage } from "./chartModel.js"
@@ -34,8 +34,7 @@ export const UsageChart = (props: {
   readonly slots: ReadonlyMap<string, number>
   readonly labelOf: (id: string) => string
 }) => {
-  const container = useRef<HTMLDivElement>(null)
-  const width = useWidth(container, 960)
+  const [width, container] = useWidth(960)
   const [hover, setHover] = useState<Hover | null>(null)
   const axis = timeAxis(props.range, width)
   const ticks = useMemo(() => niceTicks(props.stacked.max), [props.stacked.max])
