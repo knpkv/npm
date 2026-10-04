@@ -6,6 +6,7 @@ import {
   type Measure,
   OTHER,
   readingAt,
+  seriesIdentity,
   stackUsage,
   stepPath
 } from "../src/client/chartModel.js"
@@ -146,5 +147,16 @@ describe("readingAt", () => {
   it("reports a reading until its window resets, and nothing after", () => {
     expect(readingAt(points, 140)).toEqual(points[0]?.reading)
     expect(readingAt(points, 170)).toBeUndefined()
+  })
+})
+
+describe("seriesIdentity", () => {
+  it("tells Codex windows apart by length and Claude windows by name", () => {
+    expect(seriesIdentity({ agent: "codex", label: "primary", windowMinutes: 300 })).not.toBe(
+      seriesIdentity({ agent: "codex", label: "primary", windowMinutes: 10_080 })
+    )
+    expect(seriesIdentity({ agent: "claude", label: "seven_day", windowMinutes: 10_080 })).not.toBe(
+      seriesIdentity({ agent: "claude", label: "seven_day_opus", windowMinutes: 10_080 })
+    )
   })
 })

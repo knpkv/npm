@@ -22,7 +22,7 @@ const body = JSON.stringify({
   seven_day: { utilization: 40, resets_at: "2026-10-07T07:00:00+00:00" },
   seven_day_opus: null,
   iguana_necktie: { utilization: 3, resets_at: null },
-  extra_usage: { is_enabled: false, monthly_limit: null, used_credits: null, utilization: null, user_disabled: true },
+  extra_usage: { is_enabled: false, monthly_limit: null, used_credits: null, utilization: 12, user_disabled: true },
   limits: [{ kind: "session", percent: 12 }]
 })
 

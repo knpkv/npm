@@ -5,7 +5,7 @@
  * @module
  */
 import type { BalanceReading, LimitSnapshot } from "../core/Model.js"
-import { limitLabel } from "./chartModel.js"
+import { limitLabel, seriesIdentity } from "./chartModel.js"
 import { describeReason, formatAge, formatBalance, formatInstant, formatPercent } from "./format.js"
 
 const balanceName = (kind: BalanceReading["kind"]): string =>
@@ -44,11 +44,7 @@ export const Tiles = (props: {
 }) => (
   <section aria-label="Current limits and balances" className="usage-tiles">
     {tileSnapshots(props.latest, props.now).map((snapshot) => (
-      <article
-        className="usage-tile"
-        data-known={snapshot.reading._tag === "Known"}
-        key={`${snapshot.agent}:${snapshot.label}`}
-      >
+      <article className="usage-tile" data-known={snapshot.reading._tag === "Known"} key={seriesIdentity(snapshot)}>
         <h3>{limitLabel(snapshot.agent, snapshot.label, snapshot.windowMinutes)}</h3>
         {snapshot.reading._tag === "Known" ? (
           <>

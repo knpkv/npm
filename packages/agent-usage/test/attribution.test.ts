@@ -25,9 +25,9 @@ describe("ticket keys", () => {
     expect(ticketKeyFromPath("/dev/repo/worktrees/PROJ-1/PROJ-2")).toBe("PROJ-2")
   })
 
-  it("mines one ticket from prose, ignoring placeholders", () => {
+  it("mines the one ticket typed, keeping numbers that look like filler", () => {
     expect(singleTicket("work on RPS-7071 please")).toBe("RPS-7071")
-    expect(singleTicket("approved RPS-1234 like the docs say")).toBeNull()
+    expect(singleTicket("fix RPS-111")).toBe("RPS-111")
     expect(singleTicket("compare RPS-7071 and RPS-7072")).toBeNull()
   })
 })

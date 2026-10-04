@@ -33,29 +33,21 @@ const TICKET_KEY = /(?<![A-Za-z0-9])[A-Z][A-Z0-9]{1,9}-\d{1,6}(?![A-Za-z0-9])/g
 
 const ticketKeys = (text: string): ReadonlyArray<string> => [...text.matchAll(TICKET_KEY)].map((match) => match[0])
 
-/** Documentation filler: an ascending run from 1 or one repeated digit, three digits or more. */
-export const isPlaceholderTicketKey = (key: string): boolean => {
-  const digits = key.slice(key.lastIndexOf("-") + 1)
-  if (digits.length < 3) return false
-  const ascending = [...digits].every((digit, index) => digit === String((index + 1) % 10))
-  const repeated = [...digits].every((digit) => digit === digits[0])
-  return ascending || repeated
-}
-
-/** The first key a branch names. No placeholder filter: naming a branch is deliberate. */
+/** The first key a branch names: naming a branch is deliberate. */
 export const ticketKeyFromBranch = (branch: string): string | null => ticketKeys(branch)[0] ?? null
 
 /** The deepest key a path names, so `worktrees/PROJ-1/PROJ-2` is working on `PROJ-2`. */
 export const ticketKeyFromPath = (cwd: string): string | null => ticketKeys(cwd).at(-1) ?? null
 
-/** The one distinct non-placeholder key in typed text, or null when there are none or several. */
+/**
+ * The one distinct key in typed text, or null when there are none or several. Stored as typed:
+ * whether it books is decided when read, by the Known Projects, so `RPS-123` (a real ticket number
+ * that looks like filler) is never lost at ingest.
+ */
 export const singleTicket = (text: string): string | null => {
-  const distinct = [...new Set(ticketKeys(text).filter((key) => !isPlaceholderTicketKey(key)))]
+  const distinct = [...new Set(ticketKeys(text))]
   return distinct.length === 1 ? distinct[0] ?? null : null
 }
-
-/** True when typed text names any non-placeholder key, even ambiguously. */
-export const namesTickets = (text: string): boolean => ticketKeys(text).some((key) => !isPlaceholderTicketKey(key))
 
 /**
  * The repo a working directory belongs to. Worktrees live at `…/worktrees/<repo>/<branch>`, so

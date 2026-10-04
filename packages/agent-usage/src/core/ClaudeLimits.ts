@@ -94,7 +94,9 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
   if (reply.status !== 200) return unknownObservations(machine, observedAt, "Fetch")
   const decoded = decodeReply(reply.body)
   if (Option.isNone(decoded)) return unknownObservations(machine, observedAt, "Parse")
-  const snapshots = Object.entries(decoded.value).flatMap(([label, value]): ReadonlyArray<LimitSnapshot> => {
+  // Extra usage is a balance, not a percentage window, even when it reports a utilization.
+  const windows = Object.entries(decoded.value).filter(([label]) => label !== "extra_usage")
+  const snapshots = windows.flatMap(([label, value]): ReadonlyArray<LimitSnapshot> => {
     const window = decodeWindow(value)
     const snapshot = (reading: LimitSnapshot["reading"]): ReadonlyArray<LimitSnapshot> => [{
       agent: "claude",

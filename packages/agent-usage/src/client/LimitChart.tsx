@@ -7,7 +7,7 @@
 import { useState } from "react"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis } from "./axis.js"
-import { limitLabel, readingAt, stepPath } from "./chartModel.js"
+import { limitLabel, readingAt, seriesIdentity, stepPath } from "./chartModel.js"
 import { describeReason, formatInstant, formatPercent } from "./format.js"
 import type { ViewRange } from "./range.js"
 import { useWidth } from "./useWidth.js"
@@ -56,7 +56,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
           <path
             className="usage-limit-line"
             d={stepPath(series.points, props.range.to, axis.x, y)}
-            key={`${series.agent}:${series.label}`}
+            key={seriesIdentity(series)}
             stroke={`var(--usage-series-${(index % 8) + 1})`}
           />
         ))}
@@ -66,7 +66,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
       </svg>
       <ul className="usage-legend" aria-label="Limit windows">
         {drawn.map((series, index) => (
-          <li key={`${series.agent}:${series.label}`}>
+          <li key={seriesIdentity(series)}>
             <span className="usage-swatch" style={{ background: `var(--usage-series-${(index % 8) + 1})` }} />
             {limitLabel(series.agent, series.label, series.windowMinutes)}
           </li>
@@ -86,7 +86,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
             <tbody>
               {drawn.flatMap((series) =>
                 series.points.map((point) => (
-                  <tr key={`${series.agent}:${series.label}:${point.at}`}>
+                  <tr key={`${seriesIdentity(series)}:${point.at}`}>
                     <th scope="row">{limitLabel(series.agent, series.label, series.windowMinutes)}</th>
                     <td>{formatInstant(point.at)}</td>
                     <td>
@@ -107,7 +107,7 @@ export const LimitChart = (props: { readonly series: ReadonlyArray<LimitSeries>;
           {drawn.map((series) => {
             const reading = readingAt(series.points, instant)
             return (
-              <div key={`${series.agent}:${series.label}`}>
+              <div key={seriesIdentity(series)}>
                 {limitLabel(series.agent, series.label, series.windowMinutes)}:{" "}
                 <strong>
                   {reading === undefined
