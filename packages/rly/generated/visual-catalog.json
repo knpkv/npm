@@ -353,7 +353,8 @@
       },
       "storyId": "patterns-entitytable--states",
       "storyIds": [
-        "patterns-entitytable--states"
+        "patterns-entitytable--states",
+        "patterns-entitytable--compact-forced-colors"
       ]
     },
     {

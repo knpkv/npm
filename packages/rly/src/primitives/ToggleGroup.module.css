@@ -45,6 +45,14 @@
     padding-inline: var(--rly-space-8);
   }
 
+  /* Fingers need a bigger target than a pointer, whichever size the row uses. */
+  @media (pointer: coarse) {
+    .defaultSize .item,
+    .compact .item {
+      min-block-size: calc(var(--rly-space-40) + var(--rly-space-4));
+    }
+  }
+
   @media (hover: hover) {
     .item:not([data-state="on"]):hover {
       background: var(--rly-color-surface-3);

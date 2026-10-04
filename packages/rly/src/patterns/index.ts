@@ -38,6 +38,7 @@ export type {
   RlyEntityTableColumn,
   RlyEntityTableData,
   RlyEntityTableDensity,
+  RlyEntityTableHeadingSize,
   RlyEntityTableRow,
   RlyEntityTableSortDirection
 } from "./EntityTable.js"

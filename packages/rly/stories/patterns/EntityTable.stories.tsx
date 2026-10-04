@@ -1,3 +1,4 @@
+import { PortalProvider } from "../../src/foundations/PortalProvider.js"
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { useState } from "react"
 import { expect, userEvent, within } from "storybook/test"
@@ -125,21 +126,24 @@ const StateCatalog = () => {
 }
 
 const CompactCanary = () => (
-  <main data-entity-table-compact="" style={pageStyle}>
-    <EntityTable
-      columns={columnsFor("ascending")}
-      data={cached("partial")}
-      heading="Compact delivery items"
-      onSortChange={() => undefined}
-    />
-    <EntityTable
-      columns={columnsFor("ascending")}
-      data={cached("partial")}
-      density="compact"
-      heading="Dense delivery items"
-      onSortChange={() => undefined}
-    />
-  </main>
+  <PortalProvider>
+    <main data-entity-table-compact="" style={pageStyle}>
+      <EntityTable
+        columns={columnsFor("ascending")}
+        data={cached("partial")}
+        heading="Compact delivery items"
+        onSortChange={() => undefined}
+      />
+      <EntityTable
+        columns={columnsFor("ascending")}
+        data={cached("partial")}
+        density="compact"
+        heading="Dense delivery items"
+        headingSize="card"
+        onSortChange={() => undefined}
+      />
+    </main>
+  </PortalProvider>
 )
 
 const meta = {

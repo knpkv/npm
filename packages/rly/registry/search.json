@@ -471,15 +471,18 @@
         "ready"
       ],
       "terms": [
+        "card",
         "compact",
         "default",
         "density",
         "empty",
         "entitytable",
         "error",
+        "heading",
         "loading",
         "pattern",
         "ready",
+        "section",
         "sort",
         "table"
       ]

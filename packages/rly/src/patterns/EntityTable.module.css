@@ -15,11 +15,65 @@
 
   .heading {
     color: var(--rly-color-text-1);
+    margin: var(--rly-space-0);
+    overflow-wrap: anywhere;
+  }
+
+  .sectionHeading .heading {
     font: var(--rly-type-section-title-weight) var(--rly-type-section-title-size) /
       var(--rly-type-section-title-line-height) var(--rly-type-section-title-font);
     letter-spacing: var(--rly-type-section-title-tracking);
-    margin: var(--rly-space-0);
-    overflow-wrap: anywhere;
+  }
+
+  .cardHeading .heading {
+    font: var(--rly-type-card-title-weight) var(--rly-type-card-title-size) / var(--rly-type-card-title-line-height)
+      var(--rly-type-card-title-font);
+    letter-spacing: var(--rly-type-card-title-tracking);
+  }
+
+  /* While it is a table, the column headers sort; the separate controls serve the card layout. */
+  .headerSort {
+    align-items: center;
+    background: transparent;
+    border: 0;
+    border-radius: var(--rly-radius-tag);
+    color: inherit;
+    cursor: pointer;
+    display: inline-flex;
+    font: inherit;
+    gap: var(--rly-space-6);
+    margin-inline: calc(-1 * var(--rly-space-4));
+    min-block-size: var(--rly-space-32);
+    padding: var(--rly-space-0) var(--rly-space-4);
+    text-align: inherit;
+  }
+
+  .headerSort:hover {
+    background: var(--rly-color-surface-2);
+    color: var(--rly-color-text-1);
+  }
+
+  .headerSort:focus-visible {
+    outline: 3px solid var(--rly-color-focus);
+    outline-offset: var(--rly-space-2);
+  }
+
+  .sortSelect {
+    align-items: center;
+    display: flex;
+    gap: var(--rly-space-8);
+  }
+
+  .sortSelect > :first-child {
+    flex: 1;
+    min-inline-size: var(--rly-space-0);
+  }
+
+  @container (min-width: 40.0625rem) {
+    .sortControls,
+    .sortSelect {
+      display: none;
+    }
   }
 
   .loading {
@@ -121,6 +175,11 @@
       display: block;
     }
 
+    /* The card layout has its own sort controls; the clipped header keeps only its labels. */
+    .headerSort {
+      visibility: hidden;
+    }
+
     .head {
       block-size: 1px;
       clip: rect(0 0 0 0);
@@ -200,6 +259,11 @@
 
     .compact .cell:first-child::before {
       content: none;
+    }
+
+    .compact .cell::before {
+      font-weight: var(--rly-type-meta-weight);
+      text-transform: none;
     }
   }
 }

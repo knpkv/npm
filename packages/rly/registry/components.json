@@ -1658,6 +1658,10 @@
         },
         {
           "kind": "type",
+          "name": "RlyEntityTableHeadingSize"
+        },
+        {
+          "kind": "type",
           "name": "RlyEntityTableRow"
         },
         {
@@ -1679,7 +1683,8 @@
       "name": "EntityTable",
       "props": {
         "defaults": {
-          "density": "default"
+          "density": "default",
+          "heading": "section"
         },
         "types": [
           "EntityTableProps"
@@ -1688,12 +1693,14 @@
       "purpose": "Present sortable entity data with responsive row semantics",
       "slots": [],
       "states": [
+        "card",
         "compact",
         "default",
         "empty",
         "error",
         "loading",
-        "ready"
+        "ready",
+        "section"
       ],
       "status": "stable",
       "variants": [
@@ -1709,6 +1716,21 @@
             {
               "description": "Use default for the density presentation.",
               "name": "default"
+            }
+          ]
+        },
+        {
+          "defaultValue": "section",
+          "description": "Controls the heading presentation axis of EntityTable.",
+          "name": "heading",
+          "values": [
+            {
+              "description": "Use card for the heading presentation.",
+              "name": "card"
+            },
+            {
+              "description": "Use section for the heading presentation.",
+              "name": "section"
             }
           ]
         }
