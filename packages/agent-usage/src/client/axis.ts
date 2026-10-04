@@ -26,8 +26,7 @@ export const niceTicks = (max: number): ReadonlyArray<number> => {
   if (max <= 0) return [0]
   const rough = max / 4
   const magnitude = 10 ** Math.floor(Math.log10(rough))
-  const step = [1, 2, 2.5, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate >= rough) ??
-    rough
+  const step = [1, 2, 2.5, 5, 10].map((factor) => factor * magnitude).find((candidate) => candidate >= rough) ?? rough
   return [0, step, step * 2, step * 3, step * 4]
 }
 
@@ -57,7 +56,8 @@ export const timeTicks = (
   const span = Math.max(1, range.to - range.from)
   const stepHours =
     STEP_HOURS.find((hours) => hours >= minStepHours && (hours * HOUR_MILLIS * plotWidth) / span >= minSpacing) ??
-      STEP_HOURS[STEP_HOURS.length - 1] ?? 720
+    STEP_HOURS[STEP_HOURS.length - 1] ??
+    720
   const cursor = new Date(range.from)
   cursor.setMinutes(0, 0, 0)
   if (stepHours >= 24) cursor.setHours(0)

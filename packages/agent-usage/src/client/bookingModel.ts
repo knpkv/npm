@@ -10,16 +10,7 @@ import type { BookingSummary } from "../shared/contracts.js"
 import { bookingLabel } from "./chartModel.js"
 
 export type BookingColumn =
-  | "booking"
-  | "title"
-  | "agents"
-  | "requests"
-  | "input"
-  | "output"
-  | "cacheRead"
-  | "cacheWrite"
-  | "tokens"
-  | "cost"
+  "booking" | "title" | "agents" | "requests" | "input" | "output" | "cacheRead" | "cacheWrite" | "tokens" | "cost"
 
 export type SortDirection = "ascending" | "descending"
 
@@ -47,7 +38,7 @@ export const bookingColumns = (
   return ["booking", ...title, "agents", "requests", ...(breakdown ? BREAKDOWN : []), "tokens", "cost"]
 }
 
-const titleText = (summary: BookingSummary): string => summary.title?._tag === "Known" ? summary.title.summary : ""
+const titleText = (summary: BookingSummary): string => (summary.title?._tag === "Known" ? summary.title.summary : "")
 
 const sortValue = (summary: BookingSummary, column: BookingColumn): number | string => {
   switch (column) {
@@ -84,9 +75,10 @@ export const sortBookings = (
   sort: BookingSort
 ): ReadonlyArray<BookingSummary> => {
   const sign = sort.direction === "ascending" ? 1 : -1
-  return [...bookings].sort((left, right) =>
-    sign * compare(sortValue(left, sort.column), sortValue(right, sort.column)) ||
-    bookingLabel(left.booking).localeCompare(bookingLabel(right.booking))
+  return [...bookings].sort(
+    (left, right) =>
+      sign * compare(sortValue(left, sort.column), sortValue(right, sort.column)) ||
+      bookingLabel(left.booking).localeCompare(bookingLabel(right.booking))
   )
 }
 

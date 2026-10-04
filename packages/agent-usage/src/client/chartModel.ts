@@ -111,9 +111,9 @@ export const assignSlots = (
 
 export const bookingLabel = (
   booking: { readonly _tag: "Ticket"; readonly key: string } | { readonly _tag: "Repo"; readonly name: string }
-): string => booking._tag === "Ticket" ? booking.key : `${booking.name} (repo)`
+): string => (booking._tag === "Ticket" ? booking.key : `${booking.name} (repo)`)
 
-const agentName = (agent: Agent): string => agent === "claude" ? "Claude" : "Codex"
+const agentName = (agent: Agent): string => (agent === "claude" ? "Claude" : "Codex")
 
 /** A limit's name: by window length when known, else by the provider's own key. */
 export const limitLabel = (agent: Agent, label: string, windowMinutes: number | null): string => {
@@ -137,12 +137,14 @@ export const stepPath = (
   x: (at: number) => number,
   y: (percent: number) => number
 ): string =>
-  points.map((point, index) => {
-    if (point.reading._tag === "Unknown") return ""
-    const until = Math.min(points[index + 1]?.at ?? end, point.reading.resetsAt ?? end)
-    if (until <= point.at) return ""
-    return `M${x(point.at)},${y(point.reading.usedPercent)}H${x(until)}`
-  }).join("")
+  points
+    .map((point, index) => {
+      if (point.reading._tag === "Unknown") return ""
+      const until = Math.min(points[index + 1]?.at ?? end, point.reading.resetsAt ?? end)
+      if (until <= point.at) return ""
+      return `M${x(point.at)},${y(point.reading.usedPercent)}H${x(until)}`
+    })
+    .join("")
 
 /**
  * The reading in force at an instant: the last point at or before it, unless that reading's window
@@ -185,5 +187,5 @@ export const formatAxis = (measure: Measure, value: number): string =>
   measure === "tokens"
     ? compactNumber.format(value)
     : value >= 10 || Number.isInteger(value)
-    ? `$${compactNumber.format(value)}`
-    : `$${value.toFixed(2)}`
+      ? `$${compactNumber.format(value)}`
+      : `$${value.toFixed(2)}`

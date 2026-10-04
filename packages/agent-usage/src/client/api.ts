@@ -24,11 +24,11 @@ const ErrorBody = Schema.Struct({ message: Schema.String })
 const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody)
 
 const send = (request: HttpClientRequest.HttpClientRequest) =>
-  Effect.gen(function*() {
+  Effect.gen(function* () {
     const client = yield* HttpClient.HttpClient
-    const response = yield* client.execute(request).pipe(
-      Effect.mapError(() => new RequestFailure({ message: "The server could not be reached", status: 0 }))
-    )
+    const response = yield* client
+      .execute(request)
+      .pipe(Effect.mapError(() => new RequestFailure({ message: "The server could not be reached", status: 0 })))
     const body = yield* response.json.pipe(Effect.orElseSucceed(() => null))
     if (response.status >= 400) {
       const parsed = decodeErrorBody(body)
@@ -48,8 +48,8 @@ const getJson = <S extends Schema.Top & { readonly DecodingServices: never }>(pa
   send(HttpClientRequest.get(new URL(path, window.location.href))).pipe(
     Effect.flatMap((body) =>
       Schema.decodeUnknownEffect(schema)(body).pipe(
-        Effect.mapError(() =>
-          new RequestFailure({ message: "The server sent a reply this page cannot read", status: 200 })
+        Effect.mapError(
+          () => new RequestFailure({ message: "The server sent a reply this page cannot read", status: 200 })
         )
       )
     )
@@ -85,7 +85,7 @@ export const fetchStatus = getJson("/api/status", ServerStatus)
  * The fragment is cleared first, so the code never outlives this function's memory even if the
  * exchange fails.
  */
-export const bootstrapSession = Effect.gen(function*() {
+export const bootstrapSession = Effect.gen(function* () {
   const token = new URLSearchParams(window.location.hash.slice(1)).get("bootstrap_token")
   // Without a code this load relies on the cookie; check it still opens the API before showing data.
   if (token === null) {
@@ -93,8 +93,6 @@ export const bootstrapSession = Effect.gen(function*() {
   }
   window.history.replaceState(null, "", window.location.pathname)
   yield* send(
-    HttpClientRequest.post(new URL("/auth/bootstrap", window.location.href)).pipe(
-      HttpClientRequest.bearerToken(token)
-    )
+    HttpClientRequest.post(new URL("/auth/bootstrap", window.location.href)).pipe(HttpClientRequest.bearerToken(token))
   )
 })

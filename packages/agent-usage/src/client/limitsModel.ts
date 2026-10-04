@@ -33,10 +33,10 @@ export const limitTone = (reading: LimitReading): LimitTone =>
   reading._tag === "Unknown"
     ? "unknown"
     : reading.usedPercent >= 100
-    ? "at-limit"
-    : reading.usedPercent >= NEAR_PERCENT
-    ? "near"
-    : "ok"
+      ? "at-limit"
+      : reading.usedPercent >= NEAR_PERCENT
+        ? "near"
+        : "ok"
 
 const toneRank = { "at-limit": 3, near: 2, unknown: 1, ok: 0 } satisfies Record<LimitTone, number>
 
@@ -55,9 +55,11 @@ const CLAUDE_MODEL_WINDOWS = new Map([
 ])
 
 /** A window's name, or null when the provider's key is not one anybody published. */
-export const windowName = (
-  window: { readonly agent: Agent; readonly label: string; readonly windowMinutes: number | null }
-): string | null => {
+export const windowName = (window: {
+  readonly agent: Agent
+  readonly label: string
+  readonly windowMinutes: number | null
+}): string | null => {
   if (window.label === "*") return null
   if (window.agent === "claude") {
     if (window.label === "five_hour") return "5-hour"
@@ -69,12 +71,14 @@ export const windowName = (
   return window.windowMinutes === null ? null : `${Math.round(window.windowMinutes / 60)}-hour`
 }
 
-export const agentName = (agent: Agent): string => agent === "claude" ? "Claude" : "Codex"
+export const agentName = (agent: Agent): string => (agent === "claude" ? "Claude" : "Codex")
 
 /** A window's name with its agent, for places that list windows of both: "Claude 5-hour". */
-export const fullWindowName = (
-  window: { readonly agent: Agent; readonly label: string; readonly windowMinutes: number | null }
-): string => {
+export const fullWindowName = (window: {
+  readonly agent: Agent
+  readonly label: string
+  readonly windowMinutes: number | null
+}): string => {
   if (window.label === "*") return `${agentName(window.agent)} limits`
   return `${agentName(window.agent)} ${windowName(window) ?? `allowance ${window.label}`}`
 }
@@ -125,19 +129,18 @@ const byCloseness = (left: WindowSummary, right: WindowSummary): number =>
  * The latest limits, per agent, closest-to-the-limit first. Windows that reset since they were
  * read, or were read before a poll that then failed for the whole agent, are left out.
  */
-export const summarizeLimits = (
-  latest: ReadonlyArray<LimitSnapshot>,
-  now: number
-): ReadonlyArray<AgentLimits> => {
+export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: number): ReadonlyArray<AgentLimits> => {
   const agents: ReadonlyArray<Agent> = ["claude", "codex"]
   const groups = agents.flatMap((agent): ReadonlyArray<AgentLimits> => {
     const own = latest.filter((snapshot) => snapshot.agent === agent)
     if (own.length === 0) return []
     const failure = own.find((snapshot) => snapshot.label === "*")
     const failedAt = failure?.observedAt ?? Number.NEGATIVE_INFINITY
-    const live = own.filter((snapshot) =>
-      snapshot.label !== "*" && snapshot.observedAt > failedAt &&
-      !(snapshot.reading._tag === "Known" && snapshot.reading.resetsAt !== null && snapshot.reading.resetsAt <= now)
+    const live = own.filter(
+      (snapshot) =>
+        snapshot.label !== "*" &&
+        snapshot.observedAt > failedAt &&
+        !(snapshot.reading._tag === "Known" && snapshot.reading.resetsAt !== null && snapshot.reading.resetsAt <= now)
     )
     const named: Array<WindowSummary> = []
     const unnamed: Array<WindowSummary> = []
@@ -146,10 +149,12 @@ export const summarizeLimits = (
       if (name === null) unnamed.push(summarize(snapshot, `Unnamed allowance (${snapshot.label})`, now))
       else named.push(summarize(snapshot, name, now))
     }
-    const problem = failure !== undefined && failure.reading._tag === "Unknown" &&
-        own.every((snapshot) => snapshot.label === "*" || snapshot.observedAt < failure.observedAt)
-      ? { reason: describeReason(failure.reading.reason), observedAt: failure.observedAt }
-      : null
+    const problem =
+      failure !== undefined &&
+      failure.reading._tag === "Unknown" &&
+      own.every((snapshot) => snapshot.label === "*" || snapshot.observedAt < failure.observedAt)
+        ? { reason: describeReason(failure.reading.reason), observedAt: failure.observedAt }
+        : null
     return [{ agent, windows: named.sort(byCloseness), unnamed: unnamed.sort(byCloseness), problem }]
   })
   const worst = (group: AgentLimits): number => Math.max(-1, ...group.windows.map((window) => toneRank[window.tone]))
@@ -203,12 +208,15 @@ export const limitRows = (series: ReadonlyArray<LimitSeries>): ReadonlyArray<Lim
   series.flatMap((window): ReadonlyArray<LimitRow> => {
     const name = windowName(window)
     if (name === null) return []
-    const failures = series.filter((other) => other.agent === window.agent && other.label === "*")
+    const failures = series
+      .filter((other) => other.agent === window.agent && other.label === "*")
       .flatMap((other) => other.points)
-    return [{
-      id: `${window.agent}:${window.agent === "codex" ? window.windowMinutes : window.label}`,
-      name: `${agentName(window.agent)} ${name}`,
-      points: [...window.points, ...failures].sort((left, right) => left.at - right.at),
-      firstAt: window.points[0]?.at ?? null
-    }]
+    return [
+      {
+        id: `${window.agent}:${window.agent === "codex" ? window.windowMinutes : window.label}`,
+        name: `${agentName(window.agent)} ${name}`,
+        points: [...window.points, ...failures].sort((left, right) => left.at - right.at),
+        firstAt: window.points[0]?.at ?? null
+      }
+    ]
   })

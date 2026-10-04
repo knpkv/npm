@@ -51,15 +51,18 @@ const Row = (props: {
   const finalReading = readingAt(props.row.points, props.end)
   return (
     <g>
+      {/* The latest value sits beside the name, clear of the plot and the "now" marker. */}
       <text className="usage-row-label" x={PLOT.left} y={props.top + 11}>
         {props.row.name}
-      </text>
-      <text className="usage-row-value" textAnchor="end" x={right} y={props.top + 11}>
-        {finalReading === undefined
-          ? "—"
-          : finalReading._tag === "Known"
-            ? formatPercent(finalReading.usedPercent)
-            : describeReason(finalReading.reason)}
+        <tspan className="usage-row-value">
+          {` · ${
+            finalReading === undefined
+              ? "not read"
+              : finalReading._tag === "Known"
+                ? formatPercent(finalReading.usedPercent)
+                : describeReason(finalReading.reason)
+          }`}
+        </tspan>
       </text>
       <line className="usage-grid" x1={PLOT.left} x2={right} y1={y(100)} y2={y(100)} />
       <line className="usage-limit-near" x1={PLOT.left} x2={right} y1={y(NEAR_PERCENT)} y2={y(NEAR_PERCENT)} />
@@ -167,7 +170,16 @@ export const LimitChart = (props: {
         ))}
         {end < props.range.to ? (
           <g aria-hidden="true">
-            <line className="usage-now" x1={axis.x(end)} x2={axis.x(end)} y1={0} y2={height - AXIS} />
+            {rows.map((row, index) => (
+              <line
+                className="usage-now"
+                key={row.id}
+                x1={axis.x(end)}
+                x2={axis.x(end)}
+                y1={index * (ROW + ROW_GAP) + LABEL}
+                y2={index * (ROW + ROW_GAP) + ROW}
+              />
+            ))}
             <text className="usage-now-label" textAnchor="middle" x={axis.x(end)} y={height - AXIS + 12}>
               now
             </text>
