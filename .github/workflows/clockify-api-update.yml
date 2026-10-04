@@ -33,11 +33,13 @@ jobs:
       - name: Regenerate client
         run: pnpm --filter @knpkv/clockify-api-client regenerate
 
-      - name: Detect generated changes
+      # Open a PR only for upstream spec changes; regenerated-code-only diffs are
+      # generator churn and must not displace the published contract.
+      - name: Detect spec changes
         id: check
         shell: bash
         run: |
-          if git diff --quiet -- packages/clockify-api-client/.specs packages/clockify-api-client/src/generated; then
+          if git diff --quiet -- packages/clockify-api-client/.specs; then
             echo "updated=false" >> "$GITHUB_OUTPUT"
           else
             echo "updated=true" >> "$GITHUB_OUTPUT"

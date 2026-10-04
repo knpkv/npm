@@ -107,6 +107,39 @@ const changesetPathDiagnostics = (source: string): ReadonlyArray<string> =>
       : [`Generated changeset ${changesetPath ?? ""} must be unique per workflow run`]
   )
 
+// A regenerated-client-only diff is generator churn, not an upstream change: the
+// detection step must compare only `.specs/`, and the pull request must be gated on it.
+const specOnlyGuardDiagnostics = (source: string): ReadonlyArray<string> => {
+  const workflow: unknown = parse(source)
+  if (!isRecord(workflow) || !isRecord(workflow.jobs)) return ["API update workflow could not be inspected"]
+
+  return Object.values(workflow.jobs).flatMap((job) => {
+    if (!isRecord(job) || !Array.isArray(job.steps)) return []
+    const steps = job.steps.filter(isRecord)
+    const detection = steps.find((step) => Predicate.isString(step.run) && step.run.includes("updated=true"))
+    if (detection === undefined || !Predicate.isString(detection.id) || !Predicate.isString(detection.run)) {
+      return ["API update workflow must detect upstream spec changes"]
+    }
+    const pathspecs = detection.run.replace(/\\\n\s*/gu, " ").match(/git diff --quiet -- ([^;\n]+)/u)?.[1]
+      ?.trim().split(/\s+/u) ?? []
+    const pathspecDiagnostics = pathspecs.length === 0
+      ? ["API update workflow must compare spec paths with git diff --quiet"]
+      : pathspecs.flatMap((pathspec) =>
+        /(?:^|\/)\.specs(?:\/|$)/u.test(pathspec)
+          ? []
+          : [`API update workflow must open a pull request only for spec changes, not ${pathspec}`]
+      )
+    const gate = `steps.${detection.id}.outputs.updated == 'true'`
+    const pullRequestDiagnostics = steps.flatMap((step) =>
+      Predicate.isString(step.uses) && step.uses.startsWith("peter-evans/create-pull-request@")
+        && !(Predicate.isString(step.if) && step.if.includes(gate))
+        ? ["API update pull request must be gated on the spec-change detection step"]
+        : []
+    )
+    return [...pathspecDiagnostics, ...pullRequestDiagnostics]
+  })
+}
+
 const releaseWorkflow = (name: string, release: string, guidance = "Review the generated API.") => `
 jobs:
   update:
@@ -318,6 +351,42 @@ jobs:
         const source = yield* loadWorkflow(name)
         expect(source).toMatch(/cat\s+>\s+\.changeset\//u)
         expect(changesetPathDiagnostics(source)).toEqual([])
+      }
+    }))
+
+  it("rejects generated-code detection and accepts a spec-only gate", () => {
+    const workflow = (pathspecs: string, gate: string) => `
+jobs:
+  update:
+    steps:
+      - name: Detect spec changes
+        id: check
+        run: |
+          if git diff --quiet -- \\
+            ${pathspecs}; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Create pull request
+        if: ${gate}
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1
+`
+    const gate = "steps.check.outputs.updated == 'true'"
+    expect(specOnlyGuardDiagnostics(workflow("packages/x/.specs packages/x/src/generated", gate))).toEqual([
+      "API update workflow must open a pull request only for spec changes, not packages/x/src/generated"
+    ])
+    expect(specOnlyGuardDiagnostics(workflow("packages/x/.specs", "always()"))).toEqual([
+      "API update pull request must be gated on the spec-change detection step"
+    ])
+    expect(specOnlyGuardDiagnostics(workflow("packages/x/.specs/x-v1.json", gate))).toEqual([])
+    expect(specOnlyGuardDiagnostics(workflow("packages/x/.specs", gate))).toEqual([])
+  })
+
+  it.effect("opens API update pull requests only for spec changes", () =>
+    Effect.gen(function*() {
+      for (const name of ["clockify-api-update.yml", "jira-api-update.yml", "confluence-api-update.yml"]) {
+        expect(specOnlyGuardDiagnostics(yield* loadWorkflow(name))).toEqual([])
       }
     }))
 

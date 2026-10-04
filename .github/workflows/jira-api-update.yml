@@ -37,9 +37,9 @@ jobs:
         id: regenerate
         run: |
           pnpm --filter @knpkv/jira-api-client regenerate
-          if git diff --quiet -- \
-            packages/jira-api-client/.specs/jira-v3.json \
-            packages/jira-api-client/src/generated/JiraApi.ts; then
+          # Open a PR only for upstream spec changes; regenerated-code-only diffs are
+          # generator churn and must not displace the published contract.
+          if git diff --quiet -- packages/jira-api-client/.specs; then
             echo "updated=false" >> $GITHUB_OUTPUT
           else
             echo "updated=true" >> $GITHUB_OUTPUT
