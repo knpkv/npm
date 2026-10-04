@@ -24,7 +24,7 @@ test("usage is stacked by booking, with typed non-project keys listed rather tha
   const status = page.getByRole("contentinfo", { name: "Ingest status" })
   await status.getByText("Ignored ticket-like keys").click()
   await expect(status.getByText("GPT (1 requests)", { exact: false })).toBeVisible()
-  await expect(page.getByRole("img", { name: "Usage per day, stacked by booking" })).toBeVisible()
+  await expect(page.getByRole("group", { name: "Usage per day, stacked by booking" })).toBeVisible()
 })
 
 test("unpriced tokens are called out, and the booking shows ? instead of a number", async ({ page }) => {
@@ -83,7 +83,7 @@ test("every limit reading is also available as a table, without hovering", async
 test("the page fits a phone without horizontal page scroll", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 900 })
   await signIn(page)
-  await expect(page.getByRole("img", { name: "Usage per day, stacked by booking" })).toBeVisible()
+  await expect(page.getByRole("group", { name: "Usage per day, stacked by booking" })).toBeVisible()
   await expect(page.getByRole("region", { name: "Claude limits" }).getByRole("meter")).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
@@ -96,4 +96,18 @@ test("the filters are named radio groups that arrow keys move through", async ({
   await range.getByRole("radio", { name: "7d" }).focus()
   await page.keyboard.press("ArrowRight")
   await expect(range.getByRole("radio", { name: "30d" })).toBeFocused()
+})
+
+test("each usage column can be reached by keyboard and says its total and bookings", async ({ page }) => {
+  await signIn(page)
+  const chart = page.getByRole("group", { name: "Usage per day, stacked by booking" })
+  const columns = chart.getByRole("img")
+  const last = columns.last()
+  await last.focus()
+  await expect(last).toHaveAccessibleName(/total/)
+  await expect(page.getByRole("status").filter({ hasText: "Total" })).toBeVisible()
+  await page.keyboard.press("ArrowLeft")
+  await expect(columns.nth((await columns.count()) - 2)).toBeFocused()
+  await page.keyboard.press("Home")
+  await expect(columns.first()).toBeFocused()
 })

@@ -249,9 +249,31 @@
   font-variant-numeric: tabular-nums;
 }
 
-.usage-segment[data-hovered="true"] {
+.usage-column-target {
+  cursor: crosshair;
+  fill: transparent;
+  outline: none;
+}
+
+.usage-column-target:focus-visible {
+  stroke: var(--rly-color-focus);
+  stroke-width: 2;
+}
+
+g[data-active="true"] .usage-segment {
   stroke: var(--rly-color-text-1);
-  stroke-width: 1.5;
+  stroke-width: 1;
+}
+
+.usage-tooltip-row {
+  align-items: center;
+  display: flex;
+  gap: var(--rly-space-6);
+}
+
+.usage-tooltip-row strong {
+  margin-inline-start: auto;
+  padding-inline-start: var(--rly-space-12);
 }
 
 .usage-limit-line {
