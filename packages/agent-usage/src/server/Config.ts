@@ -13,7 +13,7 @@
  *
  * @module
  */
-import { Config, Crypto, Effect, Path, Schema, SchemaTransformation } from "effect"
+import { Config, ConfigProvider, Crypto, Effect, Path, Schema, SchemaTransformation } from "effect"
 import { Hex } from "effect/encoding"
 import type { SourceRoots } from "../core/Ingest.js"
 
@@ -45,11 +45,11 @@ const KEYCHAIN_SERVICE = "Claude Code-credentials"
  * eight hex digits of the directory's SHA-256 whenever a non-default directory was chosen, under the
  * user's account. Asking for the bare name with a custom directory reads another account's item.
  *
- * Claude Code reads an explicitly empty `CLAUDE_SECURESTORAGE_CONFIG_DIR` as "the default
- * directory"; Effect's configuration treats an empty variable as unset, so here it means "follow
- * `CLAUDE_CONFIG_DIR`". Only that combination (both set, the secure-storage one empty) differs.
+ * An explicitly empty `CLAUDE_SECURESTORAGE_CONFIG_DIR` means the default directory and the bare
+ * item name, as in Claude Code, so it is read from an environment that keeps empty values.
  */
 const claudeCredentialsLocation = (options: {
+  readonly home: string
   readonly user: string
   readonly claudeConfigDir: string
   readonly configDirChosen: boolean
@@ -58,8 +58,14 @@ const claudeCredentialsLocation = (options: {
   Effect.gen(function*() {
     const path = yield* Path.Path
     const digests = yield* Crypto.Crypto
-    const unsuffixed = options.secureStorageDir === undefined && !options.configDirChosen
-    const directory = (options.secureStorageDir ?? options.claudeConfigDir).normalize("NFC")
+    const unsuffixed = options.secureStorageDir === undefined
+      ? !options.configDirChosen
+      : options.secureStorageDir === ""
+    const directory = (options.secureStorageDir === undefined
+      ? options.claudeConfigDir
+      : options.secureStorageDir === ""
+      ? path.join(options.home, ".claude")
+      : options.secureStorageDir).normalize("NFC")
     const suffix = unsuffixed
       ? ""
       : `-${Hex.encode(yield* digests.digest("SHA-256", new TextEncoder().encode(directory))).slice(0, 8)}`
@@ -95,8 +101,12 @@ const Projects = Schema.String.pipe(
   )
 )
 
-/** Reads the configuration; `hostname` comes from the executable, the only place that may ask. */
-export const loadConfig = (hostname: string) =>
+/**
+ * Reads the configuration; `hostname` comes from the executable, the only place that may ask.
+ * `exactEnvironment` is the environment with empty values kept, which the executable builds; it
+ * is read only where an empty value means something (`CLAUDE_SECURESTORAGE_CONFIG_DIR`).
+ */
+export const loadConfig = (hostname: string, exactEnvironment?: ConfigProvider.ConfigProvider) =>
   Effect.gen(function*() {
     const path = yield* Path.Path
     const home = yield* Config.String("HOME")
@@ -108,9 +118,13 @@ export const loadConfig = (hostname: string) =>
     )
     const chosenConfigDir = yield* Config.option(Config.String("CLAUDE_CONFIG_DIR"))
     const claudeConfigDir = chosenConfigDir._tag === "Some" ? chosenConfigDir.value : path.join(home, ".claude")
-    const secureStorageDir = yield* Config.option(Config.String("CLAUDE_SECURESTORAGE_CONFIG_DIR"))
+    const secureStorageRead = Config.option(Config.String("CLAUDE_SECURESTORAGE_CONFIG_DIR"))
+    const secureStorageDir = yield* (exactEnvironment === undefined
+      ? secureStorageRead
+      : secureStorageRead.pipe(Effect.provideService(ConfigProvider.ConfigProvider, exactEnvironment)))
     const user = yield* Config.String("USER").pipe(Config.withDefault("claude-code-user"))
     const claudeCredentials = yield* claudeCredentialsLocation({
+      home,
       user,
       claudeConfigDir,
       configDirChosen: chosenConfigDir._tag === "Some",

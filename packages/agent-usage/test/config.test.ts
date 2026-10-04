@@ -4,7 +4,10 @@ import { ConfigProvider, Effect } from "effect"
 import { loadConfig, machineName } from "../src/server/Config.js"
 
 const load = (env: Record<string, string>) =>
-  loadConfig("Example-MacBook.local").pipe(
+  loadConfig(
+    "Example-MacBook.local",
+    ConfigProvider.fromEnvRecord({ HOME: "/home/a", USER: "a", ...env }, { preserveEmptyStrings: true })
+  ).pipe(
     Effect.provideService(
       ConfigProvider.ConfigProvider,
       ConfigProvider.fromEnvRecord({ HOME: "/home/a", USER: "a", ...env })
@@ -55,6 +58,13 @@ describe("configuration", () => {
         expect(custom.claudeCredentials).toEqual({
           file: "/home/a/claude-work/.credentials.json",
           keychainService: "Claude Code-credentials-864021f6",
+          keychainAccount: "a"
+        })
+        // An explicitly empty secure-storage directory means Claude Code's default, unsuffixed item.
+        const reset = yield* load({ CLAUDE_CONFIG_DIR: "/home/a/claude-work", CLAUDE_SECURESTORAGE_CONFIG_DIR: "" })
+        expect(reset.claudeCredentials).toEqual({
+          file: "/home/a/.claude/.credentials.json",
+          keychainService: "Claude Code-credentials",
           keychainAccount: "a"
         })
         const moved = yield* load({ CLAUDE_SECURESTORAGE_CONFIG_DIR: "/vault" })

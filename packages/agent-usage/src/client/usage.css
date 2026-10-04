@@ -65,7 +65,7 @@
   margin: 0;
 }
 
-.usage-live[data-live="Disconnected"] {
+.usage-live[data-live="problem"] {
   color: var(--rly-color-held-ink);
 }
 
@@ -397,6 +397,11 @@ g[data-active="true"] .usage-segment {
   pointer-events: none;
   position: absolute;
   z-index: 3;
+}
+
+/* A failure's explanation can be hovered, so it stays readable under magnification. */
+.usage-tooltip-hoverable {
+  pointer-events: auto;
 }
 
 .usage-tooltip-title {

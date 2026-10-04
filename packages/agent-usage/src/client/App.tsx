@@ -27,7 +27,7 @@ import { LimitChart } from "./LimitChart.js"
 import { LimitsSummary } from "./LimitsSummary.js"
 import { LiveIndicator } from "./LiveIndicator.js"
 import { PRESETS } from "./range.js"
-import { shown } from "./result.js"
+import { outcomeOf, shown } from "./result.js"
 import { StatusStrip } from "./StatusStrip.js"
 import { useLiveUpdates } from "./useLiveUpdates.js"
 import { formatMeasure, UsageChart } from "./UsageChart.js"
@@ -61,14 +61,21 @@ const Dashboard = () => {
   const [agent, setAgent] = useAtom(agentAtom)
   const [measure, setMeasure] = useAtom(measureAtom)
   const [selected, setSelected] = useAtom(selectedAtom)
-  const usage = shown(useAtomValue(usageAtom))
-  const limits = shown(useAtomValue(limitsAtom))
-  const status = shown(useAtomValue(statusAtom))
+  const usageResult = useAtomValue(usageAtom)
+  const limitsResult = useAtomValue(limitsAtom)
+  const statusResult = useAtomValue(statusAtom)
+  const usage = shown(usageResult)
+  const limits = shown(limitsResult)
+  const status = shown(statusResult)
   const now = useNow()
   const refreshUsage = useAtomRefresh(usageAtom)
   const refreshLimits = useAtomRefresh(limitsAtom)
   const refreshStatus = useAtomRefresh(statusAtom)
-  const live = useLiveUpdates({ usage: refreshUsage, limits: refreshLimits, status: refreshStatus })
+  const live = useLiveUpdates({
+    usage: { refresh: refreshUsage, outcome: outcomeOf(usageResult) },
+    limits: { refresh: refreshLimits, outcome: outcomeOf(limitsResult) },
+    status: { refresh: refreshStatus, outcome: outcomeOf(statusResult) }
+  })
   const slotsRef = useRef<ReadonlyMap<string, number>>(new Map())
 
   const stacked = useMemo(

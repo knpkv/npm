@@ -237,7 +237,8 @@ const seriesKey = (snapshot: LimitSnapshot): string =>
 const sameReading = (left: LimitSnapshot["reading"], right: LimitSnapshot["reading"]): boolean =>
   left._tag === "Known" && right._tag === "Known"
     ? left.usedPercent === right.usedPercent && left.resetsAt === right.resetsAt
-    : left._tag === "Unknown" && right._tag === "Unknown" && left.reason === right.reason
+    : left._tag === "Unknown" && right._tag === "Unknown" && left.reason === right.reason &&
+      left.detail === right.detail
 
 /**
  * Limit series over a range, from every snapshot up to its end in time order. Each series starts
@@ -251,7 +252,6 @@ export const buildLimitsReport = (
     agent: LimitSnapshot["agent"]
     label: string
     windowMinutes: LimitSnapshot["windowMinutes"]
-    readonly source: LimitSnapshot["source"]
     points: Array<LimitSeries["points"][number]>
   }
   const series = new Map<string, Building>()
@@ -280,18 +280,19 @@ export const buildLimitsReport = (
         agent: snapshot.agent,
         label: snapshot.label,
         windowMinutes: snapshot.windowMinutes,
-        source: snapshot.source,
         points: []
       }
     entry.label = snapshot.label
     entry.windowMinutes = snapshot.windowMinutes
     series.set(key, entry)
     append(entry, snapshot.observedAt, snapshot.reading)
-    // A source that could not be read at all breaks every window it reports, so no level is
-    // carried across the outage.
+    // A source that could not be read at all breaks every window of its agent, so no level is
+    // carried across the outage; the next reading from any source restores it. Claude's windows are
+    // observed by polls and claude-statusline alike, so the source a series was first seen by
+    // cannot decide which failures it shows.
     if (snapshot.label === "*") {
       for (const [other, otherEntry] of series) {
-        if (other !== key && otherEntry.agent === snapshot.agent && otherEntry.source === snapshot.source) {
+        if (other !== key && otherEntry.agent === snapshot.agent) {
           append(otherEntry, snapshot.observedAt, snapshot.reading)
         }
       }

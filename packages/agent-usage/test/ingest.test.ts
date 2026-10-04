@@ -259,3 +259,31 @@ describe("ingestOnce with Claude limit samples", () => {
       }))
   })
 })
+
+describe("ingestOnce with a limit log of any name", () => {
+  it.layer(TestLayer)((it) => {
+    it.effect("reads the configured file whatever its extension", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const custom = {
+          ...roots,
+          claudeLimitSamples: path.join(path.dirname(roots.claudeProjects), "claude-limits.log")
+        }
+        yield* fs.writeFileString(
+          custom.claudeLimitSamples,
+          `${
+            JSON.stringify({
+              v: 1,
+              observedAt: 1_000,
+              machine: "h",
+              window: "seven_day",
+              usedPercentage: 3,
+              resetsAt: null
+            })
+          }\n`
+        )
+        const status = yield* ingestOnce(custom)
+        expect(status.claudeLimitSamples).toMatchObject({ rootMissing: false, filesRead: 1 })
+      }))
+  })
+})

@@ -9,7 +9,7 @@
  * @module
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
+import { ConfigProvider, Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
@@ -21,7 +21,8 @@ import { makeOwnerSessionSecrets, ownerSessionOrigin, ownerSessionUrl } from "./
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
 import { IngestStatus as IngestStatusSchema } from "./shared/contracts.js"
 
-const config = loadConfig(hostname())
+// Empty values kept, for the one variable where an empty value means something.
+const config = loadConfig(hostname(), ConfigProvider.fromEnv({ preserveEmptyStrings: true }))
 
 const serve = Command.make(
   "serve",

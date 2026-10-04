@@ -6,7 +6,7 @@
  *
  * @module
  */
-import { useId, useState } from "react"
+import { useId, useRef, useState } from "react"
 import type { LimitReading, UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis, timeTicks } from "./axis.js"
@@ -165,7 +165,16 @@ export const LimitChart = (props: {
 }) => {
   const [width, container] = useWidth(960)
   const [cursor, setCursor] = useState<number | null>(null)
-  const [gap, setGap] = useState<Gap | null>(null)
+  const [gap, setShownGap] = useState<Gap | null>(null)
+  // Leaving a gap closes its explanation after a moment, so the pointer can move onto it
+  // (WCAG 1.4.13); entering the explanation keeps it open.
+  const closing = useRef<number | undefined>(undefined)
+  const setGap = (next: Gap | null) => {
+    window.clearTimeout(closing.current)
+    if (next !== null) setShownGap(next)
+    else closing.current = window.setTimeout(() => setShownGap(null), 300)
+  }
+  const keepGap = () => window.clearTimeout(closing.current)
   const [tableOpen, setTableOpen] = useState(false)
   const hatch = `${useId()}-hatch`
   const axis = timeAxis(props.range, width)
@@ -177,7 +186,8 @@ export const LimitChart = (props: {
   const tooltip = useTooltipPlacement(gap?.anchor ?? cursor, width, 0)
   useDismissOnEscape(cursor !== null || gap !== null, () => {
     setCursor(null)
-    setGap(null)
+    window.clearTimeout(closing.current)
+    setShownGap(null)
   })
 
   if (tabled.length === 0) {
@@ -301,7 +311,14 @@ export const LimitChart = (props: {
         ) : null}
       </details>
       {rows.length === 0 ? null : gap !== null ? (
-        <div className="usage-tooltip" ref={tooltip.ref} role="status" style={tooltip.style}>
+        <div
+          className="usage-tooltip usage-tooltip-hoverable"
+          onMouseEnter={keepGap}
+          onMouseLeave={() => setGap(null)}
+          ref={tooltip.ref}
+          role="status"
+          style={tooltip.style}
+        >
           <div className="usage-tooltip-title">{gap.window} could not be read</div>
           <div className="usage-tooltip-muted">
             {formatInstant(gap.from)} to {formatInstant(gap.to)}

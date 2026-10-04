@@ -435,3 +435,38 @@ test("a dropped live socket says so, reconnects and refetches once", async ({ pa
   expect(connections).toBe(2)
   expect(usageReads).toBe(readsWhileDown + 1)
 })
+
+test("an announced read that fails to load is retried, and the page does not claim to be current", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  const total = page.getByTestId("usage-total")
+  const before = await total.textContent()
+  let failuresLeft = 1
+  await page.route("**/api/usage?*", async (route) => {
+    if (failuresLeft > 0) {
+      failuresLeft -= 1
+      await route.fulfill({ status: 500, body: "boom" })
+      return
+    }
+    await route.continue()
+  })
+  await page.request.get("/__test/push")
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  await expect(total).not.toHaveText(before ?? "", { timeout: 5_000 })
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+})
+
+test("a failure's explanation stays open while the pointer moves onto it", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  const gap = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await gap.hover()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip).toContainText("security exited 36")
+  const box = await tooltip.boundingBox()
+  if (box === null) throw new Error("tooltip not laid out")
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 })
+  await expect(tooltip).toContainText("security exited 36")
+  await page.mouse.move(0, 0)
+  await expect(tooltip).toHaveCount(0)
+})

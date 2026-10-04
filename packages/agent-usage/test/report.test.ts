@@ -299,3 +299,53 @@ describe("buildLimitsReport", () => {
       .toEqual(["Known"])
   })
 })
+
+describe("buildLimitsReport across Claude sources", () => {
+  const reading = (
+    source: "claude-oauth-usage" | "claude-statusline",
+    label: string,
+    observedAt: number,
+    value: LimitSnapshot["reading"]
+  ): LimitSnapshot => ({
+    agent: "claude",
+    machine: "host-a",
+    source,
+    label,
+    windowMinutes: label === "*" ? null : 300,
+    observedAt,
+    reading: value
+  })
+  const known = (usedPercent: number): LimitSnapshot["reading"] => ({ _tag: "Known", usedPercent, resetsAt: null })
+  const failed = (detail: string): LimitSnapshot["reading"] => ({ _tag: "Unknown", reason: "Fetch", detail })
+
+  it("breaks a window with a failed poll whichever source observed it first", () => {
+    const firsts: ReadonlyArray<"claude-oauth-usage" | "claude-statusline"> = [
+      "claude-statusline",
+      "claude-oauth-usage"
+    ]
+    for (const first of firsts) {
+      const report = buildLimitsReport(
+        [
+          reading(first, "five_hour", 1_100, known(5)),
+          reading("claude-oauth-usage", "*", 1_200, failed("HTTP 500")),
+          reading("claude-oauth-usage", "five_hour", 1_300, known(9))
+        ],
+        { from: 1_000, to: 2_000 }
+      )
+      expect(report.series[0]?.points.map((point) => point.reading._tag)).toEqual(["Known", "Unknown", "Known"])
+    }
+  })
+
+  it("keeps a failure whose detail changed as its own point", () => {
+    const report = buildLimitsReport(
+      [
+        reading("claude-oauth-usage", "five_hour", 1_100, known(5)),
+        reading("claude-oauth-usage", "*", 1_200, failed("HTTP 429")),
+        reading("claude-oauth-usage", "*", 1_300, failed("HTTP 429")),
+        reading("claude-oauth-usage", "*", 1_400, failed("HTTP 500"))
+      ],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series[0]?.points.map((point) => point.at)).toEqual([1_100, 1_200, 1_400])
+  })
+})

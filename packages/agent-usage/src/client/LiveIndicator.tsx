@@ -22,23 +22,25 @@ export const LiveIndicator = (props: { readonly state: LiveState }) => {
     return () => window.clearInterval(timer)
   }, [])
   const { state } = props
+  // The live region holds only a stable phrase, announced once when it appears; the ticking age
+  // sits outside it, so a screen reader is not told the time every second.
+  const problem =
+    state._tag === "Disconnected"
+      ? "live updates disconnected, retrying"
+      : state._tag === "Live" && state.refetchFailing
+        ? "update failed, retrying"
+        : null
+  const age =
+    state._tag === "Connecting" || state.updatedAt === null
+      ? null
+      : `${problem === null ? "updated" : "last updated"} ${ago(state.updatedAt, now)}`
   return (
-    // Only losing the connection is announced; the ticking age would otherwise speak every second.
-    <Text
-      aria-live={state._tag === "Disconnected" ? "polite" : "off"}
-      as="p"
-      className="usage-live"
-      data-live={state._tag}
-      tone="secondary"
-      variant="meta"
-    >
-      {state._tag === "Live"
-        ? `updated ${ago(state.updatedAt, now)}`
-        : state._tag === "Connecting"
-          ? "connecting to live updates…"
-          : state.updatedAt === null
-            ? "live updates disconnected, retrying"
-            : `live updates disconnected, retrying · last updated ${ago(state.updatedAt, now)}`}
+    <Text as="p" className="usage-live" data-live={problem === null ? "ok" : "problem"} tone="secondary" variant="meta">
+      <span aria-atomic="true" aria-live="polite">
+        {problem}
+      </span>
+      {problem !== null && age !== null ? " · " : null}
+      {age ?? (problem === null ? "connecting to live updates…" : null)}
     </Text>
   )
 }
