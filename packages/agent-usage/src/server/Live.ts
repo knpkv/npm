@@ -1,0 +1,62 @@
+/**
+ * The live-updates socket: `GET /api/live` upgrades to a WebSocket that sends the current
+ * {@link LiveVersions} and then every change, so the page refetches a read only when it moved.
+ *
+ * **Mental model**
+ *
+ * - **The same door as every read.** The upgrade is admitted by the owner-session check the API
+ *   uses, unchanged: the session cookie, the page's own origin, Fetch Metadata, a read method.
+ *   Anything else is refused before the socket exists.
+ * - **Versions, not data.** A message names which reads moved; the page fetches them through the
+ *   ordinary authenticated routes, so the socket adds no second path to the data.
+ * - **Moved after commit.** The runtime moves a counter once the store holds the change, so a
+ *   refetch triggered by a message always sees it.
+ *
+ * @module
+ */
+import { Effect, Schema, Stream, SubscriptionRef } from "effect"
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
+import { LiveVersions } from "../shared/contracts.js"
+import { authorizeOwnerRequest, OwnerSessionSecrets } from "./OwnerSession.js"
+import { RuntimeState } from "./Runtime.js"
+
+const encodeVersions = Schema.encodeSync(Schema.fromJsonString(LiveVersions))
+
+const refusal = (status: 401 | 403, message: string) =>
+  HttpServerResponse.text(message, { status, headers: { "cache-control": "private, no-store" } })
+
+const live = Effect.gen(function*() {
+  const request = yield* HttpServerRequest.HttpServerRequest
+  const secrets = yield* OwnerSessionSecrets
+  const state = yield* RuntimeState
+  const admitted = yield* Effect.result(authorizeOwnerRequest(
+    {
+      credential: request.cookies["agent_usage_owner"] ?? "",
+      fetchSite: request.headers["sec-fetch-site"],
+      method: request.method,
+      origin: request.headers.origin
+    },
+    secrets
+  ))
+  if (admitted._tag === "Failure") {
+    return admitted.failure._tag === "UnauthorizedApiError"
+      ? refusal(401, admitted.failure.message)
+      : refusal(403, admitted.failure.message)
+  }
+  const socket = yield* request.upgrade
+  const write = yield* socket.writer
+  const reader = yield* socket.reader
+  // Messages from the page are not expected; reading only notices that it went away.
+  const closed = Effect.forever(reader.pull).pipe(Effect.ignore)
+  const pushing = SubscriptionRef.changes(state.versions).pipe(
+    Stream.runForEach((versions) => write.write(encodeVersions(versions))),
+    Effect.ignore
+  )
+  yield* Effect.raceFirst(pushing, closed)
+  return HttpServerResponse.empty()
+}).pipe(
+  Effect.scoped,
+  Effect.catchTag("HttpServerError", () => Effect.succeed(refusal(403, "Not a WebSocket upgrade")))
+)
+
+export const LiveRouter = HttpRouter.use((router) => router.add("GET", "/api/live", live))

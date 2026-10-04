@@ -73,6 +73,32 @@ describe("UsageStore", () => {
         expect(series.map((row) => row.observedAt)).toEqual([10_000, 20_000, 30_000])
       }))
 
+    it.effect("compresses a Claude window across poll and claude-statusline readings as one series", () =>
+      Effect.gen(function*() {
+        const store = yield* UsageStore
+        const claude = (
+          source: "claude-oauth-usage" | "claude-statusline",
+          observedAt: number,
+          usedPercent: number
+        ): LimitSnapshot => ({
+          agent: "claude",
+          machine: "merged",
+          source,
+          label: "five_hour",
+          windowMinutes: 300,
+          observedAt,
+          reading: { _tag: "Known", usedPercent, resetsAt: null }
+        })
+        yield* store.recordObservations([
+          claude("claude-oauth-usage", 1_100, 10),
+          claude("claude-statusline", 1_200, 15),
+          claude("claude-oauth-usage", 1_300, 10),
+          claude("claude-oauth-usage", 1_400, 20)
+        ], [])
+        const series = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "merged" })
+        expect(series.map((row) => row.observedAt)).toEqual([1_100, 1_200, 1_300, 1_400])
+      }))
+
     it.effect("finds a change that arrives late, inside a run of equal readings", () =>
       Effect.gen(function*() {
         const store = yield* UsageStore

@@ -19,7 +19,7 @@ import { Data, Effect, Option } from "effect"
 import type { BookingSummary, LimitSeries, LimitsReport, Period, UsageCell, UsageReport } from "../shared/contracts.js"
 import { attribute, bookingId, projectOf } from "./Attribution.js"
 import type { Agent, LimitSnapshot, TicketTitleValue, Tokens } from "./Model.js"
-import { totalTokens } from "./Model.js"
+import { failureCovers, totalTokens } from "./Model.js"
 import { groupCost } from "./Pricing.js"
 import { BUCKET_MILLIS, type Range, type UsageGroup } from "./Store.js"
 
@@ -237,7 +237,8 @@ const seriesKey = (snapshot: LimitSnapshot): string =>
 const sameReading = (left: LimitSnapshot["reading"], right: LimitSnapshot["reading"]): boolean =>
   left._tag === "Known" && right._tag === "Known"
     ? left.usedPercent === right.usedPercent && left.resetsAt === right.resetsAt
-    : left._tag === "Unknown" && right._tag === "Unknown" && left.reason === right.reason
+    : left._tag === "Unknown" && right._tag === "Unknown" && left.reason === right.reason &&
+      left.detail === right.detail
 
 /**
  * Limit series over a range, from every snapshot up to its end in time order. Each series starts
@@ -251,11 +252,15 @@ export const buildLimitsReport = (
     agent: LimitSnapshot["agent"]
     label: string
     windowMinutes: LimitSnapshot["windowMinutes"]
-    readonly source: LimitSnapshot["source"]
     points: Array<LimitSeries["points"][number]>
   }
   const series = new Map<string, Building>()
   const latest = new Map<string, LimitSnapshot>()
+  // Every source-wide failure so far, per agent, for windows that appear only after one.
+  const failures = new Map<
+    LimitSnapshot["agent"],
+    Array<{ readonly at: number; readonly reading: LimitSnapshot["reading"] }>
+  >()
   const append = (entry: Building, at: number, reading: LimitSnapshot["reading"]) => {
     const point = { at: Math.max(at, range.from), reading }
     // Before the range, only the newest reading matters: it becomes the left-edge point.
@@ -275,23 +280,33 @@ export const buildLimitsReport = (
     const key = seriesKey(snapshot)
     // The tiles show the newest observation, so "read … ago" moves on with unchanged readings.
     latest.set(key, snapshot)
-    const entry = series.get(key) ??
+    const known = series.get(key)
+    const entry = known ??
       {
         agent: snapshot.agent,
         label: snapshot.label,
         windowMinutes: snapshot.windowMinutes,
-        source: snapshot.source,
         points: []
       }
+    // A window first seen after a failed poll still carries that failure: the poll did not read it.
+    if (known === undefined && snapshot.label !== "*" && failureCovers(snapshot.agent, snapshot.label)) {
+      for (const failure of failures.get(snapshot.agent) ?? []) append(entry, failure.at, failure.reading)
+    }
     entry.label = snapshot.label
     entry.windowMinutes = snapshot.windowMinutes
     series.set(key, entry)
     append(entry, snapshot.observedAt, snapshot.reading)
-    // A source that could not be read at all breaks every window it reports, so no level is
-    // carried across the outage.
+    // A source that could not be read at all breaks every window of its agent, so no level is
+    // carried across the outage; the next reading from any source restores it. Claude's windows are
+    // observed by polls and claude-statusline alike, so the source a series was first seen by
+    // cannot decide which failures it shows.
     if (snapshot.label === "*") {
+      failures.set(snapshot.agent, [
+        ...(failures.get(snapshot.agent) ?? []),
+        { at: snapshot.observedAt, reading: snapshot.reading }
+      ])
       for (const [other, otherEntry] of series) {
-        if (other !== key && otherEntry.agent === snapshot.agent && otherEntry.source === snapshot.source) {
+        if (other !== key && otherEntry.agent === snapshot.agent && failureCovers(otherEntry.agent, otherEntry.label)) {
           append(otherEntry, snapshot.observedAt, snapshot.reading)
         }
       }

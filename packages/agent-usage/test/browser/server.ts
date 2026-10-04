@@ -4,8 +4,8 @@
  */
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Clock, Effect, Layer, Redacted } from "effect"
-import { Etag, HttpPlatform, HttpRouter, HttpServerResponse } from "effect/http"
+import { Clock, Effect, Layer, Redacted, SubscriptionRef } from "effect"
+import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import type { UsageEvent } from "../../src/core/Model.js"
 import { UsageStore } from "../../src/core/Store.js"
@@ -67,6 +67,27 @@ const seed = Effect.gen(function*() {
       source: "claude-oauth-usage",
       label: "five_hour",
       windowMinutes: 300,
+      observedAt: now - 4 * HOUR,
+      reading: { _tag: "Known", usedPercent: 30, resetsAt: now + 3 * HOUR }
+    }, {
+      // A poll the Keychain refused, between two good readings: the gap must say why.
+      agent: "claude",
+      machine: "fixture",
+      source: "claude-oauth-usage",
+      label: "*",
+      windowMinutes: null,
+      observedAt: now - 3 * HOUR,
+      reading: {
+        _tag: "Unknown",
+        reason: "KeychainDenied",
+        detail: "the Keychain refused access (security exited 36)"
+      }
+    }, {
+      agent: "claude",
+      machine: "fixture",
+      source: "claude-oauth-usage",
+      label: "five_hour",
+      windowMinutes: 300,
       observedAt: now - HOUR,
       reading: { _tag: "Known", usedPercent: 42, resetsAt: now + 3 * HOUR }
     }],
@@ -92,6 +113,69 @@ const run = Effect.gen(function*() {
         "GET",
         "/__test/session",
         Effect.succeed(HttpServerResponse.text(Redacted.value(security.ownerToken)))
+      )
+      // Stands in for a Claude poll some minutes ago: failed, or read again, then announced.
+      yield* router.add(
+        "GET",
+        "/__test/limits",
+        Effect.gen(function*() {
+          const request = yield* HttpServerRequest.HttpServerRequest
+          const url = new URL(request.url, origin)
+          const usage = yield* UsageStore
+          const state = yield* RuntimeState
+          const now = yield* Clock.currentTimeMillis
+          const observedAt = now - Number(url.searchParams.get("ago") ?? "0")
+          yield* usage.recordObservations(
+            [
+              url.searchParams.get("reading") === "recover"
+                ? {
+                  agent: "claude",
+                  machine: "fixture",
+                  source: "claude-oauth-usage",
+                  label: "five_hour",
+                  windowMinutes: 300,
+                  observedAt,
+                  reading: { _tag: "Known", usedPercent: 50, resetsAt: now + 3 * HOUR }
+                }
+                : {
+                  agent: "claude",
+                  machine: "fixture",
+                  source: "claude-oauth-usage",
+                  label: "*",
+                  windowMinutes: null,
+                  observedAt,
+                  reading: { _tag: "Unknown", reason: "Fetch", detail: "HTTP 500" }
+                }
+            ],
+            []
+          )
+          yield* SubscriptionRef.update(state.versions, (versions) => ({ ...versions, limits: versions.limits + 1 }))
+          return HttpServerResponse.text("recorded")
+        })
+      )
+      // Stands in for an ingest pass: a new booking committed, then announced on the live socket.
+      yield* router.add(
+        "GET",
+        "/__test/push",
+        Effect.gen(function*() {
+          const usage = yield* UsageStore
+          const state = yield* RuntimeState
+          const now = yield* Clock.currentTimeMillis
+          const pushed = event(now, `pushed-${now}`, {
+            occurredAt: now - 1_000,
+            attribution: { cwd: "/home/dev/code/pushed-repository", branch: "main", activeTicket: null }
+          })
+          yield* usage.commitChunk({
+            agent: "claude",
+            fileKey: `pushed-${now}.jsonl`,
+            cursor: { identity: "0:0", offset: 0, state: "{}" },
+            events: [pushed],
+            snapshots: [],
+            balances: []
+          })
+          yield* SubscriptionRef.update(state.versions, (versions) => ({ ...versions, usage: versions.usage + 1 }))
+          return HttpServerResponse.text("pushed")
+        })
       )
     })
   )

@@ -47,7 +47,7 @@ A rolling subscription allowance the provider meters as a percentage, such as Cl
 _Avoid_: Quota, rate limit bucket
 
 **Limit Snapshot**:
-One observation of a Limit Window's used percentage and reset time, or a typed reason it could not be read. Kept as observed (Codex: unchanged readings at most every 10 minutes); a series is read back as its changes.
+One observation of a Limit Window's used percentage and reset time, or a typed reason it could not be read (with what exactly went wrong). Claude's come from limit polls and from claude-statusline's limit log, Codex's from its rollouts; a Claude window is one series whichever observed it. Kept as observed (Codex: unchanged readings at most every 10 minutes); a series is read back as its changes.
 _Avoid_: Limit sample, usage reading
 
 **Balance Reading**:

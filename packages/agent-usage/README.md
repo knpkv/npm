@@ -26,7 +26,12 @@ pnpm --filter @knpkv/agent-usage start serve     # prints the URL that gets you 
 pnpm --filter @knpkv/agent-usage start ingest    # one pass, then a summary; --json for one JSON value
 ```
 
-`serve` ingests every minute and polls Claude's limits every five. The printed URL carries a
+`serve` ingests every minute and polls Claude's limits every five. The page stays current by
+itself: after each ingest pass and limit poll is stored, the server tells the page over a WebSocket
+(`/api/live`, admitted by the same session cookie and origin checks as every read) which reads
+changed, and the page refetches only those. A dropped socket reconnects with backoff and refetches
+everything once; the header says how long ago the page was updated, or that it is reconnecting.
+The printed URL carries a
 one-time code in its fragment; opening it exchanges the code for a session cookie and strips it from
 the address bar. The code expires a minute after the server binds, so restart for a fresh one. The
 server only listens on loopback and only answers reads.
@@ -39,14 +44,16 @@ For development, `pnpm --filter @knpkv/agent-usage dev` runs the server and Vite
 
 ## Configuration
 
-| Variable               | Default                      | Meaning                                                                   |
-| ---------------------- | ---------------------------- | ------------------------------------------------------------------------- |
-| `PORT`                 | `3112`                       | Port to bind on `127.0.0.1`                                               |
-| `AGENT_USAGE_HOME`     | `~/.local/share/agent-usage` | Store directory; must be `0700`, created so when missing                  |
-| `AGENT_USAGE_MACHINE`  | short, lower-cased hostname  | Machine name stamped on every row                                         |
-| `AGENT_USAGE_PROJECTS` | none                         | Extra Known Projects, comma-separated (`RPS,ABC`)                         |
-| `CLAUDE_CONFIG_DIR`    | `~/.claude`                  | Claude Code's config; transcripts are read from `projects/` below it      |
-| `CODEX_HOME`           | `~/.codex`                   | Codex's home; rollouts are read from `sessions/` and `archived_sessions/` |
+| Variable                          | Default                                                             | Meaning                                                                   |
+| --------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| `PORT`                            | `3112`                                                              | Port to bind on `127.0.0.1`                                               |
+| `AGENT_USAGE_HOME`                | `~/.local/share/agent-usage`                                        | Store directory; must be `0700`, created so when missing                  |
+| `AGENT_USAGE_MACHINE`             | short, lower-cased hostname                                         | Machine name stamped on every row                                         |
+| `AGENT_USAGE_PROJECTS`            | none                                                                | Extra Known Projects, comma-separated (`RPS,ABC`)                         |
+| `CLAUDE_CONFIG_DIR`               | `~/.claude`                                                         | Claude Code's config; transcripts are read from `projects/` below it      |
+| `CODEX_HOME`                      | `~/.codex`                                                          | Codex's home; rollouts are read from `sessions/` and `archived_sessions/` |
+| `CLAUDE_SECURESTORAGE_CONFIG_DIR` | unset                                                               | Where Claude Code keeps credentials when not in its config directory      |
+| `AGENT_USAGE_CLAUDE_LIMITS`       | `${XDG_STATE_HOME:-~/.local/state}/agent-usage/claude-limits.jsonl` | The claude-statusline limit log, read like a transcript                   |
 
 Ticket titles come from `acli jira workitem search` when `acli` is installed, cached for a day in
 the store. Without it, tickets show their key and the status line says why.
@@ -80,11 +87,23 @@ with no price are shown as unpriced, never as $0.
 
 - **Claude** limits appear in no transcript. They are polled from `GET
 https://api.anthropic.com/api/oauth/usage`, the endpoint Claude Code's `/usage` dialog reads, with
-  the OAuth access token Claude Code already holds (`<CLAUDE_CONFIG_DIR>/.credentials.json`, or the
-  macOS login Keychain item `Claude Code-credentials`). The token is server-private: it is read per
-  poll, sent only in that request's `Authorization` header to `api.anthropic.com` with redirects
-  refused, and never stored, logged, refreshed or put in an error. A failed poll is stored as an
-  Unknown reading with its reason, so the gap shows.
+  the OAuth access token Claude Code already holds: `.credentials.json` in its secure-storage
+  directory (`CLAUDE_SECURESTORAGE_CONFIG_DIR`, else `CLAUDE_CONFIG_DIR`, else `~/.claude`), or on
+  macOS the login Keychain item Claude Code itself reads, `Claude Code-credentials` under your user
+  name, suffixed with `-` and the first eight hex digits of the directory's SHA-256 whenever a
+  non-default directory is set. The token is server-private: it is read per poll, sent only in that
+  request's `Authorization` header to `api.anthropic.com` with redirects refused, and never stored,
+  logged, refreshed or put in an error. A failed poll is stored as an Unknown reading with its
+  reason and what exactly went wrong (no credentials file, no Keychain item, the Keychain refusing
+  access with `security`'s exit code, an expired token, an HTTP status, an unreadable reply), shown
+  on hover or focus of the hatched gap and in the readings table.
+- **claude-statusline** appends a line to its limit log whenever a Claude window's reading moves
+  (`{"v":1,"observedAt":<ms>,"machine":"<hostname>","window":"five_hour"|"seven_day"|"spend",
+"usedPercentage":<number>,"resetsAt":<ms|null>}`). The log is read incrementally like a
+  transcript and recorded as Limit Snapshots of this Machine next to the polls, so a window is one
+  series whichever observed it. A repeated reading (same machine, window, reset and percentage) is
+  kept once; a line that does not decode, or another format version, is skipped and counted in the
+  status line. `spend` is the apps gateway's spend limit, shown as the Spend row.
 - **Codex** writes its account limits and credit balance into every rollout, so its limit history
   is backfilled from old sessions. Only the account-level `codex` limit is read; model-scoped limits
   are left out. A forked subagent rollout begins with a copy of its parent's history; that copy is

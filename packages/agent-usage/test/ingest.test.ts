@@ -20,6 +20,7 @@ const setup = Effect.gen(function*() {
   const roots: SourceRoots = {
     claudeProjects: path.join(root, "claude", "projects"),
     codexHome: path.join(root, "codex"),
+    claudeLimitSamples: path.join(root, "state", "agent-usage", "claude-limits.jsonl"),
     machine: "host-a"
   }
   yield* fs.makeDirectory(path.join(roots.claudeProjects, "-w-app", "sess-1", "subagents"), { recursive: true })
@@ -218,6 +219,86 @@ describe("ingestOnce", () => {
         const store = yield* UsageStore
         const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "host-a" })
         expect(groups.map((group) => [group.requests, group.tokens.output])).toEqual([[1, 1_093]])
+      }))
+  })
+})
+
+describe("ingestOnce with Claude limit samples", () => {
+  it.layer(TestLayer)((it) => {
+    it.effect("reads the samples file incrementally and reports it when missing", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const missing = yield* ingestOnce(roots)
+        expect(missing.claudeLimitSamples.rootMissing).toBe(true)
+
+        yield* fs.makeDirectory(path.dirname(roots.claudeLimitSamples), { recursive: true })
+        const line = (observedAt: number, usedPercentage: number) =>
+          `${
+            JSON.stringify({
+              v: 1,
+              observedAt,
+              machine: "KNPKV-SER8",
+              window: "five_hour",
+              usedPercentage,
+              resetsAt: 1_791_139_731_000
+            })
+          }\n`
+        yield* fs.writeFileString(roots.claudeLimitSamples, `${line(1_000, 6)}garbage\n`)
+        const first = yield* ingestOnce(roots)
+        expect(first.claudeLimitSamples).toMatchObject({ rootMissing: false, filesRead: 1 })
+        expect(first.claudeLimitSamples.skipped.unparseableLine).toBe(1)
+
+        yield* fs.writeFileString(roots.claudeLimitSamples, `${line(2_000, 6)}${line(3_000, 8)}`, { flag: "a" })
+        yield* ingestOnce(roots)
+        const store = yield* UsageStore
+        const snapshots = yield* store.limitSnapshots({ from: 0, to: 10_000, machine: "host-a" })
+        expect(snapshots.map((snapshot) => [snapshot.source, snapshot.observedAt])).toEqual([
+          ["claude-statusline", 1_000],
+          ["claude-statusline", 3_000]
+        ])
+      }))
+  })
+})
+
+describe("ingestOnce with a limit log of any name", () => {
+  it.layer(TestLayer)((it) => {
+    it.effect("reads the configured file whatever its extension", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const custom = {
+          ...roots,
+          claudeLimitSamples: path.join(path.dirname(roots.claudeProjects), "claude-limits.log")
+        }
+        yield* fs.writeFileString(
+          custom.claudeLimitSamples,
+          `${
+            JSON.stringify({
+              v: 1,
+              observedAt: 1_000,
+              machine: "h",
+              window: "seven_day",
+              usedPercentage: 3,
+              resetsAt: null
+            })
+          }\n`
+        )
+        const status = yield* ingestOnce(custom)
+        expect(status.claudeLimitSamples).toMatchObject({ rootMissing: false, filesRead: 1 })
+      }))
+  })
+})
+
+describe("ingestOnce with an unreadable limit-log directory", () => {
+  it.layer(TestLayer)((it) => {
+    it.effect("says the directory could not be read rather than that nothing was logged", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const directory = path.dirname(roots.claudeLimitSamples)
+        yield* fs.makeDirectory(directory, { recursive: true })
+        yield* fs.chmod(directory, 0o000)
+        const status = yield* ingestOnce(roots).pipe(Effect.ensuring(fs.chmod(directory, 0o700).pipe(Effect.ignore)))
+        expect(status.claudeLimitSamples.rootMissing).toBe(false)
+        expect(status.claudeLimitSamples.unreadable.map((entry) => entry.reason)).toEqual(["PermissionDenied"])
       }))
   })
 })

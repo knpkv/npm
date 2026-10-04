@@ -36,7 +36,7 @@ export interface AgentUsageServerOptions {
 /** The background ingest and polling, with their live dependencies. */
 const background = (config: AgentUsageConfig) =>
   Layer.unwrap(Effect.gen(function*() {
-    const claude = yield* liveClaudeUsageDeps(config.claudeConfigDir)
+    const claude = yield* liveClaudeUsageDeps(config.claudeCredentials)
     const ticketSearch = yield* acliTicketSearch
     return backgroundLayer({ roots: config.roots, claude, ticketSearch })
   }))

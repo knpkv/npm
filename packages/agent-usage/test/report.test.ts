@@ -164,6 +164,33 @@ describe("buildUsageReport", () => {
 })
 
 describe("buildLimitsReport", () => {
+  it("draws a Claude window as one series whether a poll or a statusline sample observed it", () => {
+    const claude = (
+      source: "claude-oauth-usage" | "claude-statusline",
+      observedAt: number,
+      usedPercent: number
+    ): LimitSnapshot => ({
+      agent: "claude",
+      machine: "host-a",
+      source,
+      label: "five_hour",
+      windowMinutes: 300,
+      observedAt,
+      reading: { _tag: "Known", usedPercent, resetsAt: null }
+    })
+    const report = buildLimitsReport(
+      [
+        claude("claude-oauth-usage", 1_100, 5),
+        claude("claude-statusline", 1_200, 7),
+        claude("claude-oauth-usage", 1_300, 9)
+      ],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series).toHaveLength(1)
+    expect(report.series[0]?.points.map((point) => point.at)).toEqual([1_100, 1_200, 1_300])
+    expect(report.latest.map((snapshot) => snapshot.source)).toEqual(["claude-oauth-usage"])
+  })
+
   it("starts each series at the range's left edge with the reading in force there", () => {
     const report = buildLimitsReport(
       [
@@ -263,12 +290,86 @@ describe("buildLimitsReport", () => {
       .toEqual(["Known", "Unknown", "Known"])
   })
 
-  it("adds no gap when the failed poll came before every window reading", () => {
+  it("shows a failed poll that came before every window reading as a gap before the first one", () => {
     const report = buildLimitsReport([
       claude("*", 1_050, { _tag: "Unknown", reason: "Fetch" }),
       claude("five_hour", 1_100, { _tag: "Known", usedPercent: 40, resetsAt: null })
     ], { from: 1_000, to: 2_000 })
     expect(report.series.find((series) => series.label === "five_hour")?.points.map((point) => point.reading._tag))
+      .toEqual(["Unknown", "Known"])
+  })
+})
+
+describe("buildLimitsReport across Claude sources", () => {
+  const reading = (
+    source: "claude-oauth-usage" | "claude-statusline",
+    label: string,
+    observedAt: number,
+    value: LimitSnapshot["reading"]
+  ): LimitSnapshot => ({
+    agent: "claude",
+    machine: "host-a",
+    source,
+    label,
+    windowMinutes: label === "*" ? null : 300,
+    observedAt,
+    reading: value
+  })
+  const known = (usedPercent: number): LimitSnapshot["reading"] => ({ _tag: "Known", usedPercent, resetsAt: null })
+  const failed = (detail: string): LimitSnapshot["reading"] => ({ _tag: "Unknown", reason: "Fetch", detail })
+
+  it("breaks a window with a failed poll whichever source observed it first", () => {
+    const firsts: ReadonlyArray<"claude-oauth-usage" | "claude-statusline"> = [
+      "claude-statusline",
+      "claude-oauth-usage"
+    ]
+    for (const first of firsts) {
+      const report = buildLimitsReport(
+        [
+          reading(first, "five_hour", 1_100, known(5)),
+          reading("claude-oauth-usage", "*", 1_200, failed("HTTP 500")),
+          reading("claude-oauth-usage", "five_hour", 1_300, known(9))
+        ],
+        { from: 1_000, to: 2_000 }
+      )
+      expect(report.series[0]?.points.map((point) => point.reading._tag)).toEqual(["Known", "Unknown", "Known"])
+    }
+  })
+
+  it("leaves the gateway Spend window alone when the OAuth poll fails, since the poll never reads it", () => {
+    const spend: LimitSnapshot = { ...reading("claude-statusline", "spend", 1_100, known(12)), windowMinutes: null }
+    const report = buildLimitsReport(
+      [spend, reading("claude-oauth-usage", "*", 1_200, failed("HTTP 401"))],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series.find((series) => series.label === "spend")?.points.map((point) => point.reading._tag))
       .toEqual(["Known"])
+  })
+
+  it("keeps a failed poll that came before a window's first reading in that window's history", () => {
+    const report = buildLimitsReport(
+      [
+        reading("claude-oauth-usage", "*", 1_100, failed("HTTP 401")),
+        reading("claude-statusline", "five_hour", 1_200, known(5))
+      ],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series[0]?.points.map((point) => [point.at, point.reading._tag])).toEqual([
+      [1_100, "Unknown"],
+      [1_200, "Known"]
+    ])
+  })
+
+  it("keeps a failure whose detail changed as its own point", () => {
+    const report = buildLimitsReport(
+      [
+        reading("claude-oauth-usage", "five_hour", 1_100, known(5)),
+        reading("claude-oauth-usage", "*", 1_200, failed("HTTP 429")),
+        reading("claude-oauth-usage", "*", 1_300, failed("HTTP 429")),
+        reading("claude-oauth-usage", "*", 1_400, failed("HTTP 500"))
+      ],
+      { from: 1_000, to: 2_000 }
+    )
+    expect(report.series[0]?.points.map((point) => point.at)).toEqual([1_100, 1_200, 1_400])
   })
 })

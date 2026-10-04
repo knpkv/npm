@@ -9,19 +9,30 @@
  * @module
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
-import { Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
+import { ConfigProvider, Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { hostname } from "node:os"
+import { hostname, userInfo } from "node:os"
 import { databaseLayer } from "./core/Database.js"
-import { ingestOnce, type IngestStatus, type SourceStatus } from "./core/Ingest.js"
+import { ingestOnce, type IngestStatus } from "./core/Ingest.js"
 import { loadConfig } from "./server/Config.js"
+import { describeIngest } from "./server/IngestSummary.js"
 import { makeOwnerSessionSecrets, ownerSessionOrigin, ownerSessionUrl } from "./server/OwnerSession.js"
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
 import { IngestStatus as IngestStatusSchema } from "./shared/contracts.js"
 
-const config = loadConfig(hostname())
+/** The operating system's name for the user; Claude Code's own fallback when it cannot ask. */
+const osUserName = (): string => {
+  try {
+    return userInfo().username
+  } catch {
+    return "claude-code-user"
+  }
+}
+
+// Empty values kept, for the one variable where an empty value means something.
+const config = loadConfig(hostname(), ConfigProvider.fromEnv({ preserveEmptyStrings: true }), osUserName())
 
 const serve = Command.make(
   "serve",
@@ -48,16 +59,6 @@ const serve = Command.make(
   })
 ).pipe(Command.withDescription("Record usage continuously and serve the browser view"))
 
-const describeSource = (name: string, status: SourceStatus): string => {
-  if (status.rootMissing) return `${name}: no sessions directory`
-  const skipped = status.skipped.unparseableLine + status.skipped.missingTimestamp + status.skipped.oversizedLine
-  return [
-    `${name}: ${status.filesRead}/${status.filesScanned} files read, ${status.eventsAdded} events added`,
-    skipped > 0 ? `, ${skipped} lines skipped` : "",
-    status.unreadable.length > 0 ? `, ${status.unreadable.length} unreadable` : ""
-  ].join("")
-}
-
 const encodeStatus = Schema.encodeSync(Schema.fromJsonString(IngestStatusSchema))
 
 const ingest = Command.make(
@@ -73,9 +74,7 @@ const ingest = Command.make(
       Effect.provide(databaseLayer(settings.storeDirectory))
     )
     if (json) return yield* Console.log(encodeStatus(status))
-    yield* Console.log(describeSource("claude", status.claude))
-    yield* Console.log(describeSource("codex", status.codex))
-    yield* Console.log(`took ${status.finishedAt - status.startedAt}ms`)
+    for (const line of describeIngest(status)) yield* Console.log(line)
   })
 ).pipe(Command.withDescription("Run one ingest pass and report what it found"))
 

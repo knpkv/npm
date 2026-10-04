@@ -22,9 +22,23 @@ import { Clock, Data, Effect, Option, Predicate, Schema } from "effect"
 import { classifyExtraUsage, ExtraUsage } from "./Balances.js"
 import type { BalanceReading, LimitSnapshot, UnknownReason, WindowMinutes } from "./Model.js"
 
-export class CredentialsMissing extends Data.TaggedError("CredentialsMissing")<{}> {}
+/**
+ * No usable credentials. `where` names the last place looked: `file`, `keychain:<service>` (the item
+ * is absent), or `credentials` (found, but not Claude Code's OAuth credentials).
+ */
+export class CredentialsMissing extends Data.TaggedError("CredentialsMissing")<{ readonly where: string }> {}
+/** The credentials file exists but could not be read; `reason` is the platform's failure kind. */
+export class CredentialsUnreadable extends Data.TaggedError("CredentialsUnreadable")<{ readonly reason: string }> {}
+/**
+ * The Keychain would not hand over the item: `security` exited with `exitCode` (locked Keychain, no
+ * GUI session, access denied), or, when `exitCode` is null, did not answer before the deadline.
+ */
+export class KeychainDenied extends Data.TaggedError("KeychainDenied")<{ readonly exitCode: number | null }> {}
+/** `security` started but the lookup broke off: reading its answer failed, or it did not exit normally. */
+export class KeychainFailed extends Data.TaggedError("KeychainFailed")<{ readonly stage: "output" | "exit" }> {}
 export class TokenExpired extends Data.TaggedError("TokenExpired")<{}> {}
-export class UsageFetchFailed extends Data.TaggedError("UsageFetchFailed")<{ readonly cause: unknown }> {}
+/** The request itself failed; `cause` is the failure's kind only, never the request carrying the token. */
+export class UsageFetchFailed extends Data.TaggedError("UsageFetchFailed")<{ readonly cause: string }> {}
 
 export interface UsageReply {
   readonly status: number
@@ -33,7 +47,10 @@ export interface UsageReply {
 
 /** How a poll reaches the token and the endpoint; the live pair lives at the executable boundary. */
 export interface ClaudeUsageDeps {
-  readonly readToken: Effect.Effect<string, CredentialsMissing | TokenExpired>
+  readonly readToken: Effect.Effect<
+    string,
+    CredentialsMissing | CredentialsUnreadable | KeychainDenied | KeychainFailed | TokenExpired
+  >
   readonly get: (token: string) => Effect.Effect<UsageReply, UsageFetchFailed>
 }
 
@@ -51,7 +68,7 @@ const decodeCredentials = Schema.decodeUnknownOption(Credentials)
 export const tokenFromCredentials = (raw: string): Effect.Effect<string, CredentialsMissing | TokenExpired> =>
   Effect.gen(function*() {
     const credentials = decodeCredentials(raw)
-    if (Option.isNone(credentials)) return yield* new CredentialsMissing()
+    if (Option.isNone(credentials)) return yield* new CredentialsMissing({ where: "credentials" })
     const { accessToken, expiresAt } = credentials.value.claudeAiOauth
     const now = yield* Clock.currentTimeMillis
     if (expiresAt !== undefined && expiresAt <= now) return yield* new TokenExpired()
@@ -63,9 +80,8 @@ const Window = Schema.Struct({
   resets_at: Schema.optionalKey(Schema.NullOr(Schema.String))
 })
 const decodeWindow = Schema.decodeUnknownOption(Window)
-const decodeReply = Schema.decodeUnknownOption(
-  Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown))
-)
+const decodeJson = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Unknown))
+const decodeReply = Schema.decodeUnknownOption(Schema.Record(Schema.String, Schema.Unknown))
 const decodeExtraUsage = Schema.decodeUnknownOption(Schema.NullOr(ExtraUsage))
 
 const windowMinutes = (label: string): WindowMinutes =>
@@ -76,7 +92,12 @@ interface Observations {
   readonly balances: ReadonlyArray<BalanceReading>
 }
 
-const unknownObservations = (machine: string, observedAt: number, reason: UnknownReason): Observations => ({
+const unknownObservations = (
+  machine: string,
+  observedAt: number,
+  reason: UnknownReason,
+  detail: string
+): Observations => ({
   snapshots: [{
     agent: "claude",
     machine,
@@ -84,16 +105,22 @@ const unknownObservations = (machine: string, observedAt: number, reason: Unknow
     label: "*",
     windowMinutes: null,
     observedAt,
-    reading: { _tag: "Unknown", reason }
+    reading: { _tag: "Unknown", reason, detail }
   }],
-  balances: [{ kind: "claude-extra-usage", machine, observedAt, value: { _tag: "Unknown", reason } }]
+  balances: [{ kind: "claude-extra-usage", machine, observedAt, value: { _tag: "Unknown", reason, detail } }]
 })
 
 const classify = (machine: string, observedAt: number, reply: UsageReply): Observations => {
-  if (reply.status === 401 || reply.status === 403) return unknownObservations(machine, observedAt, "AuthExpired")
-  if (reply.status !== 200) return unknownObservations(machine, observedAt, "Fetch")
-  const decoded = decodeReply(reply.body)
-  if (Option.isNone(decoded)) return unknownObservations(machine, observedAt, "Parse")
+  if (reply.status === 401 || reply.status === 403) {
+    return unknownObservations(machine, observedAt, "AuthExpired", `HTTP ${reply.status}`)
+  }
+  if (reply.status !== 200) return unknownObservations(machine, observedAt, "Fetch", `HTTP ${reply.status}`)
+  const json = decodeJson(reply.body)
+  if (Option.isNone(json)) return unknownObservations(machine, observedAt, "Parse", "reply was not JSON")
+  const decoded = Array.isArray(json.value) ? Option.none() : decodeReply(json.value)
+  if (Option.isNone(decoded)) {
+    return unknownObservations(machine, observedAt, "Parse", "reply was JSON but not an object")
+  }
   // Extra usage is a balance, not a percentage window, even when it reports a utilization.
   const windows = Object.entries(decoded.value).filter(([label]) => label !== "extra_usage")
   const snapshots = windows.flatMap(([label, value]): ReadonlyArray<LimitSnapshot> => {
@@ -111,7 +138,15 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
       // A window that is there but does not read is a failed reading of it, not silence: its last
       // level must not carry on.
       const claimsWindow = Predicate.hasProperty(value, "utilization") && value.utilization !== null
-      return claimsWindow ? snapshot({ _tag: "Unknown", reason: "Parse" }) : []
+      return claimsWindow
+        ? snapshot({
+          _tag: "Unknown",
+          reason: "Parse",
+          detail: Predicate.isNumber(value.utilization)
+            ? `${label}: resets_at is not a time`
+            : `${label}: utilization is not a number`
+        })
+        : []
     }
     const resets = window.value.resets_at
     if (resets === undefined || resets === null) {
@@ -120,22 +155,33 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
     const resetsAt = Date.parse(resets)
     return Number.isFinite(resetsAt)
       ? snapshot({ _tag: "Known", usedPercent: window.value.utilization, resetsAt })
-      : snapshot({ _tag: "Unknown", reason: "Parse" })
+      : snapshot({ _tag: "Unknown", reason: "Parse", detail: `${label}: resets_at is not a time` })
   })
   const extra = decodeExtraUsage(decoded.value["extra_usage"] ?? null)
   const balance: BalanceReading = {
     kind: "claude-extra-usage",
     machine,
     observedAt,
-    value: Option.isNone(extra) ? { _tag: "Unknown", reason: "Parse" } : classifyExtraUsage(extra.value)
+    value: Option.isNone(extra)
+      ? { _tag: "Unknown", reason: "Parse", detail: "extra_usage not understood" }
+      : classifyExtraUsage(extra.value)
   }
   return {
-    snapshots: snapshots.length === 0 ? unknownObservations(machine, observedAt, "NoData").snapshots : snapshots,
+    snapshots: snapshots.length === 0
+      ? unknownObservations(machine, observedAt, "NoData", "the reply named no limit window").snapshots
+      : snapshots,
     balances: [balance]
   }
 }
 
-/** One poll's observations. Never fails: every failure is an Unknown reading. */
+const describeMissing = (where: string): string =>
+  where === "file"
+    ? "no credentials file"
+    : where === "credentials"
+    ? "the stored credentials are not Claude Code's OAuth credentials"
+    : `no Keychain item ${where.replace(/^keychain:/u, "")}`
+
+/** One poll's observations. Never fails: every failure is an Unknown reading, with its detail. */
 export const pollClaudeLimits = (deps: ClaudeUsageDeps, machine: string): Effect.Effect<Observations> =>
   Effect.gen(function*() {
     const observedAt = yield* Clock.currentTimeMillis
@@ -143,9 +189,50 @@ export const pollClaudeLimits = (deps: ClaudeUsageDeps, machine: string): Effect
       Effect.flatMap(deps.get),
       Effect.map((reply) => classify(machine, observedAt, reply)),
       Effect.catchTags({
-        CredentialsMissing: () => Effect.succeed(unknownObservations(machine, observedAt, "NoAuth")),
-        TokenExpired: () => Effect.succeed(unknownObservations(machine, observedAt, "AuthExpired")),
-        UsageFetchFailed: () => Effect.succeed(unknownObservations(machine, observedAt, "Fetch"))
+        CredentialsMissing: (error) =>
+          Effect.succeed(unknownObservations(machine, observedAt, "NoAuth", describeMissing(error.where))),
+        CredentialsUnreadable: (error) =>
+          Effect.succeed(
+            unknownObservations(
+              machine,
+              observedAt,
+              "NoAuth",
+              `the credentials file could not be read (${error.reason})`
+            )
+          ),
+        KeychainDenied: (error) =>
+          Effect.succeed(
+            unknownObservations(
+              machine,
+              observedAt,
+              "KeychainDenied",
+              error.exitCode === null
+                ? "the Keychain did not answer in time (locked, or waiting on a password prompt)"
+                : `the Keychain refused access (security exited ${error.exitCode})`
+            )
+          ),
+        KeychainFailed: (error) =>
+          Effect.succeed(
+            unknownObservations(
+              machine,
+              observedAt,
+              "KeychainDenied",
+              error.stage === "output"
+                ? "the Keychain lookup broke off while its answer was being read"
+                : "the Keychain process did not exit normally"
+            )
+          ),
+        TokenExpired: () =>
+          Effect.succeed(
+            unknownObservations(
+              machine,
+              observedAt,
+              "AuthExpired",
+              "the stored token expired; Claude Code renews it on its next use"
+            )
+          ),
+        UsageFetchFailed: (error) =>
+          Effect.succeed(unknownObservations(machine, observedAt, "Fetch", `request failed: ${error.cause}`))
       })
     )
   })

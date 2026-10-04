@@ -21,7 +21,7 @@ import { type ClaudeUsageDeps, pollClaudeLimits } from "../core/ClaudeLimits.js"
 import { ingestOnce, type SourceRoots } from "../core/Ingest.js"
 import { UsageStore } from "../core/Store.js"
 import { refreshTicketTitles, type TicketSearch } from "../core/Tickets.js"
-import type { ServerStatus } from "../shared/contracts.js"
+import type { LiveVersions, ServerStatus } from "../shared/contracts.js"
 
 export const INGEST_INTERVAL = Duration.seconds(60)
 export const CLAUDE_POLL_INTERVAL = Duration.minutes(5)
@@ -34,22 +34,36 @@ export class RuntimeState extends Context.Service<RuntimeState, {
   readonly projects: ReadonlyArray<string>
   /** The status the page shows; a SubscriptionRef so its changes can be followed. */
   readonly status: SubscriptionRef.SubscriptionRef<ServerStatus>
+  /** What the live-updates socket pushes; moved only after the store has committed the change. */
+  readonly versions: SubscriptionRef.SubscriptionRef<LiveVersions>
 }>()("@knpkv/agent-usage/server/Runtime/RuntimeState") {
   static readonly layer = (machine: string, projects: ReadonlyArray<string> = []) =>
     Layer.effect(
       RuntimeState,
-      Effect.map(
-        SubscriptionRef.make<ServerStatus>({
+      Effect.gen(function*() {
+        const status = yield* SubscriptionRef.make<ServerStatus>({
           machine,
           ingest: null,
           ingestFailure: null,
           limitsFailure: null,
           ticketLookupFailures: []
-        }),
-        (status) => RuntimeState.of({ machine, projects, status })
-      )
+        })
+        const versions = yield* SubscriptionRef.make<LiveVersions>({ usage: 0, limits: 0, status: 0 })
+        return RuntimeState.of({ machine, projects, status, versions })
+      })
     )
 }
+
+/** Moves the named counters by one; called once the change they announce is in the store. */
+const announce = (reads: ReadonlyArray<keyof LiveVersions>) =>
+  Effect.gen(function*() {
+    const state = yield* RuntimeState
+    yield* SubscriptionRef.update(state.versions, (versions) => ({
+      usage: versions.usage + (reads.includes("usage") ? 1 : 0),
+      limits: versions.limits + (reads.includes("limits") ? 1 : 0),
+      status: versions.status + (reads.includes("status") ? 1 : 0)
+    }))
+  })
 
 /** The Known Projects now: those the store's branches and paths name, plus the configured ones. */
 export const currentKnownProjects = Effect.gen(function*() {
@@ -85,16 +99,24 @@ export const ingestCycle = (options: BackgroundOptions) =>
     const state = yield* RuntimeState
     const outcome = yield* Effect.result(ingestOnce(options.roots))
     if (outcome._tag === "Failure") {
+      // The page shows which operation failed; the log keeps why, for whoever runs the server.
+      yield* Effect.logWarning("ingest pass failed", outcome.failure.operation, outcome.failure.cause)
       yield* SubscriptionRef.update(state.status, (status) => ({
         ...status,
         ingestFailure: `${outcome.failure.operation}: the store could not be written`
       }))
+      // Chunks committed before the failure are in the store, so both reads may have moved.
+      yield* announce(["usage", "limits", "status"])
       return
     }
     yield* SubscriptionRef.update(
       state.status,
       (status) => ({ ...status, ingest: outcome.success, ingestFailure: null })
     )
+    // Every chunk of the pass is committed by now. Rollouts and samples carry limit readings too.
+    const { claude, claudeLimitSamples, codex } = outcome.success
+    const read = claude.filesRead + codex.filesRead + claudeLimitSamples.filesRead > 0
+    yield* announce(read ? ["usage", "limits", "status"] : ["status"])
   })
 
 /**
@@ -107,12 +129,17 @@ export const titleCycle = (options: BackgroundOptions) =>
     const failures = yield* recentTicketKeys.pipe(
       Effect.flatMap((keys) => refreshTicketTitles(keys, options.ticketSearch)),
       Effect.map((lookups) => lookups.map((failure) => failure.reason)),
-      Effect.catchTag("StoreError", (error) => Effect.succeed([`ticket titles: ${error.operation} failed`]))
+      Effect.catchTag("StoreError", (error) =>
+        Effect.logWarning("ticket title refresh failed", error.operation, error.cause).pipe(
+          Effect.as([`ticket titles: ${error.operation} failed`])
+        ))
     )
     yield* SubscriptionRef.update(
       state.status,
       (status) => ({ ...status, ticketLookupFailures: [...new Set(failures)] })
     )
+    // Titles saved in this cycle change the Booking table.
+    yield* announce(["usage", "status"])
   })
 
 /**
@@ -131,6 +158,7 @@ export const claudePollCycle = (options: BackgroundOptions) =>
         ? `${stored.failure.operation}: Claude limits could not be stored`
         : null
     }))
+    yield* announce(stored._tag === "Failure" ? ["status"] : ["limits", "status"])
   })
 
 /** Runs both cycles on their intervals for the life of the layer's scope. */

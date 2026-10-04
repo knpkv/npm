@@ -16,6 +16,7 @@
  */
 import { Clock, Effect, FileSystem, Option, Path, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
+import { initialSamplesState, readClaudeLimitSamples, SamplesState } from "./ClaudeLimitSamples.js"
 import { ClaudeReaderState, initialClaudeState, readClaude } from "./ClaudeReader.js"
 import { CodexReaderState, initialCodexState, readCodex } from "./CodexReader.js"
 import type { Agent } from "./Model.js"
@@ -36,6 +37,8 @@ export interface SourceRoots {
   readonly claudeProjects: string
   /** `<CODEX_HOME>`: rollouts live in `sessions/`, and Codex moves archived ones to `archived_sessions/`. */
   readonly codexHome: string
+  /** The Claude limit samples claude-statusline appends (`AGENT_USAGE_CLAUDE_LIMITS`). */
+  readonly claudeLimitSamples: string
   readonly machine: string
 }
 
@@ -60,6 +63,7 @@ export interface IngestStatus {
   readonly finishedAt: number
   readonly claude: SourceStatus
   readonly codex: SourceStatus
+  readonly claudeLimitSamples: SourceStatus
 }
 
 export interface IngestOptions {
@@ -87,6 +91,8 @@ interface Source<State> {
   readonly read: (file: SourceFile, lines: ReadonlyArray<SourceLine>, state: State) => ReadResult<State>
   /** Whether to list a directory, given its path segments below the root. */
   readonly descend: (segments: ReadonlyArray<string>) => boolean
+  /** Whether a file name found while walking is one of this source's files. */
+  readonly candidate: (name: string) => boolean
   /** The files worth reading among the `.jsonl` paths found, relative to the root. */
   readonly select: (relativePaths: ReadonlyArray<string>, path: Path.Path) => ReadonlyArray<ListedFile>
 }
@@ -101,6 +107,7 @@ const claudeSource: Source<ClaudeReaderState> = {
   decodeState: Schema.decodeUnknownOption(ClaudeStateJson),
   encodeState: Schema.encodeSync(ClaudeStateJson),
   read: readClaude,
+  candidate: (name) => name.endsWith(".jsonl"),
   descend: (segments) => segments.length <= 2 || (segments.length === 3 && segments[2] === "subagents"),
   select: (paths, path) =>
     paths.flatMap((fileKey) => {
@@ -129,6 +136,7 @@ const codexSource: Source<CodexReaderState> = {
   decodeState: Schema.decodeUnknownOption(CodexStateJson),
   encodeState: Schema.encodeSync(CodexStateJson),
   read: readCodex,
+  candidate: (name) => name.endsWith(".jsonl"),
   descend: (segments) => CODEX_ROLLOUT_DIRECTORIES.has(segments[0] ?? "") && segments.length <= 4,
   select: (paths, path) =>
     paths.flatMap((fileKey) => {
@@ -138,6 +146,25 @@ const codexSource: Source<CodexReaderState> = {
       return [{ fileKey, sessionId: ROLLOUT_ID.exec(name)?.[1] ?? path.basename(name, ".jsonl") }]
     })
 }
+
+const SamplesStateJson = Schema.fromJsonString(SamplesState)
+
+/**
+ * The one samples file, read as a single-file source rooted at its directory. Its cursor key is the
+ * bare file name, which no Claude transcript key can equal (those always sit in a project
+ * directory).
+ */
+const claudeLimitSamplesSource = (fileName: string): Source<SamplesState> => ({
+  agent: "claude",
+  initial: initialSamplesState,
+  decodeState: Schema.decodeUnknownOption(SamplesStateJson),
+  encodeState: Schema.encodeSync(SamplesStateJson),
+  read: readClaudeLimitSamples,
+  // The configured file, whatever its name; nothing else in its directory.
+  candidate: (name) => name === fileName,
+  descend: () => false,
+  select: (paths) => paths.filter((fileKey) => fileKey === fileName).map((fileKey) => ({ fileKey, sessionId: fileKey }))
+})
 
 const decoder = new TextDecoder()
 
@@ -298,11 +325,15 @@ interface Walk {
 }
 
 /**
- * Every `.jsonl` path under the root, listing one directory at a time so that one directory this
+ * Every candidate file under the root, listing one directory at a time so that one directory this
  * user cannot read (a container's, owned by another uid) is reported on its own instead of
  * hiding the rest of the root.
  */
-const walk = (root: string, descend: (segments: ReadonlyArray<string>) => boolean) =>
+const walk = (
+  root: string,
+  descend: (segments: ReadonlyArray<string>) => boolean,
+  candidate: (name: string) => boolean
+) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -323,7 +354,7 @@ const walk = (root: string, descend: (segments: ReadonlyArray<string>) => boolea
       }
       for (const name of [...listing.success].sort()) {
         const child = [...segments, name]
-        if (name.endsWith(".jsonl")) {
+        if (candidate(name)) {
           files.push(child.join(path.sep))
           continue
         }
@@ -347,7 +378,7 @@ const ingestSource = <State>(
 ) =>
   Effect.gen(function*() {
     const path = yield* Path.Path
-    const walked = yield* walk(root, source.descend)
+    const walked = yield* walk(root, source.descend, source.candidate)
     if (walked.rootMissing) return emptyStatus(true)
     const files = source.select(walked.files, path)
     let status: SourceStatus = { ...emptyStatus(false), filesScanned: files.length, unreadable: walked.unreadable }
@@ -370,7 +401,10 @@ const ingestSource = <State>(
     return status
   })
 
-/** Reads everything appended since the last pass in both sources. Fails only when the store does. */
+/**
+ * Reads everything appended since the last pass in every source: Claude transcripts, Codex rollouts
+ * and Claude limit samples. Fails only when the store does.
+ */
 export const ingestOnce = (
   roots: SourceRoots,
   options: IngestOptions = {}
@@ -381,6 +415,19 @@ export const ingestOnce = (
     const startedAt = yield* Clock.currentTimeMillis
     const claude = yield* ingestSource(claudeSource, roots.claudeProjects, roots.machine, chunkBytes, maxLineBytes)
     const codex = yield* ingestSource(codexSource, roots.codexHome, roots.machine, chunkBytes, maxLineBytes)
+    const path = yield* Path.Path
+    const samples = yield* ingestSource(
+      claudeLimitSamplesSource(path.basename(roots.claudeLimitSamples)),
+      path.dirname(roots.claudeLimitSamples),
+      roots.machine,
+      chunkBytes,
+      maxLineBytes
+    )
+    // The directory holding the samples may hold other files; the log is missing only when its
+    // directory listed fine without it. A directory that could not be listed says why instead.
+    const claudeLimitSamples = samples.filesScanned === 0 && samples.unreadable.length === 0
+      ? { ...samples, rootMissing: true }
+      : samples
     const finishedAt = yield* Clock.currentTimeMillis
-    return { startedAt, finishedAt, claude, codex }
+    return { startedAt, finishedAt, claude, codex, claudeLimitSamples }
   })

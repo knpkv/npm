@@ -188,7 +188,7 @@ test("every limit reading is also available as a table, without hovering", async
   await signIn(page)
   await page.getByText("Limit readings as a table").click()
   const table = page.locator(".usage-readings table")
-  await expect(table.getByRole("rowheader", { name: "Claude 5-hour" })).toBeVisible()
+  await expect(table.getByRole("rowheader", { name: "Claude 5-hour" }).first()).toBeVisible()
   await expect(table).toContainText("42%")
 })
 
@@ -377,4 +377,211 @@ test("a focused column keeps its breakdown when the pointer leaves the chart", a
   // The breakdown on show is the focused column's, not one the pointer passed over.
   const period = (await column.getAttribute("aria-label"))?.split(":")[0] ?? ""
   await expect(tooltip.locator(".usage-tooltip-title")).toHaveText(period)
+})
+
+test("a reading that failed says why, on focus of its gap and in the readings table", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  const gap = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await gap.focus()
+  await expect(page.locator(".usage-tooltip")).toContainText("security exited 36")
+  await page.getByText("Limit readings as a table").click()
+  const table = page.locator(".usage-readings table")
+  await expect(table).toContainText("Keychain access refused: the Keychain refused access (security exited 36)")
+})
+
+test("a pushed change updates the page in place, keeping open details and focus", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  await page.evaluate(() => document.body.setAttribute("data-same-page", "yes"))
+  const total = page.getByTestId("usage-total")
+  const before = await total.textContent()
+  await page.getByText("Limit readings as a table").click()
+  const column = page.getByRole("group", { name: "Usage per day, stacked by booking" }).getByRole("img", {
+    name: /total/
+  })
+    .first()
+  await column.focus()
+
+  await page.request.get("/__test/push")
+  await expect(total).not.toHaveText(before ?? "")
+  await expect(page.getByRole("table", { name: "Bookings" })).toContainText("pushed-repository")
+  await expect(page.locator("body")).toHaveAttribute("data-same-page", "yes")
+  await expect(page.locator(".usage-readings")).toHaveAttribute("open", "")
+  await expect(column).toBeFocused()
+})
+
+test("a dropped live socket says so, reconnects and refetches once", async ({ page }) => {
+  let connections = 0
+  await page.routeWebSocket("**/api/live", (socket) => {
+    connections += 1
+    const server = socket.connectToServer()
+    if (connections === 1) {
+      // Drop the first connection once its first message has arrived.
+      server.onMessage((message) => {
+        socket.send(message)
+        setTimeout(() => socket.close(), 200)
+      })
+    }
+  })
+  let usageReads = 0
+  page.on("request", (request) => {
+    if (request.url().includes("/api/usage?")) usageReads += 1
+  })
+  await signIn(page)
+  await expect(page.getByText("live updates disconnected", { exact: false })).toBeVisible()
+  const readsWhileDown = usageReads
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
+  expect(connections).toBe(2)
+  expect(usageReads).toBe(readsWhileDown + 1)
+})
+
+test("an announced read that fails to load is retried, and the page does not claim to be current", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  const total = page.getByTestId("usage-total")
+  const before = await total.textContent()
+  let failuresLeft = 1
+  await page.route("**/api/usage?*", async (route) => {
+    if (failuresLeft > 0) {
+      failuresLeft -= 1
+      await route.fulfill({ status: 500, body: "boom" })
+      return
+    }
+    await route.continue()
+  })
+  await page.request.get("/__test/push")
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  await expect(total).not.toHaveText(before ?? "", { timeout: 5_000 })
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+})
+
+test("a failure's explanation stays open while the pointer moves onto it", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  const gap = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await gap.hover()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip).toContainText("security exited 36")
+  const box = await tooltip.boundingBox()
+  if (box === null) throw new Error("tooltip not laid out")
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 })
+  await expect(tooltip).toContainText("security exited 36")
+  await page.mouse.move(0, 0)
+  await expect(tooltip).toHaveCount(0)
+})
+
+test("reads already loading when the first live message arrives still settle", async ({ page }) => {
+  // Hold the page's first usage read until the socket's first message has arrived, then let it finish.
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let arrived: () => void = () => undefined
+  const requestArrived = new Promise<void>((resolve) => {
+    arrived = resolve
+  })
+  const firstFrame = new Promise<void>((resolve) => {
+    page.on("websocket", (socket) => socket.on("framereceived", () => resolve()))
+  })
+  let first = true
+  await page.route("**/api/usage?*", async (route) => {
+    if (first) {
+      first = false
+      arrived()
+      await held
+    }
+    await route.continue()
+  })
+  await signIn(page)
+  await requestArrived
+  await firstFrame
+  release()
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
+})
+
+test("a read announced again while loading still retries a failure and settles", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  const total = page.getByTestId("usage-total")
+  const before = await total.textContent()
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let request = 0
+  await page.route("**/api/usage?*", async (route) => {
+    request += 1
+    if (request === 1) {
+      await held
+      await route.continue()
+      return
+    }
+    if (request === 2) {
+      await route.fulfill({ status: 500, body: "boom" })
+      return
+    }
+    await route.continue()
+  })
+  await page.request.get("/__test/push")
+  await expect.poll(() => request).toBeGreaterThanOrEqual(1)
+  await page.request.get("/__test/push")
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  release()
+  await expect(total).not.toHaveText(before ?? "", { timeout: 5_000 })
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
+})
+
+test("a focused failure keeps its explanation when the pointer moves away", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  const gap = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await gap.hover()
+  await gap.focus()
+  await page.mouse.move(0, 0)
+  await page.waitForTimeout(600)
+  await expect(gap).toBeFocused()
+  await expect(page.locator(".usage-tooltip")).toContainText("security exited 36")
+})
+
+test("while a failed read is being retried, the page keeps saying the update failed", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  let release: () => void = () => undefined
+  const held = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let request = 0
+  await page.route("**/api/usage?*", async (route) => {
+    request += 1
+    if (request === 1) {
+      await route.fulfill({ status: 500, body: "boom" })
+      return
+    }
+    if (request === 2) await held
+    await route.continue()
+  })
+  await page.request.get("/__test/push")
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  await expect.poll(() => request, { timeout: 5_000 }).toBe(2)
+  await page.waitForTimeout(300)
+  await expect(page.getByText("update failed, retrying", { exact: false })).toBeVisible()
+  release()
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
+})
+
+test("an open failure explanation follows the chart when the failure ends", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  await page.request.get(`/__test/limits?reading=fail&ago=${30 * 60_000}`)
+  const gaps = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await expect(gaps).toHaveCount(2)
+  const ongoing = gaps.last()
+  await ongoing.focus()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip).toContainText("HTTP 500")
+  const before = await tooltip.textContent()
+  await page.request.get(`/__test/limits?reading=recover&ago=${10 * 60_000}`)
+  await expect(tooltip).not.toHaveText(before ?? "")
+  await expect(tooltip).toContainText("HTTP 500")
 })

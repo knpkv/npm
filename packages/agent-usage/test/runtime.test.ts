@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Queue, Stream, SubscriptionRef } from "effect"
+import { Effect, Fiber, FileSystem, Layer, Path, Queue, Stream, SubscriptionRef } from "effect"
 import { TestClock } from "effect/testing"
 import { CredentialsMissing } from "../src/core/ClaudeLimits.js"
 import { StoreError, UsageStore } from "../src/core/Store.js"
@@ -44,6 +44,7 @@ describe("background work", () => {
           roots: {
             claudeProjects: path.join(root, "projects"),
             codexHome: path.join(root, "codex"),
+            claudeLimitSamples: path.join(root, "claude-limits.jsonl"),
             machine: "host-a"
           },
           claude: { readToken: Effect.never, get: () => Effect.never },
@@ -77,8 +78,13 @@ describe("background work", () => {
             Effect.fail(new StoreError({ operation: "record-observations", cause: "disk full" }))
         })
         const options = {
-          roots: { claudeProjects: "/nonexistent/projects", codexHome: "/nonexistent/codex", machine: "host-a" },
-          claude: { readToken: Effect.fail(new CredentialsMissing()), get: () => Effect.never },
+          roots: {
+            claudeProjects: "/nonexistent/projects",
+            codexHome: "/nonexistent/codex",
+            claudeLimitSamples: "/nonexistent/claude-limits.jsonl",
+            machine: "host-a"
+          },
+          claude: { readToken: Effect.fail(new CredentialsMissing({ where: "file" })), get: () => Effect.never },
           ticketSearch: () => Effect.never
         }
         yield* claudePollCycle(options).pipe(Effect.provideService(UsageStore, failing))
@@ -88,6 +94,66 @@ describe("background work", () => {
         )
         yield* claudePollCycle(options)
         expect((yield* SubscriptionRef.get(state.status)).limitsFailure).toBeNull()
+      }))
+  })
+})
+
+describe("live versions", () => {
+  it.layer(Services)((it) => {
+    it.effect("move only after a pass or poll has been stored, and only for what it could change", () =>
+      Effect.gen(function*() {
+        const fs = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const root = yield* fs.makeTempDirectoryScoped()
+        const state = yield* RuntimeState
+        const store = yield* UsageStore
+        const options = {
+          roots: {
+            claudeProjects: path.join(root, "projects"),
+            codexHome: path.join(root, "codex"),
+            claudeLimitSamples: path.join(root, "claude-limits.jsonl"),
+            machine: "host-a"
+          },
+          claude: { readToken: Effect.fail(new CredentialsMissing({ where: "file" })), get: () => Effect.never },
+          ticketSearch: () => Effect.never
+        }
+        const start = yield* SubscriptionRef.get(state.versions)
+
+        // Nothing to read: the status moved, the data did not.
+        yield* ingestCycle(options)
+        const idle = yield* SubscriptionRef.get(state.versions)
+        expect(idle.usage).toBe(start.usage)
+        expect(idle.status).toBeGreaterThan(start.status)
+
+        // A sample read: the pass is committed before anyone is told.
+        yield* fs.writeFileString(
+          options.roots.claudeLimitSamples,
+          `${
+            JSON.stringify({
+              v: 1,
+              observedAt: 1_000,
+              machine: "h",
+              window: "five_hour",
+              usedPercentage: 5,
+              resetsAt: null
+            })
+          }\n`
+        )
+        const seen = yield* SubscriptionRef.changes(state.versions).pipe(
+          Stream.filter((versions) => versions.limits > idle.limits),
+          Stream.take(1),
+          Stream.mapEffect(() => store.limitSnapshots({ from: 0, to: 10_000, machine: "host-a" })),
+          Stream.runCollect,
+          Effect.forkScoped
+        )
+        yield* ingestCycle(options)
+        const [committed] = yield* Fiber.join(seen)
+        expect(committed).toHaveLength(1)
+
+        // A poll stored, even a failed one, is a limits change.
+        const beforePoll = yield* SubscriptionRef.get(state.versions)
+        yield* claudePollCycle(options)
+        expect((yield* SubscriptionRef.get(state.versions)).limits).toBe(beforePoll.limits + 1)
       }))
   })
 })

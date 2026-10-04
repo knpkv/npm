@@ -16,7 +16,7 @@ export default defineConfig(({ mode }) => {
       // The dev server is the public origin; the API and the bootstrap exchange are proxied to the
       // bound server, so the session cookie applies. Anchored so `api.ts` itself is not proxied.
       proxy: {
-        "^/api/": { target: backendOrigin, changeOrigin: false },
+        "^/api/": { target: backendOrigin, changeOrigin: false, ws: true },
         "^/auth/": { target: backendOrigin, changeOrigin: false }
       }
     }

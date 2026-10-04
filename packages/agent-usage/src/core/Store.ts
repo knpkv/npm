@@ -9,10 +9,12 @@
  * - **A chunk commits whole.** A file chunk's events, observations and the cursor past them land in
  *   one transaction, so a pass killed mid-backfill neither loses nor double-counts: the next pass
  *   resumes from the cursor, and event keys absorb any overlap.
- * - **Every observation is kept; series are compressed when read.** Rollouts are read file by file,
- *   so a limit's history arrives interleaved; compressing at write time would lose confirmations a
- *   later file needs. Reads keep only the rows where a series' reading changed (Codex echoes one per
- *   request), plus each series' last observation, which is what "read … ago" reports.
+ * - **Every observation is kept; series are compressed when read.** A series is the window, not
+ *   the source: Claude's polls and claude-statusline's readings of one window compress as one.
+ *   Rollouts are read file by file, so a limit's history arrives interleaved; compressing at write
+ *   time would lose confirmations a later file needs. Reads keep only the rows where a series'
+ *   reading changed (Codex echoes one per request), plus each series' last observation, which is
+ *   what "read … ago" reports.
  * - **Usage is pre-aggregated into 15-minute buckets** by every dimension pricing and Booking need.
  *   Every time zone's offset is a multiple of 15 minutes, so callers roll buckets up into local
  *   hours, days and weeks without touching raw events.
@@ -415,32 +417,30 @@ export class UsageStore extends Context.Service<UsageStore, {
             SELECT agent, machine, source, label, window_minutes, observed_at, reading, series,
               coalesce(window_minutes, 'null') || ' ' || reading AS signature,
               lag(coalesce(window_minutes, 'null') || ' ' || reading)
-                OVER (PARTITION BY agent, source, series ORDER BY observed_at) AS previous,
-              lag(observed_at) OVER (PARTITION BY agent, source, series ORDER BY observed_at) AS previous_at,
+                OVER (PARTITION BY agent, series ORDER BY observed_at) AS previous,
+              lag(observed_at) OVER (PARTITION BY agent, series ORDER BY observed_at) AS previous_at,
               max(CASE WHEN label = '*' THEN observed_at END) OVER (
-                PARTITION BY agent, source ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                PARTITION BY agent ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
               ) AS failed_at,
               max(CASE WHEN label <> '*' THEN observed_at END) OVER (
-                PARTITION BY agent, source ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+                PARTITION BY agent ORDER BY observed_at ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
               ) AS succeeded_at,
-              row_number() OVER (PARTITION BY agent, source, series ORDER BY observed_at DESC) AS from_end
+              row_number() OVER (PARTITION BY agent, series ORDER BY observed_at DESC) AS from_end
             FROM (
               SELECT *, ${sql.literal(seriesOf(""))} AS series FROM limit_snapshots
               WHERE machine = ${range.machine} AND observed_at >= ${range.from} AND observed_at < ${range.to}
             )
           ),
           series_before AS (
-            SELECT agent, source, ${
-          sql.literal(seriesOf(""))
-        } AS series, max(observed_at) AS observed_at FROM limit_snapshots
+            SELECT agent, ${sql.literal(seriesOf(""))} AS series, max(observed_at) AS observed_at FROM limit_snapshots
             WHERE machine = ${range.machine} AND observed_at < ${range.from}
-            GROUP BY agent, source, series
+            GROUP BY agent, series
           )
           SELECT snapshot.agent, snapshot.machine, snapshot.source, snapshot.label, snapshot.window_minutes,
             snapshot.observed_at, snapshot.reading
           FROM series_before JOIN limit_snapshots AS snapshot
             ON snapshot.machine = ${range.machine} AND snapshot.agent = series_before.agent
-            AND snapshot.source = series_before.source AND snapshot.observed_at = series_before.observed_at
+            AND snapshot.observed_at = series_before.observed_at
             AND ${sql.literal(seriesOf("snapshot."))} = series_before.series
           UNION ALL
           -- A row starts a new step when its reading changed, or when the other kind of reading (a

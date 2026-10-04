@@ -91,12 +91,55 @@ describe("summarizeLimits", () => {
   })
 })
 
+describe("Spend and failed polls", () => {
+  it("keeps showing the Spend window after a failed poll, which never reads it", () => {
+    const summary = summarizeLimits(
+      [
+        snapshot({
+          source: "claude-statusline",
+          label: "spend",
+          windowMinutes: null,
+          observedAt: now - 2 * HOUR,
+          reading: { _tag: "Known", usedPercent: 12, resetsAt: null }
+        }),
+        snapshot({ label: "*", windowMinutes: null, reading: { _tag: "Unknown", reason: "NoAuth" } })
+      ],
+      now
+    )
+    expect(summary[0]?.windows.map((window) => window.name)).toEqual(["Spend"])
+  })
+
+  it("still says the poll failed after a newer Spend sample, which cannot vouch for the other windows", () => {
+    const summary = summarizeLimits(
+      [
+        snapshot({ observedAt: now - 3 * HOUR }),
+        snapshot({
+          label: "*",
+          windowMinutes: null,
+          observedAt: now - 2 * HOUR,
+          reading: { _tag: "Unknown", reason: "NoAuth" }
+        }),
+        snapshot({
+          source: "claude-statusline",
+          label: "spend",
+          windowMinutes: null,
+          observedAt: now - HOUR,
+          reading: { _tag: "Known", usedPercent: 12, resetsAt: null }
+        })
+      ],
+      now
+    )
+    expect(summary[0]?.problem?.reason).toBe("not signed in")
+    expect(summary[0]?.windows.map((window) => window.name)).toEqual(["Spend"])
+  })
+})
+
 describe("limitSegments", () => {
   it("draws levels, a reset nobody read since, and a reading that failed as three kinds", () => {
     const segments = limitSegments(
       [
         { at: 0, reading: { _tag: "Known", usedPercent: 10, resetsAt: 100 } },
-        { at: 150, reading: { _tag: "Unknown", reason: "Fetch" } },
+        { at: 150, reading: { _tag: "Unknown", reason: "Fetch", detail: "HTTP 503" } },
         { at: 200, reading: { _tag: "Known", usedPercent: 30, resetsAt: null } }
       ],
       300
@@ -104,7 +147,7 @@ describe("limitSegments", () => {
     expect(segments).toEqual([
       { kind: "level", from: 0, to: 100, usedPercent: 10 },
       { kind: "reset", from: 100, to: 150 },
-      { kind: "unknown", from: 150, to: 200 },
+      { kind: "unknown", from: 150, to: 200, reason: "Fetch", detail: "HTTP 503" },
       { kind: "level", from: 200, to: 300, usedPercent: 30 }
     ])
   })
@@ -206,5 +249,6 @@ describe("windowName", () => {
     expect(codex(120)).toBe("2-hour")
     expect(codex(90)).toBe("90-minute")
     expect(codex(30)).toBe("30-minute")
+    expect(windowName({ agent: "claude", label: "spend", windowMinutes: null })).toBe("Spend")
   })
 })

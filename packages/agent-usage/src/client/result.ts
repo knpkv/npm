@@ -28,3 +28,7 @@ export const shown = <A>(result: AsyncResult.AsyncResult<A, RequestFailure>): Sh
     }
   }
 }
+
+/** Where a read's latest fetch stands, for settling a live update: still loading, in, or failed. */
+export const outcomeOf = <A>(result: AsyncResult.AsyncResult<A, RequestFailure>): "loading" | "loaded" | "failed" =>
+  result._tag === "Initial" || result.waiting ? "loading" : result._tag === "Success" ? "loaded" : "failed"
