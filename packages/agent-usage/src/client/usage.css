@@ -272,7 +272,12 @@ g[data-active="true"] .usage-segment {
   gap: var(--rly-space-6);
 }
 
+.usage-tooltip-row .usage-swatch {
+  align-self: center;
+}
+
 .usage-tooltip-row strong {
+  white-space: nowrap;
   margin-inline-start: auto;
   padding-inline-start: var(--rly-space-12);
 }
@@ -366,9 +371,11 @@ g[data-active="true"] .usage-segment {
   color: var(--rly-color-text-1);
   font-size: 0.85em;
   padding: var(--rly-space-8);
+  box-sizing: border-box;
+  max-inline-size: 100%;
+  overflow-wrap: anywhere;
   pointer-events: none;
   position: absolute;
-  white-space: nowrap;
   z-index: 3;
 }
 

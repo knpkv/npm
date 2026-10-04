@@ -168,3 +168,25 @@ describe("limitRows first reading", () => {
     expect(rows[0]?.firstAt).toBe(500)
   })
 })
+
+describe("window identity", () => {
+  it("keeps Codex windows without a length apart by their provider label", () => {
+    const summary = summarizeLimits(
+      [
+        snapshot({ agent: "codex", source: "codex-rollout", label: "primary", windowMinutes: null }),
+        snapshot({ agent: "codex", source: "codex-rollout", label: "secondary", windowMinutes: null }),
+        snapshot({
+          agent: "codex",
+          source: "codex-rollout",
+          label: "primary",
+          windowMinutes: 300,
+          observedAt: now - 2 * 60_000
+        }),
+        snapshot({ agent: "codex", source: "codex-rollout", label: "secondary", windowMinutes: 10_080 })
+      ],
+      now
+    )
+    const ids = summary.flatMap((group) => [...group.windows, ...group.unnamed]).map((window) => window.id)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+})

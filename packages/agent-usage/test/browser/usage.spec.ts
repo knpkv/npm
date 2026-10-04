@@ -73,9 +73,9 @@ test("picking a booking draws only it, and Show all brings the rest back", async
   await expect(page.getByTestId("usage-total")).toHaveText("880K")
   await page.getByRole("button", { name: "Show all" }).click()
   await expect(page.getByRole("heading", { name: "Usage by booking", exact: true })).toBeVisible()
-  await expect(page.getByTestId("usage-total")).toHaveText("1.1M")
+  await expect(page.getByTestId("usage-total")).toHaveText("1.5M")
   await page.getByRole("radiogroup", { name: "Measure" }).getByRole("radio", { name: "API-eq. $" }).click()
-  await expect(page.getByTestId("usage-total")).toHaveText("$5.10")
+  await expect(page.getByTestId("usage-total")).toHaveText("$8.10")
 })
 
 test("all-unpriced requests remain usage, with a warning and a token chart", async ({ page }) => {
@@ -94,7 +94,7 @@ test("all-unpriced requests remain usage, with a warning and a token chart", asy
   await expect(page.getByText("tokens have no price", { exact: false })).toContainText("new-model")
   await expect(page.getByText("No Claude or Codex request was made in this range.")).toHaveCount(0)
   await page.getByRole("radiogroup", { name: "Measure" }).getByRole("radio", { name: "Tokens" }).click()
-  await expect(page.getByTestId("usage-total")).toHaveText("1.1M")
+  await expect(page.getByTestId("usage-total")).toHaveText("1.5M")
   await expect(page.getByRole("group", { name: "Usage per day, stacked by booking" })).toBeVisible()
 })
 
@@ -222,4 +222,27 @@ test("each usage column can be reached by keyboard and says its total and bookin
   await expect(columns.nth((await columns.count()) - 2)).toBeFocused()
   await page.keyboard.press("Home")
   await expect(columns.first()).toBeFocused()
+})
+
+test("on a phone, every column's breakdown stays inside the chart", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await signIn(page)
+  for (const { bucket, range } of [{ range: "7d", bucket: "day" }, { range: "24h", bucket: "hour" }]) {
+    await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: range }).click()
+    const chart = page.getByRole("group", { name: `Usage per ${bucket}, stacked by booking` })
+    await expect(chart).toBeVisible()
+    const box = await chart.boundingBox()
+    if (box === null) throw new Error("chart not laid out")
+    const columns = chart.getByRole("img", { name: /total; / })
+    const count = await columns.count()
+    expect(count).toBeGreaterThan(0)
+    for (let index = 0; index < count; index++) {
+      await columns.nth(index).focus()
+      const tooltip = page.locator(".usage-tooltip")
+      const bounds = await tooltip.boundingBox()
+      if (bounds === null) throw new Error("tooltip not shown")
+      expect(bounds.x).toBeGreaterThanOrEqual(box.x - 0.5)
+      expect(bounds.x + bounds.width).toBeLessThanOrEqual(box.x + box.width + 0.5)
+    }
+  }
 })

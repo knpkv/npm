@@ -13,6 +13,7 @@ import { niceTicks, PLOT, timeAxis } from "./axis.js"
 import { type Column, formatAxis, type Measure, OTHER, type StackedUsage } from "./chartModel.js"
 import { formatPeriod, formatTokens, formatUsd } from "./format.js"
 import type { ViewRange } from "./range.js"
+import { useTooltipPlacement } from "./useTooltipPlacement.js"
 import { useWidth } from "./useWidth.js"
 
 const HEIGHT = 260
@@ -81,6 +82,7 @@ export const UsageChart = (props: {
     activePeriod === undefined
       ? 0
       : (axis.x(activePeriod.start) + axis.x(periods[(active ?? 0) + 1]?.start ?? props.range.to)) / 2
+  const tooltip = useTooltipPlacement(activePeriod === undefined ? null : activeCentre, width, PLOT.top)
 
   return (
     <div className="usage-chart" ref={container}>
@@ -172,15 +174,7 @@ export const UsageChart = (props: {
         />
       </svg>
       {activeColumn === undefined || activePeriod === undefined ? null : (
-        <div
-          className="usage-tooltip"
-          role="status"
-          style={
-            activeCentre > width / 2
-              ? { right: width - activeCentre + 12, top: PLOT.top }
-              : { left: activeCentre + 12, top: PLOT.top }
-          }
-        >
+        <div className="usage-tooltip" ref={tooltip.ref} role="status" style={tooltip.style}>
           <div className="usage-tooltip-title">{formatPeriod(activePeriod.start, props.range.bucket)}</div>
           {[...activeColumn.segments].reverse().map((segment) => (
             <div className="usage-tooltip-row" key={segment.id}>

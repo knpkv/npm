@@ -15,6 +15,7 @@
  */
 import type { Agent, LimitReading, LimitSnapshot } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
+import { seriesIdentity } from "./chartModel.js"
 import { describeReason } from "./format.js"
 
 export type LimitTone = "ok" | "near" | "at-limit" | "unknown"
@@ -110,7 +111,7 @@ const summarize = (snapshot: LimitSnapshot, name: string, now: number): WindowSu
   const reading = snapshot.reading
   const resetsAt = reading._tag === "Known" ? reading.resetsAt : null
   return {
-    id: `${snapshot.agent}:${snapshot.agent === "codex" ? snapshot.windowMinutes : snapshot.label}`,
+    id: seriesIdentity(snapshot),
     name,
     tone: limitTone(reading),
     usedPercent: reading._tag === "Known" ? reading.usedPercent : null,
@@ -212,7 +213,7 @@ export const limitRows = (series: ReadonlyArray<LimitSeries>): ReadonlyArray<Lim
       .flatMap((other) => other.points)
     return [
       {
-        id: `${window.agent}:${window.agent === "codex" ? window.windowMinutes : window.label}`,
+        id: seriesIdentity(window),
         name: `${agentName(window.agent)} ${name}`,
         points: [...window.points, ...failures].sort((left, right) => left.at - right.at),
         firstAt: window.points[0]?.at ?? null

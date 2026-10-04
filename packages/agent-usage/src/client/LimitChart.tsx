@@ -13,6 +13,7 @@ import { readingAt } from "./chartModel.js"
 import { describeReason, formatInstant, formatPercent, formatShortInstant } from "./format.js"
 import { fullWindowName, type LimitRow, limitRows, limitSegments, NEAR_PERCENT } from "./limitsModel.js"
 import type { ViewRange } from "./range.js"
+import { useTooltipPlacement } from "./useTooltipPlacement.js"
 import { useWidth } from "./useWidth.js"
 
 const ROW = 56
@@ -124,6 +125,7 @@ export const LimitChart = (props: {
   // A range may run on past now (today ends at midnight); nothing after now has been read yet.
   const end = Math.min(props.range.to, props.now)
   const tabled = props.series.filter((series) => series.label !== "*")
+  const tooltip = useTooltipPlacement(cursor, width, 0)
 
   if (tabled.length === 0) {
     return <p className="usage-empty">No limit readings in this range yet.</p>
@@ -132,7 +134,6 @@ export const LimitChart = (props: {
   const height = rows.length * (ROW + ROW_GAP) + AXIS
   const instant = cursor === null ? null : axis.instantAt(cursor)
   const kinds = new Set(rows.flatMap((row) => limitSegments(row.points, end).map((segment) => segment.kind)))
-  const flip = cursor !== null && cursor > width / 2
   return (
     <div className="usage-chart" ref={container}>
       {rows.length === 0 ? null : (
@@ -250,11 +251,7 @@ export const LimitChart = (props: {
         ) : null}
       </details>
       {rows.length === 0 || instant === null || cursor === null ? null : (
-        <div
-          className="usage-tooltip"
-          role="status"
-          style={flip ? { right: width - cursor + 12, top: 0 } : { left: cursor + 12, top: 0 }}
-        >
+        <div className="usage-tooltip" ref={tooltip.ref} role="status" style={tooltip.style}>
           <div className="usage-tooltip-title">{formatInstant(instant)}</div>
           {rows.map((row) => {
             const reading = instant > end ? undefined : readingAt(row.points, instant)

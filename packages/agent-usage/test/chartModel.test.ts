@@ -12,6 +12,7 @@ import {
   stackUsage,
   stepPath
 } from "../src/client/chartModel.js"
+import { tooltipLeft } from "../src/client/useTooltipPlacement.js"
 import type { LimitSnapshot } from "../src/core/Model.js"
 import type { BookingSummary, UsageReport } from "../src/shared/contracts.js"
 
@@ -144,5 +145,14 @@ describe("headline and axis", () => {
     expect(formatAxis("cost", 400)).toBe("$400")
     expect(formatAxis("cost", 2.5)).toBe("$2.50")
     expect(formatAxis("tokens", 1_500_000)).toBe("1.5M")
+  })
+})
+
+describe("tooltipLeft", () => {
+  it("opens towards the roomier side and never leaves the chart", () => {
+    expect(tooltipLeft(50, 100, 400)).toBe(62)
+    expect(tooltipLeft(350, 100, 400)).toBe(238)
+    expect(tooltipLeft(180, 160, 200)).toBe(8)
+    expect(tooltipLeft(20, 300, 200)).toBe(0)
   })
 })
