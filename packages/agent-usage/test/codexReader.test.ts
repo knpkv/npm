@@ -304,6 +304,23 @@ describe("readCodex", () => {
     expect(result.state.ownSession).toBe("child-0000")
   })
 
+  it("keeps a fork's own branch while its copied parent turns visit other directories", () => {
+    const child = "019ef5b6-0000-7000-8000-000000000003"
+    const source = lines(
+      codexMeta("/w/app", "feat/RPS-9", { id: child, historyStart: 4, ordinal: 0 }),
+      withOrdinal(1, codexTurn("gpt-6-sol", "/w/older-repo")),
+      withOrdinal(2, codexTurn("gpt-6-sol", "/w/app")),
+      withOrdinal(3, codexTokenCount({ at: "2026-09-01T10:00:05.000Z", last: [1, 0, 1, 0], total: 2 })),
+      withOrdinal(4, codexTokenCount({ at: "2026-09-01T10:05:00.000Z", last: [1, 0, 1, 0], total: 4 }))
+    )
+    const onePass = readCodex({ ...file, sessionId: child }, source, initialCodexState)
+    expect(onePass.events.map((event) => attribute(event.attribution, new Set()).booking)).toEqual([
+      { _tag: "Ticket", key: "RPS-9" }
+    ])
+    const first = readCodex({ ...file, sessionId: child }, source.slice(0, 2), initialCodexState)
+    expect(readCodex({ ...file, sessionId: child }, source.slice(2), first.state).events).toEqual(onePass.events)
+  })
+
   it("finds the fork's own session_meta by the id in its file name, whichever line comes first", () => {
     const child = "019ef5b6-0000-7000-8000-000000000001"
     const result = readCodex(

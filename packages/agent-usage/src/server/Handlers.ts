@@ -3,7 +3,7 @@
  *
  * @module
  */
-import { Effect, Ref } from "effect"
+import { Effect, SubscriptionRef } from "effect"
 import { HttpApiBuilder } from "effect/http-api"
 import { attribute } from "../core/Attribution.js"
 import { buildLimitsReport, buildUsageReport, checkTimeZone, periodsOf } from "../core/Report.js"
@@ -60,5 +60,5 @@ export const UsageLive = HttpApiBuilder.group(AgentUsageApi, "usage", (handlers)
           const balances = yield* store.latestBalances(state.machine)
           return { ...buildLimitsReport(snapshots, query), balances }
         }).pipe(Effect.catchTag("StoreError", (error) => Effect.fail(storeUnavailable(error)))))
-      .handle("status", () => Ref.get(state.status))
+      .handle("status", () => SubscriptionRef.get(state.status))
   }))

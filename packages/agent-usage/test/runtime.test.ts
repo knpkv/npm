@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, FileSystem, Layer, Path, Ref } from "effect"
+import { Effect, FileSystem, Layer, Path, Queue, Stream, SubscriptionRef } from "effect"
 import { TestClock } from "effect/testing"
 import { UsageStore } from "../src/core/Store.js"
 import { backgroundLayer, RuntimeState } from "../src/server/Runtime.js"
@@ -39,24 +39,25 @@ describe("background work", () => {
           snapshots: [],
           balances: []
         })
-        yield* Layer.build(backgroundLayer({
+        const build = Layer.build(backgroundLayer({
           roots: { claudeProjects: path.join(root, "projects"), codexHome: path.join(root, "codex"), machine: "ser8" },
           claude: { readToken: Effect.never, get: () => Effect.never },
           ticketSearch: () => Effect.never
         }))
-        /** Waits, without moving the test clock, for a pass that finished after `after`. */
-        const passAfter = (after: number) =>
-          Effect.yieldNow.pipe(
-            Effect.andThen(Ref.get(state.status)),
-            Effect.map((status) => status.ingest?.finishedAt),
-            Effect.repeat({ until: (finished) => finished !== undefined && finished > after, times: 10_000 })
-          )
-        const first = yield* passAfter(-1)
+        // Each finished pass, in order, as the status records it: the natural completion signal.
+        const passes = yield* Queue.unbounded<number>()
+        yield* SubscriptionRef.changes(state.status).pipe(
+          Stream.map((status) => status.ingest?.finishedAt ?? null),
+          Stream.filter((finishedAt) => finishedAt !== null),
+          Stream.changes,
+          Stream.runForEach((finishedAt) => Queue.offer(passes, finishedAt)),
+          Effect.forkScoped
+        )
+        yield* build
+        const first = yield* Queue.take(passes)
         yield* TestClock.adjust("61 seconds")
-        const second = yield* passAfter(first ?? 0)
-        expect(first).toBeDefined()
-        expect(second).toBeDefined()
-        expect(second).toBeGreaterThan(first ?? Number.POSITIVE_INFINITY)
+        const second = yield* Queue.take(passes)
+        expect(second).toBeGreaterThan(first)
       }))
   })
 })

@@ -283,6 +283,12 @@ export const readCodex = (
         // Each turn says where it ran; a resumed session may have moved to another worktree. The
         // branch was read for the old directory, so a move drops it rather than book the new work to
         // the old branch's ticket.
+        // A fork's copied parent turns say where the parent ran, not the fork: they leave its own
+        // directory and branch alone.
+        if (copied) {
+          state = { ...state, model: record.payload.model ?? state.model }
+          break
+        }
         const cwd = record.payload.cwd ?? state.cwd
         state = {
           ...state,

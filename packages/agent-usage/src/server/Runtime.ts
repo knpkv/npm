@@ -15,7 +15,7 @@
  * @module
  */
 import type { FileSystem, Path } from "effect"
-import { Clock, Context, Duration, Effect, Layer, Ref, Schedule } from "effect"
+import { Clock, Context, Duration, Effect, Layer, Schedule, SubscriptionRef } from "effect"
 import { attribute, knownProjects } from "../core/Attribution.js"
 import { type ClaudeUsageDeps, pollClaudeLimits } from "../core/ClaudeLimits.js"
 import { ingestOnce, type SourceRoots } from "../core/Ingest.js"
@@ -32,13 +32,14 @@ export class RuntimeState extends Context.Service<RuntimeState, {
   readonly machine: string
   /** Known Projects from configuration. */
   readonly projects: ReadonlyArray<string>
-  readonly status: Ref.Ref<ServerStatus>
+  /** The status the page shows; a SubscriptionRef so its changes can be followed. */
+  readonly status: SubscriptionRef.SubscriptionRef<ServerStatus>
 }>()("@knpkv/agent-usage/server/Runtime/RuntimeState") {
   static readonly layer = (machine: string, projects: ReadonlyArray<string> = []) =>
     Layer.effect(
       RuntimeState,
       Effect.map(
-        Ref.make<ServerStatus>({ machine, ingest: null, ingestFailure: null, ticketLookupFailures: [] }),
+        SubscriptionRef.make<ServerStatus>({ machine, ingest: null, ingestFailure: null, ticketLookupFailures: [] }),
         (status) => RuntimeState.of({ machine, projects, status })
       )
     )
@@ -78,13 +79,16 @@ export const ingestCycle = (options: BackgroundOptions) =>
     const state = yield* RuntimeState
     const outcome = yield* Effect.result(ingestOnce(options.roots))
     if (outcome._tag === "Failure") {
-      yield* Ref.update(state.status, (status) => ({
+      yield* SubscriptionRef.update(state.status, (status) => ({
         ...status,
         ingestFailure: `${outcome.failure.operation}: the store could not be written`
       }))
       return
     }
-    yield* Ref.update(state.status, (status) => ({ ...status, ingest: outcome.success, ingestFailure: null }))
+    yield* SubscriptionRef.update(
+      state.status,
+      (status) => ({ ...status, ingest: outcome.success, ingestFailure: null })
+    )
   })
 
 /**
@@ -99,7 +103,10 @@ export const titleCycle = (options: BackgroundOptions) =>
       Effect.map((lookups) => lookups.map((failure) => failure.reason)),
       Effect.catchTag("StoreError", (error) => Effect.succeed([`ticket titles: ${error.operation} failed`]))
     )
-    yield* Ref.update(state.status, (status) => ({ ...status, ticketLookupFailures: [...new Set(failures)] }))
+    yield* SubscriptionRef.update(
+      state.status,
+      (status) => ({ ...status, ticketLookupFailures: [...new Set(failures)] })
+    )
   })
 
 /** One Claude limit poll, recorded. A store failure lands in the status like an ingest failure. */
@@ -110,7 +117,7 @@ export const claudePollCycle = (options: BackgroundOptions) =>
     const observations = yield* pollClaudeLimits(options.claude, state.machine)
     yield* store.recordObservations(observations.snapshots, observations.balances).pipe(
       Effect.catchTag("StoreError", (error) =>
-        Ref.update(state.status, (status) => ({
+        SubscriptionRef.update(state.status, (status) => ({
           ...status,
           ingestFailure: `${error.operation}: Claude limits could not be stored`
         })))
