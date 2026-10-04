@@ -173,3 +173,17 @@ export const seriesIdentity = (series: {
   series.agent === "codex" && series.windowMinutes !== null
     ? `codex:${series.windowMinutes}m`
     : `${series.agent}:${series.label}`
+
+/** The whole range's usage by the measure: the panel's headline number. */
+export const rangeTotal = (report: UsageReport, measure: Measure): number =>
+  report.cells.reduce((sum, cell) => sum + measureOf(measure, cell), 0)
+
+const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
+
+/** An axis tick: whole dollars once they are large enough to need no cents, compact tokens. */
+export const formatAxis = (measure: Measure, value: number): string =>
+  measure === "tokens"
+    ? compactNumber.format(value)
+    : value >= 10 || Number.isInteger(value)
+    ? `$${compactNumber.format(value)}`
+    : `$${value.toFixed(2)}`

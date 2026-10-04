@@ -6,7 +6,7 @@
 import { useMemo, useState } from "react"
 import type { UsageReport } from "../shared/contracts.js"
 import { niceTicks, PLOT, timeAxis } from "./axis.js"
-import { type Measure, OTHER, type StackedUsage } from "./chartModel.js"
+import { formatAxis, type Measure, OTHER, type StackedUsage } from "./chartModel.js"
 import { formatPeriod, formatTokens, formatUsd } from "./format.js"
 import type { ViewRange } from "./range.js"
 import { useWidth } from "./useWidth.js"
@@ -42,7 +42,11 @@ export const UsageChart = (props: {
   const plotHeight = HEIGHT - PLOT.top - PLOT.bottom
   const y = (value: number) => PLOT.top + plotHeight - (top === 0 ? 0 : (value / top) * plotHeight)
   const { periods } = props.report
-  const labelEvery = Math.max(1, Math.ceil(periods.length / Math.max(1, Math.floor(width / 72))))
+  // Space labels by how wide they are, so "Mon, Sep 28" never runs into its neighbour on a phone.
+  const columnWidth = Math.max(1, (width - PLOT.left - PLOT.right) / Math.max(1, periods.length))
+  const labelWidth = Math.max(0, ...periods.map((period) => formatPeriod(period.start, props.range.bucket).length)) *
+      7 + 16
+  const labelEvery = Math.max(1, Math.ceil(labelWidth / columnWidth))
 
   return (
     <div className="usage-chart" ref={container}>
@@ -51,7 +55,7 @@ export const UsageChart = (props: {
           <g key={tick}>
             <line className="usage-grid" x1={PLOT.left} x2={width - PLOT.right} y1={y(tick)} y2={y(tick)} />
             <text className="usage-axis-label" textAnchor="end" x={PLOT.left - 8} y={y(tick) + 4}>
-              {formatMeasure(props.measure, tick)}
+              {formatAxis(props.measure, tick)}
             </text>
           </g>
         ))}

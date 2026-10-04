@@ -3,7 +3,7 @@
  *
  * @module
  */
-import type { ServerStatus } from "../shared/contracts.js"
+import type { ServerStatus, UsageReport } from "../shared/contracts.js"
 import { formatAge } from "./format.js"
 
 type Source = NonNullable<ServerStatus["ingest"]>["claude"]
@@ -17,7 +17,11 @@ const describeSource = (name: string, source: Source): string => {
   return parts.join(", ")
 }
 
-export const StatusStrip = (props: { readonly status: ServerStatus; readonly now: number }) => {
+export const StatusStrip = (props: {
+  readonly status: ServerStatus
+  readonly ignoredKeys: UsageReport["ignoredKeys"]
+  readonly now: number
+}) => {
   const { ingest } = props.status
   const unreadable =
     ingest === null
@@ -45,6 +49,16 @@ export const StatusStrip = (props: { readonly status: ServerStatus; readonly now
           {failure}
         </span>
       ))}
+      {props.ignoredKeys.length === 0 ? null : (
+        <details>
+          <summary>Ignored ticket-like keys ({props.ignoredKeys.length})</summary>
+          <p>
+            Typed in sessions but not a known project, so booked to their repo:{" "}
+            {props.ignoredKeys.map((key) => `${key.prefix} (${key.requests.toLocaleString()} requests)`).join(", ")}.
+            A project counts once a branch names it or it is listed in AGENT_USAGE_PROJECTS.
+          </p>
+        </details>
+      )}
       {unreadable.length === 0 ? null : (
         <details>
           <summary>Unreadable paths</summary>

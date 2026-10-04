@@ -21,7 +21,9 @@ test("usage is stacked by booking, with typed non-project keys listed rather tha
   await expect(table.getByRole("button", { name: "RPS-12" })).toBeVisible()
   await expect(table.getByRole("button", { name: "tools (repo)" })).toBeVisible()
   await expect(table.getByRole("button", { name: "GPT-6" })).toHaveCount(0)
-  await expect(page.getByText("GPT (1 requests)", { exact: false })).toBeVisible()
+  const status = page.getByRole("contentinfo", { name: "Ingest status" })
+  await status.getByText("Ignored ticket-like keys").click()
+  await expect(status.getByText("GPT (1 requests)", { exact: false })).toBeVisible()
   await expect(page.getByRole("img", { name: "Usage per day, stacked by booking" })).toBeVisible()
 })
 
@@ -32,12 +34,21 @@ test("unpriced tokens are called out, and the booking shows ? instead of a numbe
   await expect(row).toContainText("+ ?")
 })
 
-test("tiles show the observed limit window and balance", async ({ page }) => {
+test("limits now groups each agent's windows with a meter, a tone word and the balances", async ({ page }) => {
   await signIn(page)
-  const tiles = page.getByRole("region", { name: "Current limits and balances" })
-  await expect(tiles.getByRole("heading", { name: "Claude 5h" })).toBeVisible()
-  await expect(tiles).toContainText("42%")
-  await expect(tiles).toContainText("5K credits")
+  const claude = page.getByRole("region", { name: "Claude limits" })
+  await expect(claude.getByRole("meter", { name: "5-hour used" })).toHaveAttribute("aria-valuenow", "42")
+  await expect(claude).toContainText("OK")
+  await expect(page.getByRole("region", { name: "Limits now" })).toContainText("5K credits")
+})
+
+test("the usage panel leads with the range total and explains API-equivalent cost on demand", async ({ page }) => {
+  await signIn(page)
+  const panel = page.getByRole("region", { name: /^Usage by booking/ })
+  await expect(panel.getByTestId("usage-total")).toHaveText(/^\$[\d,.]+$/)
+  await expect(panel.getByText("not what a subscription charges", { exact: false })).toBeHidden()
+  await panel.getByText("What is API-equivalent?").click()
+  await expect(panel.getByText("not what a subscription charges", { exact: false })).toBeVisible()
 })
 
 test("picking a booking draws only it, and Show all brings the rest back", async ({ page }) => {
@@ -65,7 +76,7 @@ test("every limit reading is also available as a table, without hovering", async
   await signIn(page)
   await page.getByText("Limit readings as a table").click()
   const table = page.locator(".usage-readings table")
-  await expect(table.getByRole("rowheader", { name: "Claude 5h" })).toBeVisible()
+  await expect(table.getByRole("rowheader", { name: "Claude 5-hour" })).toBeVisible()
   await expect(table).toContainText("42%")
 })
 
@@ -73,7 +84,7 @@ test("the page fits a phone without horizontal page scroll", async ({ page }) =>
   await page.setViewportSize({ width: 390, height: 900 })
   await signIn(page)
   await expect(page.getByRole("img", { name: "Usage per day, stacked by booking" })).toBeVisible()
-  await expect(page.getByRole("heading", { name: "Claude 5h" })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Claude limits" }).getByRole("meter")).toBeVisible()
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
   expect(overflow).toBeLessThanOrEqual(0)
 })
