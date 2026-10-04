@@ -86,10 +86,7 @@ const login = Command.make(
   {
     open: Flag.Boolean("open").pipe(Flag.withDescription("Open the link in the browser too"), Flag.withDefault(false))
   },
-  Effect.fn(function*({ open }) {
-    const settings = yield* config
-    yield* requestLogin(settings.storeDirectory, open, platform())
-  })
+  ({ open }) => requestLogin(config, open, platform())
 ).pipe(Command.withDescription("Print a fresh one-time link to the running server"))
 
 const cli = Command.make("agent-usage").pipe(

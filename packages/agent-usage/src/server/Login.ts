@@ -12,11 +12,12 @@ import {
   type LoginReplyInvalid,
   requestLoginUrl,
   type ServerNotRunning,
+  type SocketPathTooLong,
   type SocketPathUnsafe,
   type SocketRefused
 } from "./ControlSocket.js"
 
-export type LoginFailure = ServerNotRunning | SocketPathUnsafe | SocketRefused | LoginReplyInvalid
+export type LoginFailure = ServerNotRunning | SocketPathTooLong | SocketPathUnsafe | SocketRefused | LoginReplyInvalid
 
 /** The failure, already explained on stderr: the runtime exits nonzero without logging it again. */
 export class LoginFailed extends Schema.TaggedError<LoginFailed>()("LoginFailed", {
@@ -34,6 +35,8 @@ export const describeLoginFailure = (failure: LoginFailure): string => {
       return `agent-usage refused its control socket at ${failure.path}: ${failure.reason}. Remove it and restart the server.`
     case "SocketRefused":
       return `agent-usage's control socket at ${failure.path} could not be used (${failure.reason}).`
+    case "SocketPathTooLong":
+      return `${failure.message}, so this store has no login. Set AGENT_USAGE_HOME to a shorter path.`
     case "LoginReplyInvalid":
       return "the running agent-usage did not answer with a link; is it an older version? Restart it."
   }
@@ -60,14 +63,25 @@ const openInBrowser = Effect.fnUntraced(function*(url: string, platform: string)
   }
 })
 
-/** Asks the server running on `storeDirectory` for a link, prints it, and opens it when asked. */
-export const login = Effect.fn("Login.login")(function*(storeDirectory: string, open: boolean, platform: string) {
-  const url = yield* requestLoginUrl(storeDirectory).pipe(
-    Effect.catch((failure: LoginFailure) =>
-      Console.error(`agent-usage: ${describeLoginFailure(failure)}`).pipe(
-        Effect.andThen(Effect.fail(new LoginFailed({ reason: failure._tag })))
-      )
-    )
+/** Explains `failure` on stderr, then fails without the runtime reporting it again. */
+const reported = (sentence: string, reason: string) =>
+  Console.error(`agent-usage: ${sentence}`).pipe(Effect.andThen(Effect.fail(new LoginFailed({ reason }))))
+
+/**
+ * Reads the store directory from `config`, asks the server running there for a link, prints it, and
+ * opens it when asked. Every failure, an unreadable configuration included, goes to stderr only, so
+ * stdout carries the link or nothing.
+ */
+export const login = Effect.fn("Login.login")(function*<E extends { readonly message: string }, R>(
+  config: Effect.Effect<{ readonly storeDirectory: string }, E, R>,
+  open: boolean,
+  platform: string
+) {
+  const settings = yield* config.pipe(
+    Effect.catch((error: E) => reported(`its configuration could not be read: ${error.message}`, "ConfigError"))
+  )
+  const url = yield* requestLoginUrl(settings.storeDirectory).pipe(
+    Effect.catch((failure: LoginFailure) => reported(describeLoginFailure(failure), failure._tag))
   )
   yield* Console.log(url)
   if (open) yield* openInBrowser(url, platform)

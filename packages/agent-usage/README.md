@@ -49,7 +49,10 @@ output you do not watch.
 is owner-only and the socket `0600`, so only the store's owner can ask; the server refuses to bind,
 and `login` to connect, when the path is a symlink, not a socket, or owned by another user. A
 socket left by a server that died is replaced on the next start; a second `serve` on a store whose
-server is still running exits with an error rather than taking over.
+server is still running, or whose socket it cannot probe, exits with an error rather than taking
+over. Either side gives up on the other after five seconds. A Unix socket path holds about a
+hundred bytes (103 here): a store directory deeper than that still runs, logs that `login` is
+unavailable, and `login` says to choose a shorter `AGENT_USAGE_HOME`.
 
 | `login` says                                 | Meaning                                                     |
 | -------------------------------------------- | ----------------------------------------------------------- |

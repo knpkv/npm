@@ -81,13 +81,23 @@ describe("agent-usage login against a running server", () => {
       expect(rival.status).not.toBe(0)
       expect(`${rival.stdout}${rival.stderr}`).toContain("already running")
     } finally {
-      server.kill("SIGTERM")
-      await new Promise((resolve) => server.once("exit", resolve))
+      // It may have exited already, failing to start: then there is no exit event left to wait for.
+      if (server.exitCode === null && server.signalCode === null) {
+        const exited = new Promise((resolve) => server.once("exit", resolve))
+        server.kill("SIGTERM")
+        await exited
+      }
     }
     const after = spawnSync(process.execPath, [...tsx, "login"], { env, encoding: "utf8" })
     expect(after.status).not.toBe(0)
     expect(after.stderr).toContain("agent-usage serve")
     expect(after.stdout).toBe("")
+    // A configuration it cannot read is a failure like any other: stderr only.
+    const { HOME: _home, ...withoutHome } = env
+    const broken = spawnSync(process.execPath, [...tsx, "login"], { env: withoutHome, encoding: "utf8" })
+    expect(broken.status).not.toBe(0)
+    expect(broken.stdout).toBe("")
+    expect(broken.stderr).toContain("agent-usage")
     rmSync(home, { recursive: true, force: true })
     rmSync(empty, { recursive: true, force: true })
   }, 60_000)
