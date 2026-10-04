@@ -3,7 +3,7 @@ import { describe, expect, it } from "@effect/vitest"
 import { Effect, Layer } from "effect"
 import { TestClock } from "effect/testing"
 import { UsageStore } from "../src/core/Store.js"
-import { refreshTicketTitles, TicketLookupFailed, ticketTitles } from "../src/core/Tickets.js"
+import { refreshTicketTitles, searchOutcome, TicketLookupFailed, ticketTitles } from "../src/core/Tickets.js"
 
 const TestStore = UsageStore.layer.pipe(Layer.provideMerge(SqliteClient.layer({ filename: ":memory:" })))
 
@@ -40,6 +40,18 @@ describe("ticket titles", () => {
         )
         expect(failures).toEqual([new TicketLookupFailed({ reason: "acli is not installed" })])
         expect((yield* ticketTitles(["ABC-9"]))["ABC-9"]).toEqual({ _tag: "Unknown", reason: "NotLookedUp" })
+      }))
+  })
+
+  describe("searchOutcome", () => {
+    it.effect("treats a nonzero exit as a failed lookup even when it printed a reply", () =>
+      Effect.gen(function*() {
+        expect(yield* Effect.flip(searchOutcome(1, "[]"))).toEqual(
+          new TicketLookupFailed({ reason: "acli exited with status 1" })
+        )
+        expect((yield* searchOutcome(0, "[]")).size).toBe(0)
+        const found = yield* searchOutcome(0, JSON.stringify([{ key: "RPS-1", fields: { summary: "Fix login" } }]))
+        expect(found.get("RPS-1")).toBe("Fix login")
       }))
   })
 })

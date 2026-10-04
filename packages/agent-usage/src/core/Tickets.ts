@@ -12,7 +12,7 @@
  *
  * @module
  */
-import { Clock, Data, Duration, Effect, Schema } from "effect"
+import { Clock, Data, Duration, Effect, Schema, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import type { TicketTitleValue } from "./Model.js"
 import { type StoreError, UsageStore } from "./Store.js"
@@ -82,27 +82,55 @@ const SearchResult = Schema.fromJsonString(Schema.Array(Schema.Struct({
 const decodeSearch = Schema.decodeUnknownEffect(SearchResult)
 
 /**
+ * What one `acli` search said, from its exit code and stdout. A nonzero exit is a failed lookup even
+ * when it printed something: a failed search cannot show that a ticket does not exist.
+ */
+export const searchOutcome = (
+  exitCode: number,
+  stdout: string
+): Effect.Effect<ReadonlyMap<string, string>, TicketLookupFailed> =>
+  exitCode !== 0
+    ? Effect.fail(new TicketLookupFailed({ reason: `acli exited with status ${exitCode}` }))
+    : decodeSearch(stdout).pipe(
+      Effect.mapError(() => new TicketLookupFailed({ reason: "acli returned an unreadable reply" })),
+      Effect.map((items) => {
+        const found = new Map<string, string>()
+        for (const item of items) {
+          if (item.fields.summary !== undefined) found.set(item.key, item.fields.summary)
+        }
+        return found
+      })
+    )
+
+/**
  * `acli jira workitem search` for a batch of keys. Keys reach the JQL only after the Booking
  * pattern accepted them, so they cannot carry JQL syntax.
  */
 export const acliTicketSearch = Effect.gen(function*() {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const search: TicketSearch = (keys) =>
-    spawner.string(
-      ChildProcess.make("acli", [
-        "jira",
-        "workitem",
-        "search",
-        "--jql",
-        `key in (${keys.join(",")})`,
-        "--fields",
-        "key,summary",
-        "--limit",
-        String(keys.length),
-        "--json"
-      ])
-    ).pipe(
-      // A hung acli (waiting on a login, a dead network) must not hold up the ingest pass behind it.
+    Effect.scoped(Effect.gen(function*() {
+      const handle = yield* spawner.spawn(
+        ChildProcess.make("acli", [
+          "jira",
+          "workitem",
+          "search",
+          "--jql",
+          `key in (${keys.join(",")})`,
+          "--fields",
+          "key,summary",
+          "--limit",
+          String(keys.length),
+          "--json"
+        ])
+      )
+      const [stdout, exitCode] = yield* Effect.all(
+        [Stream.mkString(Stream.decodeText(handle.stdout)), handle.exitCode],
+        { concurrency: 2 }
+      )
+      return { stdout, exitCode }
+    })).pipe(
+      // A hung acli (waiting on a login, a dead network) must not hold up the work behind it.
       Effect.timeoutOrElse({
         duration: ACLI_TIMEOUT,
         orElse: () => Effect.fail(new TicketLookupFailed({ reason: "acli did not answer within 30 seconds" }))
@@ -114,18 +142,7 @@ export const acliTicketSearch = Effect.gen(function*() {
             : `acli could not run (${error.reason._tag})`
         })
       ),
-      Effect.flatMap((output) =>
-        decodeSearch(output).pipe(
-          Effect.mapError(() => new TicketLookupFailed({ reason: "acli returned an unreadable reply" }))
-        )
-      ),
-      Effect.map((items) => {
-        const found = new Map<string, string>()
-        for (const item of items) {
-          if (item.fields.summary !== undefined) found.set(item.key, item.fields.summary)
-        }
-        return found
-      })
+      Effect.flatMap(({ exitCode, stdout }) => searchOutcome(exitCode, stdout))
     )
   return search
 })
