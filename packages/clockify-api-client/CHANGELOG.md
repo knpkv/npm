@@ -1,5 +1,28 @@
 # @knpkv/clockify-api-client
 
+## 2.0.0
+
+### Major Changes
+
+- [#377](https://github.com/knpkv/npm/pull/377) [`bd45f8c`](https://github.com/knpkv/npm/commit/bd45f8cdeb1e8301bfcde42254792a488734d7e5) Thanks [@konopkov](https://github.com/konopkov)! - Update the generated Clockify API client from the latest OpenAPI specification and decode workspace feature plans as objects.
+
+  Breaking: the published `./generated` entry point removes upstream models including `AmountDto`, `AttendanceDto`, `BalanceDtoV1`, `SharedReportDtoV1`, and `TimeEntryDto`. Consumers importing generated models must update their imports and check the regenerated request and response schemas before upgrading.
+
+### Minor Changes
+
+- [#439](https://github.com/knpkv/npm/pull/439) [`e17fbbb`](https://github.com/knpkv/npm/commit/e17fbbb8760f5f8bcf9a73b7d2d11a526c37fadd) Thanks [@github-actions](https://github.com/apps/github-actions)! - Update the generated Clockify API client from the latest OpenAPI specification: time intervals expose zoned start and end times, time-off status changes carry their time zone, templates and approval requests accept a time view mode, and feature plans include `ACTIVITY_MONITORING`.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+### Patch Changes
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Replace internal project names, keys and work descriptions in fixtures, examples and documentation
+  with neutral placeholders. Nothing about behaviour changes; these are the strings a reader of a
+  public package would otherwise see.
+
+  `ClockifyApiClient`'s tests now compose their client once through `it.layer`, with each case
+  declaring the response it wants, instead of providing a layer inside every test body.
+
 ## 1.1.1
 
 ### Patch Changes

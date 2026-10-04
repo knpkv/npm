@@ -1,5 +1,13 @@
 # @knpkv/control-center-sql
 
+## 0.5.0
+
+### Minor Changes
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`8e1ab9c`](https://github.com/knpkv/npm/commit/8e1ab9ca35c8d87d6d361f6cf3472ada3f9f5c93) Thanks [@konopkov](https://github.com/konopkov)! - Ship a patched copy of `effect-qb` 0.22.0 in `dist/vendor/effect-qb` so the package runs on Effect 4.0.0. No `effect-qb` release supports Effect 4.0.0 yet, and the workspace patch does not travel with a published dependency. `effect-qb` is no longer a runtime dependency; `pgsql-ast-parser` is. The copy is temporary and goes away once upstream supports Effect 4.0.0.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
 ## 0.4.0
 
 ### Minor Changes

@@ -1,5 +1,19 @@
 # @knpkv/ai-codex
 
+## 0.5.0
+
+### Minor Changes
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Add optional reasoning effort and bounded, cancellable visible activity callbacks to the Codex model adapter.
+
+  Classify the Codex CLI 0.154.0 feature inventory for prompt-only turns, disable screen-context collection and new host-facing capabilities including worktrees and interactive terminals, and retain fail-closed rejection of unknown features. Protect the reviewed inventory with independent versioned fixtures for 0.154.0 and 0.153.4.
+
+- [#452](https://github.com/knpkv/npm/pull/452) [`755eafa`](https://github.com/knpkv/npm/commit/755eafab8c0bc3e82b00e2dd27c68d669a1de87e) Thanks [@konopkov](https://github.com/konopkov)! - Upgrade to Effect 4.0.0 stable. `effect` and every `@effect/*` dependency or peer dependency now require `4.0.0`; imports move from the removed `effect/unstable/*` paths to `effect/*`.
+
+### Patch Changes
+
+- [#376](https://github.com/knpkv/npm/pull/376) [`379b029`](https://github.com/knpkv/npm/commit/379b02947180d50d4a40cf4b7723851aa68fc183) Thanks [@konopkov](https://github.com/konopkov)! - Start a Codex turn's timeout after prompt-only feature discovery, so a slow `codex features list` no longer eats into the turn's budget. JCF now reads Issue Keys from textual tool results as attribution evidence (never as presence), and agent reconcile no longer says both sides hold everything while withheld, unattributed or skipped time is still listed. Session Root and Standing Attribution prefixes now accept `~` only as `~` or `~/…`, `jcf watch` names unplaced time again when a later session or another half hour adds to the same day, and `jcf timer edit` exits non-zero when a guarded edit is refused.
+
 ## 0.4.0
 
 ### Minor Changes
