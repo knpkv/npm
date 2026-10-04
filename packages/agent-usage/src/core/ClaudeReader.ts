@@ -5,8 +5,8 @@
  * **Mental model**
  *
  * - **One event per model request.** Claude Code writes a message once per content block, each line
- *   repeating the usage; message id + request id dedupes them, and the store's key absorbs repeats
- *   across chunks and re-reads.
+ *   repeating the usage; message id + request id dedupes them. Should a later line carry larger
+ *   counts (a streamed request's final usage), the larger counts win, here and in the store.
  * - **Zero-token messages are placeholders** (`<synthetic>` local replies), not requests.
  * - **The Active Ticket follows the human.** Each typed user turn sets it to the one ticket it names,
  *   or clears it; tool results, meta turns, sidechain (subagent) prompts and injected reminders
@@ -119,7 +119,7 @@ export const readClaude = (
   state: ClaudeReaderState
 ): ReadResult<ClaudeReaderState> => {
   const events: Array<UsageEvent> = []
-  const seen = new Set<string>()
+  const seen = new Map<string, number>()
   let skipped = noSkips
   let activeTicket = state.activeTicket
 
@@ -156,9 +156,16 @@ export const readClaude = (
       continue
     }
     const event = toEvent(file, line, assistant.value, occurredAt, activeTicket)
-    if (event === null || seen.has(event.dedupeKey)) continue
-    seen.add(event.dedupeKey)
-    events.push(event)
+    if (event === null) continue
+    // A request's usage can be written more than once as it streams; the largest is the final one.
+    const earlier = seen.get(event.dedupeKey)
+    if (earlier === undefined) {
+      seen.set(event.dedupeKey, events.length)
+      events.push(event)
+    } else if (event.tokens.output > (events[earlier]?.tokens.output ?? 0)) {
+      const first = events[earlier]
+      if (first !== undefined) events[earlier] = { ...first, tokens: event.tokens }
+    }
   }
 
   return { events, snapshots: [], balances: [], skipped, state: { activeTicket } }

@@ -73,6 +73,21 @@ describe("pollClaudeLimits", () => {
       }])
     }))
 
+  it.effect("reads a window that is there but malformed as Unknown, so its last level does not carry on", () =>
+    Effect.gen(function*() {
+      const malformed = JSON.stringify({
+        five_hour: { utilization: "lots", resets_at: "2026-10-03T15:00:00+00:00" },
+        seven_day: { utilization: 40, resets_at: "not a time" },
+        seven_day_opus: null,
+        extra_usage: null
+      })
+      const result = yield* poll(reply(200, malformed))
+      expect(result.snapshots.map((snapshot) => [snapshot.label, snapshot.reading])).toEqual([
+        ["five_hour", { _tag: "Unknown", reason: "Parse" }],
+        ["seven_day", { _tag: "Unknown", reason: "Parse" }]
+      ])
+    }))
+
   it.effect("records an expired token as AuthExpired for limits and balance alike", () =>
     Effect.gen(function*() {
       const result = yield* poll(reply(401, "{}"))

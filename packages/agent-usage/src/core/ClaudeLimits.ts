@@ -18,7 +18,7 @@
  *
  * @module
  */
-import { Clock, Data, Effect, Option, Schema } from "effect"
+import { Clock, Data, Effect, Option, Predicate, Schema } from "effect"
 import { classifyExtraUsage, ExtraUsage } from "./Balances.js"
 import type { BalanceReading, LimitSnapshot, UnknownReason, WindowMinutes } from "./Model.js"
 
@@ -96,22 +96,29 @@ const classify = (machine: string, observedAt: number, reply: UsageReply): Obser
   if (Option.isNone(decoded)) return unknownObservations(machine, observedAt, "Parse")
   const snapshots = Object.entries(decoded.value).flatMap(([label, value]): ReadonlyArray<LimitSnapshot> => {
     const window = decodeWindow(value)
-    if (Option.isNone(window)) return []
-    const resets = window.value.resets_at
-    const resetsAt = resets === undefined || resets === null ? null : Date.parse(resets)
-    return [{
+    const snapshot = (reading: LimitSnapshot["reading"]): ReadonlyArray<LimitSnapshot> => [{
       agent: "claude",
       machine,
       source: "claude-oauth-usage",
       label,
       windowMinutes: windowMinutes(label),
       observedAt,
-      reading: {
-        _tag: "Known",
-        usedPercent: window.value.utilization,
-        resetsAt: resetsAt !== null && Number.isFinite(resetsAt) ? resetsAt : null
-      }
+      reading
     }]
+    if (Option.isNone(window)) {
+      // A window that is there but does not read is a failed reading of it, not silence: its last
+      // level must not carry on.
+      const claimsWindow = Predicate.hasProperty(value, "utilization") && value.utilization !== null
+      return claimsWindow ? snapshot({ _tag: "Unknown", reason: "Parse" }) : []
+    }
+    const resets = window.value.resets_at
+    if (resets === undefined || resets === null) {
+      return snapshot({ _tag: "Known", usedPercent: window.value.utilization, resetsAt: null })
+    }
+    const resetsAt = Date.parse(resets)
+    return Number.isFinite(resetsAt)
+      ? snapshot({ _tag: "Known", usedPercent: window.value.utilization, resetsAt })
+      : snapshot({ _tag: "Unknown", reason: "Parse" })
   })
   const extra = decodeExtraUsage(decoded.value["extra_usage"] ?? null)
   const balance: BalanceReading = {

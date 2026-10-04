@@ -273,8 +273,21 @@ export class UsageStore extends Context.Service<UsageStore, {
             INSERT INTO usage_events ${sql.insert(rows)}
             ON CONFLICT DO NOTHING
             RETURNING dedupe_key
-          `
+          `.pipe(Effect.flatMap(Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ dedupe_key: Schema.String })))))
           added += inserted.length
+          // A Claude request read again with larger counts (its final streamed usage) takes them;
+          // its time and attribution stay as first recorded. Codex keys are byte offsets: never.
+          const fresh = new Set(inserted.map((row) => row.dedupe_key))
+          for (const event of events.slice(start, start + EVENT_BATCH)) {
+            if (event.agent !== "claude" || fresh.has(event.dedupeKey)) continue
+            yield* sql`
+              UPDATE usage_events SET
+                input = ${event.tokens.input}, output = ${event.tokens.output},
+                reasoning = ${event.tokens.reasoning}, cache_read = ${event.tokens.cacheRead},
+                cache_write_5m = ${event.tokens.cacheWrite5m}, cache_write_1h = ${event.tokens.cacheWrite1h}
+              WHERE agent = 'claude' AND dedupe_key = ${event.dedupeKey} AND output < ${event.tokens.output}
+            `
+          }
         }
         return added
       })

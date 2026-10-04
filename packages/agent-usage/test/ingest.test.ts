@@ -198,4 +198,26 @@ describe("ingestOnce", () => {
         expect(status.claude.skipped.oversizedLine).toBe(1)
       }))
   })
+
+  it.layer(TestLayer)((it) => {
+    it.effect("takes a request's larger counts when they arrive on a later pass", () =>
+      Effect.gen(function*() {
+        const { fs, path, roots } = yield* setup
+        const session = path.join(roots.claudeProjects, "-w-app", "sess-1.jsonl")
+        yield* fs.writeFileString(
+          session,
+          jsonl(claudeAssistant({ id: "m", at: "2026-09-01T10:00:00.000Z", output: 2 }))
+        )
+        yield* ingestOnce(roots)
+        yield* fs.writeFileString(
+          session,
+          jsonl(claudeAssistant({ id: "m", at: "2026-09-01T10:00:03.000Z", output: 1_093 })),
+          { flag: "a" }
+        )
+        expect((yield* ingestOnce(roots)).claude.eventsAdded).toBe(0)
+        const store = yield* UsageStore
+        const groups = yield* store.usageGroups({ from: 0, to: Number.MAX_SAFE_INTEGER, machine: "ser8" })
+        expect(groups.map((group) => [group.requests, group.tokens.output])).toEqual([[1, 1_093]])
+      }))
+  })
 })

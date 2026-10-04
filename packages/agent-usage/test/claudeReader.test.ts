@@ -23,6 +23,15 @@ describe("readClaude", () => {
     })
   })
 
+  it("keeps a streamed request's final, larger usage", () => {
+    const partial = claudeAssistant({ id: "m", at: "2026-09-01T10:00:00.000Z", output: 2 })
+    const final = claudeAssistant({ id: "m", at: "2026-09-01T10:00:03.000Z", output: 1_093 })
+    const result = read(lines(partial, final))
+    expect(result.events).toHaveLength(1)
+    expect(result.events[0]?.tokens.output).toBe(1_093)
+    expect(result.events[0]?.occurredAt).toBe(Date.parse("2026-09-01T10:00:00.000Z"))
+  })
+
   it("keeps the 5m/1h cache-write split and the fast flag pricing needs", () => {
     const result = read(lines(claudeAssistant({
       id: "m",
