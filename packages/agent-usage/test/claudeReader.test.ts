@@ -87,6 +87,14 @@ describe("readClaude", () => {
     expect(result.events[0]?.attribution.activeTicket).toBe("RPS-7071")
   })
 
+  it("takes the Active Ticket from Claude Code's record of the last typed prompt", () => {
+    const result = read(lines(
+      { type: "last-prompt", lastPrompt: "continue RPS-7071", leafUuid: "x", sessionId: "s-1" },
+      claudeAssistant({ id: "a", at: "2026-09-01T10:00:00.000Z" })
+    ))
+    expect(result.events[0]?.attribution.activeTicket).toBe("RPS-7071")
+  })
+
   it("ignores the task a parent agent hands a subagent", () => {
     const result = read(
       lines(

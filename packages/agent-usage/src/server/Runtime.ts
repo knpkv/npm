@@ -1,6 +1,7 @@
 /**
- * The long-running half of `agent-usage serve`: an ingest pass every minute, ticket titles after
- * each pass, and a Claude limit poll every five minutes, all feeding the store the API reads.
+ * The long-running half of `agent-usage serve`: an ingest pass every minute, a ticket-title refresh
+ * on its own minute schedule, and a Claude limit poll every five minutes, all feeding the store the
+ * API reads.
  *
  * **Mental model**
  *
@@ -71,7 +72,7 @@ const recentTicketKeys = Effect.gen(function*() {
   return [...keys]
 })
 
-/** One ingest pass and title refresh, its outcome written to the status. */
+/** One ingest pass, its outcome written to the status. */
 export const ingestCycle = (options: BackgroundOptions) =>
   Effect.gen(function*() {
     const state = yield* RuntimeState
@@ -84,6 +85,15 @@ export const ingestCycle = (options: BackgroundOptions) =>
       return
     }
     yield* Ref.update(state.status, (status) => ({ ...status, ingest: outcome.success, ingestFailure: null }))
+  })
+
+/**
+ * One title refresh for the tickets booked recently. It runs on its own schedule: a slow or hung
+ * `acli` delays titles, never the next ingest pass.
+ */
+export const titleCycle = (options: BackgroundOptions) =>
+  Effect.gen(function*() {
+    const state = yield* RuntimeState
     const failures = yield* recentTicketKeys.pipe(
       Effect.flatMap((keys) => refreshTicketTitles(keys, options.ticketSearch)),
       Effect.map((lookups) => lookups.map((failure) => failure.reason)),
@@ -113,5 +123,6 @@ export const backgroundLayer = (
 ): Layer.Layer<never, never, RuntimeState | UsageStore | FileSystem.FileSystem | Path.Path> =>
   Layer.effectDiscard(Effect.gen(function*() {
     yield* Effect.forkScoped(Effect.repeat(ingestCycle(options), Schedule.spaced(INGEST_INTERVAL)))
+    yield* Effect.forkScoped(Effect.repeat(titleCycle(options), Schedule.spaced(INGEST_INTERVAL)))
     yield* Effect.forkScoped(Effect.repeat(claudePollCycle(options), Schedule.spaced(CLAUDE_POLL_INTERVAL)))
   }))

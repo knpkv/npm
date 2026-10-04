@@ -62,6 +62,10 @@ const UserLine = Schema.Struct({
   })
 })
 
+/** Claude Code's record of the latest prompt the human typed, written as the session moves on. */
+const LastPromptLine = Schema.Struct({ type: Schema.Literal("last-prompt"), lastPrompt: Schema.String })
+const decodeLastPrompt = Schema.decodeUnknownOption(Schema.fromJsonString(LastPromptLine))
+
 const decodeAssistant = Schema.decodeUnknownOption(Schema.fromJsonString(AssistantLine))
 const decodeUser = Schema.decodeUnknownOption(Schema.fromJsonString(UserLine))
 
@@ -129,6 +133,14 @@ export const readClaude = (
           const typed = claudeHumanText(content)
           if (typed !== "") activeTicket = singleTicket(typed)
         }
+        continue
+      }
+    }
+    if (line.text.includes("\"last-prompt\"")) {
+      const prompt = decodeLastPrompt(line.text)
+      if (Option.isSome(prompt)) {
+        const typed = claudeHumanText(prompt.value.lastPrompt)
+        if (typed !== "") activeTicket = singleTicket(typed)
         continue
       }
     }
