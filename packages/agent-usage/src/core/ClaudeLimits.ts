@@ -27,8 +27,13 @@ import type { BalanceReading, LimitSnapshot, UnknownReason, WindowMinutes } from
  * is absent), or `credentials` (found, but not Claude Code's OAuth credentials).
  */
 export class CredentialsMissing extends Data.TaggedError("CredentialsMissing")<{ readonly where: string }> {}
-/** The Keychain item exists but this process may not read it (locked Keychain, no GUI session, denied). */
-export class KeychainDenied extends Data.TaggedError("KeychainDenied")<{ readonly exitCode: number }> {}
+/** The credentials file exists but could not be read; `reason` is the platform's failure kind. */
+export class CredentialsUnreadable extends Data.TaggedError("CredentialsUnreadable")<{ readonly reason: string }> {}
+/**
+ * The Keychain would not hand over the item: `security` exited with `exitCode` (locked Keychain, no
+ * GUI session, access denied), or, when `exitCode` is null, did not answer before the deadline.
+ */
+export class KeychainDenied extends Data.TaggedError("KeychainDenied")<{ readonly exitCode: number | null }> {}
 export class TokenExpired extends Data.TaggedError("TokenExpired")<{}> {}
 /** The request itself failed; `cause` is the failure's kind only, never the request carrying the token. */
 export class UsageFetchFailed extends Data.TaggedError("UsageFetchFailed")<{ readonly cause: string }> {}
@@ -40,7 +45,7 @@ export interface UsageReply {
 
 /** How a poll reaches the token and the endpoint; the live pair lives at the executable boundary. */
 export interface ClaudeUsageDeps {
-  readonly readToken: Effect.Effect<string, CredentialsMissing | KeychainDenied | TokenExpired>
+  readonly readToken: Effect.Effect<string, CredentialsMissing | CredentialsUnreadable | KeychainDenied | TokenExpired>
   readonly get: (token: string) => Effect.Effect<UsageReply, UsageFetchFailed>
 }
 
@@ -168,13 +173,24 @@ export const pollClaudeLimits = (deps: ClaudeUsageDeps, machine: string): Effect
       Effect.catchTags({
         CredentialsMissing: (error) =>
           Effect.succeed(unknownObservations(machine, observedAt, "NoAuth", describeMissing(error.where))),
+        CredentialsUnreadable: (error) =>
+          Effect.succeed(
+            unknownObservations(
+              machine,
+              observedAt,
+              "NoAuth",
+              `the credentials file could not be read (${error.reason})`
+            )
+          ),
         KeychainDenied: (error) =>
           Effect.succeed(
             unknownObservations(
               machine,
               observedAt,
               "KeychainDenied",
-              `the Keychain refused access (security exited ${error.exitCode})`
+              error.exitCode === null
+                ? "the Keychain did not answer in time (locked, or waiting on a password prompt)"
+                : `the Keychain refused access (security exited ${error.exitCode})`
             )
           ),
         TokenExpired: () =>

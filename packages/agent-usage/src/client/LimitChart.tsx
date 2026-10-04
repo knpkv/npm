@@ -33,6 +33,8 @@ const LABEL = 16
 /** A failed reading's span on show: which window, when, and why. */
 interface Gap {
   readonly anchor: number
+  /** The top of the gap's row, so its explanation opens beside it. */
+  readonly top: number
   readonly window: string
   readonly from: number
   readonly to: number
@@ -49,9 +51,11 @@ const readingText = (reading: LimitReading): string =>
 const gapOf = (
   window: string,
   segment: Extract<LimitSegment, { readonly kind: "unknown" }>,
-  x: (at: number) => number
+  x: (at: number) => number,
+  top: number
 ): Gap => ({
   anchor: (x(segment.from) + x(segment.to)) / 2,
+  top,
   window,
   from: segment.from,
   to: segment.to,
@@ -66,7 +70,8 @@ const Row = (props: {
   readonly from: number
   readonly x: (at: number) => number
   readonly hatch: string
-  readonly onGap: (gap: Gap | null) => void
+  readonly onGapHover: (gap: Gap | null) => void
+  readonly onGapFocus: (gap: Gap | null) => void
 }) => {
   const plotTop = props.top + LABEL
   const plotHeight = ROW - LABEL
@@ -115,10 +120,10 @@ const Row = (props: {
             fill={`url(#${props.hatch})`}
             height={plotHeight}
             key={`u${segment.from}`}
-            onBlur={() => props.onGap(null)}
-            onFocus={() => props.onGap(gapOf(props.row.name, segment, props.x))}
-            onMouseEnter={() => props.onGap(gapOf(props.row.name, segment, props.x))}
-            onMouseLeave={() => props.onGap(null)}
+            onBlur={() => props.onGapFocus(null)}
+            onFocus={() => props.onGapFocus(gapOf(props.row.name, segment, props.x, props.top))}
+            onMouseEnter={() => props.onGapHover(gapOf(props.row.name, segment, props.x, props.top))}
+            onMouseLeave={() => props.onGapHover(null)}
             role="img"
             tabIndex={0}
             width={Math.max(1, props.x(segment.to) - props.x(segment.from))}
@@ -165,14 +170,17 @@ export const LimitChart = (props: {
 }) => {
   const [width, container] = useWidth(960)
   const [cursor, setCursor] = useState<number | null>(null)
-  const [gap, setShownGap] = useState<Gap | null>(null)
-  // Leaving a gap closes its explanation after a moment, so the pointer can move onto it
-  // (WCAG 1.4.13); entering the explanation keeps it open.
+  // Hover and keyboard focus open a failure's explanation independently; each ends only its own,
+  // so moving the pointer away keeps a focused one. Leaving a hovered gap closes it after a moment,
+  // so the pointer can move onto the explanation (WCAG 1.4.13); entering it keeps it open.
+  const [hoveredGap, setHoveredGap] = useState<Gap | null>(null)
+  const [focusedGap, setFocusedGap] = useState<Gap | null>(null)
+  const gap = hoveredGap ?? focusedGap
   const closing = useRef<number | undefined>(undefined)
-  const setGap = (next: Gap | null) => {
+  const hoverGap = (next: Gap | null) => {
     window.clearTimeout(closing.current)
-    if (next !== null) setShownGap(next)
-    else closing.current = window.setTimeout(() => setShownGap(null), 300)
+    if (next !== null) setHoveredGap(next)
+    else closing.current = window.setTimeout(() => setHoveredGap(null), 300)
   }
   const keepGap = () => window.clearTimeout(closing.current)
   const [tableOpen, setTableOpen] = useState(false)
@@ -183,11 +191,12 @@ export const LimitChart = (props: {
   const end = Math.min(props.range.to, props.now)
   const tabled = props.series.filter((series) => series.label !== "*")
   // A focused or hovered failure explains itself; otherwise the pointer shows every row's reading.
-  const tooltip = useTooltipPlacement(gap?.anchor ?? cursor, width, 0)
+  const tooltip = useTooltipPlacement(gap?.anchor ?? cursor, width, gap?.top ?? 0)
   useDismissOnEscape(cursor !== null || gap !== null, () => {
     setCursor(null)
     window.clearTimeout(closing.current)
-    setShownGap(null)
+    setHoveredGap(null)
+    setFocusedGap(null)
   })
 
   if (tabled.length === 0) {
@@ -228,7 +237,8 @@ export const LimitChart = (props: {
                 from={props.range.from}
                 hatch={hatch}
                 key={row.id}
-                onGap={setGap}
+                onGapFocus={setFocusedGap}
+                onGapHover={hoverGap}
                 row={row}
                 top={index * (ROW + ROW_GAP)}
                 width={width}
@@ -314,7 +324,7 @@ export const LimitChart = (props: {
         <div
           className="usage-tooltip usage-tooltip-hoverable"
           onMouseEnter={keepGap}
-          onMouseLeave={() => setGap(null)}
+          onMouseLeave={() => hoverGap(null)}
           ref={tooltip.ref}
           role="status"
           style={tooltip.style}

@@ -72,9 +72,9 @@ const Dashboard = () => {
   const refreshLimits = useAtomRefresh(limitsAtom)
   const refreshStatus = useAtomRefresh(statusAtom)
   const live = useLiveUpdates({
-    usage: { refresh: refreshUsage, outcome: outcomeOf(usageResult) },
-    limits: { refresh: refreshLimits, outcome: outcomeOf(limitsResult) },
-    status: { refresh: refreshStatus, outcome: outcomeOf(statusResult) }
+    usage: { refresh: refreshUsage, result: usageResult, outcome: outcomeOf(usageResult) },
+    limits: { refresh: refreshLimits, result: limitsResult, outcome: outcomeOf(limitsResult) },
+    status: { refresh: refreshStatus, result: statusResult, outcome: outcomeOf(statusResult) }
   })
   const slotsRef = useRef<ReadonlyMap<string, number>>(new Map())
 

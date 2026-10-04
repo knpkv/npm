@@ -1,16 +1,23 @@
 import { describe, expect, it } from "@effect/vitest"
-import { Effect } from "effect"
+import { Effect, Fiber } from "effect"
 import { TestClock } from "effect/testing"
 import {
   type ClaudeUsageDeps,
   CredentialsMissing,
+  CredentialsUnreadable,
   KeychainDenied,
   pollClaudeLimits,
   TokenExpired,
   tokenFromCredentials,
   UsageFetchFailed
 } from "../src/core/ClaudeLimits.js"
-import { keychainArgs, keychainOutcome } from "../src/core/ClaudeLimitsLive.js"
+import {
+  credentialsFileFailure,
+  KEYCHAIN_DEADLINE,
+  keychainArgs,
+  keychainOutcome,
+  withKeychainDeadline
+} from "../src/core/ClaudeLimitsLive.js"
 
 const now = Date.parse("2026-10-03T12:00:00.000Z")
 
@@ -123,6 +130,18 @@ describe("pollClaudeLimits", () => {
         reason: "KeychainDenied",
         detail: "the Keychain refused access (security exited 36)"
       })
+      expect(yield* readingOf(failing(Effect.fail(new KeychainDenied({ exitCode: null }))))).toEqual({
+        _tag: "Unknown",
+        reason: "KeychainDenied",
+        detail: "the Keychain did not answer in time (locked, or waiting on a password prompt)"
+      })
+      expect(yield* readingOf(failing(Effect.fail(new CredentialsUnreadable({ reason: "PermissionDenied" }))))).toEqual(
+        {
+          _tag: "Unknown",
+          reason: "NoAuth",
+          detail: "the credentials file could not be read (PermissionDenied)"
+        }
+      )
       expect(yield* readingOf(failing(Effect.fail(new TokenExpired())))).toEqual({
         _tag: "Unknown",
         reason: "AuthExpired",
@@ -169,5 +188,21 @@ describe("keychain lookup", () => {
         new CredentialsMissing({ where: "keychain:Claude Code-credentials" })
       )
       expect(yield* Effect.flip(keychainOutcome(36, "", service))).toEqual(new KeychainDenied({ exitCode: 36 }))
+    }))
+})
+
+describe("credential lookups that go wrong", () => {
+  it("tells a missing credentials file from one that cannot be read", () => {
+    expect(credentialsFileFailure("NotFound")).toEqual(new CredentialsMissing({ where: "file" }))
+    expect(credentialsFileFailure("PermissionDenied")).toEqual(
+      new CredentialsUnreadable({ reason: "PermissionDenied" })
+    )
+  })
+
+  it.effect("gives up on a Keychain that never answers, so the next poll still runs", () =>
+    Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(Effect.flip(withKeychainDeadline(Effect.never)))
+      yield* TestClock.adjust(KEYCHAIN_DEADLINE)
+      expect(yield* Fiber.join(fiber)).toEqual(new KeychainDenied({ exitCode: null }))
     }))
 })

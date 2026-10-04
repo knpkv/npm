@@ -21,6 +21,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
   type ClaudeUsageDeps,
   CredentialsMissing,
+  CredentialsUnreadable,
   KeychainDenied,
   tokenFromCredentials,
   USAGE_URL,
@@ -31,6 +32,22 @@ const TIMEOUT = Duration.seconds(5)
 
 /** `security`'s exit code for an item that does not exist (errSecItemNotFound). */
 const ITEM_NOT_FOUND = 44
+
+/** How long `security` may take: a locked Keychain or a password prompt can wait forever. */
+export const KEYCHAIN_DEADLINE = Duration.seconds(10)
+
+/** A Keychain lookup bounded by {@link KEYCHAIN_DEADLINE}, so a hung lookup cannot stall polling. */
+export const withKeychainDeadline = <A, E, R>(lookup: Effect.Effect<A, E, R>) =>
+  lookup.pipe(
+    Effect.timeoutOrElse({
+      duration: KEYCHAIN_DEADLINE,
+      orElse: () => Effect.fail(new KeychainDenied({ exitCode: null }))
+    })
+  )
+
+/** A failed read of the credentials file: only a missing file sends the lookup on to the Keychain. */
+export const credentialsFileFailure = (reason: string): CredentialsMissing | CredentialsUnreadable =>
+  reason === "NotFound" ? new CredentialsMissing({ where: "file" }) : new CredentialsUnreadable({ reason })
 
 /** Where Claude Code's credentials live; built by the configuration. */
 export interface ClaudeCredentialsPlaces {
@@ -71,16 +88,16 @@ export const liveClaudeUsageDeps = (places: ClaudeCredentialsPlaces) =>
     const client = yield* HttpClient.HttpClient
 
     const fromFile = fs.readFileString(places.file).pipe(
-      Effect.mapError(() => new CredentialsMissing({ where: "file" }))
+      Effect.mapError((error) => credentialsFileFailure(error.reason._tag))
     )
-    const fromKeychain = Effect.scoped(
+    const fromKeychain = withKeychainDeadline(Effect.scoped(
       Effect.gen(function*() {
         const handle = yield* spawner.spawn(ChildProcess.make("security", keychainArgs(places)))
         const stdout = yield* Stream.mkString(Stream.decodeText(handle.stdout))
         const exitCode = yield* handle.exitCode
         return yield* keychainOutcome(exitCode, stdout, places.keychainService)
       })
-    ).pipe(
+    )).pipe(
       // No `security` binary (Linux) or no way to run it: the file was the only place to look.
       Effect.catchTag("PlatformError", () => Effect.fail(new CredentialsMissing({ where: "file" })))
     )

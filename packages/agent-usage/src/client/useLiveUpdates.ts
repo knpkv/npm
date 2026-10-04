@@ -5,7 +5,9 @@
  * showing what it has.
  *
  * A refetch counts only once its read has loaded: one that fails is retried with the same backoff,
- * and "updated … ago" moves only when every announced read is in. Refetching goes through the
+ * and "updated … ago" moves only when every announced read is in. A fetch is known to have finished
+ * when its read holds a result object other than the one it held when the fetch was asked for (each
+ * completed fetch is a new result), so a read already loading when it was announced settles too. Refetching goes through the
  * atoms, which keep their previous value while the new one loads, so the range, filters, focus and
  * open details are untouched by an update.
  *
@@ -21,9 +23,11 @@ const decodeVersions = Schema.decodeUnknownOption(Schema.fromJsonString(LiveVers
 /** Where one read's latest fetch stands. */
 export type ReadOutcome = "loading" | "loaded" | "failed"
 
-/** A read the socket can announce: how to refetch it, and how its latest fetch went. */
+/** A read the socket can announce: how to refetch it, its latest result, and how that went. */
 export interface TrackedRead {
   readonly refresh: () => void
+  /** The read's current result; a new object each time a fetch completes. */
+  readonly result: object
   readonly outcome: ReadOutcome
 }
 
@@ -34,9 +38,9 @@ export type LiveState =
 
 const now = (): number => performance.timeOrigin + performance.now()
 
-/** An announced read, settled only after its fetch has been seen to start and then finish. */
+/** An announced read, settled once a result newer than `baseline` has arrived. */
 interface Pending {
-  started: boolean
+  baseline: object
   attempt: number
   retry: number | undefined
 }
@@ -50,18 +54,13 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
   const connected = useRef(false)
 
   // Settle announced reads as their fetches finish: a load clears one, a failure retries it.
-  const outcomes = `${reads.usage.outcome} ${reads.limits.outcome} ${reads.status.outcome}`
   useEffect(() => {
     if (pending.current.size === 0) return
     let failing = false
     for (const [read, entry] of pending.current) {
-      const outcome = readsRef.current[read].outcome
-      if (outcome === "loading") {
-        entry.started = true
-        continue
-      }
-      if (!entry.started) continue
-      if (outcome === "loaded") {
+      const current = readsRef.current[read]
+      if (current.outcome === "loading" || current.result === entry.baseline) continue
+      if (current.outcome === "loaded") {
         pending.current.delete(read)
         continue
       }
@@ -71,14 +70,14 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
         entry.attempt += 1
         entry.retry = window.setTimeout(() => {
           entry.retry = undefined
-          entry.started = false
+          entry.baseline = readsRef.current[read].result
           readsRef.current[read].refresh()
         }, delay)
       }
     }
     if (pending.current.size === 0) updatedAt.current = now()
     if (connected.current) setState({ _tag: "Live", updatedAt: updatedAt.current, refetchFailing: failing })
-  }, [outcomes])
+  }, [reads.usage.result, reads.limits.result, reads.status.result])
 
   useEffect(() => {
     let socket: WebSocket | null = null
@@ -89,11 +88,12 @@ export const useLiveUpdates = (reads: Readonly<Record<LiveRead, TrackedRead>>): 
     const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/live`
 
     const request = (read: LiveRead) => {
+      const baseline = readsRef.current[read].result
       const entry = pending.current.get(read)
-      if (entry === undefined) pending.current.set(read, { started: false, attempt: 0, retry: undefined })
+      if (entry === undefined) pending.current.set(read, { baseline, attempt: 0, retry: undefined })
       else {
         window.clearTimeout(entry.retry)
-        entry.started = false
+        entry.baseline = baseline
         entry.retry = undefined
       }
       readsRef.current[read].refresh()
