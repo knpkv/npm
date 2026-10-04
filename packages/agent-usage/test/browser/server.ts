@@ -10,11 +10,7 @@ import { createServer } from "node:http"
 import type { UsageEvent } from "../../src/core/Model.js"
 import { UsageStore } from "../../src/core/Store.js"
 import { application } from "../../src/server/HttpApplication.js"
-import {
-  makeOwnerSessionSecrets,
-  OwnerSessionSecrets,
-  mintBootstrapUrl
-} from "../../src/server/OwnerSession.js"
+import { makeOwnerSessionSecrets, mintBootstrapUrl, OwnerSessionSecrets } from "../../src/server/OwnerSession.js"
 import { RuntimeState } from "../../src/server/Runtime.js"
 
 // This executable composes a seeded store and a real loopback HTTP listener.
@@ -191,7 +187,7 @@ const run = Effect.gen(function*() {
       Layer.provide(NodeHttpServer.layerServer(createServer, { host: "127.0.0.1", port: 4180 })),
       Layer.provide(Etag.layer),
       Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
-      Layer.provide(NodeServices.layer),
+      Layer.provide(NodeServices.layer)
     )
   )
 })

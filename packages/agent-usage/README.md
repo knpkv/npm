@@ -17,12 +17,13 @@ every model request in a private SQLite store, polls Claude's limits, and serves
 
 ## Running it
 
-Installed from npm, the binary is `agent-usage` (`agent-usage serve`, `agent-usage ingest`). From this
-repository:
+Installed from npm, the binary is `agent-usage` (`agent-usage serve`, `agent-usage login`,
+`agent-usage ingest`). From this repository:
 
 ```bash
 pnpm build                                       # builds the workspace, this package included
 pnpm --filter @knpkv/agent-usage start serve     # prints the URL that gets you in
+pnpm --filter @knpkv/agent-usage start login     # a fresh URL from the running server; --open opens it
 pnpm --filter @knpkv/agent-usage start ingest    # one pass, then a summary; --json for one JSON value
 ```
 
@@ -33,8 +34,89 @@ changed, and the page refetches only those. A dropped socket reconnects with bac
 everything once; the header says how long ago the page was updated, or that it is reconnecting.
 The printed URL carries a
 one-time code in its fragment; opening it exchanges the code for a session cookie and strips it from
-the address bar. The code expires a minute after the server binds, so restart for a fresh one. The
-server only listens on loopback and only answers reads.
+the address bar. The code works once and expires a minute after it was printed. The server only
+listens on loopback and only answers reads.
+
+### Getting back in
+
+`agent-usage login` asks the running server for a fresh link and prints it; `agent-usage login
+--open` also opens it in the browser (`xdg-open` on Linux, `open` on macOS). Each link follows the
+startup link's rules: one use, one minute, and a newer link replaces one not yet used. Use it when
+the startup link has expired, the session cookie is gone, or the server runs as a service whose
+output you do not watch.
+
+`login` reaches the server over a Unix socket, `serve.sock` in the store directory. The directory
+is owner-only and the socket `0600`, so only the store's owner can ask; the server refuses to bind,
+and `login` to connect, when the path is a symlink, not a socket, or owned by another user. A
+socket left by a server that died is replaced on the next start; a second `serve` on a store whose
+server is still running exits with an error rather than taking over.
+
+| `login` says                                 | Meaning                                                     |
+| -------------------------------------------- | ----------------------------------------------------------- |
+| `agent-usage is not running on this store`   | Nothing listens on the socket: start `serve` or its service |
+| `refused its control socket … : <reason>`    | Something other than the server's own socket is at the path |
+| `control socket … could not be used (<why>)` | The socket exists but this process may not connect to it    |
+| `did not answer with a link`                 | The server is an older version without `login`; restart it  |
+
+Every failure exits nonzero and prints nothing on stdout, so `agent-usage login | xargs …` is safe.
+
+### Running as a service
+
+`serve` needs no terminal: it reads nothing from stdin and prints the startup link to stdout once.
+Run it under the service manager and get in with `agent-usage login --open`. It reads its
+configuration from the environment ([Configuration](#configuration)); set `AGENT_USAGE_HOME` and
+`PORT` there when the defaults do not suit. Point `ExecStart` / `ProgramArguments` at the installed
+binary (`command -v agent-usage`).
+
+systemd user unit, `~/.config/systemd/user/agent-usage.service`:
+
+```ini
+[Unit]
+Description=agent-usage: Claude and Codex usage over time
+
+[Service]
+ExecStart=%h/.local/bin/agent-usage serve
+Restart=on-failure
+# Environment=AGENT_USAGE_HOME=%h/.local/share/agent-usage
+# Environment=PORT=3112
+
+[Install]
+WantedBy=default.target
+```
+
+```bash
+systemctl --user daemon-reload && systemctl --user enable --now agent-usage
+journalctl --user -u agent-usage    # its output
+```
+
+Under a service manager stdout goes to the journal or a log file, so the startup link lands there.
+It is spent on first use and dead a minute after startup either way; `login` links never leave the
+`login` process.
+
+launchd agent, `~/Library/LaunchAgents/dev.knpkv.agent-usage.plist`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>dev.knpkv.agent-usage</string>
+  <key>ProgramArguments</key>
+  <array><string>/usr/local/bin/agent-usage</string><string>serve</string></array>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+</dict>
+</plist>
+```
+
+```bash
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/dev.knpkv.agent-usage.plist
+```
+
+A service's environment is not your shell's: if Claude Code or Codex keep their files somewhere
+other than the defaults (`CLAUDE_CONFIG_DIR`, `CODEX_HOME`), set the same variables for the service.
+On macOS, the Keychain lookup for Claude's token needs the service to run in your login session (a
+LaunchAgent does; a LaunchDaemon does not).
 
 The first pass backfills everything on disk (on a machine with ~9 GB of Codex rollouts, under a
 minute); later passes read only what was appended. A line longer than 32 MiB (a huge pasted tool
@@ -123,8 +205,10 @@ do not publish, so any split would be invented.
   `0600`, and a symlinked store directory or database file is refused.
 - Nothing leaves the machine except the Claude limit poll to Anthropic and, when installed, `acli`
   lookups of ticket keys against your Jira.
-- The session cookie (`agent_usage_owner`, `HttpOnly`, `SameSite=Strict`, path `/api`) and the
-  one-time bootstrap code are minted per process; the code is printed to stdout only, never logged.
+- The session cookie (`agent_usage_owner`, `HttpOnly`, `SameSite=Strict`, path `/api`) is minted per
+  process. One-time codes are minted at startup and on each `agent-usage login`; they reach only
+  stdout of `serve` or `login`, are never logged, and with `--open` are on the opener's command line
+  for the moment it runs.
 
 Each machine keeps its own store. Every row names its machine, so a combined view across machines
 can come later without migrating anything.

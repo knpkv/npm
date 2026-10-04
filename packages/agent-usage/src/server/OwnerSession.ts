@@ -268,7 +268,7 @@ export const authorizeBootstrapRequest = Effect.fn("OwnerSession.authorizeBootst
           })
           if (decision === "accepted") return
           const message = decision === "expired"
-            ? "Bootstrap token has expired — run agent-usage login for a fresh URL"
+            ? "Bootstrap token has expired"
             : decision === "consumed"
             ? "Bootstrap token has already been used"
             : "Bootstrap token state is invalid"

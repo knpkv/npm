@@ -18,6 +18,7 @@ import { liveClaudeUsageDeps } from "../core/ClaudeLimitsLive.js"
 import { databaseLayer } from "../core/Database.js"
 import { acliTicketSearch } from "../core/Tickets.js"
 import type { AgentUsageConfig } from "./Config.js"
+import { controlSocket } from "./ControlSocket.js"
 import { application } from "./HttpApplication.js"
 import { mintBootstrapUrl, OwnerSessionSecrets, type OwnerSessionSecretsContract } from "./OwnerSession.js"
 import { backgroundLayer, RuntimeState } from "./Runtime.js"
@@ -44,8 +45,16 @@ const background = (config: AgentUsageConfig) =>
 export const makeServer = (options: AgentUsageServerOptions) =>
   Layer.unwrap(
     Schema.decodeUnknownEffect(LoopbackHostname)(options.hostname ?? "127.0.0.1").pipe(Effect.map((hostname) => {
+      const store = databaseLayer(options.config.storeDirectory)
+      // The login socket, in the store directory the store layer has just checked is owner-only.
+      // It comes up before the HTTP listener, so a second server on this store stops early.
+      const control = Layer.effectDiscard(controlSocket(options.config.storeDirectory, options.security)).pipe(
+        Layer.provide(store),
+        Layer.provide(NodeServices.layer)
+      )
       const services = Layer.mergeAll(
-        databaseLayer(options.config.storeDirectory),
+        store,
+        control,
         RuntimeState.layer(options.config.roots.machine, options.config.projects)
       )
       return Layer.mergeAll(HttpRouter.serve(application), background(options.config)).pipe(

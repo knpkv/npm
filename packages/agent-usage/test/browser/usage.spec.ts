@@ -182,6 +182,7 @@ test("changing the agent filter drops a picked booking, so the chart is never le
 test("a reload without a working session says how to get back in instead of showing empty charts", async ({ page }) => {
   await page.goto("/")
   await expect(page.getByText("Could not sign in")).toBeVisible()
+  await expect(page.getByText("Run agent-usage login for a fresh link.", { exact: false })).toBeVisible()
 })
 
 test("every limit reading is also available as a table, without hovering", async ({ page }) => {
