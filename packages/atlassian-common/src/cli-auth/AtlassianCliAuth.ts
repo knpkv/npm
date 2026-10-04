@@ -188,7 +188,7 @@ const REFRESH_TIMEOUT = "30 seconds"
  *
  * @category Constructors
  */
-export const makeAtlassianCliAuth = <MissingError>(
+export const makeAtlassianCliAuth = Effect.fn("AtlassianCliAuth.make")(<MissingError>(
   options: AtlassianCliAuthOptions<MissingError>
 ): Effect.Effect<
   AtlassianCliAuth<MissingError>,
@@ -225,7 +225,7 @@ export const makeAtlassianCliAuth = <MissingError>(
     const deleteToken = () => deleteActiveProfile(toolName).pipe(withStorage)
     const saveConfig = (config: OAuthConfig) => saveOAuthConfig(toolName, config).pipe(withStorage)
     const legacyOAuthConfig = options.legacyOAuthConfig
-    const loadConfig = () =>
+    const loadConfig = Effect.fn("AtlassianCliAuth.loadConfig")(() =>
       Effect.gen(function*() {
         const config = yield* loadOAuthConfig(toolName)
         if (config !== null || legacyOAuthConfig === undefined) return config
@@ -235,12 +235,13 @@ export const makeAtlassianCliAuth = <MissingError>(
         }
         return legacy
       }).pipe(withStorage)
+    )
 
     const refreshLock = yield* Ref.make<Option.Option<RefreshDeferred>>(Option.none())
 
     // The URL is printed before this runs, so a browser that will not open is
     // reported and the wait for the callback continues.
-    const openBrowserOrWarn = (url: string): Effect.Effect<void> =>
+    const openBrowserOrWarn = Effect.fn("AtlassianCliAuth.openBrowserOrWarn")((url: string): Effect.Effect<void> =>
       openBrowser(url).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, childProcessSpawner),
         Effect.catchTags({
@@ -249,8 +250,12 @@ export const makeAtlassianCliAuth = <MissingError>(
           PlatformError: () => Console.error("Could not open a browser; visit the URL above.")
         })
       )
+    )
 
-    const getConfig = (): Effect.Effect<OAuthConfig, OAuthError | StorageError> =>
+    const getConfig = Effect.fn("AtlassianCliAuth.getConfig")((): Effect.Effect<
+      OAuthConfig,
+      OAuthError | StorageError
+    > =>
       Effect.gen(function*() {
         const config = yield* loadConfig()
         if (config === null) {
@@ -261,8 +266,9 @@ export const makeAtlassianCliAuth = <MissingError>(
         }
         return config
       })
+    )
 
-    const refreshAndPersist = (
+    const refreshAndPersist = Effect.fn("AtlassianCliAuth.refreshAndPersist")((
       token: OAuthToken,
       config: OAuthConfig
     ): Effect.Effect<OAuthToken, OAuthError | StorageError> =>
@@ -280,10 +286,13 @@ export const makeAtlassianCliAuth = <MissingError>(
           return updated
         })
       )
+    )
 
-    const isConfigured = () => loadConfig().pipe(Effect.map((config) => config !== null))
+    const isConfigured = Effect.fn("AtlassianCliAuth.isConfigured")(() =>
+      loadConfig().pipe(Effect.map((config) => config !== null))
+    )
 
-    const login = (
+    const login = Effect.fn("AtlassianCliAuth.login")((
       loginOptions?: LoginOptions
     ): Effect.Effect<ReadonlyArray<AccessibleSite> | void, OAuthError | StorageError> =>
       Effect.gen(function*() {
@@ -373,8 +382,9 @@ export const makeAtlassianCliAuth = <MissingError>(
         yield* Console.log(`Logged in as ${user.name} (${user.email})`)
         return undefined
       })
+    )
 
-    const logout = (): Effect.Effect<void, OAuthError | StorageError> =>
+    const logout = Effect.fn("AtlassianCliAuth.logout")((): Effect.Effect<void, OAuthError | StorageError> =>
       Effect.gen(function*() {
         const token = yield* loadToken()
         if (token === null) {
@@ -393,8 +403,12 @@ export const makeAtlassianCliAuth = <MissingError>(
 
         yield* deleteToken()
       })
+    )
 
-    const getAccessToken = (): Effect.Effect<Redacted.Redacted<string>, MissingError | OAuthError | StorageError> =>
+    const getAccessToken = Effect.fn("AtlassianCliAuth.getAccessToken")((): Effect.Effect<
+      Redacted.Redacted<string>,
+      MissingError | OAuthError | StorageError
+    > =>
       Effect.gen(function*() {
         const token = yield* loadToken()
         if (token === null) {
@@ -481,6 +495,7 @@ export const makeAtlassianCliAuth = <MissingError>(
 
         return Redacted.make(result.access_token)
       })
+    )
 
     const storedTokenField = <A>(read: (token: OAuthToken) => A) => (): Effect.Effect<A, MissingError | StorageError> =>
       loadToken().pipe(
@@ -488,18 +503,31 @@ export const makeAtlassianCliAuth = <MissingError>(
       )
 
     return {
-      configure: saveConfig,
+      configure: Effect.fn("AtlassianCliAuth.configure")(saveConfig),
       isConfigured,
       login,
       logout,
       getAccessToken,
-      getCloudId: storedTokenField((token) => token.cloud_id),
-      getSiteUrl: storedTokenField((token) => token.site_url),
-      getCurrentUser: () => loadToken().pipe(Effect.map((token) => token?.user ?? null)),
-      getActiveProfile: () => loadActiveProfile(toolName).pipe(withStorage),
-      listProfiles: () => loadProfiles(toolName).pipe(Effect.map((store) => store.profiles), withStorage),
-      switchProfile: (selector) => setActiveProfileBySelector(toolName, selector).pipe(withStorage),
-      removeProfile: (selector) => deleteProfileBySelector(toolName, selector).pipe(withStorage),
-      isLoggedIn: () => loadToken().pipe(Effect.map((token) => token !== null))
+      getCloudId: Effect.fn("AtlassianCliAuth.getCloudId")(storedTokenField((token) => token.cloud_id)),
+      getSiteUrl: Effect.fn("AtlassianCliAuth.getSiteUrl")(storedTokenField((token) => token.site_url)),
+      getCurrentUser: Effect.fn("AtlassianCliAuth.getCurrentUser")(() =>
+        loadToken().pipe(Effect.map((token) => token?.user ?? null))
+      ),
+      getActiveProfile: Effect.fn("AtlassianCliAuth.getActiveProfile")(() =>
+        loadActiveProfile(toolName).pipe(withStorage)
+      ),
+      listProfiles: Effect.fn("AtlassianCliAuth.listProfiles")(() =>
+        loadProfiles(toolName).pipe(Effect.map((store) => store.profiles), withStorage)
+      ),
+      switchProfile: Effect.fn("AtlassianCliAuth.switchProfile")((selector) =>
+        setActiveProfileBySelector(toolName, selector).pipe(withStorage)
+      ),
+      removeProfile: Effect.fn("AtlassianCliAuth.removeProfile")((selector) =>
+        deleteProfileBySelector(toolName, selector).pipe(withStorage)
+      ),
+      isLoggedIn: Effect.fn("AtlassianCliAuth.isLoggedIn")(() =>
+        loadToken().pipe(Effect.map((token) => token !== null))
+      )
     }
   })
+)

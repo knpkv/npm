@@ -39,14 +39,14 @@ rule:
         regex: "^startCallbackServer$"
 
 files:
-  - "packages/*/src/**/*.ts"
-  - "packages/*/src/**/*.tsx"
-ignores:
-  - "packages/atlassian-common/src/**"
+  - "packages/jira-cli/src/**/*.ts"
+  - "packages/jira-cli/src/**/*.tsx"
+  - "packages/confluence-to-markdown/src/**/*.ts"
+  - "packages/confluence-to-markdown/src/**/*.tsx"
 
 note: |
   jira-cli and confluence-to-markdown carried two drifting ~600-line copies of
   the browser login and rotating refresh-token flow. The flow lives once in
   @knpkv/atlassian-common/cli-auth; a CLI binds it with makeAtlassianCliAuth.
-  Server-side browser OAuth (control-center) imports the endpoint helpers but
-  not refreshToken, and is unaffected.
+  Only these two CLI implementations are covered. Other integrations may use
+  the endpoint helpers or their own callback servers.

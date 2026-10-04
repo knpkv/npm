@@ -4,6 +4,8 @@ export default defineConfig({
   resolve: {
     alias: {
       "@knpkv/atlassian-common/auth": new URL("../atlassian-common/src/auth/index.ts", import.meta.url).pathname,
+      "@knpkv/atlassian-common/cli-auth":
+        new URL("../atlassian-common/src/cli-auth/index.ts", import.meta.url).pathname,
       "@knpkv/atlassian-common/config": new URL("../atlassian-common/src/config/index.ts", import.meta.url).pathname,
       "@knpkv/clockify-api-client": new URL("../clockify-api-client/src/index.ts", import.meta.url).pathname,
       "@knpkv/jira-api-client": new URL("../jira-api-client/src/index.ts", import.meta.url).pathname,
