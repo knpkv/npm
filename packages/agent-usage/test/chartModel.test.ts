@@ -161,6 +161,8 @@ describe("small cost ticks", () => {
   it("shows enough decimals that adjacent ticks read differently", () => {
     const labels = [0, 0.001, 0.002, 0.003, 0.004].map((tick) => formatAxis("cost", tick, 0.001))
     expect(new Set(labels).size).toBe(labels.length)
+    const tiny = [0.0000002, 0.0000004].map((tick) => formatAxis("cost", tick, 0.0000002))
+    expect(new Set(tiny).size).toBe(2)
     expect(formatAxis("cost", 0.25, 0.25)).toBe("$0.25")
     expect(formatAxis("cost", 400, 100)).toBe("$400")
   })

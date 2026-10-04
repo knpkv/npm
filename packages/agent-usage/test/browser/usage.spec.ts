@@ -374,5 +374,7 @@ test("a focused column keeps its breakdown when the pointer leaves the chart", a
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
   await page.mouse.move(box.x + box.width / 2, box.y + box.height + 200)
   await expect(column).toBeFocused()
-  await expect(tooltip).toBeVisible()
+  // The breakdown on show is the focused column's, not one the pointer passed over.
+  const period = (await column.getAttribute("aria-label"))?.split(":")[0] ?? ""
+  await expect(tooltip.locator(".usage-tooltip-title")).toHaveText(period)
 })

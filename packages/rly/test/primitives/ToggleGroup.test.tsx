@@ -126,6 +126,20 @@ describe("ToggleGroup", () => {
     await act(async () => root.unmount())
   })
 
+  it("still moves focus onto the chosen option without reporting it again", async () => {
+    const onValueChange = vi.fn()
+    const root = await mount(onValueChange)
+    await act(async () => {
+      const unchosen = option("24h")
+      unchosen?.focus()
+      unchosen?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "ArrowRight" }))
+      await new Promise<void>((resolve) => setTimeout(resolve, 0))
+    })
+    expect(document.activeElement?.textContent).toBe("7d")
+    expect(onValueChange).not.toHaveBeenCalled()
+    await act(async () => root.unmount())
+  })
+
   it("rejects inaccessible or ambiguous configurations", () => {
     const noop = () => undefined
     expect(() =>

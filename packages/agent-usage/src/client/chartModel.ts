@@ -192,6 +192,7 @@ export const formatAxis = (measure: Measure, value: number, step = 1): string =>
   if (measure === "tokens") return compactNumber.format(value)
   if (value >= 10 || Number.isInteger(value)) return `$${compactNumber.format(value)}`
   // Enough decimals for the tick step, so $0.001 and $0.002 do not both read $0.00.
-  const decimals = step > 0 && step < 0.01 ? Math.min(6, Math.ceil(-Math.log10(step))) : 2
+  // toFixed takes at most 100 digits; 20 already separates any step a usage chart can produce.
+  const decimals = step > 0 && step < 0.01 ? Math.min(20, Math.ceil(-Math.log10(step))) : 2
   return `$${value.toFixed(decimals)}`
 }
