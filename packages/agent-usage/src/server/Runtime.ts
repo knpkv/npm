@@ -99,6 +99,8 @@ export const ingestCycle = (options: BackgroundOptions) =>
     const state = yield* RuntimeState
     const outcome = yield* Effect.result(ingestOnce(options.roots))
     if (outcome._tag === "Failure") {
+      // The page shows which operation failed; the log keeps why, for whoever runs the server.
+      yield* Effect.logWarning("ingest pass failed", outcome.failure.operation, outcome.failure.cause)
       yield* SubscriptionRef.update(state.status, (status) => ({
         ...status,
         ingestFailure: `${outcome.failure.operation}: the store could not be written`
@@ -127,7 +129,10 @@ export const titleCycle = (options: BackgroundOptions) =>
     const failures = yield* recentTicketKeys.pipe(
       Effect.flatMap((keys) => refreshTicketTitles(keys, options.ticketSearch)),
       Effect.map((lookups) => lookups.map((failure) => failure.reason)),
-      Effect.catchTag("StoreError", (error) => Effect.succeed([`ticket titles: ${error.operation} failed`]))
+      Effect.catchTag("StoreError", (error) =>
+        Effect.logWarning("ticket title refresh failed", error.operation, error.cause).pipe(
+          Effect.as([`ticket titles: ${error.operation} failed`])
+        ))
     )
     yield* SubscriptionRef.update(
       state.status,
