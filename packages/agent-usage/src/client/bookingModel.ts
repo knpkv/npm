@@ -47,6 +47,10 @@ export const bookingColumns = (
   return ["booking", ...title, "agents", "requests", ...(breakdown ? BREAKDOWN : []), "tokens", "cost"]
 }
 
+/** Fall back to the default cost sort while the chosen column is hidden. */
+export const visibleSort = (sort: BookingSort, columns: ReadonlyArray<BookingColumn>): BookingSort =>
+  columns.includes(sort.column) ? sort : DEFAULT_SORT
+
 const titleText = (summary: BookingSummary): string => (summary.title?._tag === "Known" ? summary.title.summary : "")
 
 const sortValue = (summary: BookingSummary, column: BookingColumn): number | string => {

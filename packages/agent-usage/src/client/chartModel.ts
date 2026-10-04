@@ -176,9 +176,11 @@ export const seriesIdentity = (series: {
     ? `codex:${series.windowMinutes}m`
     : `${series.agent}:${series.label}`
 
-/** The whole range's usage by the measure: the panel's headline number. */
-export const rangeTotal = (report: UsageReport, measure: Measure): number =>
-  report.cells.reduce((sum, cell) => sum + measureOf(measure, cell), 0)
+/** The range's usage by the measure, restricted to the selected Booking when one is picked. */
+export const rangeTotal = (report: UsageReport, measure: Measure, selected: string | null = null): number =>
+  report.cells
+    .filter((cell) => selected === null || cell.booking === selected)
+    .reduce((sum, cell) => sum + measureOf(measure, cell), 0)
 
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 

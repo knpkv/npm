@@ -65,7 +65,7 @@ const useStatusUntilIngested = (ingested: boolean): void => {
   }, [ingested, refresh])
 }
 
-const PANEL_LOADING = <Skeleton decorative={false} height="16rem" label="Loading" variant="block" />
+const PANEL_LOADING = <Skeleton height="16rem" variant="block" />
 
 const Dashboard = () => {
   const [preset, setPreset] = useAtom(presetAtom)
@@ -172,7 +172,7 @@ const Dashboard = () => {
               {usage.value === null || range === null ? null : (
                 <p className="usage-headline">
                   <span className="usage-headline-value" data-testid="usage-total">
-                    {formatMeasure(measure, rangeTotal(usage.value.report, measure))}
+                    {formatMeasure(measure, rangeTotal(usage.value.report, measure, selected))}
                   </span>{" "}
                   <Text as="span" tone="secondary" variant="meta">
                     {measure === "cost" ? "API-equivalent" : "tokens"} · {preset}
@@ -188,7 +188,7 @@ const Dashboard = () => {
           )}
           {usage.value === null || stacked === null ? (
             PANEL_LOADING
-          ) : stacked.series.length === 0 ? (
+          ) : usage.value.report.bookings.length === 0 ? (
             <StatePanel
               description="No Claude or Codex request was made in this range."
               title="No usage"

@@ -1,4 +1,15 @@
 import { expect, type Page, test } from "@playwright/test"
+import { Deferred, Effect, Schema } from "effect"
+import { totalTokens } from "../../src/core/Model.js"
+import { LimitsReport, UsageReport } from "../../src/shared/contracts.js"
+
+/** Replaces a decoded fixture report while retaining the real server's periods and identities. */
+const replaceUsage = (page: Page, change: (report: UsageReport) => UsageReport) =>
+  page.route("**/api/usage?*", async (route) => {
+    const response = await route.fetch()
+    const report = Schema.decodeUnknownSync(UsageReport)(await response.json())
+    await route.fulfill({ response, json: change(report) })
+  })
 
 /** Signs in with the owner cookie the fixture hands out, as the bootstrap exchange would. */
 const signIn = async (page: Page) => {
@@ -57,8 +68,107 @@ test("picking a booking draws only it, and Show all brings the rest back", async
   await signIn(page)
   await page.getByRole("button", { name: "RPS-12" }).click()
   await expect(page.getByRole("heading", { name: "Usage by booking — RPS-12 only" })).toBeVisible()
+  await expect(page.getByTestId("usage-total")).toHaveText("$3.60")
+  await page.getByRole("radiogroup", { name: "Measure" }).getByRole("radio", { name: "Tokens" }).click()
+  await expect(page.getByTestId("usage-total")).toHaveText("880K")
   await page.getByRole("button", { name: "Show all" }).click()
   await expect(page.getByRole("heading", { name: "Usage by booking", exact: true })).toBeVisible()
+  await expect(page.getByTestId("usage-total")).toHaveText("1.1M")
+  await page.getByRole("radiogroup", { name: "Measure" }).getByRole("radio", { name: "API-eq. $" }).click()
+  await expect(page.getByTestId("usage-total")).toHaveText("$5.10")
+})
+
+test("all-unpriced requests remain usage, with a warning and a token chart", async ({ page }) => {
+  await replaceUsage(page, (report) => ({
+    ...report,
+    cells: report.cells.map((cell) => ({ ...cell, costUsd: 0, unpricedTokens: cell.tokens })),
+    bookings: report.bookings.map((booking) => ({
+      ...booking,
+      costUsd: 0,
+      unpricedTokens: totalTokens(booking.tokens),
+      unpricedModels: ["new-model"]
+    })),
+    unpriced: { tokens: report.cells.reduce((sum, cell) => sum + cell.tokens, 0), models: ["new-model"] }
+  }))
+  await signIn(page)
+  await expect(page.getByText("tokens have no price", { exact: false })).toContainText("new-model")
+  await expect(page.getByText("No Claude or Codex request was made in this range.")).toHaveCount(0)
+  await page.getByRole("radiogroup", { name: "Measure" }).getByRole("radio", { name: "Tokens" }).click()
+  await expect(page.getByTestId("usage-total")).toHaveText("1.1M")
+  await expect(page.getByRole("group", { name: "Usage per day, stacked by booking" })).toBeVisible()
+})
+
+test("an empty usage report says no requests", async ({ page }) => {
+  await replaceUsage(page, (report) => ({
+    ...report,
+    cells: [],
+    bookings: [],
+    unpriced: { tokens: 0, models: [] }
+  }))
+  await signIn(page)
+  await expect(page.getByText("No Claude or Codex request was made in this range.")).toBeVisible()
+  await expect(page.getByText("tokens have no price", { exact: false })).toHaveCount(0)
+})
+
+test("hiding the sorted breakdown column restores the visible cost sort", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("checkbox", { name: "Show token breakdown" }).check()
+  await page.getByRole("button", { name: "Sort by Input, currently none" }).click()
+  await page.getByRole("checkbox", { name: "Show token breakdown" }).uncheck()
+  const cost = page.getByRole("columnheader", { name: /API-eq. cost/ })
+  await expect(cost).toHaveAttribute("aria-sort", "descending")
+  await page.getByRole("button", { name: "Sort by API-eq. cost, currently descending" }).click()
+  await expect(cost).toHaveAttribute("aria-sort", "ascending")
+})
+
+test("initial dashboard loading has one named status region", async ({ page }) => {
+  const pending = Effect.runSync(Deferred.make<void>())
+  await page.route(/\/api\/(?:usage|limits)\?/, async (route) => {
+    await Effect.runPromise(Deferred.await(pending))
+    await route.continue()
+  })
+  try {
+    await signIn(page)
+    await expect(page.getByRole("status", { name: "Loading limits" })).toBeVisible()
+    await expect(page.getByRole("status")).toHaveCount(1)
+  } finally {
+    Effect.runSync(Deferred.succeed(pending, undefined))
+  }
+  await expect(page.getByTestId("usage-total")).toBeVisible()
+})
+
+test("unnamed-only limits still expose their readings table", async ({ page }) => {
+  await page.route("**/api/limits?*", async (route) => {
+    const response = await route.fetch()
+    const report = Schema.decodeUnknownSync(LimitsReport)(await response.json())
+    await route.fulfill({
+      response,
+      json: {
+        ...report,
+        series: report.series.map((series) => ({ ...series, label: "iguana_necktie", windowMinutes: null }))
+      }
+    })
+  })
+  await signIn(page)
+  await page.getByText("Limit readings as a table").click()
+  await expect(page.locator(".usage-readings table")).toContainText("Claude allowance iguana_necktie")
+  await expect(page.locator(".usage-readings table")).toContainText("42%")
+  await expect(page.getByText("No limit readings in this range yet.")).toHaveCount(0)
+})
+
+test("phone booking headers retain their names", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 })
+  await signIn(page)
+  const table = page.getByRole("table", { name: "Bookings" })
+  await expect(table.getByRole("columnheader", { name: "Booking", exact: true })).toHaveCount(1)
+  await expect(table.getByRole("columnheader", { name: "API-eq. cost", exact: true })).toHaveCount(1)
+})
+
+test("empty limit history keeps the no-readings state", async ({ page }) => {
+  await page.route("**/api/limits?*", (route) => route.fulfill({ json: { series: [], latest: [], balances: [] } }))
+  await signIn(page)
+  await expect(page.getByText("No limit readings in this range yet.")).toBeVisible()
+  await expect(page.getByText("Limit readings as a table")).toHaveCount(0)
 })
 
 test("changing the agent filter drops a picked booking, so the chart is never left empty", async ({ page }) => {

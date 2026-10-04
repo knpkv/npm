@@ -125,7 +125,7 @@ export const LimitChart = (props: {
   const end = Math.min(props.range.to, props.now)
   const tabled = props.series.filter((series) => series.label !== "*")
 
-  if (rows.length === 0) {
+  if (tabled.length === 0) {
     return <p className="usage-empty">No limit readings in this range yet.</p>
   }
 
@@ -135,87 +135,91 @@ export const LimitChart = (props: {
   const flip = cursor !== null && cursor > width / 2
   return (
     <div className="usage-chart" ref={container}>
-      <svg
-        aria-labelledby={`${hatch}-title`}
-        height={height}
-        onMouseLeave={() => setCursor(null)}
-        onMouseMove={(event) => {
-          const pixel = event.nativeEvent.offsetX
-          setCursor(pixel >= PLOT.left && pixel <= width - PLOT.right ? pixel : null)
-        }}
-        role="img"
-        width={width}
-      >
-        <title id={`${hatch}-title`}>
-          {`Limits used over time, one row per window: ${rows
-            .map((row) => row.name)
-            .join(", ")}. The table below lists every reading.`}
-        </title>
-        <defs>
-          <pattern height="6" id={hatch} patternTransform="rotate(45)" patternUnits="userSpaceOnUse" width="6">
-            <line className="usage-hatch" x1="0" x2="0" y1="0" y2="6" />
-          </pattern>
-        </defs>
-        {rows.map((row, index) => (
-          <Row
-            end={end}
-            from={props.range.from}
-            hatch={hatch}
-            key={row.id}
-            row={row}
-            top={index * (ROW + ROW_GAP)}
+      {rows.length === 0 ? null : (
+        <>
+          <svg
+            aria-labelledby={`${hatch}-title`}
+            height={height}
+            onMouseLeave={() => setCursor(null)}
+            onMouseMove={(event) => {
+              const pixel = event.nativeEvent.offsetX
+              setCursor(pixel >= PLOT.left && pixel <= width - PLOT.right ? pixel : null)
+            }}
+            role="img"
             width={width}
-            x={axis.x}
-          />
-        ))}
-        {end < props.range.to ? (
-          <g aria-hidden="true">
+          >
+            <title id={`${hatch}-title`}>
+              {`Limits used over time, one row per window: ${rows
+                .map((row) => row.name)
+                .join(", ")}. The table below lists every reading.`}
+            </title>
+            <defs>
+              <pattern height="6" id={hatch} patternTransform="rotate(45)" patternUnits="userSpaceOnUse" width="6">
+                <line className="usage-hatch" x1="0" x2="0" y1="0" y2="6" />
+              </pattern>
+            </defs>
             {rows.map((row, index) => (
-              <line
-                className="usage-now"
+              <Row
+                end={end}
+                from={props.range.from}
+                hatch={hatch}
                 key={row.id}
-                x1={axis.x(end)}
-                x2={axis.x(end)}
-                y1={index * (ROW + ROW_GAP) + LABEL}
-                y2={index * (ROW + ROW_GAP) + ROW}
+                row={row}
+                top={index * (ROW + ROW_GAP)}
+                width={width}
+                x={axis.x}
               />
             ))}
-            <text className="usage-now-label" textAnchor="middle" x={axis.x(end)} y={height - AXIS + 12}>
-              now
-            </text>
-          </g>
-        ) : null}
-        {timeTicks(props.range, width, 72, props.range.bucket === "hour" ? 1 : 24).map((tick) => (
-          <text className="usage-axis-label" key={tick.at} textAnchor="middle" x={axis.x(tick.at)} y={height - 4}>
-            {tick.label}
-          </text>
-        ))}
-        {cursor === null ? null : (
-          <line className="usage-crosshair" x1={cursor} x2={cursor} y1={0} y2={height - AXIS} />
-        )}
-      </svg>
-      <ul aria-label="How to read the rows" className="usage-legend usage-legend-quiet">
-        <li>
-          <span className="usage-key usage-key-level" />
-          share used
-        </li>
-        <li>
-          <span className="usage-key usage-key-near" />
-          {NEAR_PERCENT}% mark
-        </li>
-        {kinds.has("reset") ? (
-          <li>
-            <span className="usage-key usage-key-reset" />
-            reset, not read since
-          </li>
-        ) : null}
-        {kinds.has("unknown") ? (
-          <li>
-            <span className="usage-key usage-key-unknown" />
-            could not be read
-          </li>
-        ) : null}
-      </ul>
+            {end < props.range.to ? (
+              <g aria-hidden="true">
+                {rows.map((row, index) => (
+                  <line
+                    className="usage-now"
+                    key={row.id}
+                    x1={axis.x(end)}
+                    x2={axis.x(end)}
+                    y1={index * (ROW + ROW_GAP) + LABEL}
+                    y2={index * (ROW + ROW_GAP) + ROW}
+                  />
+                ))}
+                <text className="usage-now-label" textAnchor="middle" x={axis.x(end)} y={height - AXIS + 12}>
+                  now
+                </text>
+              </g>
+            ) : null}
+            {timeTicks(props.range, width, 72, props.range.bucket === "hour" ? 1 : 24).map((tick) => (
+              <text className="usage-axis-label" key={tick.at} textAnchor="middle" x={axis.x(tick.at)} y={height - 4}>
+                {tick.label}
+              </text>
+            ))}
+            {cursor === null ? null : (
+              <line className="usage-crosshair" x1={cursor} x2={cursor} y1={0} y2={height - AXIS} />
+            )}
+          </svg>
+          <ul aria-label="How to read the rows" className="usage-legend usage-legend-quiet">
+            <li>
+              <span className="usage-key usage-key-level" />
+              share used
+            </li>
+            <li>
+              <span className="usage-key usage-key-near" />
+              {NEAR_PERCENT}% mark
+            </li>
+            {kinds.has("reset") ? (
+              <li>
+                <span className="usage-key usage-key-reset" />
+                reset, not read since
+              </li>
+            ) : null}
+            {kinds.has("unknown") ? (
+              <li>
+                <span className="usage-key usage-key-unknown" />
+                could not be read
+              </li>
+            ) : null}
+          </ul>
+        </>
+      )}
       <details className="usage-readings" onToggle={(event) => setTableOpen(event.currentTarget.open)}>
         <summary>Limit readings as a table</summary>
         {tableOpen ? (
@@ -245,7 +249,7 @@ export const LimitChart = (props: {
           </table>
         ) : null}
       </details>
-      {instant === null || cursor === null ? null : (
+      {rows.length === 0 || instant === null || cursor === null ? null : (
         <div
           className="usage-tooltip"
           role="status"

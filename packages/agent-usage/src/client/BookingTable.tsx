@@ -15,7 +15,8 @@ import {
   bookingColumns,
   DEFAULT_SORT,
   nextSort,
-  sortBookings
+  sortBookings,
+  visibleSort
 } from "./bookingModel.js"
 import { bookingLabel, OTHER } from "./chartModel.js"
 import { formatTokens, formatUsd } from "./format.js"
@@ -69,11 +70,12 @@ export const BookingTable = (props: {
   const [sort, setSort] = useState<BookingSort>(DEFAULT_SORT)
   const [breakdown, setBreakdown] = useState(false)
   const shown = bookingColumns(props.bookings, breakdown)
+  const effectiveSort = visibleSort(sort, shown)
   const columns = shown.map((id): RlyEntityTableColumn => ({
     id,
     label: LABELS[id],
     sortable: true,
-    sortDirection: sort.column === id ? sort.direction : "none"
+    sortDirection: effectiveSort.column === id ? effectiveSort.direction : "none"
   }))
   const [first, ...rest] = columns
   const cell = (summary: BookingSummary, column: BookingColumn) => {
@@ -121,7 +123,7 @@ export const BookingTable = (props: {
         )
     }
   }
-  const rows = sortBookings(props.bookings, sort).map((summary): RlyEntityTableRow => ({
+  const rows = sortBookings(props.bookings, effectiveSort).map((summary): RlyEntityTableRow => ({
     id: summary.id,
     cells: shown.map((column) => ({ columnId: column, content: cell(summary, column) }))
   }))
@@ -141,7 +143,7 @@ export const BookingTable = (props: {
         headingSize="card"
         onSortChange={(id) => {
           const column = shown.find((candidate) => candidate === id)
-          if (column !== undefined) setSort(nextSort(sort, column))
+          if (column !== undefined) setSort(nextSort(effectiveSort, column))
         }}
       />
       <label className="usage-breakdown-toggle">

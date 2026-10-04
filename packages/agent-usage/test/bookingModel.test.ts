@@ -1,5 +1,12 @@
 import { describe, expect, it } from "@effect/vitest"
-import { bookingColumns, nextSort, sortBookings } from "../src/client/bookingModel.js"
+import {
+  bookingColumns,
+  type BookingSort,
+  DEFAULT_SORT,
+  nextSort,
+  sortBookings,
+  visibleSort
+} from "../src/client/bookingModel.js"
 import type { BookingSummary } from "../src/shared/contracts.js"
 
 const tokens = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite5m: 0, cacheWrite1h: 0 }
@@ -76,5 +83,19 @@ describe("bookingColumns", () => {
       "tokens",
       "cost"
     ])
+  })
+})
+
+describe("visibleSort", () => {
+  it("falls back to cost when the breakdown or title column disappears, retaining visible sorts", () => {
+    const shown = bookingColumns(rows, false)
+    expect(visibleSort({ column: "input", direction: "ascending" }, shown)).toEqual(DEFAULT_SORT)
+    expect(visibleSort({ column: "title", direction: "ascending" }, shown)).toEqual(DEFAULT_SORT)
+    const current: BookingSort = { column: "cost", direction: "ascending" }
+    expect(visibleSort(current, shown)).toBe(current)
+    expect(visibleSort({ column: "input", direction: "ascending" }, bookingColumns(rows, true))).toEqual({
+      column: "input",
+      direction: "ascending"
+    })
   })
 })
