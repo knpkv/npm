@@ -470,6 +470,21 @@ g[data-active="true"] .usage-segment {
 
 .usage-number {
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/*
+ * Ten breakdown columns cannot share a mid-width table: it keeps a readable width and scrolls
+ * sideways inside its panel instead of squeezing every number onto two lines.
+ */
+.usage-bookings[data-breakdown="true"] > section {
+  overflow-x: auto;
+}
+
+@container (min-width: 40.0625rem) {
+  .usage-bookings[data-breakdown="true"] table {
+    min-inline-size: 60rem;
+  }
 }
 
 .usage-bookings {

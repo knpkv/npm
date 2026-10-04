@@ -30,7 +30,11 @@ export const usageAtom = Atom.make((get) => {
   const preset = get(presetAtom)
   const agent = get(agentAtom)
   return currentRange(preset).pipe(
-    Effect.flatMap((range) => Effect.map(fetchUsage({ ...range, agent, timeZone }), (report) => ({ range, report })))
+    // The preset travels with its report: a failed refresh keeps showing the last report, which must
+    // keep naming the range it covers rather than the one just picked.
+    Effect.flatMap((range) =>
+      Effect.map(fetchUsage({ ...range, agent, timeZone }), (report) => ({ preset, range, report }))
+    )
   )
 }).pipe(Atom.withRefresh(REFRESH))
 

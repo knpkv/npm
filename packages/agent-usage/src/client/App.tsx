@@ -175,7 +175,7 @@ const Dashboard = () => {
                     {formatMeasure(measure, rangeTotal(usage.value.report, measure, selected))}
                   </span>{" "}
                   <Text as="span" tone="secondary" variant="meta">
-                    {measure === "cost" ? "API-equivalent" : "tokens"} · {preset}
+                    {measure === "cost" ? "API-equivalent" : "tokens"} · {usage.value.preset}
                     {selected === null ? "" : ` · ${labels(selected)}`}
                   </Text>
                 </p>

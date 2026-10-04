@@ -69,7 +69,9 @@ export const windowName = (window: {
   }
   if (window.windowMinutes === 300) return "5-hour"
   if (window.windowMinutes === 10_080) return "Weekly"
-  return window.windowMinutes === null ? null : `${Math.round(window.windowMinutes / 60)}-hour`
+  if (window.windowMinutes === null) return null
+  // Exact length only: a 90-minute window is not a "2-hour" one.
+  return window.windowMinutes % 60 === 0 ? `${window.windowMinutes / 60}-hour` : `${window.windowMinutes}-minute`
 }
 
 export const agentName = (agent: Agent): string => (agent === "claude" ? "Claude" : "Codex")

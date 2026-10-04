@@ -130,7 +130,7 @@ export const BookingTable = (props: {
   if (first === undefined) return null
   return (
     // Numbers align right from the Requests column on; the column before it depends on the title.
-    <div className="usage-bookings" data-numeric-from={shown.indexOf("requests") + 1}>
+    <div className="usage-bookings" data-breakdown={breakdown} data-numeric-from={shown.indexOf("requests") + 1}>
       <EntityTable
         columns={[first, ...rest]}
         density="compact"

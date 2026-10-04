@@ -1,6 +1,13 @@
 import { describe, expect, it } from "@effect/vitest"
 import { PLOT, timeTicks } from "../src/client/axis.js"
-import { limitRows, limitSegments, limitTone, relativeReset, summarizeLimits } from "../src/client/limitsModel.js"
+import {
+  limitRows,
+  limitSegments,
+  limitTone,
+  relativeReset,
+  summarizeLimits,
+  windowName
+} from "../src/client/limitsModel.js"
 import type { LimitSnapshot } from "../src/core/Model.js"
 
 const HOUR = 3_600_000
@@ -188,5 +195,16 @@ describe("window identity", () => {
     )
     const ids = summary.flatMap((group) => [...group.windows, ...group.unnamed]).map((window) => window.id)
     expect(new Set(ids).size).toBe(ids.length)
+  })
+})
+
+describe("windowName", () => {
+  it("names a window by its exact length, never rounding minutes into hours", () => {
+    const codex = (windowMinutes: number) => windowName({ agent: "codex", label: "primary", windowMinutes })
+    expect(codex(300)).toBe("5-hour")
+    expect(codex(10_080)).toBe("Weekly")
+    expect(codex(120)).toBe("2-hour")
+    expect(codex(90)).toBe("90-minute")
+    expect(codex(30)).toBe("30-minute")
   })
 })

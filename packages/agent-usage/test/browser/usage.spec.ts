@@ -314,3 +314,30 @@ test("on a phone, a tall breakdown keeps every booking and the total readable", 
     expect(hit).toBe(true)
   }
 })
+
+test("a failed range change keeps labelling the shown total with the range it covers", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByRole("region", { name: /^Usage by booking/ })).toContainText("· 7d")
+  const total = await page.getByTestId("usage-total").textContent()
+  await page.route("**/api/usage?*", (route) => route.fulfill({ status: 500, body: "boom" }))
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  await expect(page.getByText("Usage could not be read")).toBeVisible()
+  const panel = page.getByRole("region", { name: /^Usage by booking/ })
+  await expect(page.getByTestId("usage-total")).toHaveText(total ?? "")
+  await expect(panel).toContainText("· 7d")
+  await expect(panel).not.toContainText("· 24h")
+})
+
+test("the token breakdown keeps every number on one line on a mid-width screen", async ({ page }) => {
+  await page.setViewportSize({ width: 800, height: 900 })
+  await signIn(page)
+  await page.getByRole("checkbox", { name: "Show token breakdown" }).check()
+  const table = page.getByRole("table", { name: "Bookings" })
+  await expect(table.getByRole("columnheader", { name: "Cache write" })).toBeAttached()
+  const wrapped = await table.locator(".usage-number").evaluateAll((numbers) =>
+    numbers.filter((number) => number.getClientRects().length > 1).map((number) => number.textContent)
+  )
+  expect(wrapped).toEqual([])
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth)
+  expect(overflow).toBeLessThanOrEqual(0)
+})
