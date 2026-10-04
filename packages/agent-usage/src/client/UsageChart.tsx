@@ -41,7 +41,11 @@ export const UsageChart = (props: {
   readonly labelOf: (id: string) => string
 }) => {
   const [width, container] = useWidth(960)
-  const [active, setActive] = useState<number | null>(null)
+  // Hover and focus open the breakdown independently; each ends only its own, so moving the pointer
+  // off the chart keeps a focused column's breakdown and leaving focus keeps a hovered one.
+  const [hovered, setHovered] = useState<number | null>(null)
+  const [focused, setFocused] = useState<number | null>(null)
+  const active = hovered ?? focused
   const [focusable, setFocusable] = useState<number | null>(null)
   const targets = useRef(new Map<number, SVGRectElement>())
   const axis = timeAxis(props.range, width)
@@ -83,14 +87,17 @@ export const UsageChart = (props: {
       ? 0
       : (axis.x(activePeriod.start) + axis.x(periods[(active ?? 0) + 1]?.start ?? props.range.to)) / 2
   const tooltip = useTooltipPlacement(activePeriod === undefined ? null : activeCentre, width, PLOT.top)
-  useDismissOnEscape(active !== null, () => setActive(null))
+  useDismissOnEscape(active !== null, () => {
+    setHovered(null)
+    setFocused(null)
+  })
 
   return (
     <div className="usage-chart" ref={container}>
       <svg
         aria-label={`Usage per ${props.range.bucket}, stacked by booking`}
         height={HEIGHT}
-        onMouseLeave={() => setActive(null)}
+        onMouseLeave={() => setHovered(null)}
         role="group"
         width={width}
       >
@@ -98,7 +105,7 @@ export const UsageChart = (props: {
           <g aria-hidden="true" key={tick}>
             <line className="usage-grid" x1={PLOT.left} x2={width - PLOT.right} y1={y(tick)} y2={y(tick)} />
             <text className="usage-axis-label" textAnchor="end" x={PLOT.left - 8} y={y(tick) + 4}>
-              {formatAxis(props.measure, tick)}
+              {formatAxis(props.measure, tick, ticks[1] ?? tick)}
             </text>
           </g>
         ))}
@@ -144,14 +151,14 @@ export const UsageChart = (props: {
                 aria-label={describeColumn(column, label, props.measure, props.labelOf)}
                 className="usage-column-target"
                 height={plotHeight}
-                onBlur={() => setActive(null)}
+                onBlur={() => setFocused(null)}
                 onFocus={() => {
                   setFocusable(column.period)
-                  setActive(column.period)
+                  setFocused(column.period)
                 }}
                 onKeyDown={(event) => move(event, column.period)}
-                onMouseEnter={() => setActive(column.period)}
-                onPointerDown={() => setActive(column.period)}
+                onMouseEnter={() => setHovered(column.period)}
+                onPointerDown={() => setHovered(column.period)}
                 ref={(element) => {
                   if (element === null) targets.current.delete(column.period)
                   else targets.current.set(column.period, element)

@@ -84,7 +84,9 @@ export const ToggleGroup = ({
     event.preventDefault()
     const next = items[(from + step + items.length) % items.length]
     if (next === undefined) return
-    onValueChange(next.value)
+    // Landing on the chosen option (a group of one, or focus that had wandered off it) is no change
+    // to report, but focus still moves there.
+    if (next.value !== value) onValueChange(next.value)
     options.current.get(next.value)?.focus()
   }
   return (

@@ -361,3 +361,20 @@ test("Escape dismisses a chart breakdown without moving focus", async ({ page })
   await page.keyboard.press("ArrowLeft")
   await expect(tooltip).toBeVisible()
 })
+
+test("a focused column keeps its breakdown when the pointer leaves the chart", async ({ page }) => {
+  await signIn(page)
+  const chart = page.getByRole("group", { name: "Usage per day, stacked by booking" })
+  const column = chart.getByRole("img", { name: /total; / }).last()
+  await column.focus()
+  const tooltip = page.locator(".usage-tooltip")
+  await expect(tooltip).toBeVisible()
+  const box = await chart.boundingBox()
+  if (box === null) throw new Error("chart not laid out")
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height + 200)
+  await expect(column).toBeFocused()
+  // The breakdown on show is the focused column's, not one the pointer passed over.
+  const period = (await column.getAttribute("aria-label"))?.split(":")[0] ?? ""
+  await expect(tooltip.locator(".usage-tooltip-title")).toHaveText(period)
+})

@@ -184,10 +184,15 @@ export const rangeTotal = (report: UsageReport, measure: Measure, selected: stri
 
 const compactNumber = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
-/** An axis tick: whole dollars once they are large enough to need no cents, compact tokens. */
-export const formatAxis = (measure: Measure, value: number): string =>
-  measure === "tokens"
-    ? compactNumber.format(value)
-    : value >= 10 || Number.isInteger(value)
-    ? `$${compactNumber.format(value)}`
-    : `$${value.toFixed(2)}`
+/**
+ * An axis tick: whole dollars once they are large enough to need no cents, compact tokens, and as
+ * many decimals as the tick `step` needs below a cent.
+ */
+export const formatAxis = (measure: Measure, value: number, step = 1): string => {
+  if (measure === "tokens") return compactNumber.format(value)
+  if (value >= 10 || Number.isInteger(value)) return `$${compactNumber.format(value)}`
+  // Enough decimals for the tick step, so $0.001 and $0.002 do not both read $0.00.
+  // toFixed takes at most 100 digits; 20 already separates any step a usage chart can produce.
+  const decimals = step > 0 && step < 0.01 ? Math.min(20, Math.ceil(-Math.log10(step))) : 2
+  return `$${value.toFixed(decimals)}`
+}
