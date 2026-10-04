@@ -389,3 +389,49 @@ test("a reading that failed says why, on focus of its gap and in the readings ta
   const table = page.locator(".usage-readings table")
   await expect(table).toContainText("Keychain access refused: the Keychain refused access (security exited 36)")
 })
+
+test("a pushed change updates the page in place, keeping open details and focus", async ({ page }) => {
+  await signIn(page)
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible()
+  await page.evaluate(() => document.body.setAttribute("data-same-page", "yes"))
+  const total = page.getByTestId("usage-total")
+  const before = await total.textContent()
+  await page.getByText("Limit readings as a table").click()
+  const column = page.getByRole("group", { name: "Usage per day, stacked by booking" }).getByRole("img", {
+    name: /total/
+  })
+    .first()
+  await column.focus()
+
+  await page.request.get("/__test/push")
+  await expect(total).not.toHaveText(before ?? "")
+  await expect(page.getByRole("table", { name: "Bookings" })).toContainText("pushed-repository")
+  await expect(page.locator("body")).toHaveAttribute("data-same-page", "yes")
+  await expect(page.locator(".usage-readings")).toHaveAttribute("open", "")
+  await expect(column).toBeFocused()
+})
+
+test("a dropped live socket says so, reconnects and refetches once", async ({ page }) => {
+  let connections = 0
+  await page.routeWebSocket("**/api/live", (socket) => {
+    connections += 1
+    const server = socket.connectToServer()
+    if (connections === 1) {
+      // Drop the first connection once its first message has arrived.
+      server.onMessage((message) => {
+        socket.send(message)
+        setTimeout(() => socket.close(), 200)
+      })
+    }
+  })
+  let usageReads = 0
+  page.on("request", (request) => {
+    if (request.url().includes("/api/usage?")) usageReads += 1
+  })
+  await signIn(page)
+  await expect(page.getByText("live updates disconnected", { exact: false })).toBeVisible()
+  const readsWhileDown = usageReads
+  await expect(page.getByText(/^updated \d+s ago$/)).toBeVisible({ timeout: 5_000 })
+  expect(connections).toBe(2)
+  expect(usageReads).toBe(readsWhileDown + 1)
+})

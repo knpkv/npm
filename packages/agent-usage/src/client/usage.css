@@ -53,6 +53,22 @@
   max-width: 1440px;
 }
 
+.usage-heading-meta {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--rly-space-12);
+  justify-content: flex-end;
+}
+
+.usage-live {
+  margin: 0;
+}
+
+.usage-live[data-live="Disconnected"] {
+  color: var(--rly-color-held-ink);
+}
+
 .usage-heading h1 {
   margin: 0;
 }

@@ -1,9 +1,10 @@
 import { NodeHttpClient, NodeHttpServer, NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
 import { describe, expect, it } from "@effect/vitest"
-import { Effect, Layer, Redacted } from "effect"
+import { Effect, Layer, Queue, Redacted, SubscriptionRef } from "effect"
 import { Etag, HttpClient, HttpPlatform, HttpRouter, HttpServer } from "effect/http"
-import { createServer } from "node:http"
+import { createServer, request } from "node:http"
+import type { Socket } from "node:net"
 import { UsageStore } from "../src/core/Store.js"
 import { application } from "../src/server/HttpApplication.js"
 import { makeOwnerSessionSecrets, OwnerSessionSecrets } from "../src/server/OwnerSession.js"
@@ -14,7 +15,7 @@ const secrets = makeOwnerSessionSecrets("http://127.0.0.1:3112")
 const TestApp = Layer.unwrap(Effect.map(secrets, (security) =>
   HttpRouter.serve(application).pipe(
     Layer.provide(UsageStore.layer.pipe(Layer.provide(SqliteClient.layer({ filename: ":memory:" })))),
-    Layer.provide(RuntimeState.layer("host-a")),
+    Layer.provideMerge(RuntimeState.layer("host-a")),
     Layer.provide(Etag.layer),
     Layer.provide(HttpPlatform.layer),
     Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, security))
@@ -24,6 +25,48 @@ const TestApp = Layer.unwrap(Effect.map(secrets, (security) =>
     Layer.provideMerge(NodeHttpServer.layer(createServer, { host: "127.0.0.1", port: 0 })),
     Layer.provideMerge(NodeServices.layer)
   )
+
+/**
+ * Opens `/api/live` with a cookie, which a WebSocket client cannot set, and yields each text frame
+ * the server sends. Server frames are unmasked and these are short, so the parse stays small.
+ */
+const openLive = (port: number, cookie: string) =>
+  Effect.gen(function*() {
+    const messages = yield* Queue.unbounded<string>()
+    const opened = yield* Effect.acquireRelease(
+      Effect.callback<{ readonly socket: Socket; readonly head: Buffer }>((resume) => {
+        const handshake = request({
+          host: "127.0.0.1",
+          port,
+          path: "/api/live",
+          headers: {
+            connection: "Upgrade",
+            upgrade: "websocket",
+            "sec-websocket-version": "13",
+            "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ==",
+            cookie
+          }
+        })
+        // Bytes that arrived with the handshake (often the first frame) come as `head`.
+        handshake.on("upgrade", (_response, upgraded, head) => resume(Effect.succeed({ socket: upgraded, head })))
+        handshake.on("response", (response) => resume(Effect.die(`refused with ${response.statusCode}`)))
+        handshake.end()
+      }),
+      (upgraded) => Effect.sync(() => upgraded.socket.destroy())
+    )
+    let buffered = Buffer.alloc(0)
+    const receive = (chunk: Buffer) => {
+      buffered = Buffer.concat([buffered, chunk])
+      while (buffered.length >= 2 && (buffered[1] ?? 0) < 126 && buffered.length >= 2 + (buffered[1] ?? 0)) {
+        const length = buffered[1] ?? 0
+        if (((buffered[0] ?? 0) & 0x0f) === 1) Queue.offerUnsafe(messages, buffered.subarray(2, 2 + length).toString())
+        buffered = buffered.subarray(2 + length)
+      }
+    }
+    receive(opened.head)
+    opened.socket.on("data", receive)
+    return messages
+  })
 
 const usagePath = (timeZone: string) =>
   `/api/usage?from=${Date.parse("2026-09-01T00:00:00Z")}&to=${Date.parse("2026-09-08T00:00:00Z")}&timeZone=${
@@ -97,6 +140,43 @@ describe("HTTP boundary", () => {
           }
         })
         expect(response.status).toBe(403)
+      }))
+  })
+})
+
+describe("live updates socket", () => {
+  it.layer(TestApp)((it) => {
+    it.effect("refuses an upgrade without the owner session, and one from another origin", () =>
+      Effect.gen(function*() {
+        const client = yield* HttpClient.HttpClient
+        const security = yield* OwnerSessionSecrets
+        const upgrade = {
+          connection: "Upgrade",
+          upgrade: "websocket",
+          "sec-websocket-version": "13",
+          "sec-websocket-key": "dGhlIHNhbXBsZSBub25jZQ=="
+        }
+        expect((yield* client.get("/api/live", { headers: upgrade })).status).toBe(401)
+        const foreign = yield* client.get("/api/live", {
+          headers: {
+            ...upgrade,
+            cookie: `agent_usage_owner=${Redacted.value(security.ownerToken)}`,
+            origin: "http://evil.example"
+          }
+        })
+        expect(foreign.status).toBe(403)
+      }))
+
+    it.effect("tells the owner the current versions, then each change", () =>
+      Effect.gen(function*() {
+        const security = yield* OwnerSessionSecrets
+        const server = yield* HttpServer.HttpServer
+        const state = yield* RuntimeState
+        const port = server.address._tag === "UnixPathAddress" ? 0 : server.address.port
+        const messages = yield* openLive(port, `agent_usage_owner=${Redacted.value(security.ownerToken)}`)
+        expect(JSON.parse(yield* Queue.take(messages))).toEqual({ usage: 0, limits: 0, status: 0 })
+        yield* SubscriptionRef.update(state.versions, (versions) => ({ ...versions, limits: versions.limits + 1 }))
+        expect(JSON.parse(yield* Queue.take(messages))).toEqual({ usage: 0, limits: 1, status: 0 })
       }))
   })
 })

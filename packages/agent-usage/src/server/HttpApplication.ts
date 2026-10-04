@@ -4,6 +4,7 @@ import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { AgentUsageApi } from "./Api.js"
 import { UsageLive } from "./Handlers.js"
+import { LiveRouter } from "./Live.js"
 import { ownerSessionAuthLayer, OwnerSessionBootstrapRouter } from "./OwnerSession.js"
 
 const mimeTypes = new Map([
@@ -84,4 +85,6 @@ const ApiRoutes = HttpApiBuilder.layer(AgentUsageApi).pipe(
 )
 
 /** Supply the store, runtime state and owner secrets; listener and platform belong to the executable. */
-export const application = Layer.mergeAll(ApiRoutes, OwnerSessionBootstrapRouter, StaticRouter).pipe(Layer.orDie)
+export const application = Layer.mergeAll(ApiRoutes, OwnerSessionBootstrapRouter, LiveRouter, StaticRouter).pipe(
+  Layer.orDie
+)

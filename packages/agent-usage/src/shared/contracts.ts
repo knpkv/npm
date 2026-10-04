@@ -147,3 +147,14 @@ export const ServerStatus = Schema.Struct({
   ticketLookupFailures: Schema.Array(Schema.String)
 })
 export type ServerStatus = typeof ServerStatus.Type
+
+/**
+ * What the live-updates socket sends: one counter per read, moved after the store has committed
+ * whatever changed it. A client refetches each read whose counter moved since it last saw one.
+ */
+export const LiveVersions = Schema.Struct({
+  usage: Count,
+  limits: Count,
+  status: Count
+})
+export type LiveVersions = typeof LiveVersions.Type

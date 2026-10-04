@@ -17,11 +17,11 @@ const describeSource = (name: string, source: Source): string => {
   return parts.join(", ")
 }
 
-/** The Claude limit samples file: absent until claude-statusline has written one. */
+/** claude-statusline's limit log: absent until claude-statusline has written one. */
 const describeSamples = (source: Source): string => {
-  if (source.rootMissing) return "Claude limit samples: none written yet"
+  if (source.rootMissing) return "claude-statusline limits: none logged yet"
   const skipped = source.skipped.unparseableLine + source.skipped.oversizedLine
-  return skipped === 0 ? "Claude limit samples: read" : `Claude limit samples: ${skipped} lines skipped`
+  return skipped === 0 ? "claude-statusline limits: read" : `claude-statusline limits: ${skipped} lines skipped`
 }
 
 export const StatusStrip = (props: {
@@ -36,7 +36,9 @@ export const StatusStrip = (props: {
       : [
           ...ingest.claude.unreadable.map((entry) => `claude ${entry.fileKey}: ${entry.reason}`),
           ...ingest.codex.unreadable.map((entry) => `codex ${entry.fileKey}: ${entry.reason}`),
-          ...ingest.claudeLimitSamples.unreadable.map((entry) => `limit samples ${entry.fileKey}: ${entry.reason}`)
+          ...ingest.claudeLimitSamples.unreadable.map(
+            (entry) => `claude-statusline limits ${entry.fileKey}: ${entry.reason}`
+          )
         ]
   return (
     <footer className="usage-status" aria-label="Ingest status">

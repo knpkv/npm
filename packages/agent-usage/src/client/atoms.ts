@@ -1,6 +1,6 @@
 /**
- * Page state: what the viewer chose, and the three reads that follow from it, each refreshed every
- * minute to match the server's ingest interval.
+ * Page state: what the viewer chose, and the three reads that follow from it. They are refreshed
+ * when the live-updates socket says they changed (see `useLiveUpdates`), never on a timer.
  *
  * The measure and the selected Booking only change how a report is drawn, so they live apart from
  * the range and agent filter that decide what is fetched.
@@ -13,8 +13,6 @@ import type { AgentFilter } from "../shared/contracts.js"
 import { fetchLimits, fetchStatus, fetchUsage } from "./api.js"
 import type { Measure } from "./chartModel.js"
 import { type Preset, rangeOf } from "./range.js"
-
-const REFRESH = "60 seconds"
 
 export const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
 
@@ -36,12 +34,12 @@ export const usageAtom = Atom.make((get) => {
       Effect.map(fetchUsage({ ...range, agent, timeZone }), (report) => ({ preset, range, report }))
     )
   )
-}).pipe(Atom.withRefresh(REFRESH))
+})
 
 export const limitsAtom = Atom.make((get) =>
   currentRange(get(presetAtom)).pipe(
     Effect.flatMap((range) => Effect.map(fetchLimits(range), (limits) => ({ range, limits })))
   )
-).pipe(Atom.withRefresh(REFRESH))
+)
 
-export const statusAtom = Atom.make(fetchStatus).pipe(Atom.withRefresh(REFRESH))
+export const statusAtom = Atom.make(fetchStatus)

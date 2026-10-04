@@ -25,9 +25,11 @@ import { assignSlots, bookingLabel, type Measure, OTHER, rangeTotal, stackUsage 
 import { formatTokens } from "./format.js"
 import { LimitChart } from "./LimitChart.js"
 import { LimitsSummary } from "./LimitsSummary.js"
+import { LiveIndicator } from "./LiveIndicator.js"
 import { PRESETS } from "./range.js"
 import { shown } from "./result.js"
 import { StatusStrip } from "./StatusStrip.js"
+import { useLiveUpdates } from "./useLiveUpdates.js"
 import { formatMeasure, UsageChart } from "./UsageChart.js"
 import type { AgentFilter } from "../shared/contracts.js"
 
@@ -52,19 +54,6 @@ const useNow = (): number => {
   return now
 }
 
-/**
- * Refreshes the status quickly until the first ingest pass has reported, then leaves it to the
- * atom's own minute: a fresh server should not say "running" for a minute after it finished.
- */
-const useStatusUntilIngested = (ingested: boolean): void => {
-  const refresh = useAtomRefresh(statusAtom)
-  useEffect(() => {
-    if (ingested) return
-    const timer = window.setInterval(refresh, 2_000)
-    return () => window.clearInterval(timer)
-  }, [ingested, refresh])
-}
-
 const PANEL_LOADING = <Skeleton height="16rem" variant="block" />
 
 const Dashboard = () => {
@@ -76,7 +65,10 @@ const Dashboard = () => {
   const limits = shown(useAtomValue(limitsAtom))
   const status = shown(useAtomValue(statusAtom))
   const now = useNow()
-  useStatusUntilIngested(status.value?.ingest != null)
+  const refreshUsage = useAtomRefresh(usageAtom)
+  const refreshLimits = useAtomRefresh(limitsAtom)
+  const refreshStatus = useAtomRefresh(statusAtom)
+  const live = useLiveUpdates({ usage: refreshUsage, limits: refreshLimits, status: refreshStatus })
   const slotsRef = useRef<ReadonlyMap<string, number>>(new Map())
 
   const stacked = useMemo(
@@ -112,9 +104,12 @@ const Dashboard = () => {
           <Text as="h1" variant="section-title">
             Agent usage
           </Text>
-          <Text tone="secondary" variant="meta">
-            {timeZone}
-          </Text>
+          <div className="usage-heading-meta">
+            <LiveIndicator state={live} />
+            <Text tone="secondary" variant="meta">
+              {timeZone}
+            </Text>
+          </div>
         </header>
 
         {limits.failure === null ? null : (

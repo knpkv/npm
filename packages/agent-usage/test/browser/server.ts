@@ -4,7 +4,7 @@
  */
 import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
-import { Clock, Effect, Layer, Redacted } from "effect"
+import { Clock, Effect, Layer, Redacted, SubscriptionRef } from "effect"
 import { Etag, HttpPlatform, HttpRouter, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
 import type { UsageEvent } from "../../src/core/Model.js"
@@ -113,6 +113,30 @@ const run = Effect.gen(function*() {
         "GET",
         "/__test/session",
         Effect.succeed(HttpServerResponse.text(Redacted.value(security.ownerToken)))
+      )
+      // Stands in for an ingest pass: a new booking committed, then announced on the live socket.
+      yield* router.add(
+        "GET",
+        "/__test/push",
+        Effect.gen(function*() {
+          const usage = yield* UsageStore
+          const state = yield* RuntimeState
+          const now = yield* Clock.currentTimeMillis
+          const pushed = event(now, `pushed-${now}`, {
+            occurredAt: now - 1_000,
+            attribution: { cwd: "/home/dev/code/pushed-repository", branch: "main", activeTicket: null }
+          })
+          yield* usage.commitChunk({
+            agent: "claude",
+            fileKey: `pushed-${now}.jsonl`,
+            cursor: { identity: "0:0", offset: 0, state: "{}" },
+            events: [pushed],
+            snapshots: [],
+            balances: []
+          })
+          yield* SubscriptionRef.update(state.versions, (versions) => ({ ...versions, usage: versions.usage + 1 }))
+          return HttpServerResponse.text("pushed")
+        })
       )
     })
   )
