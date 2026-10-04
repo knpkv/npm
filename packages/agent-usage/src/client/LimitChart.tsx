@@ -7,11 +7,20 @@
  * @module
  */
 import { useId, useState } from "react"
+import type { LimitReading, UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
 import { PLOT, timeAxis, timeTicks } from "./axis.js"
 import { readingAt } from "./chartModel.js"
 import { describeReason, formatInstant, formatPercent, formatShortInstant } from "./format.js"
-import { fullWindowName, type LimitRow, limitRows, limitSegments, NEAR_PERCENT } from "./limitsModel.js"
+import {
+  describeUnknown,
+  fullWindowName,
+  type LimitRow,
+  limitRows,
+  type LimitSegment,
+  limitSegments,
+  NEAR_PERCENT
+} from "./limitsModel.js"
 import type { ViewRange } from "./range.js"
 import { useDismissOnEscape, useTooltipPlacement } from "./useTooltipPlacement.js"
 import { useWidth } from "./useWidth.js"
@@ -21,6 +30,34 @@ const ROW_GAP = 12
 const AXIS = 34
 const LABEL = 16
 
+/** A failed reading's span on show: which window, when, and why. */
+interface Gap {
+  readonly anchor: number
+  readonly window: string
+  readonly from: number
+  readonly to: number
+  readonly text: string
+}
+
+/** "Keychain access refused: the Keychain refused access (security exited 36)". */
+const unknownText = (reason: UnknownReason, detail: string | null | undefined): string =>
+  describeUnknown(detail === null || detail === undefined ? { reason } : { reason, detail })
+
+const readingText = (reading: LimitReading): string =>
+  reading._tag === "Known" ? formatPercent(reading.usedPercent) : unknownText(reading.reason, reading.detail)
+
+const gapOf = (
+  window: string,
+  segment: Extract<LimitSegment, { readonly kind: "unknown" }>,
+  x: (at: number) => number
+): Gap => ({
+  anchor: (x(segment.from) + x(segment.to)) / 2,
+  window,
+  from: segment.from,
+  to: segment.to,
+  text: unknownText(segment.reason, segment.detail)
+})
+
 const Row = (props: {
   readonly row: LimitRow
   readonly top: number
@@ -29,6 +66,7 @@ const Row = (props: {
   readonly from: number
   readonly x: (at: number) => number
   readonly hatch: string
+  readonly onGap: (gap: Gap | null) => void
 }) => {
   const plotTop = props.top + LABEL
   const plotHeight = ROW - LABEL
@@ -70,10 +108,19 @@ const Row = (props: {
       {segments.map((segment) =>
         segment.kind === "level" ? null : segment.kind === "unknown" ? (
           <rect
+            aria-label={`${props.row.name} could not be read ${formatInstant(segment.from)} to ${formatInstant(
+              segment.to
+            )}: ${unknownText(segment.reason, segment.detail)}`}
             className="usage-limit-unknown"
             fill={`url(#${props.hatch})`}
             height={plotHeight}
             key={`u${segment.from}`}
+            onBlur={() => props.onGap(null)}
+            onFocus={() => props.onGap(gapOf(props.row.name, segment, props.x))}
+            onMouseEnter={() => props.onGap(gapOf(props.row.name, segment, props.x))}
+            onMouseLeave={() => props.onGap(null)}
+            role="img"
+            tabIndex={0}
             width={Math.max(1, props.x(segment.to) - props.x(segment.from))}
             x={props.x(segment.from)}
             y={plotTop}
@@ -118,6 +165,7 @@ export const LimitChart = (props: {
 }) => {
   const [width, container] = useWidth(960)
   const [cursor, setCursor] = useState<number | null>(null)
+  const [gap, setGap] = useState<Gap | null>(null)
   const [tableOpen, setTableOpen] = useState(false)
   const hatch = `${useId()}-hatch`
   const axis = timeAxis(props.range, width)
@@ -125,8 +173,12 @@ export const LimitChart = (props: {
   // A range may run on past now (today ends at midnight); nothing after now has been read yet.
   const end = Math.min(props.range.to, props.now)
   const tabled = props.series.filter((series) => series.label !== "*")
-  const tooltip = useTooltipPlacement(cursor, width, 0)
-  useDismissOnEscape(cursor !== null, () => setCursor(null))
+  // A focused or hovered failure explains itself; otherwise the pointer shows every row's reading.
+  const tooltip = useTooltipPlacement(gap?.anchor ?? cursor, width, 0)
+  useDismissOnEscape(cursor !== null || gap !== null, () => {
+    setCursor(null)
+    setGap(null)
+  })
 
   if (tabled.length === 0) {
     return <p className="usage-empty">No limit readings in this range yet.</p>
@@ -147,7 +199,7 @@ export const LimitChart = (props: {
               const pixel = event.nativeEvent.offsetX
               setCursor(pixel >= PLOT.left && pixel <= width - PLOT.right ? pixel : null)
             }}
-            role="img"
+            role="group"
             width={width}
           >
             <title id={`${hatch}-title`}>
@@ -166,6 +218,7 @@ export const LimitChart = (props: {
                 from={props.range.from}
                 hatch={hatch}
                 key={row.id}
+                onGap={setGap}
                 row={row}
                 top={index * (ROW + ROW_GAP)}
                 width={width}
@@ -239,11 +292,7 @@ export const LimitChart = (props: {
                   <tr key={`${series.agent}:${series.label}:${series.windowMinutes}:${point.at}`}>
                     <th scope="row">{fullWindowName(series)}</th>
                     <td>{formatInstant(point.at)}</td>
-                    <td>
-                      {point.reading._tag === "Known"
-                        ? formatPercent(point.reading.usedPercent)
-                        : describeReason(point.reading.reason)}
-                    </td>
+                    <td>{readingText(point.reading)}</td>
                   </tr>
                 ))
               )}
@@ -251,21 +300,22 @@ export const LimitChart = (props: {
           </table>
         ) : null}
       </details>
-      {rows.length === 0 || instant === null || cursor === null ? null : (
+      {rows.length === 0 ? null : gap !== null ? (
+        <div className="usage-tooltip" ref={tooltip.ref} role="status" style={tooltip.style}>
+          <div className="usage-tooltip-title">{gap.window} could not be read</div>
+          <div className="usage-tooltip-muted">
+            {formatInstant(gap.from)} to {formatInstant(gap.to)}
+          </div>
+          <div>{gap.text}</div>
+        </div>
+      ) : instant === null || cursor === null ? null : (
         <div className="usage-tooltip" ref={tooltip.ref} role="status" style={tooltip.style}>
           <div className="usage-tooltip-title">{formatInstant(instant)}</div>
           {rows.map((row) => {
             const reading = instant > end ? undefined : readingAt(row.points, instant)
             return (
               <div key={row.id}>
-                {row.name}:{" "}
-                <strong>
-                  {reading === undefined
-                    ? "not read"
-                    : reading._tag === "Known"
-                      ? formatPercent(reading.usedPercent)
-                      : describeReason(reading.reason)}
-                </strong>
+                {row.name}: <strong>{reading === undefined ? "not read" : readingText(reading)}</strong>
               </div>
             )
           })}

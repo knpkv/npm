@@ -188,7 +188,7 @@ test("every limit reading is also available as a table, without hovering", async
   await signIn(page)
   await page.getByText("Limit readings as a table").click()
   const table = page.locator(".usage-readings table")
-  await expect(table.getByRole("rowheader", { name: "Claude 5-hour" })).toBeVisible()
+  await expect(table.getByRole("rowheader", { name: "Claude 5-hour" }).first()).toBeVisible()
   await expect(table).toContainText("42%")
 })
 
@@ -377,4 +377,15 @@ test("a focused column keeps its breakdown when the pointer leaves the chart", a
   // The breakdown on show is the focused column's, not one the pointer passed over.
   const period = (await column.getAttribute("aria-label"))?.split(":")[0] ?? ""
   await expect(tooltip.locator(".usage-tooltip-title")).toHaveText(period)
+})
+
+test("a reading that failed says why, on focus of its gap and in the readings table", async ({ page }) => {
+  await signIn(page)
+  await page.getByRole("radiogroup", { name: "Range" }).getByRole("radio", { name: "24h" }).click()
+  const gap = page.getByRole("img", { name: /Claude 5-hour could not be read/ })
+  await gap.focus()
+  await expect(page.locator(".usage-tooltip")).toContainText("security exited 36")
+  await page.getByText("Limit readings as a table").click()
+  const table = page.locator(".usage-readings table")
+  await expect(table).toContainText("Keychain access refused: the Keychain refused access (security exited 36)")
 })

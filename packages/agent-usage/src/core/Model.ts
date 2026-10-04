@@ -72,6 +72,8 @@ export type UsageEvent = typeof UsageEvent.Type
 export const UnknownReason = Schema.Literals([
   "NoAuth",
   "AuthExpired",
+  /** macOS refused this process access to the login Keychain item. */
+  "KeychainDenied",
   "NotSupported",
   "Fetch",
   "Parse",
@@ -93,7 +95,11 @@ export const LimitReading = Schema.Union([
     /** Epoch milliseconds; null when the provider gave no reset time. */
     resetsAt: Schema.NullOr(Schema.Int)
   }),
-  Schema.TaggedStruct("Unknown", { reason: UnknownReason })
+  Schema.TaggedStruct("Unknown", {
+    reason: UnknownReason,
+    /** What exactly went wrong, in words (an HTTP status, the Keychain's exit code); never a secret. */
+    detail: Schema.optionalKey(Schema.String)
+  })
 ])
 export type LimitReading = typeof LimitReading.Type
 
@@ -131,7 +137,7 @@ export type Balance = typeof Balance.Type
 
 export const BalanceValue = Schema.Union([
   Schema.TaggedStruct("Known", { balance: Balance }),
-  Schema.TaggedStruct("Unknown", { reason: UnknownReason })
+  Schema.TaggedStruct("Unknown", { reason: UnknownReason, detail: Schema.optionalKey(Schema.String) })
 ])
 export type BalanceValue = typeof BalanceValue.Type
 

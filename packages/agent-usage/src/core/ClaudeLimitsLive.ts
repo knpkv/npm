@@ -1,21 +1,27 @@
 /**
  * The live token and endpoint behind {@link pollClaudeLimits}.
  *
- * Linux keeps Claude Code's credentials in `<config>/.credentials.json`; macOS keeps them in the
- * login Keychain. The file is tried first and the Keychain second, so no platform check is needed:
- * on Linux the `security` binary does not exist and the lookup fails as missing credentials.
+ * Linux keeps Claude Code's credentials in `<secure storage dir>/.credentials.json`; macOS keeps them
+ * in the login Keychain. The file is tried first and the Keychain second, so no platform check is
+ * needed: on Linux the `security` binary does not exist and the lookup reports the missing file.
+ *
+ * The Keychain item is the one Claude Code itself reads: its service name carries a hash of a
+ * non-default config directory and the account is the user (see `ClaudeCredentialsLocation`).
+ * `security`'s exit code tells a missing item (44) from one this process may not read, such as a
+ * locked Keychain or a session without a GUI, so neither shows up as "not signed in".
  *
  * The executable provides `FetchHttpClient.layer`; redirects are refused so the token cannot
  * follow one off Anthropic's host.
  *
  * @module
  */
-import { Duration, Effect, FileSystem, Path } from "effect"
+import { Duration, Effect, FileSystem, Stream } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import {
   type ClaudeUsageDeps,
   CredentialsMissing,
+  KeychainDenied,
   tokenFromCredentials,
   USAGE_URL,
   UsageFetchFailed
@@ -23,20 +29,61 @@ import {
 
 const TIMEOUT = Duration.seconds(5)
 
-/** Builds the live dependencies for a Claude config directory (`CLAUDE_CONFIG_DIR` or `~/.claude`). */
-export const liveClaudeUsageDeps = (claudeConfigDir: string) =>
+/** `security`'s exit code for an item that does not exist (errSecItemNotFound). */
+const ITEM_NOT_FOUND = 44
+
+/** Where Claude Code's credentials live; built by the configuration. */
+export interface ClaudeCredentialsPlaces {
+  readonly file: string
+  readonly keychainService: string
+  readonly keychainAccount: string
+}
+
+/** The `security` arguments that print Claude Code's own Keychain item. */
+export const keychainArgs = (
+  places: Pick<ClaudeCredentialsPlaces, "keychainService" | "keychainAccount">
+): ReadonlyArray<string> => [
+  "find-generic-password",
+  "-a",
+  places.keychainAccount,
+  "-w",
+  "-s",
+  places.keychainService
+]
+
+/** What a finished `security` lookup means: the item's contents, or why there are none. */
+export const keychainOutcome = (
+  exitCode: number,
+  stdout: string,
+  service: string
+): Effect.Effect<string, CredentialsMissing | KeychainDenied> =>
+  exitCode === 0
+    ? Effect.succeed(stdout)
+    : exitCode === ITEM_NOT_FOUND
+    ? Effect.fail(new CredentialsMissing({ where: `keychain:${service}` }))
+    : Effect.fail(new KeychainDenied({ exitCode }))
+
+/** Builds the live dependencies for where Claude Code keeps its credentials. */
+export const liveClaudeUsageDeps = (places: ClaudeCredentialsPlaces) =>
   Effect.gen(function*() {
     const fs = yield* FileSystem.FileSystem
-    const path = yield* Path.Path
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
     const client = yield* HttpClient.HttpClient
 
-    const fromFile = fs.readFileString(path.join(claudeConfigDir, ".credentials.json")).pipe(
-      Effect.mapError(() => new CredentialsMissing())
+    const fromFile = fs.readFileString(places.file).pipe(
+      Effect.mapError(() => new CredentialsMissing({ where: "file" }))
     )
-    const fromKeychain = spawner.string(
-      ChildProcess.make("security", ["find-generic-password", "-s", "Claude Code-credentials", "-w"])
-    ).pipe(Effect.mapError(() => new CredentialsMissing()))
+    const fromKeychain = Effect.scoped(
+      Effect.gen(function*() {
+        const handle = yield* spawner.spawn(ChildProcess.make("security", keychainArgs(places)))
+        const stdout = yield* Stream.mkString(Stream.decodeText(handle.stdout))
+        const exitCode = yield* handle.exitCode
+        return yield* keychainOutcome(exitCode, stdout, places.keychainService)
+      })
+    ).pipe(
+      // No `security` binary (Linux) or no way to run it: the file was the only place to look.
+      Effect.catchTag("PlatformError", () => Effect.fail(new CredentialsMissing({ where: "file" })))
+    )
 
     const deps: ClaudeUsageDeps = {
       readToken: fromFile.pipe(

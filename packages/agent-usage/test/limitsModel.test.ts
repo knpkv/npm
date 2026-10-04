@@ -96,7 +96,7 @@ describe("limitSegments", () => {
     const segments = limitSegments(
       [
         { at: 0, reading: { _tag: "Known", usedPercent: 10, resetsAt: 100 } },
-        { at: 150, reading: { _tag: "Unknown", reason: "Fetch" } },
+        { at: 150, reading: { _tag: "Unknown", reason: "Fetch", detail: "HTTP 503" } },
         { at: 200, reading: { _tag: "Known", usedPercent: 30, resetsAt: null } }
       ],
       300
@@ -104,7 +104,7 @@ describe("limitSegments", () => {
     expect(segments).toEqual([
       { kind: "level", from: 0, to: 100, usedPercent: 10 },
       { kind: "reset", from: 100, to: 150 },
-      { kind: "unknown", from: 150, to: 200 },
+      { kind: "unknown", from: 150, to: 200, reason: "Fetch", detail: "HTTP 503" },
       { kind: "level", from: 200, to: 300, usedPercent: 30 }
     ])
   })

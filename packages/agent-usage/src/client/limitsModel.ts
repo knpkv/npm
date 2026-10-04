@@ -13,10 +13,16 @@
  *
  * @module
  */
-import type { Agent, LimitReading, LimitSnapshot } from "../core/Model.js"
+import type { Agent, LimitReading, LimitSnapshot, UnknownReason } from "../core/Model.js"
 import type { LimitSeries } from "../shared/contracts.js"
 import { seriesIdentity } from "./chartModel.js"
 import { describeReason } from "./format.js"
+
+/** A failed reading in words, with what exactly went wrong when that is known. */
+export const describeUnknown = (
+  reading: { readonly reason: UnknownReason; readonly detail?: string | undefined }
+): string =>
+  reading.detail === undefined ? describeReason(reading.reason) : `${describeReason(reading.reason)}: ${reading.detail}`
 
 export type LimitTone = "ok" | "near" | "at-limit" | "unknown"
 
@@ -123,7 +129,7 @@ const summarize = (snapshot: LimitSnapshot, name: string, now: number): WindowSu
     resetsAt,
     freshness: now - snapshot.observedAt > STALE_AFTER_MILLIS ? "stale" : "current",
     observedAt: snapshot.observedAt,
-    problem: reading._tag === "Unknown" ? describeReason(reading.reason) : null
+    problem: reading._tag === "Unknown" ? describeUnknown(reading) : null
   }
 }
 
@@ -157,7 +163,7 @@ export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: numbe
     const problem = failure !== undefined &&
         failure.reading._tag === "Unknown" &&
         own.every((snapshot) => snapshot.label === "*" || snapshot.observedAt < failure.observedAt)
-      ? { reason: describeReason(failure.reading.reason), observedAt: failure.observedAt }
+      ? { reason: describeUnknown(failure.reading), observedAt: failure.observedAt }
       : null
     return [{ agent, windows: named.sort(byCloseness), unnamed: unnamed.sort(byCloseness), problem }]
   })
@@ -168,7 +174,13 @@ export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: numbe
 export type LimitSegment =
   | { readonly kind: "level"; readonly from: number; readonly to: number; readonly usedPercent: number }
   | { readonly kind: "reset"; readonly from: number; readonly to: number }
-  | { readonly kind: "unknown"; readonly from: number; readonly to: number }
+  | {
+    readonly kind: "unknown"
+    readonly from: number
+    readonly to: number
+    readonly reason: UnknownReason
+    readonly detail: string | null
+  }
 
 /**
  * A limit series as drawable spans: each Known level until the next reading or its reset, the
@@ -181,7 +193,15 @@ export const limitSegments = (
   points.flatMap((point, index): ReadonlyArray<LimitSegment> => {
     const next = points[index + 1]?.at ?? end
     if (next <= point.at) return []
-    if (point.reading._tag === "Unknown") return [{ kind: "unknown", from: point.at, to: next }]
+    if (point.reading._tag === "Unknown") {
+      return [{
+        kind: "unknown",
+        from: point.at,
+        to: next,
+        reason: point.reading.reason,
+        detail: point.reading.detail ?? null
+      }]
+    }
     const resetsAt = point.reading.resetsAt
     if (resetsAt === null || resetsAt >= next) {
       return [{ kind: "level", from: point.at, to: next, usedPercent: point.reading.usedPercent }]

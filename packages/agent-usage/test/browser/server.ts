@@ -67,6 +67,27 @@ const seed = Effect.gen(function*() {
       source: "claude-oauth-usage",
       label: "five_hour",
       windowMinutes: 300,
+      observedAt: now - 4 * HOUR,
+      reading: { _tag: "Known", usedPercent: 30, resetsAt: now + 3 * HOUR }
+    }, {
+      // A poll the Keychain refused, between two good readings: the gap must say why.
+      agent: "claude",
+      machine: "fixture",
+      source: "claude-oauth-usage",
+      label: "*",
+      windowMinutes: null,
+      observedAt: now - 3 * HOUR,
+      reading: {
+        _tag: "Unknown",
+        reason: "KeychainDenied",
+        detail: "the Keychain refused access (security exited 36)"
+      }
+    }, {
+      agent: "claude",
+      machine: "fixture",
+      source: "claude-oauth-usage",
+      label: "five_hour",
+      windowMinutes: 300,
       observedAt: now - HOUR,
       reading: { _tag: "Known", usedPercent: 42, resetsAt: now + 3 * HOUR }
     }],

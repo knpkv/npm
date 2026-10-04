@@ -84,7 +84,7 @@ describe("background work", () => {
             claudeLimitSamples: "/nonexistent/claude-limits.jsonl",
             machine: "host-a"
           },
-          claude: { readToken: Effect.fail(new CredentialsMissing()), get: () => Effect.never },
+          claude: { readToken: Effect.fail(new CredentialsMissing({ where: "file" })), get: () => Effect.never },
           ticketSearch: () => Effect.never
         }
         yield* claudePollCycle(options).pipe(Effect.provideService(UsageStore, failing))

@@ -44,6 +44,7 @@ export const formatPeriod = (start: number, bucket: "hour" | "day" | "week"): st
 const reasons = {
   NoAuth: "not signed in",
   AuthExpired: "sign-in expired",
+  KeychainDenied: "Keychain access refused",
   NotSupported: "not available on this plan",
   Fetch: "could not be fetched",
   Parse: "reply not understood",

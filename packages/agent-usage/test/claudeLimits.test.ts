@@ -4,11 +4,13 @@ import { TestClock } from "effect/testing"
 import {
   type ClaudeUsageDeps,
   CredentialsMissing,
+  KeychainDenied,
   pollClaudeLimits,
   TokenExpired,
   tokenFromCredentials,
   UsageFetchFailed
 } from "../src/core/ClaudeLimits.js"
+import { keychainArgs, keychainOutcome } from "../src/core/ClaudeLimitsLive.js"
 
 const now = Date.parse("2026-10-03T12:00:00.000Z")
 
@@ -91,28 +93,47 @@ describe("pollClaudeLimits", () => {
   it.effect("records an expired token as AuthExpired for limits and balance alike", () =>
     Effect.gen(function*() {
       const result = yield* poll(reply(401, "{}"))
-      expect(result.snapshots.map((snapshot) => [snapshot.label, snapshot.reading])).toEqual([
-        ["*", { _tag: "Unknown", reason: "AuthExpired" }]
-      ])
-      expect(result.balances[0]?.value).toEqual({ _tag: "Unknown", reason: "AuthExpired" })
+      const expired = { _tag: "Unknown", reason: "AuthExpired", detail: "HTTP 401" }
+      expect(result.snapshots.map((snapshot) => [snapshot.label, snapshot.reading])).toEqual([["*", expired]])
+      expect(result.balances[0]?.value).toEqual(expired)
     }))
 
-  it.effect("classifies each failure as its own Unknown reason", () =>
+  it.effect("keeps each failure's typed reason and what exactly went wrong", () =>
     Effect.gen(function*() {
-      const reasonOf = (deps: ClaudeUsageDeps) => poll(deps).pipe(Effect.map((result) => result.snapshots[0]?.reading))
-      expect(yield* reasonOf(reply(500, ""))).toEqual({ _tag: "Unknown", reason: "Fetch" })
-      expect(yield* reasonOf(reply(200, "not json"))).toEqual({ _tag: "Unknown", reason: "Parse" })
-      expect(yield* reasonOf({ ...reply(200, body), readToken: Effect.fail(new CredentialsMissing()) })).toEqual({
+      const readingOf = (deps: ClaudeUsageDeps) => poll(deps).pipe(Effect.map((result) => result.snapshots[0]?.reading))
+      const failing = (readToken: ClaudeUsageDeps["readToken"]): ClaudeUsageDeps => ({ ...reply(200, body), readToken })
+      expect(yield* readingOf(reply(503, ""))).toEqual({ _tag: "Unknown", reason: "Fetch", detail: "HTTP 503" })
+      expect(yield* readingOf(reply(200, "not json"))).toEqual({
         _tag: "Unknown",
-        reason: "NoAuth"
+        reason: "Parse",
+        detail: "reply was not JSON"
       })
-      expect(yield* reasonOf({ ...reply(200, body), readToken: Effect.fail(new TokenExpired()) })).toEqual({
+      expect(yield* readingOf(failing(Effect.fail(new CredentialsMissing({ where: "file" }))))).toEqual({
         _tag: "Unknown",
-        reason: "AuthExpired"
+        reason: "NoAuth",
+        detail: "no credentials file"
       })
       expect(
-        yield* reasonOf({ ...reply(200, body), get: () => Effect.fail(new UsageFetchFailed({ cause: "offline" })) })
-      ).toEqual({ _tag: "Unknown", reason: "Fetch" })
+        yield* readingOf(
+          failing(Effect.fail(new CredentialsMissing({ where: "keychain:Claude Code-credentials-1a2b3c4d" })))
+        )
+      ).toEqual({ _tag: "Unknown", reason: "NoAuth", detail: "no Keychain item Claude Code-credentials-1a2b3c4d" })
+      expect(yield* readingOf(failing(Effect.fail(new KeychainDenied({ exitCode: 36 }))))).toEqual({
+        _tag: "Unknown",
+        reason: "KeychainDenied",
+        detail: "the Keychain refused access (security exited 36)"
+      })
+      expect(yield* readingOf(failing(Effect.fail(new TokenExpired())))).toEqual({
+        _tag: "Unknown",
+        reason: "AuthExpired",
+        detail: "the stored token expired; Claude Code renews it on its next use"
+      })
+      expect(
+        yield* readingOf({
+          ...reply(200, body),
+          get: () => Effect.fail(new UsageFetchFailed({ cause: "TimeoutError" }))
+        })
+      ).toEqual({ _tag: "Unknown", reason: "Fetch", detail: "request failed: TimeoutError" })
     }))
 })
 
@@ -124,6 +145,29 @@ describe("tokenFromCredentials", () => {
       yield* TestClock.setTime(now)
       expect(yield* tokenFromCredentials(credentials(now + 60_000))).toBe("synthetic-token")
       expect(yield* Effect.flip(tokenFromCredentials(credentials(now - 1)))).toBeInstanceOf(TokenExpired)
-      expect(yield* Effect.flip(tokenFromCredentials("{}"))).toBeInstanceOf(CredentialsMissing)
+      expect(yield* Effect.flip(tokenFromCredentials("{}"))).toEqual(new CredentialsMissing({ where: "credentials" }))
+    }))
+})
+
+describe("keychain lookup", () => {
+  it("asks for Claude Code's own item under the user's account", () => {
+    expect(keychainArgs({ keychainService: "Claude Code-credentials-1a2b3c4d", keychainAccount: "a" })).toEqual([
+      "find-generic-password",
+      "-a",
+      "a",
+      "-w",
+      "-s",
+      "Claude Code-credentials-1a2b3c4d"
+    ])
+  })
+
+  it.effect("tells a missing item from a refused one by the exit code", () =>
+    Effect.gen(function*() {
+      const service = "Claude Code-credentials"
+      expect(yield* keychainOutcome(0, "{\"claudeAiOauth\":{}}\n", service)).toBe("{\"claudeAiOauth\":{}}\n")
+      expect(yield* Effect.flip(keychainOutcome(44, "", service))).toEqual(
+        new CredentialsMissing({ where: "keychain:Claude Code-credentials" })
+      )
+      expect(yield* Effect.flip(keychainOutcome(36, "", service))).toEqual(new KeychainDenied({ exitCode: 36 }))
     }))
 })
