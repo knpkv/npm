@@ -299,7 +299,7 @@ export const App = () => {
         <StatePanel
           title="Could not sign in"
           tone="critical"
-          description={`${boot.message}. Restart agent-usage serve and open the URL it prints.`}
+          description={`${boot.message}. Run agent-usage login for a fresh link.`}
         />
       )}
     </ThemeProvider>

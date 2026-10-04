@@ -4,6 +4,7 @@
  *
  * - `agent-usage serve` ingests every minute, polls Claude limits every five, and prints the URL
  *   that gets you in.
+ * - `agent-usage login [--open]` asks the running server for a fresh one-time link and prints it.
  * - `agent-usage ingest [--json]` runs one ingest pass and reports what it found.
  *
  * @module
@@ -13,12 +14,13 @@ import { ConfigProvider, Console, Deferred, Effect, Fiber, Layer, Option, Schema
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
 import * as Stream from "effect/Stream"
-import { hostname, userInfo } from "node:os"
+import { hostname, platform, userInfo } from "node:os"
 import { databaseLayer } from "./core/Database.js"
 import { ingestOnce, type IngestStatus } from "./core/Ingest.js"
 import { loadConfig } from "./server/Config.js"
 import { describeIngest } from "./server/IngestSummary.js"
-import { makeOwnerSessionSecrets, ownerSessionOrigin, ownerSessionUrl } from "./server/OwnerSession.js"
+import { login as requestLogin } from "./server/Login.js"
+import { makeOwnerSessionSecrets, ownerSessionOrigin } from "./server/OwnerSession.js"
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
 import { IngestStatus as IngestStatusSchema } from "./shared/contracts.js"
 
@@ -46,13 +48,14 @@ const serve = Command.make(
       ownerSessionOrigin("127.0.0.1", port),
       Option.getOrUndefined(configuredOrigin)
     )
-    const ready = yield* Deferred.make<void>()
+    const ready = yield* Deferred.make<string>()
     const server = yield* Layer.launch(makeServer({ config: settings, port, ready, security })).pipe(
       Effect.forkChild({ startImmediately: true })
     )
-    yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(server))
+    // The server only ends this race by failing; until it is listening there is no link to print.
+    const url = yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(server).pipe(Effect.andThen(Effect.never)))
     // On stdout and nowhere else: this line is the credential, so it is never logged.
-    yield* Stream.make(`agent usage: ${ownerSessionUrl(security.browserOrigin, security)}\n`).pipe(
+    yield* Stream.make(`agent usage: ${url}\n`).pipe(
       Stream.run(stdio.stdout())
     )
     return yield* Fiber.join(server)
@@ -78,9 +81,18 @@ const ingest = Command.make(
   })
 ).pipe(Command.withDescription("Run one ingest pass and report what it found"))
 
+const login = Command.make(
+  "login",
+  {
+    open: Flag.Boolean("open").pipe(Flag.withDescription("Open the link in the browser too"), Flag.withDefault(false))
+  },
+  // The user id `login` trusts the socket to belong to; -1 (no POSIX ids) matches no owner.
+  ({ open }) => requestLogin(config, open, platform(), process.geteuid?.() ?? -1)
+).pipe(Command.withDescription("Print a fresh one-time link to the running server"))
+
 const cli = Command.make("agent-usage").pipe(
   Command.withDescription("Claude and Codex subscription usage over time, per ticket and against limits"),
-  Command.withSubcommands([serve, ingest]),
+  Command.withSubcommands([serve, login, ingest]),
   Command.run({ version: "0.1.0" })
 )
 
