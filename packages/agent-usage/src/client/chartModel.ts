@@ -187,5 +187,5 @@ export const formatAxis = (measure: Measure, value: number): string =>
   measure === "tokens"
     ? compactNumber.format(value)
     : value >= 10 || Number.isInteger(value)
-      ? `$${compactNumber.format(value)}`
-      : `$${value.toFixed(2)}`
+    ? `$${compactNumber.format(value)}`
+    : `$${value.toFixed(2)}`

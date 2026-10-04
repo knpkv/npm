@@ -33,10 +33,10 @@ export const limitTone = (reading: LimitReading): LimitTone =>
   reading._tag === "Unknown"
     ? "unknown"
     : reading.usedPercent >= 100
-      ? "at-limit"
-      : reading.usedPercent >= NEAR_PERCENT
-        ? "near"
-        : "ok"
+    ? "at-limit"
+    : reading.usedPercent >= NEAR_PERCENT
+    ? "near"
+    : "ok"
 
 const toneRank = { "at-limit": 3, near: 2, unknown: 1, ok: 0 } satisfies Record<LimitTone, number>
 
@@ -149,12 +149,11 @@ export const summarizeLimits = (latest: ReadonlyArray<LimitSnapshot>, now: numbe
       if (name === null) unnamed.push(summarize(snapshot, `Unnamed allowance (${snapshot.label})`, now))
       else named.push(summarize(snapshot, name, now))
     }
-    const problem =
-      failure !== undefined &&
-      failure.reading._tag === "Unknown" &&
-      own.every((snapshot) => snapshot.label === "*" || snapshot.observedAt < failure.observedAt)
-        ? { reason: describeReason(failure.reading.reason), observedAt: failure.observedAt }
-        : null
+    const problem = failure !== undefined &&
+        failure.reading._tag === "Unknown" &&
+        own.every((snapshot) => snapshot.label === "*" || snapshot.observedAt < failure.observedAt)
+      ? { reason: describeReason(failure.reading.reason), observedAt: failure.observedAt }
+      : null
     return [{ agent, windows: named.sort(byCloseness), unnamed: unnamed.sort(byCloseness), problem }]
   })
   const worst = (group: AgentLimits): number => Math.max(-1, ...group.windows.map((window) => toneRank[window.tone]))

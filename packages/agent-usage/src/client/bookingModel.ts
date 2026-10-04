@@ -10,7 +10,16 @@ import type { BookingSummary } from "../shared/contracts.js"
 import { bookingLabel } from "./chartModel.js"
 
 export type BookingColumn =
-  "booking" | "title" | "agents" | "requests" | "input" | "output" | "cacheRead" | "cacheWrite" | "tokens" | "cost"
+  | "booking"
+  | "title"
+  | "agents"
+  | "requests"
+  | "input"
+  | "output"
+  | "cacheRead"
+  | "cacheWrite"
+  | "tokens"
+  | "cost"
 
 export type SortDirection = "ascending" | "descending"
 

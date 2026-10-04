@@ -24,7 +24,7 @@ const ErrorBody = Schema.Struct({ message: Schema.String })
 const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody)
 
 const send = (request: HttpClientRequest.HttpClientRequest) =>
-  Effect.gen(function* () {
+  Effect.gen(function*() {
     const client = yield* HttpClient.HttpClient
     const response = yield* client
       .execute(request)
@@ -85,7 +85,7 @@ export const fetchStatus = getJson("/api/status", ServerStatus)
  * The fragment is cleared first, so the code never outlives this function's memory even if the
  * exchange fails.
  */
-export const bootstrapSession = Effect.gen(function* () {
+export const bootstrapSession = Effect.gen(function*() {
   const token = new URLSearchParams(window.location.hash.slice(1)).get("bootstrap_token")
   // Without a code this load relies on the cookie; check it still opens the API before showing data.
   if (token === null) {

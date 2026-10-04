@@ -36,10 +36,10 @@ export const formatPeriod = (start: number, bucket: "hour" | "day" | "week"): st
   bucket === "hour"
     ? new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(start)
     : new Intl.DateTimeFormat(undefined, {
-        weekday: bucket === "day" ? "short" : undefined,
-        day: "numeric",
-        month: "short"
-      }).format(start)
+      weekday: bucket === "day" ? "short" : undefined,
+      day: "numeric",
+      month: "short"
+    }).format(start)
 
 const reasons = {
   NoAuth: "not signed in",
