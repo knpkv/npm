@@ -1,0 +1,50 @@
+@layer rly.components {
+  .root {
+    --rly-limit-track-ink: var(--rly-color-text-2);
+    background: var(--rly-color-surface-3);
+    border-radius: var(--rly-radius-tag);
+    display: block;
+    inline-size: 100%;
+    min-inline-size: var(--rly-space-48);
+    overflow: hidden;
+    position: relative;
+  }
+  .defaultSize {
+    block-size: var(--rly-space-12);
+  }
+  .slim {
+    block-size: var(--rly-space-6);
+  }
+  .fill {
+    background: var(--rly-limit-track-ink, var(--rly-color-text-2));
+    inset-block: 0;
+    inset-inline-start: 0;
+    position: absolute;
+  }
+  .root[data-tone="near"] {
+    --rly-limit-track-ink: var(--rly-color-held-ink);
+  }
+  .root[data-tone="full"] {
+    --rly-limit-track-ink: var(--rly-color-blocked-ink);
+  }
+  /* Old readings are hatched in the same ink, so the tone survives and the age is still visible. */
+  .root[data-stale="true"] .fill {
+    background: repeating-linear-gradient(
+      135deg,
+      var(--rly-limit-track-ink, var(--rly-color-text-2)) 0 3px,
+      transparent 3px 6px
+    );
+  }
+  .projection {
+    border-block: 2px dotted var(--rly-color-held-ink);
+    box-sizing: border-box;
+    inset-block: 25%;
+    position: absolute;
+  }
+  .near {
+    background: var(--rly-color-border-2);
+    inline-size: 1px;
+    inset-block: 0;
+    position: absolute;
+  }
+}

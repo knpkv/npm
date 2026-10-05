@@ -30,7 +30,19 @@ export const colorTokenSource = defineColors([
   { name: "service-codepipeline", light: "#8A42C2", dark: "#D69CFF", forced: "LinkText", purpose: "provenance" },
   { name: "service-jira", light: "#0C66E4", dark: "#75AEFF", forced: "LinkText", purpose: "provenance" },
   { name: "service-confluence", light: "#4758D6", dark: "#9EA9FF", forced: "LinkText", purpose: "provenance" },
-  { name: "service-clockify", light: "#0087C7", dark: "#64CCF2", forced: "LinkText", purpose: "provenance" }
+  { name: "service-clockify", light: "#0087C7", dark: "#64CCF2", forced: "LinkText", purpose: "provenance" },
+  // Chart series in assignment order: neighbours differ in hue and lightness, and orange sits sixth
+  // so a small chart does not read as provider provenance. Charts always ship a labelled key and a
+  // table equivalent, so colour is never the only carrier; forced colours collapse to CanvasText.
+  { name: "series-1", light: "#2A78D6", dark: "#3987E5", forced: "CanvasText", purpose: "series" },
+  { name: "series-2", light: "#008300", dark: "#2E9E2E", forced: "CanvasText", purpose: "series" },
+  { name: "series-3", light: "#E87BA4", dark: "#D55181", forced: "CanvasText", purpose: "series" },
+  { name: "series-4", light: "#EDA100", dark: "#C98500", forced: "CanvasText", purpose: "series" },
+  { name: "series-5", light: "#1BAF7A", dark: "#199E70", forced: "CanvasText", purpose: "series" },
+  { name: "series-6", light: "#EB6834", dark: "#D95926", forced: "CanvasText", purpose: "series" },
+  { name: "series-7", light: "#4A3AA7", dark: "#9085E9", forced: "CanvasText", purpose: "series" },
+  { name: "series-8", light: "#E34948", dark: "#E66767", forced: "CanvasText", purpose: "series" },
+  { name: "series-other", light: "#9B9A96", dark: "#6E6D69", forced: "CanvasText", purpose: "series" }
 ])
 
 /** Text and non-text contrast invariants for both schemes. */

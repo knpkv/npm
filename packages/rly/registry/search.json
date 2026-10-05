@@ -181,6 +181,28 @@
     },
     {
       "capabilities": [
+        "explain",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "ChartLegend",
+      "states": [
+        "default",
+        "other",
+        "series"
+      ],
+      "terms": [
+        "chartlegend",
+        "explain",
+        "other",
+        "present",
+        "primitive",
+        "series"
+      ]
+    },
+    {
+      "capabilities": [
         "group",
         "people"
       ],
@@ -661,6 +683,35 @@
         "secondary",
         "size",
         "variant"
+      ]
+    },
+    {
+      "capabilities": [
+        "measure",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "LimitTrack",
+      "states": [
+        "default",
+        "full",
+        "near",
+        "stale",
+        "unknown"
+      ],
+      "terms": [
+        "default",
+        "full",
+        "limittrack",
+        "measure",
+        "near",
+        "present",
+        "primitive",
+        "size",
+        "slim",
+        "stale",
+        "unknown"
       ]
     },
     {
@@ -1348,6 +1399,28 @@
         "select",
         "size",
         "togglegroup"
+      ]
+    },
+    {
+      "capabilities": [
+        "explain",
+        "present"
+      ],
+      "category": "primitive",
+      "importPath": "@knpkv/rly/primitives",
+      "name": "TrackKey",
+      "states": [
+        "default",
+        "near",
+        "stale"
+      ],
+      "terms": [
+        "explain",
+        "near",
+        "present",
+        "primitive",
+        "stale",
+        "trackkey"
       ]
     },
     {

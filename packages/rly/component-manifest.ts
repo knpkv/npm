@@ -166,6 +166,53 @@ export const componentManifest = {
   components: [
     // scaffold:components:insert
     {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "ChartLegend" },
+        { kind: "value", name: "RLY_SERIES" },
+        { kind: "value", name: "rlySeriesColor" },
+        { kind: "type", name: "ChartLegendProps" },
+        { kind: "type", name: "RlyChartLegendItem" },
+        { kind: "type", name: "RlySeries" }
+      ],
+      name: "ChartLegend",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/ChartLegend.tsx",
+      status: "experimental",
+      styles: ["src/primitives/ChartLegend.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/primitives/ChartLegend.stories.tsx",
+        storyId: "primitives-chartlegend--all-series",
+        tests: ["test/primitives/ChartLegend.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "LimitTrack" },
+        { kind: "value", name: "RLY_LIMIT_TRACK_DEFAULT_VARIANTS" },
+        { kind: "value", name: "RLY_LIMIT_TRACK_VARIANTS" },
+        { kind: "value", name: "limitTrackTone" },
+        { kind: "type", name: "LimitTrackProps" },
+        { kind: "type", name: "RlyLimitTrackSize" },
+        { kind: "type", name: "RlyLimitTrackTone" }
+      ],
+      name: "LimitTrack",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/LimitTrack.tsx",
+      status: "experimental",
+      styles: ["src/primitives/LimitTrack.module.css"],
+      variants: [{ defaultValue: "default", name: "size", values: ["default", "slim"] }],
+      visual: {
+        story: "stories/primitives/LimitTrack.stories.tsx",
+        storyId: "primitives-limittrack--gallery",
+        tests: ["test/primitives/LimitTrack.test.tsx"]
+      }
+    },
+    {
       category: "diff",
       exports: [
         { kind: "value", name: "PatchDiffView" },
@@ -1494,6 +1541,28 @@ export const componentManifest = {
         story: "stories/patterns/TimelineRow.stories.tsx",
         storyId: "patterns-timelinerow--actor-kinds",
         tests: ["test/patterns/TimelineRow.test.tsx"]
+      }
+    },
+    {
+      category: "primitive",
+      exports: [
+        { kind: "value", name: "RLY_TRACK_KEY_MARKS" },
+        { kind: "value", name: "TrackKey" },
+        { kind: "type", name: "RlyTrackKeyItem" },
+        { kind: "type", name: "RlyTrackKeyMark" },
+        { kind: "type", name: "TrackKeyProps" }
+      ],
+      name: "TrackKey",
+      publicEntry: "primitives",
+      registry: true,
+      source: "src/primitives/TrackKey.tsx",
+      status: "experimental",
+      styles: ["src/primitives/TrackKey.module.css"],
+      variants: [],
+      visual: {
+        story: "stories/primitives/TrackKey.stories.tsx",
+        storyId: "primitives-trackkey--without-projection",
+        tests: ["test/primitives/TrackKey.test.tsx"]
       }
     },
     {

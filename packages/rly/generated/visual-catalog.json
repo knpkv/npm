@@ -138,6 +138,23 @@
       ]
     },
     {
+      "name": "ChartLegend",
+      "paths": {
+        "source": "packages/rly/src/primitives/ChartLegend.tsx",
+        "story": "packages/rly/stories/primitives/ChartLegend.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/ChartLegend.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/ChartLegend.test.tsx"
+        ]
+      },
+      "storyId": "primitives-chartlegend--all-series",
+      "storyIds": [
+        "primitives-chartlegend--all-series"
+      ]
+    },
+    {
       "name": "CollaboratorGroup",
       "paths": {
         "source": "packages/rly/src/patterns/CollaboratorGroup.tsx",
@@ -471,6 +488,23 @@
       "storyId": "primitives-iconbutton--states",
       "storyIds": [
         "primitives-iconbutton--states"
+      ]
+    },
+    {
+      "name": "LimitTrack",
+      "paths": {
+        "source": "packages/rly/src/primitives/LimitTrack.tsx",
+        "story": "packages/rly/stories/primitives/LimitTrack.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/LimitTrack.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/LimitTrack.test.tsx"
+        ]
+      },
+      "storyId": "primitives-limittrack--gallery",
+      "storyIds": [
+        "primitives-limittrack--gallery"
       ]
     },
     {
@@ -929,6 +963,23 @@
       "storyId": "primitives-togglegroup--interaction",
       "storyIds": [
         "primitives-togglegroup--interaction"
+      ]
+    },
+    {
+      "name": "TrackKey",
+      "paths": {
+        "source": "packages/rly/src/primitives/TrackKey.tsx",
+        "story": "packages/rly/stories/primitives/TrackKey.stories.tsx",
+        "styles": [
+          "packages/rly/src/primitives/TrackKey.module.css"
+        ],
+        "tests": [
+          "packages/rly/test/primitives/TrackKey.test.tsx"
+        ]
+      },
+      "storyId": "primitives-trackkey--without-projection",
+      "storyIds": [
+        "primitives-trackkey--without-projection"
       ]
     },
     {
