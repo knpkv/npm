@@ -481,14 +481,14 @@ export const makeAtlassianCliAuth = Effect.fn("AtlassianCliAuth.make")(<MissingE
           })
         )
 
-        // This fiber owns the refresh. Complete the shared Deferred with the final
-        // transformed exit so waiters observe the same success or failure.
-        const exit = yield* refresh.pipe(
-          Effect.exit,
-          Effect.ensuring(Ref.set(refreshLock, Option.none()))
+        // This fiber owns the refresh. Publish every exit to the waiters —
+        // success, failure, and interruption of this fiber alike — so none of
+        // them blocks on a result that would otherwise never arrive.
+        const result = yield* refresh.pipe(
+          Effect.onExit((exit) =>
+            Ref.set(refreshLock, Option.none()).pipe(Effect.andThen(Deferred.done(deferred, exit)))
+          )
         )
-        yield* Deferred.done(deferred, exit)
-        const result = yield* Deferred.await(deferred)
 
         return Redacted.make(result.access_token)
       })

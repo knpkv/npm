@@ -250,6 +250,29 @@ describe("Atlassian CLI token refresh", () => {
       expect(after?.refresh_token).toBe("rotated-refresh")
     })))
 
+  // A second caller that arrives mid-refresh waits on the first caller's
+  // result. If the first caller is interrupted, the waiter must still settle
+  // instead of blocking forever on a result nobody will publish.
+  it.live("settles a waiting caller when the refreshing caller is interrupted", () =>
+    withHome(Effect.gen(function*() {
+      yield* seedExpiredToken
+      const issued = yield* Deferred.make<void>()
+      const release = yield* Deferred.make<void>()
+      const auth = yield* makeAtlassianCliAuth(authOptions).pipe(
+        Effect.provide(Layer.mergeAll(gatedClient(issued, release), NodeServices.layer, NodeCliAuthLive))
+      )
+
+      const owner = yield* auth.getAccessToken().pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.await(issued) // the owner holds the refresh lock, grant in flight
+      const waiter = yield* auth.getAccessToken().pipe(Effect.exit, Effect.forkChild({ startImmediately: true }))
+      const interrupting = yield* Fiber.interrupt(owner).pipe(Effect.forkChild({ startImmediately: true }))
+      yield* Deferred.succeed(release, undefined)
+      yield* Fiber.join(interrupting)
+
+      const settled = yield* Fiber.join(waiter).pipe(Effect.timeoutOption("2 seconds"))
+      expect(settled._tag).toBe("Some")
+    })))
+
   it.effect("discards the stored credential only when the provider rejects it", () =>
     withHome(Effect.gen(function*() {
       yield* seedExpiredToken
