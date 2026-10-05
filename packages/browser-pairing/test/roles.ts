@@ -1,4 +1,5 @@
-import type { Redacted } from "effect"
+import { type Effect, Redacted } from "effect"
+import { bootstrapUrl, type OwnerSessionService } from "../src/owner-session.js"
 import { CsrfToken, PairingCode, readBootstrapToken, SessionToken } from "../src/schema.js"
 import type { CredentialCookieOptions } from "../src/schema.js"
 
@@ -49,3 +50,21 @@ acceptsCsrfToken(pairingCode)
 acceptsSessionToken(pairingCode)
 // @ts-expect-error Role brands must not be interchangeable.
 acceptsPairingCode(csrfToken)
+
+declare const session: OwnerSessionService
+
+// @ts-expect-error A bootstrap URL carries only the pairing role, never the session.
+bootstrapUrl("http://127.0.0.1:3000", Redacted.make(sessionToken))
+bootstrapUrl("http://127.0.0.1:3000", Redacted.make(pairingCode))
+
+if (session.writes._tag === "Csrf") {
+  const csrfCredential: Redacted.Redacted<CsrfToken> = session.writes.token
+  void csrfCredential
+  // @ts-expect-error The CSRF proof must not stand in for the pairing role.
+  const pairingFromCsrf: Redacted.Redacted<PairingCode> = session.writes.token
+  void pairingFromCsrf
+}
+
+// @ts-expect-error A minted code is a pairing credential, not a session token.
+const sessionFromMint: Effect.Effect<Redacted.Redacted<SessionToken>, unknown> = session.mintBootstrapCode
+void sessionFromMint

@@ -100,6 +100,10 @@ _Avoid_: Edit, adjust, stop-time fix
 A completed time interval logged after the fact when a Timer was never started, built from a ticket, duration, and start time rather than from a running Timer.
 _Avoid_: Correction interval, manual log, backfill
 
+**Owner Session**:
+The authority a single-operator loopback web app (codecommit-web, jcf-web, agent-usage) grants to whoever holds the bootstrap URL it prints: one session cookie per process, earned by spending a one-time code from the URL fragment. There are no accounts and nothing persists across restarts.
+_Avoid_: Login, pairing, user session
+
 **Coding Agent**:
 A local AI coding tool whose runs leave a durable transcript on the developer's machine, such as Claude Code or Codex. Distinct from an Agent Skill, which is instruction material a Coding Agent reads, and from a Release Agent Job, which runs on a server.
 _Avoid_: Agent, assistant, AI, bot

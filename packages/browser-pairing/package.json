@@ -20,6 +20,10 @@
     "./schema": {
       "types": "./dist/schema.d.ts",
       "import": "./dist/schema.js"
+    },
+    "./owner-session": {
+      "types": "./dist/owner-session.d.ts",
+      "import": "./dist/owner-session.js"
     }
   },
   "files": [
