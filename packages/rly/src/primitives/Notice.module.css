@@ -3,7 +3,7 @@
     align-items: flex-start;
     /* Every tone keeps an edge, so the box survives forced colors, which drop backgrounds. */
     border: 1px solid color-mix(in oklab, currentcolor 30%, transparent);
-    border-radius: var(--rly-radius-group);
+    border-radius: var(--rly-radius-control);
     box-sizing: border-box;
     display: flex;
     flex-wrap: wrap;
@@ -58,6 +58,7 @@
 
   .action {
     align-items: center;
+    align-self: center;
     display: flex;
     flex-wrap: wrap;
     gap: var(--rly-space-8);
