@@ -37,11 +37,11 @@
  * - agent-usage `test/login.test.ts`, `test/version.test.ts`: spawn node/tsx, need a fresh `pnpm build`.
  * - control-center `test/runtime/offline-backup.test.ts`: runs the built CLI by design.
  */
+import * as Predicate from "effect/Predicate"
+import * as Schema from "effect/Schema"
 import { existsSync, readdirSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
-import * as Predicate from "effect/Predicate"
-import * as Schema from "effect/Schema"
 
 interface SourceAlias {
   readonly find: RegExp
@@ -79,6 +79,21 @@ const builtAssetExports = new Set(["@knpkv/review/guide/styles.css", "@knpkv/rly
 
 /** Built extension and the source extensions it may come from. */
 const sourceExtensions = [[".js", [".ts", ".tsx"]], [".css", [".css"]]] as const
+
+/** Package-root exports that are published as-is and have no build step. */
+const unbuiltExportPrefixes = new Map([["@knpkv/rly", ["./registry/"]]])
+
+/** A workspace export the aliases cannot map to source; fails config loading. */
+class WorkspaceSourceAliasError extends Error {
+  override readonly name = "WorkspaceSourceAliasError"
+  readonly specifier: string
+  readonly target: string | undefined
+  constructor(specifier: string, target: string | undefined, reason: string) {
+    super(`workspace source alias: ${specifier} -> ${target ?? "(no import/default target)"}: ${reason}`)
+    this.specifier = specifier
+    this.target = target
+  }
+}
 
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 
@@ -121,17 +136,18 @@ const aliasesFor = (directory: string): ReadonlyArray<SourceAlias> => {
   if (!manifest.name.startsWith("@knpkv/")) return []
   const aliases: Array<SourceAlias> = []
   for (const [key, value] of exportEntries(manifest)) {
-    const target = runtimeTarget(value)
-    if (target === undefined || !target.startsWith("./dist/")) continue
     const specifier = key === "." ? manifest.name : `${manifest.name}/${key.slice(2)}`
+    const target = runtimeTarget(value)
+    if (target === undefined) throw new WorkspaceSourceAliasError(specifier, target, "no runtime target")
+    if (target.startsWith("./src/")) continue
+    if ((unbuiltExportPrefixes.get(manifest.name) ?? []).some((prefix) => target.startsWith(prefix))) continue
+    if (!target.startsWith("./dist/")) {
+      throw new WorkspaceSourceAliasError(specifier, target, "points outside dist/ and src/")
+    }
     if (builtAssetExports.has(specifier)) continue
-    if (key.includes("*")) {
-      throw new Error(`workspace source alias: wildcard export ${specifier} -> ${target} is not supported`)
-    }
+    if (key.includes("*")) throw new WorkspaceSourceAliasError(specifier, target, "wildcard dist export")
     const source = sourceFor(manifest.name, directory, target)
-    if (source === undefined) {
-      throw new Error(`workspace source alias: no source file for ${specifier} -> ${target}`)
-    }
+    if (source === undefined) throw new WorkspaceSourceAliasError(specifier, target, "no source file")
     aliases.push({ find: new RegExp(`^${escapeRegExp(specifier)}$`), replacement: source })
   }
   return aliases
