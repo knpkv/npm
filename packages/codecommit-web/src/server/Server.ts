@@ -1,4 +1,5 @@
 import { BunFileSystem, BunHttpServer, BunServices } from "@effect/platform-bun"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import {
   AwsClient,
   AwsClientConfig,
@@ -39,30 +40,13 @@ import {
 } from "./handlers/index.js"
 import { BackgroundScopeLive } from "./internal/BackgroundScope.js"
 import { autoRefreshLayer, sandboxStartupLayer } from "./internal/BackgroundWorkers.js"
-import {
-  activateOwnerSessionBootstrap,
-  makeOwnerSessionSecrets,
-  ownerSessionAuthLayer,
-  OwnerSessionBootstrapRouter,
-  ownerSessionOrigin,
-  OwnerSessionSecrets,
-  type OwnerSessionSecretsContract,
-  requireLoopbackHostname
-} from "./internal/OwnerSessionSecurity.js"
+import { makeOwnerSession, ownerSessionAuthLayer } from "./internal/OwnerSession.js"
 import { InnerCodeCommitReadClient, makePermissionedReadClient } from "./internal/PermissionedReadClient.js"
-import { resolveCodeCommitBootstrapUrlForBind } from "./internal/PublicOrigin.js"
+import { resolveCodeCommitPublicOriginForBind } from "./internal/PublicOrigin.js"
 import { makeRelayFindingPublisher, RelayFindingPublisher } from "./review/RelayFindingPublisher.js"
 
-export {
-  makeOwnerSessionSecrets,
-  ownerSessionOrigin,
-  OwnerSessionSecrets,
-  type OwnerSessionSecretsContract,
-  ownerSessionUrl,
-  ownerSessionUrlForOrigin,
-  requireLoopbackHostname,
-  requireLoopbackOrigin
-} from "./internal/OwnerSessionSecurity.js"
+export { loopbackOrigin, requireLoopbackHostname } from "@knpkv/browser-pairing/owner-session"
+export { makeOwnerSession } from "./internal/OwnerSession.js"
 
 // MIME types for common files
 interface MimeTypeLookup extends Readonly<Record<string, string>> {}
@@ -331,7 +315,7 @@ const CorsLive = Layer.unwrap(
 )
 
 // Combined routes with CORS — orDie for remaining service construction errors
-const AllRoutes = Layer.mergeAll(ApiLive, OwnerSessionBootstrapRouter, StaticRouter).pipe(
+const AllRoutes = Layer.mergeAll(ApiLive, OwnerSession.BootstrapRouter, StaticRouter).pipe(
   Layer.provide(CorsLive),
   Layer.orDie
 )
@@ -342,14 +326,17 @@ const HttpPlatformLive = HttpPlatform.layer.pipe(Layer.provide(BunFileSystem.lay
 export interface CodeCommitServerOptions {
   readonly hostname?: string
   readonly port: number
-  readonly ready?: Deferred.Deferred<void>
-  readonly security: OwnerSessionSecretsContract
+  /** The origin the printed URL uses; the bound server's own when omitted. */
+  readonly publicOrigin?: string
+  /** Completed with the bootstrap URL once the server is listening. */
+  readonly ready?: Deferred.Deferred<string>
+  readonly security: OwnerSession.OwnerSessionService
 }
 
 export const makeServer = (options: CodeCommitServerOptions) => {
   const hostname = options.hostname ?? "127.0.0.1"
   return Layer.unwrap(
-    requireLoopbackHostname(hostname).pipe(
+    OwnerSession.requireLoopbackHostname(hostname).pipe(
       Effect.map(() => {
         const server = HttpRouter.serve(AllRoutes, {
           // Coordinate tokens include provider-valid repository names up to 100
@@ -360,16 +347,16 @@ export const makeServer = (options: CodeCommitServerOptions) => {
           Layer.provide(BunHttpServer.layer({ hostname, port: options.port, idleTimeout: 0 })),
           Layer.provide(Etag.layer),
           Layer.provide(HttpPlatformLive),
-          Layer.provide(Layer.succeed(OwnerSessionSecrets, options.security))
+          Layer.provide(Layer.succeed(OwnerSession.OwnerSession, options.security))
         )
         return server.pipe(
           Layer.tap(() =>
-            activateOwnerSessionBootstrap(options.security).pipe(
-              Effect.andThen(
-                options.ready === undefined
-                  ? Effect.void
-                  : Deferred.succeed(options.ready, undefined)
-              )
+            // Minted only once the server is listening, so the printed code is one that can be spent.
+            options.security.mintBootstrapCode.pipe(
+              Effect.map((code) =>
+                OwnerSession.bootstrapUrl(options.publicOrigin ?? options.security.authorityOrigin, code)
+              ),
+              Effect.flatMap((url) => options.ready === undefined ? Effect.void : Deferred.succeed(options.ready, url))
             )
           )
         )
@@ -378,7 +365,7 @@ export const makeServer = (options: CodeCommitServerOptions) => {
   )
 }
 
-export const makeCodeCommitServer = (port: number, security: OwnerSessionSecretsContract) =>
+export const makeCodeCommitServer = (port: number, security: OwnerSession.OwnerSessionService) =>
   makeServer({ port, security })
 
 export const Port = Config.Int("PORT").pipe(Config.withDefault(3000))
@@ -412,22 +399,25 @@ export const CodeCommitServerLive = Effect.gen(function*() {
   return yield* Effect.forever(
     Effect.gen(function*() {
       const p = yield* Ref.get(portRef)
-      const directOrigin = ownerSessionOrigin("127.0.0.1", p)
+      const directOrigin = OwnerSession.loopbackOrigin("127.0.0.1", p)
       // Rotate every authority-bearing secret on each bind attempt so a URL
       // emitted for an occupied port cannot authenticate to a later retry.
-      const security = yield* makeOwnerSessionSecrets(directOrigin)
-      const bootstrapUrl = yield* resolveCodeCommitBootstrapUrlForBind(
+      const security = yield* makeOwnerSession(directOrigin)
+      const publicOrigin = yield* resolveCodeCommitPublicOriginForBind(
         Option.getOrUndefined(publicOriginOverride),
         requestedPort,
-        p,
-        security
+        p
       )
-      const ready = yield* Deferred.make<void>()
-      const serverFiber = yield* Layer.launch(makeServer({ port: p, ready, security })).pipe(
+      const ready = yield* Deferred.make<string>()
+      const serverFiber = yield* Layer.launch(makeServer({ port: p, publicOrigin, ready, security })).pipe(
         Effect.forkChild({ startImmediately: true })
       )
-      yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
-      yield* Effect.logInfo(`Authenticated server ready at ${ownerSessionOrigin("127.0.0.1", p)}`)
+      // The server only ends this race by failing; until it is listening there is no link to print.
+      const bootstrapUrl = yield* Effect.raceFirst(
+        Deferred.await(ready),
+        Fiber.join(serverFiber).pipe(Effect.andThen(Effect.never))
+      )
+      yield* Effect.logInfo(`Authenticated server ready at ${directOrigin}`)
       yield* Stream.make(`Authenticated bootstrap URL: ${bootstrapUrl}\n`).pipe(
         Stream.run(stdio.stdout())
       )

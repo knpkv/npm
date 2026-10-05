@@ -60,8 +60,9 @@ process-scoped owner session. Its `Auth` service keeps secret values redacted
 and role-branded (`PairingCode`, `SessionToken`, and `CsrfToken`) at its
 server-only boundary, stores only digests, and exposes the pairing and CSRF
 brands at its HTTP schemas; session identity and CSRF recovery are bound to
-durable workspace/session UUIDs. CodeCommit's ephemeral
-`OwnerSessionSecurity` retains the same role brands through issuance. These
+durable workspace/session UUIDs. The ephemeral Owner Session that CodeCommit
+web shares from `@knpkv/browser-pairing/owner-session` retains the same role
+brands through issuance. These
 lifecycles and credentials are intentionally not interchangeable; neither
 service accepts the other's persistence or authorization policy.
 

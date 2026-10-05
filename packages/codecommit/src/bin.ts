@@ -17,13 +17,7 @@ import {
   decodeCodeCommitMockEndpointEffect,
   withCodeCommitMock
 } from "@knpkv/codecommit-core/MockTransport.js"
-import {
-  makeOwnerSessionSecrets,
-  makeServer,
-  ownerSessionOrigin,
-  ownerSessionUrl,
-  requireLoopbackHostname
-} from "@knpkv/codecommit-web"
+import { loopbackOrigin, makeOwnerSession, makeServer, requireLoopbackHostname } from "@knpkv/codecommit-web"
 import { Console, Deferred, Effect, Fiber, Layer, Stream } from "effect"
 import { Command, Flag as Options } from "effect/cli"
 import * as HttpClient from "effect/http/HttpClient"
@@ -52,15 +46,19 @@ const web = Command.make("web", {
 }, ({ hostname, port }) =>
   Effect.gen(function*() {
     yield* requireLoopbackHostname(hostname)
-    const security = yield* makeOwnerSessionSecrets(ownerSessionOrigin(hostname, port))
-    const ready = yield* Deferred.make<void>()
-    const url = ownerSessionUrl(hostname, port, security)
+    const origin = loopbackOrigin(hostname, port)
+    const security = yield* makeOwnerSession(origin)
+    const ready = yield* Deferred.make<string>()
     const stdio = yield* Stdio.Stdio
     const serverFiber = yield* Layer.launch(makeServer({ port, hostname, ready, security })).pipe(
       Effect.forkChild({ startImmediately: true })
     )
-    yield* Effect.raceFirst(Deferred.await(ready), Fiber.join(serverFiber))
-    yield* Effect.logInfo(`Authenticated web server ready at ${ownerSessionOrigin(hostname, port)}`)
+    // The server only ends this race by failing; the URL exists once it is listening.
+    const url = yield* Effect.raceFirst(
+      Deferred.await(ready),
+      Fiber.join(serverFiber).pipe(Effect.andThen(Effect.never))
+    )
+    yield* Effect.logInfo(`Authenticated web server ready at ${origin}`)
     yield* Stream.make(`Authenticated bootstrap URL: ${url}\n`).pipe(Stream.run(stdio.stdout()))
 
     // Open browser
