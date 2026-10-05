@@ -9,7 +9,8 @@
     flex-wrap: wrap;
     font: var(--rly-type-body-weight) var(--rly-type-body-size) / var(--rly-type-body-line-height)
       var(--rly-type-body-font);
-    gap: var(--rly-space-8) var(--rly-space-12);
+    /* Row gap absorbs the action's negative block margin when it wraps below the message. */
+    gap: var(--rly-space-16) var(--rly-space-12);
     margin: var(--rly-space-0);
     max-inline-size: 100%;
     padding: var(--rly-space-12);
@@ -58,10 +59,11 @@
 
   .action {
     align-items: center;
-    align-self: center;
     display: flex;
     flex-wrap: wrap;
     gap: var(--rly-space-8);
+    /* Centre a compact control on the first text line without growing one-line notices. */
+    margin-block: calc((1lh - var(--rly-space-40)) / 2);
     margin-inline-start: auto;
   }
 }
