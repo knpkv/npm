@@ -33,38 +33,59 @@ export const Verbose = GlobalFlag.Setting("verbose")({
 const truthy = new Set(["true", "1", "y", "yes", "on"])
 const falsy = new Set(["false", "0", "n", "no", "off"])
 
-/**
- * Whether `args` turn {@link Verbose} on, read the way the flag parses: only tokens before `--`, the last
- * of `--verbose`, `--no-verbose` and `--verbose=<boolean>` wins.
- */
-export const verboseFlagIn = (args: ReadonlyArray<string>): boolean => {
-  const end = args.indexOf("--")
-  let verbose = false
-  for (const token of end === -1 ? args : args.slice(0, end)) {
-    if (token === "--verbose") verbose = true
-    else if (token === "--no-verbose") verbose = false
-    else if (token.startsWith("--verbose=")) {
-      const value = token.slice("--verbose=".length).toLowerCase()
-      if (truthy.has(value)) verbose = true
-      else if (falsy.has(value)) verbose = false
-    }
-  }
-  return verbose
+const booleanLiteral = (token: string | undefined): boolean | undefined => {
+  const value = token?.toLowerCase()
+  return value === undefined ? undefined : truthy.has(value) ? true : falsy.has(value) ? false : undefined
 }
 
-const isVerboseToken = (token: string): boolean =>
-  token === "--verbose" || token === "--no-verbose" || token.startsWith("--verbose=")
+interface VerboseScan {
+  /** The value the flag parser settles on, or undefined when the flag is absent. */
+  readonly verbose: boolean | undefined
+  /** `args` with every token the flag consumed removed. */
+  readonly rest: ReadonlyArray<string>
+}
 
 /**
- * `args` without the {@link Verbose} flag (before `--`), for code that routes on the command words
- * before the CLI parses them, such as choosing which service layer to build.
+ * Read {@link Verbose} out of `args` the way `effect/cli` parses a boolean flag: only before `--`;
+ * `--verbose` may take a following boolean literal (`--verbose false`), `--verbose=<boolean>` and
+ * `--no-verbose` are the other spellings, and the first occurrence decides the value.
  */
-export const commandArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> => {
+const scanVerbose = (args: ReadonlyArray<string>): VerboseScan => {
   const end = args.indexOf("--")
   const head = end === -1 ? args : args.slice(0, end)
   const tail = end === -1 ? [] : args.slice(end)
-  return [...head.filter((token) => !isVerboseToken(token)), ...tail]
+  const rest: Array<string> = []
+  let verbose: boolean | undefined
+  const settle = (value: boolean) => {
+    if (verbose === undefined) verbose = value
+  }
+  for (let index = 0; index < head.length; index++) {
+    const token = head[index]!
+    if (token === "--verbose") {
+      const literal = booleanLiteral(head[index + 1])
+      if (literal !== undefined) index++
+      settle(literal ?? true)
+    } else if (token === "--no-verbose") {
+      settle(false)
+    } else if (token.startsWith("--verbose=")) {
+      // A value that is not a boolean makes the parser fail; it never turns verbose on.
+      const literal = booleanLiteral(token.slice("--verbose=".length))
+      if (literal !== undefined) settle(literal)
+    } else {
+      rest.push(token)
+    }
+  }
+  return { rest: [...rest, ...tail], verbose }
 }
+
+/** Whether `args` turn {@link Verbose} on, as the flag parser would read them. */
+export const verboseFlagIn = (args: ReadonlyArray<string>): boolean => scanVerbose(args).verbose === true
+
+/**
+ * `args` without the {@link Verbose} flag and the value it consumed, for code that routes on the
+ * command words before the CLI parses them, such as choosing which service layer to build.
+ */
+export const commandArgs = (args: ReadonlyArray<string>): ReadonlyArray<string> => scanVerbose(args).rest
 
 /** `--verbose` in `args`, or `DEBUG=1`. Only `1`: `DEBUG` is also the debug package's namespace list. */
 export const verboseRequested = (args: ReadonlyArray<string>): Effect.Effect<boolean> =>
@@ -83,13 +104,17 @@ const describe = <E>(error: E): string => {
   return String(error)
 }
 
+/** `Command.runWith` prints help and user errors itself before failing with them; nothing else. */
+const renderedByRunner = <E>(error: E): boolean =>
+  CliError.isCliError(error) && (error._tag === "ShowHelp" || error._tag === "UserError")
+
 /** Print a failed run's cause to stderr: each failure's message, or the full cause when verbose. */
 export const handleCliError = <E>(cause: Cause.Cause<E>, options: { readonly verbose: boolean }): Effect.Effect<void> =>
   options.verbose
     ? Console.error(Cause.pretty(cause))
     : Effect.forEach(cause.reasons, (reason) => {
       if (Cause.isFailReason(reason)) {
-        return CliError.isCliError(reason.error) ? Effect.void : Console.error(describe(reason.error))
+        return renderedByRunner(reason.error) ? Effect.void : Console.error(describe(reason.error))
       }
       if (Cause.isDieReason(reason)) return Console.error(`Error: ${describe(reason.defect)}`)
       return Console.error("Interrupted")

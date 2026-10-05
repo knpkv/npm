@@ -3,16 +3,24 @@
  * How every Atlassian CLI reports a failed run: the message by default, the full cause when asked,
  * nothing for what `Command.runWith` already rendered, and the exit unchanged.
  */
+import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import { ConfigProvider } from "effect"
 import * as Cause from "effect/Cause"
-import { CliError } from "effect/cli"
+import { Argument, CliError, Command } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Effect from "effect/Effect"
 import * as Exit from "effect/Exit"
 import * as Schema from "effect/Schema"
 import * as Stdio from "effect/Stdio"
-import { commandArgs, handleCliError, verboseFlagIn, verboseRequested, withCliErrorHandling } from "../src/cli/index.js"
+import {
+  commandArgs,
+  handleCliError,
+  Verbose,
+  verboseFlagIn,
+  verboseRequested,
+  withCliErrorHandling
+} from "../src/cli/index.js"
 
 class ProfileGone extends Schema.TaggedError<ProfileGone>()("ProfileGone", { message: Schema.String }) {}
 class Bare extends Schema.TaggedError<Bare>()("Bare", {}) {}
@@ -53,25 +61,55 @@ describe("handleCliError", () => {
 })
 
 describe("verbose", () => {
-  it("reads --verbose the way the flag parses it", () => {
-    const cases: ReadonlyArray<readonly [ReadonlyArray<string>, boolean]> = [
-      [["--verbose"], true],
-      [["auth", "use", "x", "--verbose"], true],
-      [["--verbose=true"], true],
-      [["--verbose=false"], false],
-      [["--verbose", "--no-verbose"], false],
-      [["--", "--verbose"], false],
-      [["--verbosely"], false],
-      [[], false]
-    ]
-    for (const [args, expected] of cases) expect(verboseFlagIn(args), JSON.stringify(args)).toBe(expected)
-  })
+  // The scanner runs before the CLI parses, so it must agree with the parser it stands in for.
+  const parsed = (args: ReadonlyArray<string>) =>
+    Effect.gen(function*() {
+      const seen: Array<boolean> = []
+      const probe = Command.make("probe", { words: Argument.String("word").pipe(Argument.variadic()) }, () =>
+        Effect.gen(function*() {
+          seen.push(yield* Verbose)
+        }))
+      const root = Command.make("tool").pipe(Command.withSubcommands([probe]), Command.withGlobalFlags([Verbose]))
+      const exit = yield* Command.runWith(root, { version: "0" })(args).pipe(
+        Effect.provide(NodeServices.layer),
+        Effect.exit
+      )
+      return { exit, verbose: seen[0] }
+    })
 
-  it("routes on the command words with --verbose removed, leaving everything after --", () => {
-    expect(commandArgs(["--verbose", "auth", "use", "x"])).toEqual(["auth", "use", "x"])
-    expect(commandArgs(["auth", "--verbose=false", "status"])).toEqual(["auth", "status"])
-    expect(commandArgs(["page", "get", "--", "--verbose"])).toEqual(["page", "get", "--", "--verbose"])
-  })
+  it.effect("reads --verbose and routes the command words exactly as the parser does", () =>
+    Effect.gen(function*() {
+      const cases: ReadonlyArray<ReadonlyArray<string>> = [
+        ["probe", "x"],
+        ["--verbose", "probe", "x"],
+        ["--verbose", "false", "probe", "x"],
+        ["--verbose", "true", "probe", "x"],
+        ["--verbose=false", "probe", "x"],
+        ["--verbose=yes", "probe", "x"],
+        ["probe", "x", "--verbose"],
+        ["--verbose", "--no-verbose", "probe", "x"],
+        ["--no-verbose", "--verbose", "probe", "x"],
+        ["probe", "--", "--verbose"]
+      ]
+      for (const args of cases) {
+        const { exit, verbose } = yield* parsed(args)
+        expect(Exit.isSuccess(exit), JSON.stringify(args)).toBe(true)
+        expect(verboseFlagIn(args), JSON.stringify(args)).toBe(verbose)
+        expect(commandArgs(args)[0], JSON.stringify(args)).toBe("probe")
+      }
+    }))
+
+  it.effect("does not report verbose for a value the parser rejects, and the rejection is printed", () =>
+    Effect.gen(function*() {
+      expect(verboseFlagIn(["--verbose=bogus", "probe"])).toBe(false)
+      const { exit } = yield* parsed(["--verbose=bogus", "probe", "x"])
+      expect(Exit.isFailure(exit)).toBe(true)
+      if (Exit.isFailure(exit)) {
+        const lines = yield* stderrOf(exit.cause, false)
+        expect(lines).toHaveLength(1)
+        expect(lines[0]).toContain("bogus")
+      }
+    }))
 
   it.effect("turns on for DEBUG=1 only", () =>
     Effect.gen(function*() {
