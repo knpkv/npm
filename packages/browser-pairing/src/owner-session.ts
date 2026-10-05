@@ -373,19 +373,17 @@ export const make = Effect.fn("OwnerSession.make")(function*(options: OwnerSessi
   const writes: WritePolicy = options.writes === "csrf"
     ? { _tag: "Csrf", token: yield* issueCsrfToken() }
     : { _tag: "ReadOnly" }
-  // A cookie name is caller configuration: an invalid one fails here, typed, rather than as a defect.
-  const sessionCookie = yield* Effect.try({
-    try: () =>
-      serializeCredentialCookie(ownerToken, {
-        httpOnly: true,
-        name: options.cookieName,
-        path: "/api",
-        sameSite: "strict",
-        secure: false
-      }),
-    catch: (cause) =>
-      isCredentialCookieError(cause) ? cause : new CredentialCookieError({ reason: "invalid-attribute" })
-  })
+  // A cookie name is caller configuration: an invalid one fails typed. Anything else the serializer
+  // throws is a bug and stays a defect.
+  const sessionCookie = yield* Effect.sync(() =>
+    serializeCredentialCookie(ownerToken, {
+      httpOnly: true,
+      name: options.cookieName,
+      path: "/api",
+      sameSite: "strict",
+      secure: false
+    })
+  ).pipe(Effect.catchDefect((defect) => isCredentialCookieError(defect) ? Effect.fail(defect) : Effect.die(defect)))
   return OwnerSession.of(makeService(
     { ...options, authorityOrigin, browserOrigin },
     ownerToken,
