@@ -697,6 +697,7 @@
         "default",
         "full",
         "near",
+        "projected",
         "stale",
         "unknown"
       ],
@@ -708,6 +709,7 @@
         "near",
         "present",
         "primitive",
+        "projected",
         "size",
         "slim",
         "stale",
@@ -1412,6 +1414,7 @@
       "states": [
         "default",
         "near",
+        "projected",
         "stale"
       ],
       "terms": [
@@ -1419,6 +1422,7 @@
         "near",
         "present",
         "primitive",
+        "projected",
         "stale",
         "trackkey"
       ]

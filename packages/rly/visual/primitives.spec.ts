@@ -73,3 +73,28 @@ test("preserves stale readings and their key in forced colours", async ({ page }
   await expect(unknown).toHaveCount(0)
   expect((await stale.boundingBox())?.width).toBe(normalWidth)
 })
+
+test("keeps the near mark two-toned over the empty track and over a full fill, in forced colours too", async ({ page }) => {
+  await page.goto(story("primitives-limittrack--gallery"))
+  const marks = [
+    page.locator("[data-limit=\"5-hour window\"] [data-part=\"near\"]"),
+    page.locator("[data-limit=\"Weekly, large model\"] [data-part=\"near\"]"),
+    page.locator("[data-mark=\"near\"]")
+  ]
+  const tones = (mark: (typeof marks)[number]) =>
+    mark.evaluate((element) => {
+      const style = getComputedStyle(element)
+      return { adjust: style.forcedColorAdjust, core: style.backgroundColor, shadow: style.boxShadow }
+    })
+  const modes: ReadonlyArray<"none" | "active"> = ["none", "active"]
+  for (const forcedColors of modes) {
+    await page.emulateMedia({ forcedColors })
+    for (const mark of marks) {
+      await expect(mark).toBeVisible()
+      const { adjust, core, shadow } = await tones(mark)
+      expect(shadow).not.toBe("none")
+      expect(shadow).not.toContain(core)
+      if (forcedColors === "active") expect(adjust).toBe("none")
+    }
+  }
+})

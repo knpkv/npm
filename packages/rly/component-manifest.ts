@@ -1561,7 +1561,7 @@ export const componentManifest = {
       variants: [],
       visual: {
         story: "stories/primitives/TrackKey.stories.tsx",
-        storyId: "primitives-trackkey--without-projection",
+        storyId: "primitives-trackkey--all-marks",
         tests: ["test/primitives/TrackKey.test.tsx"]
       }
     },

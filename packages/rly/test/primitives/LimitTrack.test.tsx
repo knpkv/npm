@@ -21,6 +21,9 @@ describe("LimitTrack", () => {
     expect(limitTrackTone(100, 80)).toBe("full")
     expect(limitTrackTone(130, 80)).toBe("full")
     expect(limitTrackTone(60, 50)).toBe("near")
+    for (const value of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(limitTrackTone(value, 80)).toBe("unknown")
+    }
   })
 
   it("fills to the reading, clamped to the track, and marks the near threshold", () => {
@@ -71,5 +74,16 @@ describe("LimitTrack", () => {
     for (const value of [62, null]) {
       expect(() => render(<LimitTrack decorative={false} label="Weekly" value={value} valueText=" " />)).toThrow()
     }
+  })
+
+  it("treats a non-finite reading as no reading, ignores a non-finite projection, and refuses a non-finite mark", () => {
+    const failed = render(<LimitTrack decorative={false} label="Weekly" value={Number.NaN} valueText="No reading" />)
+    expect(failed.dataset.tone).toBe("unknown")
+    expect(failed.getAttribute("role")).toBe("img")
+    expect(failed.getAttribute("aria-valuenow")).toBeNull()
+    expect(part(failed, "fill")).toBeNull()
+    expect(part(render(<LimitTrack projected={Number.NaN} value={62} />), "projection")).toBeNull()
+    expect(part(render(<LimitTrack projected={Number.POSITIVE_INFINITY} value={62} />), "projection")).toBeNull()
+    expect(() => render(<LimitTrack near={Number.NaN} value={62} />)).toThrow("finite")
   })
 })

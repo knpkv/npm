@@ -180,11 +180,13 @@ motion is governed by the central theme tokens.
 ## Limits and chart keys
 
 `LimitTrack` shows how full a limit is on a 0–100% track: the fill is the latest
-reading, a hairline marks the near threshold (80% unless `near` says otherwise),
+reading, a two-tone hairline marks the near threshold (80% unless `near` says otherwise),
 a dotted extension shows a `projected` level the application computed, and a
 `stale` reading is hatched. Rly derives only the tone (`limitTrackTone`); it never
 estimates a projection. The track is decorative by default because the number sits
-beside it. Pass `decorative={false}` with a `label` and the caller's `valueText`
+beside it, so that text must also carry the age and the projection ("61%, old
+reading", "84%, about 103% at reset"). A non-finite `value` is drawn as no reading,
+and a non-finite `near` throws. Pass `decorative={false}` with a `label` and the caller's `valueText`
 to expose it as a meter instead. With `value={null}`, it is a named image whose
 accessible label combines `label` and `valueText`, without a numeric range.
 

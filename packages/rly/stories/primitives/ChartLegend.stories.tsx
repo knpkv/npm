@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "@storybook/react-vite"
 import { expect } from "storybook/test"
 import { ChartLegend, RLY_SERIES } from "../../src/primitives/ChartLegend.js"
-import { pageStyle } from "./storyStyles.js"
+import { forcedColoursActive, pageStyle } from "./storyStyles.js"
 
 const meta = { component: ChartLegend, tags: ["autodocs"], title: "Primitives/ChartLegend" } satisfies Meta<
   typeof ChartLegend
@@ -24,7 +24,7 @@ export const AllSeries: Story = {
     const colours = [...canvasElement.querySelectorAll("[data-series]")].map(
       (swatch) => getComputedStyle(swatch).backgroundColor
     )
-    await expect(new Set(colours).size).toBe(RLY_SERIES.length)
+    await expect(new Set(colours).size).toBe(forcedColoursActive(canvasElement) ? 1 : RLY_SERIES.length)
   },
   render: (args) => (
     <main style={pageStyle}>

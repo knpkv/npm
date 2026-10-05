@@ -18,19 +18,32 @@ export type RlyLimitTrackSize = keyof typeof RLY_LIMIT_TRACK_VARIANTS.size
 /** How full a limit is: no reading, comfortable, past the near mark, or at the limit. */
 export type RlyLimitTrackTone = "unknown" | "ok" | "near" | "full"
 
-/** Tone of a reading in percent against the near mark; 100% and above is full. */
-export const limitTrackTone = (value: number | null, near: number): RlyLimitTrackTone =>
-  value === null ? "unknown" : value >= 100 ? "full" : value >= near ? "near" : "ok"
+/** A reading that is not a finite number (for example a failed division) is no reading at all. */
+const readingOf = (value: number | null): number | null => (value !== null && Number.isFinite(value) ? value : null)
+
+/** Tone of a reading in percent against the near mark; 100% and above is full, non-finite is unknown. */
+export const limitTrackTone = (value: number | null, near: number): RlyLimitTrackTone => {
+  const reading = readingOf(value)
+  return reading === null ? "unknown" : reading >= 100 ? "full" : reading >= near ? "near" : "ok"
+}
+
+const requireFinite = (value: number, label: string): number => {
+  if (!Number.isFinite(value)) throw new Error(`${label} must be a finite number`)
+  return value
+}
 
 const percent = (value: number): number => Math.min(100, Math.max(0, value))
 
 type LimitTrackBaseProps = Omit<ComponentPropsWithRef<"span">, "aria-label" | "children" | "role">
 export type LimitTrackProps = LimitTrackBaseProps & {
-  /** Latest reading in percent of the limit; `null` when there is none. Values past 100 fill the track. */
+  /**
+   * Latest reading in percent of the limit; `null` when there is none. Values past 100 fill the track.
+   * A non-finite value is drawn and announced as no reading.
+   */
   readonly value: number | null
-  /** Where the caller expects the limit to stand later (for example at its reset), in percent. */
+  /** Where the caller expects the limit to stand later (for example at its reset), in percent. Non-finite draws none. */
   readonly projected?: number
-  /** The near-limit mark in percent. Defaults to 80. */
+  /** The near-limit mark in percent. Defaults to 80; a non-finite mark throws. */
   readonly near?: number
   /** The reading is old: it says how full the limit was, not how full it is. */
   readonly stale?: boolean
@@ -43,8 +56,10 @@ export type LimitTrackProps = LimitTrackBaseProps & {
 /**
  * A 0–100% limit track. The solid fill is the latest reading, a dotted extension shows a projected
  * level the caller computed, and a hairline marks the near threshold. A stale reading is hatched.
- * Decorative by default, because the caller prints the number beside it; pass `decorative={false}`
- * with a label and the caller's own words for the value to expose it as a meter instead.
+ * Decorative by default, because the caller prints the number beside it. A decorative track hides
+ * everything it draws, so that adjacent text must also say when the reading is old and what the
+ * projection is (for example "61%, old reading" or "84%, about 103% at reset"). Pass
+ * `decorative={false}` with a label and the caller's own words for the value to expose it as a meter.
  * An unknown reading is a named image with the label and value description, without a numeric range.
  */
 export const LimitTrack = ({
@@ -55,16 +70,18 @@ export const LimitTrack = ({
   projected,
   size = RLY_LIMIT_TRACK_DEFAULT_VARIANTS.size,
   stale = false,
-  value,
+  value: rawValue,
   valueText,
   ...props
 }: LimitTrackProps): ReactElement => {
+  const value = readingOf(rawValue)
+  const nearMark = requireFinite(near, "LimitTrack near")
   const accessible = !decorative && label !== undefined && valueText !== undefined
   const accessibleLabel = accessible ? requireText(label, "LimitTrack label") : undefined
   const accessibleValueText = accessible ? requireText(valueText, "LimitTrack valueText") : undefined
   const meter = accessible && value !== null
   const projection =
-    value !== null && projected !== undefined && projected > value
+    value !== null && projected !== undefined && Number.isFinite(projected) && projected > value
       ? { start: percent(value), length: percent(projected) - percent(value) }
       : null
   return (
@@ -78,7 +95,7 @@ export const LimitTrack = ({
       aria-valuetext={meter ? accessibleValueText : undefined}
       className={classNames(style("root"), RLY_LIMIT_TRACK_VARIANTS.size[size].className, className)}
       data-stale={stale ? "true" : undefined}
-      data-tone={limitTrackTone(value, near)}
+      data-tone={limitTrackTone(value, nearMark)}
       role={accessible ? (meter ? "meter" : "img") : undefined}
     >
       {value === null ? null : (
@@ -91,7 +108,7 @@ export const LimitTrack = ({
           style={{ inlineSize: `${projection.length}%`, insetInlineStart: `${projection.start}%` }}
         />
       )}
-      <span className={style("near")} data-part="near" style={{ insetInlineStart: `${percent(near)}%` }} />
+      <span className={style("near")} data-part="near" style={{ insetInlineStart: `${percent(nearMark)}%` }} />
     </span>
   )
 }

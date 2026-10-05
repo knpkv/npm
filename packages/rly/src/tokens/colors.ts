@@ -74,5 +74,9 @@ export const contrastPairSource = defineContrastPairs([
   { name: "series 8 on canvas", foreground: "series-8", background: "canvas", minimum: 3 },
   { name: "series 8 on surface-1", foreground: "series-8", background: "surface-1", minimum: 3 },
   { name: "series other on canvas", foreground: "series-other", background: "canvas", minimum: 3 },
-  { name: "series other on surface-1", foreground: "series-other", background: "surface-1", minimum: 3 }
+  { name: "series other on surface-1", foreground: "series-other", background: "surface-1", minimum: 3 },
+  { name: "limit near mark on track", foreground: "text-1", background: "surface-3", minimum: 3 },
+  { name: "limit near halo on fill", foreground: "surface-1", background: "text-2", minimum: 3 },
+  { name: "limit near halo on near fill", foreground: "surface-1", background: "held-ink", minimum: 3 },
+  { name: "limit near halo on full fill", foreground: "surface-1", background: "blocked-ink", minimum: 3 }
 ])

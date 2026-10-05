@@ -5,7 +5,7 @@ import { ChartLegend } from "../../src/primitives/ChartLegend.js"
 import { LimitTrack } from "../../src/primitives/LimitTrack.js"
 import { Text } from "../../src/primitives/Text.js"
 import { TrackKey } from "../../src/primitives/TrackKey.js"
-import { pageStyle, stackStyle } from "./storyStyles.js"
+import { forcedColoursActive, pageStyle, stackStyle } from "./storyStyles.js"
 
 const rowStyle: CSSProperties = {
   alignItems: "center",
@@ -16,9 +16,9 @@ const rowStyle: CSSProperties = {
 
 const limits = [
   { name: "5-hour window", state: "ok", value: 42, text: "42%" },
-  { name: "Weekly", state: "near", value: 84, projected: 103, text: "84%" },
+  { name: "Weekly", state: "near", value: 84, projected: 103, text: "84%, about 103% at reset" },
   { name: "Weekly, large model", state: "full", value: 100, text: "100%" },
-  { name: "Codex weekly", state: "stale", value: 61, stale: true, text: "61%" },
+  { name: "Codex weekly", state: "stale", value: 61, stale: true, text: "61%, old reading" },
   { name: "Codex 5-hour", state: "unknown", value: null, text: "No reading" }
 ] satisfies ReadonlyArray<{
   readonly name: string
@@ -89,8 +89,13 @@ export const Gallery: Story = {
       const fill = fillOf(canvasElement, name)
       return fill === null ? "" : getComputedStyle(fill).backgroundColor
     }
-    await expect(ink("Weekly")).not.toBe(ink("5-hour window"))
-    await expect(ink("Weekly, large model")).not.toBe(ink("Weekly"))
+    if (!forcedColoursActive(canvasElement)) {
+      await expect(ink("Weekly")).not.toBe(ink("5-hour window"))
+      await expect(ink("Weekly, large model")).not.toBe(ink("Weekly"))
+    }
+    // A decorative track hides its marks, so the text beside it carries the age and the projection.
+    await expect(canvas.getByText("61%, old reading")).toBeVisible()
+    await expect(canvas.getByText("84%, about 103% at reset")).toBeVisible()
     await expect(fillOf(canvasElement, "Codex 5-hour")).toBeNull()
     await expect(canvasElement.querySelectorAll('[data-part="projection"]')).toHaveLength(1)
     await expect(canvas.getByRole("list", { name: "What the track marks mean" })).toBeVisible()

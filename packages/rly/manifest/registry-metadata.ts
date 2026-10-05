@@ -28,6 +28,7 @@ export const COMPONENT_REGISTRY_METADATA = {
   LimitTrack: registryMetadata("Show how full a limit is, with a near mark, a projection, and a stale hatch", [
     "near",
     "full",
+    "projected",
     "stale",
     "unknown"
   ], ["present", "measure"]),
@@ -316,7 +317,7 @@ export const COMPONENT_REGISTRY_METADATA = {
     "service",
     "system"
   ], ["audit", "timeline"]),
-  TrackKey: registryMetadata("Explain the marks a set of limit tracks draws", ["near", "stale"], [
+  TrackKey: registryMetadata("Explain the marks a set of limit tracks draws", ["near", "projected", "stale"], [
     "present",
     "explain"
   ]),

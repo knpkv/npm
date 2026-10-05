@@ -41,13 +41,21 @@
     inset-block: 25%;
     position: absolute;
   }
+  /* A dark core on a light halo, so the mark reads over the empty track and over every fill. */
   .near {
-    background: var(--rly-color-border-2);
+    background: var(--rly-color-text-1);
+    box-shadow:
+      -1px 0 0 var(--rly-color-surface-1),
+      1px 0 0 var(--rly-color-surface-1);
     inline-size: 1px;
     inset-block: 0;
     position: absolute;
   }
   @media (forced-colors: active) {
+    /* Keep the halo: forced colours drop box-shadow, and the tokens already map to system colours. */
+    .near {
+      forced-color-adjust: none;
+    }
     /* Preserve the age cue with the user's palette when the browser removes background images. */
     .root[data-stale="true"] .fill {
       background: repeating-linear-gradient(135deg, CanvasText 0 3px, Canvas 3px 6px);

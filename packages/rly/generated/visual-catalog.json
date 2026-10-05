@@ -977,9 +977,9 @@
           "packages/rly/test/primitives/TrackKey.test.tsx"
         ]
       },
-      "storyId": "primitives-trackkey--without-projection",
+      "storyId": "primitives-trackkey--all-marks",
       "storyIds": [
-        "primitives-trackkey--without-projection"
+        "primitives-trackkey--all-marks"
       ]
     },
     {
