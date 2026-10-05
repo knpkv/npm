@@ -89,19 +89,26 @@ describe("verbose", () => {
         ["probe", "x", "--verbose"],
         ["--verbose", "--no-verbose", "probe", "x"],
         ["--no-verbose", "--verbose", "probe", "x"],
-        ["probe", "--", "--verbose"]
+        ["probe", "--", "--verbose"],
+        ["probe", "x", "--verbose", "FALSE"],
+        ["probe", "x", "--verbose", "True"]
       ]
       for (const args of cases) {
         const { exit, verbose } = yield* parsed(args)
         expect(Exit.isSuccess(exit), JSON.stringify(args)).toBe(true)
         expect(verboseFlagIn(args), JSON.stringify(args)).toBe(verbose)
         expect(commandArgs(args)[0], JSON.stringify(args)).toBe("probe")
+        // A literal the parser does not consume stays a positional word.
+        for (const word of ["FALSE", "True"]) {
+          if (args.includes(word)) expect(commandArgs(args), JSON.stringify(args)).toContain(word)
+        }
       }
     }))
 
   it.effect("does not report verbose for a value the parser rejects, and the rejection is printed", () =>
     Effect.gen(function*() {
       expect(verboseFlagIn(["--verbose=bogus", "probe"])).toBe(false)
+      expect(verboseFlagIn(["--verbose=FALSE", "probe"])).toBe(false)
       const { exit } = yield* parsed(["--verbose=bogus", "probe", "x"])
       expect(Exit.isFailure(exit)).toBe(true)
       if (Exit.isFailure(exit)) {

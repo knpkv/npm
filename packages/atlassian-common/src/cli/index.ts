@@ -33,10 +33,9 @@ export const Verbose = GlobalFlag.Setting("verbose")({
 const truthy = new Set(["true", "1", "y", "yes", "on"])
 const falsy = new Set(["false", "0", "n", "no", "off"])
 
-const booleanLiteral = (token: string | undefined): boolean | undefined => {
-  const value = token?.toLowerCase()
-  return value === undefined ? undefined : truthy.has(value) ? true : falsy.has(value) ? false : undefined
-}
+/** Exactly the literals `effect/cli` accepts for a boolean: lowercase only, so `FALSE` is not one. */
+const booleanLiteral = (token: string | undefined): boolean | undefined =>
+  token === undefined ? undefined : truthy.has(token) ? true : falsy.has(token) ? false : undefined
 
 interface VerboseScan {
   /** The value the flag parser settles on, or undefined when the flag is absent. */
