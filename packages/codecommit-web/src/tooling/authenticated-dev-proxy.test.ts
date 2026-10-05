@@ -1,16 +1,12 @@
+import { NodeCrypto } from "@effect/platform-node"
 import { describe, expect, it, vi } from "@effect/vitest"
-import { CsrfToken, PairingCode, SessionToken } from "@knpkv/browser-pairing/schema"
-import { Effect, Redacted, Ref, Result, Schema } from "effect"
+import { bootstrapUrl, loopbackOrigin } from "@knpkv/browser-pairing/owner-session"
+import { PairingCode } from "@knpkv/browser-pairing/schema"
+import { Effect, Redacted, Result, Schema } from "effect"
 import { IncomingMessage, ServerResponse } from "node:http"
 import { Socket } from "node:net"
 import packageJson from "../../package.json" with { type: "json" }
-import {
-  authorizeBootstrapRequest,
-  ownerSessionOrigin,
-  type OwnerSessionSecretsContract,
-  ownerSessionUrlForOrigin,
-  requireLoopbackOrigin
-} from "../server/internal/OwnerSessionSecurity.js"
+import { makeOwnerSession } from "../server/internal/OwnerSession.js"
 import {
   authenticatedDevBackendOrigin,
   authenticatedDevProxyConfig,
@@ -99,24 +95,18 @@ describe("authenticated development proxy", () => {
     expect(setHeader).toHaveBeenCalledWith("origin", retryOrigin)
   })
 
-  it.effect("accepts a bootstrap request after the proxy origin rewrite", () =>
-    Effect.gen(function*() {
-      const secrets = {
-        authorityOrigin: yield* requireLoopbackOrigin(ownerSessionOrigin("127.0.0.1", 3000)),
-        bootstrapAvailable: yield* Ref.make(true),
-        bootstrapAttemptState: yield* Ref.make({ failedAttempts: 0, inFlight: 0 }),
-        bootstrapExpiresAtMillis: yield* Ref.make<number | undefined>(Number.MAX_SAFE_INTEGER),
-        bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32))),
-        csrfToken: Redacted.make(Schema.decodeSync(CsrfToken)("cd".repeat(32))),
-        ownerToken: Redacted.make(Schema.decodeSync(SessionToken)("ef".repeat(32)))
-      } satisfies OwnerSessionSecretsContract
-      const result = yield* Effect.result(authorizeBootstrapRequest({
-        authorization: `Bearer ${Redacted.value(secrets.bootstrapToken)}`,
-        host: "127.0.0.1:3000",
-        origin: authenticatedDevBackendOrigin
-      }, secrets))
-      expect(Result.isSuccess(result)).toBe(true)
-    }))
+  it.layer(NodeCrypto.layer)("owner session", (it) => {
+    it.effect("accepts a bootstrap request after the proxy origin rewrite", () =>
+      Effect.gen(function*() {
+        const session = yield* makeOwnerSession(loopbackOrigin("127.0.0.1", 3000))
+        const code = yield* session.mintBootstrapCode
+        const result = yield* Effect.result(session.authorizeBootstrap({
+          authorization: `Bearer ${Redacted.value(code)}`,
+          origin: authenticatedDevBackendOrigin
+        }))
+        expect(Result.isSuccess(result)).toBe(true)
+      }))
+  })
 
   it("advertises the token-bearing bootstrap URL on the Vite origin", () => {
     expect(packageJson.scripts.dev).toContain(authenticatedDevPublicOriginEnvironment)
@@ -127,15 +117,16 @@ describe("authenticated development proxy", () => {
     expect(predev.endsWith("pnpm build")).toBe(true)
     expect(predev.indexOf("@knpkv/browser-pairing")).toBeLessThan(predev.indexOf("@knpkv/relay-product..."))
     expect(predev.indexOf("@knpkv/relay-product...")).toBeLessThan(predev.indexOf("@knpkv/review..."))
-    const url = ownerSessionUrlForOrigin(authenticatedDevPublicOrigin, {
-      bootstrapToken: Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32)))
-    })
+    const url = bootstrapUrl(
+      authenticatedDevPublicOrigin,
+      Redacted.make(Schema.decodeSync(PairingCode)("ab".repeat(32)))
+    )
     expect(url).toBe(`http://localhost:5173/#bootstrap_token=${"ab".repeat(32)}`)
     expect(url).not.toContain(authenticatedDevBackendOrigin)
   })
 
   it("keeps the configured backend authority separate from the advertised Vite origin", () => {
-    expect(ownerSessionOrigin("127.0.0.1", 3000)).toBe(`${authenticatedDevBackendOrigin}/`)
+    expect(loopbackOrigin("127.0.0.1", 3000)).toBe(authenticatedDevBackendOrigin)
     expect(authenticatedDevPublicOrigin).not.toBe(authenticatedDevBackendOrigin)
     expect(setAuthenticatedDevProxyOrigin).toBeTypeOf("function")
   })

@@ -4,6 +4,6 @@
     "noEmit": true,
     "rootDir": "."
   },
-  "include": ["src/**/*", "package.json", "test/roles.ts"],
+  "include": ["src/**/*", "package.json"],
   "exclude": ["dist", "node_modules"]
 }

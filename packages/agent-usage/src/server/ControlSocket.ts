@@ -23,12 +23,13 @@
  */
 import { NodeSocket, NodeSocketServer } from "@effect/platform-node"
 import { SqliteClient } from "@effect/sql-sqlite-node"
+import { isLoopbackHostname, type OwnerSessionService } from "@knpkv/browser-pairing/owner-session"
 import { PairingCode } from "@knpkv/browser-pairing/schema"
 import { Duration, Effect, FileSystem, Option, Path, Predicate, Schema } from "effect"
 import type { PlatformError } from "effect/PlatformError"
 import type { Socket, SocketServer } from "effect/socket"
 import { prepareStoreDirectory } from "../core/Database.js"
-import { isLoopbackHostname, mintBootstrapUrl, type OwnerSessionSecretsContract } from "./OwnerSession.js"
+import { mintBootstrapUrl } from "./OwnerSession.js"
 
 export const SOCKET_FILE = "serve.sock"
 export const LOCK_FILE = "serve.lock"
@@ -180,7 +181,7 @@ const readLine = (reader: Socket.Reader) =>
   })
 
 /** One connection: a `mint` request answered with a fresh link, anything else with an error. */
-const answer = (secrets: OwnerSessionSecretsContract, listening: Effect.Effect<void>) => (socket: Socket.Socket) =>
+const answer = (secrets: OwnerSessionService, listening: Effect.Effect<void>) => (socket: Socket.Socket) =>
   Effect.scoped(Effect.gen(function*() {
     const reader = yield* socket.reader
     const write = yield* socket.writer
@@ -236,7 +237,7 @@ const holdStoreLock = Effect.fnUntraced(function*(directory: string) {
  */
 export const controlSocket = Effect.fn("ControlSocket.listen")(function*(
   directory: string,
-  secrets: OwnerSessionSecretsContract,
+  secrets: OwnerSessionService,
   listening: Effect.Effect<void>
 ) {
   const fs = yield* FileSystem.FileSystem

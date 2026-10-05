@@ -1,11 +1,12 @@
 /** The same authenticated routes, bootstrap exchange and static client in production and tests. */
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Effect, FileSystem, Layer, Path } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { HttpApiBuilder } from "effect/http-api"
 import { AgentUsageApi } from "./Api.js"
 import { UsageLive } from "./Handlers.js"
 import { LiveRouter } from "./Live.js"
-import { ownerSessionAuthLayer, OwnerSessionBootstrapRouter } from "./OwnerSession.js"
+import { ownerSessionAuthLayer } from "./OwnerSession.js"
 
 const mimeTypes = new Map([
   [".css", "text/css"],
@@ -85,6 +86,6 @@ const ApiRoutes = HttpApiBuilder.layer(AgentUsageApi).pipe(
 )
 
 /** Supply the store, runtime state and owner secrets; listener and platform belong to the executable. */
-export const application = Layer.mergeAll(ApiRoutes, OwnerSessionBootstrapRouter, LiveRouter, StaticRouter).pipe(
+export const application = Layer.mergeAll(ApiRoutes, OwnerSession.BootstrapRouter, LiveRouter, StaticRouter).pipe(
   Layer.orDie
 )

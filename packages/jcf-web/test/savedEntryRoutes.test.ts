@@ -1,15 +1,17 @@
 import { NodeCrypto, NodeServices } from "@effect/platform-node"
 import { expect, it } from "@effect/vitest"
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { ReconcileService, SavedEntries, SessionAttributor, SourceConsumption } from "@knpkv/jira-clockify"
 import { FAKE_HOME, type FakeHeadlessOptions, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
-import { Clock, Deferred, Effect, Layer, Redacted, Schema } from "effect"
+import { Clock, Deferred, Effect, Layer, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter } from "effect/http"
 import { TestClock } from "effect/testing"
 import { readWeekStream } from "../src/client/api.js"
 import { application } from "../src/server/HttpApplication.js"
-import { makeOwnerSessionSecrets, ownerSessionCookie, OwnerSessionSecrets } from "../src/server/OwnerSession.js"
+import { makeOwnerSession } from "../src/server/OwnerSession.js"
 import { DescribeSavedEntryResponse, SavedWeek, UpdateSavedEntryResponse, WeekPlan } from "../src/shared/contracts.js"
 import type { SavedEntry, WeekPlanResponse, WeekScopeName } from "../src/shared/contracts.js"
+import { csrfOf } from "./ownerSessionFixture.js"
 
 // Production HTTP composition over fake providers and agent; no listener, real writes or agent processes.
 // @effect-diagnostics strictEffectProvide:off
@@ -51,7 +53,7 @@ const makeApplication = async (options: {
   if (clock !== undefined && nowMs !== undefined) await Effect.runPromise(clock.setTime(nowMs))
   const clockLayer = clock === undefined ? Layer.empty : Layer.succeed(Clock.Clock, clock)
   const secrets = await Effect.runPromise(
-    makeOwnerSessionSecrets(origin).pipe(
+    makeOwnerSession(origin).pipe(
       Effect.provide([NodeCrypto.layer, clockLayer])
     )
   )
@@ -140,7 +142,7 @@ const makeApplication = async (options: {
     Layer.provide(attributor),
     Layer.provide(engine),
     Layer.provide(fake.layer),
-    Layer.provideMerge(Layer.succeed(OwnerSessionSecrets, secrets)),
+    Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, secrets)),
     Layer.provide(Etag.layer),
     Layer.provideMerge(NodeServices.layer),
     Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
@@ -148,17 +150,17 @@ const makeApplication = async (options: {
   )
   const web = HttpRouter.toWebHandler(app, { disableLogger: true })
   const get = (path: string) =>
-    web.handler(new Request(`${origin}${path}`, { headers: { cookie: ownerSessionCookie(secrets) } }))
+    web.handler(new Request(`${origin}${path}`, { headers: { cookie: secrets.sessionCookie } }))
   const post = (
     path: string,
     body: Schema.Json,
     auth: "owner" | "no-csrf" | "none" | "wrong-origin" | "wrong-csrf" = "owner"
   ) => {
     const headers = new Headers({ "content-type": "application/json" })
-    if (auth !== "none") headers.set("cookie", ownerSessionCookie(secrets))
+    if (auth !== "none") headers.set("cookie", secrets.sessionCookie)
     if (auth === "owner" || auth === "wrong-origin" || auth === "wrong-csrf") {
       headers.set("origin", auth === "wrong-origin" ? "http://untrusted.example" : origin)
-      headers.set("x-csrf-token", auth === "wrong-csrf" ? "invalid-token" : Redacted.value(secrets.csrfToken))
+      headers.set("x-csrf-token", auth === "wrong-csrf" ? "invalid-token" : csrfOf(secrets))
     }
     return web.handler(
       new Request(`${origin}${path}`, {

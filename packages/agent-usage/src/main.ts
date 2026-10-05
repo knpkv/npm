@@ -10,6 +10,7 @@
  * @module
  */
 import { NodeRuntime, NodeServices } from "@effect/platform-node"
+import { loopbackOrigin } from "@knpkv/browser-pairing/owner-session"
 import { ConfigProvider, Console, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import * as Stdio from "effect/Stdio"
@@ -22,7 +23,7 @@ import { ingestOnce, type IngestStatus } from "./core/Ingest.js"
 import { loadConfig } from "./server/Config.js"
 import { describeIngest } from "./server/IngestSummary.js"
 import { login as requestLogin } from "./server/Login.js"
-import { makeOwnerSessionSecrets, ownerSessionOrigin } from "./server/OwnerSession.js"
+import { makeOwnerSession } from "./server/OwnerSession.js"
 import { makeServer, Port, PublicOrigin } from "./server/Server.js"
 import { IngestStatus as IngestStatusSchema } from "./shared/contracts.js"
 
@@ -46,8 +47,8 @@ const serve = Command.make(
     const settings = yield* config
     const port = yield* Port
     const configuredOrigin = yield* PublicOrigin
-    const security = yield* makeOwnerSessionSecrets(
-      ownerSessionOrigin("127.0.0.1", port),
+    const security = yield* makeOwnerSession(
+      loopbackOrigin("127.0.0.1", port),
       Option.getOrUndefined(configuredOrigin)
     )
     const ready = yield* Deferred.make<string>()

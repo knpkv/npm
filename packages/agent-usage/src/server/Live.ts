@@ -14,10 +14,10 @@
  *
  * @module
  */
+import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { Effect, Schema, Stream, SubscriptionRef } from "effect"
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { LiveVersions } from "../shared/contracts.js"
-import { authorizeOwnerRequest, OwnerSessionSecrets } from "./OwnerSession.js"
 import { RuntimeState } from "./Runtime.js"
 
 const encodeVersions = Schema.encodeSync(Schema.fromJsonString(LiveVersions))
@@ -27,19 +27,11 @@ const refusal = (status: 401 | 403, message: string) =>
 
 const live = Effect.gen(function*() {
   const request = yield* HttpServerRequest.HttpServerRequest
-  const secrets = yield* OwnerSessionSecrets
+  const session = yield* OwnerSession.OwnerSession
   const state = yield* RuntimeState
-  const admitted = yield* Effect.result(authorizeOwnerRequest(
-    {
-      credential: request.cookies["agent_usage_owner"] ?? "",
-      fetchSite: request.headers["sec-fetch-site"],
-      method: request.method,
-      origin: request.headers.origin
-    },
-    secrets
-  ))
+  const admitted = yield* Effect.result(session.authorizeHttp(request.cookies[session.cookieName] ?? ""))
   if (admitted._tag === "Failure") {
-    return admitted.failure._tag === "UnauthorizedApiError"
+    return admitted.failure._tag === "OwnerSessionUnauthorizedError"
       ? refusal(401, admitted.failure.message)
       : refusal(403, admitted.failure.message)
   }
