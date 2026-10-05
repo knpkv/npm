@@ -81,6 +81,8 @@ export interface JcfConfig {
    * ticket, and answering it once should not have to be answered again next week.
    */
   readonly sessionOwnershipOverrides: ReadonlyArray<string>
+  /** Globally excluded session tickets. Overlapping eligible sessions absorb their time; solo time is only reported. */
+  readonly sessionIgnoredTickets: ReadonlyArray<string>
 }
 
 /** The values every unset field falls back to, and what `jcf config reset` restores. */
@@ -99,7 +101,8 @@ export const defaultJcfConfig: JcfConfig = {
   sessionConfidenceFloor: 0.7,
   sessionDwellSeconds: 900,
   sessionOwnership: "assigned",
-  sessionOwnershipOverrides: []
+  sessionOwnershipOverrides: [],
+  sessionIgnoredTickets: []
 }
 
 export interface ConfigServiceContract {
@@ -182,10 +185,12 @@ export const parseConfigPatch = (content: string): Partial<JcfConfig> => {
     ? parsed.sessionOwnership
     : undefined
   const sessionOwnershipOverrides = stringArray(parsed.sessionOwnershipOverrides)?.filter(isTicketKey)
+  const sessionIgnoredTickets = stringArray(parsed.sessionIgnoredTickets)?.filter(isTicketKey)
   return {
     ...((sessionAgent !== undefined) && { sessionAgent }),
     ...((sessionOwnership !== undefined) && { sessionOwnership }),
     ...((sessionOwnershipOverrides !== undefined) && { sessionOwnershipOverrides }),
+    ...((sessionIgnoredTickets !== undefined) && { sessionIgnoredTickets }),
     ...((sessionRoots !== undefined) && { sessionRoots }),
     ...((sessionTicketMap !== undefined) && { sessionTicketMap }),
     ...((sessionIdleCapSeconds !== undefined) && { sessionIdleCapSeconds }),

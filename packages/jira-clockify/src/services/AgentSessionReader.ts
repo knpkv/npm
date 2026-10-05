@@ -12,18 +12,21 @@
  * - **Tolerant decoding**: the transcript layout is an external contract that changes without
  *   notice. Unrecognised and malformed lines are skipped; a session survives on the lines it can
  *   decode rather than failing the whole run.
- * - **Presence, not busy-ness**: only messages the *person* typed count as Session Activity. A
- *   transcript is overwhelmingly the agent's own output — measured on one real day, 1641 events of
- *   which 66 were human — so counting every event measures how long the agent was busy, which is
- *   not the same as how long anyone was working.
+ * - **Supervised turns, not busy-ness**: a message the *person* typed opens a supervised turn, and
+ *   the agent's work counts as Session Activity only inside one — until the agent ends the turn, a
+ *   turn nobody typed takes over, or the agent falls silent for longer than the Idle Cap. Agent
+ *   output outside a turn the person started measures how long the agent was busy, not how long
+ *   anyone was working, so it never counts. See ADR-0006's 2026-10-03 amendment.
  *
  * **Gotchas**
  *
  * - A `user` line is not necessarily a person. Tool results come back as `user` messages whose
- *   content is `tool_result` blocks, and they outnumber real prompts roughly ten to one. Only text
- *   content counts.
+ *   content is `tool_result` blocks; task notifications and auto-continuations carry a machine
+ *   `origin`; `isMeta` lines are expanded skills and command caveats. None of them opens a turn.
+ * - A message typed while the agent is busy is not a `user` line at all: it is a `queued_command`
+ *   attachment, timestamped when it was typed. It opens a turn like any other prompt.
  * - Assistant output, sidechain turns, and tool results still feed the candidate Issue Keys and the
- *   digest: they say nothing about presence, but plenty about *what* the session was for.
+ *   digest whether or not they count as presence: they say plenty about *what* the session was for.
  * - The working directory and branch are taken from the session's last in-window line of any kind —
  *   the state the credited work actually ran under.
  *
@@ -45,12 +48,14 @@ import {
   expandHomePath,
   isWithinSessionRoots,
   mineTicketKeys,
-  type SessionActivity
+  type SessionActivity,
+  ticketMentionCounts
 } from "../agent/sessions.js"
 import { codexTranscriptLines, decodeCodexLine } from "./CodexTranscript.js"
 import { ConfigService } from "./ConfigService.js"
 import { HomeDirectory } from "./HomeDirectory.js"
 import type { ReconcilePeriod } from "./ReconcileService.js"
+import type { Presence, SessionLine } from "./SessionLine.js"
 
 // ---------------------------------------------------------------------------
 // Domain
@@ -101,7 +106,10 @@ const TranscriptLine = Schema.Struct({
   cwd: Schema.optional(Schema.String),
   gitBranch: Schema.optional(Schema.NullOr(Schema.String)),
   isSidechain: Schema.optional(Schema.NullOr(Schema.Boolean)),
-  message: Schema.optional(Schema.Unknown)
+  isMeta: Schema.optional(Schema.NullOr(Schema.Boolean)),
+  origin: Schema.optional(Schema.Unknown),
+  message: Schema.optional(Schema.Unknown),
+  attachment: Schema.optional(Schema.Unknown)
 })
 
 const TextBlock = Schema.Struct({
@@ -126,23 +134,42 @@ const MessageContent = Schema.Struct({
   content: Schema.optional(Schema.Union([Schema.String, Schema.Array(ContentBlock)]))
 })
 
+/** Why a turn started. Absent on older transcripts, where the content prefix is the only hint. */
+const Origin = Schema.Struct({ kind: Schema.optional(Schema.String) })
+
+/** A message typed while the agent was busy, recorded when it was typed rather than delivered. */
+const QueuedCommand = Schema.Struct({
+  type: Schema.Literal("queued_command"),
+  commandMode: Schema.optional(Schema.String),
+  origin: Schema.optional(Schema.Unknown),
+  prompt: Schema.optional(Schema.Union([Schema.String, Schema.Array(ContentBlock)]))
+})
+
+const AssistantStop = Schema.Struct({ stop_reason: Schema.optional(Schema.NullOr(Schema.String)) })
+
 const JsonValue = Schema.fromJsonString(Schema.Json)
 
 const decodeJson = Schema.decodeUnknownOption(JsonValue)
 const decodeLine = Schema.decodeUnknownOption(TranscriptLine)
 const decodeContent = Schema.decodeUnknownOption(MessageContent)
-
-/** Line types that carry a timestamp and a message. Everything else is session metadata. */
-const ACTIVITY_TYPES: ReadonlyArray<string> = ["user", "assistant"]
+const decodeOrigin = Schema.decodeUnknownOption(Origin)
+const decodeQueuedCommand = Schema.decodeUnknownOption(QueuedCommand)
+const decodeAssistantStop = Schema.decodeUnknownOption(AssistantStop)
 
 /** Block types that are the agent's own machinery rather than anything a person wrote. */
 const MACHINE_BLOCK_TYPES: ReadonlyArray<string> = ["tool_result", "tool_use", "thinking"]
 
-/** The fields of a transcript line that decide whether it evidences a person being present. */
-interface TranscriptLineFields {
-  readonly type?: string | undefined
-  readonly isSidechain?: boolean | null | undefined
-}
+/** Turn origins nobody typed. */
+const MACHINE_ORIGINS: ReadonlyArray<string> = ["task-notification", "auto-continuation"]
+
+/** Stop reasons that end the agent's turn rather than pausing it for a tool. */
+const TURN_END_STOPS: ReadonlyArray<string> = ["end_turn", "stop_sequence"]
+
+/**
+ * Prefixes of `user` lines that echo a local command's output or announce a notification. Older
+ * transcripts carry no `origin`, so the content is the only evidence that nobody typed them.
+ */
+const MACHINE_TEXT = /^\s*<(task-notification|local-command-stdout|local-command-stderr|bash-stdout|bash-stderr)\b/
 
 /**
  * How much of one tool result is kept as evidence. Command output can be megabytes; an Issue Key a
@@ -161,16 +188,15 @@ const toolResultText = <UnparsedInput>(output: UnparsedInput): ReadonlyArray<str
   return text.length === 0 ? [] : [text.slice(0, TOOL_RESULT_TEXT_LIMIT)]
 }
 
+type Content = typeof MessageContent.Type["content"]
+
 /**
- * The readable text of a message, or `""` when it carries none we understand.
+ * The readable text of message content, or `""` when it carries none we understand.
  *
  * Includes tool-result output: it is attribution and description evidence, never presence, which
- * {@link isHumanPrompt} decides separately.
+ * {@link claudePresence} decides separately.
  */
-const messageText = <UnparsedInput>(message: UnparsedInput): string => {
-  const decoded = decodeContent(message)
-  if (Option.isNone(decoded)) return ""
-  const content = decoded.value.content
+const contentText = (content: Content): string => {
   if (content === undefined) return ""
   if (Predicate.isString(content)) return content
   return content.flatMap((block) =>
@@ -182,31 +208,56 @@ const messageText = <UnparsedInput>(message: UnparsedInput): string => {
   ).join("\n")
 }
 
-/**
- * True when a line is a message the person typed — the only thing that evidences their presence.
- *
- * A bare string is a person only on the main thread. A block list is a person only if it contains
- * none of the agent's machinery: tool results in particular arrive as `user` messages and are far
- * more numerous than real prompts, so counting them would measure the agent's throughput as if it
- * were attention.
- *
- * A sidechain line is the agent talking to its own subagent. It has the exact shape of a typed
- * prompt — `type: "user"`, plain string content — so nothing else here would exclude it, and a run
- * that fans out to many subagents would manufacture a stream of "prompts" dense enough to bridge
- * every Idle Cap gap. That is the one thing the Idle Cap exists to stop, and under `jcf watch` the
- * result would be written unattended.
- */
-const isHumanPrompt = <UnparsedInput>(line: TranscriptLineFields, message: UnparsedInput): boolean => {
-  if (line.type !== "user" || line.isSidechain === true) return false
-  const decoded = decodeContent(message)
-  if (Option.isNone(decoded)) return false
-  const content = decoded.value.content
+/** True when content is something a person could have typed: text with none of the agent's machinery. */
+const isTypedContent = (content: Content): boolean => {
   if (content === undefined) return false
   if (Predicate.isString(content)) return content.trim().length > 0
-  return (
-    content.length > 0 &&
+  return content.length > 0 &&
     content.every((block) => block.type === undefined || !MACHINE_BLOCK_TYPES.includes(block.type))
-  )
+}
+
+const isMachineOrigin = <UnparsedInput>(origin: UnparsedInput): boolean => {
+  const decoded = decodeOrigin(origin)
+  return Option.isSome(decoded) && decoded.value.kind !== undefined && MACHINE_ORIGINS.includes(decoded.value.kind)
+}
+
+/**
+ * What one Claude line says about presence, with its readable text; `undefined` for lines that are
+ * neither messages nor queued prompts.
+ *
+ * A sidechain line is the agent talking to its own subagent. It has the exact shape of a typed
+ * prompt — `type: "user"`, plain string content — so it is classified as the agent's work before the
+ * content is looked at: it may continue a turn the person started, never open one.
+ */
+const claudePresence = (
+  line: typeof TranscriptLine.Type
+): { readonly presence: Presence; readonly text: string } | undefined => {
+  if (line.type === "assistant") {
+    const content = decodeContent(line.message)
+    const text = Option.isSome(content) ? contentText(content.value.content) : ""
+    const stop = decodeAssistantStop(line.message)
+    const stopReason = Option.isSome(stop) ? stop.value.stop_reason : undefined
+    // A subagent finishing its own turn does not end the person's turn on the main thread.
+    const ends = line.isSidechain !== true && stopReason !== undefined && stopReason !== null &&
+      TURN_END_STOPS.includes(stopReason)
+    return { presence: ends ? "turn-end" : "work", text }
+  }
+  if (line.type === "attachment") {
+    const queued = decodeQueuedCommand(line.attachment)
+    if (Option.isNone(queued)) return undefined
+    const text = contentText(queued.value.prompt)
+    const typed = queued.value.commandMode === "prompt" && !isMachineOrigin(queued.value.origin)
+    return { presence: typed ? "prompt" : "machine", text }
+  }
+  if (line.type !== "user") return undefined
+  const decoded = decodeContent(line.message)
+  const content = Option.isSome(decoded) ? decoded.value.content : undefined
+  const text = contentText(content)
+  if (isMachineOrigin(line.origin)) return { presence: "machine", text }
+  if (line.isSidechain === true || line.isMeta === true) return { presence: "work", text }
+  if (/^\s*<task-notification\b/.test(text)) return { presence: "machine", text }
+  if (MACHINE_TEXT.test(text) || !isTypedContent(content)) return { presence: "work", text }
+  return { presence: "prompt", text }
 }
 
 /** What one transcript file contributes, before scope and window filtering. */
@@ -217,8 +268,15 @@ interface DecodedTranscript {
   readonly activity: ReadonlyArray<SessionActivity>
   /** Where this segment gave way to the next, or null when nothing followed it. */
   readonly boundedAtMs: number | null
-  /** Prompt text in transcript order — mined for candidate keys and folded into the digest. */
+  /** Text in transcript order — mined for candidate keys and folded into the digest. */
   readonly texts: ReadonlyArray<string>
+}
+
+/** The window being read and the Idle Cap that ends a silent supervised turn. */
+export interface DecodeOptions {
+  readonly fromMs: number
+  readonly toMs: number
+  readonly idleCapMs: number
 }
 
 /**
@@ -239,82 +297,117 @@ interface DecodedTranscript {
  * Pure and total: a malformed line, an unparseable timestamp, or a file of pure noise yields no
  * segments rather than an error.
  */
-export const decodeTranscript = (
-  content: string,
-  period: { readonly fromMs: number; readonly toMs: number }
-): ReadonlyArray<DecodedTranscript> => decodeTranscriptLines(claudeTranscriptLines(content), period)
+export const decodeTranscript = (content: string, options: DecodeOptions): ReadonlyArray<DecodedTranscript> =>
+  decodeSessionLines(claudeTranscriptLines(content), options)
 
 /** Skip malformed external lines before the common segmenter sees them. */
-function* claudeTranscriptLines(content: string) {
+function* claudeTranscriptLines(content: string): Generator<SessionLine> {
   for (const rawLine of content.split("\n")) {
     const json = decodeJson(rawLine)
     if (Option.isNone(json)) continue
     const decoded = decodeLine(json.value)
-    if (Option.isSome(decoded)) yield decoded.value
+    if (Option.isNone(decoded)) continue
+    const line = decoded.value
+    if (line.sessionId === undefined || line.timestamp === undefined || line.cwd === undefined) continue
+    const classified = claudePresence(line)
+    if (classified === undefined) continue
+    yield {
+      sessionId: line.sessionId,
+      cwd: line.cwd,
+      gitBranch: line.gitBranch ?? null,
+      atMs: Date.parse(line.timestamp),
+      ...classified
+    }
   }
 }
 
-/** Both providers share presence accounting and per-directory evidence boundaries. */
-const decodeTranscriptLines = (
-  lines: Iterable<typeof TranscriptLine.Type>,
-  period: { readonly fromMs: number; readonly toMs: number }
+/**
+ * Both providers share supervised-turn accounting and per-directory evidence boundaries.
+ *
+ * Turn state is tracked across the whole file, including lines outside the window, so a prompt
+ * typed just before the window opens still supervises the work that runs into it.
+ */
+export const decodeSessionLines = (
+  lines: Iterable<SessionLine>,
+  options: DecodeOptions
 ): ReadonlyArray<DecodedTranscript> => {
   const segments: Array<DecodedTranscript> = []
-  let promptTimes: Array<number> = []
+  let activityTimes: Array<number> = []
   let texts: Array<string> = []
   let sessionId: string | null = null
   let cwd: string | null = null
   let gitBranch: string | null = null
+  let afterIdle = false
+  // Last counted instant of the open supervised turn, or null when no turn is open.
+  let turnAtMs: number | null = null
 
   // One segment per `(cwd, branch)`. The id carries the segment index so windows, attributions and
   // digests all key on the same thing — they are looked up from three different places.
   const closeSegment = (endedAtMs: number | null) => {
-    if (sessionId !== null && cwd !== null && promptTimes.length > 0) {
-      const id = segments.length === 0 ? sessionId : `${sessionId}#${String(segments.length)}`
+    if (sessionId !== null && cwd !== null && activityTimes.length > 0) {
+      const id = afterIdle
+        ? `${sessionId}@${String(activityTimes[0])}`
+        : segments.length === 0
+        ? sessionId
+        : `${sessionId}#${String(segments.length)}`
       segments.push({
         sessionId: id,
         cwd,
         gitBranch,
-        // Where the segment gives way to the next. Presence after its final prompt ends there, not
+        // Where the segment gives way to the next. Presence after its final activity ends there, not
         // one whole Idle Cap later: the same person carried straight on under a different branch, so
         // crediting the tail to both would put the switch's minutes on two tickets at once.
         boundedAtMs: endedAtMs,
-        activity: promptTimes.map((atMs): SessionActivity => ({ sessionId: id, atMs })),
+        activity: activityTimes.map((atMs): SessionActivity => ({ sessionId: id, atMs })),
         texts
       })
     }
-    // Reset unconditionally. A stretch with no typed prompt still has text, and leaving it behind
+    // Reset unconditionally. A stretch with no activity still has text, and leaving it behind
     // leaks it into the next segment — including text from a directory that was never opted in.
-    promptTimes = []
+    activityTimes = []
     texts = []
   }
 
   for (const line of lines) {
-    if (line.type === undefined || !ACTIVITY_TYPES.includes(line.type)) continue
-    if (line.sessionId === undefined || line.timestamp === undefined || line.cwd === undefined) continue
-
-    const atMs = Date.parse(line.timestamp)
+    const atMs = line.atMs
     if (Number.isNaN(atMs)) continue
 
-    if (atMs < period.fromMs || atMs >= period.toMs) continue
+    // The turn advances on every line, inside the window or not.
+    const supervised: boolean = turnAtMs !== null && atMs - turnAtMs <= options.idleCapMs
+    const counts: boolean = line.presence === "prompt" ||
+      ((line.presence === "work" || line.presence === "turn-end") && supervised)
+    if (line.presence === "prompt") turnAtMs = Math.max(turnAtMs ?? atMs, atMs)
+    else if (line.presence === "work") turnAtMs = supervised ? Math.max(turnAtMs ?? atMs, atMs) : null
+    else if (line.presence === "turn-end" || line.presence === "machine") turnAtMs = null
+
+    if (atMs < options.fromMs || atMs >= options.toMs) continue
+
+    // Later mentions must not rebalance an already settled group. An idle barrier closes its text
+    // and activity together; the next group has a timestamp identity stable under later appends.
+    const lastActivityMs = activityTimes.at(-1)
+    if (lastActivityMs !== undefined && atMs - lastActivityMs > options.idleCapMs) {
+      closeSegment(lastActivityMs + options.idleCapMs)
+      afterIdle = true
+    }
 
     // Closed *before* this line contributes anything: the first line under the new branch is
     // evidence about the new segment, and appending it first put it in the old segment's digest and
     // left it out of the new one's.
-    const branch = line.gitBranch ?? null
-    if (cwd !== null && (cwd !== line.cwd || gitBranch !== branch)) closeSegment(atMs)
+    if (cwd !== null && (cwd !== line.cwd || gitBranch !== line.gitBranch)) {
+      closeSegment(atMs)
+      afterIdle = false
+    }
     sessionId = line.sessionId
     cwd = line.cwd
-    gitBranch = branch
+    gitBranch = line.gitBranch
 
     // Inside the window only, and every kind of line: a key mentioned solely in the agent's own
     // output is still a candidate, but a prompt written after the window is not evidence about it.
     // A resumed session that moved on to something else would otherwise attribute — and describe —
     // yesterday's hours from today's work, and could carry text from a directory that was never
     // opted in to a Coding Agent.
-    const text = messageText(line.message)
-    if (text !== "") texts.push(text)
-    if (isHumanPrompt(line, line.message)) promptTimes.push(atMs)
+    if (line.text !== "") texts.push(line.text)
+    if (counts) activityTimes.push(atMs)
   }
 
   closeSegment(null)
@@ -429,6 +522,7 @@ export const layer = Layer.effect(
 
         const fromMs = period.from.getTime()
         const toMs = period.to.getTime()
+        const idleCapMs = Math.max(0, cfg.sessionIdleCapSeconds) * 1000
         const paths = yield* transcriptPaths(roots)
         const records: Array<AgentSessionRecord> = []
 
@@ -441,6 +535,7 @@ export const layer = Layer.effect(
               cwd: segment.cwd,
               gitBranch: segment.gitBranch,
               candidateKeys: mineTicketKeys(segment.texts.join("\n")),
+              mentionCounts: ticketMentionCounts(segment.texts.join("\n")),
               digest: buildSessionDigest(segment.texts),
               activity: segment.activity,
               boundedAtMs: segment.boundedAtMs
@@ -466,7 +561,7 @@ export const layer = Layer.effect(
             )
           )
 
-          addSegments(decodeTranscript(content, { fromMs, toMs }))
+          addSegments(decodeTranscript(content, { fromMs, toMs, idleCapMs }))
         }
 
         const hasCodex = yield* fs
@@ -491,7 +586,7 @@ export const layer = Layer.effect(
               Stream.runCollect,
               Effect.catch(asAgentSessionError("Reading Codex session failed"))
             )
-            addSegments(decodeTranscriptLines(codexTranscriptLines(lines), { fromMs, toMs }))
+            addSegments(decodeSessionLines(codexTranscriptLines(lines), { fromMs, toMs, idleCapMs }))
           }
         }
 

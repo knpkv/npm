@@ -3,9 +3,23 @@ import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
 import type { Schema } from "effect"
 import { Effect, FileSystem, Layer } from "effect"
-import { AgentSessionReader, layer as readerLayer } from "../src/services/AgentSessionReader.js"
+import {
+  activeWindows,
+  attributeSession,
+  mineTicketKeys,
+  splitCredits,
+  splitSessionAttribution,
+  ticketMentionCounts
+} from "../src/agent/sessions.js"
+import {
+  AgentSessionReader,
+  decodeSessionLines,
+  decodeTranscript,
+  layer as readerLayer
+} from "../src/services/AgentSessionReader.js"
 import { layer as configLayer } from "../src/services/ConfigService.js"
 import { HomeDirectory } from "../src/services/HomeDirectory.js"
+import type { SessionLine } from "../src/services/SessionLine.js"
 import { makeFakeHeadless } from "../src/testing/fakeHeadless.js"
 
 // @effect-diagnostics strictEffectProvide:off
@@ -27,6 +41,77 @@ const prompt = (text: string, minutes: number) =>
     },
     minutes
   )
+
+it("keeps settled split blocks unchanged when later mentions are appended across idle", () => {
+  const first = Array.from({ length: 56 }, (_, minute): SessionLine => ({
+    sessionId: "orchestrator",
+    cwd: "/work",
+    gitBranch: null,
+    atMs: fromMs + minute * 60_000,
+    presence: "prompt",
+    text: minute === 0 ? "PROJ-1 PROJ-1 PROJ-1 PROJ-2" : ""
+  }))
+  const decode = (lines: ReadonlyArray<SessionLine>) => decodeSessionLines(lines, { fromMs, toMs, idleCapMs: 300_000 })
+  const allocate = (lines: ReadonlyArray<SessionLine>) => {
+    const records = decode(lines)
+    const windows = activeWindows(records.flatMap((record) => record.activity), {
+      idleCapSeconds: 300,
+      observedAtMs: toMs,
+      boundsBySession: new Map(
+        records.flatMap((record) =>
+          record.boundedAtMs === null ? [] : [[record.sessionId, record.boundedAtMs] satisfies [string, number]]
+        )
+      )
+    })
+    const attributions = records.map((record) => {
+      const session = {
+        ...record,
+        candidateKeys: mineTicketKeys(record.texts.join("\n")),
+        mentionCounts: ticketMentionCounts(record.texts.join("\n"))
+      }
+      return splitSessionAttribution(
+        session,
+        attributeSession(session, { standingMap: {}, confidenceFloor: 0.7 }),
+        new Set(["PROJ-1", "PROJ-2"]),
+        new Set()
+      )
+    })
+    return splitCredits(windows, attributions).attributed.flatMap((row) =>
+      row.blocks
+        .filter((block) => block.sourceStartMs === fromMs).map((block) => ({ ticketKey: row.ticketKey, ...block }))
+    )
+  }
+  const appended: ReadonlyArray<SessionLine> = [...first, {
+    sessionId: "orchestrator",
+    cwd: "/work",
+    gitBranch: null,
+    presence: "prompt",
+    atMs: fromMs + 180 * 60_000,
+    text: Array.from({ length: 10 }, () => "PROJ-2").join(" ")
+  }]
+  expect(decode(appended).map((record) => record.sessionId)).toEqual([
+    "orchestrator",
+    `orchestrator@${fromMs + 180 * 60_000}`
+  ])
+  expect(allocate(first).map((block) => block.seconds)).toEqual([2700, 900])
+  expect(allocate(appended)).toEqual(allocate(first))
+})
+
+it("keeps the person's turn open when a subagent ends its own turn", () => {
+  const line = (minutes: number, fields: Readonly<Record<string, Schema.Json>>) =>
+    JSON.stringify({ sessionId: "main", cwd: "/work", timestamp: at(minutes), ...fields })
+  const transcript = [
+    line(0, { type: "user", message: { content: "review PROJ-1" } }),
+    line(1, { type: "assistant", isSidechain: true, message: { content: "done", stop_reason: "end_turn" } }),
+    line(2, { type: "assistant", message: { content: "applying the review", stop_reason: "tool_use" } })
+  ].join("\n")
+  const [segment] = decodeTranscript(transcript, { fromMs, toMs, idleCapMs: 300_000 })
+  expect(segment?.activity.map((activity) => activity.atMs)).toEqual([
+    fromMs,
+    fromMs + 60_000,
+    fromMs + 120_000
+  ])
+})
 
 /** A resumed rollout can live in an older date directory; activity time decides its week. */
 const withTranscripts = (files: Readonly<Record<string, string>>, sessionRoots: ReadonlyArray<string> = ["/work"]) =>
@@ -205,7 +290,7 @@ describe("Claude and Codex session discovery", () => {
     }).pipe(Effect.provide(fake.layer))
   })
 
-  it.effect("counts authoritative user events once and ignores injected context, replay and tool output", () =>
+  it.effect("counts authoritative user events once, supervises the work after them, and ignores injected context", () =>
     withTranscripts({
       ".codex/sessions/2026/09/07/rollout.jsonl": [
         meta("human", "/work/repo"),
@@ -245,7 +330,15 @@ describe("Claude and Codex session discovery", () => {
     }).pipe(
       Effect.map((records) => {
         expect(records).toHaveLength(1)
-        expect(records[0]?.activity).toHaveLength(2)
+        // Prompt at 10 (once), the agent's completed item at 11, tool output at 12 and reply at 13,
+        // prompt at 15. The injected message at 0 is a copy, not work, and precedes any prompt.
+        expect(records[0]?.activity.map((activity) => (activity.atMs - fromMs) / 60_000)).toEqual([
+          10,
+          11,
+          12,
+          13,
+          15
+        ])
         expect(records[0]?.candidateKeys).toEqual(["PROJ-5662"])
         expect(records[0]?.digest).toContain("Verified PROJ-5662 fix")
         expect(records[0]?.digest).not.toContain("Injected")
@@ -303,6 +396,45 @@ describe("Claude and Codex session discovery", () => {
         })
         expect(records[0]?.digest).not.toContain("Outside")
         expect(records[0]?.digest).not.toContain("Machine")
+      })
+    ))
+
+  it.effect("ends a supervised Codex turn at task_complete", () =>
+    withTranscripts({
+      ".codex/sessions/2026/09/07/turns.jsonl": [
+        meta("turns", "/work/repo"),
+        prompt("Do PROJ-5662", 10),
+        event("event_msg", { type: "item_completed", item: { type: "CommandExecution" } }, 12),
+        event("event_msg", { type: "task_complete" }, 14),
+        event("event_msg", { type: "item_completed", item: { type: "CommandExecution" } }, 15)
+      ].join("\n")
+    }).pipe(
+      Effect.map((records) => {
+        expect(records[0]?.activity.map((activity) => (activity.atMs - fromMs) / 60_000)).toEqual([10, 12, 14])
+      })
+    ))
+
+  // Older rollouts have no completed-item events: a long tool run is only response items, and must
+  // keep the turn alive without letting an injected user-role copy's text into the evidence.
+  it.effect("supervises legacy tool-call response items without keeping their text", () =>
+    withTranscripts({
+      ".codex/sessions/2026/09/07/legacy.jsonl": [
+        meta("legacy", "/work/repo"),
+        event("event_msg", { type: "user_message", message: "Fix PROJ-5662" }, 10),
+        event("response_item", { type: "function_call", name: "shell", arguments: "{}" }, 14),
+        event("response_item", { type: "function_call_output", output: "PROJ-7777" }, 18),
+        event(
+          "response_item",
+          { type: "message", role: "user", content: [{ type: "input_text", text: "PROJ-9999" }] },
+          20
+        ),
+        event("response_item", { type: "reasoning", summary: [] }, 22)
+      ].join("\n")
+    }).pipe(
+      Effect.map((records) => {
+        // The user-role copy at 20 is context, never work; the reasoning at 22 continues the turn.
+        expect(records[0]?.activity.map((activity) => (activity.atMs - fromMs) / 60_000)).toEqual([10, 14, 18, 22])
+        expect(records[0]?.candidateKeys).toEqual(["PROJ-5662"])
       })
     ))
 
