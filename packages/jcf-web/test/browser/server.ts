@@ -1,12 +1,12 @@
 /** Isolated application over real engine logic and fake providers. Controls never encode API replies. */
-import { NodeHttpServer, NodeRuntime, NodeServices } from "@effect/platform-node"
+import { NodeFileSystem, NodeHttpServer, NodePath, NodeRuntime, NodeServices } from "@effect/platform-node"
 import * as OwnerSession from "@knpkv/browser-pairing/owner-session"
 import { ReconcileService } from "@knpkv/jira-clockify"
 import { FAKE_HOME, makeFakeHeadless } from "@knpkv/jira-clockify/testing.js"
 import { Effect, Layer, Queue, Ref, Schema } from "effect"
 import { Etag, HttpPlatform, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/http"
 import { createServer } from "node:http"
-import { application } from "../../src/server/HttpApplication.js"
+import { apiApplication, StaticRouter } from "../../src/server/HttpApplication.js"
 import { makeOwnerSession } from "../../src/server/OwnerSession.js"
 
 // This executable composes isolated engine services and a real loopback HTTP listener.
@@ -157,14 +157,26 @@ const makeFixture = Effect.fn("BrowserFixture.make")(function*(
       return controlled
     })
   ).pipe(Layer.provideMerge(fake.layer))
-  const app = application.pipe(
-    Layer.provide(engine),
+  const app = Layer.mergeAll(
+    apiApplication.pipe(Layer.provide(engine)),
+    // The built client is a host file; the fake engine's in-memory FileSystem would hide it.
+    StaticRouter.pipe(Layer.provide(Layer.mergeAll(NodeFileSystem.layer, NodePath.layer)))
+  ).pipe(
     Layer.provideMerge(Layer.succeed(OwnerSession.OwnerSession, security)),
     Layer.provide(Etag.layer),
     Layer.provide(HttpPlatform.layer.pipe(Layer.provide(NodeServices.layer))),
     Layer.provideMerge(NodeServices.layer)
   )
   const web = HttpRouter.toWebHandler(app, { disableLogger: true })
+  // A fixture that cannot serve the built client fails here, not as a Playwright webServer timeout.
+  yield* Effect.promise(async () => {
+    const response = await web.handler(new Request(`${origin}/`))
+    return { body: await response.text(), status: response.status }
+  }).pipe(Effect.flatMap((root) =>
+    root.status === 200 && root.body.includes("<div id=")
+      ? Effect.void
+      : Effect.die(new Error(`fixture does not serve dist/client: GET / -> ${root.status}`))
+  ))
   // Seed by reading through the real routes. Saved plans, IDs and JSON codecs remain application-owned.
   yield* Effect.forEach(
     seed ? mondays : [],
