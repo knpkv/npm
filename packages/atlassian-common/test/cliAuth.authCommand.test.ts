@@ -6,10 +6,12 @@
  */
 import { NodeServices } from "@effect/platform-node"
 import { describe, expect, it } from "@effect/vitest"
+import * as Cause from "effect/Cause"
 import { Command } from "effect/cli"
 import * as Console from "effect/Console"
 import * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
+import * as Exit from "effect/Exit"
 import * as Layer from "effect/Layer"
 import * as PlatformError from "effect/PlatformError"
 import { ChildProcessSpawner } from "effect/process"
@@ -144,10 +146,16 @@ describe("makeAuthCommand", () => {
       expect((yield* run(["status"], {})).output).toContain("Not logged in. Use 'jira auth login' to authenticate.")
     }))
 
-  it.effect("profiles marks the active one; use and remove report an unknown selector", () =>
+  it.effect("profiles marks the active one; use and remove fail typed on an unknown selector", () =>
     Effect.gen(function*() {
       expect((yield* run(["profiles"], { active: profile })).output).toContain("* cloud-1:account-1")
-      expect((yield* run(["use", "nope"], {})).output).toContain("Profile not found: nope")
-      expect((yield* run(["remove", "nope"], {})).output).toContain("Profile not found: nope")
+      for (const subcommand of ["use", "remove"]) {
+        const { exit } = yield* run([subcommand, "nope"], {})
+        expect(Exit.isFailure(exit) && Cause.squash(exit.cause), subcommand).toMatchObject({
+          _tag: "ProfileNotFoundError",
+          message: "Profile not found: nope",
+          selector: "nope"
+        })
+      }
     }))
 })

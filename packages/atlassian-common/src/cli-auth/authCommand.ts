@@ -19,6 +19,7 @@ import * as Console from "effect/Console"
 import type * as Context from "effect/Context"
 import * as Effect from "effect/Effect"
 import * as Option from "effect/Option"
+import * as Schema from "effect/Schema"
 import type { AtlassianCliAuth, AtlassianCliDescriptor } from "./AtlassianCliAuth.js"
 import { openBrowser } from "./openBrowser.js"
 
@@ -57,6 +58,15 @@ export const scopeInstructions = (descriptor: AtlassianCliDescriptor, apiSection
     ...section("User Identity API", permissions.filter((scope) => scope === "read:me"))
   ].join("\n")
 }
+
+/** `auth use` or `auth remove` named no stored profile. The CLI prints the message and exits non-zero. */
+export class ProfileNotFoundError extends Schema.TaggedError<ProfileNotFoundError>()("ProfileNotFoundError", {
+  selector: Schema.String,
+  message: Schema.String
+}) {}
+
+const profileNotFound = (selector: string) =>
+  new ProfileNotFoundError({ selector, message: `Profile not found: ${selector}` })
 
 /** Print the URL, then try to open it; a browser that never opened fails the command. */
 const visit = (url: string) => Console.log(`Opening ${url}`).pipe(Effect.andThen(openBrowser(url)))
@@ -202,7 +212,7 @@ After adding scopes, run: ${loginHint}
         Effect.flatMap(
           auth.switchProfile(profile),
           (selected) =>
-            Console.log(selected === null ? `Profile not found: ${profile}` : `Active profile: ${selected.name}`)
+            selected === null ? Effect.fail(profileNotFound(profile)) : Console.log(`Active profile: ${selected.name}`)
         )
       )
   ).pipe(Command.withDescription("Switch active auth profile"))
@@ -215,7 +225,7 @@ After adding scopes, run: ${loginHint}
         Effect.flatMap(
           auth.removeProfile(profile),
           (removed) =>
-            Console.log(removed === null ? `Profile not found: ${profile}` : `Removed profile: ${removed.name}`)
+            removed === null ? Effect.fail(profileNotFound(profile)) : Console.log(`Removed profile: ${removed.name}`)
         )
       )
   ).pipe(Command.withDescription("Remove stored auth profile"))
